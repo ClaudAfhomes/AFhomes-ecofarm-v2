@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared dashboard design-system primitives for the JAD Admin and Member panels (DESIGN-SYSTEM §6). Consumed by apps/web and apps/admin; token/base CSS ships from here so both apps share a single source.",
+  "description": "Shared design-system primitives for the AF Homes Ecofarm apps. Consumed by apps/web and apps/admin; token/base CSS ships from here so both apps share a single source.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

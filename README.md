@@ -1,34 +1,44 @@
-# JA&D (JAD) - Monorepo
+# AF Homes Ecofarm
 
-TypeScript monorepo for the JAD platform (pnpm workspaces + Turborepo). Per
-`docs/architecture/FOLDER-STRUCTURE.md`.
+TypeScript monorepo for the AF Homes Ecofarm platform — membership-card sales,
+operations, and staff administration. pnpm workspaces + Turborepo.
 
 ## Layout
 
-- `apps/web` - public website frontend (React + Vite SPA). P1 scope: Home, About,
-  Properties/Listings, FAQs, Contacts, 404.
-- `packages/contracts` - shared DTO types, Zod schemas, error envelope (single source).
-- `packages/config` - typed environment schema.
-- `packages/shared` - framework-free utilities (exact-decimal money display helpers).
-- `docs/` - SSOT documentation (existing, authoritative).
+- `apps/web` - public site SPA (React + Vite). Phase 1 ships a placeholder
+  shell; public pages land in a later phase.
+- `apps/admin` - staff operations console (React + Vite). Dashboard, Staff,
+  Departments, Roles & Permissions.
+- `api/` - REST API as a single Vercel Function, backed by Supabase Postgres +
+  Supabase Auth.
+- `packages/contracts` - Zod request/response contracts (single source).
+- `packages/config` - typed public environment.
+- `packages/shared` - framework-free exact-decimal money helpers.
+- `packages/ui` - design tokens and shared components.
+- `supabase/` - migrations, reference seed, Super Admin bootstrap, RLS audit.
+- `legacy/` - the retired JAD Realty application, kept for reference only.
+  Never applied, never imported.
 
-## Commands (from root)
+## Commands
 
 ```sh
 pnpm install
-pnpm dev        # run dev servers (turbo)
-pnpm typecheck  # tsc --noEmit across packages
-pnpm lint       # eslint
-pnpm test       # vitest run
-pnpm build      # production build
+pnpm dev          # dev servers (web :5173, admin :5174)
+pnpm test         # vitest run
+pnpm typecheck    # tsc --noEmit
+pnpm lint
+pnpm build
 
-pnpm exec tsx api/dev-server.ts # To start API in localhost
-pnpm seed # TO seed the data in the localhost
+pnpm db:migrate               # apply supabase/migrations
+pnpm seed                     # reference plans only
+pnpm bootstrap:superadmin     # one-time invite-based Super Admin bootstrap
+
+pnpm exec tsx api/dev-server.ts   # local API on :3000
 ```
 
 ## Conventions
 
-All engineering conventions and SSOT references live in `docs/`. Do not invent
-business rules, API contracts, property data, or brand values - see
-`docs/development/DEVELOPMENT-GUIDELINES.md` and the design-system tokens in
-`apps/web/src/styles/tokens.css` (placeholder values pending approval).
+Engineering conventions and invariants live in `AGENTS.md` — read it before
+changing authorization, RLS, migrations, or money handling. Current scope is
+`docs/AFHOMES-PHASE-1-PLAN.md`; the other documents under `docs/` describe the
+retired JAD platform and are historical reference only.

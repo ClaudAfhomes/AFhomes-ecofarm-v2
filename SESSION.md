@@ -1,5 +1,13 @@
 # SESSION.md - handoff for a new chat session
 
+> ## ⚠️ STALE — describes the retired JAD Realty platform
+>
+> Every path, table, endpoint, credential, and migration below belongs to the
+> JAD platform that AF Homes Ecofarm replaced. It also points at a different
+> machine. **Do not act on it.** Read `AGENTS.md` and
+> `docs/AFHOMES-PHASE-1-PLAN.md` instead. Kept only for provenance; the JAD
+> code is archived under `legacy/`.
+
 Date: 2026-09-24 (UTC). This session (plan → build): **registration validation hardening** (names, middle-initial N/A, per-country phone, structured PH/non-PH address, strict DOB, submit re-validation) + **localhost location-list incident** (root-caused to unapplied/unseeded location tables, fixed live). Prior session work (voucher edit/delete, SweetAlert modal, QR stop-on-decode, message auto-scroll, login privacy link, storage sync) is committed as `be541ad` on `develop`. **This session's 45 files are UNCOMMITTED and UNDEPLOYED** - but `pnpm db:migrate` + `seed:locations` were run against the hosted DB (backward-compatible, see below). No `vercel --prod` this session.
 
 ## Deployment - current state (the important part)

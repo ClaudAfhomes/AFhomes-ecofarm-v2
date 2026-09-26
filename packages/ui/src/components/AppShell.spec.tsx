@@ -14,7 +14,7 @@ const NAV = [
 function renderShell() {
   return render(
     <MemoryRouter>
-      <AppShell brand="JA&D Admin" navItems={NAV} topbarActions={<button>Export</button>}>
+      <AppShell brand="AF Homes" navItems={NAV} topbarActions={<button>Export</button>}>
         <h1>Queue</h1>
       </AppShell>
     </MemoryRouter>,
@@ -67,7 +67,7 @@ describe('AppShell', () => {
     ];
     render(
       <MemoryRouter>
-        <AppShell brand="JA&D Admin" navItems={NAV_WITH_DROPDOWN}>
+        <AppShell brand="AF Homes" navItems={NAV_WITH_DROPDOWN}>
           <h1>Queue</h1>
         </AppShell>
       </MemoryRouter>,

@@ -1,54 +1,26 @@
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import App from './App';
 import { renderWithProviders } from '../test/utils';
+import App from './App';
 
-describe('App routing', () => {
-  it.each([
-    ['/', /where big dreams meet property/i],
-    ['/about', /about ja&d/i],
-    ['/properties', /properties & listings/i],
-    ['/faqs', /frequently asked questions/i],
-    ['/contact', /talk with ja&d realty services/i],
-    ['/login', /welcome back/i],
-    ['/register', /join ja&d/i],
-  ])('renders the %s route', async (route, heading) => {
-    renderWithProviders(<App />, { route });
+describe('public site shell', () => {
+  it('mounts and identifies the platform without exposing JAD branding', () => {
+    renderWithProviders(<App />);
 
-    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      'Public site under construction',
+    );
+    expect(screen.getByText('AF Homes Ecofarm')).toBeInTheDocument();
+    expect(document.title).not.toMatch(/JA&D|JAD Realty/i);
   });
 
-  it('renders a property category page', async () => {
-    renderWithProviders(<App />, { route: '/properties/income-generating-properties' });
+  it('links staff to the administration console', () => {
+    renderWithProviders(<App />);
 
-    expect(
-      await screen.findByRole('heading', { name: 'Income Generating Properties' }),
-    ).toBeInTheDocument();
-  });
-
-  it('renders a property detail page', async () => {
-    renderWithProviders(<App />, {
-      route: '/properties/tenanted-condo-resales/prisma-astra-1br',
-    });
-
-    expect(
-      await screen.findByRole('heading', { name: 'Prisma Residences - Astra Building Condo' }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('₱5,300,000.00')).toBeInTheDocument();
-  });
-
-  it('renders the friendly 404 page for an unknown property route', async () => {
-    renderWithProviders(<App />, {
-      route: '/properties/tenanted-condo-resales/no-such-property',
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
-  });
-
-  it('renders the friendly 404 page for an unknown route', async () => {
-    renderWithProviders(<App />, { route: '/no-such-page' });
-
-    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Staff administration' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('5174'),
+    );
   });
 });

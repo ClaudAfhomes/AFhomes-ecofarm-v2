@@ -1,147 +1,194 @@
 /**
- * `pnpm db:migrate` - apply pending Supabase migrations in filename order and
- * self-verify the result.
+ * AF Homes-only migration runner.
  *
- * Connects via `DATABASE_URL` (transaction pooler connection string from the
- * Dashboard - `db.<ref>.supabase.co` no longer resolves). Records applied
- * versions in `supabase_migrations.schema_migrations` (the Supabase CLI
- * convention) so `supabase db push` and this runner agree, and re-applying is
- * a no-op. Idempotent: each `.sql` file is written with `if not exists` /
- * `on conflict` guards, and this runner skips versions already recorded.
+ * Safety properties (do not weaken):
+ *  - Refuses to run unless AFHOMES_TARGET_PROJECT_REF equals the expected ref
+ *    AND the DATABASE_URL actually points at that project. A matching env var
+ *    with a foreign connection string is refused, not trusted.
+ *  - Applies ONLY files in supabase/migrations, and refuses the whole run if
+ *    any of them is not an AF Homes migration. The retired JAD migrations under
+ *    legacy/ can never reach this path.
+ *  - Each migration runs in its own transaction together with its history row,
+ *    so a failure leaves no partial schema and no phantom history entry.
+ *  - Connection strings, passwords and Supabase secrets are never logged.
+ *  - No password, key or connection string is ever printed on any code path,
+ *    including failures.
  *
- * Pure bookkeeping lives in api/_lib/migrations.ts (unit-tested); this file
- * only wires I/O. After applying it probes `to_regclass` for the messaging
- * tables and reminds about the RLS invariants audit.
+ * Usage:
+ *   npx pnpm db:migrate                # apply pending migrations
+ *   npx pnpm db:migrate -- --check     # preflight only, no connection
  *
- * Run from the repo root: `pnpm db:migrate`
+ * RUNTIME NOTE - why there is no top-level `await` in this file:
+ * the repository root `package.json` declares no `"type"` field, so a `.ts` file
+ * under `supabase/` (which has no package.json of its own) is treated as
+ * CommonJS by Node's resolver. esbuild/tsx therefore targets the CJS output
+ * format, where a top-level `await` is a syntax error, even though `tsc`
+ * accepts it (`tsconfig.base.json` sets `"module": "ESNext"`). The `api/`
+ * workspace avoids this by declaring `"type": "module"`. All async work
+ * therefore lives in `main()`, which runs correctly under BOTH the CJS and the
+ * ESM resolution, so the script stays valid if the root `"type"` ever changes.
+ *
+ * This runner resolves supabase/migrations relative to the current working
+ * directory, so it must be invoked from the repository root. `--check` prints
+ * the resolved directory so a wrong CWD is immediately visible.
  */
-
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadEnvFile } from 'node:process';
 import { Client } from 'pg';
 
-import { parseMigrationVersion, resolvePendingMigrations } from '../api/_lib/migrations.js';
+if (fs.existsSync('.env.local')) loadEnvFile('.env.local');
 
-function loadEnvFile(p: string) {
+/** The one project this runner will ever touch. */
+const EXPECTED_PROJECT_REF = 'ikaevepedpqygdlipsei';
+
+const CHECK_ONLY = process.argv.includes('--check');
+
+type Target = { connectionString: string; migrationsDir: string; files: string[] };
+
+/* ---------------------------------------------------------------- */
+/* Configuration and fail-closed guards                              */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Validate the operator environment and resolve the migration set. No network
+ * call, no client, no write. Throws with an operator-facing message on any
+ * problem, so the process fails closed before a connection is attempted.
+ */
+function readTarget(): Target {
+  if (process.env.AFHOMES_TARGET_PROJECT_REF !== EXPECTED_PROJECT_REF) {
+    throw new Error(
+      `Refusing migration: AFHOMES_TARGET_PROJECT_REF must equal ${EXPECTED_PROJECT_REF}.`,
+    );
+  }
+
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('DATABASE_URL is required');
+
+  // The env var alone is not proof of target: DATABASE_URL decides where the
+  // connection actually lands. Verify it, and never echo it when refusing.
+  let parsed: URL;
   try {
-    const content = fs.readFileSync(p, 'utf8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
-      if (!(key in process.env) && value) process.env[key] = value;
-    }
-  } catch {}
-}
-loadEnvFile('.env');
-loadEnvFile('apps/web/.env.local');
-loadEnvFile('apps/admin/.env.local');
+    parsed = new URL(connectionString);
+  } catch {
+    throw new Error('Refusing migration: DATABASE_URL is not a valid connection string.');
+  }
+  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+    throw new Error('Refusing migration: DATABASE_URL is not a postgres connection string.');
+  }
 
-const MIGRATIONS_DIR = path.resolve('supabase/migrations');
-const INVARIANTS_PATH = path.resolve('supabase/security/rls_invariants.sql');
+  // Both documented connection styles are supported:
+  //   direct   db.<ref>.supabase.co
+  //   pooler   <region>.pooler.supabase.com, where the username carries the ref
+  const isDirect = parsed.hostname === `db.${EXPECTED_PROJECT_REF}.supabase.co`;
+  const isPooler =
+    parsed.hostname.endsWith('.pooler.supabase.com') &&
+    decodeURIComponent(parsed.username) === `postgres.${EXPECTED_PROJECT_REF}`;
+  if (!isDirect && !isPooler) {
+    throw new Error(
+      `Refusing migration: DATABASE_URL does not point at project ${EXPECTED_PROJECT_REF}. ` +
+        `Set AFHOMES_TARGET_PROJECT_REF=${EXPECTED_PROJECT_REF} only when the connection string targets that same project.`,
+    );
+  }
 
-async function appliedVersions(client: Client): Promise<string[]> {
-  await client.query('create schema if not exists supabase_migrations');
-  await client.query(
-    'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
-  );
-  const { rows } = await client.query('select version from supabase_migrations.schema_migrations');
-  return rows.map((r: { version: string }) => r.version);
-}
+  const migrationsDir = path.resolve('supabase/migrations');
+  if (!fs.existsSync(migrationsDir) || !fs.statSync(migrationsDir).isDirectory()) {
+    throw new Error(
+      `Refusing migration: ${migrationsDir} is not a directory. Run this from the repository root.`,
+    );
+  }
 
-async function run(client: Client): Promise<void> {
   const files = fs
-    .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
+    .readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
     .sort();
-  const applied = await appliedVersions(client);
+  if (files.some((file) => !file.includes('afhomes_')))
+    throw new Error('Non-AF Homes migration found in active path.');
 
-  // `--mark-existing`: an out-of-band database (migrations applied manually
-  // via the SQL editor, never recorded) must not re-run every historical
-  // file. Record every current migration version as applied first, then the
-  // pending resolver only picks up genuinely new files.
-  if (process.argv.includes('--mark-existing')) {
-    let marked = 0;
+  return { connectionString, migrationsDir, files };
+}
+
+/* ---------------------------------------------------------------- */
+/* Migration run                                                     */
+/* ---------------------------------------------------------------- */
+
+async function main(): Promise<void> {
+  // 1. Every guard runs before a client exists.
+  const { connectionString, migrationsDir, files } = readTarget();
+
+  if (CHECK_ONLY) {
+    // Preflight only. No Client is constructed, so no socket is opened and no
+    // migration can be applied.
+    console.log('[afhomes:migrate] --check: configuration is valid. No connection was made.');
+    console.log(`[afhomes:migrate] target project : ${EXPECTED_PROJECT_REF}`);
+    console.log(`[afhomes:migrate] migrations dir  : ${migrationsDir}`);
+    console.log(`[afhomes:migrate] migrations found: ${files.length}`);
+    for (const file of files) console.log(`  - ${file}`);
+    console.log(
+      '[afhomes:migrate] No migration was applied. Re-run without --check to apply pending migrations.',
+    );
+    return;
+  }
+
+  const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
+  try {
+    await client.connect();
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '28P01') {
+      throw new Error(
+        'Supabase rejected DATABASE_URL credentials. Copy a fresh Session pooler URI from ' +
+          'Dashboard > Connect, keep username postgres.ikaevepedpqygdlipsei, replace only ' +
+          '[YOUR-PASSWORD] with the database password (not the service-role key), and percent-encode ' +
+          'reserved password characters. The already-live foundation does not need to be reapplied ' +
+          'before running bootstrap:superadmin.',
+      );
+    }
+    throw error;
+  }
+  try {
+    await client.query('create schema if not exists supabase_migrations');
+    await client.query(
+      'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
+    );
+    let appliedCount = 0;
     for (const file of files) {
-      const version = parseMigrationVersion(file);
-      if (version && !applied.includes(version)) {
+      const version = file.split('_', 1)[0]!;
+      const applied = await client.query(
+        'select 1 from supabase_migrations.schema_migrations where version=$1',
+        [version],
+      );
+      if (applied.rowCount) continue;
+      await client.query('begin');
+      try {
+        await client.query(fs.readFileSync(path.join(migrationsDir, file), 'utf8'));
         await client.query(
-          'insert into supabase_migrations.schema_migrations (version) values ($1) on conflict do nothing',
+          'insert into supabase_migrations.schema_migrations(version) values ($1)',
           [version],
         );
-        marked += 1;
+        await client.query('commit');
+        appliedCount += 1;
+        console.log(`[afhomes:migrate] applied ${file}`);
+      } catch (error) {
+        await client.query('rollback');
+        throw error;
       }
     }
-    console.log(
-      `[db:migrate] --mark-existing: recorded ${marked} existing migration(s) as applied.`,
-    );
-  }
-
-  // Re-read after --mark-existing so only genuinely new files are pending.
-  const pending = resolvePendingMigrations(files, await appliedVersions(client));
-
-  if (pending.length === 0) {
-    console.log(`[db:migrate] No pending migrations (${applied.length} recorded).`);
-  }
-
-  for (const file of pending) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
-    const version = parseMigrationVersion(file);
-    console.log(`[db:migrate] applying ${file}`);
-    await client.query(sql);
-    await client.query(
-      'insert into supabase_migrations.schema_migrations (version) values ($1) on conflict do nothing',
-      [version],
-    );
-    console.log(`[db:migrate] applied ${file}`);
-  }
-
-  // Self-verify: messaging tables resolvable by Postgres (PostgREST schema
-  // cache follows the live catalog; a reload may still be needed in the
-  // dashboard if it caches stale).
-  const { rows } = await client.query(
-    `select to_regclass('public."Conversation"') as conversation,
-            to_regclass('public."Message"') as message`,
-  );
-  const { conversation, message } = rows[0] as {
-    conversation: string | null;
-    message: string | null;
-  };
-  if (conversation && message) {
-    console.log('[db:migrate] OK: Conversation + Message tables present.');
-  } else {
-    console.error('[db:migrate] FAIL: messaging tables missing after apply:');
-    console.error('  Conversation:', conversation ?? 'MISSING');
-    console.error('  Message:', message ?? 'MISSING');
-    process.exitCode = 1;
-  }
-
-  console.log(
-    `[db:migrate] Run supabase/security/rls_invariants.sql in the SQL editor; expect only the documented is_staff_user exception row.`,
-  );
-}
-
-async function main() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    console.error(
-      '[db:migrate] Missing DATABASE_URL. Add the current transaction-pooler connection string (Dashboard → Settings → Database → Connect) to root .env.',
-    );
-    process.exit(1);
-  }
-  const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
-  await client.connect();
-  try {
-    await run(client);
+    if (appliedCount === 0) {
+      console.log(
+        `[afhomes:migrate] no pending migrations (${files.length} known, all already recorded).`,
+      );
+    } else {
+      console.log(`[afhomes:migrate] done. ${appliedCount} migration(s) applied.`);
+    }
   } finally {
     await client.end();
   }
 }
 
-main().catch((e) => {
-  console.error('[db:migrate] failed:', (e as Error).message);
-  process.exit(1);
+main().catch((error) => {
+  console.error(
+    error instanceof Error ? error.message : 'Migration runner failed.',
+  );
+  process.exitCode = 1;
 });

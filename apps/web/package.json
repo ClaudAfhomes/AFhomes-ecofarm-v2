@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "JAD public website frontend (React + Vite SPA). P1 scope: public pages.",
+  "description": "AF Homes Ecofarm public site frontend (React + Vite SPA).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -13,17 +13,12 @@
   },
   "dependencies": {
     "@jad/config": "workspace:*",
-    "@jad/contracts": "workspace:*",
-    "@jad/mock": "workspace:*",
-    "@jad/shared": "workspace:*",
     "@jad/ui": "workspace:*",
-    "@supabase/supabase-js": "^2.112.4",
     "@tanstack/react-query": "^5.101.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^7.18.2",
-    "sweetalert2": "^11.26.25",
-    "zod": "^4.4.3"
+    "sweetalert2": "^11.26.25"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

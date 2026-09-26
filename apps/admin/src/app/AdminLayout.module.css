@@ -6,10 +6,10 @@
 }
 
 /**
- * Unresolved staff-role notice: the session carries a staff role but no
- * navigation modules resolved (e.g. MemberRole link missing or role lookup
- * failing). Fails loud instead of rendering a mysteriously empty sidebar - 
- * deny-by-default is preserved (no links are shown).
+ * Unresolved-permission notice: the session resolved a staff role but no
+ * navigation modules came back (e.g. the role assignment or its permission
+ * rows are missing). Fails loud instead of rendering a mysteriously empty
+ * sidebar - deny-by-default is preserved (no links are shown).
  */
 .roleNotice {
   display: grid;

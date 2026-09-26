@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared DTO types, Zod schemas, and the API error envelope. Single source of truth (FOLDER-STRUCTURE §4.1).",
+  "description": "Shared Zod request/response contracts and the API error envelope. Single source of truth for DTOs exchanged between apps and api.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

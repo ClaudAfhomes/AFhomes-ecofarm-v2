@@ -1,8 +1,8 @@
 {
-  "name": "jad-realty",
+  "name": "afhomes-ecofarm",
   "version": "0.0.0",
   "private": true,
-  "description": "JA&D (JAD) platform monorepo. P1 scope: public website frontend.",
+  "description": "AF Homes Ecofarm platform monorepo.",
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=20.19.0"
@@ -11,24 +11,23 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc --noEmit -p supabase",
     "test": "turbo run test",
     "format": "prettier --write .",
+    "check:env": "node scripts/check-env-isolation.mjs",
     "seed": "tsx supabase/seed.ts",
-    "seed:locations": "tsx supabase/seed-ph-locations.ts",
+    "seed:demo": "tsx supabase/seed-demo.ts",
     "db:migrate": "tsx supabase/apply-migrations.ts",
-    "reset:dev": "tsx supabase/reset-dev.ts",
-    "purge:core": "tsx supabase/purge-seed-keep-core.ts",
-    "provision:superadmin": "tsx supabase/provision-superadmin.ts",
-    "reseed:programs": "tsx supabase/reseed-programs.ts",
-    "import:cms-catalog": "tsx supabase/import-cms-catalog.ts",
-    "backfill:staff": "tsx supabase/backfill-staff-domain.ts"
+    "bootstrap:superadmin": "tsx supabase/invite-superadmin.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.112.4",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.10",
     "pg": "^8.23.0",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",
-    "turbo": "^2.10.11"
+    "turbo": "^2.10.11",
+    "typescript": "~5.9.3"
   }
 }

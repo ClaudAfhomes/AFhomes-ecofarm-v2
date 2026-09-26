@@ -1,5 +1,16 @@
 # Changelog — JA&D (JAD) Platform
 
+> ## ⚠️ HISTORICAL — RETIRED PLATFORM
+>
+> This changelog documents the **JAD Realty** platform, which AF Homes Ecofarm
+> replaced. It is retained for provenance only. It is **not** the changelog for
+> this repository's current product, and the phases listed below were never
+> implemented as written.
+>
+> For the current codebase, read `AGENTS.md` (authority) and
+> `docs/AFHOMES-PHASE-1-PLAN.md` (scope). The JAD implementation itself is
+> preserved under `legacy/`.
+
 > **Purpose:** Maintainable, evidence-based record of meaningful project changes. This is **not** a commit log — it records new capabilities, feature modifications, architecture changes, business-rule changes, breaking changes, and migration notes that materially affect the project.
 >
 > **Source of truth:** entries are derived only from authoritative repository evidence — the SSOT documents under `docs/`, their in-file version headers, and the project's decision registers (ARCHITECTURE §16, BUSINESS-RULES §12, DATABASE-DESIGN §24, TESTING §20, SECURITY §20, DEPLOYMENT §20). No entry is fabricated; where evidence is insufficient, it is marked **Unknown**.

@@ -19,7 +19,6 @@ import { fileURLToPath, URL } from 'node:url';
 
 import { findRouteCoverageGaps } from './_lib/route-coverage.js';
 import { getSupabaseEnv } from './_lib/env.js';
-import { findMissingSchemaRelations } from './_lib/schema-check.js';
 import { routeRequest } from './_lib/router.js';
 
 // ---------------------------------------------------------------------------
@@ -187,26 +186,27 @@ for (const gap of findRouteCoverageGaps(
   );
 }
 
-// Schema self-check: probe the messaging tables via PostgREST so a missing
-// migration is caught at startup (loud) instead of every endpoint returning
-// "Could not find the table 'public.Conversation' in the schema cache".
+// Schema self-check: probe the AF Homes foundation tables via PostgREST so a
+// missing migration is caught at startup (loud) instead of every endpoint
+// returning "Could not find the table ... in the schema cache".
 // Skipped when Supabase is not configured (mock/dev-server-only mode).
+const REQUIRED_TABLES = ['modules', 'roles', 'departments', 'staff_users'] as const;
+
 void (async () => {
   const { url, serviceKey } = getSupabaseEnv();
   if (!url || !serviceKey) return;
   const { createClient } = await import('@supabase/supabase-js');
   const svc = createClient(url, serviceKey, { auth: { autoRefreshToken: false } });
-  try {
-    const missing = await findMissingSchemaRelations(svc as never);
-    if (missing.length > 0) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[dev-server] FATAL: messaging schema missing (${missing.join(', ')}) - run \`pnpm db:migrate\` or apply supabase/migrations/20261008000001_messaging.sql.`,
-      );
-    }
-  } catch (e) {
+  const missing: string[] = [];
+  for (const table of REQUIRED_TABLES) {
+    const { error } = await svc.from(table).select('*').limit(1);
+    if (error) missing.push(table);
+  }
+  if (missing.length > 0) {
     // eslint-disable-next-line no-console
-    console.error('[dev-server] schema self-check failed:', (e as Error).message);
+    console.error(
+      `[dev-server] FATAL: AF Homes schema incomplete (missing: ${missing.join(', ')}) - run \`pnpm db:migrate\`.`,
+    );
   }
 })();
 

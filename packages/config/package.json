@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Typed environment schema and runtime config (FOLDER-STRUCTURE §4.2).",
+  "description": "Typed public environment schema and runtime config.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

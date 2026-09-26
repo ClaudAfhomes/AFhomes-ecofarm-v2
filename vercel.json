@@ -12,10 +12,6 @@
     {
       "path": "/health",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/crons/commission-clearing",
-      "schedule": "0 1 * * *"
     }
   ],
   "rewrites": [

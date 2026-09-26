@@ -6,7 +6,7 @@ dist/
 coverage/
 vercel-static/
 
-# Environment — secrets are never committed (FOLDER-STRUCTURE §7, §9.4)
+# Environment — secrets are never committed
 .env
 .env.*
 !.env.example
@@ -39,5 +39,11 @@ supabase/backfill-staff-domain.retire.json
 
 # opencode agent skills (local-only, never commit or deploy)
 .opencode/
+
+# Local pnpm shim used so turbo can find the package manager (see AGENTS.md)
+.tmp-bin/
+
+# Supabase CLI local cache (project ref + pooler URL - connection metadata)
+supabase/.temp/
 
 .env*

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Framework-free utilities: exact-decimal money display helpers (FOLDER-STRUCTURE §4.3). No React, no business logic.",
+  "description": "Framework-free utilities: exact-decimal money helpers. No React, no business logic.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

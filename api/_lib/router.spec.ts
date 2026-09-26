@@ -3,48 +3,96 @@ import { describe, expect, it } from 'vitest';
 import { resolveRequestUrl, selectHandler } from './router.js';
 
 describe('selectHandler', () => {
-  it('routes exact endpoints', () => {
-    expect(selectHandler('/api/v1/config/public', {})?.routeKey).toBe('config/public');
-    expect(selectHandler('/api/v1/admin/queues', {})?.routeKey).toBe('admin/queues');
-    expect(selectHandler('/api/v1/me/wallet', {})?.routeKey).toBe('me/wallet');
-    expect(selectHandler('/api/v1/auth/verify-email', {})?.routeKey).toBe('auth/verify-email');
-    expect(selectHandler('/api/v1/auth/verify-email/resend', {})?.routeKey).toBe(
-      'auth/verify-email/resend',
-    );
+  it('routes the health probe on both the bare and versioned paths', () => {
+    expect(selectHandler('/health', {})?.routeKey).toBe('health');
+    expect(selectHandler('/api/v1/health', {})?.routeKey).toBe('health');
   });
 
-  it('routes nested dynamic endpoints and captures params', () => {
+  it('routes the AF Homes surface and captures the sub-path', () => {
     const q: Record<string, string | undefined> = {};
-    expect(selectHandler('/api/v1/admin/members', q)?.routeKey).toBe('admin/members');
-    expect(selectHandler('/api/v1/admin/members/mem-001', q)?.routeKey).toBe('admin/members/[id]');
-    expect(q.id).toBe('mem-001');
-    expect(selectHandler('/api/v1/admin/vouchers/vch-1/redeem', q)?.routeKey).toBe(
-      'admin/vouchers/[id]/redeem',
+    expect(selectHandler('/api/v1/admin/afhomes/session', q)?.routeKey).toBe(
+      'admin/afhomes/session',
     );
-    expect(selectHandler('/api/v1/admin/config/COMMISSION_DIRECT_RATE', q)?.routeKey).toBe(
-      'admin/config/[key]',
+    expect(q.afPath).toBe('session');
+
+    expect(selectHandler('/api/v1/admin/afhomes/roles', q)?.routeKey).toBe('admin/afhomes/roles');
+    expect(selectHandler('/api/v1/admin/afhomes/dashboard', q)?.routeKey).toBe(
+      'admin/afhomes/dashboard',
     );
-    expect(q.key).toBe('COMMISSION_DIRECT_RATE');
-    expect(selectHandler('/api/v1/admin/property-categories/residential', q)?.routeKey).toBe(
-      'admin/property-categories/[slug]',
-    );
-    expect(selectHandler('/api/v1/admin/conversations/uuid-1/messages', q)?.routeKey).toBe(
-      'admin/conversations/[memberId]/messages',
-    );
+    expect(selectHandler('/api/v1/admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b', q)
+      ?.routeKey).toBe('admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b');
   });
 
-  it('routes sub-actions over the plain id resource', () => {
+  it('routes the Phase 2 business families and captures the sub-path', () => {
     const q: Record<string, string | undefined> = {};
-    expect(selectHandler('/api/v1/sales/sal-1/resubmit', q)?.routeKey).toBe('sales/resubmit');
-    expect(selectHandler('/api/v1/sales/sal-1', q)?.routeKey).toBe('sales/[id]');
-    expect(selectHandler('/api/v1/me/sales/sal-1/reopen-request', q)?.routeKey).toBe(
-      'me/sales/reopen-request',
-    );
+    for (const [path, expected] of [
+      ['card-products', 'cards/card-products'],
+      ['customers', 'customers/customers'],
+      ['sales', 'sales/sales'],
+      ['memberships', 'memberships/memberships'],
+      ['points', 'memberships/points'],
+      ['commissions', 'commissions/commissions'],
+      ['referrals', 'referrals/referrals'],
+      ['queues', 'queues/queues'],
+    ] as const) {
+      expect(selectHandler(`/api/v1/${path}`, q)?.routeKey, path).toBe(expected);
+      expect(q.familyPath, path).toBe('');
+    }
+
+    q.familyPath = '';
+    expect(selectHandler('/api/v1/sales/abc/payments', q)?.routeKey).toBe('sales/abc/payments');
+    expect(q.familyPath).toBe('abc/payments');
+    expect(selectHandler('/api/v1/payments/abc/verify', q)?.routeKey).toBe('sales/abc/verify');
+    expect(selectHandler('/api/v1/queues/finance', q)?.routeKey).toBe('queues/finance');
+    expect(selectHandler('/api/v1/points/ledger/abc', q)?.routeKey).toBe('memberships/ledger/abc');
   });
 
-  it('routes the cms fallback by key', () => {
-    expect(selectHandler('/api/v1/cms/homepage', {})?.routeKey).toBe('homepage');
-    expect(selectHandler('/api/v1/cms/upload', {})?.routeKey).toBe('upload');
+  it('serves the bare /api prefix used by the local dev server', () => {
+    const q: Record<string, string | undefined> = {};
+    expect(selectHandler('/api/admin/afhomes/departments', q)?.routeKey).toBe(
+      'admin/afhomes/departments',
+    );
+    expect(q.afPath).toBe('departments');
+    expect(selectHandler('/api/sales/xyz', q)?.routeKey).toBe('sales/xyz');
+  });
+
+  it('does not let a family prefix swallow a longer unknown path', () => {
+    expect(selectHandler('/api/v1/salesx', {})).toBeNull();
+    expect(selectHandler('/api/v1/customers-archive', {})).toBeNull();
+  });
+
+  it('requires a sub-path on the AF Homes prefix', () => {
+    // The catch-all is `(.+)`; the bare prefix must not swallow the prefix itself.
+    expect(selectHandler('/api/v1/admin/afhomes', {})).toBeNull();
+    expect(selectHandler('/api/v1/admin/afhomes/', {})).toBeNull();
+  });
+
+  it('returns null for the retired JAD route families', () => {
+    for (const path of [
+      '/api/v1/admin/members',
+      '/api/v1/admin/queues',
+      '/api/v1/admin/registrations',
+      '/api/v1/admin/vouchers',
+      '/api/v1/admin/withdrawals',
+      '/api/v1/admin/properties',
+      '/api/v1/admin/roles',
+      '/api/v1/admin/staff',
+      '/api/v1/admin/session',
+      '/api/v1/me/wallet',
+      '/api/v1/me/ledger',
+      '/api/v1/auth/register',
+      '/api/v1/auth/verify-email',
+      '/api/v1/cms/homepage',
+      '/api/v1/config/public',
+      '/api/v1/policies',
+      '/api/v1/programs',
+      '/api/v1/locations/provinces',
+      '/api/v1/contact',
+      '/api/v1/registration/location-verify',
+      '/api/v1/crons/commission-clearing',
+    ]) {
+      expect(selectHandler(path, {}), path).toBeNull();
+    }
   });
 
   it('returns null for unknown paths', () => {
@@ -56,25 +104,25 @@ describe('selectHandler', () => {
 describe('resolveRequestUrl', () => {
   it('keeps the original /api/v1 URL and its query string', () => {
     const req = {
-      url: '/api/v1/me/ledger?type=DIRECT_COMMISSION&cursor=abc',
-      query: { path: 'me/ledger' },
+      url: '/api/v1/admin/afhomes/dashboard?range=month',
+      query: { path: 'admin/afhomes/dashboard' },
     };
-    expect(resolveRequestUrl(req)).toBe('/api/v1/me/ledger?type=DIRECT_COMMISSION&cursor=abc');
+    expect(resolveRequestUrl(req)).toBe('/api/v1/admin/afhomes/dashboard?range=month');
   });
 
   it('rebuilds the path from the rewrite query param', () => {
-    expect(resolveRequestUrl({ url: '/api/router', query: { path: 'config/public' } })).toBe(
-      '/api/v1/config/public',
-    );
     expect(
-      resolveRequestUrl({ url: '/api/router', query: { path: 'admin/members/mem-001' } }),
-    ).toBe('/api/v1/admin/members/mem-001');
+      resolveRequestUrl({ url: '/api/router', query: { path: 'admin/afhomes/roles' } }),
+    ).toBe('/api/v1/admin/afhomes/roles');
+    expect(
+      resolveRequestUrl({ url: '/api/router', query: { path: 'admin/afhomes/staff/abc-123' } }),
+    ).toBe('/api/v1/admin/afhomes/staff/abc-123');
   });
 
   it('joins array path params and falls back to the raw url', () => {
-    expect(resolveRequestUrl({ url: '/api/router', query: { path: ['admin', 'members'] } })).toBe(
-      '/api/v1/admin/members',
-    );
+    expect(
+      resolveRequestUrl({ url: '/api/router', query: { path: ['admin', 'afhomes', 'roles'] } }),
+    ).toBe('/api/v1/admin/afhomes/roles');
     expect(resolveRequestUrl({ url: '/', query: {} })).toBe('/');
   });
 });

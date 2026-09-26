@@ -1,38 +1,43 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { render, type RenderOptions } from '@testing-library/react';
+import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { SessionProvider, type SessionUser } from '../lib/session';
-import { adminMockHandlers } from '../mock/handlers';
-import { createMockServer } from '@jad/mock';
+
+type ProvidersOptions = Omit<RenderOptions, 'wrapper'> & {
+  route?: string;
+  user?: SessionUser;
+  queryClient?: QueryClient;
+};
+
+/** Fresh, retry-free QueryClient so tests never wait on backoff. */
+export function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+}
 
 /**
  * Test renderer mirroring the providers used in `main.tsx`: fresh QueryClient
- * (no retries), MemoryRouter, and the app session provider (restore instant).
+ * (no retries), MemoryRouter, and the resolved session provider.
  */
 export function renderWithProviders(
   ui: ReactElement,
-  {
-    route = '/admin',
-    user,
-    onRevalidate,
-  }: { route?: string; user?: SessionUser; onRevalidate?: () => void | Promise<void> } = {},
+  { route = '/admin', user, queryClient = createTestQueryClient(), ...renderOptions }: ProvidersOptions = {},
 ) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  const result = render(
-    <SessionProvider initialUser={user} restoreDelayMs={0} onRevalidate={onRevalidate}>
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
-      </QueryClientProvider>
-    </SessionProvider>,
-  );
-  return { ...result, client };
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <SessionProvider initialUser={user}>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+        </QueryClientProvider>
+      </SessionProvider>
+    );
+  }
+
+  const result = render(ui, { wrapper: Wrapper, ...renderOptions });
+  return { ...result, client: queryClient };
 }
 
-/** Install the admin mock API with zero latency; returns the server for `restore()`. */
-export function installMockApi() {
-  return createMockServer(adminMockHandlers, 0);
-}
+export * from '@testing-library/react';

@@ -1,0 +1,84 @@
+/*
+ * JAD public website global styles. The base + accessibility contract and
+ * design tokens now ship from `@jad/ui` (tokens.css / base.css) and are
+ * imported in `main.tsx`. Only public-website editorial rules remain here.
+ */
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2 {
+  font-family: var(--font-family-display);
+  font-weight: 500;
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--text-h1);
+}
+
+h2 {
+  font-size: var(--text-h2);
+}
+
+h3 {
+  font-size: var(--text-h3);
+  line-height: var(--line-height-tight);
+  font-weight: 600;
+}
+
+a {
+  color: var(--color-brand-primary);
+}
+
+a:visited {
+  color: var(--color-brand-primary);
+}
+
+/* Container (DESIGN-SYSTEM §4.1: max-width 1200px centered) */
+.container {
+  width: 100%;
+  max-width: var(--container-max);
+  margin-inline: auto;
+  padding-inline: var(--container-pad);
+}
+
+@media (min-width: 640px) {
+  .container {
+    --container-pad: var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .container {
+    --container-pad: var(--space-8);
+  }
+}
+
+/* Reading column for narrative content (DESIGN-SYSTEM §7.5 ~65ch) */
+.prose {
+  max-width: 65ch;
+}
+
+/* Horizontal scroll for wide tables (member panel). */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+@media (max-width: 639px) {
+  .table-scroll {
+    overflow-x: visible;
+  }
+}

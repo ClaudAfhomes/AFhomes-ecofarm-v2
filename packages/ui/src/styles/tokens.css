@@ -1,29 +1,33 @@
 /*
- * JAD design tokens - single source consumed by both apps (@jad/ui/tokens.css).
+ * AF Homes Ecofarm design tokens - single source consumed by both apps
+ * (@jad/ui/tokens.css).
  *
- * Palette derived from the official JA&D logo (#2C6AA7, #3477B8, #A9853A,
- * #DAC56A, #FFFFFF). The logo blues carry the brand; gold is a restrained
- * accent used for rules, eyebrows, and emphasis. All values are centralized
- * here so a future brand refresh is a single edit.
+ * Palette: a deep forest green carries the brand (matching the `#174f3b`
+ * theme-color in both app shells), paired with a restrained harvest gold for
+ * rules, eyebrows, and emphasis. All values are centralized here so a brand
+ * refresh is a single edit.
+ *
+ * Contrast: brand (#174f3b) is 8.99:1 and accent-strong (#8a6420) is 5.08:1
+ * against the canvas, so body text and the 3px focus ring both clear WCAG AA.
  */
 
 :root {
-  /* Colors - brand palette from the official JA&D logo. */
-  --color-brand-primary: #2c6aa7;
-  --color-brand-primary-hover: #23598f;
-  --color-brand-secondary: #3477b8;
-  --color-brand-soft: #eaf1f8;
-  /* Deep brand navy - dark header/footer surfaces (carries the white JA&D logo). */
-  --color-brand-deep: #142b47;
-  --color-brand-deep-hover: #1d3c5f;
+  /* Colors - brand palette. */
+  --color-brand-primary: #174f3b;
+  --color-brand-primary-hover: #123d2d;
+  --color-brand-secondary: #1f6b4f;
+  --color-brand-soft: #e8f1ec;
+  /* Deep brand green - dark header/footer surfaces. */
+  --color-brand-deep: #0e2b20;
+  --color-brand-deep-hover: #163a2c;
 
-  --color-accent: #a9853a;
-  --color-accent-strong: #8c6d2f;
-  --color-accent-soft: #f5efdf;
-  --color-accent-subtle: #f5efdf;
-  --color-accent-light: #dac56a;
+  --color-accent: #b08328;
+  --color-accent-strong: #8a6420;
+  --color-accent-soft: #f7f0df;
+  --color-accent-subtle: #f7f0df;
+  --color-accent-light: #dcc06a;
 
-  /* Text on dark brand surfaces (white JA&D logo, heroes, dark chrome). */
+  /* Text on dark brand surfaces (heroes, dark chrome). */
   --color-on-dark: #ffffff;
   --color-on-dark-muted: rgba(255, 255, 255, 0.84);
   --color-on-dark-faint: rgba(255, 255, 255, 0.64);
@@ -48,7 +52,7 @@
   --color-success-strong: #2e6b3a;
   --color-warning: #9a6b1f;
   --color-danger: #a63a32;
-  --color-info: #2c6aa7;
+  --color-info: #1f6b8f;
 
   --color-state-focus: var(--color-accent-strong);
   --color-state-disabled-bg: #ece9e0;

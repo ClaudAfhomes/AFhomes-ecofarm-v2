@@ -6,7 +6,7 @@ import { z } from 'zod';
  * Private/backend configuration NEVER appears here.
  */
 const vitePublicEnvSchema = z.object({
-  /** Base URL of the JAD REST API. Defaults to same-origin `/api/v1` (API-SPECIFICATION §1.1). */
+  /** Base URL of the AF Homes REST API. Defaults to same-origin `/api/v1`. */
   VITE_API_BASE_URL: z.string().min(1).default('/api/v1'),
   /** Base URL of the Admin application for cross-origin redirects from the web origin. */
   VITE_ADMIN_URL: z.string().min(1).default('http://localhost:5174/admin'),
@@ -16,6 +16,8 @@ const vitePublicEnvSchema = z.object({
   VITE_SUPABASE_URL: z.string().url().optional(),
   /** Supabase anonymous key (public, RLS enforced). */
   VITE_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  /** Current Supabase browser credential; preferred over the legacy anon key. */
+  VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
 });
 
 export type PublicEnv = z.infer<typeof vitePublicEnvSchema>;

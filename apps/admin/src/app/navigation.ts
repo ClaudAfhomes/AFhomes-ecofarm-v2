@@ -1,344 +1,97 @@
-import type { Role, RoleRecord, StaffModule } from '@jad/contracts';
-import { resolveRoleModules } from '@jad/contracts';
+import type { AfHomesModuleKey, AfHomesPermission } from '@jad/contracts';
 import type { BreadcrumbItem, SidebarItem } from '@jad/ui';
 
-/**
- * Admin navigation registry (UI-UX §4.2 destinations). Categories group related
- * navlinks under a labeled header with a dropdown arrow. Each top-level
- * sidebar link has a unique icon; sub-items share the category visual style.
- * The mock session drives which items render, and the same registry guards
- * route access (RequireRole).
- * PROPOSED paths - no SSOT defines admin route paths yet.
- */
-/** Dropdown sub-item with its own module for per-link RBAC filtering. */
-export interface AdminNavSubItem {
+export type NavLink = { to: string; label: string; module: AfHomesModuleKey };
+export type AdminNavItem = {
   to: string;
   label: string;
+  icon?: SidebarItem['icon'];
   end?: boolean;
-  module: StaffModule;
-}
+  module: AfHomesModuleKey;
+  dropdown?: NavLink[];
+};
 
-/** Structural match of the ui `SidebarDivider` (renders as a horizontal rule). */
-export interface AdminNavDivider {
-  divider: true;
-}
-
-export type AdminNavDropdownItem = AdminNavSubItem | AdminNavDivider;
-
-export interface AdminNavItem extends SidebarItem {
-  roles: Role[];
-  /** RBAC module for this destination (single source: STAFF_PERMISSIONS matrix). */
-  module: StaffModule;
-  /** Optional dropdown sub-items when the item is a category header. */
-  dropdown?: AdminNavDropdownItem[];
-}
-
-/** Phase 1 fresh-start: admin role only (user → no admin nav). Legacy SUPER_ADMIN maps to admin via normalizeRole. */
-const ALL_STAFF: Role[] = ['admin'];
-const ADMINS_ONLY: Role[] = ['admin'];
-
-/**
- * Categorized admin navigation items. Each top-level entry is either a
- * single-page link or a category with a dropdown of sub-items. Every
- * top-level link receives a unique icon from the @jad/ui icon set.
- */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  /* Single-page link */
-  {
-    to: '/admin',
-    label: 'Dashboard',
-    icon: 'grid',
-    end: true,
-    roles: ALL_STAFF,
-    module: 'dashboard',
-  },
-
-  /* Category: Members - Registration + Members as dropdown */
-  {
-    to: '/admin/members',
-    label: 'Members',
-    icon: 'users',
-    roles: ADMINS_ONLY,
-    module: 'members',
-    dropdown: [
-      { to: '/admin/registrations', label: 'Registration', module: 'registrations' },
-      { to: '/admin/members', label: 'Members', module: 'members' },
-    ],
-  },
-
-  /* Category: Operations (dropdown) */
+  { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
   {
     to: '/admin/sales',
-    label: 'Operations',
-    icon: 'wallet',
-    roles: ALL_STAFF,
-    module: 'sales',
+    label: 'Sales & Customers',
+    icon: 'grid',
+    module: 'sales.card_sales',
     dropdown: [
-      { to: '/admin/sales', label: 'Sales', module: 'sales' },
-      { to: '/admin/payouts', label: 'Payouts', module: 'payouts' },
-      { to: '/admin/withdrawals', label: 'Withdrawals', module: 'withdrawals' },
-      { to: '/admin/reports', label: 'Reports', module: 'sales' },
-      { to: '/admin/vouchers', label: 'Vouchers', module: 'vouchers' },
+      { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
+      { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
+      { to: '/admin/products', label: 'Card Products', module: 'sales.card_plans' },
     ],
   },
-
-  /* Flat: Properties - transactional catalog + Content as top-level links (no dropdown) */
   {
-    to: '/admin/properties',
-    label: 'Properties',
-    icon: 'home',
-    roles: ADMINS_ONLY,
-    module: 'properties',
-  },
-  {
-    to: '/admin/marketing-tools',
-    label: 'Marketing Tools',
-    icon: 'image',
-    roles: ADMINS_ONLY,
-    module: 'marketing_tools',
-  },
-  {
-    to: '/admin/broadcasts',
-    label: 'Broadcasts',
-    icon: 'bell',
-    roles: ADMINS_ONLY,
-    module: 'marketing_tools',
-  },
-  {
-    to: '/admin/messages',
-    label: 'Messages',
-    icon: 'message',
-    roles: ADMINS_ONLY,
-    module: 'messages',
-  },
-  {
-    to: '/admin/policies',
-    label: 'Policies',
-    icon: 'file-text',
-    roles: ADMINS_ONLY,
-    module: 'policies',
-  },
-
-  /* Category: System (dropdown) */
-  {
-    to: '/admin/config',
-    label: 'System',
-    icon: 'gear',
-    roles: ['admin'],
-    module: 'config',
+    to: '/admin/finance',
+    label: 'Finance',
+    icon: 'grid',
+    module: 'finance.payment_verification',
     dropdown: [
-      { to: '/admin/config', label: 'System Configuration', module: 'config' },
-      { to: '/admin/audit', label: 'Audit Log', module: 'audit' },
-      { to: '/admin/staff', label: 'Staff', module: 'staff' },
-      { to: '/admin/roles', label: 'Roles', module: 'staff' },
+      { to: '/admin/finance/payments', label: 'Payment Queue', module: 'finance.payment_verification' },
+      { to: '/admin/finance/activation', label: 'Activation Queue', module: 'finance.card_activation' },
     ],
   },
-
-  /* Category: Website CMS (Phase 1: Homepage, Phase 2: About, Phase 3: Properties, Phase 4: FAQs) */
   {
-    to: '/admin/cms',
-    label: 'Website CMS',
-    icon: 'list',
-    roles: ADMINS_ONLY,
-    module: 'cms',
+    to: '/admin/staff',
+    label: 'Organization',
+    icon: 'users',
+    module: 'organization.staff',
     dropdown: [
-      { to: '/admin/cms/homepage', label: 'Homepage', module: 'cms' },
-      { to: '/admin/cms/about', label: 'About', module: 'cms' },
-      { to: '/admin/cms/properties', label: 'Properties', module: 'cms' },
-      { to: '/admin/cms/faqs', label: 'FAQs', module: 'cms' },
-      { to: '/admin/cms/contact', label: 'Contact', module: 'cms' },
-      { to: '/admin/inquiries', label: 'Inquiries', module: 'cms' },
-      { to: '/admin/cms/global', label: 'Global Content', module: 'cms' },
-      { divider: true },
-      { to: '/admin/cms/login', label: 'Login', module: 'cms' },
-      { to: '/admin/cms/register', label: 'Register', module: 'cms' },
+      { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
+      { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
+      { to: '/admin/roles', label: 'Roles & Permissions', module: 'organization.roles' },
     ],
   },
 ];
 
-export const ROLE_LABELS: Record<Role, string> = {
-  user: 'User',
-  admin: 'Admin',
-};
+export const canViewModule = (
+  permissions: readonly AfHomesPermission[] | undefined,
+  key: AfHomesModuleKey,
+) => permissions?.some((permission) => permission.moduleKey === key && permission.canView) === true;
 
-/** Find the nav item whose `to` matches the given pathname (supports nested detail routes). */
-export function findNavItem(pathname: string): AdminNavItem | undefined {
-  const exact = ADMIN_NAV_ITEMS.find((item) => item.to === pathname);
-  if (exact) return exact;
-  // Check dropdown children first for more specific match
-  for (const item of ADMIN_NAV_ITEMS) {
-    if (
-      item.dropdown?.some(
-        (sub) => !('divider' in sub) && (pathname === sub.to || pathname.startsWith(`${sub.to}/`)),
-      )
-    ) {
-      return item;
-    }
-    if (pathname.startsWith(`${item.to}/`) && item.to !== '/admin') {
-      return item;
-    }
-  }
-  return undefined;
+export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
+  return ADMIN_NAV_ITEMS.flatMap((item) => {
+    const dropdown = item.dropdown?.filter((child) => canViewModule(permissions, child.module));
+    if (!canViewModule(permissions, item.module) && !dropdown?.length) return [];
+    return [{ to: item.to, label: item.label, icon: item.icon, end: item.end, dropdown }];
+  });
 }
 
-/** Find the specific sub-item matching a pathname (for breadcrumb detail labels). */
-export function findNavSubItem(
-  pathname: string,
-): { parent: AdminNavItem; sub: AdminNavSubItem } | undefined {
-  for (const item of ADMIN_NAV_ITEMS) {
-    const sub = item.dropdown?.find(
-      (s) => !('divider' in s) && (pathname === s.to || pathname.startsWith(`${s.to}/`)),
+export function findNavItem(pathname: string) {
+  return ADMIN_NAV_ITEMS.find(
+    (item) =>
+      item.to === pathname ||
+      item.dropdown?.some((child) => pathname === child.to || pathname.startsWith(`${child.to}/`)),
+  );
+}
+
+export function findNavSubItem(pathname: string) {
+  for (const parent of ADMIN_NAV_ITEMS) {
+    const sub = parent.dropdown?.find(
+      (item) => pathname === item.to || pathname.startsWith(`${item.to}/`),
     );
-    if (sub && !('divider' in sub)) return { parent: item, sub };
+    if (sub) return { parent, sub };
   }
   return undefined;
 }
 
-/**
- * Breadcrumb trail for a pathname - the single source for AdminLayout's bar
- * so page-level trails never duplicate it (UI-UX §4.3/§4.7). Trail shapes:
- * - exact sub/list page: Dashboard(link) > Category > Current
- *   (category span collapses when it would duplicate the page label).
- * - detail page under a sub or plain item: Dashboard(link) > List(link) >
- *   Details (current) - the list link stays clickable because it is not the
- *   last crumb.
- * - unmatched routes: `null` (suppress the bar) - except /admin/profile
- *   (My Account, outside the nav registry).
- */
 export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
   if (pathname === '/admin') return [{ label: 'Dashboard' }];
-  if (pathname === '/admin/profile') {
-    return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
-  }
-  const dashboardLink: BreadcrumbItem = { label: 'Dashboard', to: '/admin' };
-  const subs = ADMIN_NAV_ITEMS.flatMap((item) =>
-    (item.dropdown ?? []).filter((s): s is AdminNavSubItem => !('divider' in s)),
-  );
-  // Exact sub matches first so nested sub routes resolve to their own label
-  // instead of a longer parent's detail trail.
-  const exactSub = subs.find((sub) => sub.to === pathname);
-  if (exactSub) {
-    if (exactSub.to === '/admin/members') {
-      // The Members category and its sub share the label/path - single crumb.
-      return [dashboardLink, { label: exactSub.label }];
-    }
-    const parent = ADMIN_NAV_ITEMS.find((item) =>
-      item.dropdown?.some((s) => !('divider' in s) && 'to' in s && s.to === exactSub.to),
-    );
-    if (parent && parent.label !== exactSub.label) {
-      return [dashboardLink, { label: parent.label }, { label: exactSub.label }];
-    }
-    return [dashboardLink, { label: exactSub.label }];
-  }
-  const detailSub = subs.find((sub) => pathname.startsWith(`${sub.to}/`));
-  if (detailSub) {
-    return [dashboardLink, { label: detailSub.label, to: detailSub.to }, { label: 'Details' }];
-  }
-  for (const item of ADMIN_NAV_ITEMS) {
-    if (item.dropdown || item.to === '/admin') continue;
-    if (pathname === item.to) {
-      return [dashboardLink, { label: item.label }];
-    }
-    if (pathname.startsWith(`${item.to}/`)) {
-      return [dashboardLink, { label: item.label, to: item.to }, { label: 'Details' }];
-    }
-  }
-  return null;
-}
-
-/** Check whether a role can access a nav item (includes categories). */
-export function canAccess(role: Role | null, item: AdminNavItem): boolean {
-  return role !== null && item.roles.includes(role);
-}
-
-/**
- * Check whether a role id can access a nav item's module (records + matrix
- * fallback). `sessionModules` - when provided by the server-resolved
- * session - is authoritative and wins over records (see resolveRoleModules).
- */
-export function canAccessModule(
-  roleId: string | null,
-  roles: readonly RoleRecord[] | undefined,
-  item: AdminNavItem,
-  sessionModules?: readonly StaffModule[],
-): boolean {
-  if (roleId === null) return false;
-  return resolveRoleModules(roles, roleId, sessionModules).includes(item.module);
-}
-
-/** Check whether a role id can access a dropdown sub-item's module. */
-export function canAccessSubModule(
-  roleId: string | null,
-  roles: readonly RoleRecord[] | undefined,
-  sub: AdminNavSubItem,
-  sessionModules?: readonly StaffModule[],
-): boolean {
-  if (roleId === null) return false;
-  return resolveRoleModules(roles, roleId, sessionModules).includes(sub.module);
-}
-
-/**
- * Filter a dropdown to the sub-items visible to a role id, dropping
- * dividers left orphaned at the edges or doubled up by the filtering.
- */
-export function filterDropdownForStaffRole(
-  dropdown: AdminNavDropdownItem[] | undefined,
-  roleId: string | null,
-  roles?: readonly RoleRecord[],
-  sessionModules?: readonly StaffModule[],
-): AdminNavDropdownItem[] | undefined {
-  if (!dropdown) return undefined;
-  if (roleId === null) return dropdown;
-  const visible = dropdown.filter(
-    (sub) => 'divider' in sub || canAccessSubModule(roleId, roles, sub, sessionModules),
-  );
-  const cleaned: AdminNavDropdownItem[] = [];
-  for (const sub of visible) {
-    const prev = cleaned[cleaned.length - 1];
-    if ('divider' in sub && (prev === undefined || 'divider' in prev)) continue;
-    cleaned.push(sub);
-  }
-  while (cleaned.length > 0 && 'divider' in cleaned[cleaned.length - 1]!) cleaned.pop();
-  return cleaned;
-}
-
-/** Extract SidebarItem list, preserving dropdown metadata for the renderer. */
-export function navItemsForRole(
-  role: Role | null,
-  roleId?: string | null,
-  roles?: readonly RoleRecord[],
-  sessionModules?: readonly StaffModule[],
-): SidebarItem[] {
-  if (role === null) return [];
-  const items = ADMIN_NAV_ITEMS.filter((item) => canAccess(role, item));
-  if (roleId === undefined) {
-    return items.map((item) => ({
-      to: item.to,
-      label: item.label,
-      icon: item.icon,
-      end: item.end,
-      badge: item.badge,
-      /** Pass through dropdown so the Sidebar can render a category header. */
-      dropdown: item.dropdown,
-    }));
-  }
-  if (roleId === null) return [];
-  return items.flatMap((item) => {
-    const dropdown = filterDropdownForStaffRole(item.dropdown, roleId, roles, sessionModules);
-    // A category stays visible when its own module is allowed or when at
-    // least one sub-item link remains (e.g. merchant sees Operations for
-    // Vouchers even though the Operations/Sales module itself is denied).
-    const hasVisibleLink = dropdown?.some((sub) => !('divider' in sub)) ?? false;
-    if (!canAccessModule(roleId, roles, item, sessionModules) && !hasVisibleLink) return [];
-    return [
-      {
-        to: item.to,
-        label: item.label,
-        icon: item.icon,
-        end: item.end,
-        badge: item.badge,
-        dropdown,
-      },
-    ];
-  });
+  const found = findNavSubItem(pathname);
+  if (!found) return null;
+  const exact = pathname === found.sub.to;
+  return exact
+    ? [
+        { label: 'Dashboard', to: '/admin' },
+        { label: found.parent.label },
+        { label: found.sub.label },
+      ]
+    : [
+        { label: 'Dashboard', to: '/admin' },
+        { label: found.sub.label, to: found.sub.to },
+        { label: 'Details' },
+      ];
 }

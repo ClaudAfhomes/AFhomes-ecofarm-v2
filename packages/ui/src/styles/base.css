@@ -1,8 +1,7 @@
 /*
  * Shared base + accessibility contract (@jad/ui/base.css).
- * Consumed by every JAD app before its own global styles: box-sizing, body
+ * Consumed by every app before its own global styles: box-sizing, body
  * defaults, visible focus, screen-reader helpers, skip link, reduced motion.
- * (UI-UX §12, DESIGN-SYSTEM §7.)
  */
 
 *,
