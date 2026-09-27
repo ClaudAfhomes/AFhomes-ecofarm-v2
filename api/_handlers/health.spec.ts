@@ -100,10 +100,21 @@ describe('GET /health', () => {
       configure({ db });
       const state = await call();
       const body = state.body as Record<string, unknown>;
-      expect(Object.keys(body).sort()).toEqual(['db', 'ok', 'service', 'time']);
+      expect(body).toMatchObject({ db: expect.any(String), ok: expect.any(Boolean), service: 'afhomes-api' });
+      expect(typeof body.time).toBe('string');
       expect(typeof body.ok).toBe('boolean');
       expect(['ok', 'error']).toContain(body.db);
       expect(body.service).toBe('afhomes-api');
+      if (body.ok === false) {
+        expect(body.error).toMatchObject({
+          code: 'INTERNAL',
+          message: 'Health dependency is unavailable',
+          requestId: expect.any(String),
+          timestamp: expect.any(String),
+        });
+      } else {
+        expect(body.error).toBeUndefined();
+      }
     }
   });
 

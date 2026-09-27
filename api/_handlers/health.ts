@@ -35,11 +35,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Unconfigured Supabase is a deployment fault, not a dependency outage: 500.
   const { url, serviceKey } = getSupabaseEnv();
   if (!url || !serviceKey) {
+    const { error } = toErrorEnvelope('INTERNAL', 'Health dependency is not configured', 500);
     res.status(500).json({
       ok: false,
       db: 'error',
       service: 'afhomes-api',
       time: new Date().toISOString(),
+      error,
     });
     return;
   }
@@ -58,10 +60,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const healthy = db === 'ok';
+  const failure = healthy
+    ? {}
+    : { error: toErrorEnvelope('INTERNAL', 'Health dependency is unavailable', 503).error };
   res.status(healthy ? 200 : 503).json({
     ok: healthy,
     db,
     service: 'afhomes-api',
     time: new Date().toISOString(),
+    ...failure,
   });
 }

@@ -152,6 +152,38 @@ const REL = {
   ssmToSm: 'eeeeeeee-0000-4000-8000-000000000002',
 } as const;
 
+describe('business endpoint error envelopes', () => {
+  beforeEach(() => install());
+
+  it.each([
+    ['cards', ''],
+    ['customers', ''],
+    ['sales', ''],
+    ['queues', 'finance'],
+    ['queues', 'activation'],
+    ['commissions', ''],
+  ] as const)('%s/%s returns a safe correlated error', async (family, path) => {
+    const state = await call(family, { path });
+    expect(state.status).toBe(401);
+    expect(state.body).toMatchObject({
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Missing authentication',
+        requestId: expect.any(String),
+        timestamp: expect.any(String),
+      },
+    });
+    const error = (state.body as { error: Record<string, unknown> }).error;
+    expect(Object.keys(error).sort()).toEqual([
+      'code',
+      'message',
+      'requestId',
+      'timestamp',
+    ]);
+    expect(JSON.stringify(state.body)).not.toMatch(/service[_-]?role|database_url|stack|select\s/i);
+  });
+});
+
 /* ================================================================== */
 /* Card products                                                      */
 /* ================================================================== */

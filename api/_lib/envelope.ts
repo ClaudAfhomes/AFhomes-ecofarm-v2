@@ -9,7 +9,7 @@ export function toErrorEnvelope(code: string, message: string, status: number, d
     error: {
       code,
       message,
-      details,
+      ...(details === undefined ? {} : { details }),
       requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date().toISOString(),
     },

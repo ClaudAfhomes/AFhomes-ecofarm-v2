@@ -15,12 +15,10 @@ import path from 'node:path';
  */
 
 const HANDLER_IMPORT_RE = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+'(\.\.\/_handlers\/[^']+)'/gm;
-// Any quoted handler specifier counts as a reference. A handler is normally
-// reached through `lazy(() => import('../_handlers/x.js'))`, but a data-driven
-// route table (`{ handler: '../_handlers/x.js' }`) references it the same way
-// and must not be reported as an orphan. Static imports are still checked
-// first, so a binding imported but never used is still flagged.
-const HANDLER_DYNAMIC_RE = /'(\.\.\/_handlers\/[^']+)'/g;
+// Only a literal dynamic import is deployable. Merely storing a handler path in
+// a data object and later calling import(variable) looks routed in source but is
+// invisible to Vercel's dependency tracer.
+const HANDLER_DYNAMIC_RE = /import\(\s*'(\.\.\/_handlers\/[^']+)'\s*\)/g;
 
 export type RouteCoverageGapReason = 'not-imported' | 'imported-but-unused';
 

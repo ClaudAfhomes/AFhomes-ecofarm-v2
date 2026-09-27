@@ -11,6 +11,7 @@
  * - `api/_lib/route-coverage.ts` fails CI if one is forgotten. Handlers are
  * loaded on first use (cold-start win); shared libs stay imported eagerly.
  */
+import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 type HandlerFn = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
@@ -52,15 +53,15 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * `route-coverage` can still prove every handler is reachable.
  */
 const BUSINESS_FAMILIES = [
-  { prefix: 'card-products', module: 'cards', handler: '../_handlers/cards.js' },
-  { prefix: 'customers', module: 'customers', handler: '../_handlers/customers.js' },
-  { prefix: 'sales', module: 'sales', handler: '../_handlers/sales.js' },
-  { prefix: 'payments', module: 'sales', handler: '../_handlers/sales.js' },
-  { prefix: 'memberships', module: 'memberships', handler: '../_handlers/memberships.js' },
-  { prefix: 'points', module: 'memberships', handler: '../_handlers/memberships.js' },
-  { prefix: 'commissions', module: 'commissions', handler: '../_handlers/commissions.js' },
-  { prefix: 'referrals', module: 'referrals', handler: '../_handlers/referrals.js' },
-  { prefix: 'queues', module: 'queues', handler: '../_handlers/queues.js' },
+  { prefix: 'card-products', module: 'cards', load: () => import('../_handlers/cards.js') },
+  { prefix: 'customers', module: 'customers', load: () => import('../_handlers/customers.js') },
+  { prefix: 'sales', module: 'sales', load: () => import('../_handlers/sales.js') },
+  { prefix: 'payments', module: 'sales', load: () => import('../_handlers/sales.js') },
+  { prefix: 'memberships', module: 'memberships', load: () => import('../_handlers/memberships.js') },
+  { prefix: 'points', module: 'memberships', load: () => import('../_handlers/memberships.js') },
+  { prefix: 'commissions', module: 'commissions', load: () => import('../_handlers/commissions.js') },
+  { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
+  { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
   // Customer portal. Neither family consults the staff permission model - see
   // api/_lib/customer-access.ts, which resolves a customer from ownership alone.
   //
@@ -76,15 +77,19 @@ const BUSINESS_FAMILIES = [
     prefix: 'auth',
     module: 'auth',
     path: 'customer/activate',
-    handler: '../_handlers/customer-activation.js',
+    load: () => import('../_handlers/customer-activation.js'),
   },
-  { prefix: 'customer', module: 'customer', handler: '../_handlers/customer-portal.js' },
+  { prefix: 'customer', module: 'customer', load: () => import('../_handlers/customer-portal.js') },
   // Staff redemption. Reuses the Phase 1 `operations.redemption` and
   // `operations.catalog` module keys, so Phase 4 adds NO new authorization
   // vocabulary. `items` and `history` live under the same prefix, and because a
   // prefix must be followed by `/` or end-of-path it cannot shadow the bare
   // `/redemptions` list.
-  { prefix: 'redemptions', module: 'operations.redemption', handler: '../_handlers/redemptions.js' },
+  {
+    prefix: 'redemptions',
+    module: 'operations.redemption',
+    load: () => import('../_handlers/redemptions.js'),
+  },
 ] as const;
 
 export function selectHandler(
@@ -110,7 +115,10 @@ export function selectHandler(
     if ('path' in family && family.path !== familyPath) continue;
     query.familyPath = familyPath;
     return {
-      handler: lazy(() => import(family.handler as `../_handlers/${string}.js`)),
+      // Keep every import specifier literal. Vercel's function tracer cannot
+      // discover a module behind import(variable), so a variable target builds
+      // successfully but disappears from the deployed function artifact.
+      handler: lazy(family.load),
       routeKey: `${family.module}/${query.familyPath || family.prefix}`,
     };
   }
@@ -158,7 +166,8 @@ export async function routeRequest(
       err?.message ?? err,
     );
     try {
-      res.status(500).json({ error: { code: 'INTERNAL', message: 'Internal server error' } });
+      const { error, status } = toErrorEnvelope('INTERNAL', 'Internal server error', 500);
+      res.status(status).json({ error });
     } catch {
       // Response already sent - nothing more we can do.
     }

@@ -2,14 +2,14 @@ import { z } from 'zod';
 
 /**
  * API error envelope. Shape is authoritative: every handler failure returns
- * `{ error: { code, message, details?, requestId?, timestamp } }`.
+ * `{ error: { code, message, details?, requestId, timestamp } }`.
  */
 export const errorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
     details: z.unknown().optional(),
-    requestId: z.string().optional(),
+    requestId: z.string().min(1),
     timestamp: z.string(),
   }),
 });

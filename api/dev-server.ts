@@ -19,6 +19,7 @@ import { fileURLToPath, URL } from 'node:url';
 
 import { findRouteCoverageGaps } from './_lib/route-coverage.js';
 import { getSupabaseEnv } from './_lib/env.js';
+import { toErrorEnvelope } from './_lib/envelope.js';
 import { routeRequest } from './_lib/router.js';
 
 // ---------------------------------------------------------------------------
@@ -148,10 +149,9 @@ const server = http.createServer(async (req, res) => {
   try {
     const handled = await routeRequest(vercelReq, vercelRes);
     if (!handled) {
+      const { error } = toErrorEnvelope('NOT_FOUND', `No handler for ${pathname}`, 404);
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({ error: { code: 'NOT_FOUND', message: `No handler for ${pathname}` } }),
-      );
+      res.end(JSON.stringify({ error }));
       console.log(`[dev-server] ${method} ${pathname} -> 404 (no handler)`);
     }
   } catch (e) {
@@ -159,8 +159,9 @@ const server = http.createServer(async (req, res) => {
     // eslint-disable-next-line no-console
     console.error(`[dev-server] request error for ${method} ${pathname}:`, err?.message ?? err);
     if (!res.headersSent) {
+      const { error } = toErrorEnvelope('INTERNAL', 'Internal server error', 500);
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'INTERNAL', message: 'Internal server error' } }));
+      res.end(JSON.stringify({ error }));
     }
   }
 });

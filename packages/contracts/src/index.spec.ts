@@ -24,9 +24,22 @@ describe('errorEnvelopeSchema', () => {
   it('accepts a valid envelope', () => {
     expect(
       errorEnvelopeSchema.safeParse({
-        error: { code: 'FORBIDDEN', message: 'Insufficient permission', timestamp: 'now' },
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Insufficient permission',
+          requestId: 'req-123',
+          timestamp: 'now',
+        },
       }).success,
     ).toBe(true);
+  });
+
+  it('rejects a missing request id', () => {
+    expect(
+      errorEnvelopeSchema.safeParse({
+        error: { code: 'FORBIDDEN', message: 'Insufficient permission', timestamp: 'now' },
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects a missing message', () => {
