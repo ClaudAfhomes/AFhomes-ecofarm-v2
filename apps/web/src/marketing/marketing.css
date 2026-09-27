@@ -1,0 +1,367 @@
+/**
+ * AFhomes public marketing styles (Phase 3 port of the source site theme).
+ *
+ * Architecture (read before touching):
+ * - Tailwind v4 is split so the reset never leaks: `theme.css` (design
+ *   tokens) + `preflight-scoped.css` (the v4 reset with every selector
+ *   prefixed `.afh-public`) + `utilities.css` (generated utilities).
+ * - The cascade-layer order below is load-bearing: utilities must stay above
+ *   base so e.g. `bg-pine-800` beats the reset's `button{background:...}`.
+ * - Page-level rules (background, fonts, selection, focus, tap, motion kill
+ *   switch) live under `.afh-public` in `@layer base`, never on `body`/`html`,
+ *   so the customer portal keeps the @jad/ui shell untouched.
+ * - `:root` collisions with @jad/ui tokens were audited: the only shared
+ *   names are `--radius-sm/md/lg`, and the unlayered ui values win ties only
+ *   for `--radius-sm` (6px vs 8px on two minor portal elements); md/lg values
+ *   are identical. Marketing never uses `rounded-sm/md`.
+ */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css';
+@import './preflight-scoped.css' layer(base);
+@import 'tailwindcss/utilities.css';
+
+@theme {
+  /* ============================================================
+     AFhomes Design System — Phase 2
+     Modern Organic Luxury · Green-led brand identity
+     ============================================================ */
+
+  /* Typography — display serif + UI sans */
+  --font-serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+
+  /* Layout */
+  --container-site: 80rem;
+  --container-narrow: 68rem;
+  --container-tight: 58rem;
+
+  /* ------------------------------------------------------------
+     PRIMARY GREEN — #57AB4B (brand-led identity)
+     leaf = mid tones, pine = deep tones, sage = natural tints
+     ------------------------------------------------------------ */
+  --color-leaf-100: #edf5e9;
+  --color-leaf-200: #dfecd8;
+  --color-leaf-300: #c3ddb9;
+  --color-leaf-400: #6fbf64;
+  --color-leaf-500: #57ab4b;
+  --color-leaf-600: #46903c;
+  --color-leaf-700: #3a7a32;
+  --color-pine-600: #3f6b47;
+  --color-pine-700: #2e5b33;
+  --color-pine-800: #23472b;
+  --color-pine-900: #1b3822;
+  --color-pine-950: #142a1a;
+
+  /* Natural green tints */
+  --color-sage-100: #f0f4ec;
+  --color-sage-200: #e4ebdd;
+  --color-sage-300: #dce7d5;
+  --color-sage-400: #c2d4b6;
+  --color-sage-500: #9bb88b;
+  --color-sage-600: #6f8067;
+  --color-sage-700: #5a6653;
+
+  /* ------------------------------------------------------------
+     DEEP NAVY — #2D4074 (premium dark sections)
+     ------------------------------------------------------------ */
+  --color-navy-950: #171f3d;
+  --color-navy-900: #1f2b52;
+  --color-navy-800: #2d4074;
+  --color-navy-700: #3a4f8f;
+  --color-navy-600: #4d63a6;
+  --color-navy-500: #687cba;
+  --color-navy-400: #8a99c9;
+  --color-navy-300: #adb9dc;
+  --color-navy-200: #cfd5ec;
+  --color-navy-100: #eceff8;
+
+  /* ------------------------------------------------------------
+     CONTROLLED WARM ACCENTS (used sparingly)
+     ------------------------------------------------------------ */
+
+  /* Coral — hospitality warmth */
+  --color-coral-100: #fef1ea;
+  --color-coral-300: #fbc4a7;
+  --color-coral-400: #f9ab85;
+  --color-coral-500: #f6946b;
+  --color-coral-600: #ef7c4d;
+  --color-coral-700: #dc6133;
+
+  /* Pink — selective */
+  --color-pink-400: #f58a97;
+  --color-pink-500: #ef6e7f;
+  --color-pink-600: #e15669;
+
+  /* Gold — VIP / premium highlights */
+  --color-gold-100: #fdf3d8;
+  --color-gold-300: #fbd985;
+  --color-gold-400: #fcd173;
+  --color-gold-500: #fbc75e;
+  --color-gold-600: #e8ae3a;
+
+  /* Cyan — Smart Wellness Hotel / water / technology */
+  --color-cyan-100: #def3f7;
+  --color-cyan-400: #4fbdd2;
+  --color-cyan-500: #28abc5;
+  --color-cyan-600: #1c8ba3;
+  --color-cyan-700: #17708a;
+
+  /* Magenta — very sparing */
+  --color-magenta-100: #fce4ee;
+  --color-magenta-400: #ef6da3;
+  --color-magenta-500: #ea3688;
+  --color-magenta-600: #cf2474;
+  --color-magenta-700: #a51c5d;
+
+  /* ------------------------------------------------------------
+     NATURAL NEUTRALS
+     warm white · ivory · soft sand · deep charcoal
+     ------------------------------------------------------------ */
+  --color-cream-50: #fcfbf8; /* warm white — primary background */
+  --color-cream-100: #f8f6f0; /* ivory — secondary surface */
+  --color-cream-200: #ede8dc; /* soft sand — muted surface */
+  --color-cream-300: #e2d9c6;
+  --color-cream-400: #d4c8ae;
+
+  /* Text ink — deep charcoal with green undertone */
+  --color-ink-900: #1b211d;
+  --color-ink-800: #242b26;
+  --color-ink-700: #303a32;
+  --color-ink-600: #47524a;
+  --color-ink-500: #5e685e;
+  --color-ink-400: #7e867e;
+
+  /* Lines & borders */
+  --color-line: #ded5c2;
+  --color-line-dark: #34453a;
+
+  /* ------------------------------------------------------------
+     SEMANTIC ALIASES — single source of brand meaning
+     ------------------------------------------------------------ */
+  --color-primary: var(--color-leaf-500);
+  --color-primary-dark: var(--color-pine-800);
+  --color-primary-light: var(--color-leaf-300);
+  --color-primary-ink: var(--color-pine-900);
+  --color-navy-brand: var(--color-navy-800);
+  --color-coral-brand: var(--color-coral-500);
+  --color-gold-brand: var(--color-gold-500);
+  --color-cyan-brand: var(--color-cyan-500);
+  --color-magenta-brand: var(--color-magenta-500);
+  --color-background: var(--color-cream-50);
+  --color-surface: var(--color-cream-100);
+  --color-surface-muted: var(--color-cream-200);
+  --color-surface-sage: var(--color-sage-300);
+  --color-charcoal: var(--color-ink-900);
+  --color-muted-green: var(--color-sage-600);
+  --color-text: var(--color-ink-900);
+  --color-text-muted: var(--color-ink-500);
+  --color-border: var(--color-line);
+
+  /* ------------------------------------------------------------
+     RADIUS — refined, not pill-heavy
+     8 / 12 / 20px + oversized only for hero imagery
+     ------------------------------------------------------------ */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1.25rem;
+  --radius-card: 1.25rem;
+  --radius-panel: 1.75rem;
+
+  /* ------------------------------------------------------------
+     SHADOWS — restrained depth, charcoal-green tint
+     ------------------------------------------------------------ */
+  --shadow-subtle:
+    0 1px 2px rgb(27 33 29 / 0.04), 0 4px 12px rgb(27 33 29 / 0.05);
+  --shadow-soft:
+    0 1px 2px rgb(27 33 29 / 0.04), 0 8px 24px rgb(27 33 29 / 0.06);
+  --shadow-lift:
+    0 2px 4px rgb(27 33 29 / 0.05), 0 16px 40px rgb(27 33 29 / 0.1);
+
+  /* ------------------------------------------------------------
+     MOTION — calm, breathing micro-animations (Phase 6)
+     Reduced-motion users get static dots via the kill switch below.
+     ------------------------------------------------------------ */
+  --animate-dot-pulse: dot-pulse 2.4s ease-in-out infinite;
+  --animate-dot-breathe: dot-breathe 1.8s ease-in-out infinite;
+
+  @keyframes dot-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.45;
+      transform: scale(0.75);
+    }
+  }
+
+  @keyframes dot-breathe {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+@layer base {
+  /* Page shell for every public marketing route. Scoped (not body/html)
+     so the customer portal keeps the @jad/ui shell untouched. */
+  .afh-public {
+    background-color: var(--color-cream-50);
+    font-family: var(--font-sans);
+    color: var(--color-ink-800);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    /* The marketing layout never scrolls horizontally. Root causes are
+       fixed individually; this keeps transient animation scale frames and
+       absolute ghost numerals from leaking a scrollbar. */
+    overflow-x: clip;
+  }
+
+  /* Fast, single-tap interactions on touch devices (no double-tap zoom delay). */
+  @media (pointer: coarse) {
+    .afh-public button,
+    .afh-public a,
+    .afh-public input,
+    .afh-public select,
+    .afh-public textarea,
+    .afh-public summary,
+    .afh-public label {
+      touch-action: manipulation;
+    }
+  }
+
+  .afh-public ::selection {
+    background-color: var(--color-leaf-500);
+    color: var(--color-pine-950);
+  }
+
+  .afh-public :focus-visible {
+    outline: 2px solid var(--color-leaf-500);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .afh-public *,
+    .afh-public *::before,
+    .afh-public *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-serif);
+  }
+
+  /* Editorial eyebrow / small caps label */
+  .label-caps {
+    @apply text-[0.7rem] font-semibold tracking-[0.22em] uppercase;
+  }
+
+  .text-shadow-soft {
+    text-shadow: 0 1px 24px rgb(20 42 26 / 0.35);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* ------------------------------------------------------------
+     TYPOGRAPHIC SCALE — editorial, responsive, restrained weights
+     ------------------------------------------------------------ */
+  .text-display {
+    font-family: var(--font-serif);
+    font-size: clamp(2.75rem, 5.5vw, 5rem);
+    line-height: 1.02;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .text-h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(2.25rem, 4.5vw, 3.75rem);
+    line-height: 1.06;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .text-h2 {
+    font-family: var(--font-serif);
+    font-size: clamp(1.875rem, 3.6vw, 2.75rem);
+    line-height: 1.1;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
+  .text-h3 {
+    font-family: var(--font-serif);
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+    line-height: 1.2;
+    font-weight: 500;
+  }
+
+  .text-h4 {
+    font-family: var(--font-serif);
+    font-size: 1.25rem;
+    line-height: 1.3;
+    font-weight: 500;
+  }
+
+  .text-body-lg {
+    font-size: clamp(1.0625rem, 1.4vw, 1.25rem);
+    line-height: 1.7;
+  }
+
+  .text-body {
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+
+  .text-body-sm {
+    font-size: 0.875rem;
+    line-height: 1.65;
+  }
+
+  .text-caption {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--color-ink-500);
+  }
+
+  /* Link interaction — subtle underline reveal */
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    transition:
+      background-size 0.3s ease,
+      color 0.3s ease;
+    text-decoration: none;
+  }
+  .link-underline:hover {
+    background-size: 100% 1px;
+  }
+  .link-underline-active {
+    background-size: 100% 1px;
+  }
+}

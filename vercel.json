@@ -19,6 +19,25 @@
     { "source": "/health", "destination": "/api/router?path=health" },
     { "source": "/admin", "destination": "/admin/index.html" },
     { "source": "/admin/:path*", "destination": "/admin/index.html" },
+    { "source": "/about", "destination": "/about/index.html" },
+    { "source": "/experiences", "destination": "/experiences/index.html" },
+    {
+      "source": "/experiences/smart-wellness-hotel",
+      "destination": "/experiences/smart-wellness-hotel/index.html"
+    },
+    {
+      "source": "/experiences/alm-japanese-restaurant",
+      "destination": "/experiences/alm-japanese-restaurant/index.html"
+    },
+    {
+      "source": "/experiences/hotspring-ecofarm-resort",
+      "destination": "/experiences/hotspring-ecofarm-resort/index.html"
+    },
+    { "source": "/vip", "destination": "/vip/index.html" },
+    { "source": "/stories", "destination": "/stories/index.html" },
+    { "source": "/faq", "destination": "/faq/index.html" },
+    { "source": "/compliance", "destination": "/compliance/index.html" },
+    { "source": "/contact", "destination": "/contact/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

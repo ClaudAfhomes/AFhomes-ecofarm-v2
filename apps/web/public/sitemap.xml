@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Static sitemap for early search indexing.
+  NOTE: URLs point at the production domain placeholder and must be regenerated
+  when the live domain is confirmed and per-page meta is static.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.afhomes.com.ph/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://www.afhomes.com.ph/experiences</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://www.afhomes.com.ph/experiences/smart-wellness-hotel</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://www.afhomes.com.ph/experiences/alm-japanese-restaurant</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://www.afhomes.com.ph/experiences/hotspring-ecofarm-resort</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://www.afhomes.com.ph/vip</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://www.afhomes.com.ph/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://www.afhomes.com.ph/stories</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://www.afhomes.com.ph/faq</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://www.afhomes.com.ph/compliance</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://www.afhomes.com.ph/contact</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+</urlset>

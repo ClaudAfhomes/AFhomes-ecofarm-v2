@@ -1,26 +1,46 @@
-import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../test/utils';
 import App from './App';
 
-describe('public site shell', () => {
-  it('mounts and identifies the platform without exposing JAD branding', () => {
-    renderWithProviders(<App />);
+beforeEach(() => {
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  window.scrollTo = vi.fn() as never;
+});
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
-      'Public site under construction',
-    );
-    expect(screen.getByText('AF Homes Ecofarm')).toBeInTheDocument();
+describe('public site shell', () => {
+  it('serves the AF Homes public site at / without JAD branding', async () => {
+    renderWithProviders(<App />);
+    const main = await screen.findByRole('main', undefined, { timeout: 20000 });
+    expect(
+      within(main).getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines'),
+    ).toBeInTheDocument();
     expect(document.title).not.toMatch(/JA&D|JAD Realty/i);
+    await vi.waitFor(() => expect(document.title).toContain('AFhomes'), { timeout: 20000 });
   });
 
-  it('links staff to the administration console', () => {
-    renderWithProviders(<App />);
+  it('keeps the customer portal mounted under /customer', async () => {
+    renderWithProviders(<App />, { route: '/customer/login' });
+    expect(await screen.findByLabelText(/Email/)).toBeInTheDocument();
+  });
 
-    expect(screen.getByRole('link', { name: 'Staff administration' })).toHaveAttribute(
-      'href',
-      expect.stringContaining('5174'),
-    );
+  it('renders the marketing 404 for unknown paths', async () => {
+    // The 404 page carries no <main> landmark by design.
+    renderWithProviders(<App />, { route: '/definitely-not-a-page' });
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: 'This page is taking a rest day.' },
+        { timeout: 20000 },
+      ),
+    ).toBeInTheDocument();
   });
 });
