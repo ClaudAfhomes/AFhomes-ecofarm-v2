@@ -9,6 +9,7 @@ import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
 import { CustomerMembershipPage } from '../features/customer/CustomerMembershipPage';
 import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
+import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
 import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
@@ -70,6 +71,9 @@ export default function App() {
 
       <Route path="/customer/login" element={<CustomerLoginPage />} />
       <Route path="/customer/activate" element={<CustomerActivatePage />} />
+      {/* Public OST registration. Outside the customer layout on purpose:
+          the applicant has no account yet, so none of the portal guards apply. */}
+      <Route path="/ost/register" element={<OstRegisterPage />} />
 
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<CustomerDashboardPage />} />

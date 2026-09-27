@@ -62,7 +62,16 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     label: 'Sales Network',
     icon: 'users',
     module: 'network.genealogy',
-    dropdown: [{ to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' }],
+    dropdown: [
+      { to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' },
+      {
+        to: '/admin/ost/applications',
+        label: 'OST Applications',
+        module: 'network.ost_registrations',
+      },
+      { to: '/admin/ost/members', label: 'OST Members', module: 'network.ost_members' },
+      { to: '/admin/ost/referral-code', label: 'My Referral Code', module: 'network.referrals' },
+    ],
   },
   {
     to: '/admin/staff',

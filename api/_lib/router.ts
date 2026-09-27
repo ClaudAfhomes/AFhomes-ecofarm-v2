@@ -70,6 +70,10 @@ const BUSINESS_FAMILIES = [
   },
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
   { prefix: 'genealogy', module: 'genealogy', load: () => import('../_handlers/genealogy.js') },
+  // Phase 8 OST registration and approval (SM -> OST). One family for the
+  // public referral/application surface and the staff review surface; the
+  // handler authorizes each route separately (public routes take no session).
+  { prefix: 'ost', module: 'ost', load: () => import('../_handlers/ost.js') },
   { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
   // Customer portal. Neither family consults the staff permission model - see
   // api/_lib/customer-access.ts, which resolves a customer from ownership alone.

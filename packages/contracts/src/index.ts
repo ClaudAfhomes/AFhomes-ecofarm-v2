@@ -204,8 +204,50 @@ export {
 } from './schemas/customer.js';
 
 /* ---- PHASE 7: authorized sales genealogy ---- */
-export { genealogyStatusSchema, genealogyNodeSchema, genealogySummarySchema } from './schemas/genealogy.js';
+export {
+  genealogyStatusSchema,
+  genealogyNodeSchema,
+  genealogySummarySchema,
+} from './schemas/genealogy.js';
 export type { GenealogyNode, GenealogySummary } from './schemas/genealogy.js';
+
+/* ---- Phase 8: OST registration and approval (SM -> OST) ----
+   The public request carries a referral CODE, never a sponsor id: the
+   sponsor is resolved and frozen server-side, so there is no field to
+   spoof. `submitted` is the pending state; no new lifecycle vocabulary. */
+export {
+  ostApplicationStatusSchema,
+  OST_REVIEWABLE_STATUSES,
+  OST_TERMINAL_STATUSES,
+  canTransitionOstApplication,
+  ostMemberStatusSchema,
+  ostReferralCodeSchema,
+  normalizeOstReferralCode,
+  buildOstRegistrationUrl,
+  ostReferralResolutionSchema,
+  submitOstApplicationSchema,
+  ostApplicationSubmittedSchema,
+  ostApplicationSchema,
+  rejectOstApplicationSchema,
+  ostMemberSchema,
+  createOstReferralCodeSchema,
+  ostReferralCodeIssuedSchema,
+  ostReferralCodeRecordSchema,
+} from './schemas/ost.js';
+export type {
+  OstApplicationStatus,
+  OstMemberStatus,
+  OstReferralCode,
+  OstReferralResolution,
+  SubmitOstApplicationRequest,
+  OstApplicationSubmitted,
+  OstApplication,
+  RejectOstApplicationRequest,
+  OstMember,
+  CreateOstReferralCodeRequest,
+  OstReferralCodeIssued,
+  OstReferralCodeRecord,
+} from './schemas/ost.js';
 
 /* ---- Phase 6: staff-managed public website CMS ---- */
 export {

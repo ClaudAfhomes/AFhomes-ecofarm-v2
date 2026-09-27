@@ -20,6 +20,10 @@ import { CmsMediaPage } from '../features/cms/CmsMediaPage';
 import { CmsPagesPage } from '../features/cms/CmsPagesPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
+import { OstApplicationDetailPage } from '../features/ost/OstApplicationDetailPage';
+import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
+import { OstMembersPage } from '../features/ost/OstMembersPage';
+import { OstReferralCodesPage } from '../features/ost/OstReferralCodesPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -60,7 +64,24 @@ export default function App() {
           />
           <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
           <Route path="/admin/genealogy" element={protectedPage(<GenealogyPage />)} />
-          <Route path="/admin/genealogy/:staffId" element={protectedPage(<GenealogyDetailsPage />)} />
+          <Route
+            path="/admin/genealogy/:staffId"
+            element={protectedPage(<GenealogyDetailsPage />)}
+          />
+          {/* OST onboarding. Each route is gated on its own module key via
+              ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree.
+              Review (approve/reject) additionally requires the update grant,
+              which the server checks - the SM pipeline is view-scoped. */}
+          <Route path="/admin/ost/applications" element={protectedPage(<OstApplicationsPage />)} />
+          <Route
+            path="/admin/ost/applications/:id"
+            element={protectedPage(<OstApplicationDetailPage />)}
+          />
+          <Route path="/admin/ost/members" element={protectedPage(<OstMembersPage />)} />
+          <Route
+            path="/admin/ost/referral-code"
+            element={protectedPage(<OstReferralCodesPage />)}
+          />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
           <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
