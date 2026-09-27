@@ -19,8 +19,10 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/admin/afhomes/dashboard', q)?.routeKey).toBe(
       'admin/afhomes/dashboard',
     );
-    expect(selectHandler('/api/v1/admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b', q)
-      ?.routeKey).toBe('admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b');
+    expect(
+      selectHandler('/api/v1/admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b', q)
+        ?.routeKey,
+    ).toBe('admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b');
   });
 
   it('routes the Phase 2 business families and captures the sub-path', () => {
@@ -45,6 +47,21 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/payments/abc/verify', q)?.routeKey).toBe('sales/abc/verify');
     expect(selectHandler('/api/v1/queues/finance', q)?.routeKey).toBe('queues/finance');
     expect(selectHandler('/api/v1/points/ledger/abc', q)?.routeKey).toBe('memberships/ledger/abc');
+  });
+
+  it('routes every Phase 6 CMS endpoint through the literal CMS handler', () => {
+    const q: Record<string, string | undefined> = {};
+    for (const path of [
+      'public',
+      'documents',
+      'pages',
+      'media',
+      'history',
+      'public/pages/about-us',
+    ]) {
+      expect(selectHandler(`/api/v1/cms/${path}`, q)?.routeKey).toBe(`cms/${path}`);
+      expect(q.familyPath).toBe(path);
+    }
   });
 
   it('serves the bare /api prefix used by the local dev server', () => {
@@ -82,7 +99,6 @@ describe('selectHandler', () => {
       '/api/v1/me/ledger',
       '/api/v1/auth/register',
       '/api/v1/auth/verify-email',
-      '/api/v1/cms/homepage',
       '/api/v1/config/public',
       '/api/v1/policies',
       '/api/v1/programs',
@@ -111,9 +127,9 @@ describe('resolveRequestUrl', () => {
   });
 
   it('rebuilds the path from the rewrite query param', () => {
-    expect(
-      resolveRequestUrl({ url: '/api/router', query: { path: 'admin/afhomes/roles' } }),
-    ).toBe('/api/v1/admin/afhomes/roles');
+    expect(resolveRequestUrl({ url: '/api/router', query: { path: 'admin/afhomes/roles' } })).toBe(
+      '/api/v1/admin/afhomes/roles',
+    );
     expect(
       resolveRequestUrl({ url: '/api/router', query: { path: 'admin/afhomes/staff/abc-123' } }),
     ).toBe('/api/v1/admin/afhomes/staff/abc-123');

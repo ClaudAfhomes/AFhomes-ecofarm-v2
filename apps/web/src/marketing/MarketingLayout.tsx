@@ -1,10 +1,12 @@
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import { MotionConfig } from 'motion/react';
 
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { LoadingState } from './components/ui/Feedback';
 import { Layout } from './components/layout/Layout';
 import './marketing.css';
+import { hydrateCms } from './lib/cms';
+import { useCmsRevision } from './hooks/useCmsRevision';
 
 /**
  * Public marketing shell (Phase 3 port of the source public site).
@@ -19,6 +21,10 @@ import './marketing.css';
  * Tailwind/motion payload never loads for portal-only visits).
  */
 export function MarketingLayout() {
+  useCmsRevision();
+  useEffect(() => {
+    void hydrateCms();
+  }, []);
   return (
     <div className="afh-public">
       <MotionConfig reducedMotion="user">

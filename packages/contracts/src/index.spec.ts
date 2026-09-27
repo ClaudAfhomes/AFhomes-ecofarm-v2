@@ -79,12 +79,18 @@ describe('exact decimal money', () => {
 });
 
 describe('afHomesModuleKeySchema', () => {
-  it('exposes exactly the 24 module keys: the 22 Phase 1 keys plus the 2 Phase 2 additions', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(24);
+  it('exposes the 24 existing keys plus four narrowly scoped Phase 6 CMS keys', () => {
+    expect(afHomesModuleKeySchema.options).toHaveLength(28);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
     expect(keys).toContain('finance.points');
+    expect(keys.filter((key) => key.startsWith('cms.'))).toEqual([
+      'cms.pages',
+      'cms.media',
+      'cms.settings',
+      'cms.history',
+    ]);
   });
 
   it('covers every seeded module group', () => {
@@ -97,8 +103,12 @@ describe('afHomesModuleKeySchema', () => {
       'network.',
       'operations.',
       'governance.',
+      'cms.',
     ]) {
-      expect(keys.some((k) => k.startsWith(group)), group).toBe(true);
+      expect(
+        keys.some((k) => k.startsWith(group)),
+        group,
+      ).toBe(true);
     }
   });
 
@@ -211,9 +221,9 @@ describe('createAfHomesRoleSchema', () => {
 
   it('rejects a too-short name and an empty permission set', () => {
     expect(createAfHomesRoleSchema.safeParse({ name: 'A', permissions: [] }).success).toBe(false);
-    expect(
-      createAfHomesRoleSchema.safeParse({ name: 'Valid Name', permissions: [] }).success,
-    ).toBe(true);
+    expect(createAfHomesRoleSchema.safeParse({ name: 'Valid Name', permissions: [] }).success).toBe(
+      true,
+    );
   });
 });
 
@@ -232,7 +242,8 @@ describe('inviteAfHomesStaffSchema', () => {
   it('rejects a malformed email or a non-uuid role', () => {
     const base = { fullName: 'New Hire', departmentId: null, roleId: UUID_B };
     expect(inviteAfHomesStaffSchema.safeParse({ ...base, email: 'bad' }).success).toBe(false);
-    expect(inviteAfHomesStaffSchema.safeParse({ ...base, email: 'a@b.co', roleId: 'x' }).success)
-      .toBe(false);
+    expect(
+      inviteAfHomesStaffSchema.safeParse({ ...base, email: 'a@b.co', roleId: 'x' }).success,
+    ).toBe(false);
   });
 });

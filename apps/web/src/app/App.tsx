@@ -22,6 +22,7 @@ const ExperienceDetailPage = lazy(() => import('../marketing/pages/ExperienceDet
 const VIPPrivilegePage = lazy(() => import('../marketing/pages/VIPPrivilege'));
 const AboutPage = lazy(() => import('../marketing/pages/About'));
 const StoriesPage = lazy(() => import('../marketing/pages/Stories'));
+const CmsPage = lazy(() => import('../marketing/pages/CmsPage'));
 const StoryDetailPage = lazy(() => import('../marketing/pages/StoryDetail'));
 const FAQPage = lazy(() => import('../marketing/pages/FAQ'));
 const CompliancePage = lazy(() => import('../marketing/pages/Compliance'));
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="faq" element={<FAQPage />} />
         <Route path="compliance" element={<CompliancePage />} />
         <Route path="contact" element={<ContactPage />} />
+        <Route path=":slug" element={<CmsPage />} />
       </Route>
 
       <Route path="/customer/login" element={<CustomerLoginPage />} />

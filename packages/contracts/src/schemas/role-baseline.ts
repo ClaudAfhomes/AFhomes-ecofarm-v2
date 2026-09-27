@@ -93,6 +93,12 @@ export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
   'finance.commission_payouts',
   'network.withdrawals',
   'governance.config',
+  // Phase 6 CMS is invitation/assignment only. Existing operational roles do
+  // not gain website publishing authority as a side effect of the migration.
+  'cms.pages',
+  'cms.media',
+  'cms.settings',
+  'cms.history',
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

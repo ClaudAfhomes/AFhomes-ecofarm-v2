@@ -14,6 +14,10 @@ import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogP
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import { AdminLoginPage } from '../features/auth/AdminLoginPage';
+import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
+import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
+import { CmsMediaPage } from '../features/cms/CmsMediaPage';
+import { CmsPagesPage } from '../features/cms/CmsPagesPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -55,6 +59,50 @@ export default function App() {
           <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+          <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
+          <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
+          <Route path="/admin/cms/media" element={protectedPage(<CmsMediaPage />)} />
+          <Route
+            path="/admin/cms/stories"
+            element={protectedPage(
+              <CmsDocumentPage
+                title="Stories"
+                description="Structured story content rendered by the existing public templates."
+                documentKey="stories"
+              />,
+            )}
+          />
+          <Route
+            path="/admin/cms/experiences"
+            element={protectedPage(
+              <CmsDocumentPage
+                title="Experiences"
+                description="Structured experience content rendered by the existing public templates."
+                documentKey="experiences"
+              />,
+            )}
+          />
+          <Route
+            path="/admin/cms/site-settings"
+            element={protectedPage(
+              <CmsDocumentPage
+                title="Site Settings"
+                description="Site identity, contact details, navigation and footer content."
+                documentKey="site"
+              />,
+            )}
+          />
+          <Route
+            path="/admin/cms/seo"
+            element={protectedPage(
+              <CmsDocumentPage
+                title="Page Content and SEO"
+                description="Structured copy and page-level metadata for the Phase 3 templates."
+                documentKey="pageContent"
+              />,
+            )}
+          />
+          <Route path="/admin/cms/history" element={protectedPage(<CmsHistoryPage />)} />
           <Route path="/admin/staff/:id" element={<Navigate to="/admin/staff" replace />} />
           <Route path="/admin/roles/:id" element={<Navigate to="/admin/roles" replace />} />
           <Route path="*" element={<NotFound />} />

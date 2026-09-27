@@ -28,6 +28,10 @@ export const afHomesModuleKeySchema = z.enum([
   'operations.catalog',
   'governance.audit',
   'governance.config',
+  'cms.pages',
+  'cms.media',
+  'cms.settings',
+  'cms.history',
 ]);
 export type AfHomesModuleKey = z.infer<typeof afHomesModuleKeySchema>;
 

@@ -30,8 +30,16 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'grid',
     module: 'finance.payment_verification',
     dropdown: [
-      { to: '/admin/finance/payments', label: 'Payment Queue', module: 'finance.payment_verification' },
-      { to: '/admin/finance/activation', label: 'Activation Queue', module: 'finance.card_activation' },
+      {
+        to: '/admin/finance/payments',
+        label: 'Payment Queue',
+        module: 'finance.payment_verification',
+      },
+      {
+        to: '/admin/finance/activation',
+        label: 'Activation Queue',
+        module: 'finance.card_activation',
+      },
     ],
   },
   {
@@ -41,7 +49,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     module: 'operations.redemption',
     dropdown: [
       { to: '/admin/redemption', label: 'Redeem Points', module: 'operations.redemption' },
-      { to: '/admin/redemption/history', label: 'Redemption History', module: 'operations.redemption' },
+      {
+        to: '/admin/redemption/history',
+        label: 'Redemption History',
+        module: 'operations.redemption',
+      },
       { to: '/admin/redemption/items', label: 'Redemption Catalog', module: 'operations.catalog' },
     ],
   },
@@ -54,6 +66,21 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
       { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
       { to: '/admin/roles', label: 'Roles & Permissions', module: 'organization.roles' },
+    ],
+  },
+  {
+    to: '/admin/cms',
+    label: 'Website CMS',
+    icon: 'grid',
+    module: 'cms.pages',
+    dropdown: [
+      { to: '/admin/cms/pages', label: 'Pages', module: 'cms.pages' },
+      { to: '/admin/cms/media', label: 'Media', module: 'cms.media' },
+      { to: '/admin/cms/stories', label: 'Stories', module: 'cms.pages' },
+      { to: '/admin/cms/experiences', label: 'Experiences', module: 'cms.pages' },
+      { to: '/admin/cms/site-settings', label: 'Site Settings', module: 'cms.settings' },
+      { to: '/admin/cms/seo', label: 'SEO', module: 'cms.settings' },
+      { to: '/admin/cms/history', label: 'History', module: 'cms.history' },
     ],
   },
 ];

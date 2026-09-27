@@ -4695,8 +4695,106 @@ async function main(): Promise<void> {
         `count=${recount}`,
       );
     }
+
+    /* ---------------------------------------------------------------- */
+    section('39. Phase 6 CMS foundation and RLS');
+    /* ---------------------------------------------------------------- */
+    {
+      for (const table of [
+        'cms_documents',
+        'cms_document_versions',
+        'cms_pages',
+        'cms_page_sections',
+        'cms_page_versions',
+        'cms_media_assets',
+      ]) {
+        check(`table public.${table} exists`, tableMap.has(table));
+        if (tableMap.has(table)) check(`  ${table} has RLS enabled`, tableMap.get(table) === true);
+      }
+      const modules = await db.query<{ key: string }>(
+        `select key from public.modules where key like 'cms.%' order by key`,
+      );
+      eq('exactly four Phase 6 CMS modules exist', modules.rows.length, 4);
+      const cmsGrants = await one<{ n: number }>(
+        `select count(*)::int as n from public.role_permissions rp
+          join public.modules m on m.id = rp.module_id where m.key like 'cms.%'`,
+      );
+      eq('no existing role receives CMS permission by default', cmsGrants.n, 0);
+      const bucket = await one<{ public: boolean; file_size_limit: string }>(
+        `select public, file_size_limit::text from storage.buckets where id = 'afhomes-cms-media'`,
+      );
+      check('CMS media has its own public-delivery bucket', bucket.public === true);
+      eq('CMS media bucket enforces the 10 MiB limit', bucket.file_size_limit, '10485760');
+
+      let cmsPageId = '';
+      try {
+        cmsPageId = (
+          await one<{ id: string }>(
+            `insert into public.cms_pages
+               (slug,title,status,seo,published_snapshot,version,created_by,updated_by,published_by,published_at)
+             values ($1,'Draft title','published','{}',
+                     jsonb_build_object('title','Published title','sections','[]'::jsonb),
+                     1,$2,$2,$2,now()) returning id::text`,
+            [`${RUN}-cms-page`, staff['admin']],
+          )
+        ).id;
+        const adminRead = await asBrowserRole(
+          target.url,
+          'authenticated',
+          staff['admin'] ?? null,
+          (c) =>
+            c
+              .query('select count(*)::int as n from public.cms_pages where id=$1', [cmsPageId])
+              .then((r) => r.rows[0] as { n: number }),
+        );
+        eq('an existing Admin has no CMS access by default', adminRead.n, 0);
+        const superRead = await asBrowserRole(
+          target.url,
+          'authenticated',
+          staff['super-admin'] ?? null,
+          (c) =>
+            c
+              .query('select count(*)::int as n from public.cms_pages where id=$1', [cmsPageId])
+              .then((r) => r.rows[0] as { n: number }),
+        );
+        eq('Super Admin retains implicit CMS read access', superRead.n, 1);
+        const writeDenied = await asBrowserRole(
+          target.url,
+          'authenticated',
+          staff['super-admin'] ?? null,
+          async (c): Promise<string> => {
+            try {
+              await c.query(`update public.cms_pages set title='browser edit' where id=$1`, [
+                cmsPageId,
+              ]);
+              return '';
+            } catch (error) {
+              return error instanceof Error ? error.message : String(error);
+            }
+          },
+        );
+        check(
+          'even Super Admin cannot write CMS tables directly from a browser session',
+          /permission denied|row-level security/i.test(writeDenied),
+          writeDenied,
+        );
+        const values = await one<{ draft: string; published: string }>(
+          `select title as draft, published_snapshot->>'title' as published
+             from public.cms_pages where id=$1`,
+          [cmsPageId],
+        );
+        eq('draft and published page snapshots remain distinct', values.draft, 'Draft title');
+        eq(
+          'published snapshot remains stable while draft changes',
+          values.published,
+          'Published title',
+        );
+      } finally {
+        if (cmsPageId) await db.query('delete from public.cms_pages where id=$1', [cmsPageId]);
+      }
+    }
   } catch (error) {
-    // An unexpected exception anywhere in sections 1-38 is a SUITE FAILURE. It
+    // An unexpected exception anywhere in sections 1-39 is a SUITE FAILURE. It
     // used to be reported from inside section 37's own handler, which meant a
     // throw in sections 1-36 produced a short, entirely green run and a zero
     // exit code. `check(..., false, ...)` records a failed result, the verdict

@@ -202,6 +202,34 @@ export {
   customerCredentialsSchema,
   CUSTOMER_ACTIVATION_ERRORS,
 } from './schemas/customer.js';
+
+/* ---- Phase 6: staff-managed public website CMS ---- */
+export {
+  cmsDocumentKeySchema,
+  cmsPublishStateSchema,
+  cmsJsonObjectSchema,
+  cmsDocumentSchema,
+  updateCmsDocumentSchema,
+  cmsBlockTypeSchema,
+  cmsSectionSchema,
+  cmsSeoSchema,
+  cmsPageSchema,
+  createCmsPageSchema,
+  updateCmsPageSchema,
+  cmsHistorySchema,
+  cmsMediaSchema,
+  createCmsMediaSchema,
+  cmsPublicContentSchema,
+} from './schemas/cms.js';
+export type {
+  CmsDocumentKey,
+  CmsDocument,
+  CmsPage,
+  CmsSection,
+  CmsHistory,
+  CmsMedia,
+  CmsPublicContent,
+} from './schemas/cms.js';
 export type {
   CustomerActivationRequest,
   CustomerActivationResult,

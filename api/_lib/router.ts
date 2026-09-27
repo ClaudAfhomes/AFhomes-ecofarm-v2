@@ -57,9 +57,17 @@ const BUSINESS_FAMILIES = [
   { prefix: 'customers', module: 'customers', load: () => import('../_handlers/customers.js') },
   { prefix: 'sales', module: 'sales', load: () => import('../_handlers/sales.js') },
   { prefix: 'payments', module: 'sales', load: () => import('../_handlers/sales.js') },
-  { prefix: 'memberships', module: 'memberships', load: () => import('../_handlers/memberships.js') },
+  {
+    prefix: 'memberships',
+    module: 'memberships',
+    load: () => import('../_handlers/memberships.js'),
+  },
   { prefix: 'points', module: 'memberships', load: () => import('../_handlers/memberships.js') },
-  { prefix: 'commissions', module: 'commissions', load: () => import('../_handlers/commissions.js') },
+  {
+    prefix: 'commissions',
+    module: 'commissions',
+    load: () => import('../_handlers/commissions.js'),
+  },
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
   { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
   // Customer portal. Neither family consults the staff permission model - see
@@ -90,6 +98,11 @@ const BUSINESS_FAMILIES = [
     module: 'operations.redemption',
     load: () => import('../_handlers/redemptions.js'),
   },
+  {
+    prefix: 'cms',
+    module: 'cms',
+    load: () => import('../_handlers/cms.js'),
+  },
 ] as const;
 
 export function selectHandler(
@@ -105,9 +118,7 @@ export function selectHandler(
     };
   }
   for (const family of BUSINESS_FAMILIES) {
-    const match = pathname.match(
-      new RegExp(`^/api(?:/v1)?/${family.prefix}(?:/(.*))?$`),
-    );
+    const match = pathname.match(new RegExp(`^/api(?:/v1)?/${family.prefix}(?:/(.*))?$`));
     if (!match) continue;
     const familyPath = decodeURIComponent(match[1] ?? '');
     // A family that owns exactly one route leaves everything else under its

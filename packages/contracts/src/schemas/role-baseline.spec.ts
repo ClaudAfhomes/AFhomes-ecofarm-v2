@@ -63,13 +63,17 @@ describe('default role permission baseline', () => {
     }
   });
 
-  it('leaves exactly the four unresolved modules ungranted to everyone', () => {
+  it('leaves the four unresolved and four Phase 6 CMS modules ungranted to everyone', () => {
     expect([...BASELINE_EXCLUDED_MODULES].sort()).toEqual(
       [
         'finance.commission_payouts',
         'finance.final_qualification',
         'governance.config',
         'network.withdrawals',
+        'cms.pages',
+        'cms.media',
+        'cms.settings',
+        'cms.history',
       ].sort(),
     );
     const granted = new Set(
