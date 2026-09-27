@@ -31,6 +31,7 @@ interface SessionContextValue {
   status: SessionStatus;
   user: SessionUser | null;
   sessionError: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
   revalidate: () => Promise<void>;
   logout: () => void;
 }
@@ -42,12 +43,19 @@ export function useSession() {
   return value;
 }
 
-function TestSessionProvider({ user, children }: { user: SessionUser | null; children: ReactNode }) {
+function TestSessionProvider({
+  user,
+  children,
+}: {
+  user: SessionUser | null;
+  children: ReactNode;
+}) {
   const value = useMemo<SessionContextValue>(
     () => ({
       status: user ? 'authenticated' : 'unauthenticated',
       user,
       sessionError: false,
+      signIn: async () => {},
       revalidate: async () => {},
       logout: () => {},
     }),
@@ -124,9 +132,18 @@ export function SessionProvider({
     setUser(null);
     setStatus('unauthenticated');
   }, [client]);
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      if (!client) throw new Error('Supabase is not configured');
+      const { error } = await client.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
+      await resolve();
+    },
+    [client, resolve],
+  );
   const value = useMemo<SessionContextValue>(
-    () => ({ status, user, sessionError, revalidate: resolve, logout }),
-    [status, user, sessionError, resolve, logout],
+    () => ({ status, user, sessionError, signIn, revalidate: resolve, logout }),
+    [status, user, sessionError, signIn, resolve, logout],
   );
 
   if (initialUser !== undefined)

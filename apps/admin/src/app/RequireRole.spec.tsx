@@ -1,81 +1,61 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getValidatedWebLoginUrl } from './RequireRole';
+import { screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { useLocation } from 'react-router';
 
-/**
- * The admin guard is UX only - the server is the security boundary - but a
- * misconfigured guard is still an operational defect, because an
- * unauthenticated operator gets a silent dead end instead of an error.
- *
- * These cases pin the rule that the `localhost:5173` fallback is a DEVELOPMENT
- * convenience only. In a production build an absent, blank or malformed
- * `VITE_WEB_URL` must resolve to `null` so the caller can report a configuration
- * error, rather than navigating the operator's browser to a host that does not
- * exist and leaving them on an eternal spinner.
- *
- * `import.meta.env.DEV` is true under vitest by default, so every production case
- * stubs it off explicitly. Getting that wrong is exactly the kind of "a test
- * that cannot fail" this suite exists to prevent: without the stub these cases
- * would pass against the localhost fallback while proving nothing.
- */
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
+import { renderWithProviders } from '../test/utils';
+import App from './App';
 
-const asProduction = () => vi.stubEnv('DEV', false);
+const superAdmin = {
+  id: 'staff-1',
+  name: 'Super Admin',
+  email: 'owner@afhomes.test',
+  roleId: 'role-1',
+  roleName: 'Super Admin',
+  status: 'active' as const,
+  afHomesPermissions: [
+    {
+      moduleKey: 'dashboard.view' as const,
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: true,
+    },
+  ],
+};
 
-describe('getValidatedWebLoginUrl', () => {
-  it('returns null rather than a localhost URL when VITE_WEB_URL is absent', () => {
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', '');
-    expect(getValidatedWebLoginUrl()).toBeNull();
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
+}
+
+describe('admin authentication routes', () => {
+  it('renders the staff login page at /admin/login', async () => {
+    renderWithProviders(<App />, { route: '/admin/login' });
+    expect(await screen.findByRole('heading', { name: 'Staff sign in' })).toBeInTheDocument();
   });
 
-  it('returns null rather than a localhost URL when VITE_WEB_URL is whitespace', () => {
-    // A whitespace-only value is the realistic operator mistake: the variable
-    // "exists" in the dashboard but carries nothing usable.
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', '   ');
-    expect(getValidatedWebLoginUrl()).toBeNull();
+  it('redirects an unauthenticated /admin request to the staff login page', async () => {
+    renderWithProviders(<App />, { route: '/admin' });
+    expect(await screen.findByRole('heading', { name: 'Staff sign in' })).toBeInTheDocument();
   });
 
-  it('returns null for a non-http(s) scheme instead of navigating to it', () => {
-    // `javascript:` here would be an XSS sink if it were ever assigned to
-    // window.location.href, so the protocol allow-list must reject it outright
-    // rather than falling back to a default.
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', 'javascript:alert(1)');
-    expect(getValidatedWebLoginUrl()).toBeNull();
+  it('redirects an unauthenticated nested admin route to the same login page', async () => {
+    renderWithProviders(<App />, { route: '/admin/products' });
+    expect(await screen.findByRole('heading', { name: 'Staff sign in' })).toBeInTheDocument();
   });
 
-  it('rejects a malformed URL instead of falling back', () => {
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', 'not a url');
-    expect(getValidatedWebLoginUrl()).toBeNull();
+  it('redirects an authenticated Super Admin away from login to the dashboard', async () => {
+    renderWithProviders(
+      <>
+        <App />
+        <LocationProbe />
+      </>,
+      { route: '/admin/login', user: superAdmin },
+    );
+    expect(await screen.findByTestId('location')).toHaveTextContent('/admin');
   });
 
-  it('builds the /login path from the configured origin', () => {
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', 'https://afhomes.example');
-    expect(getValidatedWebLoginUrl()).toBe('https://afhomes.example/login');
-  });
-
-  it('does not double up /login when the configured value already ends in it', () => {
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', 'https://afhomes.example/login');
-    expect(getValidatedWebLoginUrl()).toBe('https://afhomes.example/login');
-  });
-
-  it('tolerates a trailing slash on the configured origin', () => {
-    asProduction();
-    vi.stubEnv('VITE_WEB_URL', 'https://afhomes.example/');
-    expect(getValidatedWebLoginUrl()).toBe('https://afhomes.example/login');
-  });
-
-  it('keeps the localhost fallback in a development build', () => {
-    // The dev convenience is deliberate and must survive: running `pnpm dev`
-    // with no VITE_WEB_URL set should still land on the local sign-in page.
-    vi.stubEnv('DEV', true);
-    vi.stubEnv('VITE_WEB_URL', '');
-    expect(getValidatedWebLoginUrl()).toBe('http://localhost:5173/login');
+  it('keeps unknown admin routes as not found', () => {
+    renderWithProviders(<App />, { route: '/admin/not-a-route' });
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
   });
 });

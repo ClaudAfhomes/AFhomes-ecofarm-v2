@@ -13,6 +13,7 @@ import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
+import { AdminLoginPage } from '../features/auth/AdminLoginPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -23,12 +24,16 @@ export default function App() {
   return (
     <ErrorBoundary>
       <Routes>
+        <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route element={<AdminLayout />}>
           <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
           <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
           <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
           <Route path="/admin/products" element={protectedPage(<BusinessProductsPage />)} />
-          <Route path="/admin/finance/payments" element={protectedPage(<BusinessFinanceQueuePage />)} />
+          <Route
+            path="/admin/finance/payments"
+            element={protectedPage(<BusinessFinanceQueuePage />)}
+          />
           <Route
             path="/admin/finance/activation"
             element={protectedPage(<BusinessActivationQueuePage />)}
