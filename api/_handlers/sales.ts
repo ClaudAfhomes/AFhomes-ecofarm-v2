@@ -63,7 +63,8 @@ async function downlineOf(db: Db, uplineId: string): Promise<string[]> {
       .select('subject_staff_id')
       .eq('upline_staff_id', id)
       .eq('is_active', true);
-    for (const row of (deeper ?? []) as { subject_staff_id: string }[]) out.add(row.subject_staff_id);
+    for (const row of (deeper ?? []) as { subject_staff_id: string }[])
+      out.add(row.subject_staff_id);
   }
   return [...out];
 }
@@ -71,11 +72,43 @@ async function downlineOf(db: Db, uplineId: string): Promise<string[]> {
 async function loadSaleView(db: Db, id: string) {
   const { data, error } = await db
     .from('card_sales')
-    .select('*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)')
+    .select(
+      '*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
+    )
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
   return data as Record<string, unknown> | null;
+}
+
+/**
+ * Scope for sale reads (Phase 9 §E).
+ *
+ * Either finance grant sees every sale. A seller sees only sales where they
+ * are the seller of record (`seller_staff_id` or `seller_ost_id`). Anything
+ * else is denied by the resolver, so unrelated seller data can never leak
+ * through a direct URL - frontend filtering is not the control.
+ */
+async function resolveSaleScope(req: VercelRequest) {
+  const finance = await authorizeAfHomes(req, 'finance.payment_verification');
+  const activation = await authorizeAfHomes(req, 'finance.card_activation');
+  const canSeeAll = !('error' in finance) || !('error' in activation);
+  const auth = canSeeAll
+    ? !('error' in finance)
+      ? finance
+      : activation
+    : await authorizeAfHomes(req, 'sales.card_sales');
+  return { canSeeAll, auth };
+}
+
+/** True when the scoped caller may read this sale row. */
+function saleInScope(
+  scope: { canSeeAll: boolean; auth: Awaited<ReturnType<typeof authorizeAfHomes>> },
+  row: Record<string, unknown>,
+): boolean {
+  if (scope.canSeeAll) return true;
+  if ('error' in scope.auth) return false;
+  return row.seller_staff_id === scope.auth.userId || row.seller_ost_id === scope.auth.userId;
 }
 
 const toSale = (row: Record<string, unknown>) => {
@@ -120,21 +153,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
       const { status, customerId, limit, offset } = parsed.data;
 
-      // A seller sees only their own sales. Finance/activation staff see the
-      // queues. RLS already narrows this; the explicit seller filter makes the
+      // A seller sees only their own sales. Finance/activation staff see every
+      // sale. RLS already narrows this; the explicit seller filter makes the
       // intent obvious and keeps the two paths independent.
-      const canSeeAll =
-        'error' in (await authorizeAfHomes(req, 'finance.payment_verification')) ||
-        'error' in (await authorizeAfHomes(req, 'finance.card_activation'));
-      const auth =
-        canSeeAll
-          ? await authorizeAfHomes(req, 'finance.payment_verification')
-          : await authorizeAfHomes(req, 'sales.card_sales');
+      const { canSeeAll, auth } = await resolveSaleScope(req);
       if ('error' in auth) return deny(res, auth);
 
       let query = db
         .from('card_sales')
-        .select('*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)', { count: 'exact' });
+        .select(
+          '*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
+          { count: 'exact' },
+        );
       if (status) query = query.eq('status', status);
       if (customerId) query = query.eq('customer_id', customerId);
       if (!canSeeAll) query = query.eq('seller_staff_id', auth.userId);
@@ -268,7 +298,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .single();
       if (saleError) {
         if ((saleError as { code?: string }).code === '23505')
-          return fail(res, 'CONFLICT', 'This customer already has an open application for this card', 409);
+          return fail(
+            res,
+            'CONFLICT',
+            'This customer already has an open application for this card',
+            409,
+          );
         throw saleError;
       }
 
@@ -301,26 +336,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* ---------------- detail ---------------- */
     const detail = route(req, 'GET', /^sales\/([0-9a-f-]+)$/);
     if (detail) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales');
-      if ('error' in auth) return deny(res, auth);
+      const scope = await resolveSaleScope(req);
+      if ('error' in scope.auth) return deny(res, scope.auth);
       const row = await loadSaleView(db, detail[1]!);
       if (!row) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      // A direct URL never bypasses the seller scope: an unrelated sale reads
+      // as missing rather than forbidden, so ids cannot be probed.
+      if (!saleInScope(scope, row)) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
       return res.status(200).json(toSale(row));
     }
 
     /* ---------------- financial summary ---------------- */
     const summary = route(req, 'GET', /^sales\/([0-9a-f-]+)\/summary$/);
     if (summary) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales');
-      if ('error' in auth) return deny(res, auth);
+      const scope = await resolveSaleScope(req);
+      if ('error' in scope.auth) return deny(res, scope.auth);
       const id = summary[1]!;
       const { data: sale, error } = await db
         .from('card_sales')
-        .select('id, status, cash_price_snapshot, minimum_down_payment_snapshot, spot_cash_started_at, spot_cash_deadline')
+        .select(
+          'id, status, seller_staff_id, seller_ost_id, cash_price_snapshot, minimum_down_payment_snapshot, spot_cash_started_at, spot_cash_deadline',
+        )
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
       if (!sale) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      if (!saleInScope(scope, sale)) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
 
       const { data: payments, error: payError } = await db
         .from('payments')
@@ -331,7 +372,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const totals = summarizePayments({
         cashPrice: sale.cash_price_snapshot ?? '0.00',
         minimumDownPayment: sale.minimum_down_payment_snapshot ?? '0.00',
-        payments: (payments ?? []) as { amount: string; status: 'recorded' | 'verified' | 'rejected' | 'voided' }[],
+        payments: (payments ?? []) as {
+          amount: string;
+          status: 'recorded' | 'verified' | 'rejected' | 'voided';
+        }[],
         spotCashStartedAt: isoOrNull(sale.spot_cash_started_at),
         spotCashDeadline: isoOrNull(sale.spot_cash_deadline),
       });
@@ -347,8 +391,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* ---------------- payments for a sale ---------------- */
     const salePayments = route(req, 'GET', /^sales\/([0-9a-f-]+)\/payments$/);
     if (salePayments) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales');
-      if ('error' in auth) return deny(res, auth);
+      const scope = await resolveSaleScope(req);
+      if ('error' in scope.auth) return deny(res, scope.auth);
+      const { data: sale, error: saleError } = await db
+        .from('card_sales')
+        .select('id, seller_staff_id, seller_ost_id')
+        .eq('id', salePayments[1]!)
+        .maybeSingle();
+      if (saleError) throw saleError;
+      if (!sale) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      if (!saleInScope(scope, sale)) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
       const { data, error } = await db
         .from('payments')
         .select('*')
@@ -405,7 +457,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
       if ('error' in auth) return deny(res, auth);
       const parsed = verifyPaymentSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid verification decision', 400);
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid verification decision', 400);
 
       const { data, error } = await db.rpc('verify_card_payment', {
         p_payment_id: verify[1]!,

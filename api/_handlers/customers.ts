@@ -6,11 +6,7 @@
  * Document images live in a private bucket and are addressed by path only.
  */
 import { z } from 'zod';
-import {
-  createCustomerSchema,
-  maskGovernmentId,
-  updateCustomerSchema,
-} from '@jad/contracts';
+import { createCustomerSchema, maskGovernmentId, updateCustomerSchema } from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
@@ -102,7 +98,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: sequence, error: seqError } = await db.rpc('next_customer_number');
       if (seqError) return mapRpcError(res, seqError);
-      const customerNumber = String((sequence as { customer_number?: string })?.customer_number ?? '');
+      const customerNumber = String(
+        (sequence as { customer_number?: string })?.customer_number ?? '',
+      );
 
       const row = {
         customer_number: customerNumber,
@@ -119,6 +117,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         government_id_number: input.governmentIdNumber ?? null,
         registration_source: 'seller_created',
         created_by: auth.userId,
+        // The registering seller is the referrer of record. Server-resolved
+        // from the session, never from the browser: there is no referrer
+        // field in the request schema to spoof.
+        referred_by_staff_id: auth.userId,
         referral_code_used: input.referralCode ?? null,
         notes: input.notes ?? null,
         status: 'prospect',
@@ -240,7 +242,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const body = (jsonBody(req) ?? {}) as { purpose?: string; validHours?: number };
       const purpose = body.purpose === 'password_reset' ? 'password_reset' : 'account_activation';
-      const validHours = Number.isInteger(body.validHours) ? Math.min(Math.max(body.validHours!, 1), 168) : 72;
+      const validHours = Number.isInteger(body.validHours)
+        ? Math.min(Math.max(body.validHours!, 1), 168)
+        : 72;
 
       // Raw token is generated here, returned once, and only its hash stored.
       const { data: issued, error } = await db.rpc('issue_customer_onboarding_token', {
@@ -259,7 +263,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expiresAt: result.expires_at ?? null,
       });
       // The token is returned to the authorized staff member exactly once.
-      return res.status(201).json({ token: result.token, purpose, expiresAt: result.expires_at ?? null });
+      return res
+        .status(201)
+        .json({ token: result.token, purpose, expiresAt: result.expires_at ?? null });
     }
 
     return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);
