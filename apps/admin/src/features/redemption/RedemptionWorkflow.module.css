@@ -293,3 +293,81 @@
   gap: var(--space-3);
   margin: 0 0 var(--space-4);
 }
+
+/* ------------------------------------------------------------------ */
+/* POS / narrow screens                                                 */
+/* ------------------------------------------------------------------ */
+/* Phones, small tablets and POS terminals: one column, full-width
+   controls, and touch targets of at least 44px. Layout only - the
+   workflow, order of controls and authorization do not change. */
+
+@media (max-width: 40rem) {
+  .identifyRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .divider {
+    align-self: flex-start;
+  }
+
+  .manualRow .input,
+  .manualRow button {
+    flex: 1 1 100%;
+  }
+
+  .manualRow button,
+  .scan > button,
+  .actions button {
+    min-height: 2.75rem;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .item {
+    padding: var(--space-4);
+  }
+
+  .quantityInput {
+    min-height: 2.75rem;
+    font-size: var(--text-body-m);
+  }
+
+  .video {
+    max-width: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Receipt printing                                                     */
+/* ------------------------------------------------------------------ */
+/* Printing shows the receipt alone: everything else on the page is hidden
+   and only the receipt subtree is revealed. The dialog chrome (title bar,
+   backdrop, footer buttons) never prints. No credential is on the receipt -
+   it carries the redemption number, figures and names only. */
+
+@media print {
+  :global(body.afh-print-receipt) {
+    visibility: hidden;
+  }
+
+  :global(body.afh-print-receipt) .receipt,
+  :global(body.afh-print-receipt) .receipt * {
+    visibility: visible;
+  }
+
+  :global(body.afh-print-receipt) .receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    color: #000;
+  }
+
+  .receiptNumber {
+    color: #000;
+  }
+}

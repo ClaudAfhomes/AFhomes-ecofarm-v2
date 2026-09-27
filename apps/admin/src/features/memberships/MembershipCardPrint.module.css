@@ -94,13 +94,15 @@
 }
 
 @media print {
-  body.afh-print-card aside,
-  body.afh-print-card header,
-  body.afh-print-card nav {
+  /* The body hook is global: CSS modules would otherwise hash it and the
+     class set from TypeScript would never match. */
+  :global(body.afh-print-card) aside,
+  :global(body.afh-print-card) header,
+  :global(body.afh-print-card) nav {
     display: none !important;
   }
 
-  body.afh-print-card main {
+  :global(body.afh-print-card) main {
     padding: 0 !important;
     margin: 0 !important;
     max-width: none !important;

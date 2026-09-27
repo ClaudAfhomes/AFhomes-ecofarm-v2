@@ -91,9 +91,27 @@ const STAFF: SessionUser = {
   roleId: 'r1',
   roleName: 'Finance',
   afHomesPermissions: [
-    { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: true, canDelete: true },
-    { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: true },
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'operations.redemption',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: true,
+    },
+    {
+      moduleKey: 'operations.catalog',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: true,
+    },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
   status: 'active',
 };
@@ -108,7 +126,10 @@ const VIEW_ONLY = {
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0]!;
+    const path = url
+      .replace(/^https?:\/\/[^/]+/, '')
+      .replace(/^\/api\/v1/, '')
+      .split('?')[0]!;
     const method = init?.method ?? 'GET';
     let body: unknown = null;
     if (typeof init?.body === 'string') {
@@ -210,7 +231,9 @@ describe('redemption lookup', () => {
     const resolveCalls = requests.filter((r) => r.path === '/redemptions/resolve');
     expect(resolveCalls).toHaveLength(1);
     expect(resolveCalls[0]!.method).toBe('GET');
-    expect(requests.filter((r) => r.path === '/redemptions' && r.method === 'POST')).toHaveLength(0);
+    expect(requests.filter((r) => r.path === '/redemptions' && r.method === 'POST')).toHaveLength(
+      0,
+    );
   });
 
   it('never sends the identifier anywhere but the resolve endpoint', async () => {
@@ -262,9 +285,11 @@ describe('redemption lookup', () => {
 
     expect(await screen.findByText('The membership has expired.')).toBeInTheDocument();
     const group = screen.getByRole('radiogroup');
-    expect(within(group).getAllByRole('radio').every((r) => (r as HTMLInputElement).disabled)).toBe(
-      true,
-    );
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .every((r) => (r as HTMLInputElement).disabled),
+    ).toBe(true);
     expect(screen.queryByRole('button', { name: /Confirm redemption/ })).toBeNull();
   });
 
@@ -327,7 +352,9 @@ describe('redemption confirm', () => {
 
     // 2,000 x 3 = 6,000 off a 60,000 balance, all from the catalog price.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Confirm redemption of 6,000 points/ })).toBeEnabled(),
+      expect(
+        screen.getByRole('button', { name: /Confirm redemption of 6,000 points/ }),
+      ).toBeEnabled(),
     );
     const cost = screen.getByText('Points cost').closest('div')!.parentElement!;
     expect(within(cost).getByText('6,000')).toBeInTheDocument();
@@ -343,12 +370,12 @@ describe('redemption confirm', () => {
     await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
 
     await waitFor(() =>
-      expect(requests.filter((r) => r.method === 'POST' && r.path === '/redemptions')).toHaveLength(1),
+      expect(requests.filter((r) => r.method === 'POST' && r.path === '/redemptions')).toHaveLength(
+        1,
+      ),
     );
-    const sent = requests.find((r) => r.method === 'POST' && r.path === '/redemptions')!.body as Record<
-      string,
-      unknown
-    >;
+    const sent = requests.find((r) => r.method === 'POST' && r.path === '/redemptions')!
+      .body as Record<string, unknown>;
     expect(Object.keys(sent).sort()).toEqual([
       'clientTransactionId',
       'membershipId',
@@ -388,7 +415,9 @@ describe('redemption confirm', () => {
     await user.click(confirm).catch(() => undefined);
 
     await waitFor(() =>
-      expect(requests.filter((r) => r.method === 'POST' && r.path === '/redemptions').length).toBeGreaterThan(0),
+      expect(
+        requests.filter((r) => r.method === 'POST' && r.path === '/redemptions').length,
+      ).toBeGreaterThan(0),
     );
     const posts = requests
       .filter((r) => r.method === 'POST' && r.path === '/redemptions')
@@ -405,9 +434,7 @@ describe('redemption confirm', () => {
     await identify(user);
     await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
     await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
-    expect(
-      await screen.findByText(/nothing was deducted twice/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/nothing was deducted twice/i)).toBeInTheDocument();
   });
 
   it('shows the business refusal and re-enables the flow', async () => {
@@ -466,6 +493,36 @@ describe('redemption confirm', () => {
 /* Permission-flavoured UI (UX only)                                   */
 /* ================================================================== */
 
+describe('redemption receipt printing', () => {
+  it('offers a printed receipt with the server figures and no credential', async () => {
+    const print = vi.fn();
+    vi.stubGlobal('print', print);
+    try {
+      const user = userEvent.setup();
+      render('/admin/redemption');
+      await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+      await user.click(screen.getByRole('button', { name: 'Look up' }));
+      await screen.findByText('Ana R Buyer');
+      await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
+      await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
+      await screen.findByText('RDM-000001');
+
+      const dialog = screen.getByRole('dialog');
+      // The receipt carries the redemption number and the figures - never a
+      // QR token or a fallback member code.
+      expect(within(dialog).getByText('RDM-000001')).toBeInTheDocument();
+      expect(dialog.textContent).not.toMatch(/AFH-[0-9A-F]{4}-[0-9A-F]{4}/);
+
+      await user.click(within(dialog).getByRole('button', { name: 'Print receipt' }));
+      expect(print).toHaveBeenCalledTimes(1);
+      // Printing leaves the receipt open for the next member flow.
+      expect(screen.getByText('RDM-000001')).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('redemption workflow permissions', () => {
   it('tells a view-only operator that they cannot create redemptions', async () => {
     const user = userEvent.setup();
@@ -473,9 +530,7 @@ describe('redemption workflow permissions', () => {
     await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
-    expect(
-      await screen.findByText(/your role cannot create redemptions/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/your role cannot create redemptions/i)).toBeInTheDocument();
   });
 });
 
@@ -542,9 +597,9 @@ describe('camera scanner safety', () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
-        getUserMedia: vi.fn().mockRejectedValue(
-          Object.assign(new Error('denied'), { name: 'NotAllowedError' }),
-        ),
+        getUserMedia: vi
+          .fn()
+          .mockRejectedValue(Object.assign(new Error('denied'), { name: 'NotAllowedError' })),
       },
     });
     render('/admin/redemption');
@@ -557,7 +612,11 @@ describe('camera scanner safety', () => {
     const user = userEvent.setup();
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
-      value: { getUserMedia: vi.fn().mockRejectedValue(Object.assign(new Error('none'), { name: 'NotFoundError' })) },
+      value: {
+        getUserMedia: vi
+          .fn()
+          .mockRejectedValue(Object.assign(new Error('none'), { name: 'NotFoundError' })),
+      },
     });
     render('/admin/redemption');
     await user.click(screen.getByRole('button', { name: 'Scan QR code' }));
@@ -565,8 +624,13 @@ describe('camera scanner safety', () => {
   });
 
   it('asks for the camera only when the scan panel is opened', async () => {
-    const getUserMedia = vi.fn().mockRejectedValue(Object.assign(new Error('x'), { name: 'NotFoundError' }));
-    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('x'), { name: 'NotFoundError' }));
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
     render('/admin/redemption');
     expect(getUserMedia).not.toHaveBeenCalled();
   });
@@ -679,13 +743,21 @@ describe('redemption route guard', () => {
     render('/admin/redemption', {
       ...STAFF,
       afHomesPermissions: [
-        { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+        {
+          moduleKey: 'dashboard.view',
+          canView: true,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
       ],
     });
     // The generic 403 copy, which deliberately does not reveal whether the
     // route or the data exists.
     expect(await screen.findByText('Access denied')).toBeInTheDocument();
-    expect(screen.getByText(/you do not have permission to view this section/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/you do not have permission to view this section/i),
+    ).toBeInTheDocument();
     // And nothing from the redemption workflow leaked into the page.
     expect(screen.queryByLabelText('Fallback member code')).toBeNull();
   });

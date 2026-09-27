@@ -1,14 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Button,
-  Dialog,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Spinner,
-  StatusChip,
-} from '@jad/ui';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, Spinner, StatusChip } from '@jad/ui';
 import type { RedemptionPreview, RedemptionReceipt } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
@@ -49,7 +41,10 @@ export function RedemptionWorkflowPage() {
   /** One reference per INTENDED transaction, reused by every retry of it. */
   const [reference, setReference] = useState(() => newTransactionReference());
 
-  const catalog = useQuery({ queryKey: ['redemption', 'items'], queryFn: () => getRedemptionItems(false) });
+  const catalog = useQuery({
+    queryKey: ['redemption', 'items'],
+    queryFn: () => getRedemptionItems(false),
+  });
 
   const lookup = useMutation({
     mutationFn: resolveMember,
@@ -70,8 +65,13 @@ export function RedemptionWorkflowPage() {
     [lookup],
   );
   const scanner = useQrScanner(onDecoded);
-  const { status: scanStatus, message: scanMessage, videoRef, start: startScan, stop: stopScan } =
-    scanner;
+  const {
+    status: scanStatus,
+    message: scanMessage,
+    videoRef,
+    start: startScan,
+    stop: stopScan,
+  } = scanner;
 
   const redeem = useMutation({
     mutationFn: redeemPoints,
@@ -97,7 +97,24 @@ export function RedemptionWorkflowPage() {
     setReference(newTransactionReference());
   };
 
-  const canAfford = preview !== null && selectedItem !== null &&
+  // While the receipt is open, printing shows the receipt alone. The class is
+  // removed the moment the dialog closes or the till resets, so a later print
+  // from anywhere else is never affected.
+  useEffect(() => {
+    if (receipt === null) return;
+    document.body.classList.add('afh-print-receipt');
+    return () => {
+      document.body.classList.remove('afh-print-receipt');
+    };
+  }, [receipt]);
+
+  const printReceipt = () => {
+    if (typeof window.print === 'function') window.print();
+  };
+
+  const canAfford =
+    preview !== null &&
+    selectedItem !== null &&
     preview.pointsBalance >= selectedItem.pointsCost * quantity;
   const affordable = preview !== null && selectedItem !== null && canAfford;
 
@@ -224,9 +241,7 @@ export function RedemptionWorkflowPage() {
             </div>
           </div>
 
-          {preview.matchedBy === 'qr' && (
-            <p className={styles.hint}>Identified by QR code.</p>
-          )}
+          {preview.matchedBy === 'qr' && <p className={styles.hint}>Identified by QR code.</p>}
           {preview.matchedBy === 'fallback_code' && (
             <p className={styles.hint}>Identified by fallback member code.</p>
           )}
@@ -315,9 +330,10 @@ export function RedemptionWorkflowPage() {
                     <div>
                       <dt>Balance after</dt>
                       <dd className={affordable ? styles.afterOk : styles.afterBad}>
-                        {(preview.pointsBalance - selectedItem.pointsCost * quantity).toLocaleString(
-                          'en-PH',
-                        )}
+                        {(
+                          preview.pointsBalance -
+                          selectedItem.pointsCost * quantity
+                        ).toLocaleString('en-PH')}
                       </dd>
                     </div>
                   </dl>
@@ -371,7 +387,14 @@ export function RedemptionWorkflowPage() {
         open={receipt !== null}
         onClose={reset}
         title="Redemption complete"
-        footer={<Button onClick={reset}>Next member</Button>}
+        footer={
+          <>
+            <Button variant="secondary" onClick={printReceipt}>
+              Print receipt
+            </Button>
+            <Button onClick={reset}>Next member</Button>
+          </>
+        }
       >
         {receipt && (
           <div className={styles.receipt}>
@@ -422,12 +445,15 @@ export function RedemptionWorkflowPage() {
         )}
       </Dialog>
 
-      {user && !user.afHomesPermissions.some((p) => p.moduleKey === 'operations.redemption' && p.canCreate) && (
-        <div className={styles.blocked} role="alert">
-          You can look members up, but your role cannot create redemptions. Ask an administrator if
-          you need this permission.
-        </div>
-      )}
+      {user &&
+        !user.afHomesPermissions.some(
+          (p) => p.moduleKey === 'operations.redemption' && p.canCreate,
+        ) && (
+          <div className={styles.blocked} role="alert">
+            You can look members up, but your role cannot create redemptions. Ask an administrator
+            if you need this permission.
+          </div>
+        )}
     </>
   );
 }
