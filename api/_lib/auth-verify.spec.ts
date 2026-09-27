@@ -1,16 +1,22 @@
 /**
  * Session verification regression suite.
  *
- * Server-side token verification goes through `verifySessionToken` (the
- * `AuthSessionVerifier` capability: `getUser(jwt)`), never through the
- * inferred `SupabaseAuthClient` type directly. These cases drive the real
- * staff and customer resolvers through the real seam - the tests mock only
- * `_lib/rest.js`, so the production `verifySessionToken` implementation runs
- * against the fake's GoTrue surface, exactly as it runs against real GoTrue.
+ * Server-side token verification goes through `verifySessionToken`. Its input
+ * contract (`AuthSessionVerifier`) is DERIVED from the pinned Supabase
+ * client's own `auth.getUser` member - never hand-duplicated - so the real
+ * `anon.auth` satisfies it by construction, and the helper normalizes AFTER
+ * the call to exactly what authorization consumes. These cases prove both
+ * sides: spec-built stubs satisfy the derived contract at compile time, the
+ * production helper runs against the fake's GoTrue surface at runtime (only
+ * `_lib/rest.js` is mocked), and both resolvers keep their exact
+ * success/denial mapping through the seam.
  */
+import { AuthError } from '@supabase/supabase-js';
+import type { User } from '@supabase/supabase-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveAfHomesPrincipal } from './afhomes-access.js';
+import type { AuthSessionVerifier } from './auth-verify.js';
 import { verifySessionToken } from './auth-verify.js';
 import { resolveCustomerPrincipal } from './customer-access.js';
 import { baseTables, baseTokens, TOKEN, UUID } from './testing/fixtures.js';
@@ -43,25 +49,73 @@ const req = (token?: string) => makeReq({ token }) as never;
 const CUSTOMER_AUTH_ID = '11111111-1111-4111-8111-1111111111aa';
 const CUSTOMER_TOKEN = 'token-customer-active';
 
+/** A complete Supabase user: every field the real `User` type requires. */
+const stubUser = (overrides: Partial<User> = {}): User => ({
+  id: 'stub-user-1',
+  email: 'stub@afhomes.test',
+  email_confirmed_at: '2026-09-01T00:00:00.000Z',
+  app_metadata: {},
+  user_metadata: {},
+  aud: 'authenticated',
+  created_at: '2026-09-01T00:00:00.000Z',
+  ...overrides,
+});
+
 describe('verifySessionToken', () => {
   beforeEach(() => install());
 
-  it('passes the bearer token to getUser and returns the raw response', async () => {
-    const response = await verifySessionToken(
-      (holder.db as FakeSupabase).auth,
-      TOKEN.admin,
-    );
+  it('accepts the real getUser shape and normalizes a valid user', async () => {
+    const verifier: AuthSessionVerifier = {
+      getUser: async () => ({ data: { user: stubUser() }, error: null }),
+    };
+    const response = await verifySessionToken(verifier, 'jwt');
     expect(response.error).toBeNull();
-    expect(response.data.user?.id).toBe(UUID.adminStaff);
+    expect(response.data.user?.id).toBe('stub-user-1');
+    expect(response.data.user?.email).toBe('stub@afhomes.test');
+    expect(response.data.user?.email_confirmed_at).toBe('2026-09-01T00:00:00.000Z');
   });
 
-  it('surfaces the GoTrue refusal for an unknown token', async () => {
-    const response = await verifySessionToken(
-      (holder.db as FakeSupabase).auth,
-      'token-unknown',
-    );
+  it('preserves the Supabase refusal when GoTrue reports an error', async () => {
+    const verifier: AuthSessionVerifier = {
+      getUser: async () => ({ data: { user: null }, error: new AuthError('bad jwt', 400) }),
+    };
+    const response = await verifySessionToken(verifier, 'jwt');
     expect(response.data.user).toBeNull();
-    expect(response.error).not.toBeNull();
+    expect(response.error?.message).toBe('bad jwt');
+  });
+
+  it('allows a user without an email', async () => {
+    const verifier: AuthSessionVerifier = {
+      getUser: async () => ({ data: { user: stubUser({ email: undefined }) }, error: null }),
+    };
+    const response = await verifySessionToken(verifier, 'jwt');
+    expect(response.error).toBeNull();
+    expect(response.data.user?.id).toBe('stub-user-1');
+    expect(response.data.user?.email).toBeUndefined();
+  });
+
+  it('allows a user without email_confirmed_at', async () => {
+    const verifier: AuthSessionVerifier = {
+      getUser: async () => ({
+        data: { user: stubUser({ email_confirmed_at: undefined }) },
+        error: null,
+      }),
+    };
+    const response = await verifySessionToken(verifier, 'jwt');
+    expect(response.error).toBeNull();
+    expect(response.data.user?.email_confirmed_at).toBeUndefined();
+  });
+
+  it('forwards the bearer token as the jwt argument', async () => {
+    let seen: string | undefined;
+    const verifier: AuthSessionVerifier = {
+      getUser: async (jwt?: string) => {
+        seen = jwt;
+        return { data: { user: stubUser() }, error: null };
+      },
+    };
+    await verifySessionToken(verifier, 'the-bearer-token');
+    expect(seen).toBe('the-bearer-token');
   });
 });
 

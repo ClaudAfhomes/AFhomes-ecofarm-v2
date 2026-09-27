@@ -1,18 +1,22 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 /**
- * Server-side session verification seam.
- *
- * GoTrue's `auth.getUser(jwt)` validates a bearer token against the Auth
- * server and returns the user - the runtime client supports it, and this
- * narrow structural interface (rather than the inferred `SupabaseAuthClient`
- * type) is the compile-time contract for it. It names exactly what
- * authorization consumes: the user id, the email, and the confirmation
- * timestamp. Both the real client and the test fake satisfy it, so no cast
- * is needed at any call site.
- *
- * If a supabase-js release ever changes the auth surface, `tsc` fails where
- * the concrete client is passed to `verifySessionToken` (it stops satisfying
- * this interface) instead of deep inside authorization logic.
+ * Exact `getUser` member of the pinned Supabase client's auth surface: the
+ * source of truth for this seam. Deriving (not hand-duplicating) means the
+ * parameter accepts the real `anon.auth` by construction in every
+ * environment — both sides resolve through the same declaration, so a
+ * structural mismatch between two copies of the type is impossible. If
+ * Supabase ever removes `getUser`, compilation fails at the call below
+ * instead of misattributing the error to the caller.
  */
+export type SupabaseGetUser = SupabaseClient['auth']['getUser'];
+
+/** Anything exposing the real `getUser` — the concrete client or a test double. */
+export type AuthSessionVerifier = {
+  getUser: SupabaseGetUser;
+};
+
+/** Exactly what authorization consumes from a verified session. */
 export type VerifiedAuthUser = {
   id: string;
   email?: string;
@@ -24,17 +28,19 @@ export type SessionVerification = {
   error: { message: string } | null;
 };
 
-export type AuthSessionVerifier = {
-  getUser(jwt: string): Promise<SessionVerification>;
-};
-
 /**
- * Verify a bearer token against GoTrue. Returns the raw `{ data, error }`
- * response unchanged, so callers keep their exact success/denial mapping.
+ * Verify a bearer token against GoTrue, then normalize to exactly what
+ * authorization consumes. Normalization happens AFTER the real call, so the
+ * input side never forces the concrete client into a hand-written shape.
  */
-export function verifySessionToken(
+export async function verifySessionToken(
   auth: AuthSessionVerifier,
   jwt: string,
 ): Promise<SessionVerification> {
-  return auth.getUser(jwt);
+  const { data, error } = await auth.getUser(jwt);
+  if (error || !data?.user) {
+    return { data: { user: null }, error: { message: error?.message ?? 'Invalid session' } };
+  }
+  const { id, email, email_confirmed_at } = data.user;
+  return { data: { user: { id, email, email_confirmed_at } }, error: null };
 }

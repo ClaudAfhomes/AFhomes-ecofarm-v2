@@ -18,6 +18,42 @@
     },
     "lint": {},
     "typecheck": {},
+    "@jad/config#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "api#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "@jad/shared#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "@jad/contracts#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
     "test": {
       "dependsOn": ["^build"]
     }
