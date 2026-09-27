@@ -1,15 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { GoTrueClient } from '@supabase/auth-js';
 
 /**
- * Exact `getUser` member of the pinned Supabase client's auth surface: the
- * source of truth for this seam. Deriving (not hand-duplicating) means the
- * parameter accepts the real `anon.auth` by construction in every
- * environment — both sides resolve through the same declaration, so a
- * structural mismatch between two copies of the type is impossible. If
- * Supabase ever removes `getUser`, compilation fails at the call below
- * instead of misattributing the error to the caller.
+ * Exact `getUser` member of the public auth client that owns the operation.
+ * `SupabaseClient.auth` is a private `SupabaseAuthClient` subclass in
+ * supabase-js' bundled declaration. The public `GoTrueClient` class is the
+ * stable boundary, and the real `anon.auth` extends it by construction.
  */
-export type SupabaseGetUser = SupabaseClient['auth']['getUser'];
+export type SupabaseGetUser = GoTrueClient['getUser'];
 
 /** Anything exposing the real `getUser` — the concrete client or a test double. */
 export type AuthSessionVerifier = {

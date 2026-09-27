@@ -2,17 +2,18 @@
  * Session verification regression suite.
  *
  * Server-side token verification goes through `verifySessionToken`. Its input
- * contract (`AuthSessionVerifier`) is DERIVED from the pinned Supabase
- * client's own `auth.getUser` member - never hand-duplicated - so the real
- * `anon.auth` satisfies it by construction, and the helper normalizes AFTER
+ * contract (`AuthSessionVerifier`) is derived from auth-js' public
+ * `GoTrueClient.getUser` member - never hand-duplicated - so the real
+ * supabase-js `anon.auth` subclass satisfies it by construction. The helper normalizes after
  * the call to exactly what authorization consumes. These cases prove both
  * sides: spec-built stubs satisfy the derived contract at compile time, the
  * production helper runs against the fake's GoTrue surface at runtime (only
  * `_lib/rest.js` is mocked), and both resolvers keep their exact
  * success/denial mapping through the seam.
  */
-import { AuthError } from '@supabase/supabase-js';
-import type { User } from '@supabase/supabase-js';
+import { AuthError } from '@supabase/auth-js';
+import type { GoTrueClient, User } from '@supabase/auth-js';
+import { createClient } from '@supabase/supabase-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveAfHomesPrincipal } from './afhomes-access.js';
@@ -33,10 +34,12 @@ vi.mock('./rest.js', () => ({
   readJsonBody: (req: { body?: unknown }) => ({ ok: true as const, body: req.body }),
 }));
 
-function install(options: {
-  tables?: Record<string, Record<string, unknown>[]>;
-  tokens?: Record<string, { id: string; email: string; email_confirmed_at?: string | null }>;
-} = {}) {
+function install(
+  options: {
+    tables?: Record<string, Record<string, unknown>[]>;
+    tokens?: Record<string, { id: string; email: string; email_confirmed_at?: string | null }>;
+  } = {},
+) {
   holder.db = new FakeSupabase({
     tables: baseTables(options.tables as never),
     tokens: { ...baseTokens(), ...(options.tokens ?? {}) },
@@ -48,6 +51,12 @@ const req = (token?: string) => makeReq({ token }) as never;
 
 const CUSTOMER_AUTH_ID = '11111111-1111-4111-8111-1111111111aa';
 const CUSTOMER_TOKEN = 'token-customer-active';
+
+// Compile-time deployment probe: the concrete supabase-js auth client must be
+// accepted by the public auth-js boundary used by the server adapter.
+const concreteAuthClient: GoTrueClient = createClient('https://example.supabase.co', 'anon').auth;
+const concreteVerifier: AuthSessionVerifier = concreteAuthClient;
+void concreteVerifier;
 
 /** A complete Supabase user: every field the real `User` type requires. */
 const stubUser = (overrides: Partial<User> = {}): User => ({
@@ -75,7 +84,7 @@ describe('verifySessionToken', () => {
     expect(response.data.user?.email_confirmed_at).toBe('2026-09-01T00:00:00.000Z');
   });
 
-  it('preserves the Supabase refusal when GoTrue reports an error', async () => {
+  it('preserves the Supabase refusal and null user when GoTrue reports an error', async () => {
     const verifier: AuthSessionVerifier = {
       getUser: async () => ({ data: { user: null }, error: new AuthError('bad jwt', 400) }),
     };
@@ -130,9 +139,7 @@ describe('resolveAfHomesPrincipal through the verification seam', () => {
     expect(principal.email).toBe('admin@afhomes.test');
     expect(principal.roleSlug).toBe('admin');
     expect(principal.status).toBe('active');
-    expect(
-      principal.permissions.find((p) => p.moduleKey === 'dashboard.view')?.canView,
-    ).toBe(true);
+    expect(principal.permissions.find((p) => p.moduleKey === 'dashboard.view')?.canView).toBe(true);
   });
 
   it('refuses a missing token without touching GoTrue', async () => {
