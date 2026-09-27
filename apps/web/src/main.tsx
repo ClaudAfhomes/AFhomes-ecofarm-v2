@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import App from './app/App';
+import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
 
 import '@jad/ui/tokens.css';
@@ -19,7 +20,9 @@ createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <CustomerSessionProvider>
+          <App />
+        </CustomerSessionProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

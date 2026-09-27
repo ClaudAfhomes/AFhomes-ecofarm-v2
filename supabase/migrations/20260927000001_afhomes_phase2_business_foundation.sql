@@ -285,6 +285,14 @@ alter table public.commissions
     'earned', 'paid', 'cancelled'
   ));
 
+-- Phase 1 declared `ost_id uuid not null`, because the only seller it modelled
+-- was an OST. Phase 2 generalises the beneficiary to staff-or-OST, so that NOT
+-- NULL has to go: while it stands, the beneficiary CHECK below can never be
+-- satisfied for a staff seller, and every commission for a VD / SSM / SM /
+-- Admin sale would be rejected by the database. Found by executing the
+-- migrations on a real PostgreSQL (see supabase/db-integration.ts).
+alter table public.commissions alter column ost_id drop not null;
+
 alter table public.commissions
   add column if not exists beneficiary_type text not null default 'ost'
     check (beneficiary_type in ('staff', 'ost')),

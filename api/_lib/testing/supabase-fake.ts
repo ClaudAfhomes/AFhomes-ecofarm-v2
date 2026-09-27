@@ -58,6 +58,17 @@ export type FakeOptions = {
   invite?: (email: string, options: unknown) => Promise<unknown>;
   /** Id handed back by `inviteUserByEmail`. */
   inviteUserId?: string;
+  /** Override `auth.admin.createUser`, e.g. to inject a GoTrue failure. */
+  createUser?: (attrs: {
+    email: string;
+    password?: string;
+    email_confirm?: boolean;
+    user_metadata?: unknown;
+  }) => Promise<unknown>;
+  /** Id handed back by `createUser`. */
+  createUserId?: string;
+  /** Addresses that already exist in GoTrue, to exercise duplicate conflicts. */
+  existingAuthEmails?: string[];
 };
 
 type Op =
@@ -68,9 +79,15 @@ type Op =
   | { t: 'eq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
   | { t: 'or'; filter: string }
+  | { t: 'ilike'; col: string; pattern: string }
+  | { t: 'gte'; col: string; val: unknown }
+  | { t: 'lte'; col: string; val: unknown }
   | { t: 'range'; from: number; to: number }
   | { t: 'order'; col: string; asc: boolean }
   | { t: 'limit'; n: number };
+
+/** A declared relation between two fixture tables. */
+type FakeLink = { child: string; parent: string; fk: string; pk?: string };
 
 const authError = (message: string, code = 'PGRST301') => ({ code, message });
 
@@ -122,18 +139,44 @@ function splitTopLevel(spec: string): string[] {
     } else current += ch;
   }
   if (current.trim()) out.push(current);
-  return out;
+  // TRIM every spec. Without this, `"a, customers!inner(status)"` yields
+  // `" customers!inner(status)"` with a leading space, so the embed key becomes
+  // `" customers"` and the table name `" customers"` matches no declared link.
+  // The embed then resolves to `undefined` IN SILENCE, and any caller reading
+  // `row.customers` gets a `?? {}` fallback rather than an error. That is how an
+  // entire embed can be untested and still be green.
+  return out.map((s) => s.trim());
 }
 
 const hasWrite = (ops: Op[]) =>
   ops.some((o) => o.t === 'insert' || o.t === 'update' || o.t === 'delete');
 
-function matches(row: FakeRow, ops: Op[]): boolean {  return ops.every((op) => {
+function matches(row: FakeRow, ops: Op[]): boolean {
+  return ops.every((op) => {
     switch (op.t) {
       case 'eq':
         return row[op.col] === op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
+      case 'ilike': {
+        // `%` is any run, `_` any single character. The only patterns the
+        // handlers build are `%term%`, so a case-insensitive `includes` of the
+        // wildcard-stripped needle is exact for them.
+        const needle = op.pattern.replace(/[%_]/g, '').toLowerCase();
+        return String(row[op.col] ?? '')
+          .toLowerCase()
+          .includes(needle);
+      }
+      case 'gte': {
+        const a = row[op.col];
+        if (a === undefined || a === null) return false;
+        return String(a) >= String(op.val);
+      }
+      case 'lte': {
+        const a = row[op.col];
+        if (a === undefined || a === null) return false;
+        return String(a) <= String(op.val);
+      }
       default:
         return true;
     }
@@ -152,8 +195,20 @@ export class FakeSupabase {
   rpcErrors: Record<string, { code?: string; message: string }>;
   calls: FakeCall[] = [];
   deletedAuthUsers: string[] = [];
+  /** Auth users this fake created via `auth.admin.createUser`. */
+  createdAuthUsers: { id: string; email: string }[] = [];
+  /** Emails that already "exist" in GoTrue, for duplicate-address conflicts. */
+  createdAuthEmails = new Set<string>();
+  /**
+   * Passwords handed to `createUser`, captured ONLY so a test can assert the
+   * value was passed through and is nowhere else. Nothing in production code
+   * ever reads this.
+   */
+  passwordsSeen: string[] = [];
   inviteUserId: string;
+  createUserId?: string;
   private inviteImpl?: FakeOptions['invite'];
+  private createUserImpl?: FakeOptions['createUser'];
 
   constructor(options: FakeOptions = {}) {
     this.tables = options.tables ? structuredClone(options.tables) : {};
@@ -167,6 +222,9 @@ export class FakeSupabase {
     this.rpcErrors = options.rpcErrors ?? {};
     this.inviteImpl = options.invite;
     this.inviteUserId = options.inviteUserId ?? 'invited-user-0001';
+    this.createUserImpl = options.createUser;
+    this.createUserId = options.createUserId;
+    for (const email of options.existingAuthEmails ?? []) this.createdAuthEmails.add(email);
   }
 
   /** Every row currently in a table (live reference - mutate via helpers). */
@@ -186,6 +244,45 @@ export class FakeSupabase {
         if (this.inviteImpl) return this.inviteImpl(email, opts);
         return {
           data: { user: { id: this.inviteUserId, email, email_confirmed_at: null } },
+          error: null,
+        };
+      },
+      /**
+       * GoTrue's admin create. `createUserImpl` lets a test inject a failure, and
+       * a duplicate email is refused the way Supabase refuses it, so the handler's
+       * conflict branch can be exercised. The password is NEVER recorded: only
+       * that a user was created.
+       */
+      createUser: async (attrs: {
+        email: string;
+        password?: string;
+        email_confirm?: boolean;
+        user_metadata?: unknown;
+      }) => {
+        this.calls.push({
+          op: 'createUser',
+          table: 'auth',
+          arg: { email: attrs.email, email_confirm: attrs.email_confirm },
+        });
+        if (attrs.password !== undefined) this.passwordsSeen.push(attrs.password);
+        if (this.createUserImpl) return this.createUserImpl(attrs);
+        if (this.createdAuthEmails.has(attrs.email)) {
+          return {
+            data: { user: null },
+            error: authError('A user with this email address has already been registered'),
+          };
+        }
+        this.createdAuthEmails.add(attrs.email);
+        const id = this.createUserId ?? `created-auth-${this.createdAuthEmails.size}`;
+        this.createdAuthUsers.push({ id, email: attrs.email });
+        return {
+          data: {
+            user: {
+              id,
+              email: attrs.email,
+              email_confirmed_at: attrs.email_confirm ? new Date().toISOString() : null,
+            },
+          },
           error: null,
         };
       },
@@ -245,6 +342,18 @@ export class FakeSupabase {
         ops.push({ t: 'or', filter });
         return this;
       },
+      ilike(col: string, pattern: string) {
+        ops.push({ t: 'ilike', col, pattern });
+        return this;
+      },
+      gte(col: string, val: unknown) {
+        ops.push({ t: 'gte', col, val });
+        return this;
+      },
+      lte(col: string, val: unknown) {
+        ops.push({ t: 'lte', col, val });
+        return this;
+      },
       range(from: number, to: number) {
         ops.push({ t: 'range', from, to });
         return this;
@@ -262,20 +371,20 @@ export class FakeSupabase {
         // not just the read result.
         const kind = hasWrite(ops) ? 'write' : 'select';
         const { data, error } = await run(kind);
-        if (error) return { data: null, error };
+        if (error) return { data: null, error, count: null };
         const rows = data ?? [];
         if (rows.length > 1) {
-          return { data: null, error: authError('multiple rows returned for maybeSingle') };
+          return { data: null, error: authError('multiple rows returned for maybeSingle'), count: null };
         }
         return { data: rows[0] ?? null, error: null };
       },
       async single() {
         const kind = hasWrite(ops) ? 'write' : 'select';
         const { data, error } = await run(kind);
-        if (error) return { data: null, error };
+        if (error) return { data: null, error, count: null };
         const rows = data ?? [];
         if (rows.length !== 1) {
-          return { data: null, error: authError('expected exactly one row') };
+          return { data: null, error: authError('expected exactly one row'), count: null };
         }
         return { data: rows[0]!, error: null };
       },
@@ -290,14 +399,15 @@ export class FakeSupabase {
     async function run(kind: 'select' | 'write'): Promise<{
       data: FakeRow[] | null;
       error: unknown;
+      count: number | null;
     }> {
       const write = ops.find((o) => o.t === 'insert' || o.t === 'update' || o.t === 'delete');
       if (kind === 'write') {
         const werr = self.writeErrors[table];
-        if (werr) return { data: null, error: { ...werr } };
+        if (werr) return { data: null, error: { ...werr }, count: null };
       } else if (write === undefined) {
         const rerr = self.errors[table];
-        if (rerr) return { data: null, error: { ...rerr } };
+        if (rerr) return { data: null, error: { ...rerr }, count: null };
       }
       const store = self.tables[table]!;
 
@@ -337,26 +447,26 @@ export class FakeSupabase {
         });
         for (const row of withDefaults) {
           const clash = uniqueViolation(null, row);
-          if (clash) return { data: null, error: clash };
+          if (clash) return { data: null, error: clash, count: null };
         }
         store.push(...withDefaults);
-        return { data: withDefaults, error: null };
+        return { data: withDefaults, error: null, count: null };
       }
       if (ops.some((o) => o.t === 'update')) {
         const op = ops.find((o) => o.t === 'update') as { t: 'update'; patch: FakeRow };
         const hit = store.filter((r) => matches(r, ops));
         for (const row of hit) {
           const clash = uniqueViolation(row, { ...row, ...op.patch });
-          if (clash) return { data: null, error: clash };
+          if (clash) return { data: null, error: clash, count: null };
         }
         for (const row of hit) Object.assign(row, op.patch);
-        return { data: hit, error: null };
+        return { data: hit, error: null, count: null };
       }
       if (ops.some((o) => o.t === 'delete')) {
         const keep = store.filter((r) => !matches(r, ops));
         const removed = store.filter((r) => matches(r, ops));
         self.tables[table] = keep;
-        return { data: removed, error: null };
+        return { data: removed, error: null, count: null };
       }
 
       let out = store.filter((r) => matches(r, ops));
@@ -389,6 +499,13 @@ export class FakeSupabase {
       const limit = [...ops].reverse().find((o) => o.t === 'limit') as
         | { t: 'limit'; n: number }
         | undefined;
+
+      // PostgREST's `count: 'exact'` is the TOTAL number of matching rows, taken
+      // BEFORE range/limit. Returning the page length instead makes every
+      // pagination total wrong - and it was previously not returned at all, so
+      // `meta.total` silently fell back to the page size.
+      const totalMatching = out.length;
+
       if (range) out = out.slice(range.from, range.to + 1);
       if (limit) out = out.slice(0, limit.n);
 
@@ -399,7 +516,11 @@ export class FakeSupabase {
       if (selectOp && selectOp.cols.includes('!')) {
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols) }));
       }
-      return { data: out, error: null };
+      return {
+        data: out,
+        error: null,
+        count: selectOp?.count === true ? totalMatching : null,
+      };
     }
 
     return builder;
@@ -415,19 +536,40 @@ export class FakeSupabase {
       if (!spec.includes('!') && !/\w+\(/.test(spec)) continue;
       const inner = spec.includes('(') ? spec.slice(0, spec.indexOf('(')) : spec;
       const [aliasRaw, targetRaw] = inner.split(':');
-      const alias = aliasRaw ?? inner;
-      const target = (targetRaw ?? aliasRaw ?? inner) as string;
-      // `child!inner` / `child!fk(cols)`. Without a constraint name, the
-      // embedded table is the PARENT side and the current table holds the FK.
+      // `alias:table!fk(cols)` names the key explicitly; a bare `table!fk(cols)`
+      // or `table!inner(cols)` is keyed by the TABLE name. Using the whole
+      // `table!inner` string as the key silently produced `undefined` on read.
+      const hasAlias = targetRaw !== undefined;
+      const bangIndex = inner.indexOf('!');
+      const tableName = bangIndex === -1 ? inner : inner.slice(0, bangIndex);
+      const alias = hasAlias ? (aliasRaw as string) : tableName;
+      const target = hasAlias ? (targetRaw as string) : inner;
+      // `table!inner(cols)` / `table!fk(cols)`. Without a constraint name the
+      // embedded table may be EITHER side of the relation, so both directions are
+      // tried: the current table holding the FK (parent side), or the embedded
+      // table holding it (child side, a reverse one-to-one). Only looking one way
+      // made a reverse embed resolve to `undefined` in silence, which is exactly
+      // the kind of gap that lets a test pass without testing anything.
       const [embedTable, constraint] = target.split('!');
-      const link = this.links.find((l) =>
+      const byName = (l: FakeLink) =>
         constraint && constraint !== 'inner'
           ? `${embedTable}_${l.fk}_fkey` === constraint
-          : l.parent === embedTable && row[l.fk] !== undefined,
-      );
+          : false;
+      const asParent = (l: FakeLink) =>
+        constraint && constraint !== 'inner' ? false : l.parent === embedTable && row[l.fk] !== undefined;
+      const asChild = (l: FakeLink) => constraint && constraint !== 'inner' ? false : l.child === embedTable;
+      const link = this.links.find((l) => byName(l) || asParent(l) || asChild(l));
       if (!link) continue;
-      const pk = link.pk ?? 'id';
-      const match = (this.tables[link.parent] ?? []).find((r) => r[pk] === row[link.fk]);
+      const parentSide = link.parent === embedTable;
+      const match = parentSide
+        ? // Embedded table is the PARENT: this row holds the FK.
+          (this.tables[link.parent] ?? []).find(
+            (r) => r[link.pk ?? 'id'] === row[link.fk],
+          )
+        : // Embedded table is the CHILD: it holds the FK pointing back here.
+          (this.tables[link.child] ?? []).find(
+            (r) => r[link.fk] === row[link.pk ?? 'id'],
+          );
       if (match) attached[alias] = match;
     }
     return attached;

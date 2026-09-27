@@ -1,0 +1,51 @@
+.filters {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, 12px);
+}
+
+.label {
+  display: block;
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  min-width: 11rem;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body-m);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-canvas);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.filterActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.footnote {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}

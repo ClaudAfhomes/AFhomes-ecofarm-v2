@@ -61,6 +61,30 @@ const BUSINESS_FAMILIES = [
   { prefix: 'commissions', module: 'commissions', handler: '../_handlers/commissions.js' },
   { prefix: 'referrals', module: 'referrals', handler: '../_handlers/referrals.js' },
   { prefix: 'queues', module: 'queues', handler: '../_handlers/queues.js' },
+  // Customer portal. Neither family consults the staff permission model - see
+  // api/_lib/customer-access.ts, which resolves a customer from ownership alone.
+  //
+  // `auth` is the UNAUTHENTICATED activation entry point and carries an explicit
+  // `path`, so it claims ONLY `auth/customer/activate`. Without that constraint it
+  // would also swallow `/api/v1/auth/register` - a route belonging to the retired
+  // JAD platform, which must stay unroutable. Claiming a whole prefix is how a
+  // retired surface quietly comes back to life.
+  //
+  // `customer` (singular) is listed AFTER `customers` (plural) and cannot match
+  // it: the prefix must be followed by `/` or end-of-path.
+  {
+    prefix: 'auth',
+    module: 'auth',
+    path: 'customer/activate',
+    handler: '../_handlers/customer-activation.js',
+  },
+  { prefix: 'customer', module: 'customer', handler: '../_handlers/customer-portal.js' },
+  // Staff redemption. Reuses the Phase 1 `operations.redemption` and
+  // `operations.catalog` module keys, so Phase 4 adds NO new authorization
+  // vocabulary. `items` and `history` live under the same prefix, and because a
+  // prefix must be followed by `/` or end-of-path it cannot shadow the bare
+  // `/redemptions` list.
+  { prefix: 'redemptions', module: 'operations.redemption', handler: '../_handlers/redemptions.js' },
 ] as const;
 
 export function selectHandler(
@@ -80,9 +104,13 @@ export function selectHandler(
       new RegExp(`^/api(?:/v1)?/${family.prefix}(?:/(.*))?$`),
     );
     if (!match) continue;
-    query.familyPath = decodeURIComponent(match[1] ?? '');
+    const familyPath = decodeURIComponent(match[1] ?? '');
+    // A family that owns exactly one route leaves everything else under its
+    // prefix unrouted, so a retired sibling route stays retired.
+    if ('path' in family && family.path !== familyPath) continue;
+    query.familyPath = familyPath;
     return {
-      handler: lazy(() => import(family.handler)),
+      handler: lazy(() => import(family.handler as `../_handlers/${string}.js`)),
       routeKey: `${family.module}/${query.familyPath || family.prefix}`,
     };
   }

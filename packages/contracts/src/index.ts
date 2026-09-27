@@ -46,6 +46,36 @@ export {
 export { listResponseSchema } from './schemas/collection.js';
 export type { ListResponse } from './schemas/collection.js';
 
+/* ---- Staff redemption of customer points (Phase 4) ----
+   The client sends no price, balance, status or staff identity: those fields do
+   not exist in the request schema, so a tampered body cannot change what a
+   redemption costs. Points are whole units, not money. */
+export {
+  pointsAmountSchema,
+  redemptionItemSchema,
+  createRedemptionItemRequestSchema,
+  updateRedemptionItemRequestSchema,
+  redemptionPreviewSchema,
+  createRedemptionRequestSchema,
+  redemptionReceiptSchema,
+  redemptionStatusSchema,
+  redemptionSchema,
+  redemptionListSchema,
+  customerRedemptionSchema,
+  customerRedemptionListSchema,
+} from './schemas/redemption.js';
+export type {
+  RedemptionItem,
+  CreateRedemptionItemRequest,
+  UpdateRedemptionItemRequest,
+  RedemptionPreview,
+  CreateRedemptionRequest,
+  RedemptionReceipt,
+  RedemptionStatus,
+  Redemption,
+  CustomerRedemption,
+} from './schemas/redemption.js';
+
 /* ---- Phase 2: lifecycle states (single source for every status string) ---- */
 export {
   customerStatusSchema,
@@ -146,3 +176,28 @@ export type {
   OnboardingToken,
   FinanceQueueItem,
 } from './schemas/finance.js';
+
+/* ---- Customer portal (Phase 3) ----
+   Ownership-based, not permission-based: nothing here derives from the staff
+   module model. */
+export {
+  customerActivationRequestSchema,
+  customerActivationResultSchema,
+  customerProfileSchema,
+  customerMembershipSchema,
+  customerPointsSummarySchema,
+  customerPointsEntrySchema,
+  customerPointsLedgerSchema,
+  customerCredentialsSchema,
+  CUSTOMER_ACTIVATION_ERRORS,
+} from './schemas/customer.js';
+export type {
+  CustomerActivationRequest,
+  CustomerActivationResult,
+  CustomerProfile,
+  CustomerMembership,
+  CustomerPointsSummary,
+  CustomerPointsEntry,
+  CustomerCredentials,
+  CustomerActivationError,
+} from './schemas/customer.js';

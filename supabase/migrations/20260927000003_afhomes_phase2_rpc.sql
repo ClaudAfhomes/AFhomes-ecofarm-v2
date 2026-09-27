@@ -23,16 +23,13 @@ language sql
 immutable
 strict
 as $$
-  select rpad(
-           split_part(v, '.', 1) || '.' ||
-           rpad(coalesce(nullif(split_part(v, '.', 2), ''), '0'), 2, '0'),
-           1, '0'
-         )
+  select split_part(v, '.', 1) || '.' ||
+         rpad(coalesce(nullif(split_part(v, '.', 2), ''), '0'), 2, '0')
   from (select trim_scale(round(value, 2))::text as v) s
 $$;
 
 comment on function private.money(numeric) is
-  'Exact-decimal money text with exactly two decimals. numeric is arbitrary precision, so no float ever participates.';
+  'Exact-decimal money text with exactly two decimals. numeric is arbitrary precision, so no float ever participates. Never wrap the result in rpad(x, n, c) with a length shorter than the value: rpad TRUNCATES, which silently turned every total into its first character. Found by executing this on a real PostgreSQL.';
 
 -- High-entropy random tokens (256 bits) are hashed with plain SHA-256. A pepper
 -- is not required: the input space is already too large to brute force, and
@@ -281,17 +278,25 @@ begin
   where id = v_payment.id;
 
   v_price := coalesce((v_sale.cash_price_snapshot)::numeric, 0);
-  select coalesce(sum((amount)::numeric), 0) into v_verified
-  from public.payments
-  where sale_id = v_sale.id and status = 'verified';
+  -- Every column is qualified. This function's OUT parameters are named
+  -- `sale_id` and `status`, so an unqualified reference would be ambiguous
+  -- between the parameter and the table column and the statement would fail at
+  -- runtime. Found by executing this on a real PostgreSQL.
+  select coalesce(sum((p.amount)::numeric), 0) into v_verified
+  from public.payments p
+  where p.sale_id = v_sale.id and p.status = 'verified';
 
   -- The 7-day spot-cash window opens on the first VERIFIED payment. Computed
   -- once, server-side, in UTC; the client never derives it.
   v_deadline := v_sale.spot_cash_deadline;
   if p_decision = 'verified' and v_deadline is null then
     v_deadline := now() + interval '7 days';
+    -- coalesce, NOT a self-assignment. The previous code wrote
+    -- spot_cash_started_at = v_sale.spot_cash_started_at, which copies the
+    -- existing (NULL) value straight back, so the instant the window opened was
+    -- never recorded. Found by executing this on a real PostgreSQL.
     update public.card_sales
-      set spot_cash_started_at = v_sale.spot_cash_started_at,
+      set spot_cash_started_at = coalesce(v_sale.spot_cash_started_at, now()),
           spot_cash_deadline = v_deadline,
           updated_at = now()
       where id = v_sale.id;
@@ -315,9 +320,9 @@ begin
   end if;
 
   if v_fully_paid then
-    update public.commissions
+    update public.commissions c
     set status = 'payment_verified'
-    where sale_id = v_sale.id and status = 'pending';
+    where c.sale_id = v_sale.id and c.status = 'pending';
   end if;
 
   insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data)
@@ -339,7 +344,7 @@ begin
 
   return query
   select v_sale.id,
-         (select status from public.card_sales where id = v_sale.id),
+         (select s.status from public.card_sales s where s.id = v_sale.id),
          private.money(v_verified),
          private.money(greatest(v_price - v_verified, 0)),
          v_fully_paid,

@@ -1,28 +1,44 @@
-import { env } from '../lib/env';
-import styles from './App.module.css';
+import { Route, Routes } from 'react-router';
+
+import { NotFound } from '@jad/ui';
+
+import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
+import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
+import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
+import { CustomerMembershipPage } from '../features/customer/CustomerMembershipPage';
+import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
+import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
+import { CustomerLayout } from './CustomerLayout';
+import { PublicHome } from './PublicHome';
 
 /**
- * Public-site shell.
+ * Public site routes.
  *
- * Phase 1 scope is the staff operations console (apps/admin). The public site
- * has no implemented routes yet, so this is a deliberately minimal placeholder:
- * it establishes the mount, providers, and design-system wiring that later
- * phases build on, without inventing screens or content.
+ * `/` remains the minimal public landing placeholder: this phase delivers the
+ * customer portal, not a marketing site.
+ *
+ * Every route below `/customer` is a real screen backed by a real endpoint.
+ * There are no placeholder routes: `/customer`, `/customer/profile`,
+ * `/customer/membership` and `/customer/points` all render, and the two
+ * unauthenticated entry screens (`login`, `activate`) are what the guard sends
+ * an anonymous visitor to.
  */
 export default function App() {
   return (
-    <main className={styles.shell}>
-      <div className={styles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={styles.title}>Public site under construction</h1>
-        <p className={styles.body}>
-          Phase 1 delivers the staff operations console. Public pages will be added in a later
-          phase.
-        </p>
-        <a className={styles.adminLink} href={env.VITE_ADMIN_URL}>
-          Staff administration
-        </a>
-      </div>
-    </main>
+    <Routes>
+      <Route path="/" element={<PublicHome />} />
+
+      <Route path="/customer/login" element={<CustomerLoginPage />} />
+      <Route path="/customer/activate" element={<CustomerActivatePage />} />
+
+      <Route path="/customer" element={<CustomerLayout />}>
+        <Route index element={<CustomerDashboardPage />} />
+        <Route path="membership" element={<CustomerMembershipPage />} />
+        <Route path="points" element={<CustomerPointsPage />} />
+        <Route path="profile" element={<CustomerProfilePage />} />
+      </Route>
+
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }

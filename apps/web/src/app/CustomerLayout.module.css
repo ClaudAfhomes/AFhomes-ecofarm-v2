@@ -1,0 +1,81 @@
+.shell {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-10);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.customerName {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-h3);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.customerNumber {
+  margin: 2px 0 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.restricted {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-light);
+  color: var(--color-accent-strong);
+  font-size: var(--text-body-s);
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin: var(--space-4) 0 var(--space-6);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.navLink,
+.navLinkActive {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body-m);
+  text-decoration: none;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.navLinkActive {
+  color: var(--color-brand-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-brand-primary);
+}
+
+.main {
+  display: block;
+}
+
+.centeredActions {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
+}

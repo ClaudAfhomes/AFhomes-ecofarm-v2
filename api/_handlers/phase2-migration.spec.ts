@@ -199,6 +199,22 @@ describe('the schema migration freezes commercial terms and identity', () => {
     expect(schema).toMatch(/constraint commissions_beneficiary_check/);
   });
 
+  it('relaxes the Phase 1 NOT NULL on commissions.ost_id', () => {
+    // REGRESSION: Phase 1 declared `ost_id uuid not null` because the only
+    // seller it modelled was an OST. Phase 2 allows a STAFF beneficiary, so
+    // while that NOT NULL stands the beneficiary CHECK can never be satisfied
+    // for a VD/SSM/SM/Admin sale and every such commission is rejected. Found
+    // by executing the migrations on a real PostgreSQL.
+    expect(schema).toMatch(
+      /alter table public\.commissions alter column ost_id drop not null/,
+    );
+    // And the new beneficiary columns must be the nullable ones.
+    expect(schema).toMatch(
+      /add column if not exists beneficiary_staff_id uuid references public\.staff_users\(id\)/,
+    );
+    expect(schema).not.toMatch(/add column if not exists beneficiary_staff_id uuid not null/);
+  });
+
   it('stores identifier hashes, never plaintext', () => {
     expect(schema).toMatch(/qr_token_hash text unique/);
     expect(schema).toMatch(/fallback_code_hash/);
@@ -230,6 +246,47 @@ describe('the RPC migration keeps money server-computed and activation gated', (
       rpc.indexOf('function private.hash_token'),
     );
     expect(moneyFn).not.toContain('to_char');
+  });
+
+  it('never length-caps a money result with rpad', () => {
+    // REGRESSION: the formatter used to wrap its output in rpad(x, 1, '0').
+    // rpad TRUNCATES when the target length is shorter than the value, so every
+    // total collapsed to its first character (60,000.00 -> "6"). Only real
+    // execution found this; supabase/db-integration.ts now pins the exact
+    // strings. This is the tripwire so it cannot come back unnoticed.
+    const moneyFn = rpc.slice(
+      rpc.indexOf('function private.money'),
+      rpc.indexOf('function private.hash_token'),
+    );
+    const body = moneyFn.slice(moneyFn.indexOf('$$') + 2);
+    // The only rpad allowed is the one that pads the fraction to two digits.
+    const rpads = [...body.matchAll(/rpad\(([^;]*?),\s*(\d+),/g)];
+    expect(rpads.length).toBeGreaterThan(0);
+    for (const [, , length] of rpads) {
+      expect(Number(length), 'rpad length must be >= 2 to avoid truncation').toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('qualifies every column inside verify_card_payment', () => {
+    // REGRESSION: the function's OUT parameters are named `sale_id` and
+    // `status`, so an unqualified `where sale_id = ...` is ambiguous between
+    // the parameter and the column and raises at runtime. Payment verification
+    // failed on every call until this was found by real execution.
+    const fn = rpc.slice(
+      rpc.indexOf('function public.verify_card_payment'),
+      rpc.indexOf('function public.activate_card_sale'),
+    );
+    expect(fn).toMatch(/from public\.payments p\s+where p\.sale_id = v_sale\.id and p\.status = 'verified'/);
+    expect(fn).toMatch(/update public\.commissions c[\s\S]*?where c\.sale_id = v_sale\.id and c\.status = 'pending'/);
+    // The return-query subquery read `select status from public.card_sales`,
+    // which is the same clash in a third place.
+    expect(fn).toMatch(
+      /\(select s\.status from public\.card_sales s where s\.id = v_sale\.id\)/,
+    );
+    // No bare reference may survive.
+    expect(fn).not.toMatch(/where sale_id = v_sale\.id and status = 'verified'/);
+    expect(fn).not.toMatch(/where sale_id = v_sale\.id and status = 'pending'/);
+    expect(fn).not.toMatch(/\(select status from public\.card_sales/);
   });
 
   it('re-checks full verified payment INSIDE the activation transaction', () => {
@@ -289,12 +346,28 @@ describe('the RPC migration keeps money server-computed and activation gated', (
     expect(fn.slice(0, fn.indexOf('if p_decision'))).not.toContain("interval '7 days'");
   });
 
+  it('records the instant the spot-cash window opened', () => {
+    // REGRESSION: the update used to read
+    //   spot_cash_started_at = v_sale.spot_cash_started_at
+    // which is a self-assignment. It copied the existing NULL straight back, so
+    // the start of the window was never recorded even though the deadline was
+    // correct. Found by executing this on a real PostgreSQL.
+    const fn = rpc.slice(
+      rpc.indexOf('function public.verify_card_payment'),
+      rpc.indexOf('function public.activate_card_sale'),
+    );
+    expect(fn).toMatch(
+      /set spot_cash_started_at = coalesce\(v_sale\.spot_cash_started_at, now\(\)\)/,
+    );
+    expect(fn).not.toMatch(/set spot_cash_started_at = v_sale\.spot_cash_started_at/);
+  });
+
   it('counts only verified money toward the price', () => {
     const fn = rpc.slice(
       rpc.indexOf('function public.verify_card_payment'),
       rpc.indexOf('function public.activate_card_sale'),
     );
-    expect(fn).toMatch(/where sale_id = v_sale\.id and status = 'verified'/);
+    expect(fn).toMatch(/where p\.sale_id = v_sale\.id and p\.status = 'verified'/);
   });
 
   it('advances the commission to payment_verified only on full payment', () => {

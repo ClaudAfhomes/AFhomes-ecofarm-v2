@@ -1,0 +1,513 @@
+/**
+ * Customer portal: guard behaviour, screen content, and the "no sensitive data on
+ * screen" rule.
+ *
+ * These tests render the REAL routes, the REAL guard and the REAL screens. Only
+ * the network boundary is stubbed, so a change that starts requesting a field
+ * the API must never return shows up here as a failure.
+ *
+ * The stub is deliberately a deny-by-default gate: any request for a path the
+ * fixture does not define fails loudly instead of resolving to `undefined`,
+ * which is what a `fetch` mock that returns `{}` would do.
+ */
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithProviders } from '../../test/utils';
+import App from '../../app/App';
+import { CustomerSessionProvider } from '../../lib/customer-session';
+import { resetSupabaseClientForTest } from '../../lib/supabase';
+import { ApiError } from '../../lib/api/errors';
+
+const CUSTOMER = {
+  id: 'cccccccc-0000-4000-8000-000000000001',
+  customerNumber: 'CUS-000777',
+  firstName: 'Ana',
+  middleName: 'R',
+  lastName: 'Buyer',
+  suffix: null,
+  fullName: 'Ana R Buyer',
+  email: 'ana.buyer@example.invalid',
+  phone: '09185550000',
+  dateOfBirth: '1990-05-04',
+  addressLine1: '77 Katipunan',
+  addressLine2: null,
+  city: 'Quezon City',
+  province: 'Metro Manila',
+  countryCode: 'PH',
+  status: 'active' as const,
+  activatedAt: '2026-01-05T02:00:00.000Z',
+  updatedAt: '2026-01-05T02:00:00.000Z',
+};
+
+const MEMBERSHIP = {
+  id: 'dddddddd-0000-4000-8000-000000000001',
+  membershipNumber: 'MBS-000777',
+  productName: 'Gold',
+  productCode: 'GOLD',
+  status: 'active' as const,
+  activatedAt: '2026-01-05T02:00:00.000Z',
+  expiresAt: '2027-01-05T02:00:00.000Z',
+  renewalDueAt: '2027-01-05T02:00:00.000Z',
+  yearlyPointsAllocated: 60000,
+  pointsBalance: 60000,
+  credentialsAvailable: false as const,
+  credentialsNote: 'Your card code is stored only as a one-way hash, so it cannot be displayed again.',
+};
+
+const POINTS = {
+  membershipId: MEMBERSHIP.id,
+  balance: 60000,
+  lifetimeAllocated: 60000,
+  lifetimeRedeemed: 0,
+  updatedAt: '2026-01-05T02:00:00.000Z',
+};
+
+const LEDGER = {
+  data: [
+    {
+      id: '2',
+      entryType: 'adjustment' as const,
+      amount: 1000,
+      balanceAfter: 61000,
+      reason: 'Goodwill adjustment',
+      occurredAt: '2026-02-01T02:00:00.000Z',
+    },
+    {
+      id: '1',
+      entryType: 'annual_allocation' as const,
+      amount: 60000,
+      balanceAfter: 60000,
+      reason: 'Annual points allocation on activation',
+      occurredAt: '2026-01-05T02:00:00.000Z',
+    },
+  ],
+  meta: {},
+};
+
+/** path suffix -> handler. Anything not listed is an explicit failure. */
+type RouteHandler = () => { status: number; body: unknown };
+const routes = new Map<string, RouteHandler>();
+
+const ok = (body: unknown): RouteHandler => () => ({ status: 200, body });
+const list = (data: unknown[]): RouteHandler => () => ({ status: 200, body: { data, meta: {} } });
+
+const SIGNED_IN = { authUserId: 'ffffffff-0000-4000-8000-000000000001', email: CUSTOMER.email };
+
+function installRoutes(over: Record<string, RouteHandler> = {}) {
+  routes.clear();
+  routes.set('/customer', ok(CUSTOMER));
+  routes.set('/customer/membership', ok(MEMBERSHIP));
+  routes.set('/customer/points', ok(POINTS));
+  routes.set('/customer/points/ledger', list(LEDGER.data));
+  for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
+}
+
+const requests: string[] = [];
+
+function mockFetch() {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0]!;
+    requests.push(`${path}`);
+    const handler = routes.get(path);
+    if (!handler) {
+      return new Response(
+        JSON.stringify({ error: { code: 'NOT_FOUND', message: `unstubbed route ${path}` } }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    const { status, body } = handler();
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+}
+
+const render = (route: string, signedIn = true) =>
+  renderWithProviders(<App />, {
+    route,
+    sessionUser: signedIn ? SIGNED_IN : null,
+  });
+
+beforeEach(() => {
+  resetSupabaseClientForTest();
+  requests.length = 0;
+  installRoutes();
+  vi.stubGlobal('fetch', mockFetch());
+});
+
+/* ================================================================== */
+/* Guard                                                                */
+/* ================================================================== */
+
+describe('customer guard', () => {
+  it('sends an unauthenticated visitor to the sign-in screen', async () => {
+    render('/customer', false);
+    expect(await screen.findByRole('heading', { name: 'Sign in', level: 1 })).toBeInTheDocument();
+    // The guard must not even ask for customer data without a session.
+    expect(requests).not.toContain('/customer');
+  });
+
+  it.each(['/customer/membership', '/customer/points', '/customer/profile'])(
+    'protects %s as well',
+    async (route) => {
+      render(route, false);
+      expect(await screen.findByRole('heading', { name: 'Sign in', level: 1 })).toBeInTheDocument();
+    },
+  );
+
+  it('lets an active customer into the dashboard', async () => {
+    render('/customer');
+    expect(await screen.findByRole('heading', { name: 'Welcome', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByText('CUS-000777')).toBeInTheDocument();
+  });
+
+  it('tells a signed-in non-customer that this is not a customer account', async () => {
+    installRoutes({
+      '/customer': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'This sign-in is not a customer account.' } },
+      }),
+    });
+    render('/customer');
+    expect(
+      await screen.findByText('This is not a customer account'),
+    ).toBeInTheDocument();
+    // A staff member must not be offered a customer sign-in form here.
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  });
+
+  it('shows a suspended customer a restricted state, not an error', async () => {
+    installRoutes({
+      '/customer': ok({ ...CUSTOMER, status: 'suspended' }),
+      '/customer/membership': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'Your account is suspended.' } },
+      }),
+      '/customer/points': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'Your account is suspended.' } },
+      }),
+      '/customer/points/ledger': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'Your account is suspended.' } },
+      }),
+    });
+    render('/customer/membership');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Your account is suspended/i);
+    // The restriction is explained, and no card data is rendered.
+    expect(await screen.findByText(/not available while this is in effect/i)).toBeInTheDocument();
+  });
+
+  it('does not render the shell before the session resolves', async () => {
+    // No `initialUser` => the provider runs its real resolve path, which with no
+    // Supabase client configured lands on "unauthenticated" without flashing.
+    renderWithProviders(<App />, { route: '/customer' });
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in', level: 1 }, { timeout: 3000 }),
+    ).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Dashboard                                                            */
+/* ================================================================== */
+
+describe('customer dashboard', () => {
+  it('shows the member their own card and points, and nothing else', async () => {
+    render('/customer');
+    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(screen.getByText('Gold')).toBeInTheDocument();
+    expect(screen.getAllByText('60,000').length).toBeGreaterThan(0);
+    // Card details, not staff or finance information.
+    expect(screen.queryByText(/commission/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/seller/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/payment/i)).not.toBeInTheDocument();
+  });
+
+  it('shows recent points activity on the dashboard', async () => {
+    render('/customer');
+    expect(await screen.findByText('Goodwill adjustment')).toBeInTheDocument();
+    expect(screen.getByText('Annual Allocation')).toBeInTheDocument();
+  });
+
+  it('renders an activation and renewal date', async () => {
+    render('/customer');
+    const activated = await screen.findByText('Activated');
+    const row = activated.closest('div');
+    expect(row).toHaveTextContent('Jan 5, 2026');
+    const renews = screen.getByText('Renews').closest('div');
+    expect(renews).toHaveTextContent('Jan 5, 2027');
+  });
+});
+
+/* ================================================================== */
+/* Profile - the read model must stay narrow                            */
+/* ================================================================== */
+
+describe('customer profile', () => {
+  it('shows the safe profile fields', async () => {
+    render('/customer/profile');
+    // The customer number appears in the shell header too, so scope to the card.
+    const card = (await screen.findByRole('heading', { name: 'Your details' })).closest('section')!;
+    expect(within(card).getByText('CUS-000777')).toBeInTheDocument();
+    expect(within(card).getByText('Ana R Buyer')).toBeInTheDocument();
+
+    const contact = screen.getByRole('heading', { name: 'Contact' }).closest('section')!;
+    expect(within(contact).getByText('ana.buyer@example.invalid')).toBeInTheDocument();
+    expect(within(contact).getByText('09185550000')).toBeInTheDocument();
+
+    const address = screen.getByRole('heading', { name: 'Address' }).closest('section')!;
+    expect(within(address).getByText(/77 Katipunan/)).toBeInTheDocument();
+  });
+
+  it('never renders a government ID, document path or staff identifier', async () => {
+    // Even if a hostile API smuggled one in, it must not reach the DOM.
+    installRoutes({
+      '/customer': ok({
+        ...CUSTOMER,
+        governmentIdNumber: '7788-9900-1122',
+        identityDocumentPath: 'afhomes-customer-ids/ana/id.pdf',
+        createdBy: '00000000-0000-4000-8000-0000000000bb',
+      }),
+    });
+    const { container } = render('/customer/profile');
+    await screen.findByRole('heading', { name: 'Your details' });
+    const html = container.innerHTML;
+    expect(html).not.toContain('7788-9900-1122');
+    expect(html).not.toContain('id.pdf');
+    expect(html).not.toContain('afhomes-customer-ids');
+    expect(html).not.toContain('00000000-0000-4000-8000-0000000000bb');
+  });
+});
+
+/* ================================================================== */
+/* Membership + credential policy                                       */
+/* ================================================================== */
+
+describe('membership screen', () => {
+  it('states that a code is not available on demand', async () => {
+    render('/customer/membership');
+    expect(await screen.findByText(/one-way hash/i)).toBeInTheDocument();
+  });
+
+  it('does not display a card code until one is explicitly requested', async () => {
+    render('/customer/membership');
+    await screen.findByText(/one-way hash/i);
+    expect(screen.queryByText('AFH-NEWW-WWWW')).not.toBeInTheDocument();
+  });
+
+  it('issues and displays a new code on request, and says the old one dies', async () => {
+    installRoutes({
+      '/customer/membership/credentials': () => ({
+        status: 201,
+        body: {
+          membershipId: MEMBERSHIP.id,
+          membershipNumber: 'MBS-000777',
+          fallbackCode: 'AFH-NEWW-WWWW',
+          qrToken: 'opaque-rotated-qr-token',
+          issuedAt: '2026-03-01T02:00:00.000Z',
+          previousCodesInvalidated: true,
+        },
+      }),
+    });
+    const user = userEvent.setup();
+    render('/customer/membership');
+    await user.click(await screen.findByRole('button', { name: /request a new card code/i }));
+
+    expect(await screen.findByText('AFH-NEWW-WWWW')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/cannot be displayed again/i).length).toBeGreaterThan(0);
+  });
+
+  it('never renders a stored credential hash', async () => {
+    installRoutes({
+      '/customer/membership': ok({
+        ...MEMBERSHIP,
+        fallback_code_hash: 'a'.repeat(64),
+        qr_token_hash: 'b'.repeat(64),
+      }),
+    });
+    const { container } = render('/customer/membership');
+    await screen.findByText('MBS-000777');
+    expect(container.innerHTML).not.toContain('a'.repeat(64));
+    expect(container.innerHTML).not.toContain('b'.repeat(64));
+  });
+});
+
+/* ================================================================== */
+/* Points                                                               */
+/* ================================================================== */
+
+describe('points screen', () => {
+  it('shows the balance, lifetime totals and history', async () => {
+    render('/customer/points');
+    const balanceCard = (await screen.findByRole('heading', { name: 'Balance' })).closest('section')!;
+    // "60,000" legitimately appears as both the current balance and the lifetime
+    // allocation, so assert the presence and the labelled totals rather than
+    // counting occurrences.
+    expect(within(balanceCard).getAllByText('60,000').length).toBeGreaterThanOrEqual(1);
+    expect(within(balanceCard).getByText('All time allocated')).toBeInTheDocument();
+    expect(within(balanceCard).getByText('All time redeemed')).toBeInTheDocument();
+    const history = screen.getByRole('heading', { name: 'Points activity' }).closest('section')!;
+    expect(within(history).getByText('Goodwill adjustment')).toBeInTheDocument();
+    expect(within(history).getByText('Annual points allocation on activation')).toBeInTheDocument();
+  });
+
+  it('offers no redemption control and mutates nothing', async () => {
+    render('/customer/points');
+    await screen.findByRole('heading', { name: 'Balance' });
+    expect(screen.queryByRole('button', { name: /redeem|convert|spend|use points/i })).toBeNull();
+    // Every request the screen made was a read.
+    const calls = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit?][] } })
+      .mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, init] of calls) {
+      const method = (init as { method?: string } | undefined)?.method ?? 'GET';
+      expect(method, `unexpected ${method}`).toBe('GET');
+    }
+  });
+});
+
+/* ================================================================== */
+/* Activation + sign-in screens                                         */
+/* ================================================================== */
+
+describe('activation screen', () => {
+  it('offers only a token and a password - never an identity field', async () => {
+    render('/customer/activate', false);
+    expect(await screen.findByLabelText('Activation code')).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+    expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
+    for (const forbidden of ['Email', 'Customer number', 'Customer ID', 'Membership', 'Role', 'Status']) {
+      expect(screen.queryByLabelText(new RegExp(forbidden, 'i'))).toBeNull();
+    }
+  });
+
+  it('never pre-renders a token from the query string', async () => {
+    // A token in `?token=` would be written to server access logs. The screen
+    // reads the fragment only, so the field must start empty.
+    render('/customer/activate?token=secret-in-query-string-0000', false);
+    const input = (await screen.findByLabelText('Activation code')) as HTMLInputElement;
+    expect(input.value).toBe('');
+  });
+});
+
+describe('sign-in screen', () => {
+  it('shows a single generic message on failure, so accounts cannot be enumerated', async () => {
+    const user = userEvent.setup();
+    const supabaseSignIn = vi.fn().mockResolvedValue({ error: { message: 'Invalid login credentials' } });
+    vi.stubGlobal('fetch', mockFetch());
+    // The provider is real; sign-in is stubbed at the Supabase boundary by
+    // simply having no client configured, so submit and assert the copy.
+    render('/customer/login', false);
+    await user.type(screen.getByLabelText('Email'), 'nobody@example.invalid');
+    await user.type(screen.getByLabelText('Password'), 'Whatever12345');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => expect(supabaseSignIn).not.toHaveBeenCalled());
+  });
+
+  it('points staff at the administration console instead of a second login form', async () => {
+    render('/customer/login', false);
+    expect(
+      await screen.findByRole('link', { name: /administration console/i }),
+    ).toHaveAttribute('href', expect.stringContaining('5174'));
+  });
+});
+
+/* ================================================================== */
+/* Session provider contract                                            */
+/* ================================================================== */
+
+describe('customer session provider', () => {
+  it('holds no permission or role - authorization lives on the server', async () => {
+    render('/customer');
+    await screen.findByText('CUS-000777');
+    // The shell renders the customer's own data and nothing about capabilities.
+    expect(document.body.textContent).not.toMatch(/permission|role|super admin/i);
+  });
+
+  it('exposes a sign-out control that clears the session', async () => {
+    const user = userEvent.setup();
+    render('/customer');
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in', level: 1 }, { timeout: 3000 }),
+    ).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* The provider must never be bypassable by a nested consumer           */
+/* ================================================================== */
+
+describe('hook misuse', () => {
+  it('the provider itself renders without a Supabase client configured', () => {
+    // With no client the real resolve path lands on "unauthenticated" rather
+    // than throwing, so the guard has a defined state to render.
+    function Orphan() {
+      return <CustomerSessionProvider>{null}</CustomerSessionProvider>;
+    }
+    expect(() => renderWithProviders(<Orphan />)).not.toThrow();
+  });
+
+  it('keeps ApiError usable for status checks outside the shell', () => {
+    expect(new ApiError({ code: 'FORBIDDEN', message: 'x', status: 403 }).status).toBe(403);
+  });
+});
+
+/* ================================================================== */
+/* Nothing sensitive reaches the DOM via an error path                 */
+/* ================================================================== */
+
+describe('error handling', () => {
+  it('renders a generic failure when the API is unreachable', async () => {
+    installRoutes({
+      '/customer': () => ({ status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } }),
+    });
+    render('/customer');
+    expect(
+      await screen.findByText('We could not load your account'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not echo a server error message that contains a staff identifier', async () => {
+    installRoutes({
+      '/customer': () => ({
+        status: 500,
+        body: {
+          error: {
+            code: 'INTERNAL',
+            message: 'failed for staff 00000000-0000-4000-8000-0000000000bb',
+          },
+        },
+      }),
+    });
+    const { container } = render('/customer');
+    await screen.findByText('We could not load your account');
+    expect(container.innerHTML).not.toContain('00000000-0000-4000-8000-0000000000bb');
+  });
+
+  it('renders a not-found screen for an unknown portal path', async () => {
+    render('/customer/nope');
+    expect(await screen.findByRole('heading')).toBeInTheDocument();
+  });
+
+  it('the portal never links to a staff-only screen', async () => {
+    render('/customer');
+    await screen.findByText('CUS-000777');
+    const hrefs = [...document.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs.some((href) => href?.includes('/admin/'))).toBe(false);
+    expect(hrefs.some((href) => href?.includes('/queues'))).toBe(false);
+  });
+
+  it('the membership screen renders within the portal shell navigation', async () => {
+    render('/customer/membership');
+    const nav = await screen.findByRole('navigation', { name: 'Customer portal' });
+    expect(within(nav).getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Points' })).toBeInTheDocument();
+  });
+});

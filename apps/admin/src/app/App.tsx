@@ -10,6 +10,9 @@ import { BusinessCustomersPage } from '../features/business/BusinessCustomersPag
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
+import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
+import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
+import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -29,6 +32,20 @@ export default function App() {
           <Route
             path="/admin/finance/activation"
             element={protectedPage(<BusinessActivationQueuePage />)}
+          />
+          {/* Redemption. Each route is gated on the module key declared for it in
+              ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree: the
+              workflow and history need `operations.redemption`, the catalog needs
+              `operations.catalog`. A redemption operator therefore cannot reach
+              pricing. (Backend permission checks remain authoritative regardless.) */}
+          <Route path="/admin/redemption" element={protectedPage(<RedemptionWorkflowPage />)} />
+          <Route
+            path="/admin/redemption/history"
+            element={protectedPage(<RedemptionHistoryPage />)}
+          />
+          <Route
+            path="/admin/redemption/items"
+            element={protectedPage(<RedemptionCatalogPage />)}
           />
           <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />

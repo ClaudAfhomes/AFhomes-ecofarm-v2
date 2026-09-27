@@ -46,4 +46,9 @@ supabase/backfill-staff-domain.retire.json
 # Supabase CLI local cache (project ref + pooler URL - connection metadata)
 supabase/.temp/
 
-.env*
+# NOTE: a bare `.env*` used to sit here. Because the LAST matching pattern wins,
+# it silently overrode the `!.env.example` negation above, so on a fresh clone
+# the documented environment template was git-ignored and could never be added
+# or updated - it only survived because it was already tracked. The explicit
+# block at the top of this file is the single source of truth; do not re-add a
+# blanket `.env*` here.

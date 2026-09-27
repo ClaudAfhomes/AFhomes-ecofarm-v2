@@ -35,6 +35,17 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     ],
   },
   {
+    to: '/admin/redemption',
+    label: 'Redemption',
+    icon: 'grid',
+    module: 'operations.redemption',
+    dropdown: [
+      { to: '/admin/redemption', label: 'Redeem Points', module: 'operations.redemption' },
+      { to: '/admin/redemption/history', label: 'Redemption History', module: 'operations.redemption' },
+      { to: '/admin/redemption/items', label: 'Redemption Catalog', module: 'operations.catalog' },
+    ],
+  },
+  {
     to: '/admin/staff',
     label: 'Organization',
     icon: 'users',
@@ -60,24 +71,43 @@ export function navItemsForPermissions(permissions?: readonly AfHomesPermission[
   });
 }
 
+/**
+ * Does `pathname` fall under this nav target?
+ *
+ * The LONGEST matching target wins. Prefix matching alone is wrong once a
+ * dropdown holds both a parent route and a nested child: `/admin/redemption/items`
+ * starts with `/admin/redemption/`, so a first-match search resolves the catalog
+ * screen to the WORKFLOW's module key and checks the wrong permission. Choosing
+ * the most specific match keeps a nested screen gated on its OWN module.
+ */
+const covers = (target: string, pathname: string): boolean =>
+  pathname === target || pathname.startsWith(`${target}/`);
+
+const mostSpecific = <T extends { to: string }>(
+  targets: readonly T[],
+  pathname: string,
+): T | undefined =>
+  targets
+    .filter((target) => covers(target.to, pathname))
+    .sort((a, b) => b.to.length - a.to.length)[0];
+
 export function findNavItem(pathname: string) {
   return ADMIN_NAV_ITEMS.find(
     (item) =>
-      item.to === pathname ||
-      item.dropdown?.some((child) => pathname === child.to || pathname.startsWith(`${child.to}/`)),
+      covers(item.to, pathname) ||
+      (item.dropdown ?? []).some((child) => covers(child.to, pathname)),
   );
 }
 
 export function findNavSubItem(pathname: string) {
+  let best: { parent: AdminNavItem; sub: NavLink } | undefined;
   for (const parent of ADMIN_NAV_ITEMS) {
-    const sub = parent.dropdown?.find(
-      (item) => pathname === item.to || pathname.startsWith(`${item.to}/`),
-    );
-    if (sub) return { parent, sub };
+    const sub = mostSpecific(parent.dropdown ?? [], pathname);
+    if (!sub) continue;
+    if (!best || sub.to.length > best.sub.to.length) best = { parent, sub };
   }
-  return undefined;
+  return best;
 }
-
 export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
   if (pathname === '/admin') return [{ label: 'Dashboard' }];
   const found = findNavSubItem(pathname);

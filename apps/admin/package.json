@@ -19,9 +19,13 @@
     "@tanstack/react-query": "^5.101.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "jsqr": "^1.4.0",
     "react-router": "^7.18.2",
     "sweetalert2": "^11.26.25",
     "zod": "^4.4.3"
+  },
+  "comments": {
+    "jsqr": "Browser-side QR DECODER for the redemption scanner. Decodes a camera frame locally; no frame and no image ever leaves the device, and the only thing sent to the API is the decoded opaque token. Chosen over a hosted scanner because uploading a frame of a member's card to a third party would be a disclosure, and over a heavyweight SDK because this is the only thing it would be used for."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
