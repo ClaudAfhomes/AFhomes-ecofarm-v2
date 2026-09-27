@@ -9,7 +9,7 @@
   "dependencies": {
     "@jad/contracts": "workspace:*",
     "@jad/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.112.4",
+    "@supabase/supabase-js": "2.117.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {

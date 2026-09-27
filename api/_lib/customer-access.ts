@@ -15,6 +15,7 @@
  * The principal is re-resolved on EVERY request. There is no cache, so a
  * suspension takes effect on the very next call with no client cooperation.
  */
+import { verifySessionToken } from './auth-verify.js';
 import { toErrorEnvelope } from './envelope.js';
 import { extractBearerToken } from './token.js';
 import { anonClient, serviceClient } from './rest.js';
@@ -57,8 +58,8 @@ export async function resolveCustomerPrincipal(
     return deny('INTERNAL', 'Server configuration is incomplete', 500);
   }
 
-  const { data: authData, error: authError } = await anon.auth.getUser(token);
-  const user = authData?.user as { id?: string } | null;
+  const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+  const user = authData?.user;
   if (authError || !user?.id) {
     return deny('UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
   }

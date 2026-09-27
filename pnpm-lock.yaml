@@ -9,7 +9,7 @@ importers:
   .:
     devDependencies:
       '@supabase/supabase-js':
-        specifier: ^2.112.4
+        specifier: 2.117.2
         version: 2.117.2
       '@types/node':
         specifier: ^24.0.0
@@ -42,7 +42,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/shared
       '@supabase/supabase-js':
-        specifier: ^2.112.4
+        specifier: 2.117.2
         version: 2.117.2
       zod:
         specifier: ^4.4.3
@@ -70,7 +70,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@supabase/supabase-js':
-        specifier: ^2.112.4
+        specifier: 2.117.2
         version: 2.117.2
       '@tanstack/react-query':
         specifier: ^5.101.4
@@ -158,7 +158,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@supabase/supabase-js':
-        specifier: ^2.112.4
+        specifier: 2.117.2
         version: 2.117.2
       '@tanstack/react-query':
         specifier: ^5.101.4

@@ -1,5 +1,6 @@
 import type { AfHomesAction, AfHomesModuleKey, AfHomesPermission } from '@jad/contracts';
 
+import { verifySessionToken } from './auth-verify.js';
 import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest } from './http.js';
 import { anonClient, serviceClient } from './rest.js';
@@ -55,12 +56,8 @@ export async function resolveAfHomesPrincipal(
     return {
       error: toErrorEnvelope('INTERNAL', 'Supabase server configuration is incomplete', 500),
     };
-  const { data: authData, error: authError } = await anon.auth.getUser(token);
-  const user = authData?.user as {
-    id?: string;
-    email?: string;
-    email_confirmed_at?: string | null;
-  } | null;
+  const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+  const user = authData?.user;
   if (authError || !user?.id)
     return { error: toErrorEnvelope('UNAUTHORIZED', 'Invalid session', 401) };
 

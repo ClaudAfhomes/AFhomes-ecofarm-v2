@@ -575,8 +575,13 @@ Single Vercel project, single origin:
 - `/api/v1/*` → the single Function `api/router.ts`
 - `/health` → readiness probe, also the only scheduled job (daily `0 0 * * *`)
 
-Build chain: `scripts/prepare-vercel-env.mjs` → `turbo run build` →
-`scripts/assemble-vercel-output.mjs` (merges both SPAs into `vercel-static/`).
+Build chain: `pnpm typecheck` → `scripts/prepare-vercel-env.mjs` →
+`turbo run build` → `scripts/assemble-vercel-output.mjs` (merges both SPAs
+into `vercel-static/`). The leading `typecheck` is load-bearing: `turbo run
+build` only builds the two SPAs (each runs its own `tsc --noEmit` first), and
+nothing else in the chain typechecks `api/` — so without it a TypeScript error
+in deployable API code would ship silently. Never remove the typecheck step
+from `vercel.json`'s `buildCommand`.
 
 - `functions["api/router.ts"].includeFiles` **must stay `packages/**`**.
   Narrowing it crashes the deployed function with
@@ -591,6 +596,18 @@ Build chain: `scripts/prepare-vercel-env.mjs` → `turbo run build` →
 - `VITE_WEB_URL`/`VITE_ADMIN_URL` are derived from
   `VERCEL_PROJECT_PRODUCTION_URL`. Do **not** set them in the Vercel env - that
   pins them to one host and breaks preview deployments.
+- `installCommand` is `pnpm install --filter=!@jad/db-testing`, so the initial
+  install covers 8 of 9 workspace projects and never touches
+  `embedded-postgres`. Vercel still runs a second, unfiltered install
+  (`Scope: all 9 workspace projects`) while processing function outputs — that
+  reinstall is Vercel platform behavior, not a repo dependency: nothing in the
+  codebase depends on `@jad/db-testing` (no manifest lists it, the `api/`
+  function imports only `@jad/contracts` and `@jad/shared`, and there are no
+  relative imports into `packages/`). The extra install succeeds silently
+  because `allowBuilds` permits exactly the two `embedded-postgres` platform
+  packages; the native binary is never loaded by the deployed function, which
+  never imports the db-testing sources. Do not "fix" this by weakening pnpm
+  security or by narrowing `includeFiles` (see above).
 
 **Do not deploy, run migrations against production, or trigger remote crons
 without explicit approval.**

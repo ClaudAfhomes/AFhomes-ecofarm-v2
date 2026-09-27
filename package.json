@@ -24,7 +24,7 @@
     "test:db:harness": "pnpm --filter @jad/db-testing install && pnpm --filter @jad/db-testing exec node scripts/test-db-harness.mjs"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.112.4",
+    "@supabase/supabase-js": "2.117.2",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.11.10",
     "pg": "^8.23.0",
