@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 
 import { startDisposablePostgres } from './lib/local-postgres.mjs';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const SUITE = ['tsx', 'supabase/db-integration.ts'];
 
 /** Run the suite once, streaming its output, and return code + captured text. */

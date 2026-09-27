@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import { startDisposablePostgres } from './lib/local-postgres.mjs';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 let postgres;
 try {

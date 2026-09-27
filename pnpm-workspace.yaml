@@ -3,6 +3,8 @@ packages:
   - 'packages/*'
   - 'api'
 allowBuilds:
+  '@embedded-postgres/linux-x64': true
+  '@embedded-postgres/windows-x64': true
   esbuild: true
   msgpackr-extract: true
   workerd: true

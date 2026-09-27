@@ -20,8 +20,8 @@
     "db:migrate": "tsx supabase/apply-migrations.ts",
     "bootstrap:superadmin": "tsx supabase/invite-superadmin.ts",
     "test:db": "tsx supabase/db-integration.ts",
-    "test:db:local": "node scripts/test-db-local.mjs",
-    "test:db:harness": "node scripts/test-db-harness.mjs"
+    "test:db:local": "pnpm --filter @jad/db-testing install && pnpm --filter @jad/db-testing exec node scripts/test-db-local.mjs",
+    "test:db:harness": "pnpm --filter @jad/db-testing install && pnpm --filter @jad/db-testing exec node scripts/test-db-harness.mjs"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.112.4",
@@ -31,7 +31,6 @@
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",
     "turbo": "^2.10.11",
-    "typescript": "~5.9.3",
-    "embedded-postgres": "^18.4.0-beta.17"
+    "typescript": "~5.9.3"
   }
 }

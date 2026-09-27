@@ -492,8 +492,10 @@ contain them:
 - `supabase/migrations/20260928000001_…redemption.sql`
 - `supabase/migrations/20260929000001_…reconcile_phase2_fixes.sql`
 - `supabase/db-testing/supabase-shim.sql`
-- `scripts/test-db-local.mjs`, `scripts/test-db-harness.mjs`,
-  `scripts/lib/local-postgres.mjs`, `scripts/gen-phase5-reconciliation.mjs`
+- `packages/db-testing/scripts/test-db-local.mjs`,
+  `packages/db-testing/scripts/test-db-harness.mjs`,
+  `packages/db-testing/scripts/lib/local-postgres.mjs`,
+  `scripts/gen-phase5-reconciliation.mjs`
 
 `.env.local` is ignored via `*.local`; `.env.example` is **not** ignored
 (verified with `git check-ignore`).

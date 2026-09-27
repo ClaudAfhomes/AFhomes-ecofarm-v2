@@ -42,9 +42,16 @@ const SERVER_ONLY = [
 const VITE_BUILTINS = new Set(['DEV', 'PROD', 'MODE', 'BASE_URL', 'SSR']);
 
 /** Directories whose source is bundled into a browser artifact. */
-const BROWSER_ROOTS = ['apps/web/src', 'apps/admin/src', 'packages'];
+const BROWSER_ROOTS = [
+  'apps/web/src',
+  'apps/admin/src',
+  'packages/config',
+  'packages/contracts',
+  'packages/shared',
+  'packages/ui',
+];
 /** Directories that run on the server, where `process.env` is correct. */
-const SERVER_ROOTS = ['api', 'supabase'];
+const SERVER_ROOTS = ['api', 'supabase', 'packages/db-testing'];
 
 const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|css)$/;
 const BUILT_EXT = /\.(js|css|html)$/;

@@ -184,7 +184,7 @@ describe('no plaintext secret handling', () => {
     //     grants nothing.
     const ALLOWED = new Set([
       'packages/config/src/env.spec.ts',
-      'scripts/lib/local-postgres.mjs',
+      'packages/db-testing/scripts/lib/local-postgres.mjs',
     ]);
     const offenders: string[] = [];
     for (const file of FILES) {
