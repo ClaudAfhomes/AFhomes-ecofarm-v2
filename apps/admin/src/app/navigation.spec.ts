@@ -16,9 +16,25 @@ describe('AF Homes navigation', () => {
       permission('dashboard.view'),
       permission('organization.staff'),
     ]);
-    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Organization']);
+    // Phase 15 adds the Reports group on `dashboard.view`; the Audit Log
+    // child stays hidden without `governance.audit`.
+    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Organization', 'Reports']);
     expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
       'Staff',
+    ]);
+    expect(items[2]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
+      'Reports',
+    ]);
+  });
+  it('reveals the Audit Log only with the governance grant', () => {
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('governance.audit'),
+    ]);
+    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Reports']);
+    expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
+      'Reports',
+      'Audit Log',
     ]);
   });
   it('hides every destination when the server grants nothing', () =>

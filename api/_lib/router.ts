@@ -71,6 +71,12 @@ const BUSINESS_FAMILIES = [
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
   { prefix: 'genealogy', module: 'genealogy', load: () => import('../_handlers/genealogy.js') },
   { prefix: 'analytics', module: 'analytics', load: () => import('../_handlers/analytics.js') },
+  // Phase 15 Reports and Audit Center. One family for the ten scoped reports
+  // plus the audit log; the handler authorizes each report against its own
+  // module key (`reports` itself is not a permission - the family module here
+  // only names the route). The audit route additionally requires
+  // `governance.audit`.
+  { prefix: 'reports', module: 'reports', load: () => import('../_handlers/reports.js') },
   // Phase 8 OST registration and approval (SM -> OST). One family for the
   // public referral/application surface and the staff review surface; the
   // handler authorizes each route separately (public routes take no session).

@@ -4866,8 +4866,199 @@ async function main(): Promise<void> {
         if (cmsPageId) await db.query('delete from public.cms_pages where id=$1', [cmsPageId]);
       }
     }
+    /* ---------------------------------------------------------------- */
+    section('40. Phase 15 reports and audit center (read-only, no migration)');
+    /* ---------------------------------------------------------------- */
+    // Phase 15 adds no tables and no columns: every report and the audit
+    // center read only what earlier phases own. These assertions prove the
+    // reads are possible (a missing column would make a report 500 in
+    // production) and that the sensitive-data exclusions are meaningful
+    // rather than vacuous (the excluded columns really exist). Strictly
+    // read-only: no synthetic rows, so cleanup is unaffected.
+    {
+      const reportColumns: Array<[string, string[]]> = [
+        [
+          'card_sales',
+          [
+            'sale_number',
+            'customer_id',
+            'plan_id',
+            'seller_staff_id',
+            'seller_ost_id',
+            'seller_type',
+            'cash_price_snapshot',
+            'minimum_down_payment_snapshot',
+            'yearly_points_snapshot',
+            'status',
+            'created_at',
+            'activated_at',
+          ],
+        ],
+        [
+          'customers',
+          [
+            'customer_number',
+            'first_name',
+            'last_name',
+            'email',
+            'phone',
+            'status',
+            'created_at',
+            'referred_by_staff_id',
+          ],
+        ],
+        [
+          'payments',
+          [
+            'sale_id',
+            'customer_id',
+            'amount',
+            'status',
+            'method',
+            'payment_type',
+            'reference',
+            'verified_by',
+            'recorded_at',
+            'verified_at',
+          ],
+        ],
+        [
+          'memberships',
+          [
+            'membership_number',
+            'customer_id',
+            'sale_id',
+            'product_id',
+            'status',
+            'yearly_points_allocated',
+            'activated_at',
+            'card_issued_at',
+            'last_printed_at',
+            'print_count',
+          ],
+        ],
+        [
+          'commissions',
+          [
+            'sale_id',
+            'beneficiary_type',
+            'beneficiary_staff_id',
+            'beneficiary_ost_id',
+            'amount',
+            'rate_snapshot',
+            'basis_amount_snapshot',
+            'status',
+            'created_at',
+            'qualified_at',
+            'earned_at',
+            'paid_at',
+          ],
+        ],
+        [
+          'points_ledger',
+          [
+            'account_id',
+            'entry_type',
+            'amount',
+            'balance_after',
+            'reference_type',
+            'reference_id',
+            'reason',
+            'created_at',
+          ],
+        ],
+        ['points_accounts', ['membership_id', 'balance']],
+        [
+          'redemptions',
+          [
+            'redemption_number',
+            'membership_id',
+            'customer_id',
+            'item_name_snapshot',
+            'quantity',
+            'total_points',
+            'balance_after_snapshot',
+            'redeemed_by',
+            'redeemed_by_name',
+            'status',
+            'created_at',
+          ],
+        ],
+        ['referral_relationships', ['subject_staff_id', 'upline_staff_id', 'is_active']],
+        ['card_sale_hierarchy_snapshots', ['sale_id', 'ancestor_staff_id']],
+        ['ost_applications', ['sponsor_staff_id', 'status', 'submitted_at', 'reviewed_at']],
+        ['ost_members', ['sponsor_staff_id', 'ost_number', 'status', 'approved_at']],
+        [
+          'card_plans',
+          [
+            'code',
+            'name',
+            'cash_price',
+            'minimum_down_payment',
+            'yearly_points',
+            'commission_rate',
+            'is_active',
+          ],
+        ],
+        [
+          'audit_events',
+          [
+            'actor_id',
+            'action',
+            'entity_type',
+            'entity_id',
+            'before_data',
+            'after_data',
+            'reason',
+            'created_at',
+          ],
+        ],
+      ];
+      for (const [table, cols] of reportColumns) {
+        const existing = await db.query<{ column_name: string }>(
+          `select column_name from information_schema.columns
+            where table_schema = 'public' and table_name = $1`,
+          [table],
+        );
+        const have = new Set(existing.rows.map((row) => row.column_name));
+        for (const col of cols) {
+          check(`public.${table}.${col} exists (Phase 15 reads it)`, have.has(col));
+        }
+      }
+      // The exclusions are load-bearing: each of these columns MUST exist in
+      // the database and MUST NOT appear in any report payload.
+      for (const [table, col] of [
+        ['customers', 'government_id_number'],
+        ['customers', 'auth_user_id'],
+        ['memberships', 'qr_token_hash'],
+        ['memberships', 'fallback_code_hash'],
+        ['payments', 'receipt_storage_path'],
+      ] as Array<[string, string]>) {
+        const found = await one<{ n: number }>(
+          `select count(*)::int as n from information_schema.columns
+            where table_schema = 'public' and table_name = $1 and column_name = $2`,
+          [table, col],
+        );
+        check(
+          `sensitive column public.${table}.${col} exists, so its exclusion is real`,
+          found.n === 1,
+        );
+      }
+      // No duplicate report data models: nothing matching reports_* exists.
+      const dupes = await db.query<{ table_name: string }>(
+        `select table_name from information_schema.tables
+          where table_schema = 'public' and table_name like 'reports\\_%'`,
+      );
+      check('no duplicate reports_* tables exist', dupes.rows.length === 0);
+      const auditModule = await one<{ n: number }>(
+        `select count(*)::int as n from public.modules where key = 'governance.audit'`,
+      );
+      check('the governance.audit module exists for the audit center gate', auditModule.n === 1);
+      const auditReadable = await db.query('select id from public.audit_events limit 1');
+      check('audit_events is readable through the service role', Array.isArray(auditReadable.rows));
+    }
   } catch (error) {
-    // An unexpected exception anywhere in sections 1-39 is a SUITE FAILURE. It
+    // An unexpected exception anywhere in sections 1-40 is a SUITE FAILURE. It
     // used to be reported from inside section 37's own handler, which meant a
     // throw in sections 1-36 produced a short, entirely green run and a zero
     // exit code. `check(..., false, ...)` records a failed result, the verdict

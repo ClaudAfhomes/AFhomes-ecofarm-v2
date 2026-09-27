@@ -90,6 +90,21 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/roles', label: 'Roles & Permissions', module: 'organization.roles' },
     ],
   },
+  // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`
+  // (every staff role holds it) so each role sees the group; the Reports
+  // screen then offers only the reports the session's permissions allow, and
+  // the Audit Log child keeps its own `governance.audit` key so sellers,
+  // employees and customers never see it. The server re-checks everything.
+  {
+    to: '/admin/reports',
+    label: 'Reports',
+    icon: 'grid',
+    module: 'dashboard.view',
+    dropdown: [
+      { to: '/admin/reports', label: 'Reports', module: 'dashboard.view' },
+      { to: '/admin/audit', label: 'Audit Log', module: 'governance.audit' },
+    ],
+  },
   {
     to: '/admin/cms',
     label: 'Website CMS',

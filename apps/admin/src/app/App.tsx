@@ -29,6 +29,8 @@ import { OstApplicationDetailPage } from '../features/ost/OstApplicationDetailPa
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
 import { OstMembersPage } from '../features/ost/OstMembersPage';
 import { OstReferralCodesPage } from '../features/ost/OstReferralCodesPage';
+import { AuditPage } from '../features/reports/AuditPage';
+import { ReportsPage } from '../features/reports/ReportsPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -102,6 +104,12 @@ export default function App() {
           />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+          {/* Phase 15 Reports and Audit Center. `/admin/reports` is visible to
+              every role with `dashboard.view`; the screen offers only the
+              reports the session allows. `/admin/audit` needs
+              `governance.audit` - the guard and the server both enforce it. */}
+          <Route path="/admin/reports" element={protectedPage(<ReportsPage />)} />
+          <Route path="/admin/audit" element={protectedPage(<AuditPage />)} />
           <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
           <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
           <Route path="/admin/cms/media" element={protectedPage(<CmsMediaPage />)} />

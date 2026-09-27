@@ -218,6 +218,37 @@ export {
 } from './schemas/analytics.js';
 export type { AnalyticsOverview, AnalyticsPeriod } from './schemas/analytics.js';
 
+/* ---- Phase 15: role-scoped reports and the audit center ----
+   Exports are generated from the same scoped server-side query as the
+   on-screen table and returned as base64-in-JSON, so the browser never
+   computes a row. */
+export {
+  reportTypeSchema,
+  reportFormatSchema,
+  reportQuerySchema,
+  reportScopeSchema,
+  reportRowSchema,
+  reportResponseSchema,
+  reportExportSchema,
+  auditQuerySchema,
+  auditEventSchema,
+  auditResponseSchema,
+  REPORT_EXPORT_CAP,
+  REPORT_PAGE_MAX,
+} from './schemas/reports.js';
+export type {
+  ReportType,
+  ReportFormat,
+  ReportQuery,
+  ReportScope,
+  ReportRow,
+  ReportResponse,
+  ReportExport,
+  AuditQuery,
+  AuditEvent,
+  AuditResponse,
+} from './schemas/reports.js';
+
 /* ---- Phase 8: OST registration and approval (SM -> OST) ----
    The public request carries a referral CODE, never a sponsor id: the
    sponsor is resolved and frozen server-side, so there is no field to
