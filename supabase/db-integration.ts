@@ -4544,8 +4544,159 @@ async function main(): Promise<void> {
         throw error;
       }
     }
+
+    section('38. Phase 2 default role permission baseline');
+    /* ---------------------------------------------------------------- */
+    // The production database held ZERO role_permissions rows, so every
+    // non-super-admin role resolved to zero modules. Migration
+    // 20260930000001 installs the reviewed defaults (the database copy of
+    // packages/contracts role-baseline.ts). These assertions read the
+    // INSTALLED rows, not the migration text: the failure mode being guarded
+    // is "the file says the right thing and the database does not" - for
+    // example a runner that skipped the file, or a hand-edited row.
+    {
+      const expectedCounts: Record<string, number> = {
+        admin: 20,
+        finance: 8,
+        hr: 3,
+        vice_director: 10,
+        senior_sales_manager: 8,
+        sales_manager: 10,
+        ost: 8,
+        employee: 3,
+        customer: 0,
+        super_admin: 0,
+      };
+      const countRows = (
+        await db.query<{ slug: string; n: number }>(
+          `select r.slug, count(rp.module_id)::int as n
+             from public.roles r
+             left join public.role_permissions rp on rp.role_id = r.id
+            group by 1`,
+        )
+      ).rows;
+      const counted = new Map(countRows.map((row) => [row.slug, row.n]));
+      for (const [slug, expected] of Object.entries(expectedCounts)) {
+        check(
+          `${slug} holds ${expected} baseline rows${expected === 0 ? ' (none by design)' : ''}`,
+          counted.get(slug) === expected,
+          `slug=${slug} count=${String(counted.get(slug))} expected=${expected}`,
+        );
+      }
+      const total = [...counted.values()].reduce((sum, n) => sum + n, 0);
+      check(
+        'the baseline installs 70 rows in total and no other role holds rows',
+        total === 70,
+        `total=${total}`,
+      );
+
+      const noDelete = await one<{ n: number }>(
+        'select count(*)::int as n from public.role_permissions where can_delete',
+      );
+      check(
+        'no baseline row grants delete (no delete endpoint exists to authorize)',
+        noDelete.n === 0,
+        `rows with can_delete=${noDelete.n}`,
+      );
+      const noOrphanAction = await one<{ n: number }>(
+        `select count(*)::int as n from public.role_permissions
+          where (can_create and not can_view) or (can_update and not can_view)`,
+      );
+      check(
+        'no baseline row grants create/update without view (the table CHECKs require it)',
+        noOrphanAction.n === 0,
+        `rows=${noOrphanAction.n}`,
+      );
+      const excluded = await one<{ n: number }>(
+        `select count(*)::int as n from public.role_permissions rp
+           join public.modules m on m.id = rp.module_id
+          where m.key in ('finance.final_qualification','finance.commission_payouts',
+                          'network.withdrawals','governance.config')`,
+      );
+      check(
+        'the four unresolved modules stay granted to nobody',
+        excluded.n === 0,
+        `rows=${excluded.n}`,
+      );
+
+      // Spot-check the load-bearing flags, not just the counts: the wrong
+      // action on the right module is a silent privilege change.
+      const flag = async (slug: string, key: string) =>
+        one<{ can_view: boolean; can_create: boolean; can_update: boolean }>(
+          `select rp.can_view, rp.can_create, rp.can_update
+             from public.role_permissions rp
+             join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+            where r.slug = $1 and m.key = $2`,
+          [slug, key],
+        );
+      const qualify = await flag('admin', 'network.commissions');
+      check(
+        'admin alone may decide commission qualification (network.commissions update)',
+        qualify?.can_view === true && qualify?.can_update === true,
+        JSON.stringify(qualify ?? null),
+      );
+      const financeQualify = await flag('finance', 'network.commissions');
+      check(
+        'finance inspects commissions but cannot qualify them',
+        financeQualify?.can_view === true && financeQualify?.can_update === false,
+        JSON.stringify(financeQualify ?? null),
+      );
+      const redeem = await flag('employee', 'operations.redemption');
+      check(
+        'employee alone may spend points (operations.redemption create)',
+        redeem?.can_view === true && redeem?.can_create === true,
+        JSON.stringify(redeem ?? null),
+      );
+      const sellerUplines = await one<{ n: number }>(
+        `select count(*)::int as n from public.role_permissions rp
+           join public.roles r on r.id = rp.role_id
+           join public.modules m on m.id = rp.module_id
+          where m.key = 'sales.uplines' and r.slug in
+                ('vice_director','senior_sales_manager','sales_manager','ost')`,
+      );
+      check(
+        'no seller holds sales.uplines (they must never assign an upline)',
+        sellerUplines.n === 0,
+        `rows=${sellerUplines.n}`,
+      );
+
+      // The resolution order itself, on real data: the synthetic admin holds
+      // the admin role, so has_permission must agree with the installed rows,
+      // and an ungranted module must stay denied.
+      const res = await asBrowserRole(target.url, 'authenticated', staff['admin'] ?? null, (c) =>
+        c
+          .query(
+            `select private.has_permission('sales.customers') as customers_view,
+                    private.has_permission('sales.customers','update') as customers_update,
+                    private.has_permission('governance.config') as config_view`,
+          )
+          .then((result) => result.rows[0] as Record<string, boolean>),
+      );
+      check(
+        'has_permission grants the installed admin rows (sales.customers view+update)',
+        res.customers_view === true && res.customers_update === true,
+        JSON.stringify(res),
+      );
+      check(
+        'has_permission denies what the baseline withholds (governance.config)',
+        res.config_view === false,
+        JSON.stringify(res),
+      );
+
+      // Idempotency: re-applying the real migration file changes nothing.
+      await db.query(readMigration('20260930000001_afhomes_role_permission_baseline.sql'));
+      const recount = (
+        await db.query<{ n: number }>('select count(*)::int as n from public.role_permissions')
+      ).rows[0]!.n;
+      check(
+        're-applying the baseline migration leaves exactly 70 rows',
+        recount === 70,
+        `count=${recount}`,
+      );
+    }
   } catch (error) {
-    // An unexpected exception anywhere in sections 1-37 is a SUITE FAILURE. It
+    // An unexpected exception anywhere in sections 1-38 is a SUITE FAILURE. It
     // used to be reported from inside section 37's own handler, which meant a
     // throw in sections 1-36 produced a short, entirely green run and a zero
     // exit code. `check(..., false, ...)` records a failed result, the verdict

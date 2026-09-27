@@ -87,6 +87,11 @@ try {
     'the reconciliation section header never appeared',
   );
   expect(
+    'section 38 EXECUTES on the successful path',
+    normal.out.includes('--- 38. Phase 2 default role permission baseline'),
+    'the role-baseline section header never appeared',
+  );
+  expect(
     'the reconciliation is proven by execution (Case A)',
     normal.out.includes('CASE A: applying the reconciliation restores exact money formatting'),
     'no Case A repair assertion was reported',

@@ -76,6 +76,17 @@ export type {
   CustomerRedemption,
 } from './schemas/redemption.js';
 
+/* ---- Phase 2: default role permission baseline (explicit grants) ----
+   `super_admin` (implicit full access) and `customer` (ownership-based, zero
+   admin modules) intentionally have no rows here. */
+export {
+  BASELINE_EXCLUDED_MODULES,
+  BASELINE_ROLES,
+  BASELINE_ROW_COUNT,
+  DEFAULT_ROLE_BASELINE,
+} from './schemas/role-baseline.js';
+export type { BaselineGrant, BaselineRole } from './schemas/role-baseline.js';
+
 /* ---- Phase 2: lifecycle states (single source for every status string) ---- */
 export {
   customerStatusSchema,
