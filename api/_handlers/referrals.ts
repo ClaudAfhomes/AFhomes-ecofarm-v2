@@ -74,7 +74,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select(SELECT_RELATIONSHIP)
         .order('assigned_at', { ascending: false });
       if (error) throw error;
-      return list(res, (data ?? []).map((row: Record<string, unknown>) => toRelationship(row)));
+      const rows=(data ?? []) as Record<string,unknown>[];
+      if (!['vice_director','senior_sales_manager','sales_manager','ost'].includes(auth.roleSlug))
+        return list(res, rows.map(toRelationship));
+      const active=rows.filter((row)=>row.is_active===true);
+      const parent=new Map(active.map((row)=>[String(row.subject_staff_id),String(row.upline_staff_id)]));
+      const children=new Map<string,string[]>(); for(const [child,upline] of parent)children.set(upline,[...(children.get(upline)??[]),child]);
+      const visible=new Set<string>([auth.userId]); let cursor=parent.get(auth.userId);let depth=0;
+      while(cursor&&depth++<4&&!visible.has(cursor)){visible.add(cursor);cursor=parent.get(cursor);}
+      if(auth.roleSlug!=='ost'){const queue=[...(children.get(auth.userId)??[])];while(queue.length&&visible.size<10000){const id=queue.shift()!;if(visible.has(id))continue;visible.add(id);queue.push(...(children.get(id)??[]));}}
+      return list(res,rows.filter((row)=>visible.has(String(row.subject_staff_id))||visible.has(String(row.upline_staff_id))).map(toRelationship));
     }
 
     /* ---------------- assign an upline ---------------- */

@@ -58,6 +58,13 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     ],
   },
   {
+    to: '/admin/genealogy',
+    label: 'Sales Network',
+    icon: 'users',
+    module: 'network.genealogy',
+    dropdown: [{ to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' }],
+  },
+  {
     to: '/admin/staff',
     label: 'Organization',
     icon: 'users',

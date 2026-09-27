@@ -35,6 +35,7 @@ describe('selectHandler', () => {
       ['points', 'memberships/points'],
       ['commissions', 'commissions/commissions'],
       ['referrals', 'referrals/referrals'],
+      ['genealogy', 'genealogy/genealogy'],
       ['queues', 'queues/queues'],
     ] as const) {
       expect(selectHandler(`/api/v1/${path}`, q)?.routeKey, path).toBe(expected);

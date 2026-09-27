@@ -623,8 +623,9 @@ export const TOKEN2 = {
 
 export const ROLE2 = {
   viceDirector: '20202020-0000-4000-8000-000000000001',
-  salesManager: '20202020-0000-4000-8000-000000000002',
-  ost: '20202020-0000-4000-8000-000000000003',
+  seniorSalesManager: '20202020-0000-4000-8000-000000000002',
+  salesManager: '20202020-0000-4000-8000-000000000003',
+  ost: '20202020-0000-4000-8000-000000000004',
   finance: UUID.role.finance,
   employee: UUID.role.employee,
   superAdmin: UUID.role.superAdmin,
@@ -635,6 +636,12 @@ export const ROLE2 = {
 export const ROLE2_MODULES: Record<string, { key: string; crud: [boolean, boolean, boolean, boolean] }[]> = {
   [ROLE2.viceDirector]: [{ key: 'dashboard.view', crud: [true, false, false, false] }],
   [ROLE2.salesManager]: [
+    { key: 'dashboard.view', crud: [true, false, false, false] },
+    { key: 'sales.card_sales', crud: [true, true, false, false] },
+    { key: 'sales.customers', crud: [true, true, true, false] },
+    { key: 'sales.card_plans', crud: [true, false, false, false] },
+  ],
+  [ROLE2.seniorSalesManager]: [
     { key: 'dashboard.view', crud: [true, false, false, false] },
     { key: 'sales.card_sales', crud: [true, true, false, false] },
     { key: 'sales.customers', crud: [true, true, true, false] },
@@ -699,7 +706,7 @@ export const staffUsersPhase2Table = (): FakeRow[] => [
 export const staffAssignmentsPhase2Table = (): FakeRow[] => [
   ...baseTables().staff_role_assignments as FakeRow[],
   { staff_id: STAFF2.viceDirector, role_id: ROLE2.viceDirector, assigned_at: iso(200) },
-  { staff_id: STAFF2.seniorSalesManager, role_id: ROLE2.salesManager, assigned_at: iso(190) },
+  { staff_id: STAFF2.seniorSalesManager, role_id: ROLE2.seniorSalesManager, assigned_at: iso(190) },
   { staff_id: STAFF2.salesManager, role_id: ROLE2.salesManager, assigned_at: iso(180) },
   { staff_id: STAFF2.ost, role_id: ROLE2.ost, assigned_at: iso(170) },
   { staff_id: STAFF2.finance, role_id: ROLE2.finance, assigned_at: iso(160) },
@@ -709,6 +716,7 @@ export const staffAssignmentsPhase2Table = (): FakeRow[] => [
 export const rolesPhase2Table = (): FakeRow[] => [
   ...baseTables().roles as FakeRow[],
   { id: ROLE2.viceDirector, slug: 'vice_director', name: 'Vice Director', description: null, is_system: true, is_active: true, created_at: iso(200), updated_at: iso(200) },
+  { id: ROLE2.seniorSalesManager, slug: 'senior_sales_manager', name: 'Senior Sales Manager', description: null, is_system: true, is_active: true, created_at: iso(200), updated_at: iso(200) },
   { id: ROLE2.salesManager, slug: 'sales_manager', name: 'Sales Manager', description: null, is_system: true, is_active: true, created_at: iso(200), updated_at: iso(200) },
   { id: ROLE2.ost, slug: 'ost', name: 'OST', description: null, is_system: true, is_active: true, created_at: iso(200), updated_at: iso(200) },
 ];

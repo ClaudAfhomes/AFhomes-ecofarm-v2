@@ -69,6 +69,7 @@ const BUSINESS_FAMILIES = [
     load: () => import('../_handlers/commissions.js'),
   },
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
+  { prefix: 'genealogy', module: 'genealogy', load: () => import('../_handlers/genealogy.js') },
   { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
   // Customer portal. Neither family consults the staff permission model - see
   // api/_lib/customer-access.ts, which resolves a customer from ownership alone.

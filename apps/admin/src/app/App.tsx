@@ -18,6 +18,8 @@ import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
 import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
 import { CmsMediaPage } from '../features/cms/CmsMediaPage';
 import { CmsPagesPage } from '../features/cms/CmsPagesPage';
+import { GenealogyPage } from '../features/genealogy/GenealogyPage';
+import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
@@ -57,6 +59,8 @@ export default function App() {
             element={protectedPage(<RedemptionCatalogPage />)}
           />
           <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
+          <Route path="/admin/genealogy" element={protectedPage(<GenealogyPage />)} />
+          <Route path="/admin/genealogy/:staffId" element={protectedPage(<GenealogyDetailsPage />)} />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
           <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />

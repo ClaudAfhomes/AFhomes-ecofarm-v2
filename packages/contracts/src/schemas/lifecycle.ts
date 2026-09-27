@@ -193,5 +193,5 @@ export function hierarchyAllowsUpline(
 ): boolean {
   const s = HIERARCHY_ORDER.indexOf(subject);
   const u = HIERARCHY_ORDER.indexOf(upline);
-  return s >= 0 && u >= 0 && u < s;
+  return s >= 0 && u >= 0 && u === s - 1;
 }

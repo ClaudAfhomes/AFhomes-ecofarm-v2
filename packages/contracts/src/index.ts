@@ -203,6 +203,10 @@ export {
   CUSTOMER_ACTIVATION_ERRORS,
 } from './schemas/customer.js';
 
+/* ---- PHASE 7: authorized sales genealogy ---- */
+export { genealogyStatusSchema, genealogyNodeSchema, genealogySummarySchema } from './schemas/genealogy.js';
+export type { GenealogyNode, GenealogySummary } from './schemas/genealogy.js';
+
 /* ---- Phase 6: staff-managed public website CMS ---- */
 export {
   cmsDocumentKeySchema,

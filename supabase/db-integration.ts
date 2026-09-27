@@ -644,8 +644,9 @@ async function main(): Promise<void> {
     await mkStaff('super-admin', 'super_admin');
     await mkStaff('admin', 'admin');
     await mkStaff('vice-director', 'vice_director');
-    await mkStaff('ssm', 'sales_manager');
+    await mkStaff('ssm', 'senior_sales_manager');
     await mkStaff('sm', 'sales_manager');
+    await mkStaff('sm-alt', 'sales_manager');
     await mkStaff('ost', 'ost');
     await mkStaff('finance', 'finance');
     await mkStaff('hr', 'employee');
@@ -1856,7 +1857,7 @@ async function main(): Promise<void> {
 
     const newRelId = await one<{ id: string }>(
       'select public.correct_referral_upline($1,$2,$3,$4) as id',
-      [originalRel.id, staff['vice-director'], 'restructured for the test', staff['admin']],
+      [originalRel.id, staff['sm-alt'], 'restructured for the test', staff['admin']],
     );
     check('correction returned a new relationship id', !!newRelId.id);
     const oldNow = await one<{ is_active: boolean }>(
@@ -1870,7 +1871,7 @@ async function main(): Promise<void> {
     );
     check('the new relationship is active', newNow.is_active === true);
     check('the new relationship is authoritative', newNow.is_authoritative === true);
-    eq('  it points at the requested upline', newNow.upline, staff['vice-director']!);
+    eq('  it points at the requested upline', newNow.upline, staff['sm-alt']!);
     const activeCount = await one<{ n: number }>(
       'select count(*)::int as n from public.referral_relationships where subject_staff_id = $1 and is_active',
       [staff['ost']],

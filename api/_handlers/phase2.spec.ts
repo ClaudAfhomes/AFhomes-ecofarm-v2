@@ -1125,7 +1125,7 @@ describe('referrals and uplines', () => {
     db.rows('referral_relationships').push({
       id: 'eeeeeeee-0000-4000-8000-0000000000ff',
       subject_staff_id: UUID.viewerStaff,
-      upline_staff_id: STAFF2.viceDirector,
+      upline_staff_id: STAFF2.seniorSalesManager,
       hierarchy_role: 'sales_manager',
       is_authoritative: true,
       is_active: true,
@@ -1139,14 +1139,14 @@ describe('referrals and uplines', () => {
       method: 'PATCH',
       path: 'referrals/' + REL.ssmToSm,
       token: TOKEN.superAdmin,
-      body: { uplineStaffId: STAFF2.viceDirector, reason: 'Reorganised the region.' },
+      body: { uplineStaffId: STAFF2.seniorSalesManager, reason: 'Reorganised the region.' },
     });
     expect(state.status).toBe(200);
-    expect((state.body as { uplineStaffId: string }).uplineStaffId).toBe(STAFF2.viceDirector);
+    expect((state.body as { uplineStaffId: string }).uplineStaffId).toBe(STAFF2.seniorSalesManager);
     const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'correct_referral_upline');
     expect(rpc?.arg).toMatchObject({
       p_relationship_id: REL.ssmToSm,
-      p_upline_staff_id: STAFF2.viceDirector,
+      p_upline_staff_id: STAFF2.seniorSalesManager,
       p_actor_id: UUID.superAdminStaff,
     });
   });
