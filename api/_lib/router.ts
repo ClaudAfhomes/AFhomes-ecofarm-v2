@@ -74,6 +74,10 @@ const BUSINESS_FAMILIES = [
   // public referral/application surface and the staff review surface; the
   // handler authorizes each route separately (public routes take no session).
   { prefix: 'ost', module: 'ost', load: () => import('../_handlers/ost.js') },
+  // Phase 12 identity documents and OCR-assisted extraction. Upload grants,
+  // suggestion-only OCR, and human-confirmed review; nothing here finalizes
+  // identity on its own.
+  { prefix: 'documents', module: 'documents', load: () => import('../_handlers/documents.js') },
   { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
   // Customer portal. Neither family consults the staff permission model - see
   // api/_lib/customer-access.ts, which resolves a customer from ownership alone.

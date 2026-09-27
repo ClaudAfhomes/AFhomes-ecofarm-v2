@@ -266,6 +266,34 @@ export type {
   MarkedPrinted,
 } from './schemas/card.js';
 
+/* ---- Phase 12: identity documents and OCR-assisted extraction ----
+   OCR output is suggestion data, never authoritative. Confirmed values are
+   human decisions; nothing here finalizes identity on its own. */
+export {
+  ocrStatusSchema,
+  documentVerificationStatusSchema,
+  documentSubjectSchema,
+  documentMimeSchema,
+  ocrFieldSchema,
+  identityDocumentSchema,
+  documentUploadRequestSchema,
+  documentUploadGrantSchema,
+  documentConfirmSchema,
+  documentAccessUrlSchema,
+} from './schemas/document.js';
+export type {
+  OcrStatus,
+  DocumentVerificationStatus,
+  DocumentSubject,
+  DocumentMime,
+  OcrField,
+  IdentityDocument,
+  DocumentUploadRequest,
+  DocumentUploadGrant,
+  DocumentConfirmRequest,
+  DocumentAccessUrl,
+} from './schemas/document.js';
+
 /* ---- Phase 6: staff-managed public website CMS ---- */
 export {
   cmsDocumentKeySchema,

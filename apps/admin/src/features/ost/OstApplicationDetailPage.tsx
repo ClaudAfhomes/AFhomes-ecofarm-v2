@@ -5,6 +5,13 @@ import { Button, ErrorState, PageHeader, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { approveOstApplication, getOstApplication, rejectOstApplication } from './services';
+import {
+  ACCEPTED_MIME,
+  MAX_BYTES,
+  getDocuments,
+  putUploadBytes,
+  requestUploadGrant,
+} from '../documents/services';
 
 /**
  * OST application review. Approval is an explicitly-invoked, permission-gated
@@ -154,6 +161,90 @@ export function OstApplicationDetailPage() {
           {outcome}
         </p>
       ) : null}
+
+      <ApplicationDocuments applicationId={id} />
     </section>
+  );
+}
+
+/**
+ * Identity scans bound to this application. Uploads land in the private OST
+ * bucket through a server-issued grant; review (with masked values) happens
+ * on the documents screen. Nothing uploaded here finalizes anything.
+ */
+function ApplicationDocuments({ applicationId }: { applicationId: string }) {
+  const client = useQueryClient();
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const docs = useQuery({
+    queryKey: ['documents', 'ost_application', applicationId],
+    queryFn: () => getDocuments({ subjectType: 'ost_application', subjectId: applicationId }),
+  });
+
+  const upload = useMutation({
+    mutationFn: async () => {
+      setError(null);
+      if (!file) throw new Error('Choose a file first.');
+      if (!ACCEPTED_MIME.includes(file.type as (typeof ACCEPTED_MIME)[number])) {
+        throw new Error('Only JPEG, PNG or PDF files are accepted.');
+      }
+      if (file.size === 0 || file.size > MAX_BYTES) {
+        throw new Error('The file must be non-empty and at most 10 MiB.');
+      }
+      const grant = await requestUploadGrant({
+        subjectType: 'ost_application',
+        subjectId: applicationId,
+        mime: file.type as (typeof ACCEPTED_MIME)[number],
+        sizeBytes: file.size,
+        originalFilename: file.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, file);
+      return grant.documentId;
+    },
+    onSuccess: () => {
+      setFile(null);
+      void client.invalidateQueries({ queryKey: ['documents', 'ost_application', applicationId] });
+    },
+    onError: (cause) => setError(cause instanceof Error ? cause.message : 'Upload failed.'),
+  });
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h2>Identity documents</h2>
+      {docs.isPending ? (
+        <p role="status">Loading documents…</p>
+      ) : docs.isError ? (
+        <ErrorState error={docs.error} onRetry={docs.refetch} />
+      ) : (docs.data ?? []).length === 0 ? (
+        <p>No identity scans are attached to this application yet.</p>
+      ) : (
+        <ul>
+          {(docs.data ?? []).map((doc) => (
+            <li key={doc.id}>
+              {doc.originalFilename} — {doc.verificationStatus.replace(/_/g, ' ')} ·{' '}
+              <Link to={`/admin/documents/${doc.id}`}>Review</Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'end', marginTop: 12, flexWrap: 'wrap' }}>
+        <label>
+          Attach an ID scan (JPEG, PNG or PDF, max 10 MiB)
+          <input
+            type="file"
+            accept={ACCEPTED_MIME.join(',')}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <Button onClick={() => upload.mutate()} disabled={upload.isPending || !file}>
+          {upload.isPending ? 'Uploading…' : 'Upload scan'}
+        </Button>
+      </div>
+      {error ? (
+        <p role="alert" style={{ color: 'var(--color-danger)' }}>
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

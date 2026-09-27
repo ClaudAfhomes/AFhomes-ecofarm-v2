@@ -20,6 +20,8 @@ import { CmsMediaPage } from '../features/cms/CmsMediaPage';
 import { CmsPagesPage } from '../features/cms/CmsPagesPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
+import { DocumentsPage } from '../features/documents/DocumentsPage';
+import { DocumentReviewPage } from '../features/documents/DocumentReviewPage';
 import { MembershipCardPrintPage } from '../features/memberships/MembershipCardPrintPage';
 import { MembershipDetailPage } from '../features/memberships/MembershipDetailPage';
 import { MembershipsPage } from '../features/memberships/MembershipsPage';
@@ -90,6 +92,10 @@ export default function App() {
               the update grant, which the server checks. */}
           <Route path="/admin/memberships" element={protectedPage(<MembershipsPage />)} />
           <Route path="/admin/memberships/:id" element={protectedPage(<MembershipDetailPage />)} />
+          {/* ID documents. Gated on the sales.id_documents nav key; the server
+              re-checks scope and never returns paths, hashes or raw ID numbers. */}
+          <Route path="/admin/documents" element={protectedPage(<DocumentsPage />)} />
+          <Route path="/admin/documents/:id" element={protectedPage(<DocumentReviewPage />)} />
           <Route
             path="/admin/memberships/:id/card"
             element={protectedPage(<MembershipCardPrintPage />)}
