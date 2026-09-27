@@ -3,11 +3,14 @@ import {
   afHomesDepartmentSchema,
   afHomesRoleSchema,
   afHomesStaffSchema,
+  analyticsOverviewSchema,
   type AfHomesDashboard,
   type AfHomesDepartment,
   type AfHomesPermission,
   type AfHomesRole,
   type AfHomesStaff,
+  type AnalyticsOverview,
+  type AnalyticsPeriod,
 } from '@jad/contracts';
 import { z } from 'zod';
 import { request, requestList } from '../../lib/api/client';
@@ -74,3 +77,6 @@ export const createAfHomesDepartment = (input: { code: string; name: string }) =
   });
 export const getAfHomesDashboard = (range: string): Promise<AfHomesDashboard> =>
   request(`/admin/afhomes/dashboard?range=${encodeURIComponent(range)}`, afHomesDashboardSchema);
+
+export const getAnalyticsOverview = (period: AnalyticsPeriod): Promise<AnalyticsOverview> =>
+  request(`/analytics?period=${encodeURIComponent(period)}`, analyticsOverviewSchema);

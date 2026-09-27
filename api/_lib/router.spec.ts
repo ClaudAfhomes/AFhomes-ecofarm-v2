@@ -19,6 +19,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/admin/afhomes/dashboard', q)?.routeKey).toBe(
       'admin/afhomes/dashboard',
     );
+    expect(selectHandler('/api/v1/analytics', q)?.routeKey).toBe('analytics/analytics');
     expect(
       selectHandler('/api/v1/admin/afhomes/staff/6f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b', q)
         ?.routeKey,

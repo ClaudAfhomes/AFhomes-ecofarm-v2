@@ -210,6 +210,13 @@ export {
   genealogySummarySchema,
 } from './schemas/genealogy.js';
 export type { GenealogyNode, GenealogySummary } from './schemas/genealogy.js';
+export {
+  analyticsOverviewSchema,
+  analyticsPeriodSchema,
+  analyticsScopeSchema,
+  analyticsTrendPointSchema,
+} from './schemas/analytics.js';
+export type { AnalyticsOverview, AnalyticsPeriod } from './schemas/analytics.js';
 
 /* ---- Phase 8: OST registration and approval (SM -> OST) ----
    The public request carries a referral CODE, never a sponsor id: the

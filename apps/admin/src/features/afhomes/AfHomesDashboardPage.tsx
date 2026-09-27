@@ -1,97 +1,173 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import type { AnalyticsOverview, AnalyticsPeriod } from '@jad/contracts';
 import { EmptyState, ErrorState, PageHeader, Select, Skeleton } from '@jad/ui';
-import { getAfHomesDashboard } from './services';
+import { getAnalyticsOverview } from './services';
+import styles from './AfHomesDashboardPage.module.css';
+
+const PERIODS = [
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+] as const;
+
+function MetricCards({ data }: { data: AnalyticsOverview }) {
+  const values: [string, string | number][] = [
+    ['Customers', data.headline.totalCustomers],
+    ['New customers', data.headline.newCustomers],
+    ['Card sales', data.headline.periodSales],
+    ['Frozen sale value', `₱${data.headline.grossFrozenSaleValue}`],
+    ['Verified payments', `₱${data.headline.periodVerifiedPayments}`],
+    ['Active memberships', data.headline.activatedMemberships],
+  ];
+  if (data.redemptions)
+    values.push(
+      ['Redemptions', data.redemptions.count],
+      ['Points redeemed', data.redemptions.pointsRedeemed],
+    );
+  return (
+    <div className={styles.metrics}>
+      {values.map(([label, value]) => (
+        <article className={styles.metric} key={label}>
+          <small>{label}</small>
+          <strong>{value}</strong>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function Trend({ data }: { data: AnalyticsOverview }) {
+  if (data.trends.length === 0)
+    return (
+      <EmptyState
+        title="No activity in this period"
+        description="This chart will populate from real sales, verified payments, activations, and completed redemptions."
+      />
+    );
+  const maximum = Math.max(
+    1,
+    ...data.trends.map((point) => point.sales + point.activations + point.redemptions),
+  );
+  return (
+    <div
+      className={styles.chart}
+      role="img"
+      aria-label="Sales, activation, and redemption activity chart"
+    >
+      {data.trends.map((point) => {
+        const total = point.sales + point.activations + point.redemptions;
+        return (
+          <div
+            className={styles.barColumn}
+            key={point.period}
+            title={`${point.period}: ${point.sales} sales, ${point.activations} activations, ${point.redemptions} redemptions`}
+          >
+            <div
+              className={styles.bar}
+              style={{ height: `${Math.max(4, (total / maximum) * 140)}px` }}
+            />
+            <small>{point.period}</small>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function AfHomesDashboardPage() {
-  const [range, setRange] = useState('month');
+  const [period, setPeriod] = useState<AnalyticsPeriod>('month');
   const query = useQuery({
-    queryKey: ['afhomes', 'dashboard', range],
-    queryFn: () => getAfHomesDashboard(range),
+    queryKey: ['analytics', 'overview', period],
+    queryFn: () => getAnalyticsOverview(period),
   });
-  const cards = query.data
-    ? [
-        ['Verified sales', query.data.totals.verifiedSales],
-        ['Verified collections', `₱${query.data.totals.verifiedCollections}`],
-        ['Active memberships', query.data.totals.activeMemberships],
-        ['Pending accounts', query.data.totals.pendingAccounts],
-        ['Overdue accounts', query.data.totals.overdueAccounts],
-        ['Pending qualifications', query.data.totals.pendingQualifications],
-        ['Earned commissions', `₱${query.data.totals.earnedUnpaidCommissions}`],
-        ['Active employees', query.data.totals.activeEmployees],
-      ]
-    : [];
   return (
     <section>
       <PageHeader
         title="AF Homes Dashboard"
-        description="Live operational facts from the AF Homes database"
+        description="Role-scoped operational facts from the AF Homes database"
         actions={
           <Select
-            aria-label="Chart period"
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            options={[
-              { value: 'today', label: 'Today' },
-              { value: 'week', label: 'Week' },
-              { value: 'month', label: 'Month' },
-              { value: 'year', label: 'Year' },
-            ]}
+            aria-label="Analytics period"
+            value={period}
+            onChange={(event) => setPeriod(event.target.value as AnalyticsPeriod)}
+            options={[...PERIODS]}
           />
         }
       />
       {query.isPending ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))',
-            gap: 16,
-          }}
-        >
-          {Array.from({ length: 8 }, (_, i) => (
-            <Skeleton key={i} />
+        <div className={styles.metrics}>
+          {Array.from({ length: 6 }, (_, index) => (
+            <Skeleton key={index} />
           ))}
         </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : (
         <>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))',
-              gap: 16,
-            }}
-          >
-            {cards.map(([label, value]) => (
-              <article
-                key={String(label)}
-                style={{
-                  padding: 18,
-                  border: '1px solid var(--color-border-default)',
-                  borderRadius: 12,
-                }}
-              >
-                <small>{label}</small>
-                <strong style={{ display: 'block', fontSize: 28 }}>{value}</strong>
-              </article>
-            ))}
-          </div>
-          <h2>Sales and activity trend</h2>
-          {query.data?.trend.length === 0 ? (
-            <EmptyState
-              title="No verified activity in this period"
-              description="The chart will populate from verified sales, collections, activations, and redemptions."
-            />
-          ) : (
-            <div role="img" aria-label="Verified sales activity chart">
-              {query.data?.trend.map((point) => (
-                <p key={point.period}>
-                  {point.period}: {point.verifiedSales} verified sales
-                </p>
-              ))}
-            </div>
-          )}
+          <p className={styles.scope}>
+            Scope: {query.data.scope.kind} · {new Date(query.data.window.from).toLocaleDateString()}
+            –{new Date(query.data.window.to).toLocaleDateString()}
+          </p>
+          <MetricCards data={query.data} />
+          {query.data.scope.unattributedLegacySaleCount > 0 ? (
+            <aside className={styles.notice}>
+              <strong>Historical sales awaiting attribution:</strong>{' '}
+              {query.data.scope.unattributedLegacySaleCount} sale(s), ₱
+              {query.data.scope.unattributedLegacySaleValue}. They are excluded from team totals.
+            </aside>
+          ) : null}
+          <h2>Activity trend</h2>
+          <Trend data={query.data} />
+          {query.data.sellers ? (
+            <section>
+              <h2>Current team</h2>
+              <div className={styles.metrics}>
+                <article className={styles.metric}>
+                  <small>Direct reports</small>
+                  <strong>{query.data.sellers.directCount}</strong>
+                </article>
+                <article className={styles.metric}>
+                  <small>Descendants</small>
+                  <strong>{query.data.sellers.descendantCount}</strong>
+                </article>
+                <article className={styles.metric}>
+                  <small>Active sellers</small>
+                  <strong>{query.data.sellers.active}</strong>
+                </article>
+                <article className={styles.metric}>
+                  <small>Inactive sellers</small>
+                  <strong>{query.data.sellers.inactive}</strong>
+                </article>
+              </div>
+            </section>
+          ) : null}
+          {query.data.salesByPlan.length ? (
+            <section>
+              <h2>Sales by card plan</h2>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Plan</th>
+                      <th>Sales</th>
+                      <th>Frozen value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {query.data.salesByPlan.map((plan) => (
+                      <tr key={plan.planId}>
+                        <td>{plan.planName}</td>
+                        <td>{plan.count}</td>
+                        <td>₱{plan.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
         </>
       )}
     </section>

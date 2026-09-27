@@ -391,6 +391,7 @@ const BASELINE_TABLES = [
   'customers',
   'staff_users',
   'card_sales',
+  'card_sale_hierarchy_snapshots',
   'payments',
   'memberships',
   'commissions',
@@ -674,6 +675,7 @@ async function main(): Promise<void> {
     };
     await link('ssm', 'vice-director', 'senior_sales_manager');
     await link('sm', 'ssm', 'sales_manager');
+    await link('sm-alt', 'ssm', 'sales_manager');
     await link('ost', 'sm', 'ost');
 
     // NOTE: Phase 2 deliberately does NOT use public.ost_members. The selling
@@ -807,6 +809,76 @@ async function main(): Promise<void> {
       [saleId, staff['sm'], commissionAmount.v, gold.commission_rate, gold.cash_price],
     );
     check('synthetic sale created with a full commercial snapshot', true);
+
+    const hierarchySnapshot = (
+      await db.query<{ ancestor_staff_id: string; ancestor_role: string }>(
+        `select ancestor_staff_id, ancestor_role
+         from public.card_sale_hierarchy_snapshots
+        where sale_id=$1 order by depth`,
+        [saleId],
+      )
+    ).rows;
+    check(
+      'Phase 14 snapshots SM -> SSM -> VD at sale creation',
+      hierarchySnapshot.length === 3 &&
+        hierarchySnapshot[0]?.ancestor_staff_id === staff['sm'] &&
+        hierarchySnapshot[1]?.ancestor_staff_id === staff['ssm'] &&
+        hierarchySnapshot[2]?.ancestor_staff_id === staff['vice-director'],
+      JSON.stringify(hierarchySnapshot),
+    );
+
+    // Prove an upline correction does not move the old sale, while a new sale
+    // takes the new hierarchy. The savepoint leaves the rest of the suite on
+    // its original genealogy after this isolated regression proof.
+    await db.query('begin');
+    const alternateSsm = uuidFor('phase14:ssm-b');
+    const alternateCustomer = uuidFor('phase14:customer-b');
+    const alternateSale = uuidFor('phase14:sale-b');
+    await db.query(`insert into auth.users(id,email) values($1,$2)`, [alternateSsm, `${RUN}-ssm-b@example.invalid`]);
+    await db.query(
+      `insert into public.staff_users(id,email,full_name,status) values($1,$2,'Phase 14 SSM B','active')`,
+      [alternateSsm, `${RUN}-ssm-b@example.invalid`],
+    );
+    await db.query(
+      `insert into public.staff_role_assignments(staff_id,role_id,assigned_by)
+       select $1,id,$2 from public.roles where slug='senior_sales_manager'`,
+      [alternateSsm, staff['super-admin']],
+    );
+    await db.query(
+      `insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,is_authoritative,is_active,assigned_by)
+       values($1,$2,'senior_sales_manager',true,true,$3)`,
+      [alternateSsm, staff['vice-director'], staff['super-admin']],
+    );
+    const smRelationship = await one<{ id: string }>(
+      `select id from public.referral_relationships where subject_staff_id=$1 and is_active`,
+      [staff['sm']],
+    );
+    await db.query(`select public.correct_referral_upline($1,$2,'Phase 14 regression',$3)`, [smRelationship.id, alternateSsm, staff['super-admin']]);
+    const oldSsm = await one<{ n: number }>(
+      `select count(*)::int n from public.card_sale_hierarchy_snapshots
+        where sale_id=$1 and ancestor_staff_id=$2`,
+      [saleId, staff['ssm']],
+    );
+    check('upline correction cannot rewrite the old sale hierarchy snapshot', oldSsm.n === 1);
+    const alternateNumber = (await one<{ customer_number: string }>('select * from public.next_customer_number()')).customer_number;
+    await db.query(
+      `insert into public.customers(id,customer_number,email,phone,first_name,last_name,status)
+       values($1,$2,$3,'09170000000','Phase','Fourteen','prospect')`,
+      [alternateCustomer, alternateNumber, `${RUN}-phase14-buyer@example.invalid`],
+    );
+    const alternateSaleNumber = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+    await db.query(
+      `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,status,balance_due_at)
+       values($1,$2,$3,$4,'staff',$5,$6,$6,'submitted',now()+interval '1 year')`,
+      [alternateSale, alternateSaleNumber, alternateCustomer, goldId, staff['sm'], gold.cash_price],
+    );
+    const newSsm = await one<{ n: number }>(
+      `select count(*)::int n from public.card_sale_hierarchy_snapshots
+        where sale_id=$1 and ancestor_staff_id=$2`,
+      [alternateSale, alternateSsm],
+    );
+    check('a sale after correction is credited to the new SSM ancestry', newSsm.n === 1);
+    await db.query('rollback');
 
     const snapshotBefore = await one<Record<string, string | number>>(
       `select cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
@@ -2125,7 +2197,7 @@ async function main(): Promise<void> {
           sn,
           customer.id,
           plan.id,
-          staff['finance'],
+          staff['ost'],
           plan.cash_price,
           plan.minimum_down_payment,
           plan.yearly_points,
@@ -2537,7 +2609,7 @@ async function main(): Promise<void> {
         claimSn,
         claimCust,
         claimPlan.id,
-        staff['finance'],
+        staff['ost'],
         claimPlan.cash_price,
         claimPlan.minimum_down_payment,
         claimPlan.yearly_points,
@@ -2993,7 +3065,7 @@ async function main(): Promise<void> {
           saleNo,
           custId,
           plan.id,
-          staff['finance'],
+          staff['ost'],
           plan.cash_price,
           plan.minimum_down_payment,
           plan.yearly_points,
@@ -4840,6 +4912,7 @@ async function main(): Promise<void> {
       ))!.rows.map((r) => r.id);
 
       await db?.query('begin');
+      await db?.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
       await db?.query('delete from public.audit_events where actor_id = any($1::uuid[])', [
         authSet,
       ]);
@@ -4885,6 +4958,11 @@ async function main(): Promise<void> {
       await db?.query('delete from public.memberships where customer_id = any($1::uuid[])', [
         custSet,
       ]);
+      await db?.query(
+        `delete from public.card_sale_hierarchy_snapshots
+          where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
+        [custSet],
+      );
       await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
         custSet,
       ]);

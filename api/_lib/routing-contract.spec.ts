@@ -247,6 +247,11 @@ describe('router -> handler contract matrix', () => {
     r = await dispatch('/api/v1/queues/activation', { token: TOKEN2.finance });
     expect(r.handled).toBe(true);
     expect(r.status).toBe(200);
+
+    r = await dispatch('/api/v1/analytics?period=month', { token: TOKEN.superAdmin });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(200);
+    expect((r.body as { scope?: { kind?: string } }).scope?.kind).toBe('global');
   });
 
   it('redemptions and cms', async () => {
