@@ -334,7 +334,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- detail ---------------- */
-    const detail = route(req, 'GET', /^sales\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const scope = await resolveSaleScope(req);
       if ('error' in scope.auth) return deny(res, scope.auth);
@@ -347,7 +347,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- financial summary ---------------- */
-    const summary = route(req, 'GET', /^sales\/([0-9a-f-]+)\/summary$/);
+    const summary = route(req, 'GET', /^([0-9a-f-]+)\/summary$/);
     if (summary) {
       const scope = await resolveSaleScope(req);
       if ('error' in scope.auth) return deny(res, scope.auth);
@@ -389,7 +389,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- payments for a sale ---------------- */
-    const salePayments = route(req, 'GET', /^sales\/([0-9a-f-]+)\/payments$/);
+    const salePayments = route(req, 'GET', /^([0-9a-f-]+)\/payments$/);
     if (salePayments) {
       const scope = await resolveSaleScope(req);
       if ('error' in scope.auth) return deny(res, scope.auth);
@@ -429,7 +429,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- record a payment ---------------- */
-    const addPayment = route(req, 'POST', /^sales\/([0-9a-f-]+)\/payments$/);
+    const addPayment = route(req, 'POST', /^([0-9a-f-]+)\/payments$/);
     if (addPayment) {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -452,7 +452,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- verify / reject a payment ---------------- */
-    const verify = route(req, 'POST', /^payments\/([0-9a-f-]+)\/verify$/);
+    const verify = route(req, 'POST', /^([0-9a-f-]+)\/verify$/);
     if (verify) {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -479,7 +479,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- activate ---------------- */
-    const activate = route(req, 'POST', /^sales\/([0-9a-f-]+)\/activate$/);
+    const activate = route(req, 'POST', /^([0-9a-f-]+)\/activate$/);
     if (activate) {
       const auth = await authorizeAfHomes(req, 'finance.card_activation', 'update');
       if ('error' in auth) return deny(res, auth);

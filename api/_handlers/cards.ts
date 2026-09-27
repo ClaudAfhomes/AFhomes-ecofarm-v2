@@ -48,7 +48,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === '' && method(req) === 'GET') {
       // A seller needs the catalogue to sell; catalogue management is a subset.
       const auth =
-        (await authorizeAfHomes(req, 'sales.card_sales')) ?? (await authorizeAfHomes(req, 'sales.card_plans'));
+        (await authorizeAfHomes(req, 'sales.card_sales')) ??
+        (await authorizeAfHomes(req, 'sales.card_plans'));
       if ('error' in auth) return deny(res, auth);
 
       const { data, error } = await db
@@ -57,14 +58,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
       if (error) throw error;
-      const onlyActive = String(req.query.includeInactive ?? '') !== 'true' || auth.roleSlug !== 'super_admin';
+      const onlyActive =
+        String(req.query.includeInactive ?? '') !== 'true' || auth.roleSlug !== 'super_admin';
       const rows = (data ?? []).filter((row: Record<string, unknown>) =>
         onlyActive ? row.is_active === true : true,
       );
       return list(res, rows.map(toProduct));
     }
 
-    const update = route(req, 'PATCH', /^card-products\/([0-9a-f-]+)$/);
+    const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);
     if (update) {
       const auth = await authorizeAfHomes(req, 'sales.card_plans', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -83,7 +85,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const nextPrice = parsed.data.cashPrice ?? before.cash_price;
       const nextDown = parsed.data.minimumDownPayment ?? before.minimum_down_payment;
-      const incoherent = assertProductEconomicsSane({ cashPrice: nextPrice, minimumDownPayment: nextDown });
+      const incoherent = assertProductEconomicsSane({
+        cashPrice: nextPrice,
+        minimumDownPayment: nextDown,
+      });
       if (incoherent) return fail(res, 'VALIDATION_ERROR', incoherent, 400);
 
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -92,7 +97,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (parsed.data.minimumDownPayment !== undefined)
         patch.minimum_down_payment = parsed.data.minimumDownPayment;
       if (parsed.data.yearlyPoints !== undefined) patch.yearly_points = parsed.data.yearlyPoints;
-      if (parsed.data.commissionRate !== undefined) patch.commission_rate = parsed.data.commissionRate;
+      if (parsed.data.commissionRate !== undefined)
+        patch.commission_rate = parsed.data.commissionRate;
       if (parsed.data.isActive !== undefined) patch.is_active = parsed.data.isActive;
       if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
 

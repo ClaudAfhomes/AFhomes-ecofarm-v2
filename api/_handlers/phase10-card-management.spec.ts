@@ -106,7 +106,7 @@ describe('card authorization and views', () => {
 
   it('15/16/17. serves printable card data with no hash and no internal id', async () => {
     install();
-    const state = await call({ path: `memberships/${MEMBERSHIP.active}/card` });
+    const state = await call({ path: `${MEMBERSHIP.active}/card` });
     expect(state.status).toBe(200);
     expect(state.body).toMatchObject({
       membershipId: MEMBERSHIP.active,
@@ -120,9 +120,7 @@ describe('card authorization and views', () => {
 
   it('refuses the card view without a card responsibility', async () => {
     install();
-    expect(
-      (await call({ path: `memberships/${MEMBERSHIP.active}/card`, token: TOKEN2.hr })).status,
-    ).toBe(403);
+    expect((await call({ path: `${MEMBERSHIP.active}/card`, token: TOKEN2.hr })).status).toBe(403);
   });
 });
 
@@ -200,7 +198,7 @@ describe('credential reissue', () => {
     );
     const state = await call({
       method: 'POST',
-      path: `memberships/${MEMBERSHIP.active}/reissue`,
+      path: `${MEMBERSHIP.active}/reissue`,
       body: { reason: 'Lost card reported at the desk' },
     });
     expect(state.status).toBe(201);
@@ -240,7 +238,7 @@ describe('credential reissue', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/${MEMBERSHIP.active}/reissue`,
+          path: `${MEMBERSHIP.active}/reissue`,
           token: TOKEN2.salesManager,
           body: { reason: 'Lost card reported at the desk' },
         })
@@ -250,7 +248,7 @@ describe('credential reissue', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/${MEMBERSHIP.active}/reissue`,
+          path: `${MEMBERSHIP.active}/reissue`,
           body: {},
         })
       ).status,
@@ -259,7 +257,7 @@ describe('credential reissue', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/00000000-0000-4000-8000-000000000099/reissue`,
+          path: `00000000-0000-4000-8000-000000000099/reissue`,
           body: { reason: 'Lost card reported at the desk' },
         })
       ).status,
@@ -283,7 +281,7 @@ describe('credential reissue', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/${MEMBERSHIP.active}/reissue`,
+          path: `${MEMBERSHIP.active}/reissue`,
           body: { reason: 'Damaged card' },
         })
       ).status,
@@ -324,12 +322,12 @@ describe('credential reissue', () => {
     const [first, second] = await Promise.all([
       call({
         method: 'POST',
-        path: `memberships/${MEMBERSHIP.active}/reissue`,
+        path: `${MEMBERSHIP.active}/reissue`,
         body: { reason: 'Two desks at once' },
       }),
       call({
         method: 'POST',
-        path: `memberships/${MEMBERSHIP.active}/reissue`,
+        path: `${MEMBERSHIP.active}/reissue`,
         body: { reason: 'Two desks at once' },
       }),
     ]);
@@ -355,13 +353,13 @@ describe('print tracking', () => {
     });
     const first = await call({
       method: 'POST',
-      path: `memberships/${MEMBERSHIP.active}/mark-printed`,
+      path: `${MEMBERSHIP.active}/mark-printed`,
     });
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ printCount: 1, reprint: false });
     const second = await call({
       method: 'POST',
-      path: `memberships/${MEMBERSHIP.active}/mark-printed`,
+      path: `${MEMBERSHIP.active}/mark-printed`,
     });
     expect(second.body).toMatchObject({ printCount: 2, reprint: true });
     const row = db.rows('memberships').find((r) => r.id === MEMBERSHIP.active)!;
@@ -379,7 +377,7 @@ describe('print tracking', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/${MEMBERSHIP.active}/mark-printed`,
+          path: `${MEMBERSHIP.active}/mark-printed`,
           token: TOKEN2.hr,
         })
       ).status,
@@ -388,7 +386,7 @@ describe('print tracking', () => {
       (
         await call({
           method: 'POST',
-          path: `memberships/00000000-0000-4000-8000-000000000099/mark-printed`,
+          path: `00000000-0000-4000-8000-000000000099/mark-printed`,
         })
       ).status,
     ).toBe(404);

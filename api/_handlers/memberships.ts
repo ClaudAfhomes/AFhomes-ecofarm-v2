@@ -180,7 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- detail ---------------- */
-    const detail = route(req, 'GET', /^memberships\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const auth = await authorizeCardStaff(req);
       if ('error' in auth) return deny(res, auth);
@@ -195,7 +195,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- points account ---------------- */
-    const account = route(req, 'GET', /^points\/accounts\/([0-9a-f-]+)$/);
+    const account = route(req, 'GET', /^accounts\/([0-9a-f-]+)$/);
     if (account) {
       const auth = await authorizeAfHomes(req, 'finance.points');
       if ('error' in auth) return deny(res, auth);
@@ -217,7 +217,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- points ledger ---------------- */
-    const ledger = route(req, 'GET', /^points\/ledger\/([0-9a-f-]+)$/);
+    const ledger = route(req, 'GET', /^ledger\/([0-9a-f-]+)$/);
     if (ledger) {
       const auth = await authorizeAfHomes(req, 'finance.points');
       if ('error' in auth) return deny(res, auth);
@@ -245,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- printable card data ---------------- */
-    const card = route(req, 'GET', /^memberships\/([0-9a-f-]+)\/card$/);
+    const card = route(req, 'GET', /^([0-9a-f-]+)\/card$/);
     if (card) {
       const auth = await authorizeCardStaff(req);
       if ('error' in auth) return deny(res, auth);
@@ -264,7 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- rotate credentials (privileged reissue) ---------------- */
-    const reissue = route(req, 'POST', /^memberships\/([0-9a-f-]+)\/reissue$/);
+    const reissue = route(req, 'POST', /^([0-9a-f-]+)\/reissue$/);
     if (reissue) {
       // Card activation staff only: redemption redeems, customer service
       // reads, but neither rotates credentials. Sellers never reach this.
@@ -327,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- record a print (never a rotation) ---------------- */
-    const markPrinted = route(req, 'POST', /^memberships\/([0-9a-f-]+)\/mark-printed$/);
+    const markPrinted = route(req, 'POST', /^([0-9a-f-]+)\/mark-printed$/);
     if (markPrinted) {
       const auth = await authorizeCardStaff(req);
       if ('error' in auth) return deny(res, auth);

@@ -302,10 +302,7 @@ beforeEach(() => {
 
 const submit = async (db: FakeSupabase, body: unknown) => {
   const { res, state } = makeRes();
-  await ost(
-    makeReq({ method: 'POST', familyPath: 'ost/applications', body }) as never,
-    res as never,
-  );
+  await ost(makeReq({ method: 'POST', familyPath: 'applications', body }) as never, res as never);
   void db;
   return state;
 };
@@ -317,7 +314,7 @@ describe('OST referral resolution', () => {
     install();
     const { res, state } = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: `ost/referrals/${RAW_CODE}` }) as never,
+      makeReq({ method: 'GET', familyPath: `referrals/${RAW_CODE}` }) as never,
       res as never,
     );
     expect(state.status).toBe(200);
@@ -330,7 +327,7 @@ describe('OST referral resolution', () => {
     install();
     const { res, state } = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/referrals/OST-FFFFFC-000003' }) as never,
+      makeReq({ method: 'GET', familyPath: 'referrals/OST-FFFFFC-000003' }) as never,
       res as never,
     );
     expect(state.status).toBe(409);
@@ -340,7 +337,7 @@ describe('OST referral resolution', () => {
     install();
     const { res, state } = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/referrals/OST-FFFFFB-000004' }) as never,
+      makeReq({ method: 'GET', familyPath: 'referrals/OST-FFFFFB-000004' }) as never,
       res as never,
     );
     expect(state.status).toBe(409);
@@ -355,10 +352,7 @@ describe('OST referral resolution', () => {
       'OST-000000-000000',
     ]) {
       const { res, state } = makeRes();
-      await ost(
-        makeReq({ method: 'GET', familyPath: `ost/referrals/${code}` }) as never,
-        res as never,
-      );
+      await ost(makeReq({ method: 'GET', familyPath: `referrals/${code}` }) as never, res as never);
       expect(state.status, code).not.toBe(200);
     }
   });
@@ -397,14 +391,11 @@ describe('OST application submission', () => {
   it('8. denies unauthenticated and unpermissioned application listing', async () => {
     install();
     const anon = makeRes();
-    await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/applications' }) as never,
-      anon.res as never,
-    );
+    await ost(makeReq({ method: 'GET', familyPath: 'applications' }) as never, anon.res as never);
     expect(anon.state.status).toBe(401);
     const emp = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/applications', token: EMP_TOKEN }) as never,
+      makeReq({ method: 'GET', familyPath: 'applications', token: EMP_TOKEN }) as never,
       emp.res as never,
     );
     expect(emp.state.status).toBe(403);
@@ -427,7 +418,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -464,7 +455,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -475,7 +466,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -498,7 +489,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/reject`,
+        familyPath: `applications/${appId}/reject`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -509,7 +500,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/reject`,
+        familyPath: `applications/${appId}/reject`,
         token: ADMIN_TOKEN,
         body: { reason: 'Documents do not match the applicant' },
       }) as never,
@@ -521,7 +512,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -542,7 +533,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: { sponsorStaffId: SM2_ID },
       }) as never,
@@ -566,7 +557,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: ADMIN_TOKEN,
         body: {},
       }) as never,
@@ -585,7 +576,7 @@ describe('OST review and approval', () => {
     await ost(
       makeReq({
         method: 'POST',
-        familyPath: `ost/applications/${appId}/approve`,
+        familyPath: `applications/${appId}/approve`,
         token: SM_TOKEN,
         body: {},
       }) as never,
@@ -643,7 +634,7 @@ describe('OST visibility scopes', () => {
     install(tablesWithTwoApps());
     const { res, state } = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/applications', token: SM_TOKEN }) as never,
+      makeReq({ method: 'GET', familyPath: 'applications', token: SM_TOKEN }) as never,
       res as never,
     );
     expect(state.status).toBe(200);
@@ -656,7 +647,7 @@ describe('OST visibility scopes', () => {
     await ost(
       makeReq({
         method: 'GET',
-        familyPath: `ost/applications/${APP_ID}`,
+        familyPath: `applications/${APP_ID}`,
         token: SM2_TOKEN,
       }) as never,
       res as never,
@@ -668,13 +659,13 @@ describe('OST visibility scopes', () => {
     install(tablesWithTwoApps());
     const own = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: `ost/members/${OST_ID}`, token: OST_TOKEN }) as never,
+      makeReq({ method: 'GET', familyPath: `members/${OST_ID}`, token: OST_TOKEN }) as never,
       own.res as never,
     );
     expect(own.state.status).toBe(200);
     const other = makeRes();
     await ost(
-      makeReq({ method: 'GET', familyPath: 'ost/members', token: OST_TOKEN }) as never,
+      makeReq({ method: 'GET', familyPath: 'members', token: OST_TOKEN }) as never,
       other.res as never,
     );
     expect(other.state.status).toBe(200);

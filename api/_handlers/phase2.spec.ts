@@ -109,7 +109,10 @@ function install(
         ],
       },
       { fn: 'correct_referral_upline', result: 'eeeeeeee-0000-4000-8000-0000000000ff' },
-      { fn: 'issue_customer_onboarding_token', result: { token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' } },
+      {
+        fn: 'issue_customer_onboarding_token',
+        result: { token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' },
+      },
     ],
     rpcErrors: options.rpcErrors,
     defaults: { staff_invitations: { status: 'pending' } },
@@ -174,12 +177,7 @@ describe('business endpoint error envelopes', () => {
       },
     });
     const error = (state.body as { error: Record<string, unknown> }).error;
-    expect(Object.keys(error).sort()).toEqual([
-      'code',
-      'message',
-      'requestId',
-      'timestamp',
-    ]);
+    expect(Object.keys(error).sort()).toEqual(['code', 'message', 'requestId', 'timestamp']);
     expect(JSON.stringify(state.body)).not.toMatch(/service[_-]?role|database_url|stack|select\s/i);
   });
 });
@@ -216,12 +214,16 @@ describe('card products', () => {
   });
 
   it('hides inactive products from the default catalogue', async () => {
-    const rows = data((await call('cards', { path: '', token: TOKEN.admin })).body) as { code: string }[];
+    const rows = data((await call('cards', { path: '', token: TOKEN.admin })).body) as {
+      code: string;
+    }[];
     expect(rows.map((r) => r.code)).not.toContain('LEGACY');
   });
 
   it('orders the catalogue by display order', async () => {
-    const rows = data((await call('cards', { path: '', token: TOKEN.admin })).body) as { code: string }[];
+    const rows = data((await call('cards', { path: '', token: TOKEN.admin })).body) as {
+      code: string;
+    }[];
     expect(rows.map((r) => r.code)).toEqual(['GOLD', 'SILVER', 'BRONZE']);
   });
 
@@ -234,7 +236,7 @@ describe('card products', () => {
     const db = install();
     const state = await call('cards', {
       method: 'PATCH',
-      path: `card-products/${PRODUCT.bronze}`,
+      path: `${PRODUCT.bronze}`,
       token: TOKEN.admin,
       body: { yearlyPoints: 30000 },
     });
@@ -247,7 +249,7 @@ describe('card products', () => {
   it('refuses a down payment above the price', async () => {
     const state = await call('cards', {
       method: 'PATCH',
-      path: `card-products/${PRODUCT.bronze}`,
+      path: `${PRODUCT.bronze}`,
       token: TOKEN.admin,
       body: { minimumDownPayment: '90000.00' },
     });
@@ -257,7 +259,7 @@ describe('card products', () => {
   it('denies configuration changes to a role without sales.card_plans update', async () => {
     const state = await call('cards', {
       method: 'PATCH',
-      path: `card-products/${PRODUCT.bronze}`,
+      path: `${PRODUCT.bronze}`,
       token: TOKEN.viewer,
       body: { yearlyPoints: 1 },
     });
@@ -300,13 +302,15 @@ describe('customers', () => {
     expect(body.customerNumber).toMatch(/^CUS-/);
     // Stored, but never returned.
     expect(body).not.toHaveProperty('governmentIdNumber');
-    expect(db.rows('customers').some((r) => r.government_id_number === '7788-9900-1122')).toBe(true);
+    expect(db.rows('customers').some((r) => r.government_id_number === '7788-9900-1122')).toBe(
+      true,
+    );
     const audit = db.rows('audit_events').find((e) => e.action === 'CUSTOMER_CREATED')!;
     expect(JSON.stringify(audit)).not.toContain('7788-9900-1122');
   });
 
   it('masks the government ID on read', async () => {
-    const state = await call('customers', { path: `customers/${CUSTOMER.prospect}`, token: TOKEN.admin });
+    const state = await call('customers', { path: `${CUSTOMER.prospect}`, token: TOKEN.admin });
     expect(state.status).toBe(200);
     const body = state.body as Record<string, unknown>;
     expect(body.governmentIdMasked).toBe('**********4455');
@@ -347,17 +351,29 @@ describe('customers', () => {
   it('lists and searches by name or number', async () => {
     const all = await call('customers', { path: '', token: TOKEN.admin });
     expect((all.body as { meta: { total: number } }).meta.total).toBe(4);
-    const search = await call('customers', { path: '', token: TOKEN.admin, query: { search: 'Santos' } });
+    const search = await call('customers', {
+      path: '',
+      token: TOKEN.admin,
+      query: { search: 'Santos' },
+    });
     expect(data(search.body)).toHaveLength(1);
   });
 
   it('filters by status', async () => {
-    const state = await call('customers', { path: '', token: TOKEN.admin, query: { status: 'cancelled' } });
+    const state = await call('customers', {
+      path: '',
+      token: TOKEN.admin,
+      query: { status: 'cancelled' },
+    });
     expect(data(state.body)).toHaveLength(1);
   });
 
   it('rejects an invalid list query', async () => {
-    const state = await call('customers', { path: '', token: TOKEN.admin, query: { limit: '9999' } });
+    const state = await call('customers', {
+      path: '',
+      token: TOKEN.admin,
+      query: { limit: '9999' },
+    });
     expect(state.status).toBe(400);
   });
 
@@ -375,7 +391,7 @@ describe('customers', () => {
     const db = install();
     const state = await call('customers', {
       method: 'PATCH',
-      path: `customers/${CUSTOMER.prospect}`,
+      path: `${CUSTOMER.prospect}`,
       token: TOKEN.admin,
       body: { lastName: 'Dela Cruz Jr' },
     });
@@ -386,7 +402,7 @@ describe('customers', () => {
 
   it('404s an unknown customer', async () => {
     const state = await call('customers', {
-      path: 'customers/99999999-9999-4999-8999-999999999999',
+      path: '99999999-9999-4999-8999-999999999999',
       token: TOKEN.admin,
     });
     expect(state.status).toBe(404);
@@ -447,7 +463,7 @@ describe('card sales', () => {
     expect(sale.id).toBe(SALE.submitted);
 
     db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!.cash_price = '90000.00';
-    const detail = await call('sales', { path: `sales/${SALE.submitted}`, token: TOKEN.admin });
+    const detail = await call('sales', { path: `${SALE.submitted}`, token: TOKEN.admin });
     expect((detail.body as { cashPrice: string }).cashPrice).toBe('60000.00');
     expect((detail.body as { expectedCommission: string }).expectedCommission).toBe('2400.00');
   });
@@ -514,8 +530,9 @@ describe('card sales', () => {
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     const saleNumber = (created.body as { saleNumber: string }).saleNumber;
-    expect(db.rows('card_sales').find((r) => r.sale_number === saleNumber)!.referral_relationship_id)
-      .toBeNull();
+    expect(
+      db.rows('card_sales').find((r) => r.sale_number === saleNumber)!.referral_relationship_id,
+    ).toBeNull();
   });
 
   it('rejects a body that tries to assert the seller for someone outside the downline', async () => {
@@ -526,7 +543,11 @@ describe('card sales', () => {
       path: '',
       token: TOKEN.admin,
       // The inactive staff account is a valid row but must not be sellable.
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold, sellerStaffId: UUID.inactiveStaff },
+      body: {
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+        sellerStaffId: UUID.inactiveStaff,
+      },
     });
     expect(state.status).toBe(403);
     expect(err(state.body).message).toMatch(/inactive/);
@@ -539,7 +560,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold, sellerStaffId: UUID.superAdminStaff },
+      body: {
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+        sellerStaffId: UUID.superAdminStaff,
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -599,7 +624,7 @@ describe('card sales', () => {
   });
 
   it('computes the financial summary from payments only', async () => {
-    const state = await call('sales', { path: `sales/${SALE.downPaid}/summary`, token: TOKEN.admin });
+    const state = await call('sales', { path: `${SALE.downPaid}/summary`, token: TOKEN.admin });
     expect(state.status).toBe(200);
     expect(state.body).toMatchObject({
       cashPrice: '40000.00',
@@ -627,9 +652,14 @@ describe('payments', () => {
     const db = install();
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
-      body: { amount: '10000.00', paymentType: 'down_payment', method: 'bank_transfer', reference: 'TRF-9' },
+      body: {
+        amount: '10000.00',
+        paymentType: 'down_payment',
+        method: 'bank_transfer',
+        reference: 'TRF-9',
+      },
     });
     expect(state.status).toBe(201);
     const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment');
@@ -644,7 +674,7 @@ describe('payments', () => {
   it('never accepts a client-supplied total or balance', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: {
         amount: '10000.00',
@@ -667,7 +697,7 @@ describe('payments', () => {
   ])('rejects a %s amount', async (_name, amount) => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: { amount, paymentType: 'installment', method: 'cash' },
     });
@@ -677,13 +707,14 @@ describe('payments', () => {
   it('rejects a receipt path that looks like a public URL', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: {
         amount: '100.00',
         paymentType: 'installment',
         method: 'cash',
-        receiptStoragePath: 'https://example.supabase.co/storage/v1/object/public/afhomes-payment-receipts/x.pdf',
+        receiptStoragePath:
+          'https://example.supabase.co/storage/v1/object/public/afhomes-payment-receipts/x.pdf',
       },
     });
     // Accepted as an opaque string, but it is never echoed back and never used
@@ -694,7 +725,7 @@ describe('payments', () => {
   it('denies recording without finance.payment_verification', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.viewer,
       body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
     });
@@ -704,7 +735,7 @@ describe('payments', () => {
   it('verifies a payment and returns the recomputed totals', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `payments/${PAYMENT.second}/verify`,
+      path: `${PAYMENT.second}/verify`,
       token: TOKEN.admin,
       body: { decision: 'verified' },
     });
@@ -720,7 +751,7 @@ describe('payments', () => {
   it('requires a reason to reject a payment', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `payments/${PAYMENT.second}/verify`,
+      path: `${PAYMENT.second}/verify`,
       token: TOKEN.admin,
       body: { decision: 'rejected' },
     });
@@ -730,7 +761,7 @@ describe('payments', () => {
   it('rejects an invalid decision', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `payments/${PAYMENT.second}/verify`,
+      path: `${PAYMENT.second}/verify`,
       token: TOKEN.admin,
       body: { decision: 'maybe' },
     });
@@ -740,7 +771,7 @@ describe('payments', () => {
   it('denies verification without finance.payment_verification', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `payments/${PAYMENT.second}/verify`,
+      path: `${PAYMENT.second}/verify`,
       token: TOKEN.viewer,
       body: { decision: 'verified' },
     });
@@ -748,10 +779,12 @@ describe('payments', () => {
   });
 
   it('surfaces the RPC refusal when a sale is cancelled', async () => {
-    install({ rpcErrors: { record_card_payment: { message: 'SALE_NOT_ACCEPTING_PAYMENTS:cancelled' } } });
+    install({
+      rpcErrors: { record_card_payment: { message: 'SALE_NOT_ACCEPTING_PAYMENTS:cancelled' } },
+    });
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
     });
@@ -759,7 +792,7 @@ describe('payments', () => {
   });
 
   it('lists the payments of a sale', async () => {
-    const state = await call('sales', { path: `sales/${SALE.downPaid}/payments`, token: TOKEN.admin });
+    const state = await call('sales', { path: `${SALE.downPaid}/payments`, token: TOKEN.admin });
     expect(state.status).toBe(200);
     const rows = data(state.body) as Record<string, unknown>[];
     expect(rows).toHaveLength(3);
@@ -778,7 +811,7 @@ describe('activation requires confirmed full payment', () => {
     const db = install();
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.fullyPaid}/activate`,
+      path: `${SALE.fullyPaid}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 12 },
     });
@@ -795,10 +828,14 @@ describe('activation requires confirmed full payment', () => {
   });
 
   it('refuses to activate an unpaid sale', async () => {
-    install({ rpcErrors: { activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=0.00 price=60000.00' } } });
+    install({
+      rpcErrors: {
+        activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=0.00 price=60000.00' },
+      },
+    });
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/activate`,
+      path: `${SALE.unpaid}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 12 },
     });
@@ -807,10 +844,14 @@ describe('activation requires confirmed full payment', () => {
   });
 
   it('refuses to activate a partially paid sale', async () => {
-    install({ rpcErrors: { activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=15000.00 price=40000.00' } } });
+    install({
+      rpcErrors: {
+        activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=15000.00 price=40000.00' },
+      },
+    });
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.downPaid}/activate`,
+      path: `${SALE.downPaid}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 12 },
     });
@@ -820,7 +861,7 @@ describe('activation requires confirmed full payment', () => {
   it('refuses activation from a status that is not payment_verified', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.submitted}/activate`,
+      path: `${SALE.submitted}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 12 },
     });
@@ -847,7 +888,7 @@ describe('activation requires confirmed full payment', () => {
     });
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.active}/activate`,
+      path: `${SALE.active}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 12 },
     });
@@ -860,7 +901,7 @@ describe('activation requires confirmed full payment', () => {
   it('rejects a nonsense validity period', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.fullyPaid}/activate`,
+      path: `${SALE.fullyPaid}/activate`,
       token: TOKEN.admin,
       body: { validityMonths: 0 },
     });
@@ -870,7 +911,7 @@ describe('activation requires confirmed full payment', () => {
   it('denies activation without finance.card_activation', async () => {
     const state = await call('sales', {
       method: 'POST',
-      path: `sales/${SALE.fullyPaid}/activate`,
+      path: `${SALE.fullyPaid}/activate`,
       token: TOKEN.viewer,
       body: { validityMonths: 12 },
     });
@@ -914,7 +955,9 @@ describe('memberships and identifiers', () => {
   it('resolves a fallback member code to the same membership as the QR token', async () => {
     const db = install();
     const { createHash } = await import('node:crypto');
-    db.rows('memberships')[0]!.fallback_code_hash = createHash('sha256').update('AFH-ABCD-EF01').digest('hex');
+    db.rows('memberships')[0]!.fallback_code_hash = createHash('sha256')
+      .update('AFH-ABCD-EF01')
+      .digest('hex');
     const state = await call('memberships', {
       path: 'resolve',
       token: TOKEN.admin,
@@ -933,7 +976,11 @@ describe('memberships and identifiers', () => {
   });
 
   it('requires a plausible identifier', async () => {
-    const state = await call('memberships', { path: 'resolve', token: TOKEN.admin, query: { identifier: 'x' } });
+    const state = await call('memberships', {
+      path: 'resolve',
+      token: TOKEN.admin,
+      query: { identifier: 'x' },
+    });
     expect(state.status).toBe(400);
   });
 
@@ -948,21 +995,21 @@ describe('memberships and identifiers', () => {
 
   it('reads the points account and its append-only ledger', async () => {
     const denied = await call('memberships', {
-      path: `points/accounts/${MEMBERSHIP.active}`,
+      path: `accounts/${MEMBERSHIP.active}`,
       token: TOKEN.viewer,
     });
     expect(denied.status).toBe(403);
 
     const accountId = 'ffffffff-0000-4000-8000-000000000001';
     const allowed = await call('memberships', {
-      path: `points/accounts/${MEMBERSHIP.active}`,
+      path: `accounts/${MEMBERSHIP.active}`,
       token: TOKEN2.finance,
     });
     expect(allowed.status).toBe(200);
     expect(allowed.body).toMatchObject({ balance: 60000, lifetimeAllocated: 60000 });
 
     const ledger = await call('memberships', {
-      path: `points/ledger/${accountId}`,
+      path: `ledger/${accountId}`,
       token: TOKEN2.finance,
     });
     expect(ledger.status).toBe(200);
@@ -997,13 +1044,15 @@ describe('commissions', () => {
     const db = install();
     const state = await call('commissions', {
       method: 'POST',
-      path: 'commissions/99990000-0000-4000-8000-000000000002/qualify',
+      path: '99990000-0000-4000-8000-000000000002/qualify',
       token: TOKEN.admin,
       body: { decision: 'earned', notes: 'Card holder qualified after 30 days.' },
     });
     expect(state.status).toBe(200);
     expect((state.body as { status: string }).status).toBe('earned');
-    expect(db.rows('commissions').find((c) => c.id === '99990000-0000-4000-8000-000000000002')!.status).toBe('earned');
+    expect(
+      db.rows('commissions').find((c) => c.id === '99990000-0000-4000-8000-000000000002')!.status,
+    ).toBe('earned');
     const audit = db.rows('audit_events').find((e) => e.action === 'COMMISSION_QUALIFIED')!;
     expect(audit.reason).toContain('30 days');
   });
@@ -1011,7 +1060,7 @@ describe('commissions', () => {
   it('refuses to qualify a commission that is not awaiting qualification', async () => {
     const state = await call('commissions', {
       method: 'POST',
-      path: 'commissions/99990000-0000-4000-8000-000000000001/qualify',
+      path: '99990000-0000-4000-8000-000000000001/qualify',
       token: TOKEN.admin,
       body: { decision: 'earned', notes: 'Trying to skip qualification.' },
     });
@@ -1021,7 +1070,7 @@ describe('commissions', () => {
   it('requires notes for a qualification decision', async () => {
     const state = await call('commissions', {
       method: 'POST',
-      path: 'commissions/99990000-0000-4000-8000-000000000002/qualify',
+      path: '99990000-0000-4000-8000-000000000002/qualify',
       token: TOKEN.admin,
       body: { decision: 'earned', notes: 'no' },
     });
@@ -1053,7 +1102,11 @@ describe('referrals and uplines', () => {
       method: 'POST',
       path: '',
       token: TOKEN.superAdmin,
-      body: { subjectStaffId: UUID.viewerStaff, uplineStaffId: UUID.viewerStaff, hierarchyRole: 'sales_manager' },
+      body: {
+        subjectStaffId: UUID.viewerStaff,
+        uplineStaffId: UUID.viewerStaff,
+        hierarchyRole: 'sales_manager',
+      },
     });
     expect(state.status).toBe(400);
   });
@@ -1080,7 +1133,11 @@ describe('referrals and uplines', () => {
       method: 'POST',
       path: '',
       token: TOKEN.superAdmin,
-      body: { subjectStaffId: UUID.viewerStaff, uplineStaffId: UUID.adminStaff, hierarchyRole: 'ost' },
+      body: {
+        subjectStaffId: UUID.viewerStaff,
+        uplineStaffId: UUID.adminStaff,
+        hierarchyRole: 'ost',
+      },
     });
     expect(state.status).toBe(400);
   });
@@ -1105,7 +1162,11 @@ describe('referrals and uplines', () => {
       method: 'POST',
       path: '',
       token: TOKEN2.ost,
-      body: { subjectStaffId: STAFF2.ost, uplineStaffId: STAFF2.salesManager, hierarchyRole: 'ost' },
+      body: {
+        subjectStaffId: STAFF2.ost,
+        uplineStaffId: STAFF2.salesManager,
+        hierarchyRole: 'ost',
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -1114,7 +1175,7 @@ describe('referrals and uplines', () => {
     const db = install();
     const noReason = await call('referrals', {
       method: 'PATCH',
-      path: 'referrals/' + REL.ssmToSm,
+      path: REL.ssmToSm,
       token: TOKEN.superAdmin,
       body: { uplineStaffId: UUID.superAdminStaff },
     });
@@ -1137,7 +1198,7 @@ describe('referrals and uplines', () => {
 
     const state = await call('referrals', {
       method: 'PATCH',
-      path: 'referrals/' + REL.ssmToSm,
+      path: REL.ssmToSm,
       token: TOKEN.superAdmin,
       body: { uplineStaffId: STAFF2.seniorSalesManager, reason: 'Reorganised the region.' },
     });
@@ -1154,7 +1215,7 @@ describe('referrals and uplines', () => {
   it('refuses a correction to the same upline', async () => {
     const state = await call('referrals', {
       method: 'PATCH',
-      path: 'referrals/' + REL.ssmToSm,
+      path: REL.ssmToSm,
       token: TOKEN.superAdmin,
       body: { uplineStaffId: UUID.adminStaff, reason: 'No change intended.' },
     });
@@ -1213,7 +1274,7 @@ describe('customer account onboarding', () => {
   it('issues a single-use token and returns it once', async () => {
     const state = await call('customers', {
       method: 'POST',
-      path: `customers/${CUSTOMER.active}/onboarding-token`,
+      path: `${CUSTOMER.active}/onboarding-token`,
       token: TOKEN.admin,
       body: { purpose: 'account_activation', validHours: 24 },
     });
@@ -1224,7 +1285,7 @@ describe('customer account onboarding', () => {
   it('denies issuing without finance.card_activation', async () => {
     const state = await call('customers', {
       method: 'POST',
-      path: `customers/${CUSTOMER.active}/onboarding-token`,
+      path: `${CUSTOMER.active}/onboarding-token`,
       token: TOKEN.viewer,
       body: {},
     });

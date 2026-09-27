@@ -107,7 +107,9 @@ describe('every Phase 2 business table has row level security', () => {
 
   it('keeps the customer self-read and the seller self-read in the predicates', () => {
     expect(rls).toMatch(/create policy customers_read[\s\S]*?auth\.uid\(\)/);
-    expect(rls).toMatch(/create policy card_sales_read[\s\S]*?seller_staff_id = \(select auth\.uid\(\)\)/);
+    expect(rls).toMatch(
+      /create policy card_sales_read[\s\S]*?seller_staff_id = \(select auth\.uid\(\)\)/,
+    );
   });
 });
 
@@ -149,9 +151,7 @@ describe('the schema migration freezes commercial terms and identity', () => {
       'rate_snapshot',
       'commission_rate_snapshot',
     ]) {
-      expect(schema, column).toMatch(
-        new RegExp(`${column}[\\s\\S]{0,200}?~ '\\^`),
-      );
+      expect(schema, column).toMatch(new RegExp(`${column}[\\s\\S]{0,200}?~ '\\^`));
     }
   });
 
@@ -191,7 +191,9 @@ describe('the schema migration freezes commercial terms and identity', () => {
   });
 
   it('keeps the points ledger append-only and allocates once per membership-year', () => {
-    expect(schema).toMatch(/create unique index if not exists points_ledger_one_allocation_per_year/);
+    expect(schema).toMatch(
+      /create unique index if not exists points_ledger_one_allocation_per_year/,
+    );
     expect(schema).toContain('Append-only points history');
   });
 
@@ -205,9 +207,7 @@ describe('the schema migration freezes commercial terms and identity', () => {
     // while that NOT NULL stands the beneficiary CHECK can never be satisfied
     // for a VD/SSM/SM/Admin sale and every such commission is rejected. Found
     // by executing the migrations on a real PostgreSQL.
-    expect(schema).toMatch(
-      /alter table public\.commissions alter column ost_id drop not null/,
-    );
+    expect(schema).toMatch(/alter table public\.commissions alter column ost_id drop not null/);
     // And the new beneficiary columns must be the nullable ones.
     expect(schema).toMatch(
       /add column if not exists beneficiary_staff_id uuid references public\.staff_users\(id\)/,
@@ -263,7 +263,9 @@ describe('the RPC migration keeps money server-computed and activation gated', (
     const rpads = [...body.matchAll(/rpad\(([^;]*?),\s*(\d+),/g)];
     expect(rpads.length).toBeGreaterThan(0);
     for (const [, , length] of rpads) {
-      expect(Number(length), 'rpad length must be >= 2 to avoid truncation').toBeGreaterThanOrEqual(2);
+      expect(Number(length), 'rpad length must be >= 2 to avoid truncation').toBeGreaterThanOrEqual(
+        2,
+      );
     }
   });
 
@@ -276,13 +278,15 @@ describe('the RPC migration keeps money server-computed and activation gated', (
       rpc.indexOf('function public.verify_card_payment'),
       rpc.indexOf('function public.activate_card_sale'),
     );
-    expect(fn).toMatch(/from public\.payments p\s+where p\.sale_id = v_sale\.id and p\.status = 'verified'/);
-    expect(fn).toMatch(/update public\.commissions c[\s\S]*?where c\.sale_id = v_sale\.id and c\.status = 'pending'/);
+    expect(fn).toMatch(
+      /from public\.payments p\s+where p\.sale_id = v_sale\.id and p\.status = 'verified'/,
+    );
+    expect(fn).toMatch(
+      /update public\.commissions c[\s\S]*?where c\.sale_id = v_sale\.id and c\.status = 'pending'/,
+    );
     // The return-query subquery read `select status from public.card_sales`,
     // which is the same clash in a third place.
-    expect(fn).toMatch(
-      /\(select s\.status from public\.card_sales s where s\.id = v_sale\.id\)/,
-    );
+    expect(fn).toMatch(/\(select s\.status from public\.card_sales s where s\.id = v_sale\.id\)/);
     // No bare reference may survive.
     expect(fn).not.toMatch(/where sale_id = v_sale\.id and status = 'verified'/);
     expect(fn).not.toMatch(/where sale_id = v_sale\.id and status = 'pending'/);
@@ -299,7 +303,9 @@ describe('the RPC migration keeps money server-computed and activation gated', (
     expect(fn).toMatch(/where sale_id = v_sale\.id and status = 'verified'/);
     expect(fn).toMatch(/if v_verified < v_price then[\s\S]*?SALE_NOT_FULLY_PAID/);
     // The guard precedes the membership insert.
-    expect(fn.indexOf('SALE_NOT_FULLY_PAID')).toBeLessThan(fn.indexOf('insert into public.memberships'));
+    expect(fn.indexOf('SALE_NOT_FULLY_PAID')).toBeLessThan(
+      fn.indexOf('insert into public.memberships'),
+    );
   });
 
   it('locks the sale row before reading money', () => {
@@ -489,7 +495,9 @@ describe('the RPC migration keeps money server-computed and activation gated', (
   });
 
   it('exposes the read-only summary to authenticated callers only', () => {
-    expect(rpc).toContain('revoke all on function public.sale_financial_summary(uuid) from public, anon;');
+    expect(rpc).toContain(
+      'revoke all on function public.sale_financial_summary(uuid) from public, anon;',
+    );
     expect(rpc).toContain(
       'grant execute on function public.sale_financial_summary(uuid) to authenticated;',
     );
@@ -550,8 +558,32 @@ function install(overrides: Record<string, unknown[]> = {}) {
       { fn: 'next_customer_number', result: { customer_number: `CUS-8${rpcCounter}0000` } },
       { fn: 'next_sale_number', result: { sale_number: `SALE-8${rpcCounter}0000` } },
       { fn: 'record_card_payment', result: 'scripted-payment' },
-      { fn: 'activate_card_sale', result: [{ membership_id: 'x', membership_number: 'MBS-1', fallback_code: null, qr_token: null, points_allocated: 0, already_active: false }] },
-      { fn: 'verify_card_payment', result: [{ sale_id: 'x', status: 'payment_in_progress', verified_total: '0.00', remaining_balance: '0.00', fully_paid: false, spot_cash_deadline: null }] },
+      {
+        fn: 'activate_card_sale',
+        result: [
+          {
+            membership_id: 'x',
+            membership_number: 'MBS-1',
+            fallback_code: null,
+            qr_token: null,
+            points_allocated: 0,
+            already_active: false,
+          },
+        ],
+      },
+      {
+        fn: 'verify_card_payment',
+        result: [
+          {
+            sale_id: 'x',
+            status: 'payment_in_progress',
+            verified_total: '0.00',
+            remaining_balance: '0.00',
+            fully_paid: false,
+            spot_cash_deadline: null,
+          },
+        ],
+      },
     ],
   });
   return holder.db as FakeSupabase;
@@ -559,7 +591,13 @@ function install(overrides: Record<string, unknown[]> = {}) {
 
 async function call(
   family: keyof typeof handlers,
-  options: { path: string; method?: string; token?: string; body?: unknown; query?: Record<string, string> },
+  options: {
+    path: string;
+    method?: string;
+    token?: string;
+    body?: unknown;
+    query?: Record<string, string>;
+  },
 ) {
   const { res, state } = makeRes();
   await handlers[family](
@@ -593,14 +631,14 @@ const MATRIX = [
     family: 'sales',
     options: {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
     },
   },
   {
     label: 'activate a sale',
     family: 'sales',
-    options: { method: 'POST', path: `sales/${SALE.fullyPaid}/activate`, body: {} },
+    options: { method: 'POST', path: `${SALE.fullyPaid}/activate`, body: {} },
   },
   { label: 'read the finance queue', family: 'queues', options: { path: 'finance' } },
   { label: 'read the activation queue', family: 'queues', options: { path: 'activation' } },
@@ -612,7 +650,11 @@ const MATRIX = [
     options: {
       method: 'POST',
       path: '',
-      body: { subjectStaffId: STAFF2.ost, uplineStaffId: STAFF2.salesManager, hierarchyRole: 'ost' },
+      body: {
+        subjectStaffId: STAFF2.ost,
+        uplineStaffId: STAFF2.salesManager,
+        hierarchyRole: 'ost',
+      },
     },
   },
 ] as const;
@@ -641,7 +683,10 @@ describe('Phase 2 role matrix', () => {
   it('a Vice Director holds no selling or finance permission in this phase', async () => {
     install();
     for (const entry of MATRIX) {
-      expect(await call(entry.family, { ...entry.options, token: TOKEN2.viceDirector }), entry.label).toBe(403);
+      expect(
+        await call(entry.family, { ...entry.options, token: TOKEN2.viceDirector }),
+        entry.label,
+      ).toBe(403);
     }
   });
 
@@ -665,7 +710,10 @@ describe('Phase 2 role matrix', () => {
   it('an Admin may do every Phase 2 action', async () => {
     install();
     for (const entry of MATRIX) {
-      expect(await call(entry.family, { ...entry.options, token: TOKEN.admin }), entry.label).not.toBe(403);
+      expect(
+        await call(entry.family, { ...entry.options, token: TOKEN.admin }),
+        entry.label,
+      ).not.toBe(403);
     }
   });
 
@@ -682,7 +730,9 @@ describe('Phase 2 role matrix', () => {
   it('an HR account with no Phase 2 permission is refused everywhere', async () => {
     install();
     for (const entry of MATRIX) {
-      expect(await call(entry.family, { ...entry.options, token: TOKEN2.hr }), entry.label).toBe(403);
+      expect(await call(entry.family, { ...entry.options, token: TOKEN2.hr }), entry.label).toBe(
+        403,
+      );
     }
   });
 

@@ -217,7 +217,7 @@ async function uploaded(
   token: string = SM_TOKEN,
   body: unknown = uploadBody,
 ): Promise<{ id: string; path: string }> {
-  const state = await call({ method: 'POST', path: 'documents/customer/upload-url', token, body });
+  const state = await call({ method: 'POST', path: 'customer/upload-url', token, body });
   expect(state.status).toBe(201);
   const grant = state.body as { documentId: string; bucket: string; uploadUrl: string };
   const row = (holder.db as FakeSupabase)
@@ -236,7 +236,7 @@ describe('upload grants', () => {
   it('1. issues a signed grant on a server-generated private path and audits it', async () => {
     const state = await call({
       method: 'POST',
-      path: 'documents/customer/upload-url',
+      path: 'customer/upload-url',
       token: SM_TOKEN,
       body: uploadBody,
     });
@@ -260,14 +260,13 @@ describe('upload grants', () => {
 
   it('2. denies strangers: no session, no grant, wrong scope', async () => {
     expect(
-      (await call({ method: 'POST', path: 'documents/customer/upload-url', body: uploadBody }))
-        .status,
+      (await call({ method: 'POST', path: 'customer/upload-url', body: uploadBody })).status,
     ).toBe(401);
     expect(
       (
         await call({
           method: 'POST',
-          path: 'documents/customer/upload-url',
+          path: 'customer/upload-url',
           token: EMP_TOKEN,
           body: uploadBody,
         })
@@ -278,7 +277,7 @@ describe('upload grants', () => {
       (
         await call({
           method: 'POST',
-          path: 'documents/customer/upload-url',
+          path: 'customer/upload-url',
           token: SM2_TOKEN,
           body: uploadBody,
         })
@@ -296,7 +295,7 @@ describe('upload grants', () => {
     };
     const own = await call({
       method: 'POST',
-      path: 'documents/ost_application/upload-url',
+      path: 'ost_application/upload-url',
       token: SM_TOKEN,
       body: ostBody,
     });
@@ -304,14 +303,14 @@ describe('upload grants', () => {
     expect((own.body as { bucket: string }).bucket).toBe('afhomes-ost-ids');
     const alien = await call({
       method: 'POST',
-      path: 'documents/ost_application/upload-url',
+      path: 'ost_application/upload-url',
       token: SM2_TOKEN,
       body: ostBody,
     });
     expect(alien.status).toBe(403);
     const gone = await call({
       method: 'POST',
-      path: 'documents/ost_application/upload-url',
+      path: 'ost_application/upload-url',
       token: SM_TOKEN,
       body: { ...ostBody, subjectId: '00000000-0000-4000-8000-000000000099' },
     });
@@ -321,14 +320,14 @@ describe('upload grants', () => {
   it('5/6. rejects oversized and non-allowlisted files before any storage call', async () => {
     const big = await call({
       method: 'POST',
-      path: 'documents/customer/upload-url',
+      path: 'customer/upload-url',
       token: SM_TOKEN,
       body: { ...uploadBody, sizeBytes: 11 * 1024 * 1024 },
     });
     expect(big.status).toBe(400);
     const gif = await call({
       method: 'POST',
-      path: 'documents/customer/upload-url',
+      path: 'customer/upload-url',
       token: SM_TOKEN,
       body: { ...uploadBody, mime: 'image/gif' },
     });
@@ -344,11 +343,11 @@ describe('upload grants', () => {
 describe('reads', () => {
   it('4/19. hides other sellers\u2019 documents but shows the reviewer everything', async () => {
     const { id } = await uploaded();
-    expect((await call({ path: `documents/${id}`, token: SM2_TOKEN })).status).toBe(403);
-    expect((await call({ path: `documents/${id}/access-url`, token: SM2_TOKEN })).status).toBe(403);
-    const own = await call({ path: `documents/${id}`, token: SM_TOKEN });
+    expect((await call({ path: `${id}`, token: SM2_TOKEN })).status).toBe(403);
+    expect((await call({ path: `${id}/access-url`, token: SM2_TOKEN })).status).toBe(403);
+    const own = await call({ path: `${id}`, token: SM_TOKEN });
     expect(own.status).toBe(200);
-    const review = await call({ path: `documents/${id}`, token: ADMIN_TOKEN });
+    const review = await call({ path: `${id}`, token: ADMIN_TOKEN });
     expect(review.status).toBe(200);
   });
 
@@ -365,7 +364,7 @@ describe('reads', () => {
       warnings: [],
     };
     row.ocr_status = 'completed';
-    const state = await call({ path: `documents/${id}`, token: SM_TOKEN });
+    const state = await call({ path: `${id}`, token: SM_TOKEN });
     expect(state.status).toBe(200);
     const body = state.body as { extractedFields: Record<string, { value: string | null }> };
     expect(body.extractedFields.idNumber!.value).toBe('**********1122');
@@ -379,7 +378,7 @@ describe('reads', () => {
 
   it('17/18. issues a scoped, short-lived download grant', async () => {
     const { id } = await uploaded();
-    const state = await call({ path: `documents/${id}/access-url`, token: SM_TOKEN });
+    const state = await call({ path: `${id}/access-url`, token: SM_TOKEN });
     expect(state.status).toBe(200);
     const grant = state.body as { url: string; expiresAt: string };
     expect(grant.url).toContain('ttl=60');
@@ -398,7 +397,7 @@ describe('ocr', () => {
     const { id } = await uploaded();
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/ocr`,
+      path: `${id}/ocr`,
       token: SM_TOKEN,
       body: {},
     });
@@ -421,7 +420,7 @@ describe('ocr', () => {
     );
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/ocr`,
+      path: `${id}/ocr`,
       token: SM_TOKEN,
       body: {},
     });
@@ -432,14 +431,14 @@ describe('ocr', () => {
   it('refuses OCR before the bytes arrive, retryably', async () => {
     const state = await call({
       method: 'POST',
-      path: 'documents/customer/upload-url',
+      path: 'customer/upload-url',
       token: SM_TOKEN,
       body: uploadBody,
     });
     const id = (state.body as { documentId: string }).documentId;
     const ocr = await call({
       method: 'POST',
-      path: `documents/${id}/ocr`,
+      path: `${id}/ocr`,
       token: SM_TOKEN,
       body: {},
     });
@@ -454,7 +453,7 @@ describe('ocr', () => {
     const { id } = await uploaded();
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/ocr`,
+      path: `${id}/ocr`,
       token: SM_TOKEN,
       body: {},
     });
@@ -479,7 +478,7 @@ describe('ocr', () => {
     const { id } = await uploaded();
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/ocr`,
+      path: `${id}/ocr`,
       token: SM_TOKEN,
       body: {},
     });
@@ -512,7 +511,7 @@ describe('confirm', () => {
     const { id } = await uploaded();
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/confirm`,
+      path: `${id}/confirm`,
       token: SM_TOKEN,
       body: { decision: 'confirmed', fields: { firstName: 'Ana-Marie', idNumber: 'P1234567' } },
     });
@@ -535,7 +534,7 @@ describe('confirm', () => {
     const { id } = await uploaded();
     const state = await call({
       method: 'POST',
-      path: `documents/${id}/confirm`,
+      path: `${id}/confirm`,
       token: SM_TOKEN,
       body: { decision: 'confirmed', fields: { idNumber: 'P1234567' } },
     });
@@ -547,7 +546,7 @@ describe('confirm', () => {
     const { id } = await uploaded();
     const rejected = await call({
       method: 'POST',
-      path: `documents/${id}/confirm`,
+      path: `${id}/confirm`,
       token: SM_TOKEN,
       body: { decision: 'rejected', fields: { notes: 'Unreadable' } },
     });
@@ -555,7 +554,7 @@ describe('confirm', () => {
     expect(rejected.body).toMatchObject({ verificationStatus: 'rejected' });
     const empty = await call({
       method: 'POST',
-      path: `documents/${id}/confirm`,
+      path: `${id}/confirm`,
       token: SM_TOKEN,
       body: { decision: 'confirmed', fields: {} },
     });
@@ -566,7 +565,7 @@ describe('confirm', () => {
     const { id } = await uploaded();
     await call({
       method: 'POST',
-      path: `documents/${id}/confirm`,
+      path: `${id}/confirm`,
       token: SM_TOKEN,
       body: { decision: 'confirmed', fields: { idNumber: 'P1234567' } },
     });

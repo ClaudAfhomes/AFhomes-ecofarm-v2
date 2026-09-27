@@ -39,7 +39,18 @@ export function deny(res: VercelResponse, denied: Denied): void {
   res.status(denied.error.status).json({ error: denied.error.error });
 }
 
-/** The sub-path a family handler is dispatching on, e.g. `sales` -> `42/payments`. */
+/**
+ * The sub-path a family handler is dispatching on, e.g. `sales` -> `42/payments`.
+ *
+ * CANONICAL ROUTING CONTRACT (Phase 13): the sub-path NEVER carries the family
+ * prefix. The router strips `/api/v1/<family>/` before dispatch, so a handler
+ * matches `42/payments` - never `sales/42/payments`. The collection root is
+ * always `''`. The single exception is an exact-path family (`auth`), whose
+ * configured full path passes through unchanged.
+ *
+ * Handler tests must pass the same stripped paths production sends; a test
+ * that passes a prefixed path is testing a request that cannot exist.
+ */
 export function subPath(req: VercelRequest): string {
   return String(req.query.familyPath ?? '').replace(/^\/+|\/+$/g, '');
 }
@@ -49,11 +60,7 @@ export function method(req: VercelRequest): string {
 }
 
 /** True when the request matches `VERB /pattern`; captures params on success. */
-export function route(
-  req: VercelRequest,
-  verb: string,
-  pattern: RegExp,
-): RegExpMatchArray | null {
+export function route(req: VercelRequest, verb: string, pattern: RegExp): RegExpMatchArray | null {
   if (method(req) !== verb.toUpperCase()) return null;
   return subPath(req).match(pattern);
 }
@@ -125,7 +132,11 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
 
   // Postgres unique violation (23505) surfaces as a duplicate conflict rather
   // than an opaque 500.
-  if (error && 'code' in (error as Record<string, unknown>) && (error as { code?: string }).code === '23505') {
+  if (
+    error &&
+    'code' in (error as Record<string, unknown>) &&
+    (error as { code?: string }).code === '23505'
+  ) {
     return fail(res, 'CONFLICT', 'A record with these details already exists', 409);
   }
   return fail(res, 'INTERNAL', 'Internal server error', 500);

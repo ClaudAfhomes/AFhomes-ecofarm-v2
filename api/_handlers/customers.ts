@@ -151,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(201).json(toCustomer(data as Record<string, unknown>));
     }
 
-    const detail = route(req, 'GET', /^customers\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
@@ -165,7 +165,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(toCustomer(data as Record<string, unknown>));
     }
 
-    const update = route(req, 'PATCH', /^customers\/([0-9a-f-]+)$/);
+    const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);
     if (update) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -226,7 +226,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(toCustomer(after as Record<string, unknown>));
     }
 
-    const token = route(req, 'POST', /^customers\/([0-9a-f-]+)\/onboarding-token$/);
+    const token = route(req, 'POST', /^([0-9a-f-]+)\/onboarding-token$/);
     if (token) {
       const auth = await authorizeAfHomes(req, 'finance.card_activation', 'update');
       if ('error' in auth) return deny(res, auth);

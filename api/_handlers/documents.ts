@@ -146,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     /* ---------------- issue an upload grant ---------------- */
-    const upload = route(req, 'POST', /^documents\/(customer|ost_application)\/upload-url$/);
+    const upload = route(req, 'POST', /^(customer|ost_application)\/upload-url$/);
     if (upload) {
       const subjectType = upload[1] as Subject;
       const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
@@ -239,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- list (scoped) ---------------- */
-    if (subPath(req) === 'documents' && method(req) === 'GET') {
+    if (subPath(req) === '' && method(req) === 'GET') {
       const subjectType = typeof req.query.subjectType === 'string' ? req.query.subjectType : '';
       const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId : '';
       if (subjectType !== 'customer' && subjectType !== 'ost_application')
@@ -274,7 +274,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- read one (masked, scoped) ---------------- */
-    const detail = route(req, 'GET', /^documents\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const { data: row, error } = await db
         .from('identity_documents')
@@ -301,7 +301,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- short-lived reviewer download ---------------- */
-    const accessUrl = route(req, 'GET', /^documents\/([0-9a-f-]+)\/access-url$/);
+    const accessUrl = route(req, 'GET', /^([0-9a-f-]+)\/access-url$/);
     if (accessUrl) {
       const { data: row, error } = await db
         .from('identity_documents')
@@ -330,7 +330,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- run OCR (suggestions only) ---------------- */
-    const ocr = route(req, 'POST', /^documents\/([0-9a-f-]+)\/ocr$/);
+    const ocr = route(req, 'POST', /^([0-9a-f-]+)\/ocr$/);
     if (ocr) {
       const { data: row, error } = await db
         .from('identity_documents')
@@ -480,7 +480,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- human confirmation (the only authority) ---------------- */
-    const confirm = route(req, 'POST', /^documents\/([0-9a-f-]+)\/confirm$/);
+    const confirm = route(req, 'POST', /^([0-9a-f-]+)\/confirm$/);
     if (confirm) {
       const { data: row, error } = await db
         .from('identity_documents')

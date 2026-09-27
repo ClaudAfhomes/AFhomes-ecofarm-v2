@@ -124,7 +124,8 @@ const SELECT_REDEMPTION =
   '*, customers!inner(first_name, middle_name, last_name, suffix), ' +
   'memberships!inner(membership_number)';
 
-const ITEM_SELECT = 'id, code, name, description, category, points_cost, is_active, sort_order, created_at, updated_at';
+const ITEM_SELECT =
+  'id, code, name, description, category, points_cost, is_active, sort_order, created_at, updated_at';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
@@ -167,7 +168,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({
         membershipId: resolved.membership.id,
         membershipNumber: resolved.membership.membership_number,
-        customerDisplayName: (await displayNameFor(db, resolved.membership.customer_id)) ?? 'Unknown customer',
+        customerDisplayName:
+          (await displayNameFor(db, resolved.membership.customer_id)) ?? 'Unknown customer',
         productName: resolved.membership.product_name,
         membershipStatus: resolved.membership.status,
         expired:
@@ -196,7 +198,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!includeInactive) query = query.eq('is_active', true);
       const { data, error } = await query.order('sort_order').order('name');
       if (error) throw error;
-      return list(res, (data ?? []).map((row: Record<string, unknown>) => toItem(row)));
+      return list(
+        res,
+        (data ?? []).map((row: Record<string, unknown>) => toItem(row)),
+      );
     }
 
     /* ================================================================
@@ -285,7 +290,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'create');
       if ('error' in auth) return deny(res, auth);
       const parsed = createRedemptionRequestSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Check the redemption details.', 400);
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Check the redemption details.', 400);
 
       const { membershipId, redemptionItemId, quantity, clientTransactionId } = parsed.data;
 
@@ -317,8 +323,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const row = (Array.isArray(data) ? data[0] : data) as
-        | Record<string, string | number>
-        | undefined;
+        Record<string, string | number> | undefined;
       if (!row) return fail(res, 'INTERNAL', 'The redemption could not be completed.', 500);
 
       return res.status(201).json({
@@ -379,7 +384,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ================================================================ */
-    const detail = route(req, 'GET', /^redemptions\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
       if ('error' in auth) return deny(res, auth);

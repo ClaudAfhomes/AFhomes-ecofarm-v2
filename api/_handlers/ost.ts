@@ -196,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     /* ---------------- public: resolve a referral code ---------------- */
-    const resolve = route(req, 'GET', /^ost\/referrals\/(.+)$/);
+    const resolve = route(req, 'GET', /^referrals\/(.+)$/);
     if (resolve) {
       const verdict = consumeIdentifierAttempt(req, 'public-ost');
       if (!verdict.allowed)
@@ -218,7 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- public: submit an application ---------------- */
-    if (subPath(req) === 'ost/applications' && method(req) === 'POST') {
+    if (subPath(req) === 'applications' && method(req) === 'POST') {
       const verdict = consumeIdentifierAttempt(req, 'public-ost-submit');
       if (!verdict.allowed)
         return fail(res, 'RATE_LIMITED', 'Too many attempts. Try again shortly.', 429);
@@ -324,7 +324,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: list applications (scoped) ---------------- */
-    if (subPath(req) === 'ost/applications' && method(req) === 'GET') {
+    if (subPath(req) === 'applications' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.ost_registrations');
       if ('error' in auth) return deny(res, auth);
       const statusFilter =
@@ -377,7 +377,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: application detail ---------------- */
-    const detail = route(req, 'GET', /^ost\/applications\/([0-9a-f-]+)$/);
+    const detail = route(req, 'GET', /^applications\/([0-9a-f-]+)$/);
     if (detail) {
       const auth = await authorizeAfHomes(req, 'network.ost_registrations');
       if ('error' in auth) return deny(res, auth);
@@ -401,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: approve ---------------- */
-    const approve = route(req, 'POST', /^ost\/applications\/([0-9a-f-]+)\/approve$/);
+    const approve = route(req, 'POST', /^applications\/([0-9a-f-]+)\/approve$/);
     if (approve) {
       const auth = await authorizeAfHomes(req, 'network.ost_registrations', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -592,7 +592,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: reject ---------------- */
-    const reject = route(req, 'POST', /^ost\/applications\/([0-9a-f-]+)\/reject$/);
+    const reject = route(req, 'POST', /^applications\/([0-9a-f-]+)\/reject$/);
     if (reject) {
       const auth = await authorizeAfHomes(req, 'network.ost_registrations', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -651,8 +651,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     /* ---------------- staff: members (scoped, OST owns self) ---------------- */
     const membersPath = subPath(req);
-    const memberSingle = membersPath.match(/^ost\/members\/([0-9a-f-]+)$/);
-    if ((membersPath === 'ost/members' || memberSingle) && method(req) === 'GET') {
+    const memberSingle = membersPath.match(/^members\/([0-9a-f-]+)$/);
+    if ((membersPath === 'members' || memberSingle) && method(req) === 'GET') {
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal) return deny(res, principal);
       const single = memberSingle;
@@ -730,7 +730,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: my referral codes ---------------- */
-    if (subPath(req) === 'ost/referral-codes/me' && method(req) === 'GET') {
+    if (subPath(req) === 'referral-codes/me' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
       const { data, error } = await db
@@ -755,7 +755,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- staff: issue a referral code (SM self-service) ---------------- */
-    if (subPath(req) === 'ost/referral-codes' && method(req) === 'POST') {
+    if (subPath(req) === 'referral-codes' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
       const parsed = createOstReferralCodeSchema.safeParse(jsonBody(req) ?? {});

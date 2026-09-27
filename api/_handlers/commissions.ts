@@ -86,12 +86,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ---------------- explicit qualification decision ---------------- */
-    const qualify = route(req, 'POST', /^commissions\/([0-9a-f-]+)\/qualify$/);
+    const qualify = route(req, 'POST', /^([0-9a-f-]+)\/qualify$/);
     if (qualify) {
       const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
       if ('error' in auth) return deny(res, auth);
       const parsed = qualifyCommissionSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'A qualification decision needs notes', 400);
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'A qualification decision needs notes', 400);
 
       const id = qualify[1]!;
       const { data: before, error: readError } = await db

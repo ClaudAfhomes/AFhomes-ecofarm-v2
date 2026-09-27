@@ -207,9 +207,9 @@ describe('seller scope on sales', () => {
   it('an unrelated seller cannot open the detail, summary or payments by URL', async () => {
     install();
     for (const path of [
-      `sales/${SALE.downPaid}`,
-      `sales/${SALE.downPaid}/summary`,
-      `sales/${SALE.downPaid}/payments`,
+      `${SALE.downPaid}`,
+      `${SALE.downPaid}/summary`,
+      `${SALE.downPaid}/payments`,
     ]) {
       const state = await call(sales, { path, token: TOKEN2.salesManager });
       expect(state.status, path).toBe(404);
@@ -221,9 +221,9 @@ describe('seller scope on sales', () => {
     // Every fixture sale belongs to the admin seller, who holds both finance
     // grants here; finance scope therefore applies to each read.
     for (const path of [
-      `sales/${SALE.downPaid}`,
-      `sales/${SALE.downPaid}/summary`,
-      `sales/${SALE.downPaid}/payments`,
+      `${SALE.downPaid}`,
+      `${SALE.downPaid}/summary`,
+      `${SALE.downPaid}/payments`,
     ]) {
       const state = await call(sales, { path, token: TOKEN2.finance });
       expect(state.status, path).toBe(200);
@@ -232,7 +232,7 @@ describe('seller scope on sales', () => {
 
   it('a caller with no sale scope is denied, never leaked through', async () => {
     install();
-    const state = await call(sales, { path: `sales/${SALE.downPaid}`, token: TOKEN2.hr });
+    const state = await call(sales, { path: `${SALE.downPaid}`, token: TOKEN2.hr });
     expect(state.status).toBe(403);
   });
 });
@@ -263,7 +263,7 @@ describe('card plan selection and frozen snapshots', () => {
     const product = db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!;
     product.cash_price = '99999.99';
     const reread = await call(sales, {
-      path: `sales/${(state.body as { id: string }).id}`,
+      path: `${(state.body as { id: string }).id}`,
       token: TOKEN2.finance,
     });
     expect(reread.body).toMatchObject({ cashPrice: '60000.00', expectedCommission: '2400.00' });
@@ -294,7 +294,7 @@ describe('payment recording and verification', () => {
     const db = install();
     const state = await call(sales, {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/payments`,
+      path: `${SALE.unpaid}/payments`,
       token: TOKEN2.finance,
       body: { amount: '10000.00', paymentType: 'down_payment', method: 'cash' },
     });
@@ -311,7 +311,7 @@ describe('payment recording and verification', () => {
       { id: 'c', sale_id: SALE.unpaid, amount: '500.00', status: 'rejected' },
     );
     const state = await call(sales, {
-      path: `sales/${SALE.unpaid}/summary`,
+      path: `${SALE.unpaid}/summary`,
       token: TOKEN2.finance,
     });
     expect(state.status).toBe(200);
@@ -330,7 +330,7 @@ describe('payment recording and verification', () => {
     install();
     const state = await call(sales, {
       method: 'POST',
-      path: `payments/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/verify`,
+      path: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/verify`,
       token: TOKEN2.finance,
       body: { decision: 'verified' },
     });
@@ -342,7 +342,7 @@ describe('payment recording and verification', () => {
     install({ rpcErrors: { verify_card_payment: { message: 'PAYMENT_NOT_PENDING:verified' } } });
     const state = await call(sales, {
       method: 'POST',
-      path: `payments/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/verify`,
+      path: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1/verify`,
       token: TOKEN2.finance,
       body: { decision: 'verified' },
     });
@@ -363,7 +363,7 @@ describe('activation and customer onboarding', () => {
     });
     const denied = await call(sales, {
       method: 'POST',
-      path: `sales/${SALE.unpaid}/activate`,
+      path: `${SALE.unpaid}/activate`,
       token: TOKEN2.finance,
       body: {},
     });
@@ -374,7 +374,7 @@ describe('activation and customer onboarding', () => {
     const db = install();
     const state = await call(sales, {
       method: 'POST',
-      path: `sales/${SALE.fullyPaid}/activate`,
+      path: `${SALE.fullyPaid}/activate`,
       token: TOKEN2.finance,
       body: { validityMonths: 12 },
     });
@@ -409,7 +409,7 @@ describe('activation and customer onboarding', () => {
     });
     const state = await call(sales, {
       method: 'POST',
-      path: `sales/${SALE.fullyPaid}/activate`,
+      path: `${SALE.fullyPaid}/activate`,
       token: TOKEN2.finance,
       body: {},
     });
@@ -421,7 +421,7 @@ describe('activation and customer onboarding', () => {
     const db = install();
     const state = await call(customers, {
       method: 'POST',
-      path: `customers/${CUSTOMER.active}/onboarding-token`,
+      path: `${CUSTOMER.active}/onboarding-token`,
       token: TOKEN2.finance,
       body: {},
     });
