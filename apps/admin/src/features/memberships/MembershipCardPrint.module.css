@@ -1,0 +1,121 @@
+/* Printable membership card. Screen shows management chrome around the card;
+   print shows the card alone at CR80 proportions with a scannable QR. */
+
+.screenOnly {
+  margin-bottom: 24px;
+}
+
+.card {
+  width: 85.6mm;
+  min-height: 54mm;
+  padding: 6mm;
+  border: 1px solid #1f2937;
+  border-radius: 3mm;
+  background: #fff;
+  color: #111827;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5mm;
+}
+
+.cardHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 4mm;
+}
+
+.brand {
+  margin: 0;
+  font-size: 11pt;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.tier {
+  margin: 0;
+  font-size: 8pt;
+  color: #374151;
+}
+
+.memberName {
+  margin: 0;
+  font-size: 12pt;
+  font-weight: 700;
+}
+
+.membershipNumber {
+  margin: 0;
+  font-size: 9pt;
+  letter-spacing: 0.08em;
+}
+
+.cardBody {
+  display: flex;
+  gap: 5mm;
+  align-items: center;
+}
+
+.cardBody img {
+  width: 28mm;
+  height: 28mm;
+}
+
+.codeLabel {
+  margin: 0;
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #374151;
+}
+
+.code {
+  margin: 0;
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.noCodes {
+  margin: 0;
+  font-size: 8pt;
+  color: #374151;
+}
+
+.cardFoot {
+  margin: auto 0 0;
+  font-size: 7pt;
+  color: #4b5563;
+}
+
+@media print {
+  body.afh-print-card aside,
+  body.afh-print-card header,
+  body.afh-print-card nav {
+    display: none !important;
+  }
+
+  body.afh-print-card main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  .screenOnly {
+    display: none !important;
+  }
+
+  .printRoot {
+    margin: 0;
+  }
+
+  .card {
+    border-width: 0.5mm;
+    box-shadow: none;
+  }
+}

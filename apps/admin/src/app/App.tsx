@@ -20,6 +20,9 @@ import { CmsMediaPage } from '../features/cms/CmsMediaPage';
 import { CmsPagesPage } from '../features/cms/CmsPagesPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
+import { MembershipCardPrintPage } from '../features/memberships/MembershipCardPrintPage';
+import { MembershipDetailPage } from '../features/memberships/MembershipDetailPage';
+import { MembershipsPage } from '../features/memberships/MembershipsPage';
 import { OstApplicationDetailPage } from '../features/ost/OstApplicationDetailPage';
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
 import { OstMembersPage } from '../features/ost/OstMembersPage';
@@ -81,6 +84,15 @@ export default function App() {
           <Route
             path="/admin/ost/referral-code"
             element={protectedPage(<OstReferralCodesPage />)}
+          />
+          {/* Membership cards. List/detail/print are gated on the
+              finance.card_activation nav key; rotation additionally requires
+              the update grant, which the server checks. */}
+          <Route path="/admin/memberships" element={protectedPage(<MembershipsPage />)} />
+          <Route path="/admin/memberships/:id" element={protectedPage(<MembershipDetailPage />)} />
+          <Route
+            path="/admin/memberships/:id/card"
+            element={protectedPage(<MembershipCardPrintPage />)}
           />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />

@@ -507,6 +507,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'CONFLICT', `Sale is not activatable from status "${status}"`, 409);
       }
 
+      // Phase 10 card issuance stamp. Informational only and best-effort: the
+      // activation above is already committed, so a stamp failure is logged
+      // and never fails the activation. Only fresh activations stamp; a repeat
+      // (already_active) leaves the original issuance moment untouched.
+      if (row.already_active !== true && row.membership_id) {
+        const { error: stampError } = await db
+          .from('memberships')
+          .update({ card_issued_at: new Date().toISOString(), card_issued_by: auth.userId })
+          .eq('id', row.membership_id);
+        if (stampError) {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[api] sales: card issuance stamp failed:',
+            stampError instanceof Error ? stampError.message : stampError,
+          );
+        }
+      }
+
       return res.status(200).json({
         membershipId: row.membership_id,
         membershipNumber: row.membership_number,

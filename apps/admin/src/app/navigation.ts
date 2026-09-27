@@ -40,6 +40,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         label: 'Activation Queue',
         module: 'finance.card_activation',
       },
+      {
+        to: '/admin/memberships',
+        label: 'Memberships',
+        module: 'finance.card_activation',
+      },
     ],
   },
   {

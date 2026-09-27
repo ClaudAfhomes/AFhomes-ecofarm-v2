@@ -249,6 +249,23 @@ export type {
   OstReferralCodeRecord,
 } from './schemas/ost.js';
 
+/* ---- Phase 10: membership card management ----
+   Hash-only credentials can be rotated but never recovered, so the card view
+   carries everything printable EXCEPT the codes, and rotation returns the
+   plaintext pair exactly once. Printing records a print; it never rotates. */
+export {
+  membershipCardSchema,
+  reissueMembershipCardSchema,
+  reissuedMembershipCardSchema,
+  markedPrintedSchema,
+} from './schemas/card.js';
+export type {
+  MembershipCard,
+  ReissueMembershipCardRequest,
+  ReissuedMembershipCard,
+  MarkedPrinted,
+} from './schemas/card.js';
+
 /* ---- Phase 6: staff-managed public website CMS ---- */
 export {
   cmsDocumentKeySchema,
