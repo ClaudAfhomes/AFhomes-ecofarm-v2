@@ -3,7 +3,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
     },
     "dev": {
       "cache": false,

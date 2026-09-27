@@ -575,13 +575,19 @@ Single Vercel project, single origin:
 - `/api/v1/*` → the single Function `api/router.ts`
 - `/health` → readiness probe, also the only scheduled job (daily `0 0 * * *`)
 
-Build chain: `pnpm typecheck` → `scripts/prepare-vercel-env.mjs` →
+Build chain: `pnpm typecheck:deploy` → `scripts/prepare-vercel-env.mjs` →
 `turbo run build` → `scripts/assemble-vercel-output.mjs` (merges both SPAs
-into `vercel-static/`). The leading `typecheck` is load-bearing: `turbo run
+into `vercel-static/`). The leading typecheck is load-bearing: `turbo run
 build` only builds the two SPAs (each runs its own `tsc --noEmit` first), and
 nothing else in the chain typechecks `api/` — so without it a TypeScript error
-in deployable API code would ship silently. Never remove the typecheck step
-from `vercel.json`'s `buildCommand`.
+in deployable API code would ship silently. `typecheck:deploy` is `turbo run
+typecheck` (api, apps, shared packages) WITHOUT the `tsc -p supabase` half:
+`supabase/` holds operator-only sources (migrations runner, seeds, bootstrap)
+that `.vercelignore` deliberately excludes from the build context, so the full
+`pnpm typecheck` fails on Vercel with TS5057. Full local validation always
+runs `pnpm typecheck` (both halves). Never remove the typecheck step from
+`vercel.json`'s `buildCommand`, and never "fix" a build by skipping API
+typechecking.
 
 - `functions["api/router.ts"].includeFiles` **must stay `packages/**`**.
   Narrowing it crashes the deployed function with
