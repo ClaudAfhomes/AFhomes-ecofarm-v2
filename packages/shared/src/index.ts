@@ -6,3 +6,13 @@ export {
   multiplyMoney,
   subtractMoney,
 } from './money.js';
+export {
+  RECOVERY_PASSWORD_MIN_LENGTH,
+  RECOVERY_SENT_MESSAGE,
+  validateRecoveryPassword,
+  isValidRecoveryEmail,
+  classifyRecoveryRequestError,
+  buildRecoveryRedirect,
+  isAllowedRecoveryRedirect,
+} from './auth-recovery.js';
+export type { RecoveryRequestOutcome } from './auth-recovery.js';

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { Button } from '@jad/ui';
 
 import { useSession } from '../../lib/session';
@@ -75,6 +75,10 @@ export function AdminLoginPage() {
             {pending ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
+
+        <p className={styles.body}>
+          <Link to="/admin/forgot-password">Forgot your password?</Link>
+        </p>
       </div>
     </main>
   );

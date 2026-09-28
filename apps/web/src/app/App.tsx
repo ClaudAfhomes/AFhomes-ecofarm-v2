@@ -5,7 +5,9 @@ import { NotFound } from '@jad/ui';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
 import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
+import { CustomerForgotPasswordPage } from '../features/customer/CustomerForgotPasswordPage';
 import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
+import { CustomerResetPasswordPage } from '../features/customer/CustomerResetPasswordPage';
 import { CustomerMembershipPage } from '../features/customer/CustomerMembershipPage';
 import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
@@ -71,6 +73,11 @@ export default function App() {
 
       <Route path="/customer/login" element={<CustomerLoginPage />} />
       <Route path="/customer/activate" element={<CustomerActivatePage />} />
+      {/* Phase 16 recovery: public by necessity, alongside login/activate.
+          Static segments outrank the marketing `:slug`, so these can never be
+          swallowed by the CMS routes. */}
+      <Route path="/customer/forgot-password" element={<CustomerForgotPasswordPage />} />
+      <Route path="/customer/reset-password" element={<CustomerResetPasswordPage />} />
       {/* Public OST registration. Outside the customer layout on purpose:
           the applicant has no account yet, so none of the portal guards apply. */}
       <Route path="/ost/register" element={<OstRegisterPage />} />

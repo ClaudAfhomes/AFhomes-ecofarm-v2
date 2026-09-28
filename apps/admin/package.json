@@ -14,6 +14,7 @@
   "dependencies": {
     "@jad/config": "workspace:*",
     "@jad/contracts": "workspace:*",
+    "@jad/shared": "workspace:*",
     "@jad/ui": "workspace:*",
     "@supabase/supabase-js": "2.117.2",
     "@tanstack/react-query": "^5.101.4",

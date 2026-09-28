@@ -101,6 +101,9 @@ export function CustomerLoginPage() {
         <p className={authStyles.body}>
           Received an activation code? <Link to="/customer/activate">Activate your account</Link>
         </p>
+        <p className={authStyles.body}>
+          <Link to="/customer/forgot-password">Forgot your password?</Link>
+        </p>
         <p className={authStyles.footnote}>
           Staff member? Use the{' '}
           <a href={env.VITE_ADMIN_URL} rel="noreferrer">

@@ -13,7 +13,9 @@ import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
+import { AdminForgotPasswordPage } from '../features/auth/AdminForgotPasswordPage';
 import { AdminLoginPage } from '../features/auth/AdminLoginPage';
+import { AdminResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
 import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
 import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
 import { CmsMediaPage } from '../features/cms/CmsMediaPage';
@@ -42,6 +44,10 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/admin/login" element={<AdminLoginPage />} />
+        {/* Phase 16 recovery: public by necessity (the visitor has no usable
+            session), outside RequireRole like the login screen. */}
+        <Route path="/admin/forgot-password" element={<AdminForgotPasswordPage />} />
+        <Route path="/admin/reset-password" element={<AdminResetPasswordPage />} />
         <Route element={<AdminLayout />}>
           <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
           <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
