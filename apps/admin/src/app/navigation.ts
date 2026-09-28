@@ -127,12 +127,49 @@ export const canViewModule = (
   key: AfHomesModuleKey,
 ) => permissions?.some((permission) => permission.moduleKey === key && permission.canView) === true;
 
+const REPORT_MODULES: readonly AfHomesModuleKey[] = [
+  'sales.card_sales',
+  'sales.customers',
+  'sales.card_plans',
+  'finance.payment_verification',
+  'finance.card_activation',
+  'finance.points',
+  'network.commissions',
+  'finance.commission_payouts',
+  'operations.redemption',
+  'network.genealogy',
+  'network.ost_registrations',
+  'network.ost_members',
+];
+
+const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
+  REPORT_MODULES.some((key) => canViewModule(permissions, key));
+
 export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
   return ADMIN_NAV_ITEMS.flatMap((item) => {
-    const dropdown = item.dropdown?.filter((child) => canViewModule(permissions, child.module));
-    if (!canViewModule(permissions, item.module) && !dropdown?.length) return [];
+    const dropdown = item.dropdown?.filter((child) =>
+      child.to === '/admin/reports'
+        ? canViewReports(permissions)
+        : canViewModule(permissions, child.module),
+    );
+    const canViewParent =
+      item.to === '/admin/reports'
+        ? canViewReports(permissions)
+        : canViewModule(permissions, item.module);
+    if (!canViewParent && !dropdown?.length) return [];
     return [{ to: item.to, label: item.label, icon: item.icon, end: item.end, dropdown }];
   });
+}
+
+export function canAccessNavTarget(
+  permissions: readonly AfHomesPermission[] | undefined,
+  pathname: string,
+): boolean {
+  if (pathname === '/admin/reports') return canViewReports(permissions);
+  const sub = findNavSubItem(pathname);
+  const item = findNavItem(pathname);
+  const key = sub?.sub.module ?? item?.module;
+  return !key || canViewModule(permissions, key);
 }
 
 /**

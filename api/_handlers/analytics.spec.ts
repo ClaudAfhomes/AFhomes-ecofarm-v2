@@ -67,6 +67,59 @@ describe('Phase 14 analytics', () => {
     expect((state.body as { redemptions: unknown }).redemptions).toBeNull();
   });
 
+  it('gives HR organization facts without sales or financial scope', async () => {
+    const db = holder.db as FakeSupabase;
+    const hrRole = {
+      id: '20202020-0000-4000-8000-000000000006',
+      slug: 'hr',
+      name: 'HR',
+      is_system: true,
+      is_active: true,
+    };
+    db.rows('roles').push(hrRole);
+    db.rows('staff_role_assignments').find((row) => row.staff_id === STAFF2.hr)!.role_id =
+      hrRole.id;
+    const staffModule = db.rows('modules').find((row) => row.key === 'organization.staff')!;
+    const dashboardModule = db.rows('modules').find((row) => row.key === 'dashboard.view')!;
+    db.rows('role_permissions').push(
+      {
+        role_id: hrRole.id,
+        module_id: dashboardModule.id,
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: hrRole.id,
+        module_id: staffModule.id,
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: false,
+      },
+    );
+    const state = await call(TOKEN2.hr);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      scope: { kind: 'organization' },
+      headline: { totalCardSales: 0, periodVerifiedPayments: '0.00' },
+      organization: { totalStaff: expect.any(Number), activeStaff: expect.any(Number) },
+      commissions: null,
+      redemptions: null,
+    });
+  });
+
+  it('gives OST self scope and its current upperline only', async () => {
+    const state = await call(TOKEN2.ost);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      scope: { kind: 'self' },
+      networkContext: { upperline: { id: STAFF2.salesManager } },
+      organization: null,
+    });
+  });
+
   it('uses immutable snapshot rows for VD, SSM and SM team totals', async () => {
     const db = holder.db as FakeSupabase;
     const sale = db.rows('card_sales')[0]!;

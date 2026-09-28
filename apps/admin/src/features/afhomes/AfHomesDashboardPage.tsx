@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { AnalyticsOverview, AnalyticsPeriod } from '@jad/contracts';
+import { Link } from 'react-router';
+import type {
+  AfHomesModuleKey,
+  AfHomesPermission,
+  AnalyticsOverview,
+  AnalyticsPeriod,
+} from '@jad/contracts';
 import { EmptyState, ErrorState, PageHeader, Select, Skeleton } from '@jad/ui';
+import { canViewModule } from '../../app/navigation';
+import { useSession } from '../../lib/session';
 import { getAnalyticsOverview } from './services';
 import styles from './AfHomesDashboardPage.module.css';
 
@@ -11,20 +19,72 @@ const PERIODS = [
   { value: 'month', label: 'Month' },
   { value: 'year', label: 'Year' },
 ] as const;
+type Metric = [label: string, value: string | number];
+type Action = { to: string; label: string; module: AfHomesModuleKey };
+const ACTIONS: Action[] = [
+  { to: '/admin/finance/payments', label: 'Payment queue', module: 'finance.payment_verification' },
+  { to: '/admin/finance/activation', label: 'Activation queue', module: 'finance.card_activation' },
+  { to: '/admin/staff', label: 'Staff records', module: 'organization.staff' },
+  { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
+  { to: '/admin/sales', label: 'Card sales', module: 'sales.card_sales' },
+  { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
+  { to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' },
+  { to: '/admin/ost/applications', label: 'OST applications', module: 'network.ost_registrations' },
+  { to: '/admin/ost/referral-code', label: 'My referral code', module: 'network.referrals' },
+  { to: '/admin/redemption', label: 'POS / QR scanner', module: 'operations.redemption' },
+  { to: '/admin/redemption/history', label: 'Redemption history', module: 'operations.redemption' },
+  { to: '/admin/redemption/items', label: 'Redemption catalog', module: 'operations.catalog' },
+];
 
-function MetricCards({ data }: { data: AnalyticsOverview }) {
-  const values: [string, string | number][] = [
-    ['Customers', data.headline.totalCustomers],
-    ['New customers', data.headline.newCustomers],
-    ['Card sales', data.headline.periodSales],
+export const dashboardActions = (permissions?: readonly AfHomesPermission[]) =>
+  ACTIONS.filter((action) => canViewModule(permissions, action.module));
+
+export function dashboardMetrics(data: AnalyticsOverview): Metric[] {
+  if (data.scope.kind === 'organization' && data.organization)
+    return [
+      ['Total staff', data.organization.totalStaff],
+      ['Active staff', data.organization.activeStaff],
+      ['Invited staff', data.organization.invitedStaff],
+      ['Inactive staff', data.organization.inactiveStaff],
+      ['Suspended staff', data.organization.suspendedStaff],
+      ['Active departments', data.organization.activeDepartments],
+    ];
+  if (data.scope.kind === 'redemption')
+    return data.redemptions
+      ? [
+          ['Redemptions', data.redemptions.count],
+          ['Points redeemed', data.redemptions.pointsRedeemed],
+        ]
+      : [];
+  if (data.scope.kind === 'finance')
+    return [
+      ['Pending payments', data.queues.pendingPaymentVerification],
+      ['Verified payments', `₱${data.headline.periodVerifiedPayments}`],
+      ['Fully paid sales', data.queues.fullPaidSales],
+      ['Activation queue', data.queues.activationReadySales],
+      ['Rejected payments', data.queues.rejectedPayments],
+      ['Active memberships', data.headline.activatedMemberships],
+    ];
+  const values: Metric[] = [
+    [data.scope.kind === 'self' ? 'My customers' : 'Customers', data.headline.totalCustomers],
+    [data.scope.kind === 'self' ? 'My sales' : 'Card sales', data.headline.periodSales],
     ['Frozen sale value', `₱${data.headline.grossFrozenSaleValue}`],
-    ['Verified payments', `₱${data.headline.periodVerifiedPayments}`],
     ['Active memberships', data.headline.activatedMemberships],
   ];
-  if (data.redemptions)
-    values.push(
-      ['Redemptions', data.redemptions.count],
-      ['Points redeemed', data.redemptions.pointsRedeemed],
+  if (data.scope.kind === 'global') {
+    values.splice(1, 0, ['New customers', data.headline.newCustomers]);
+    values.push(['Verified payments', `₱${data.headline.periodVerifiedPayments}`]);
+  }
+  return values;
+}
+
+function MetricCards({ values }: { values: Metric[] }) {
+  if (!values.length)
+    return (
+      <EmptyState
+        title="No dashboard activity"
+        description="Your permitted operational areas have no activity to summarize yet."
+      />
     );
   return (
     <div className={styles.metrics}>
@@ -39,11 +99,11 @@ function MetricCards({ data }: { data: AnalyticsOverview }) {
 }
 
 function Trend({ data }: { data: AnalyticsOverview }) {
-  if (data.trends.length === 0)
+  if (!data.trends.length)
     return (
       <EmptyState
         title="No activity in this period"
-        description="This chart will populate from real sales, verified payments, activations, and completed redemptions."
+        description="This chart will populate from real activity inside your authorized scope."
       />
     );
   const maximum = Math.max(
@@ -51,11 +111,7 @@ function Trend({ data }: { data: AnalyticsOverview }) {
     ...data.trends.map((point) => point.sales + point.activations + point.redemptions),
   );
   return (
-    <div
-      className={styles.chart}
-      role="img"
-      aria-label="Sales, activation, and redemption activity chart"
-    >
+    <div className={styles.chart} role="img" aria-label="Authorized operational activity chart">
       {data.trends.map((point) => {
         const total = point.sales + point.activations + point.redemptions;
         return (
@@ -78,15 +134,17 @@ function Trend({ data }: { data: AnalyticsOverview }) {
 
 export function AfHomesDashboardPage() {
   const [period, setPeriod] = useState<AnalyticsPeriod>('month');
+  const { user } = useSession();
   const query = useQuery({
     queryKey: ['analytics', 'overview', period],
     queryFn: () => getAnalyticsOverview(period),
   });
+  const actions = dashboardActions(user?.afHomesPermissions);
   return (
     <section>
       <PageHeader
-        title="AF Homes Dashboard"
-        description="Role-scoped operational facts from the AF Homes database"
+        title={`${user?.roleName ?? 'AF Homes'} Dashboard`}
+        description="Live operational facts limited to your effective permissions and data scope"
         actions={
           <Select
             aria-label="Analytics period"
@@ -96,8 +154,17 @@ export function AfHomesDashboardPage() {
           />
         }
       />
+      {actions.length ? (
+        <nav className={styles.actions} aria-label="Dashboard actions">
+          {actions.map((action) => (
+            <Link key={action.to} to={action.to}>
+              {action.label}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
       {query.isPending ? (
-        <div className={styles.metrics}>
+        <div className={styles.metrics} role="status" aria-label="Loading dashboard">
           {Array.from({ length: 6 }, (_, index) => (
             <Skeleton key={index} />
           ))}
@@ -110,7 +177,13 @@ export function AfHomesDashboardPage() {
             Scope: {query.data.scope.kind} · {new Date(query.data.window.from).toLocaleDateString()}
             –{new Date(query.data.window.to).toLocaleDateString()}
           </p>
-          <MetricCards data={query.data} />
+          <MetricCards values={dashboardMetrics(query.data)} />
+          {query.data.networkContext?.upperline ? (
+            <aside className={styles.notice}>
+              <strong>Current upperline:</strong> {query.data.networkContext.upperline.name} ·{' '}
+              {query.data.networkContext.upperline.role}
+            </aside>
+          ) : null}
           {query.data.scope.unattributedLegacySaleCount > 0 ? (
             <aside className={styles.notice}>
               <strong>Historical sales awaiting attribution:</strong>{' '}
@@ -118,29 +191,34 @@ export function AfHomesDashboardPage() {
               {query.data.scope.unattributedLegacySaleValue}. They are excluded from team totals.
             </aside>
           ) : null}
-          <h2>Activity trend</h2>
-          <Trend data={query.data} />
           {query.data.sellers ? (
             <section>
               <h2>Current team</h2>
-              <div className={styles.metrics}>
-                <article className={styles.metric}>
-                  <small>Direct reports</small>
-                  <strong>{query.data.sellers.directCount}</strong>
-                </article>
-                <article className={styles.metric}>
-                  <small>Descendants</small>
-                  <strong>{query.data.sellers.descendantCount}</strong>
-                </article>
-                <article className={styles.metric}>
-                  <small>Active sellers</small>
-                  <strong>{query.data.sellers.active}</strong>
-                </article>
-                <article className={styles.metric}>
-                  <small>Inactive sellers</small>
-                  <strong>{query.data.sellers.inactive}</strong>
-                </article>
-              </div>
+              <MetricCards
+                values={[
+                  ['Direct reports', query.data.sellers.directCount],
+                  ['Descendants', query.data.sellers.descendantCount],
+                  ['Active sellers', query.data.sellers.active],
+                  ['Inactive sellers', query.data.sellers.inactive],
+                ]}
+              />
+            </section>
+          ) : null}
+          {query.data.commissions ? (
+            <section>
+              <h2>Commission status</h2>
+              <MetricCards
+                values={Object.entries(query.data.commissions).map(([status, count]) => [
+                  status.replaceAll('_', ' '),
+                  count,
+                ])}
+              />
+            </section>
+          ) : null}
+          {query.data.scope.kind !== 'organization' ? (
+            <section>
+              <h2>Activity trend</h2>
+              <Trend data={query.data} />
             </section>
           ) : null}
           {query.data.salesByPlan.length ? (

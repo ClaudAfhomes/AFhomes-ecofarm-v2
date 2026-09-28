@@ -4,7 +4,14 @@ import { commissionStatusSchema } from './lifecycle.js';
 export const analyticsPeriodSchema = z.enum(['day', 'week', 'month', 'year']);
 export type AnalyticsPeriod = z.infer<typeof analyticsPeriodSchema>;
 
-export const analyticsScopeSchema = z.enum(['global', 'finance', 'team', 'self', 'redemption']);
+export const analyticsScopeSchema = z.enum([
+  'global',
+  'finance',
+  'organization',
+  'team',
+  'self',
+  'redemption',
+]);
 const moneySchema = z.string().regex(/^(0|[1-9][0-9]*)\.\d{2}$/);
 const countSchema = z.number().int().nonnegative();
 
@@ -53,6 +60,21 @@ export const analyticsOverviewSchema = z.object({
       active: countSchema,
       inactive: countSchema,
       byRole: z.record(z.string(), countSchema),
+    })
+    .nullable(),
+  organization: z
+    .object({
+      totalStaff: countSchema,
+      activeStaff: countSchema,
+      inactiveStaff: countSchema,
+      invitedStaff: countSchema,
+      suspendedStaff: countSchema,
+      activeDepartments: countSchema,
+    })
+    .nullable(),
+  networkContext: z
+    .object({
+      upperline: z.object({ id: z.string().uuid(), name: z.string(), role: z.string() }).nullable(),
     })
     .nullable(),
   commissions: z.record(commissionStatusSchema, countSchema).nullable(),

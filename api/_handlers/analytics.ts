@@ -7,7 +7,7 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { serviceClient } from '../_lib/rest.js';
 
 type Row = Record<string, unknown>;
-type ScopeKind = 'global' | 'finance' | 'team' | 'self' | 'redemption';
+type ScopeKind = 'global' | 'finance' | 'organization' | 'team' | 'self' | 'redemption';
 const SELLER_ROLES = new Set(['vice_director', 'senior_sales_manager', 'sales_manager', 'ost']);
 const COMMISSION_STATUSES = [
   'pending',
@@ -63,6 +63,14 @@ function roleScope(principal: AfHomesPrincipal): ScopeKind {
   if (['vice_director', 'senior_sales_manager', 'sales_manager'].includes(principal.roleSlug))
     return 'team';
   if (principal.roleSlug === 'ost') return 'self';
+  if (
+    principal.permissions.some(
+      (permission) =>
+        permission.canView &&
+        ['organization.staff', 'organization.departments'].includes(permission.moduleKey),
+    )
+  )
+    return 'organization';
   return 'redemption';
 }
 
@@ -198,6 +206,36 @@ async function currentTeam(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
   };
 }
 
+async function currentNetworkContext(db: Db, principal: AfHomesPrincipal, kind: ScopeKind) {
+  if (kind !== 'team' && kind !== 'self') return null;
+  const relationshipResult = await db
+    .from('referral_relationships')
+    .select('upline_staff_id')
+    .eq('subject_staff_id', principal.userId)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (relationshipResult.error) throw relationshipResult.error;
+  const uplineId = (relationshipResult.data as Row | null)?.upline_staff_id;
+  if (!uplineId) return { upperline: null };
+  const [staff, assignments, roles] = await Promise.all([
+    rows(db, 'staff_users', 'id,full_name'),
+    rows(db, 'staff_role_assignments', 'staff_id,role_id'),
+    rows(db, 'roles', 'id,name'),
+  ]);
+  const upline = staff.find((row) => row.id === uplineId);
+  const assignment = assignments.find((row) => row.staff_id === uplineId);
+  const role = roles.find((row) => row.id === assignment?.role_id);
+  return {
+    upperline: upline
+      ? {
+          id: String(upline.id),
+          name: String(upline.full_name),
+          role: String(role?.name ?? 'Staff'),
+        }
+      : null,
+  };
+}
+
 function bucketKey(value: unknown, period: AnalyticsPeriod) {
   const date = new Date(String(value));
   if (period === 'day') return date.toISOString().slice(0, 13) + ':00';
@@ -244,6 +282,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       commissionsAll,
       redemptionsAll,
       sellers,
+      organizationStaff,
+      organizationDepartments,
+      networkContext,
     ] = await Promise.all([
       kind === 'global' || kind === 'finance'
         ? rows(db, 'customers', 'id,created_at')
@@ -310,6 +351,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })()
           : [],
       currentTeam(db, principal, kind),
+      kind === 'global' || kind === 'organization' ? rows(db, 'staff_users', 'id,status') : [],
+      kind === 'global' || kind === 'organization' ? rows(db, 'departments', 'id,is_active') : [],
+      currentNetworkContext(db, principal, kind),
     ]);
     const payments = paymentsAll as Row[];
     const memberships = membershipsAll as Row[];
@@ -422,6 +466,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ).length,
       },
       sellers,
+      organization:
+        kind === 'global' || kind === 'organization'
+          ? {
+              totalStaff: organizationStaff.length,
+              activeStaff: organizationStaff.filter((row) => row.status === 'active').length,
+              inactiveStaff: organizationStaff.filter((row) => row.status === 'inactive').length,
+              invitedStaff: organizationStaff.filter((row) => row.status === 'invited').length,
+              suspendedStaff: organizationStaff.filter((row) => row.status === 'suspended').length,
+              activeDepartments: organizationDepartments.filter((row) => row.is_active === true)
+                .length,
+            }
+          : null,
+      networkContext,
       commissions: canCommissions ? commissionCounts : null,
       redemptions: canRedemption
         ? {

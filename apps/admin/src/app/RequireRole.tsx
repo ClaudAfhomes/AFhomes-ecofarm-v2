@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Button, Forbidden, Skeleton, Spinner } from '@jad/ui';
 import { Navigate, useLocation } from 'react-router';
 import { useSession } from '../lib/session';
-import { canViewModule, findNavItem, findNavSubItem } from './navigation';
+import { canAccessNavTarget } from './navigation';
 import styles from './RequireRole.module.css';
 
 function Loading() {
@@ -22,10 +22,7 @@ export function RequireRole({ children }: { children: ReactNode }) {
   if (status !== 'authenticated') {
     return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />;
   }
-  const sub = findNavSubItem(location.pathname);
-  const item = findNavItem(location.pathname);
-  const key = sub?.sub.module ?? item?.module;
-  if (key && !canViewModule(user?.afHomesPermissions, key))
+  if (!canAccessNavTarget(user?.afHomesPermissions, location.pathname))
     return (
       <Forbidden
         action={sessionError ? <Button onClick={() => void revalidate()}>Retry</Button> : undefined}

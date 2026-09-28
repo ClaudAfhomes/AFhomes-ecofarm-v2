@@ -16,6 +16,23 @@
 .scope {
   color: var(--color-text-secondary);
 }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+.actions a {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: 0.65rem;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+.actions a:hover,
+.actions a:focus-visible {
+  border-color: var(--color-brand-primary);
+}
 .notice {
   margin: 1rem 0;
   padding: 1rem;
@@ -43,4 +60,18 @@
 }
 .barColumn small {
   white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+  .metric strong {
+    font-size: 1.25rem;
+    overflow-wrap: anywhere;
+  }
+  .actions a {
+    flex: 1 1 calc(50% - 0.65rem);
+    text-align: center;
+  }
 }

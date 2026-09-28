@@ -16,14 +16,11 @@ describe('AF Homes navigation', () => {
       permission('dashboard.view'),
       permission('organization.staff'),
     ]);
-    // Phase 15 adds the Reports group on `dashboard.view`; the Audit Log
-    // child stays hidden without `governance.audit`.
-    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Organization', 'Reports']);
+    // Phase 25 removes the dead Reports destination when none of its real
+    // report modules are visible.
+    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Organization']);
     expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
       'Staff',
-    ]);
-    expect(items[2]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
-      'Reports',
     ]);
   });
   it('reveals the Audit Log only with the governance grant', () => {
@@ -33,7 +30,6 @@ describe('AF Homes navigation', () => {
     ]);
     expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Reports']);
     expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
-      'Reports',
       'Audit Log',
     ]);
   });
