@@ -827,6 +827,48 @@ async function main(): Promise<void> {
       JSON.stringify(hierarchySnapshot),
     );
 
+    // Preview QA regression: Phase 2 has always allowed Admin/Super Admin to
+    // sell, but those roles do not belong to the genealogy. Phase 14 must not
+    // reject the sale or invent a hierarchy for it.
+    const adminCustomer = uuidFor('preview-qa:admin-customer');
+    const adminSale = uuidFor('preview-qa:admin-sale');
+    const adminCustomerNumber = (
+      await one<{ customer_number: string }>('select * from public.next_customer_number()')
+    ).customer_number;
+    await db.query(
+      `insert into public.customers(id,customer_number,email,phone,first_name,last_name,status)
+       values($1,$2,$3,'09170000000','Preview','Admin Sale','prospect')`,
+      [adminCustomer, adminCustomerNumber, `${RUN}-admin-sale@example.invalid`],
+    );
+    createdCustomerIds.push(adminCustomer);
+    const adminSaleNumber = (
+      await one<{ sale_number: string }>('select * from public.next_sale_number()')
+    ).sale_number;
+    await db.query(
+      `insert into public.card_sales
+       (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,
+        cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
+        commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at,created_by)
+       values($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted',now(),now()+interval '1 year',$5)`,
+      [
+        adminSale,
+        adminSaleNumber,
+        adminCustomer,
+        goldId,
+        staff['super-admin'],
+        gold.cash_price,
+        gold.minimum_down_payment,
+        gold.yearly_points,
+        gold.commission_rate,
+        commissionAmount.v,
+      ],
+    );
+    const adminSnapshot = await one<{ n: number }>(
+      `select count(*)::int n from public.card_sale_hierarchy_snapshots where sale_id=$1`,
+      [adminSale],
+    );
+    check('Admin/Super Admin sale succeeds without fabricated genealogy', adminSnapshot.n === 0);
+
     // Prove an upline correction does not move the old sale, while a new sale
     // takes the new hierarchy. The savepoint leaves the rest of the suite on
     // its original genealogy after this isolated regression proof.
@@ -1690,7 +1732,14 @@ async function main(): Promise<void> {
     );
     for (const fn of definer.rows) {
       const config = (fn.proconfig ?? []).join(',');
-      check(`  ${fn.proname} pins search_path`, /search_path\s*=\s*public/.test(config), config);
+      check(
+        `  ${fn.proname} pins search_path`,
+        /search_path\s*=\s*public/.test(config) ||
+          /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(
+            config,
+          ),
+        config,
+      );
     }
 
     const grants = await db.query<{ proname: string; grantee: string }>(

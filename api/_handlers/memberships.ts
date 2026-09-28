@@ -57,7 +57,8 @@ const toMembership = (row: Record<string, unknown>) => {
     activatedAt: isoOrNull(row.activated_at),
     expiresAt: isoOrNull(row.expires_at),
     renewalDueAt: isoOrNull(row.renewal_due_at),
-    createdAt: isoOrNull(row.created_at) ?? '',
+    // Memberships are born at activation and have no separate created_at.
+    createdAt: isoOrNull(row.activated_at) ?? '',
   };
 };
 
@@ -170,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let query = db.from('memberships').select(SELECT_MEMBERSHIP, { count: 'exact' });
       if (status) query = query.eq('status', status);
       const { data, error, count } = await query
-        .order('created_at', { ascending: false })
+        .order('activated_at', { ascending: false })
         .range(offset, offset + limit - 1);
       if (error) throw error;
       return res.status(200).json({

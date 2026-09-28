@@ -7,8 +7,6 @@ import {
   SALE_STATUS_LABEL,
   SALE_STATUS_TONE,
   formatMoney,
-  formatPoints,
-  formatRate,
 } from './format';
 import { getSalePayments, getSaleSummary, getSales } from './services';
 
@@ -65,14 +63,13 @@ export function BusinessSalesPage() {
                 <th>Customer</th>
                 <th>Card</th>
                 <th>Seller</th>
-                <th>Status</th>
                 <th>Total</th>
-                <th>Min. down</th>
-                <th>Points</th>
-                <th>Commission</th>
-                <th>Spot-cash deadline</th>
-                <th>Activated</th>
-                <th />
+                <th>Paid</th>
+                <th>Balance</th>
+                <th>Payment status</th>
+                <th>Activation status</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -82,21 +79,17 @@ export function BusinessSalesPage() {
                   <td>{sale.customerName}</td>
                   <td>{sale.productName}</td>
                   <td>{sale.sellerName ?? '—'}</td>
+                  <td>{formatMoney(sale.cashPrice)}</td>
+                  <td>{formatMoney(sale.paidAmount)}</td>
+                  <td>{formatMoney(sale.balance)}</td>
                   <td>
                     <StatusChip
                       label={SALE_STATUS_LABEL[sale.status] ?? sale.status}
                       tone={SALE_STATUS_TONE[sale.status] ?? 'neutral'}
                     />
                   </td>
-                  <td>{formatMoney(sale.cashPrice)}</td>
-                  <td>{formatMoney(sale.minimumDownPayment)}</td>
-                  <td>{formatPoints(sale.yearlyPoints)}</td>
-                  <td>
-                    {formatMoney(sale.expectedCommission)}{' '}
-                    <span style={{ opacity: 0.7 }}>({formatRate(sale.commissionRate)})</span>
-                  </td>
-                  <td>{sale.spotCashDeadline ? formatDateTime(sale.spotCashDeadline) : '—'}</td>
-                  <td>{sale.activatedAt ? formatDateTime(sale.activatedAt) : '—'}</td>
+                  <td>{sale.activatedAt ? 'Active' : 'Not activated'}</td>
+                  <td>{formatDateTime(sale.createdAt)}</td>
                   <td>
                     <Button variant="secondary" onClick={() => setOpenId(sale.id)}>
                       Payments

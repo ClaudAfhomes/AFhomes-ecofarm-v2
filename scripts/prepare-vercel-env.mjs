@@ -5,8 +5,9 @@
  * host - otherwise login on the production domain redirects to a
  * per-deployment URL, a different origin whose localStorage cannot see the
  * session, and the user bounces back to login. Prefer
- * `VERCEL_PROJECT_PRODUCTION_URL` (the stable production domain); fall back to
- * `VERCEL_URL` (previews) when it is unset. Real process-env values win over
+ * `VERCEL_PROJECT_PRODUCTION_URL` (the stable production domain) in production;
+ * previews use `VERCEL_URL`, so their Auth redirects remain on the preview
+ * origin. Real process-env values win over
  * the written `.env.production` files.
  *
  * Do NOT set VITE_WEB_URL / VITE_ADMIN_URL in the Vercel project env: that
@@ -14,7 +15,10 @@
  */
 import { writeFileSync } from 'node:fs';
 
-const url = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+const url =
+  process.env.VERCEL_ENV === 'production'
+    ? (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL)
+    : (process.env.VERCEL_URL ?? process.env.VERCEL_PROJECT_PRODUCTION_URL);
 if (!url) process.exit(0);
 
 const lines = [];

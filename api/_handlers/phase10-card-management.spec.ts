@@ -98,8 +98,13 @@ async function call(options: {
 
 describe('card authorization and views', () => {
   it('1. lists memberships for card operations staff and denies strangers', async () => {
-    install();
-    expect((await call({ path: '' })).status).toBe(200);
+    const db = install();
+    // Real memberships have activated_at, not created_at. The fake deliberately
+    // lacks created_at so this catches a PostgREST ORDER BY drift.
+    for (const row of db.rows('memberships')) delete row.created_at;
+    const listed = await call({ path: '' });
+    expect(listed.status).toBe(200);
+    expect(JSON.stringify(listed.body)).not.toContain('"createdAt":""');
     expect((await call({ path: '', token: TOKEN2.hr })).status).toBe(403);
     expect((await call({ path: '', token: null })).status).toBe(401);
   });

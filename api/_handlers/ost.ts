@@ -44,6 +44,7 @@ import { hashIdentifier } from '../_lib/identifier.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { resolveAdminUrl } from '../_lib/admin-url.js';
 
 const REVIEWABLE = [...OST_REVIEWABLE_STATUSES] as string[];
 const UUID_RE = /^[0-9a-f-]{36}$/i;
@@ -468,7 +469,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ostRole?.is_active) return fail(res, 'CONFLICT', 'The OST role is not available', 409);
 
       const fullName = applicantName(app);
-      const redirectTo = process.env.AFHOMES_ADMIN_URL;
+      const redirectTo = resolveAdminUrl();
       if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
       const invited = (await db.auth.admin.inviteUserByEmail(String(app.email), {
         redirectTo,

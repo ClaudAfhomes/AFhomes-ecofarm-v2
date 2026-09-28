@@ -199,6 +199,9 @@ export const saleSchema = z.object({
   yearlyPoints: z.number().int().nonnegative(),
   commissionRate: exactDecimalRateSchema,
   expectedCommission: exactDecimalStringSchema,
+  /** VERIFIED payments only; recorded/rejected/voided amounts do not count. */
+  paidAmount: exactDecimalStringSchema,
+  balance: exactDecimalStringSchema,
   spotCashDeadline: z.string().nullable(),
   submittedAt: z.string().nullable(),
   paymentVerifiedAt: z.string().nullable(),

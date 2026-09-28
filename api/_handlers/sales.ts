@@ -73,12 +73,57 @@ async function loadSaleView(db: Db, id: string) {
   const { data, error } = await db
     .from('card_sales')
     .select(
-      '*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
+      '*, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
     )
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
   return data as Record<string, unknown> | null;
+}
+
+type SaleMoney = { paidAmount: string; balance: string };
+
+async function moneyBySale(db: Db, rows: Record<string, unknown>[]): Promise<Map<string, SaleMoney>> {
+  const ids = rows.map((row) => String(row.id));
+  if (ids.length === 0) return new Map();
+  const { data, error } = await db
+    .from('payments')
+    .select('sale_id, amount, status, recorded_at, verified_at')
+    .in('sale_id', ids);
+  if (error) throw error;
+
+  type Payment = {
+    amount: string;
+    status: 'recorded' | 'verified' | 'rejected' | 'voided';
+    recordedAt?: string;
+    verifiedAt?: string | null;
+  };
+  const payments = new Map<string, Payment[]>();
+  for (const payment of (data ?? []) as Record<string, unknown>[]) {
+    const saleId = String(payment.sale_id);
+    const bucket = payments.get(saleId) ?? [];
+    bucket.push({
+      amount: String(payment.amount),
+      status: String(payment.status) as Payment['status'],
+      recordedAt: isoOrNull(payment.recorded_at) ?? undefined,
+      verifiedAt: isoOrNull(payment.verified_at),
+    });
+    payments.set(saleId, bucket);
+  }
+
+  return new Map(
+    rows.map((row) => {
+      const id = String(row.id);
+      const summary = summarizePayments({
+        cashPrice: String(row.cash_price_snapshot ?? row.cash_price ?? '0.00'),
+        minimumDownPayment: String(row.minimum_down_payment_snapshot ?? '0.00'),
+        payments: payments.get(id) ?? [],
+        spotCashStartedAt: isoOrNull(row.spot_cash_started_at),
+        spotCashDeadline: isoOrNull(row.spot_cash_deadline),
+      });
+      return [id, { paidAmount: summary.verifiedTotal, balance: summary.remainingBalance }];
+    }),
+  );
 }
 
 /**
@@ -111,7 +156,7 @@ function saleInScope(
   return row.seller_staff_id === scope.auth.userId || row.seller_ost_id === scope.auth.userId;
 }
 
-const toSale = (row: Record<string, unknown>) => {
+const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   const seller = (row.staff_users ?? {}) as Record<string, unknown>;
@@ -134,6 +179,8 @@ const toSale = (row: Record<string, unknown>) => {
     yearlyPoints: row.yearly_points_snapshot ?? 0,
     commissionRate: row.commission_rate_snapshot ?? '0.0400',
     expectedCommission: row.expected_commission_snapshot ?? '0.00',
+    paidAmount: money?.paidAmount ?? '0.00',
+    balance: money?.balance ?? String(row.cash_price_snapshot ?? row.cash_price ?? '0.00'),
     spotCashDeadline: isoOrNull(row.spot_cash_deadline),
     submittedAt: isoOrNull(row.submitted_at),
     paymentVerifiedAt: isoOrNull(row.payment_verified_at),
@@ -162,7 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let query = db
         .from('card_sales')
         .select(
-          '*, customers!inner(full_name, first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
+          '*, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name, code), staff_users!card_sales_seller_staff_id_fkey(full_name)',
           { count: 'exact' },
         );
       if (status) query = query.eq('status', status);
@@ -173,9 +220,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
       if (error) throw error;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const money = await moneyBySale(db, rows);
       return res.status(200).json({
-        data: (data ?? []).map((row: Record<string, unknown>) => toSale(row)),
-        meta: { total: count ?? (data ?? []).length, limit, offset },
+        data: rows.map((row) => toSale(row, money.get(String(row.id)))),
+        meta: { total: count ?? rows.length, limit, offset },
       });
     }
 
@@ -343,7 +392,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // A direct URL never bypasses the seller scope: an unrelated sale reads
       // as missing rather than forbidden, so ids cannot be probed.
       if (!saleInScope(scope, row)) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
-      return res.status(200).json(toSale(row));
+      const money = await moneyBySale(db, [row]);
+      return res.status(200).json(toSale(row, money.get(String(row.id))));
     }
 
     /* ---------------- financial summary ---------------- */

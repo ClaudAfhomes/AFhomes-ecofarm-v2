@@ -451,6 +451,36 @@ describe('card sales', () => {
     expect(db.rows('audit_events').some((e) => e.action === 'APPLICATION_SUBMITTED')).toBe(true);
   });
 
+  it('creates an SM-owned sale with the same server-side commercial snapshot', async () => {
+    const db = install();
+    db.rows('staff_role_assignments').find(
+      (assignment) => assignment.staff_id === UUID.viewerStaff,
+    )!.role_id = UUID.role.custom;
+    db.rows('role_permissions').push({
+      role_id: UUID.role.custom,
+      module_id: 'module:sales.card_sales',
+      can_view: true,
+      can_create: true,
+      can_update: false,
+      can_delete: false,
+    });
+    const state = await call('sales', {
+      method: 'POST',
+      path: '',
+      token: TOKEN.viewer,
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+    });
+    expect(state.status).toBe(201);
+    expect(state.body).toMatchObject({
+      sellerStaffId: UUID.viewerStaff,
+      cashPrice: '60000.00',
+      minimumDownPayment: '20000.00',
+      yearlyPoints: 60000,
+      commissionRate: '0.04',
+      expectedCommission: '2400.00',
+    });
+  });
+
   it('a later price change cannot alter an existing sale', async () => {
     const db = install();
     await call('sales', {
@@ -606,6 +636,29 @@ describe('card sales', () => {
     const rows = data(state.body) as { sellerStaffId: string }[];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.sellerStaffId === UUID.adminStaff)).toBe(true);
+  });
+
+  it('returns a terminal empty list instead of leaving the UI loading', async () => {
+    const db = install();
+    db.rows('card_sales').length = 0;
+    const state = await call('sales', { path: '', token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    expect(data(state.body)).toEqual([]);
+    expect((state.body as { meta: { total: number } }).meta.total).toBe(0);
+  });
+
+  it('returns verified paid amount and remaining balance with a populated list', async () => {
+    const state = await call('sales', { path: '', token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    const rows = data(state.body) as { id: string; paidAmount: string; balance: string }[];
+    expect(rows.find((row) => row.id === SALE.downPaid)).toMatchObject({
+      paidAmount: '15000.00',
+      balance: '25000.00',
+    });
+  });
+
+  it('denies an unauthenticated sale list request', async () => {
+    expect((await call('sales', { path: '' })).status).toBe(401);
   });
 
   it('shows Finance every sale', async () => {

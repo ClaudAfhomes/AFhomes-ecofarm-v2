@@ -13,6 +13,7 @@ import {
 } from '../../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../../_lib/envelope.js';
 import type { VercelRequest, VercelResponse } from '../../_lib/http.js';
+import { resolveAdminUrl } from '../../_lib/admin-url.js';
 import { serviceClient } from '../../_lib/rest.js';
 
 // All database access in this handler uses the server-only service client after authorization.
@@ -491,7 +492,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Cannot assign a role with permissions you do not possess',
           403,
         );
-      const redirectTo = process.env.AFHOMES_ADMIN_URL;
+      const redirectTo = resolveAdminUrl();
       if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
       const { data: invited, error: inviteError } = await db.auth.admin.inviteUserByEmail(
         parsed.data.email,
