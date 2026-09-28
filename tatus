@@ -1,0 +1,75 @@
+warning: in the working copy of 'api/_handlers/cards.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/customer-portal.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/memberships.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/ost.spec.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/ost.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/phase2.spec.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/redemptions.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/reports.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_handlers/sales.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_lib/commerce.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_lib/router.spec.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_lib/router.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'api/_lib/testing/phase2-fixtures.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/app/navigation.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/business/BusinessCustomersPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/business/BusinessProductsPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/business/services.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/memberships/MembershipCardPrintPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/memberships/MembershipDetailPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/memberships/MembershipsPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/ost/OstApplicationDetailPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/ost/services.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/redemption/RedemptionCatalogPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/redemption/RedemptionWorkflowPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/redemption/redemption.spec.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/redemption/services.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/admin/src/features/reports/services.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/app/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/app/CustomerLayout.module.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/app/CustomerLayout.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/CustomerActivatePage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/CustomerDashboardPage.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/auth.module.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/customer-portal.spec.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/portal.module.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/queries.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/web/src/features/customer/services.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/index.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/card.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/customer.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/finance.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/ost.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/reports.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/contracts/src/schemas/sales.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'supabase/db-integration.ts', LF will be replaced by CRLF the next time Git touches it
+ api/_handlers/cards.ts                             | 297 [32m++++++++[m[31m-[m
+ api/_handlers/customer-portal.ts                   |  43 [32m++[m
+ api/_handlers/memberships.ts                       |  73 [32m++[m[31m-[m
+ api/_handlers/ost.spec.ts                          | 197 [32m+++++[m[31m-[m
+ api/_handlers/ost.ts                               |  56 [32m++[m
+ api/_handlers/phase2.spec.ts                       |   2 [32m+[m[31m-[m
+ api/_handlers/redemptions.ts                       |  87 [32m++[m[31m-[m
+ api/_handlers/reports.ts                           |   1 [32m+[m
+ api/_handlers/sales.ts                             |  29 [32m+[m[31m-[m
+ api/_lib/commerce.ts                               |  15 [32m+[m[31m-[m
+ api/_lib/router.spec.ts                            |   1 [32m+[m
+ api/_lib/router.ts                                 |   5 [32m+[m
+ api/_lib/testing/phase2-fixtures.ts                |   5 [32m+[m
+ apps/admin/src/app/navigation.ts                   |   2 [32m+[m[31m-[m
+ .../features/business/BusinessCustomersPage.tsx    |  26 [32m+[m[31m-[m
+ .../src/features/business/BusinessProductsPage.tsx | 697 [32m++++++++++++++++++[m[31m---[m
+ apps/admin/src/features/business/services.ts       |  48 [32m+[m[31m-[m
+ .../memberships/MembershipCardPrintPage.tsx        |   5 [32m+[m[31m-[m
+ .../features/memberships/MembershipDetailPage.tsx  |  48 [32m++[m
+ .../src/features/memberships/MembershipsPage.tsx   |   8 [32m+[m
+ .../src/features/ost/OstApplicationDetailPage.tsx  |  45 [32m+[m[31m-[m
+ apps/admin/src/features/ost/services.ts            |   3 [32m+[m
+ .../features/redemption/RedemptionCatalogPage.tsx  |  49 [32m+[m[31m-[m
+ .../features/redemption/RedemptionWorkflowPage.tsx |  26 [32m+[m[31m-[m
+ .../src/features/redemption/redemption.spec.tsx    | 170 [32m++++[m[31m-[m
+ apps/admin/src/features/redemption/services.ts     |  21 [32m+[m[31m-[m
+ apps/admin/src/features/reports/services.ts        |   1 [32m+[m
+ apps/web/src/app/App.tsx                           |   4 [32m+[m
+ apps/web/src/app/CustomerLayout.module.css         |  13 [32m+[m
+ apps/web/src/app/CustomerLayout.tsx                

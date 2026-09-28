@@ -150,6 +150,30 @@ export type CustomerPointsEntry = z.infer<typeof customerPointsEntrySchema>;
 export const customerPointsLedgerSchema = listResponseSchema(customerPointsEntrySchema);
 
 /* ================================================================== */
+/* Payment history (read only)                                          */
+/* ================================================================== */
+
+/**
+ * A payment as the MEMBER sees it: only their own card sale's payments, and
+ * only the safe columns. Staff ids, receipt storage paths, rejection reasons
+ * and internal notes are never selected and so can never reach the portal.
+ */
+export const customerPaymentSchema = z.object({
+  id: z.string().uuid(),
+  saleId: z.string().uuid(),
+  amount: z.string(),
+  paymentType: z.string().nullable(),
+  method: z.string(),
+  reference: z.string().nullable(),
+  status: z.string(),
+  recordedAt: z.string(),
+  verifiedAt: z.string().nullable(),
+});
+export type CustomerPayment = z.infer<typeof customerPaymentSchema>;
+
+export const customerPaymentListSchema = listResponseSchema(customerPaymentSchema);
+
+/* ================================================================== */
 /* Credential re-issue (one-time plaintext)                             */
 /* ================================================================== */
 

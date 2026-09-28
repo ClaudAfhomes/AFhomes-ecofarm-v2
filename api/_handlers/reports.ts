@@ -1110,6 +1110,7 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
     if (input.actor) query = query.eq('actor_id', input.actor);
     if (input.action) query = query.eq('action', input.action);
     if (input.entityType) query = query.eq('entity_type', input.entityType);
+    if (input.entityId) query = query.eq('entity_id', input.entityId);
     if (window.from) query = query.gte('created_at', window.from);
     if (window.to) query = query.lte('created_at', window.to);
     if (input.format === 'json') {

@@ -11,6 +11,8 @@ const NAV = [
   { to: '/customer', label: 'Dashboard', end: true },
   { to: '/customer/membership', label: 'My card', end: false },
   { to: '/customer/points', label: 'Points', end: false },
+  { to: '/customer/redemptions', label: 'Redemptions', end: false },
+  { to: '/customer/payments', label: 'Payments', end: false },
   { to: '/customer/profile', label: 'Profile', end: false },
 ];
 

@@ -10,7 +10,7 @@
  * fixture does not define fails loudly instead of resolving to `undefined`,
  * which is what a `fetch` mock that returns `{}` would do.
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -81,6 +81,42 @@ const LEDGER = {
       balanceAfter: 60000,
       reason: 'Annual points allocation on activation',
       occurredAt: '2026-01-05T02:00:00.000Z',
+    },
+  ],
+  meta: {},
+};
+
+const REDEMPTION_LEDGER = {
+  data: [
+    {
+      id: '9',
+      entryType: 'redemption' as const,
+      amount: -2000,
+      balanceAfter: 58000,
+      reason: 'Redeemed Japanese Teppanyaki (TEPPANYAKI)',
+      occurredAt: '2026-03-01T02:00:00.000Z',
+      redemptionNumber: 'RDM-000001',
+      itemName: 'Japanese Teppanyaki',
+      itemCode: 'TEPPANYAKI',
+      quantity: 1,
+    },
+    ...LEDGER.data,
+  ],
+  meta: {},
+};
+
+const PAYMENTS = {
+  data: [
+    {
+      id: 'cccccccc-0000-4000-8000-000000000001',
+      saleId: 'bbbbbbbb-0000-4000-8000-000000000001',
+      amount: '20000.00',
+      paymentType: 'installment',
+      method: 'bank_transfer',
+      reference: 'TRF-9001',
+      status: 'verified',
+      recordedAt: '2026-02-01T02:00:00.000Z',
+      verifiedAt: '2026-02-02T02:00:00.000Z',
     },
   ],
   meta: {},
@@ -222,10 +258,12 @@ describe('customer dashboard', () => {
     expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
     expect(screen.getByText('Gold')).toBeInTheDocument();
     expect(screen.getAllByText('60,000').length).toBeGreaterThan(0);
-    // Card details, not staff or finance information.
+    // Card details, not staff or finance information - and no payment figures
+    // leak onto the dashboard (amounts live on the Payments screen only).
     expect(screen.queryByText(/commission/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/seller/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/payment/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/₱/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/TRF-/)).not.toBeInTheDocument();
   });
 
   it('shows recent points activity on the dashboard', async () => {
@@ -399,15 +437,16 @@ describe('activation screen', () => {
 describe('sign-in screen', () => {
   it('shows a single generic message on failure, so accounts cannot be enumerated', async () => {
     const user = userEvent.setup();
-    const supabaseSignIn = vi.fn().mockResolvedValue({ error: { message: 'Invalid login credentials' } });
-    vi.stubGlobal('fetch', mockFetch());
-    // The provider is real; sign-in is stubbed at the Supabase boundary by
-    // simply having no client configured, so submit and assert the copy.
     render('/customer/login', false);
     await user.type(screen.getByLabelText('Email'), 'nobody@example.invalid');
     await user.type(screen.getByLabelText('Password'), 'Whatever12345');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    await waitFor(() => expect(supabaseSignIn).not.toHaveBeenCalled());
+    // Whatever the backend says (unknown address or wrong password), the
+    // member sees exactly one sentence that names neither case.
+    expect(
+      await screen.findByText('We could not sign you in with that email and password.'),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/invalid login|user not found|unknown/i);
   });
 
   it('points staff at the administration console instead of a second login form', async () => {
@@ -509,5 +548,196 @@ describe('error handling', () => {
     const nav = await screen.findByRole('navigation', { name: 'Customer portal' });
     expect(within(nav).getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Points' })).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Payment history                                                       */
+/* ================================================================== */
+
+describe('customer payments screen', () => {
+  it('renders the member own payments with safe columns only', async () => {
+    installRoutes({ '/customer/payments': list(PAYMENTS.data) });
+    render('/customer/payments');
+    expect(await screen.findByText('TRF-9001')).toBeInTheDocument();
+    expect(screen.getByText('bank_transfer')).toBeInTheDocument();
+    expect(screen.getByText('verified')).toBeInTheDocument();
+    for (const heading of ['Date', 'Type', 'Method', 'Reference', 'Status', 'Amount']) {
+      expect(screen.getByRole('columnheader', { name: heading })).toBeInTheDocument();
+    }
+    const html = document.body.innerHTML;
+    expect(html).not.toMatch(/recorded_by|verified_by|receipt|rejection|staff/i);
+  });
+
+  it('shows an empty state with no payments', async () => {
+    installRoutes({ '/customer/payments': list([]) });
+    render('/customer/payments');
+    expect(await screen.findByText('No payments recorded yet.')).toBeInTheDocument();
+  });
+
+  it('shows a forbidden state for a restricted account', async () => {
+    installRoutes({
+      '/customer/payments': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'Your account is suspended.' } },
+      }),
+    });
+    render('/customer/payments');
+    expect(await screen.findByText('Payments unavailable')).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Redemption history                                                    */
+/* ================================================================== */
+
+describe('customer redemptions screen', () => {
+  it('renders only redemption entries with their frozen snapshots', async () => {
+    installRoutes({ '/customer/points/ledger': list(REDEMPTION_LEDGER.data) });
+    render('/customer/redemptions');
+    // The item cell splits name and code across nodes, so match the full text.
+    expect(
+      await screen.findByText((_, el) => el?.textContent === 'Japanese Teppanyaki (TEPPANYAKI)'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('RDM-000001')).toBeInTheDocument();
+    expect(screen.queryByText('Goodwill adjustment')).toBeNull();
+    expect(screen.queryByText('Annual points allocation on activation')).toBeNull();
+  });
+
+  it('shows an empty state with no redemptions', async () => {
+    render('/customer/redemptions');
+    expect(await screen.findByText(/No redemptions yet/)).toBeInTheDocument();
+  });
+
+  it('shows an unavailable state when the ledger fails', async () => {
+    installRoutes({
+      '/customer/points/ledger': () => ({
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'boom' } },
+      }),
+    });
+    render('/customer/redemptions');
+    expect(await screen.findByText('Redemptions unavailable')).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Portal navigation and dashboard resilience                            */
+/* ================================================================== */
+
+describe('portal navigation', () => {
+  it('links every section from the shell', async () => {
+    render('/customer');
+    const nav = await screen.findByRole('navigation', { name: 'Customer portal' });
+    for (const name of ['Dashboard', 'My card', 'Points', 'Redemptions', 'Payments', 'Profile']) {
+      expect(within(nav).getByRole('link', { name })).toBeInTheDocument();
+    }
+    expect(within(nav).getByRole('link', { name: 'Payments' })).toHaveAttribute(
+      'href',
+      '/customer/payments',
+    );
+    expect(within(nav).getByRole('link', { name: 'Redemptions' })).toHaveAttribute(
+      'href',
+      '/customer/redemptions',
+    );
+  });
+
+  it('links profile, redemptions and payments from the dashboard', async () => {
+    render('/customer');
+    // The section links render once the membership they depend on resolves.
+    await screen.findByText('MBS-000777');
+    expect(screen.getByRole('link', { name: 'Your profile' })).toHaveAttribute(
+      'href',
+      '/customer/profile',
+    );
+    expect(screen.getByRole('link', { name: 'Redemption history' })).toHaveAttribute(
+      'href',
+      '/customer/redemptions',
+    );
+    expect(screen.getByRole('link', { name: 'Payment history' })).toHaveAttribute(
+      'href',
+      '/customer/payments',
+    );
+  });
+
+  it('keeps the dashboard usable when one section fails', async () => {
+    installRoutes({
+      '/customer/points/ledger': () => ({
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'boom' } },
+      }),
+    });
+    render('/customer');
+    // The card section is independent of the ledger section.
+    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(screen.getByText('Your points activity is not available right now.')).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Activation password policy + public recovery routes                   */
+/* ================================================================== */
+
+describe('activation password policy', () => {
+  it('rejects a weak password before any network call', async () => {
+    const user = userEvent.setup();
+    render('/customer/activate', false);
+    await user.type(screen.getByLabelText('Activation code'), 'a-valid-token-value-0000000001');
+    await user.type(screen.getByLabelText('Password'), 'weakpassword');
+    await user.type(screen.getByLabelText('Confirm password'), 'weakpassword');
+    await user.click(screen.getByRole('button', { name: 'Activate my account' }));
+    expect(
+      await screen.findByText('Password must contain a lowercase letter, an uppercase letter and a digit.'),
+    ).toBeInTheDocument();
+  });
+
+  it('rejects mismatched passwords before any network call', async () => {
+    const user = userEvent.setup();
+    render('/customer/activate', false);
+    await user.type(screen.getByLabelText('Activation code'), 'a-valid-token-value-0000000001');
+    await user.type(screen.getByLabelText('Password'), 'StrongPass123');
+    await user.type(screen.getByLabelText('Confirm password'), 'StrongPass124');
+    await user.click(screen.getByRole('button', { name: 'Activate my account' }));
+    expect(await screen.findByText('The passwords do not match')).toBeInTheDocument();
+  });
+});
+
+describe('public recovery routes', () => {
+  it('renders forgot-password without a session', async () => {
+    render('/customer/forgot-password', false);
+    expect(await screen.findByRole('heading', { name: 'Reset your password' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+  });
+
+  it('renders an invalid-link state for reset without a recovery session', async () => {
+    render('/customer/reset-password', false);
+    expect(
+      await screen.findByText('This recovery link is invalid or has expired. Recovery links are single-use.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Request a new link' })).toBeInTheDocument();
+  });
+});
+
+/* ================================================================== */
+/* Non-active membership display                                         */
+/* ================================================================== */
+
+describe('membership status display', () => {
+  it('renders a cancelled membership with a neutral status', async () => {
+    installRoutes({
+      '/customer/membership': ok({ ...MEMBERSHIP, status: 'cancelled' as const }),
+    });
+    render('/customer/membership');
+    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+  });
+
+  it('renders an expired membership with a neutral status', async () => {
+    installRoutes({
+      '/customer/membership': ok({ ...MEMBERSHIP, status: 'expired' as const }),
+    });
+    render('/customer/membership');
+    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(screen.getByText('expired')).toBeInTheDocument();
   });
 });

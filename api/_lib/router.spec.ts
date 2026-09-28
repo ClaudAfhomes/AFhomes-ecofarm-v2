@@ -30,6 +30,7 @@ describe('selectHandler', () => {
     const q: Record<string, string | undefined> = {};
     for (const [path, expected] of [
       ['card-products', 'cards/card-products'],
+      ['card-categories', 'cards/card-categories'],
       ['customers', 'customers/customers'],
       ['sales', 'sales/sales'],
       ['memberships', 'memberships/memberships'],

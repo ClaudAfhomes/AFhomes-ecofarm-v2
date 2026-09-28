@@ -37,7 +37,14 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 /** Must match private.hash_token() in the migration exactly. */
 export const hashIdentifier = (value: string) => createHash('sha256').update(value).digest('hex');
 
-const toMembership = (row: Record<string, unknown>) => {
+type CategoryInfo = { name: string | null };
+type IssuerInfo = { name: string | null };
+
+const toMembership = (
+  row: Record<string, unknown>,
+  categories: Map<string, CategoryInfo>,
+  issuers: Map<string, IssuerInfo>,
+) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   return {
@@ -47,26 +54,56 @@ const toMembership = (row: Record<string, unknown>) => {
       [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
         .filter((p) => typeof p === 'string' && p)
         .join(' ') || 'Unknown customer',
+    customerStatus: (customer.status as string | null) ?? null,
     saleId: row.sale_id,
     membershipNumber: row.membership_number,
     productId: isoOrNull(row.product_id),
     productName: isoOrNull(product.name),
+    categoryName: categories.get(String(product.category_id ?? ''))?.name ?? null,
     status: row.status,
     pointsBalance: Number(row.points_balance ?? 0),
     yearlyPointsAllocated: Number(row.yearly_points_allocated ?? 0),
     activatedAt: isoOrNull(row.activated_at),
     expiresAt: isoOrNull(row.expires_at),
     renewalDueAt: isoOrNull(row.renewal_due_at),
+    cardIssuedAt: isoOrNull(row.card_issued_at),
+    issuedBy: issuers.get(String(row.card_issued_by ?? ''))?.name ?? null,
+    lastPrintedAt: isoOrNull(row.last_printed_at),
+    printCount: Number(row.print_count ?? 0),
     // Memberships are born at activation and have no separate created_at.
     createdAt: isoOrNull(row.activated_at) ?? '',
   };
 };
 
 const SELECT_MEMBERSHIP =
-  '*, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name)';
+  '*, customers!inner(first_name, middle_name, last_name, suffix, status), card_plans!inner(name,category_id)';
 
 const SELECT_CARD =
-  '*, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name, code)';
+  '*, customers!inner(first_name, middle_name, last_name, suffix, status), card_plans!inner(name, code, category_id)';
+
+/** Category names for plan rows (the plan embed carries no category). */
+async function categoryDirectory(db: Db): Promise<Map<string, CategoryInfo>> {
+  const { data, error } = await db.from('card_categories').select('id,name');
+  if (error) throw error;
+  const out = new Map<string, CategoryInfo>();
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    out.set(String(row.id), { name: (row.name as string | null) ?? null });
+  }
+  return out;
+}
+
+/** Issuer display names for `card_issued_by` staff ids. */
+async function issuerDirectory(db: Db, ids: string[]): Promise<Map<string, IssuerInfo>> {
+  const out = new Map<string, IssuerInfo>();
+  const distinct = [...new Set(ids.filter((id) => id))];
+  if (distinct.length === 0) return out;
+  const { data, error } = await db.from('staff_users').select('id,full_name').in('id', distinct);
+  if (error) throw error;
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    out.set(String(row.id), { name: (row.full_name as string | null) ?? null });
+  }
+  return out;
+}
 
 /**
  * Staff who may READ a card: redemption, activation, and customer service.
@@ -89,7 +126,11 @@ async function authorizeCardStaff(req: VercelRequest) {
  * from the product catalogue. Credential codes are NEVER here - hash-only
  * storage means they cannot be recovered, only rotated.
  */
-const toCard = (row: Record<string, unknown>) => {
+const toCard = (
+  row: Record<string, unknown>,
+  categories: Map<string, CategoryInfo>,
+  issuers: Map<string, IssuerInfo>,
+) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   return {
@@ -99,13 +140,17 @@ const toCard = (row: Record<string, unknown>) => {
       [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
         .filter((p) => typeof p === 'string' && p)
         .join(' ') || 'Unknown customer',
+    customerStatus: (customer.status as string | null) ?? null,
     tierName: typeof product.name === 'string' && product.name ? product.name : 'AF Homes card',
     tierCode: typeof product.code === 'string' ? product.code : '',
+    categoryName: categories.get(String(product.category_id ?? ''))?.name ?? null,
     status: row.status,
     pointsBalance: Number(row.points_balance ?? 0),
+    yearlyPointsAllocated: Number(row.yearly_points_allocated ?? 0),
     activatedAt: isoOrNull(row.activated_at),
     expiresAt: isoOrNull(row.expires_at),
     cardIssuedAt: isoOrNull(row.card_issued_at),
+    issuedBy: issuers.get(String(row.card_issued_by ?? ''))?.name ?? null,
     lastPrintedAt: isoOrNull(row.last_printed_at),
     printCount: Number(row.print_count ?? 0),
   };
@@ -174,9 +219,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .order('activated_at', { ascending: false })
         .range(offset, offset + limit - 1);
       if (error) throw error;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const categories = await categoryDirectory(db);
+      const issuers = await issuerDirectory(
+        db,
+        rows.map((row) => String(row.card_issued_by ?? '')),
+      );
       return res.status(200).json({
-        data: (data ?? []).map((row: Record<string, unknown>) => toMembership(row)),
-        meta: { total: count ?? (data ?? []).length, limit, offset },
+        data: rows.map((row) => toMembership(row, categories, issuers)),
+        meta: { total: count ?? rows.length, limit, offset },
       });
     }
 
@@ -192,7 +243,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (error) throw error;
       if (!data) return fail(res, 'NOT_FOUND', 'Membership not found', 404);
-      return res.status(200).json(toMembership(data as Record<string, unknown>));
+      const row = data as Record<string, unknown>;
+      const categories = await categoryDirectory(db);
+      const issuers = await issuerDirectory(db, [String(row.card_issued_by ?? '')]);
+      return res.status(200).json(toMembership(row, categories, issuers));
     }
 
     /* ---------------- points account ---------------- */
@@ -259,7 +313,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!data) return fail(res, 'NOT_FOUND', 'Membership not found', 404);
       // Contract-validated: the card shape can never drift to include a hash
       // or an internal id, because the schema rejects it here first.
-      const parsed = membershipCardSchema.safeParse(toCard(data as Record<string, unknown>));
+      const row = data as Record<string, unknown>;
+      const categories = await categoryDirectory(db);
+      const issuers = await issuerDirectory(db, [String(row.card_issued_by ?? '')]);
+      const parsed = membershipCardSchema.safeParse(toCard(row, categories, issuers));
       if (!parsed.success) return fail(res, 'INTERNAL', 'Card data is unavailable', 500);
       return res.status(200).json(parsed.data);
     }

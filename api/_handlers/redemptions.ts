@@ -193,15 +193,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (await authorizeAfHomes(req, 'operations.catalog', 'view'));
       if ('error' in auth) return deny(res, auth);
 
-      const includeInactive = req.query.includeInactive === 'true';
-      let query = db.from('redemption_items').select(ITEM_SELECT);
-      if (!includeInactive) query = query.eq('is_active', true);
-      const { data, error } = await query.order('sort_order').order('name');
+      // Inactive items are management-only: redemption operators and the
+      // Phase 22 POS fetch normally receive active items only. A caller that
+      // holds catalog management (create or update - viewing alone is not
+      // enough) may ask for the inactive or full set.
+      const canSeeInactive = (auth.permissions ?? []).some(
+        (p: { moduleKey?: string; canView?: boolean; canCreate?: boolean; canUpdate?: boolean }) =>
+          p.moduleKey === 'operations.catalog' &&
+          (p.canCreate === true || p.canUpdate === true),
+      );
+      const query = (req.query ?? {}) as Record<string, unknown>;
+      const activeParam = String(query.active ?? '').toLowerCase();
+      const legacyAll = String(query.includeInactive ?? '') === 'true';
+      const mode =
+        activeParam === 'all' || legacyAll ? 'all' : activeParam === 'false' ||
+          activeParam === 'inactive' ? 'inactive' : 'active';
+      const effective = mode === 'active' || !canSeeInactive ? 'active' : mode;
+      let itemsQuery = db.from('redemption_items').select(ITEM_SELECT);
+      if (effective === 'active') itemsQuery = itemsQuery.eq('is_active', true);
+      if (effective === 'inactive') itemsQuery = itemsQuery.eq('is_active', false);
+      const { data, error } = await itemsQuery.order('sort_order').order('name');
       if (error) throw error;
+      const needle = String(query.search ?? '').trim().toLowerCase();
+      const rows = ((data ?? []) as Record<string, unknown>[]).filter(
+        (row) =>
+          needle.length === 0 ||
+          `${String(row.code ?? '')} ${String(row.name ?? '')} ${String(row.category ?? '')}`
+            .toLowerCase()
+            .includes(needle),
+      );
       return list(
         res,
-        (data ?? []).map((row: Record<string, unknown>) => toItem(row)),
+        rows.map((row) => toItem(row)),
       );
+    }
+
+    /* ================================================================
+     * GET /redemptions/items/:id  - one catalog item
+     * ================================================================ */
+    const itemDetail = route(req, 'GET', /^items\/([0-9a-f-]+)$/);
+    if (itemDetail) {
+      const auth =
+        (await authorizeAfHomes(req, 'operations.redemption', 'view')) ??
+        (await authorizeAfHomes(req, 'operations.catalog', 'view'));
+      if ('error' in auth) return deny(res, auth);
+
+      const { data, error } = await db
+        .from('redemption_items')
+        .select(ITEM_SELECT)
+        .eq('id', itemDetail[1]!)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
+      const row = data as Record<string, unknown>;
+      // Inactive items are management-only: without catalog management
+      // (create or update) a retired item reads exactly like an unknown id.
+      const canSeeInactive = (auth.permissions ?? []).some(
+        (p: { moduleKey?: string; canCreate?: boolean; canUpdate?: boolean }) =>
+          p.moduleKey === 'operations.catalog' &&
+          (p.canCreate === true || p.canUpdate === true),
+      );
+      if (row.is_active !== true && !canSeeInactive)
+        return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
+      return res.status(200).json(toItem(row));
     }
 
     /* ================================================================
@@ -252,6 +306,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = updateRedemptionItemRequestSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Check the item details.', 400);
 
+      const { data: before, error: readError } = await db
+        .from('redemption_items')
+        .select('id,is_active')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
+      // Snapshot pre-update state NOW: a row reference may be live (the
+      // in-memory double mutates it in place on update).
+      const wasActive = (before as Record<string, unknown>).is_active === true;
+
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (parsed.data.name !== undefined) patch.name = parsed.data.name;
       if (parsed.data.description !== undefined) patch.description = parsed.data.description;
@@ -269,13 +334,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) throw error;
       if (!data) return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
 
-      // Deactivation is its own audited event, because it stops the item being
-      // usable without removing it from history.
+      // Deactivation and reactivation are their own audited events:
+      // deactivation stops the item being usable without removing it from
+      // history, and reactivation returns it to the sellable set.
       const deactivated = parsed.data.isActive === false;
+      const activated = parsed.data.isActive === true && !wasActive;
       await audit(
         db,
         auth.userId,
-        deactivated ? 'REDEMPTION_ITEM_DEACTIVATED' : 'REDEMPTION_ITEM_UPDATED',
+        deactivated
+          ? 'REDEMPTION_ITEM_DEACTIVATED'
+          : activated
+            ? 'REDEMPTION_ITEM_ACTIVATED'
+            : 'REDEMPTION_ITEM_UPDATED',
         'redemption_item',
         id,
         { code: data.code, ...(deactivated ? {} : { pointsCost: Number(data.points_cost) }) },

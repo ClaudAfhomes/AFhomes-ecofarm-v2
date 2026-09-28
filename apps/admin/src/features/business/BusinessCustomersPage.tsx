@@ -30,7 +30,14 @@ export function BusinessCustomersPage() {
     queryKey: ['business', 'customers', applied],
     queryFn: () => getCustomers(applied ? { search: applied } : {}),
   });
-  const products = useQuery({ queryKey: ['business', 'card-products'], queryFn: getCardProducts });
+  const products = useQuery({ queryKey: ['business', 'card-products'], queryFn: () => getCardProducts() });
+  // New applications may only offer ACTIVE plans under ACTIVE categories.
+  // The list endpoint already returns sellable-only by default, but the
+  // filter below keeps the dialog correct even when the shared cache holds
+  // a management (all/inactive) view.
+  const activeProducts = (products.data ?? []).filter(
+    (product) => product.isActive && product.categoryIsActive,
+  );
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateCustomerRequest>(EMPTY);
@@ -126,7 +133,7 @@ export function BusinessCustomersPage() {
                       disabled={customer.status === 'cancelled'}
                       onClick={() => {
                         setSelling(customer.id);
-                        setProductId(products.data?.[0]?.id ?? '');
+                        setProductId(activeProducts[0]?.id ?? '');
                       }}
                     >
                       New application
@@ -270,15 +277,26 @@ export function BusinessCustomersPage() {
           </p>
           <label>
             Card product
-            <select value={productId} onChange={(e) => setProductId(e.target.value)}>
+            <select
+              value={productId}
+              onChange={(e) => setProductId(e.target.value)}
+              disabled={products.isPending || activeProducts.length === 0}
+            >
               <option value="">Select a card</option>
-              {products.data?.map((product) => (
+              {activeProducts.map((product) => (
                 <option key={product.id} value={product.id}>
                   {product.name} — {product.code}
                 </option>
               ))}
             </select>
           </label>
+          {products.isPending ? <p role="status">Loading card plans…</p> : null}
+          {products.isError ? (
+            <p role="alert">Could not load card plans. Close and retry.</p>
+          ) : null}
+          {!products.isPending && !products.isError && activeProducts.length === 0 ? (
+            <p role="status">No active card plans available.</p>
+          ) : null}
           {sell.error ? <p role="alert">{sell.error.message}</p> : null}
         </div>
       </Dialog>

@@ -96,6 +96,7 @@ export const auditQuerySchema = z.object({
   actor: z.string().uuid().optional(),
   action: z.string().trim().max(80).optional(),
   entityType: z.string().trim().max(60).optional(),
+  entityId: z.string().trim().max(100).optional(),
   from: z.string().trim().max(30).optional(),
   to: z.string().trim().max(30).optional(),
   format: reportFormatSchema.default('json'),

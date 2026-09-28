@@ -79,3 +79,16 @@
   justify-content: center;
   margin-top: var(--space-4);
 }
+
+/* Small screens: tighter shell padding and a wrapping nav that stays tappable. */
+@media (max-width: 48rem) {
+  .shell {
+    padding: var(--space-4) var(--space-3) var(--space-8);
+  }
+
+  .navLink,
+  .navLinkActive {
+    padding: var(--space-2);
+    font-size: var(--text-body-s);
+  }
+}

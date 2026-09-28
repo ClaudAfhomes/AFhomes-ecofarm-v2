@@ -168,6 +168,13 @@ export const rejectOstApplicationSchema = z.object({
 });
 export type RejectOstApplicationRequest = z.infer<typeof rejectOstApplicationSchema>;
 
+export const requestOstApplicationChangesSchema = z.object({
+  notes: z.string().trim().min(5).max(500),
+});
+export type RequestOstApplicationChangesRequest = z.infer<
+  typeof requestOstApplicationChangesSchema
+>;
+
 export const ostMemberSchema = z.object({
   id: z.string().uuid(),
   applicationId: z.string().uuid(),

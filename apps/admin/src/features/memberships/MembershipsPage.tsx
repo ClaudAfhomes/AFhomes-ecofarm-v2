@@ -73,9 +73,13 @@ export function MembershipsPage() {
                 <th>Member</th>
                 <th>Number</th>
                 <th>Tier</th>
+                <th>Category</th>
                 <th>Status</th>
                 <th>Points</th>
                 <th>Activated</th>
+                <th>Card Issued</th>
+                <th>Last Printed</th>
+                <th>Prints</th>
                 <th />
               </tr>
             </thead>
@@ -85,6 +89,7 @@ export function MembershipsPage() {
                   <td>{m.customerName}</td>
                   <td>{m.membershipNumber}</td>
                   <td>{m.productName ?? '—'}</td>
+                  <td>{m.categoryName ?? '—'}</td>
                   <td>
                     <StatusChip
                       label={m.status}
@@ -93,6 +98,9 @@ export function MembershipsPage() {
                   </td>
                   <td>{m.pointsBalance.toLocaleString('en-PH')}</td>
                   <td>{m.activatedAt ? formatDateTime(m.activatedAt) : '—'}</td>
+                  <td>{m.cardIssuedAt ? formatDateTime(m.cardIssuedAt) : '—'}</td>
+                  <td>{m.lastPrintedAt ? formatDateTime(m.lastPrintedAt) : '—'}</td>
+                  <td>{m.printCount}</td>
                   <td>
                     <Link to={`/admin/memberships/${m.id}`}>Manage</Link>
                   </td>

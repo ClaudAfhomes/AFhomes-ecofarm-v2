@@ -54,6 +54,11 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  */
 const BUSINESS_FAMILIES = [
   { prefix: 'card-products', module: 'cards', load: () => import('../_handlers/cards.js') },
+  {
+    prefix: 'card-categories',
+    module: 'cards',
+    load: () => import('../_handlers/card-categories.js'),
+  },
   { prefix: 'customers', module: 'customers', load: () => import('../_handlers/customers.js') },
   { prefix: 'sales', module: 'sales', load: () => import('../_handlers/sales.js') },
   { prefix: 'payments', module: 'sales', load: () => import('../_handlers/sales.js') },

@@ -70,6 +70,20 @@ async function downlineOf(db: Db, uplineId: string): Promise<string[]> {
   return [...out];
 }
 
+/**
+ * A plan's category must be active for a NEW application. A missing category
+ * row fails closed (not sellable) rather than assumed.
+ */
+async function categoryIsActive(db: Db, categoryId: unknown): Promise<boolean> {
+  const { data, error } = await db
+    .from('card_categories')
+    .select('is_active')
+    .eq('id', String(categoryId ?? ''))
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { is_active?: unknown } | null)?.is_active === true;
+}
+
 async function loadSaleView(db: Db, id: string) {
   const { data, error } = await db
     .from('card_sales')
@@ -245,11 +259,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (productError) throw productError;
       if (!product) return fail(res, 'NOT_FOUND', 'Card product not found', 404);
 
-      const rejection = productSaleRejection({
-        isActive: product.is_active === true,
-        cashPrice: product.cash_price,
-        minimumDownPayment: product.minimum_down_payment,
-      });
+      const rejection = productSaleRejection(
+        {
+          isActive: product.is_active === true,
+          cashPrice: product.cash_price,
+          minimumDownPayment: product.minimum_down_payment,
+        },
+        // A plan is selectable for a NEW application only when its category
+        // is active too. A missing category fails closed: not sellable.
+        (await categoryIsActive(db, product.category_id)) === true,
+      );
       if (rejection) return fail(res, 'CONFLICT', rejection.replace(/_/g, ' ').toLowerCase(), 409);
 
       const { data: customer, error: customerError } = await db

@@ -35,6 +35,7 @@ export function RedemptionWorkflowPage() {
   const [manualCode, setManualCode] = useState('');
   const [preview, setPreview] = useState<RedemptionPreview | null>(null);
   const [itemId, setItemId] = useState('');
+  const [itemFilter, setItemFilter] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [receipt, setReceipt] = useState<RedemptionReceipt | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -51,6 +52,7 @@ export function RedemptionWorkflowPage() {
     onSuccess: (found) => {
       setPreview(found);
       setItemId('');
+      setItemFilter('');
       setQuantity(1);
       // A new member means a new intended transaction.
       setReference(newTransactionReference());
@@ -86,9 +88,20 @@ export function RedemptionWorkflowPage() {
     [catalog.data, itemId],
   );
 
+  // Client-side filter over the fetched ACTIVE catalog. The server remains
+  // authoritative: this only narrows what the till displays, never what a
+  // redemption may cost or whether it is allowed.
+  const needle = itemFilter.trim().toLowerCase();
+  const visibleItems = (catalog.data ?? []).filter(
+    (item) =>
+      needle.length === 0 ||
+      `${item.name} ${item.code} ${item.category}`.toLowerCase().includes(needle),
+  );
+
   const reset = () => {
     setPreview(null);
     setItemId('');
+    setItemFilter('');
     setQuantity(1);
     setManualCode('');
     setReceipt(null);
@@ -265,8 +278,19 @@ export function RedemptionWorkflowPage() {
 
           {catalog.data && catalog.data.length > 0 && (
             <>
+              <label className={styles.label} htmlFor="redemption-item-filter">
+                Filter items
+              </label>
+              <input
+                id="redemption-item-filter"
+                name="redemption-item-filter"
+                value={itemFilter}
+                onChange={(event) => setItemFilter(event.target.value)}
+                placeholder="Name, code or category"
+                autoComplete="off"
+              />
               <ul className={styles.items} role="radiogroup" aria-label="Redemption items">
-                {catalog.data.map((item) => {
+                {visibleItems.map((item) => {
                   const unaffordable = preview.pointsBalance < item.pointsCost;
                   return (
                     <li key={item.id}>

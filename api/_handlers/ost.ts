@@ -19,6 +19,7 @@ import {
   normalizeOstReferralCode,
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
+  requestOstApplicationChangesSchema,
   submitOstApplicationSchema,
 } from '@jad/contracts';
 
@@ -639,6 +640,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status: 'rejected',
           reason: parsed.data.reason,
         },
+      );
+      const row = updated as Record<string, unknown>;
+      const [{ data: sponsor }, { data: code }] = await Promise.all([
+        db.from('staff_users').select('full_name').eq('id', row.sponsor_staff_id).maybeSingle(),
+        db.from('referral_codes').select('code_hint').eq('id', row.referral_code_id).maybeSingle(),
+      ]);
+      return res
+        .status(200)
+        .json(toApplication(row, String(sponsor?.full_name ?? ''), String(code?.code_hint ?? '')));
+    }
+
+    /* ---------------- staff: request changes ---------------- */
+    const requestChanges = route(req, 'POST', /^applications\/([0-9a-f-]+)\/request-changes$/);
+    if (requestChanges) {
+      const auth = await authorizeAfHomes(req, 'network.ost_registrations', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const id = requestChanges[1]!;
+      const parsed = requestOstApplicationChangesSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Change requests require review notes', 400);
+      const { data: app, error: readError } = await db
+        .from('ost_applications')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!app) return fail(res, 'NOT_FOUND', 'OST application not found', 404);
+      if (!['submitted', 'under_review'].includes(String(app.status)))
+        return fail(
+          res,
+          'CONFLICT',
+          `An application with status ${String(app.status)} cannot receive a change request`,
+          409,
+        );
+      const now = new Date().toISOString();
+      const { data: updated, error: updateError } = await db
+        .from('ost_applications')
+        .update({
+          status: 'changes_requested',
+          reviewed_by: auth.userId,
+          reviewed_at: now,
+          review_notes: parsed.data.notes,
+        })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (updateError) throw updateError;
+      await audit(
+        db,
+        auth.userId,
+        'OST_APPLICATION_CHANGES_REQUESTED',
+        'ost_application',
+        id,
+        { status: String(app.status) },
+        { status: 'changes_requested', notes: parsed.data.notes },
       );
       const row = updated as Record<string, unknown>;
       const [{ data: sponsor }, { data: code }] = await Promise.all([

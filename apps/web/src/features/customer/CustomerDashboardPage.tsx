@@ -67,6 +67,12 @@ export function CustomerDashboardPage() {
         {membership.data && (
           <p className={styles.notice}>
             <Link to="/customer/membership">Manage your card code</Link>
+            {' · '}
+            <Link to="/customer/redemptions">Redemption history</Link>
+            {' · '}
+            <Link to="/customer/payments">Payment history</Link>
+            {' · '}
+            <Link to="/customer/profile">Your profile</Link>
           </p>
         )}
       </Card>

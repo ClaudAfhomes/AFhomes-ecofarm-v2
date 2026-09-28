@@ -51,6 +51,9 @@ export function RedemptionCatalogPage() {
   const client = useQueryClient();
   const [editing, setEditing] = useState<RedemptionItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [visibility, setVisibility] = useState<'active' | 'inactive' | 'all'>('all');
 
   const canManage =
     user?.afHomesPermissions.some(
@@ -58,8 +61,8 @@ export function RedemptionCatalogPage() {
     ) === true;
 
   const items = useQuery({
-    queryKey: ['redemption', 'items', 'all'],
-    queryFn: () => getRedemptionItems(true),
+    queryKey: ['redemption', 'items', 'all', appliedSearch, visibility],
+    queryFn: () => getRedemptionItems(visibility, appliedSearch),
   });
 
   const setActive = useMutation({
@@ -69,7 +72,8 @@ export function RedemptionCatalogPage() {
   });
 
   if (items.isLoading) return <p role="status">Loading the catalog…</p>;
-  if (items.isError) return <ErrorState title="The catalog could not be loaded" />;
+  if (items.isError)
+    return <ErrorState title="The catalog could not be loaded" onRetry={() => items.refetch()} />;
 
   return (
     <>
@@ -87,10 +91,41 @@ export function RedemptionCatalogPage() {
         </p>
       )}
 
+      <form
+        style={{ display: 'flex', gap: 8, marginBottom: 16 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          setAppliedSearch(search.trim());
+        }}
+      >
+        <input
+          aria-label="Search catalog items"
+          placeholder="Name, code or category"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select
+          aria-label="Filter by status"
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as 'active' | 'inactive' | 'all')}
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="all">All</option>
+        </select>
+        <Button type="submit" variant="secondary">
+          Search
+        </Button>
+      </form>
+
       {(items.data ?? []).length === 0 ? (
         <EmptyState
-          title="The catalog is empty"
-          description="Add the first item members can redeem."
+          title={appliedSearch || visibility !== 'all' ? 'No items match' : 'The catalog is empty'}
+          description={
+            appliedSearch || visibility !== 'all'
+              ? 'Adjust the search or status filter.'
+              : 'Add the first item members can redeem.'
+          }
         />
       ) : (
         <table className={styles.table}>
@@ -103,6 +138,9 @@ export function RedemptionCatalogPage() {
                 Points cost
               </th>
               <th scope="col">Status</th>
+              <th scope="col" className={styles.numeric}>
+                Display order
+              </th>
               {canManage && <th scope="col">Actions</th>}
             </tr>
           </thead>
@@ -122,6 +160,7 @@ export function RedemptionCatalogPage() {
                     tone={item.isActive ? 'success' : 'neutral'}
                   />
                 </td>
+                <td className={styles.numeric}>{item.sortOrder}</td>
                 {canManage && (
                   <td>
                     <div className={styles.actions}>

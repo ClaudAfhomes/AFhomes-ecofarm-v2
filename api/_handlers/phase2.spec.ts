@@ -243,7 +243,7 @@ describe('card products', () => {
     expect(state.status).toBe(200);
     expect((state.body as { yearlyPoints: number }).yearlyPoints).toBe(30000);
     expect(db.rows('card_plans').find((r) => r.id === PRODUCT.bronze)!.yearly_points).toBe(30000);
-    expect(db.rows('audit_events').some((e) => e.action === 'CARD_PRODUCT_CHANGED')).toBe(true);
+    expect(db.rows('audit_events').some((e) => e.action === 'CARD_PLAN_UPDATED')).toBe(true);
   });
 
   it('refuses a down payment above the price', async () => {

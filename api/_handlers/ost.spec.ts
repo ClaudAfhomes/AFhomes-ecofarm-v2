@@ -276,7 +276,14 @@ function baseTables(): Record<string, Row[]> {
   };
 }
 
-function install(tables?: Record<string, Row[]>, opts: { inviteUserId?: string } = {}) {
+function install(
+  tables?: Record<string, Row[]>,
+  opts: {
+    inviteUserId?: string;
+    invite?: (email: string, options: unknown) => Promise<unknown>;
+    unique?: Record<string, string[][]>;
+  } = {},
+) {
   resetIdentifierRateLimit();
   vi.stubEnv('AFHOMES_ADMIN_URL', 'https://admin.afhomes.test');
   vi.stubEnv('AFHOMES_WEB_URL', 'https://web.afhomes.test');
@@ -290,6 +297,8 @@ function install(tables?: Record<string, Row[]>, opts: { inviteUserId?: string }
       [EMP_TOKEN]: { id: EMP_ID, email: 'emp@afhomes.test', email_confirmed_at: ago(200) },
     },
     inviteUserId: opts.inviteUserId ?? NEW_OST_ID,
+    invite: opts.invite,
+    unique: opts.unique,
     rpcs: [{ fn: 'next_ost_number', result: [{ ost_number: 'OST-000001' }] }],
   });
   holder.db = db as unknown;
@@ -524,6 +533,31 @@ describe('OST review and approval', () => {
     );
   });
 
+  it('requests changes with notes and an audit event', async () => {
+    install();
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/request-changes`,
+        token: ADMIN_TOKEN,
+        body: { notes: 'Please upload a clearer identity scan.' },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      status: 'changes_requested',
+      reviewNotes: 'Please upload a clearer identity scan.',
+    });
+    expect((holder.db as FakeSupabase).rows('audit_events').map((a) => a.action)).toContain(
+      'OST_APPLICATION_CHANGES_REQUESTED',
+    );
+  });
+
   it('12. the sponsor stays frozen: approval uses the stored sponsor', async () => {
     install(undefined, { inviteUserId: NEW_OST_ID });
     const appId = (
@@ -672,6 +706,167 @@ describe('OST visibility scopes', () => {
     expect((other.state.body as { data: { id: string }[] }).data.map((r) => r.id)).toEqual([
       OST_ID,
     ]);
+  });
+});
+
+describe('OST approval state guards', () => {
+  async function approve(appId: string, token = ADMIN_TOKEN, body: unknown = {}) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token,
+        body,
+      }) as never,
+      res as never,
+    );
+    return state;
+  }
+
+  function seedApplication(db: FakeSupabase, over: Row): string {
+    const id = String(over.id);
+    db.rows('ost_applications').push({
+      referral_code_id: CODE_ID,
+      sponsor_staff_id: SM_ID,
+      email: 'quinn@example.invalid',
+      phone: '+639171234567',
+      first_name: 'Quinn',
+      middle_name: null,
+      last_name: 'Applicant',
+      birth_date: '1994-03-03',
+      address: { line1: '9 Farm Road', city: 'Tagaytay', province: 'Cavite', countryCode: 'PH' },
+      registration_details: {},
+      status: 'submitted',
+      review_notes: null,
+      reviewed_by: null,
+      submitted_at: ago(10),
+      reviewed_at: null,
+      ...over,
+      id,
+    });
+    return id;
+  }
+
+  it('23. a withdrawn application cannot be approved or rejected', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const id = seedApplication(db, { id: APP_ID, status: 'withdrawn' });
+    expect((await approve(id)).status).toBe(409);
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${id}/reject`,
+        token: ADMIN_TOKEN,
+        body: { reason: 'Too late to reject.' },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(409);
+    expect(db.rows('ost_members')).toHaveLength(1);
+  });
+
+  it('24. reviewable states (under_review, changes_requested) approve normally', async () => {
+    for (const status of ['under_review', 'changes_requested']) {
+      const db = install(undefined, { inviteUserId: NEW_OST_ID });
+      const id = seedApplication(db, { id: APP_ID, status });
+      const state = await approve(id);
+      expect(state.status, status).toBe(201);
+      expect(db.rows('ost_members').filter((r) => r.application_id === id)).toHaveLength(1);
+    }
+  });
+
+  it('25. a suspended sponsor at approval time is refused with nothing written', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    db.rows('staff_users').find((r) => r.id === SM_ID)!.status = 'suspended';
+    expect((await approve(appId)).status).toBe(409);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(
+      db.rows('referral_relationships').filter((r) => r.upline_staff_id === SM_ID),
+    ).toHaveLength(0);
+  });
+
+  it('26. a duplicate email in different case is refused while reviewable', async () => {
+    const db = install();
+    expect((await submit(db, applicant)).status).toBe(201);
+    expect((await submit(db, { ...applicant, email: 'OSCAR@EXAMPLE.INVALID' })).status).toBe(409);
+  });
+
+  it('27. an email is reusable after a terminal decision', async () => {
+    for (const status of ['rejected', 'withdrawn']) {
+      const db = install();
+      seedApplication(db, { id: APP_ID, status, email: applicant.email });
+      expect((await submit(db, applicant)).status).toBe(201);
+    }
+  });
+
+  it('28. an email stays blocked while changes are requested', async () => {
+    const db = install();
+    seedApplication(db, { id: APP_ID, status: 'changes_requested', email: applicant.email });
+    expect((await submit(db, applicant)).status).toBe(409);
+  });
+
+  it('29. approval without an admin URL fails closed before inviting', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    vi.unstubAllEnvs();
+    expect((await approve(appId)).status).toBe(500);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(0);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+  });
+
+  it('30. an invitation failure writes nothing', async () => {
+    const db = install(undefined, {
+      invite: async () => ({ data: { user: null }, error: { message: 'GoTrue is down' } }),
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    expect((await approve(appId)).status).toBe(409);
+    expect(db.rows('staff_users').find((r) => r.email === applicant.email)).toBeUndefined();
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(db.calls.filter((c) => c.op === 'deleteUser')).toHaveLength(0);
+  });
+
+  it('31. a database failure after the invite cleans up the orphan Auth user', async () => {
+    const db = install(undefined, {
+      inviteUserId: NEW_OST_ID,
+      unique: { staff_role_assignments: [['staff_id']] },
+    });
+    // A prior partial run left the assignment behind; the member insert would
+    // land next, so the approval must unwind the Auth user it just invited.
+    db.rows('staff_role_assignments').push({ staff_id: NEW_OST_ID, role_id: 'r-ost' });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    expect((await approve(appId)).status).toBe(409);
+    expect(
+      db.calls.filter((c) => c.op === 'deleteUser' && String(c.arg) === NEW_OST_ID),
+    ).toHaveLength(1);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(
+      db.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),
+    ).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('32. the issued OST number is non-blank and sequenced', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(201);
+    const ostNumber = (state.body as { ostNumber: string }).ostNumber;
+    expect(ostNumber).toMatch(/^OST-\d{6}$/);
+    expect(db.rows('ost_members').find((r) => r.application_id === appId)?.ost_number).toBe(
+      ostNumber,
+    );
+  });
+
+  it('33. an anonymous caller cannot open an application by id', async () => {
+    install();
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: `applications/${APP_ID}` }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(401);
   });
 });
 

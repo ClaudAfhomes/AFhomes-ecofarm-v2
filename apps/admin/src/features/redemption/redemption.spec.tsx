@@ -79,7 +79,7 @@ const RECEIPT = {
 
 type Route = { status?: number; body: unknown };
 const routes = new Map<string, Route>();
-const requests: { path: string; method: string; body: unknown }[] = [];
+const requests: { path: string; method: string; body: unknown; query: string }[] = [];
 
 const ok = (body: unknown): Route => ({ status: 200, body });
 const list = (data: unknown[]): Route => ({ status: 200, body: { data, meta: {} } });
@@ -126,10 +126,11 @@ const VIEW_ONLY = {
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const path = url
+    const [bare, query = ''] = url
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/^\/api\/v1/, '')
-      .split('?')[0]!;
+      .split('?');
+    const path = bare!;
     const method = init?.method ?? 'GET';
     let body: unknown = null;
     if (typeof init?.body === 'string') {
@@ -139,7 +140,7 @@ function mockFetch() {
         body = init.body;
       }
     }
-    requests.push({ path, method, body });
+    requests.push({ path, method, body, query });
 
     // The resolve endpoint is identified by its query string.
     if (path === '/redemptions/resolve') {
@@ -312,6 +313,98 @@ describe('redemption lookup', () => {
 /* ================================================================== */
 /* Confirm                                                             */
 /* ================================================================== */
+
+describe('POS till: items, pending confirmation, print safety', () => {
+  const identify = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await screen.findByText('Ana R Buyer');
+  };
+
+  it('never asks for inactive items: the till fetches the active catalog only', async () => {
+    const user = userEvent.setup();
+    render('/admin/redemption');
+    await identify(user);
+    expect(await screen.findByText('Japanese Teppanyaki')).toBeInTheDocument();
+    const fetches = requests.filter(
+      (r) => r.method === 'GET' && r.path === '/redemptions/items',
+    );
+    expect(fetches.length).toBeGreaterThan(0);
+    for (const fetch of fetches) {
+      expect(fetch.query).not.toMatch(/all|includeInactive/);
+    }
+    // And whatever the (active-only, server-filtered) response holds is shown.
+    expect(screen.getByText('Spa Day Pass')).toBeInTheDocument();
+  });
+
+  it('filters till items by name or code without refetching', async () => {
+    const user = userEvent.setup();
+    render('/admin/redemption');
+    await identify(user);
+    await screen.findByText('Japanese Teppanyaki');
+    await user.type(screen.getByLabelText('Filter items'), 'spa');
+    expect(screen.queryByText('Japanese Teppanyaki')).toBeNull();
+    expect(screen.getByText('Spa Day Pass')).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Filter items'));
+    expect(screen.getByText('Japanese Teppanyaki')).toBeInTheDocument();
+  });
+
+  it('disables Confirm while the redemption is pending, sending one request', async () => {
+    const fallback = mockFetch();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if ((init?.method ?? 'GET') === 'POST' && url.includes('/redemptions')) {
+          // Record the attempt like the base stub, then hang: the mutation
+          // stays pending so the till must stay disabled with one request.
+          let body: unknown = null;
+          if (typeof init?.body === 'string') {
+            try {
+              body = JSON.parse(init.body);
+            } catch {
+              body = init.body;
+            }
+          }
+          requests.push({ path: '/redemptions', method: 'POST', body, query: '' });
+          return new Promise(() => {}) as unknown as Response;
+        }
+        return (fallback as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>)(
+          input,
+          init,
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    render('/admin/redemption');
+    await identify(user);
+    await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
+    await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
+    const pending = await screen.findByRole('button', { name: 'Redeeming…' });
+    expect(pending).toBeDisabled();
+    expect(
+      requests.filter((r) => r.method === 'POST' && r.path === '/redemptions'),
+    ).toHaveLength(1);
+  });
+
+  it('printing the receipt sends no further requests and keeps it open', async () => {
+    const user = userEvent.setup();
+    render('/admin/redemption');
+    await identify(user);
+    await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
+    await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
+    expect(await screen.findByText('RDM-000001')).toBeInTheDocument();
+    const postsBefore = requests.filter(
+      (r) => r.method === 'POST' && r.path === '/redemptions',
+    ).length;
+    await user.click(screen.getByRole('button', { name: 'Print receipt' }));
+    expect(
+      requests.filter((r) => r.method === 'POST' && r.path === '/redemptions'),
+    ).toHaveLength(postsBefore);
+    // The receipt is still open for the next member flow.
+    expect(screen.getByText('RDM-000001')).toBeInTheDocument();
+  });
+});
 
 describe('redemption confirm', () => {
   const identify = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -731,6 +824,75 @@ describe('redemption screens', () => {
     expect(screen.getByText(/you can view the catalog but not change it/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add item' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+});
+
+describe('redemption catalog search and filter', () => {
+  it('shows the display-order column with formatted whole points', async () => {
+    render('/admin/redemption/items');
+    await screen.findByText('Japanese Teppanyaki');
+    expect(screen.getByRole('columnheader', { name: 'Display order' })).toBeInTheDocument();
+    // Whole points with grouping, never decimals: "2,000", not "2000.00".
+    expect(screen.getByText('2,000')).toBeInTheDocument();
+    expect(screen.queryByText('2000.00')).toBeNull();
+  });
+
+  it('sends the search term to the catalog API', async () => {
+    const user = userEvent.setup();
+    render('/admin/redemption/items');
+    await screen.findByText('Japanese Teppanyaki');
+    await user.type(screen.getByLabelText('Search catalog items'), 'tepp');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => {
+      const get = requests.find(
+        (r) => r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('search=tepp'),
+      );
+      expect(get).toBeDefined();
+    });
+  });
+
+  it('sends the inactive filter to the catalog API', async () => {
+    const user = userEvent.setup();
+    render('/admin/redemption/items');
+    await screen.findByText('Japanese Teppanyaki');
+    await user.selectOptions(screen.getByLabelText('Filter by status'), 'inactive');
+    await waitFor(() => {
+      const get = requests.find(
+        (r) => r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('active=false'),
+      );
+      expect(get).toBeDefined();
+    });
+  });
+
+  it('shows a filtered-empty state when nothing matches', async () => {
+    install({ 'GET /redemptions/items': list([]) });
+    const user = userEvent.setup();
+    render('/admin/redemption/items');
+    await screen.findByText('The catalog is empty');
+    await user.type(screen.getByLabelText('Search catalog items'), 'nothing-matches');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByText('No items match')).toBeInTheDocument();
+  });
+
+  it('shows loading while the catalog request is pending', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    render('/admin/redemption/items');
+    expect(await screen.findByText('Loading the catalog…')).toBeInTheDocument();
+  });
+
+  it('recovers from a load error through retry', async () => {
+    const user = userEvent.setup();
+    install({
+      'GET /redemptions/items': { status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } },
+    });
+    render('/admin/redemption/items');
+    await screen.findByText('The catalog could not be loaded');
+    install({ 'GET /redemptions/items': list(ITEMS) });
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Japanese Teppanyaki')).toBeInTheDocument();
   });
 });
 

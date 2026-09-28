@@ -54,11 +54,22 @@ export const resolveMember = (identifier: string): Promise<RedemptionPreview> =>
 /* Catalog                                                             */
 /* ------------------------------------------------------------------ */
 
-export const getRedemptionItems = (includeInactive = false): Promise<RedemptionItem[]> =>
-  requestList(
-    `/redemptions/items${includeInactive ? '?includeInactive=true' : ''}`,
-    redemptionItemSchema,
-  );
+export type RedemptionItemVisibility = 'active' | 'inactive' | 'all';
+
+export const getRedemptionItems = (
+  includeInactive: boolean | RedemptionItemVisibility = false,
+  search = '',
+): Promise<RedemptionItem[]> => {
+  const query = new URLSearchParams();
+  if (includeInactive === true || includeInactive === 'all') query.set('active', 'all');
+  else if (includeInactive === 'inactive') query.set('active', 'false');
+  if (search.trim()) query.set('search', search.trim());
+  const suffix = query.toString();
+  return requestList(`/redemptions/items${suffix ? `?${suffix}` : ''}`, redemptionItemSchema);
+};
+
+export const getRedemptionItem = (id: string): Promise<RedemptionItem> =>
+  request(`/redemptions/items/${id}`, redemptionItemSchema);
 
 export const createRedemptionItem = (
   input: CreateRedemptionItemRequest,

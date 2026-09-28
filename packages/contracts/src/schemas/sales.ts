@@ -21,8 +21,13 @@ import {
 export const cardProductSchema = z.object({
   id: z.string().uuid(),
   categoryId: z.string().uuid(),
+  /** Display name of the category (null when the category row is missing). */
+  categoryName: z.string().nullable(),
+  /** False when the plan's category is inactive or missing: not sellable. */
+  categoryIsActive: z.boolean(),
   code: z.string().min(1).max(40),
   name: z.string().min(1).max(80),
+  description: z.string().max(2000).nullable(),
   cashPrice: exactDecimalStringSchema,
   minimumDownPayment: exactDecimalStringSchema,
   yearlyPoints: z.number().int().nonnegative(),
@@ -37,6 +42,9 @@ export type CardProduct = z.infer<typeof cardProductSchema>;
 export const updateCardProductSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
+    code: z.string().trim().min(1).max(40).optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    categoryId: z.string().uuid().optional(),
     cashPrice: exactDecimalStringSchema.optional(),
     minimumDownPayment: exactDecimalStringSchema.optional(),
     yearlyPoints: z.number().int().nonnegative().optional(),
@@ -58,6 +66,114 @@ export function assertProductEconomicsSane(input: {
   const price = BigInt(input.cashPrice.replace('.', '').padEnd(3, '0').slice(0, -1) || '0');
   const down = BigInt(input.minimumDownPayment.replace('.', '').padEnd(3, '0').slice(0, -1) || '0');
   return down <= price ? null : 'Minimum down payment cannot exceed the cash price';
+}
+
+/**
+ * Phase 19 - card-plan codes are normalised to SCREAMING identifiers so
+ * `gold`, ` Gold ` and `GOLD` can never become three different plans. The
+ * existing Bronze/Silver/Gold rows already use this form and are untouched.
+ */
+export function normalizePlanCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+/** Parse an exact-decimal rate into ten-thousandths, or null when malformed. */
+function rateToBasisPoints(rate: string): number | null {
+  const match = /^(\d+)(?:\.(\d{1,4}))?$/.exec(rate);
+  if (!match) return null;
+  return Number(match[1]) * 10000 + Number((match[2] ?? '').padEnd(4, '0'));
+}
+
+/** A commission rate is valid only inside the closed interval 0..1. */
+export function assertCommissionRateInRange(rate: string): string | null {
+  const basisPoints = rateToBasisPoints(rate);
+  if (basisPoints === null || basisPoints < 0 || basisPoints > 10000)
+    return 'Commission rate must be between 0 and 1';
+  return null;
+}
+
+/**
+ * Full Phase 19 plan validation with exact-decimal arithmetic (never float):
+ * cash_price > 0, minimum_down_payment in 0..price, yearly_points >= 0,
+ * commission_rate in 0..1. Shape errors (regex, int) are reported by Zod;
+ * this reports the cross-field and range errors.
+ */
+export function assertCardPlanEconomicsSane(input: {
+  cashPrice: string;
+  minimumDownPayment: string;
+  yearlyPoints: number;
+  commissionRate: string;
+}): string | null {
+  const toCentavos = (v: string) => BigInt(v.replace('.', '').padEnd(3, '0').slice(0, -1) || '0');
+  if (toCentavos(input.cashPrice) <= 0n) return 'Cash price must be greater than zero';
+  if (toCentavos(input.minimumDownPayment) < 0n)
+    return 'Minimum down payment cannot be negative';
+  if (toCentavos(input.minimumDownPayment) > toCentavos(input.cashPrice))
+    return 'Minimum down payment cannot exceed the cash price';
+  if (!Number.isInteger(input.yearlyPoints) || input.yearlyPoints < 0)
+    return 'Yearly points cannot be negative';
+  return assertCommissionRateInRange(input.commissionRate);
+}
+
+export const createCardProductSchema = z.object({  name: z.string().trim().min(1).max(80),
+  code: z.string().trim().min(1).max(40),
+  description: z.string().trim().max(2000).optional(),
+  categoryId: z.string().uuid().optional(),
+  cashPrice: exactDecimalStringSchema,
+  minimumDownPayment: exactDecimalStringSchema,
+  yearlyPoints: z.number().int().nonnegative(),
+  commissionRate: exactDecimalRateSchema,
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+export type CreateCardProductRequest = z.infer<typeof createCardProductSchema>;
+
+/* ================================================================== */
+/* Card categories                                                     */
+/* ================================================================== */
+
+/** Database slug rule (`card_categories.slug CHECK`): lowercase slug form. */
+export const CATEGORY_SLUG_RE = /^[a-z][a-z0-9-]{1,63}$/;
+
+export const cardCategorySchema = z.object({
+  id: z.string().uuid(),
+  slug: z.string().min(1).max(64),
+  name: z.string().min(1).max(80),
+  description: z.string().max(2000).nullable(),
+  isActive: z.boolean(),
+  sortOrder: z.number().int(),
+  /** Plans currently filed under this category (list views only). */
+  planCount: z.number().int().nonnegative().optional(),
+});
+export type CardCategory = z.infer<typeof cardCategorySchema>;
+
+export const createCardCategorySchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  slug: z.string().trim().toLowerCase().min(1).max(64).regex(CATEGORY_SLUG_RE),
+  description: z.string().trim().max(2000).optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+export type CreateCardCategoryRequest = z.infer<typeof createCardCategorySchema>;
+
+export const updateCardCategorySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    slug: z.string().trim().toLowerCase().min(1).max(64).regex(CATEGORY_SLUG_RE).optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
+export type UpdateCardCategoryRequest = z.infer<typeof updateCardCategorySchema>;
+
+/**
+ * Normalise a category slug to its canonical form (trimmed, lowercase), so
+ * `Membership`, ` Membership ` and `membership` can never become three
+ * different categories. The existing `membership` row already uses it.
+ */
+export function normalizeCategorySlug(slug: string): string {
+  return slug.trim().toLowerCase();
 }
 
 /* ================================================================== */

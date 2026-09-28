@@ -143,12 +143,23 @@ export type SellableProduct = {
   commissionRate: string;
 };
 
-export type ProductRejection = 'PRODUCT_INACTIVE' | 'DOWN_PAYMENT_EXCEEDS_PRICE' | 'ZERO_PRICE';
+export type ProductRejection =
+  | 'PRODUCT_CATEGORY_INACTIVE'
+  | 'PRODUCT_INACTIVE'
+  | 'DOWN_PAYMENT_EXCEEDS_PRICE'
+  | 'ZERO_PRICE';
 
-/** A product may only be sold when it is active and its economics are coherent. */
+/**
+ * A product may only be sold when it is active, its category is active, and
+ * its economics are coherent. The category defaults to active so existing
+ * callers (and old tests) keep their meaning; the sale handler always passes
+ * the real category state.
+ */
 export function productSaleRejection(
   product: Pick<SellableProduct, 'isActive' | 'cashPrice' | 'minimumDownPayment'>,
+  categoryIsActive = true,
 ): ProductRejection | null {
+  if (!categoryIsActive) return 'PRODUCT_CATEGORY_INACTIVE';
   if (!product.isActive) return 'PRODUCT_INACTIVE';
   if (compareMoney(product.cashPrice, '0.00') <= 0) return 'ZERO_PRICE';
   if (compareMoney(product.minimumDownPayment, product.cashPrice) > 0) {

@@ -4,7 +4,12 @@ import { Link, useParams } from 'react-router';
 import { Button, ErrorState, PageHeader, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
-import { approveOstApplication, getOstApplication, rejectOstApplication } from './services';
+import {
+  approveOstApplication,
+  getOstApplication,
+  rejectOstApplication,
+  requestOstApplicationChanges,
+} from './services';
 import {
   ACCEPTED_MIME,
   MAX_BYTES,
@@ -47,6 +52,17 @@ export function OstApplicationDetailPage() {
       void client.invalidateQueries({ queryKey: ['ost'] });
     },
     onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Rejection failed.'),
+  });
+
+  const requestChanges = useMutation({
+    mutationFn: () => requestOstApplicationChanges(id, reason.trim()),
+    onSuccess: () => {
+      setOutcome('Changes requested.');
+      setReason('');
+      void client.invalidateQueries({ queryKey: ['ost'] });
+    },
+    onError: (cause) =>
+      setOutcome(cause instanceof Error ? cause.message : 'Change request failed.'),
   });
 
   if (query.isPending) return <p role="status">Loading application…</p>;
@@ -127,12 +143,12 @@ export function OstApplicationDetailPage() {
               )
                 approve.mutate();
             }}
-            disabled={approve.isPending || reject.isPending}
+            disabled={approve.isPending || reject.isPending || requestChanges.isPending}
           >
             {approve.isPending ? 'Approving…' : 'Approve as OST'}
           </Button>
           <label>
-            Rejection reason (required, min 5 characters)
+            Review notes (required for rejection or requested changes, min 5 characters)
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -144,9 +160,30 @@ export function OstApplicationDetailPage() {
             variant="secondary"
             onClick={() => {
               setOutcome(null);
+              requestChanges.mutate();
+            }}
+            disabled={
+              requestChanges.isPending ||
+              reject.isPending ||
+              approve.isPending ||
+              reason.trim().length < 5 ||
+              app.status === 'changes_requested'
+            }
+          >
+            {requestChanges.isPending ? 'Requesting…' : 'Request changes'}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setOutcome(null);
               reject.mutate();
             }}
-            disabled={reject.isPending || approve.isPending || reason.trim().length < 5}
+            disabled={
+              reject.isPending ||
+              approve.isPending ||
+              requestChanges.isPending ||
+              reason.trim().length < 5
+            }
           >
             {reject.isPending ? 'Rejecting…' : 'Reject application'}
           </Button>

@@ -35,6 +35,7 @@ export type AuditFilters = {
   actor?: string;
   action?: string;
   entityType?: string;
+  entityId?: string;
   from?: string;
   to?: string;
   limit?: number;

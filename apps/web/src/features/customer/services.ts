@@ -7,6 +7,7 @@ import {
   customerActivationResultSchema,
   customerCredentialsSchema,
   customerMembershipSchema,
+  customerPaymentSchema,
   customerPointsEntrySchema,
   customerPointsSummarySchema,
   customerProfileSchema,
@@ -14,6 +15,7 @@ import {
   type CustomerActivationResult,
   type CustomerCredentials,
   type CustomerMembership,
+  type CustomerPayment,
   type CustomerPointsEntry,
   type CustomerPointsSummary,
   type CustomerProfile,
@@ -48,6 +50,9 @@ export const getCustomerPoints = (): Promise<CustomerPointsSummary> =>
 export const getCustomerPointsLedger = (): Promise<CustomerPointsEntry[]> =>
   requestList('/customer/points/ledger', customerPointsEntrySchema);
 
+export const getCustomerPayments = (): Promise<CustomerPayment[]> =>
+  requestList('/customer/payments', customerPaymentSchema);
+
 /**
  * Request fresh card credentials. The previous QR and fallback code stop working
  * immediately, and the new plaintext is returned exactly once - it is never
@@ -56,4 +61,4 @@ export const getCustomerPointsLedger = (): Promise<CustomerPointsEntry[]> =>
 export const reissueCardCredentials = (): Promise<CustomerCredentials> =>
   request('/customer/membership/credentials', customerCredentialsSchema, { method: 'POST' });
 
-export type { CustomerProfile, CustomerMembership, CustomerPointsSummary, CustomerPointsEntry, CustomerCredentials };
+export type { CustomerProfile, CustomerMembership, CustomerPointsSummary, CustomerPointsEntry, CustomerPayment, CustomerCredentials };

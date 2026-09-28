@@ -876,7 +876,10 @@ async function main(): Promise<void> {
     const alternateSsm = uuidFor('phase14:ssm-b');
     const alternateCustomer = uuidFor('phase14:customer-b');
     const alternateSale = uuidFor('phase14:sale-b');
-    await db.query(`insert into auth.users(id,email) values($1,$2)`, [alternateSsm, `${RUN}-ssm-b@example.invalid`]);
+    await db.query(`insert into auth.users(id,email) values($1,$2)`, [
+      alternateSsm,
+      `${RUN}-ssm-b@example.invalid`,
+    ]);
     await db.query(
       `insert into public.staff_users(id,email,full_name,status) values($1,$2,'Phase 14 SSM B','active')`,
       [alternateSsm, `${RUN}-ssm-b@example.invalid`],
@@ -895,20 +898,28 @@ async function main(): Promise<void> {
       `select id from public.referral_relationships where subject_staff_id=$1 and is_active`,
       [staff['sm']],
     );
-    await db.query(`select public.correct_referral_upline($1,$2,'Phase 14 regression',$3)`, [smRelationship.id, alternateSsm, staff['super-admin']]);
+    await db.query(`select public.correct_referral_upline($1,$2,'Phase 14 regression',$3)`, [
+      smRelationship.id,
+      alternateSsm,
+      staff['super-admin'],
+    ]);
     const oldSsm = await one<{ n: number }>(
       `select count(*)::int n from public.card_sale_hierarchy_snapshots
         where sale_id=$1 and ancestor_staff_id=$2`,
       [saleId, staff['ssm']],
     );
     check('upline correction cannot rewrite the old sale hierarchy snapshot', oldSsm.n === 1);
-    const alternateNumber = (await one<{ customer_number: string }>('select * from public.next_customer_number()')).customer_number;
+    const alternateNumber = (
+      await one<{ customer_number: string }>('select * from public.next_customer_number()')
+    ).customer_number;
     await db.query(
       `insert into public.customers(id,customer_number,email,phone,first_name,last_name,status)
        values($1,$2,$3,'09170000000','Phase','Fourteen','prospect')`,
       [alternateCustomer, alternateNumber, `${RUN}-phase14-buyer@example.invalid`],
     );
-    const alternateSaleNumber = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+    const alternateSaleNumber = (
+      await one<{ sale_number: string }>('select * from public.next_sale_number()')
+    ).sale_number;
     await db.query(
       `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,status,balance_due_at)
        values($1,$2,$3,$4,'staff',$5,$6,$6,'submitted',now()+interval '1 year')`,
@@ -1735,9 +1746,7 @@ async function main(): Promise<void> {
       check(
         `  ${fn.proname} pins search_path`,
         /search_path\s*=\s*public/.test(config) ||
-          /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(
-            config,
-          ),
+          /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(config),
         config,
       );
     }
@@ -5116,6 +5125,212 @@ async function main(): Promise<void> {
     // can echo the connection string, and a harness must never log credentials.
     check('suite completed without an unexpected error', false, safeErrorMessage(error));
   } finally {
+    section('41. OST referral codes, applications, members and SM->OST genealogy');
+    /* ---------------------------------------------------------------- */
+    // Phase 8/24 primitives on real PostgreSQL: the sequence-backed OST
+    // number (read as a one-row set, the Phase 18 lesson), hash-addressed
+    // referral codes, the case-insensitive reviewable-email guard, member
+    // creation, the adjacency trigger, the one-active-upline backstop, and
+    // RLS scoping for two different Sales Managers.
+    const ostStaffId = uuidFor('ost:phase41-member');
+    const ostEmail = `${RUN}-phase41-ost@example.invalid`;
+    await db.query('insert into auth.users (id, email) values ($1, $2)', [ostStaffId, ostEmail]);
+    await db.query(
+      `insert into public.staff_users (id, email, full_name, status) values ($1, $2, 'Synthetic phase41 ost', 'invited')`,
+      [ostStaffId, ostEmail],
+    );
+    await db.query(
+      'insert into public.staff_role_assignments (staff_id, role_id, assigned_by) values ($1, $2, $3)',
+      [ostStaffId, roles['ost'], staff['super-admin']],
+    );
+    createdStaffIds.push(ostStaffId);
+
+    // 41a. next_ost_number() answers a ONE-ROW SET with a non-blank number.
+    // A handler that reads `.ost_number` off the set itself (instead of the
+    // row) would persist a blank - exactly the Phase 18 sale-number defect.
+    const ostNumbers = await db.query<{ ost_number: string }>(
+      'select * from public.next_ost_number()',
+    );
+    eq('next_ost_number returns exactly one row', ostNumbers.rows.length, 1);
+    const ostNumber = ostNumbers.rows[0]!.ost_number;
+    check(
+      'the OST number is non-blank and sequenced',
+      typeof ostNumber === 'string' && /^OST-\d{6}$/.test(ostNumber),
+      JSON.stringify(ostNumber),
+    );
+
+    // 41b. Referral codes are addressed by SHA-256 hash, never plaintext.
+    const rawCode = `OST-${RUN.slice(1, 7).toUpperCase().padEnd(6, 'X')}-${RUN.slice(7, 13).toUpperCase().padEnd(6, 'Y')}`;
+    const codeHash = createHash('sha256').update(rawCode).digest('hex');
+    const codeId = uuidFor('ost:phase41-code');
+    await db.query(
+      `insert into public.referral_codes
+        (id, code_hash, code_hint, sponsor_staff_id, expires_at, max_uses, use_count, is_active, created_by)
+       values ($1, $2, $3, $4, now() + interval '7 days', 10, 0, true, $4)`,
+      [codeId, codeHash, `OST-…-${rawCode.slice(-4)}`, staff['sm']],
+    );
+    const byHash = await one<{ id: string } | undefined>(
+      'select id from public.referral_codes where code_hash = $1',
+      [codeHash],
+    );
+    eq('a code resolves by its hash', byHash?.id, codeId);
+    const byUnknown = await one<{ id: string } | undefined>(
+      'select id from public.referral_codes where code_hash = $1',
+      ['0'.repeat(64)],
+    );
+    eq('an unknown hash resolves to nothing', byUnknown, undefined);
+
+    // 41c. One reviewable application per email, case-insensitively; a
+    // terminal decision frees the address.
+    const appEmail = `${RUN}-phase41-applicant@example.invalid`;
+    const appId = uuidFor('ost:phase41-app');
+    await db.query(
+      `insert into public.ost_applications
+        (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
+         birth_date, address, status)
+       values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
+         '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
+         'submitted')`,
+      [appId, codeId, staff['sm'], appEmail],
+    );
+    let duplicateRefused = false;
+    try {
+      await db.query(
+        `insert into public.ost_applications
+          (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
+           birth_date, address, status)
+         values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
+           '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
+           'under_review')`,
+        [uuidFor('ost:phase41-app-dupe'), codeId, staff['sm'], appEmail.toUpperCase()],
+      );
+    } catch (error) {
+      duplicateRefused = (error as { code?: string })?.code === '23505';
+    }
+    check('a mixed-case duplicate reviewable email is refused', duplicateRefused);
+    await db.query(`update public.ost_applications set status = 'rejected' where id = $1`, [appId]);
+    const reuseId = uuidFor('ost:phase41-app-reuse');
+    await db.query(
+      `insert into public.ost_applications
+        (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
+         birth_date, address, status)
+       values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
+         '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
+         'submitted')`,
+      [reuseId, codeId, staff['sm'], appEmail],
+    );
+    check('the address is reusable after a terminal decision', true);
+
+    // 41d. Member creation plus the SM -> OST edge; the trigger and the
+    // one-active-upline index are the backstops, not the handler.
+    const memberNumber = (
+      await one<{ ost_number: string }>('select * from public.next_ost_number()')
+    ).ost_number;
+    await db.query(
+      `insert into public.ost_members
+        (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone,
+         status, approved_by)
+       values ($1, $2, $3, $4, 'Synthetic phase41 ost', $5, '+639170000041', 'active', $6)`,
+      [ostStaffId, reuseId, staff['sm'], memberNumber, ostEmail, staff['super-admin']],
+    );
+    const edgeId = (
+      await one<{ id: string }>(
+        `insert into public.referral_relationships
+          (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+         values ($1, $2, 'ost', true, true, $3) returning id`,
+        [ostStaffId, staff['sm'], staff['super-admin']],
+      )
+    ).id;
+    check('an SM -> OST edge is created', typeof edgeId === 'string' && edgeId.length > 0);
+    let secondEdgeRefused = false;
+    try {
+      await db.query(
+        `insert into public.referral_relationships
+          (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+         values ($1, $2, 'ost', true, true, $3)`,
+        [ostStaffId, staff['sm'], staff['super-admin']],
+      );
+    } catch (error) {
+      secondEdgeRefused = (error as { code?: string })?.code === '23505';
+    }
+    check('a second active upline for the same subject is refused', secondEdgeRefused);
+    let wrongUplineRefused = false;
+    try {
+      await db.query(
+        `insert into public.referral_relationships
+          (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+         values ($1, $2, 'ost', false, false, $3)`,
+        [uuidFor('ost:phase41-ost2'), staff['vice-director'], staff['super-admin']],
+      );
+    } catch {
+      wrongUplineRefused = true;
+    }
+    check('an OST edge under a Vice Director is refused by the trigger', wrongUplineRefused);
+    let duplicateNumberRefused = false;
+    try {
+      await db.query(
+        `insert into public.ost_members
+          (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone, status, approved_by)
+         values ($1, $2, $3, $4, 'Duplicate number', $5, '+639170000042', 'active', $6)`,
+        [
+          uuidFor('ost:phase41-dupe'),
+          appId,
+          staff['sm'],
+          memberNumber,
+          `${RUN}-phase41-dupe@example.invalid`,
+          staff['super-admin'],
+        ],
+      );
+    } catch (error) {
+      duplicateNumberRefused = (error as { code?: string })?.code === '23505';
+    }
+    check('a duplicate OST number is refused', duplicateNumberRefused);
+
+    // 41e. RLS: anonymous sees nothing; an unrelated role sees nothing; each
+    // SM sees applications including the one they sponsor.
+    const hrStaffId = staff['hr'];
+    const smStaffId = staff['sm'];
+    if (!hrStaffId || !smStaffId) throw new Error('Phase 41 staff fixtures are incomplete');
+    eq(
+      'anon reads no OST applications',
+      await visibleRows(
+        target.url,
+        'anon',
+        null,
+        'select count(*)::int as n from public.ost_applications',
+      ),
+      0,
+    );
+    eq(
+      'an unrelated role reads no OST applications',
+      await visibleRows(
+        target.url,
+        'authenticated',
+        hrStaffId,
+        'select count(*)::int as n from public.ost_applications',
+      ),
+      0,
+    );
+    const smSees = await visibleRows(
+      target.url,
+      'authenticated',
+      smStaffId,
+      `select count(*)::int as n from public.ost_applications where sponsor_staff_id = '${smStaffId}'`,
+    );
+    check('the sponsoring SM reads their own applications', smSees >= 2, String(smSees));
+
+    // 41f. Explicit tidy-up for tables the shared cleanup does not count:
+    // edges first (restrict), then members, applications and codes.
+    await db.query('delete from public.referral_relationships where subject_staff_id = $1', [
+      ostStaffId,
+    ]);
+    await db.query('delete from public.ost_members where id = $1', [ostStaffId]);
+    await db.query('delete from public.ost_applications where id = any($1::uuid[])', [
+      [appId, reuseId],
+    ]);
+    await db.query('delete from public.referral_codes where id = $1', [codeId]);
+    check('phase 41 synthetics removed', true);
+
     section('21. cleanup');
     try {
       // Every synthetic row is reachable either by an id this process recorded or

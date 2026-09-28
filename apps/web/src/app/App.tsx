@@ -9,8 +9,10 @@ import { CustomerForgotPasswordPage } from '../features/customer/CustomerForgotP
 import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
 import { CustomerResetPasswordPage } from '../features/customer/CustomerResetPasswordPage';
 import { CustomerMembershipPage } from '../features/customer/CustomerMembershipPage';
+import { CustomerPaymentsPage } from '../features/customer/CustomerPaymentsPage';
 import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
+import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemptionsPage';
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
 import { MarketingLayout } from '../marketing/MarketingLayout';
@@ -86,6 +88,8 @@ export default function App() {
         <Route index element={<CustomerDashboardPage />} />
         <Route path="membership" element={<CustomerMembershipPage />} />
         <Route path="points" element={<CustomerPointsPage />} />
+        <Route path="redemptions" element={<CustomerRedemptionsPage />} />
+        <Route path="payments" element={<CustomerPaymentsPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
         <Route path="*" element={<NotFound />} />
       </Route>

@@ -123,7 +123,11 @@ export type {
 
 export {
   cardProductSchema,
+  cardCategorySchema,
+  createCardProductSchema,
+  createCardCategorySchema,
   updateCardProductSchema,
+  updateCardCategorySchema,
   governmentIdTypeSchema,
   genderSchema,
   customerAddressSchema,
@@ -132,6 +136,10 @@ export {
   customerSchema,
   maskGovernmentId,
   assertProductEconomicsSane,
+  assertCardPlanEconomicsSane,
+  assertCommissionRateInRange,
+  normalizePlanCode,
+  normalizeCategorySlug,
   createSaleSchema,
   saleSchema,
   saleFinancialSummarySchema,
@@ -141,7 +149,11 @@ export {
 } from './schemas/sales.js';
 export type {
   CardProduct,
+  CardCategory,
+  CreateCardProductRequest,
+  CreateCardCategoryRequest,
   UpdateCardProductRequest,
+  UpdateCardCategoryRequest,
   GovernmentIdType,
   CustomerAddress,
   CreateCustomerRequest,
@@ -199,6 +211,8 @@ export {
   customerPointsSummarySchema,
   customerPointsEntrySchema,
   customerPointsLedgerSchema,
+  customerPaymentSchema,
+  customerPaymentListSchema,
   customerCredentialsSchema,
   CUSTOMER_ACTIVATION_ERRORS,
 } from './schemas/customer.js';
@@ -267,6 +281,7 @@ export {
   ostApplicationSubmittedSchema,
   ostApplicationSchema,
   rejectOstApplicationSchema,
+  requestOstApplicationChangesSchema,
   ostMemberSchema,
   createOstReferralCodeSchema,
   ostReferralCodeIssuedSchema,
@@ -281,6 +296,7 @@ export type {
   OstApplicationSubmitted,
   OstApplication,
   RejectOstApplicationRequest,
+  RequestOstApplicationChangesRequest,
   OstMember,
   CreateOstReferralCodeRequest,
   OstReferralCodeIssued,
@@ -366,6 +382,7 @@ export type {
   CustomerMembership,
   CustomerPointsSummary,
   CustomerPointsEntry,
+  CustomerPayment,
   CustomerCredentials,
   CustomerActivationError,
 } from './schemas/customer.js';

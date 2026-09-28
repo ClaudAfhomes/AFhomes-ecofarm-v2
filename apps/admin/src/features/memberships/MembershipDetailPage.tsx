@@ -6,6 +6,7 @@ import type { ReissuedMembershipCard } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/format';
+import { getAudit } from '../reports/services';
 import { getMembershipCard, markMembershipPrinted, reissueMembershipCard } from './services';
 
 /**
@@ -39,6 +40,15 @@ export function MembershipDetailPage() {
     user?.afHomesPermissions.some(
       (p) => p.moduleKey === 'finance.card_activation' && p.canUpdate,
     ) === true;
+  const canSeeAudit =
+    user?.afHomesPermissions.some((p) => p.moduleKey === 'governance.audit' && p.canView) ===
+    true;
+  const history = useQuery({
+    queryKey: ['memberships', id, 'history'],
+    queryFn: () => getAudit({ entityType: 'membership', entityId: id, limit: 20 }),
+    enabled: canSeeAudit,
+    retry: false,
+  });
 
   const reissue = useMutation({
     mutationFn: () => reissueMembershipCard(id, reason.trim()),
@@ -93,6 +103,14 @@ export function MembershipDetailPage() {
           </dd>
         </div>
         <div>
+          <dt>Category</dt>
+          <dd>{data.categoryName ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Customer account</dt>
+          <dd>{data.customerStatus ?? '—'}</dd>
+        </div>
+        <div>
           <dt>Status</dt>
           <dd>
             <StatusChip
@@ -106,12 +124,20 @@ export function MembershipDetailPage() {
           <dd>{data.pointsBalance.toLocaleString('en-PH')}</dd>
         </div>
         <div>
+          <dt>Yearly entitlement</dt>
+          <dd>{data.yearlyPointsAllocated.toLocaleString('en-PH')}</dd>
+        </div>
+        <div>
           <dt>Activated</dt>
           <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
         </div>
         <div>
           <dt>Card issued</dt>
           <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
+        </div>
+        <div>
+          <dt>Issued by</dt>
+          <dd>{data.issuedBy ?? '—'}</dd>
         </div>
         <div>
           <dt>Prints</dt>
@@ -183,6 +209,28 @@ export function MembershipDetailPage() {
         <p role="status" style={{ marginTop: 16 }}>
           {outcome}
         </p>
+      ) : null}
+
+      {canSeeAudit ? (
+        <div style={{ marginTop: 24 }}>
+          <h2>History</h2>
+          {history.isPending ? (
+            <p role="status">Loading history…</p>
+          ) : history.isError ? (
+            <p role="alert">Card history is unavailable right now.</p>
+          ) : history.data.data.length === 0 ? (
+            <p>No card events recorded yet.</p>
+          ) : (
+            <ul>
+              {history.data.data.map((event) => (
+                <li key={String(event.id)}>
+                  {event.action} · {event.summary} ·{' '}
+                  {event.createdAt ? formatDateTime(event.createdAt) : '—'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ) : null}
 
       <Dialog

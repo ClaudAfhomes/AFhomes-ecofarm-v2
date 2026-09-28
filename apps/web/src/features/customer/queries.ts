@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   activateCustomer,
   getCustomerMembership,
+  getCustomerPayments,
   getCustomerPoints,
   getCustomerPointsLedger,
   getCustomerProfile,
@@ -37,6 +38,13 @@ export const useCustomerLedgerQuery = (enabled = true) =>
   useQuery({
     queryKey: ['customer', 'points', 'ledger'],
     queryFn: getCustomerPointsLedger,
+    enabled,
+  });
+
+export const useCustomerPaymentsQuery = (enabled = true) =>
+  useQuery({
+    queryKey: ['customer', 'payments'],
+    queryFn: getCustomerPayments,
     enabled,
   });
 

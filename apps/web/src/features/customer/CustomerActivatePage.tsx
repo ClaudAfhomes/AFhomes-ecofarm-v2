@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@jad/ui';
+import { validateRecoveryPassword } from '@jad/shared';
 
 import { useActivateMutation } from './queries';
 import { useCustomerSession } from '../../lib/customer-session';
@@ -50,6 +51,17 @@ export function CustomerActivatePage() {
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    // Same client-side policy as password reset: weak choices are rejected
+    // before they ever leave the browser. The server re-validates regardless.
+    const policyError = validateRecoveryPassword(password);
+    if (policyError) {
+      setError(policyError);
+      return;
+    }
+    if (password !== passwordConfirmation) {
+      setError('The passwords do not match');
+      return;
+    }
     const secret = token.trim();
     try {
       const result = await activation.mutateAsync({

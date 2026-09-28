@@ -36,6 +36,9 @@ export const approveOstApplication = (id: string): Promise<OstMember> =>
 export const rejectOstApplication = (id: string, reason: string): Promise<OstApplication> =>
   post(`/ost/applications/${id}/reject`, ostApplicationSchema, { reason });
 
+export const requestOstApplicationChanges = (id: string, notes: string): Promise<OstApplication> =>
+  post(`/ost/applications/${id}/request-changes`, ostApplicationSchema, { notes });
+
 export const getOstMembers = (): Promise<OstMember[]> =>
   requestList('/ost/members', ostMemberSchema);
 

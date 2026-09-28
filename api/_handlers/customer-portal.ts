@@ -282,6 +282,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
 
+    /* ---------------- payment history ---------------- */
+    if (path === 'payments' && method(req) === 'GET') {
+      if (!isActiveCustomer(principal)) {
+        return fail(
+          res,
+          'FORBIDDEN',
+          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          403,
+        );
+      }
+      // Only this customer's own card sales, then only those sales' payments.
+      // Staff ids, receipt paths, rejection reasons and notes are deliberately
+      // never selected, so finance internals cannot reach the portal.
+      const { data: sales, error: salesError } = await db
+        .from('card_sales')
+        .select('id')
+        .eq('customer_id', principal.customerId);
+      if (salesError) throw salesError;
+      const saleIds = ((sales ?? []) as Record<string, unknown>[]).map((s) => String(s.id));
+      if (saleIds.length === 0) return list(res, []);
+      const { data, error } = await db
+        .from('payments')
+        .select('id, sale_id, amount, payment_type, method, reference, status, recorded_at, verified_at')
+        .in('sale_id', saleIds)
+        .order('recorded_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return list(
+        res,
+        ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+          id: row.id,
+          saleId: row.sale_id,
+          amount: row.amount,
+          paymentType: isoOrNull(row.payment_type),
+          method: row.method,
+          reference: isoOrNull(row.reference),
+          status: row.status,
+          recordedAt: isoOrNull(row.recorded_at) ?? '',
+          verifiedAt: isoOrNull(row.verified_at),
+        })),
+      );
+    }
+
     /* ---------------- re-issue card credentials ---------------- */
     const credentials = route(req, 'POST', /^membership\/credentials$/);
     if (credentials) {

@@ -92,7 +92,10 @@ export function MembershipCardPrintPage() {
         <div className={styles.cardHead}>
           <div>
             <p className={styles.brand}>AF Homes Ecofarm</p>
-            <p className={styles.tier}>{data.tierName}</p>
+            <p className={styles.tier}>
+              {data.tierName}
+              {data.categoryName ? ` · ${data.categoryName}` : ''}
+            </p>
           </div>
           <StatusChip label={data.status} tone={data.status === 'active' ? 'success' : 'neutral'} />
         </div>
