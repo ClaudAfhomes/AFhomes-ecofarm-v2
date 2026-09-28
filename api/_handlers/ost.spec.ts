@@ -290,7 +290,7 @@ function install(tables?: Record<string, Row[]>, opts: { inviteUserId?: string }
       [EMP_TOKEN]: { id: EMP_ID, email: 'emp@afhomes.test', email_confirmed_at: ago(200) },
     },
     inviteUserId: opts.inviteUserId ?? NEW_OST_ID,
-    rpcs: [{ fn: 'next_ost_number', result: 'OST-000001' }],
+    rpcs: [{ fn: 'next_ost_number', result: [{ ost_number: 'OST-000001' }] }],
   });
   holder.db = db as unknown;
   return db;

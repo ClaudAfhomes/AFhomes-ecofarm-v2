@@ -33,6 +33,7 @@ import {
   mapRpcError,
   method,
   route,
+  singleRpcText,
   subPath,
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
@@ -308,7 +309,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: sequence, error: seqError } = await db.rpc('next_sale_number');
       if (seqError) return mapRpcError(res, seqError);
-      const saleNumber = String((sequence as { sale_number?: string })?.sale_number ?? '');
+      // next_sale_number() is RETURNS TABLE, so live PostgREST answers with a
+      // one-row array. A missing or blank number is a generation failure: the
+      // sale must fail BEFORE the row is inserted, never persist a blank.
+      const saleNumber = singleRpcText(sequence, 'sale_number');
+      if (!saleNumber) return fail(res, 'INTERNAL', 'Sale number generation failed', 500);
 
       const terms = snapshotSaleTerms({
         id: product.id,

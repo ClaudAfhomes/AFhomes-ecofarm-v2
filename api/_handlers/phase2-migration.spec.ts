@@ -555,8 +555,8 @@ function install(overrides: Record<string, unknown[]> = {}) {
     // The transactional functions cannot run in-process; this matrix is about
     // WHO may call them, so a permissive scripted result is enough.
     rpcs: [
-      { fn: 'next_customer_number', result: { customer_number: `CUS-8${rpcCounter}0000` } },
-      { fn: 'next_sale_number', result: { sale_number: `SALE-8${rpcCounter}0000` } },
+      { fn: 'next_customer_number', result: [{ customer_number: `CUS-8${rpcCounter}0000` }] },
+      { fn: 'next_sale_number', result: [{ sale_number: `SALE-8${rpcCounter}0000` }] },
       { fn: 'record_card_payment', result: 'scripted-payment' },
       {
         fn: 'activate_card_sale',

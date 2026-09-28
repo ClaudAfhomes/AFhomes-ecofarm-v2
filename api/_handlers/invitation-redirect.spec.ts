@@ -195,7 +195,7 @@ function ostWorld() {
       [ADMIN_TOKEN]: { id: ADMIN_ID, email: 'admin@afhomes.test', email_confirmed_at: ago() },
     },
     inviteUserId: NEW_OST_ID,
-    rpcs: [{ fn: 'next_ost_number', result: 'OST-000001' }],
+    rpcs: [{ fn: 'next_ost_number', result: [{ ost_number: 'OST-000001' }] }],
   });
   return holder.db as FakeSupabase;
 }

@@ -162,3 +162,33 @@ export function isoOrNull(value: unknown): string | null {
 export function requireString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
+
+/**
+ * Extract the single row of a `RETURNS TABLE` RPC result.
+ *
+ * Live PostgREST returns a set-returning function as an ARRAY of rows
+ * (`[{ sale_number: 'SALE-000001' }]`), never a bare object. A bare object
+ * is tolerated only so older scripted doubles keep working; anything else -
+ * an empty array, more than one row, a scalar, null - yields null so the
+ * caller fails closed BEFORE persisting anything.
+ */
+export function singleRpcRow(data: unknown): Record<string, unknown> | null {
+  const row = Array.isArray(data) ? (data.length === 1 ? data[0] : undefined) : data;
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  return row as Record<string, unknown>;
+}
+
+/**
+ * Extract a single non-blank text column from a `RETURNS TABLE` RPC result.
+ * Returns null when the shape is wrong, the column is missing, or the value
+ * is blank - every one of those is a generation failure, never an empty
+ * string to persist.
+ */
+export function singleRpcText(data: unknown, column: string): string | null {
+  const row = singleRpcRow(data);
+  if (!row) return null;
+  const value = row[column];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}

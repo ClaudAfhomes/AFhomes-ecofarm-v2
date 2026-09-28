@@ -66,8 +66,8 @@ function install(
     links: LINKS as never,
     rpcs: [
       ...(options.rpcs ?? []),
-      { fn: 'next_customer_number', result: { customer_number: `CUS-${910000 + counter}` } },
-      { fn: 'next_sale_number', result: { sale_number: `SALE-${910000 + counter}` } },
+      { fn: 'next_customer_number', result: [{ customer_number: `CUS-${910000 + counter}` }] },
+      { fn: 'next_sale_number', result: [{ sale_number: `SALE-${910000 + counter}` }] },
       { fn: 'record_card_payment', result: `pay-${counter}` },
       {
         fn: 'verify_card_payment',
@@ -97,7 +97,7 @@ function install(
       },
       {
         fn: 'issue_customer_onboarding_token',
-        result: { token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' },
+        result: [{ token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' }],
       },
     ],
     rpcErrors: options.rpcErrors,

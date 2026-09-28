@@ -64,8 +64,8 @@ function install() {
     unique: UNIQUE,
     links: LINKS as never,
     rpcs: [
-      { fn: 'next_customer_number', result: { customer_number: 'CUS-900001' } },
-      { fn: 'next_sale_number', result: { sale_number: 'SALE-900001' } },
+      { fn: 'next_customer_number', result: [{ customer_number: 'CUS-900001' }] },
+      { fn: 'next_sale_number', result: [{ sale_number: 'SALE-900001' }] },
       { fn: 'record_card_payment', result: 'pay-1' },
       {
         fn: 'verify_card_payment',
@@ -95,7 +95,7 @@ function install() {
       },
       {
         fn: 'issue_customer_onboarding_token',
-        result: { token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' },
+        result: [{ token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' }],
       },
     ],
   });

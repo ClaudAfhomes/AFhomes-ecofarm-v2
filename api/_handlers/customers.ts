@@ -20,6 +20,8 @@ import {
   mapRpcError,
   method,
   route,
+  singleRpcRow,
+  singleRpcText,
   subPath,
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
@@ -98,9 +100,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: sequence, error: seqError } = await db.rpc('next_customer_number');
       if (seqError) return mapRpcError(res, seqError);
-      const customerNumber = String(
-        (sequence as { customer_number?: string })?.customer_number ?? '',
-      );
+      // next_customer_number() is RETURNS TABLE, so live PostgREST answers
+      // with a one-row array. Fail BEFORE the insert, never persist a blank.
+      const customerNumber = singleRpcText(sequence, 'customer_number');
+      if (!customerNumber) return fail(res, 'INTERNAL', 'Customer number generation failed', 500);
 
       const row = {
         customer_number: customerNumber,
@@ -254,8 +257,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_actor_id: auth.userId,
       });
       if (error) return mapRpcError(res, error);
-      const result = issued as { token?: string; expires_at?: string } | null;
-      if (!result?.token) return fail(res, 'INTERNAL', 'Token issue failed', 500);
+      // issue_customer_onboarding_token() is RETURNS TABLE, so live
+      // PostgREST answers with a one-row array. The raw token is a
+      // credential: required byte-exact (never trimmed) and non-empty.
+      const issuedRow = singleRpcRow(issued);
+      const rawToken = issuedRow?.token;
+      if (typeof rawToken !== 'string' || rawToken.length === 0)
+        return fail(res, 'INTERNAL', 'Token issue failed', 500);
+      const result = { token: rawToken, expires_at: issuedRow?.expires_at };
 
       await audit(db, auth.userId, 'CUSTOMER_ONBOARDING_TOKEN_ISSUED', 'customer', id, null, {
         purpose,
