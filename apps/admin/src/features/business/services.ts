@@ -72,8 +72,10 @@ export const getCardProduct = (id: string): Promise<CardProduct> =>
 export const createCardProduct = (input: CreateCardProductRequest): Promise<CardProduct> =>
   post('/card-products', cardProductSchema, input);
 
-export const updateCardProduct = (id: string, input: UpdateCardProductRequest): Promise<CardProduct> =>
-  patch(`/card-products/${id}`, cardProductSchema, input);
+export const updateCardProduct = (
+  id: string,
+  input: UpdateCardProductRequest,
+): Promise<CardProduct> => patch(`/card-products/${id}`, cardProductSchema, input);
 
 /* ------------------------------------------------------------------ */
 /* Card categories (the plan vocabulary; same permission family)        */
@@ -101,7 +103,9 @@ export const updateCardCategory = (
 /* Customers                                                           */
 /* ------------------------------------------------------------------ */
 
-export const getCustomers = (params: { search?: string; status?: string } = {}): Promise<Customer[]> => {
+export const getCustomers = (
+  params: { search?: string; status?: string } = {},
+): Promise<Customer[]> => {
   const query = new URLSearchParams();
   if (params.search) query.set('search', params.search);
   if (params.status) query.set('status', params.status);
@@ -112,6 +116,16 @@ export const getCustomers = (params: { search?: string; status?: string } = {}):
 export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> =>
   post('/customers', customerSchema, input);
 
+const customerDeactivationSchema = z.object({ deactivated: z.literal(true) });
+const customerAnonymizationSchema = z.object({ anonymized: z.literal(true) });
+const customerDeletionSchema = z.object({ deleted: z.literal(true) });
+export const deactivateCustomer = (id: string) =>
+  post(`/customers/${id}/deactivate`, customerDeactivationSchema, {});
+export const anonymizeCustomer = (id: string) =>
+  post(`/customers/${id}/anonymize`, customerAnonymizationSchema, {});
+export const deleteCustomer = (id: string) =>
+  request(`/customers/${id}`, customerDeletionSchema, { method: 'DELETE' });
+
 /* ------------------------------------------------------------------ */
 /* Sales                                                               */
 /* ------------------------------------------------------------------ */
@@ -121,7 +135,8 @@ export const getSales = (params: { status?: string } = {}): Promise<Sale[]> => {
   return requestList(`/sales${suffix}`, saleSchema);
 };
 
-export const createSale = (input: CreateSaleRequest): Promise<Sale> => post('/sales', saleSchema, input);
+export const createSale = (input: CreateSaleRequest): Promise<Sale> =>
+  post('/sales', saleSchema, input);
 
 /** Server-computed money state. The UI never totals a sale itself. */
 export const getSaleSummary = (saleId: string): Promise<SaleFinancialSummary> =>
@@ -130,7 +145,10 @@ export const getSaleSummary = (saleId: string): Promise<SaleFinancialSummary> =>
 export const getSalePayments = (saleId: string): Promise<Payment[]> =>
   requestList(`/sales/${saleId}/payments`, paymentSchema);
 
-export const recordPayment = (saleId: string, input: RecordPaymentRequest): Promise<{ id: string }> =>
+export const recordPayment = (
+  saleId: string,
+  input: RecordPaymentRequest,
+): Promise<{ id: string }> =>
   post(`/sales/${saleId}/payments`, z.object({ id: z.string() }), input);
 
 export const verifyPayment = (
@@ -157,10 +175,7 @@ export const verifyPayment = (
     input,
   );
 
-export const activateSale = (
-  saleId: string,
-  validityMonths = 12,
-): Promise<ActivationResult> =>
+export const activateSale = (saleId: string, validityMonths = 12): Promise<ActivationResult> =>
   post(`/sales/${saleId}/activate`, activationResultSchema, { validityMonths });
 
 /* ------------------------------------------------------------------ */
@@ -187,7 +202,9 @@ export const getReferrals = (): Promise<ReferralRelationship[]> =>
 /* Commissions                                                         */
 /* ------------------------------------------------------------------ */
 
-export const getCommissions = (params: { status?: string; search?: string; seller?: string } = {}): Promise<Commission[]> => {
+export const getCommissions = (
+  params: { status?: string; search?: string; seller?: string } = {},
+): Promise<Commission[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.search) query.set('search', params.search);

@@ -58,6 +58,35 @@ const listQuerySchema = z.object({
 });
 const parseListQuery = (req: VercelRequest) => listQuerySchema.safeParse(req.query);
 
+async function hasReference(db: Db, table: string, column: string, id: string) {
+  const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
+  const checks: Array<[string, string, string]> = [
+    ['sales', 'card_sales', 'customer_id'],
+    ['payments', 'payments', 'customer_id'],
+    ['memberships', 'memberships', 'customer_id'],
+    ['redemptions', 'redemptions', 'customer_id'],
+    ['documents', 'identity_documents', 'customer_id'],
+  ];
+  const results = await Promise.all(
+    checks.map(async ([label, table, column]) => ({
+      label,
+      blocked: await hasReference(db, table, column, id),
+    })),
+  );
+  return results.filter((result) => result.blocked).map((result) => result.label);
+}
+
+async function removeCustomerAuth(db: Db, authUserId: string | null | undefined) {
+  if (!authUserId) return;
+  const { error } = await db.auth.admin.deleteUser(authUserId);
+  if (error) throw error;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
@@ -275,6 +304,137 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res
         .status(201)
         .json({ token: result.token, purpose, expiresAt: result.expires_at ?? null });
+    }
+
+    const deactivate = route(req, 'POST', /^([0-9a-f-]+)\/deactivate$/);
+    if (deactivate) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const id = deactivate[1]!;
+      const { data: before, error: readError } = await db
+        .from('customers')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
+      const { error } = await db
+        .from('customers')
+        .update({ status: 'suspended', auth_user_id: null, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      await removeCustomerAuth(db, before.auth_user_id);
+      await audit(
+        db,
+        auth.userId,
+        'CUSTOMER_DEACTIVATED',
+        'customer',
+        id,
+        {
+          status: before.status,
+        },
+        { status: 'suspended', loginRemoved: true },
+      );
+      return res.status(200).json({ deactivated: true });
+    }
+
+    const anonymize = route(req, 'POST', /^([0-9a-f-]+)\/anonymize$/);
+    if (anonymize) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'delete');
+      if ('error' in auth) return deny(res, auth);
+      if (auth.roleSlug !== 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Only Super Admin can anonymize customers', 403);
+      const id = anonymize[1]!;
+      const { data: before, error: readError } = await db
+        .from('customers')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+      const suffix = id.replace(/-/g, '').slice(0, 20);
+      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
+      const { error } = await db
+        .from('customers')
+        .update({
+          first_name: 'Deleted',
+          middle_name: null,
+          last_name: 'Customer',
+          suffix: null,
+          email: `deleted+${suffix}@invalid.local`,
+          phone: '0000000',
+          birth_date: null,
+          gender: null,
+          address: {},
+          government_id_type: null,
+          government_id_number: null,
+          notes: null,
+          auth_user_id: null,
+          status: 'cancelled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+      if (error) throw error;
+      await removeCustomerAuth(db, before.auth_user_id);
+      await audit(
+        db,
+        auth.userId,
+        'CUSTOMER_ANONYMIZED',
+        'customer',
+        id,
+        {
+          status: before.status,
+        },
+        {
+          status: 'cancelled',
+          directProfilePiiRemoved: true,
+          identityDocumentsRetainedPendingPolicy: true,
+        },
+      );
+      return res.status(200).json({ anonymized: true });
+    }
+
+    const remove = route(req, 'DELETE', /^([0-9a-f-]+)$/);
+    if (remove) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'delete');
+      if ('error' in auth) return deny(res, auth);
+      if (auth.roleSlug !== 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Only Super Admin can permanently delete customers', 403);
+      const id = remove[1]!;
+      const { data: before, error: readError } = await db
+        .from('customers')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+      const blockers = await customerDeleteBlockers(db, id);
+      if (blockers.length)
+        return res.status(409).json({
+          error: {
+            code: 'PROTECTED_HISTORY',
+            message:
+              'This customer has historical business records and cannot be permanently deleted. Deactivate or anonymize the account instead.',
+            details: { canDelete: false, blockers },
+          },
+        });
+      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
+      const { error: deleteError } = await db.from('customers').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+      await removeCustomerAuth(db, before.auth_user_id);
+      await audit(
+        db,
+        auth.userId,
+        'CUSTOMER_DELETED',
+        'customer',
+        id,
+        {
+          customerNumber: before.customer_number,
+        },
+        { deleted: true },
+      );
+      return res.status(200).json({ deleted: true });
     }
 
     return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);

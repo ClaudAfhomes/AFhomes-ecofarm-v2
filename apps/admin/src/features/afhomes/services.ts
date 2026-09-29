@@ -68,6 +68,12 @@ export const updateAfHomesStaff = (
     method: 'PATCH',
     body: JSON.stringify(input),
   });
+const staffDeactivationSchema = z.object({ deactivated: z.literal(true) });
+const deletionSchema = z.object({ deleted: z.literal(true) });
+export const deactivateAfHomesStaff = (id: string) =>
+  request(`/admin/afhomes/staff/${id}/deactivate`, staffDeactivationSchema, { method: 'POST' });
+export const deleteAfHomesStaff = (id: string) =>
+  request(`/admin/afhomes/staff/${id}`, deletionSchema, { method: 'DELETE' });
 export const getAfHomesDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
 export const createAfHomesDepartment = (input: { code: string; name: string }) =>

@@ -337,6 +337,115 @@ describe('GET /admin/afhomes/session', () => {
   });
 });
 
+describe('staff account deletion safety', () => {
+  beforeEach(() => install());
+
+  it('deactivates another staff member without deleting their profile', async () => {
+    const db = install();
+    const state = await call({
+      method: 'POST',
+      afPath: `staff/${UUID.viewerStaff}/deactivate`,
+      token: TOKEN.admin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('staff_users').find((row) => row.id === UUID.viewerStaff)?.status).toBe(
+      'inactive',
+    );
+    expect(db.rows('audit_events').some((row) => row.action === 'STAFF_DEACTIVATED')).toBe(true);
+  });
+
+  it('never lets staff delete themselves', async () => {
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.superAdminStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('never lets an Admin permanently delete staff', async () => {
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.admin,
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('never permanently deletes another Super Admin', async () => {
+    const target = 'aaaaaaaa-0000-4000-8000-000000000077';
+    install({
+      tables: {
+        staff_users: [
+          {
+            id: target,
+            email: 'second.superadmin@afhomes.test',
+            full_name: 'Second Super Admin',
+            status: 'active',
+          },
+        ],
+        staff_role_assignments: [
+          { id: 'assignment-second-superadmin', staff_id: target, role_id: UUID.role.superAdmin },
+        ],
+      },
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${target}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('blocks hard deletion when protected sales exist', async () => {
+    install({
+      tables: {
+        card_sales: [{ id: 'sale-1', seller_staff_id: UUID.viewerStaff }],
+      },
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({
+      error: { code: 'PROTECTED_HISTORY', details: { blockers: ['sales'] } },
+    });
+  });
+
+  it.each([
+    ['commissions', 'commissions', 'beneficiary_staff_id'],
+    ['genealogy', 'referral_relationships', 'upline_staff_id'],
+  ])('blocks hard deletion when protected %s exist', async (label, table, column) => {
+    install({ tables: { [table]: [{ id: `${label}-1`, [column]: UUID.viewerStaff }] } });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(
+      (state.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
+    ).toContain(label);
+  });
+
+  it('hard-deletes an unused non-Super-Admin profile and its Auth user', async () => {
+    const db = install();
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(false);
+    expect(
+      db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === UUID.viewerStaff),
+    ).toBe(true);
+    expect(db.rows('audit_events').some((row) => row.action === 'STAFF_DELETED')).toBe(true);
+  });
+});
+
 describe('GET /admin/afhomes/account-activation', () => {
   it('returns only the invited profile bound to a verified invite session', async () => {
     const db = install({

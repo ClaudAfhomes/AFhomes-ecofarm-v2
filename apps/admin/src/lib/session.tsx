@@ -23,6 +23,7 @@ export interface SessionUser {
   name: string;
   email: string;
   roleId: string;
+  roleSlug?: string;
   roleName: string;
   afHomesPermissions: AfHomesPermission[];
   status: 'active' | 'invited' | 'inactive' | 'suspended';
@@ -105,6 +106,7 @@ export function SessionProvider({
         name: parsed.fullName,
         email: parsed.email,
         roleId: parsed.roleId,
+        roleSlug: parsed.roleSlug,
         roleName: parsed.roleName,
         afHomesPermissions: parsed.permissions,
         status: parsed.status,

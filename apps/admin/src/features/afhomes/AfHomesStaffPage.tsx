@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
@@ -12,7 +13,10 @@ import {
   StatusChip,
 } from '@jad/ui';
 import type { AfHomesStaff } from '@jad/contracts';
+import { useSession } from '../../lib/session';
 import {
+  deactivateAfHomesStaff,
+  deleteAfHomesStaff,
   getAfHomesDepartments,
   getAfHomesRoles,
   getAfHomesStaff,
@@ -23,6 +27,7 @@ import {
 type Restriction = AfHomesStaff['restrictions'][number];
 export function AfHomesStaffPage() {
   const client = useQueryClient();
+  const { user } = useSession();
   const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
   const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
   const departments = useQuery({
@@ -38,6 +43,11 @@ export function AfHomesStaffPage() {
   const [departmentId, setDepartmentId] = useState('');
   const [editing, setEditing] = useState<AfHomesStaff | null>(null);
   const [restrictions, setRestrictions] = useState<Restriction[]>([]);
+  const [accountAction, setAccountAction] = useState<{
+    kind: 'deactivate' | 'delete';
+    staff: AfHomesStaff;
+  } | null>(null);
+  const [confirmation, setConfirmation] = useState('');
   const invite = useMutation({
     mutationFn: () =>
       inviteAfHomesStaff({ fullName, email, roleId, departmentId: departmentId || null }),
@@ -51,6 +61,17 @@ export function AfHomesStaffPage() {
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
       setEditing(null);
+    },
+  });
+  const changeAccount = useMutation({
+    mutationFn: async () => {
+      if (accountAction?.kind === 'delete') await deleteAfHomesStaff(accountAction.staff.id);
+      else await deactivateAfHomesStaff(accountAction!.staff.id);
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
+      setAccountAction(null);
+      setConfirmation('');
     },
   });
   const rows = useMemo(
@@ -166,6 +187,28 @@ export function AfHomesStaffPage() {
                     <Button variant="secondary" onClick={() => openRestrictions(item)}>
                       Restrictions
                     </Button>
+                    {item.id !== user?.id && item.status !== 'inactive' ? (
+                      <>
+                        {' '}
+                        <Button
+                          variant="secondary"
+                          onClick={() => setAccountAction({ kind: 'deactivate', staff: item })}
+                        >
+                          Deactivate
+                        </Button>
+                      </>
+                    ) : null}
+                    {user?.roleSlug === 'super_admin' && item.id !== user.id ? (
+                      <>
+                        {' '}
+                        <Button
+                          variant="danger"
+                          onClick={() => setAccountAction({ kind: 'delete', staff: item })}
+                        >
+                          Delete Permanently
+                        </Button>
+                      </>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -277,6 +320,43 @@ export function AfHomesStaffPage() {
         </div>
         {update.error ? <p role="alert">{update.error.message}</p> : null}
       </Dialog>
+      <ConfirmDialog
+        open={accountAction !== null}
+        onCancel={() => {
+          setAccountAction(null);
+          setConfirmation('');
+        }}
+        onConfirm={() => changeAccount.mutate()}
+        title={
+          accountAction?.kind === 'delete'
+            ? 'Permanently Delete Staff Account'
+            : 'Deactivate Staff Account'
+        }
+        message={
+          <div>
+            <p>
+              {accountAction?.kind === 'delete'
+                ? 'This action permanently removes the login/account if no protected business records exist. This cannot be undone.'
+                : 'This user will no longer be able to access the AF Homes staff system. Historical records will remain.'}
+            </p>
+            {accountAction?.kind === 'delete' ? (
+              <label>
+                Type DELETE to confirm
+                <input
+                  aria-label="Type DELETE to confirm staff deletion"
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
+          </div>
+        }
+        danger
+        confirmLabel={accountAction?.kind === 'delete' ? 'Delete Permanently' : 'Confirm'}
+        confirmDisabled={accountAction?.kind === 'delete' && confirmation !== 'DELETE'}
+        confirmLoading={changeAccount.isPending}
+      />
     </section>
   );
 }

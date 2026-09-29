@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
@@ -10,9 +11,17 @@ import {
   SearchField,
   StatusChip,
 } from '@jad/ui';
-import type { CreateCustomerRequest } from '@jad/contracts';
+import type { CreateCustomerRequest, Customer } from '@jad/contracts';
 
-import { createCustomer, getCardProducts, getCustomers } from './services';
+import { useSession } from '../../lib/session';
+import {
+  anonymizeCustomer,
+  createCustomer,
+  deactivateCustomer,
+  deleteCustomer,
+  getCardProducts,
+  getCustomers,
+} from './services';
 import { SaleApplicationDialog } from './SaleApplicationDialog';
 
 const EMPTY: CreateCustomerRequest = {
@@ -34,13 +43,17 @@ const EMPTY: CreateCustomerRequest = {
  */
 export function BusinessCustomersPage() {
   const client = useQueryClient();
+  const { user } = useSession();
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const customers = useQuery({
     queryKey: ['business', 'customers', applied],
     queryFn: () => getCustomers(applied ? { search: applied } : {}),
   });
-  const products = useQuery({ queryKey: ['business', 'card-products'], queryFn: () => getCardProducts() });
+  const products = useQuery({
+    queryKey: ['business', 'card-products'],
+    queryFn: () => getCardProducts(),
+  });
   // New applications may only offer ACTIVE plans under ACTIVE categories.
   // The list endpoint already returns sellable-only by default, but the
   // filter below keeps the dialog correct even when the shared cache holds
@@ -52,6 +65,11 @@ export function BusinessCustomersPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateCustomerRequest>(EMPTY);
   const [selling, setSelling] = useState<string | null>(null);
+  const [accountAction, setAccountAction] = useState<{
+    kind: 'deactivate' | 'delete' | 'anonymize';
+    customer: Customer;
+  } | null>(null);
+  const [confirmation, setConfirmation] = useState('');
 
   const set = <K extends keyof CreateCustomerRequest>(key: K, value: CreateCustomerRequest[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -64,15 +82,26 @@ export function BusinessCustomersPage() {
       setOpen(false);
     },
   });
+  const changeAccount = useMutation({
+    mutationFn: async () => {
+      if (accountAction?.kind === 'delete') await deleteCustomer(accountAction.customer.id);
+      else if (accountAction?.kind === 'anonymize')
+        await anonymizeCustomer(accountAction.customer.id);
+      else await deactivateCustomer(accountAction!.customer.id);
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['business', 'customers'] });
+      setAccountAction(null);
+      setConfirmation('');
+    },
+  });
 
   return (
     <section>
       <PageHeader
         title="Customers"
         description="Register a customer and open a card application. Financial terms are set by the product, not by the seller."
-        actions={
-          <Button onClick={() => setOpen(true)}>Register customer</Button>
-        }
+        actions={<Button onClick={() => setOpen(true)}>Register customer</Button>}
       />
 
       <form
@@ -103,7 +132,10 @@ export function BusinessCustomersPage() {
       ) : customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : customers.data?.length === 0 ? (
-        <EmptyState title="No customers" description="Register the first customer to get started." />
+        <EmptyState
+          title="No customers"
+          description="Register the first customer to get started."
+        />
       ) : (
         <div className="table-scroll">
           <table>
@@ -142,7 +174,31 @@ export function BusinessCustomersPage() {
                       }}
                     >
                       New application
+                    </Button>{' '}
+                    <Button
+                      variant="secondary"
+                      disabled={customer.status === 'suspended' || customer.status === 'cancelled'}
+                      onClick={() => setAccountAction({ kind: 'deactivate', customer })}
+                    >
+                      Deactivate Account
                     </Button>
+                    {user?.roleSlug === 'super_admin' ? (
+                      <>
+                        {' '}
+                        <Button
+                          variant="secondary"
+                          onClick={() => setAccountAction({ kind: 'anonymize', customer })}
+                        >
+                          Anonymize
+                        </Button>{' '}
+                        <Button
+                          variant="danger"
+                          onClick={() => setAccountAction({ kind: 'delete', customer })}
+                        >
+                          Delete Permanently
+                        </Button>
+                      </>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -176,7 +232,10 @@ export function BusinessCustomersPage() {
           </label>
           <label>
             Middle name
-            <input value={form.middleName ?? ''} onChange={(e) => set('middleName', e.target.value)} />
+            <input
+              value={form.middleName ?? ''}
+              onChange={(e) => set('middleName', e.target.value)}
+            />
           </label>
           <label>
             Last name
@@ -224,7 +283,10 @@ export function BusinessCustomersPage() {
             <input
               value={form.address.province}
               onChange={(e) =>
-                setForm((prev) => ({ ...prev, address: { ...prev.address, province: e.target.value } }))
+                setForm((prev) => ({
+                  ...prev,
+                  address: { ...prev.address, province: e.target.value },
+                }))
               }
             />
           </label>
@@ -270,6 +332,53 @@ export function BusinessCustomersPage() {
           onCreated={() => setSelling(null)}
         />
       ) : null}
+      <ConfirmDialog
+        open={accountAction !== null}
+        onCancel={() => {
+          setAccountAction(null);
+          setConfirmation('');
+        }}
+        onConfirm={() => changeAccount.mutate()}
+        title={
+          accountAction?.kind === 'delete'
+            ? 'Permanently Delete Customer Account'
+            : accountAction?.kind === 'anonymize'
+              ? 'Anonymize Customer Account'
+              : 'Deactivate Customer Account'
+        }
+        message={
+          <div>
+            <p>
+              {accountAction?.kind === 'delete'
+                ? 'This permanently removes an unused customer account only when no protected business records exist.'
+                : accountAction?.kind === 'anonymize'
+                  ? 'Direct profile information and login access will be removed while business history remains.'
+                  : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
+            </p>
+            {accountAction?.kind !== 'deactivate' ? (
+              <label>
+                Type DELETE to confirm
+                <input
+                  aria-label="Type DELETE to confirm customer action"
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
+          </div>
+        }
+        danger
+        confirmLabel={
+          accountAction?.kind === 'delete'
+            ? 'Delete Permanently'
+            : accountAction?.kind === 'anonymize'
+              ? 'Anonymize'
+              : 'Confirm'
+        }
+        confirmDisabled={accountAction?.kind !== 'deactivate' && confirmation !== 'DELETE'}
+        confirmLoading={changeAccount.isPending}
+      />
     </section>
   );
 }

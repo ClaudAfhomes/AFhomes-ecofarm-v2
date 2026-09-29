@@ -173,6 +173,82 @@ async function staffCatalog(db: Db) {
   });
 }
 
+async function hasReference(db: Db, table: string, column: string, id: string) {
+  const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
+  const checks: Array<[string, string, string]> = [
+    ['sales', 'card_sales', 'seller_staff_id'],
+    ['sales', 'card_sales', 'created_by'],
+    ['commissions', 'commissions', 'beneficiary_staff_id'],
+    ['commissions', 'commissions', 'qualified_by'],
+    ['commissions', 'commissions', 'paid_by'],
+    ['genealogy', 'referral_relationships', 'subject_staff_id'],
+    ['genealogy', 'referral_relationships', 'upline_staff_id'],
+    ['genealogy', 'referral_relationships', 'assigned_by'],
+    ['genealogy', 'card_sale_hierarchy_snapshots', 'ancestor_staff_id'],
+    ['customer referrals', 'customers', 'referred_by_staff_id'],
+    ['customer records', 'customers', 'created_by'],
+    ['OST records', 'ost_members', 'id'],
+    ['OST records', 'ost_referral_codes', 'sponsor_staff_id'],
+    ['OST records', 'referral_codes', 'sponsor_staff_id'],
+    ['OST records', 'referral_codes', 'created_by'],
+    ['OST records', 'ost_applications', 'sponsor_staff_id'],
+    ['OST records', 'ost_applications', 'reviewed_by'],
+    ['OST records', 'ost_members', 'sponsor_staff_id'],
+    ['OST records', 'ost_members', 'approved_by'],
+    ['redemptions', 'redemptions', 'redeemed_by'],
+    ['redemptions', 'redemptions', 'voided_by'],
+    ['documents', 'identity_documents', 'uploaded_by'],
+    ['documents', 'identity_documents', 'reviewed_by'],
+    ['payments', 'payments', 'recorded_by'],
+    ['payments', 'payments', 'verified_by'],
+    ['memberships', 'memberships', 'activated_by'],
+    ['memberships', 'memberships', 'card_issued_by'],
+    ['qualification reviews', 'final_qualifications', 'reviewed_by'],
+    ['points history', 'points_ledger', 'actor_id'],
+    ['customer onboarding', 'customer_onboarding_tokens', 'created_by'],
+    ['CMS history', 'cms_documents', 'created_by'],
+    ['CMS history', 'cms_documents', 'updated_by'],
+    ['CMS history', 'cms_documents', 'published_by'],
+    ['CMS history', 'cms_document_versions', 'created_by'],
+    ['CMS history', 'cms_pages', 'created_by'],
+    ['CMS history', 'cms_pages', 'updated_by'],
+    ['CMS history', 'cms_pages', 'published_by'],
+    ['CMS history', 'cms_page_versions', 'created_by'],
+    ['CMS history', 'cms_media_assets', 'created_by'],
+    ['audit history', 'audit_events', 'actor_id'],
+    ['staff invitations', 'staff_invitations', 'invited_by'],
+  ];
+  const results = await Promise.all(
+    checks.map(async ([label, table, column]) => ({
+      label,
+      blocked: await hasReference(db, table, column, id),
+    })),
+  );
+  return [...new Set(results.filter((result) => result.blocked).map((result) => result.label))];
+}
+
+async function staffRole(db: Db, id: string) {
+  const { data: assignment, error } = await db
+    .from('staff_role_assignments')
+    .select('role_id')
+    .eq('staff_id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!assignment) return null;
+  const { data: role, error: roleError } = await db
+    .from('roles')
+    .select('id,slug,name')
+    .eq('id', assignment.role_id)
+    .maybeSingle();
+  if (roleError) throw roleError;
+  return role;
+}
+
 function cents(values: unknown[]) {
   let total = 0n;
   for (const value of values) {
@@ -645,6 +721,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res
         .status(200)
         .json((await staffCatalog(db)).find((staff: { id: string }) => staff.id === id));
+    }
+    const staffDeactivate = path.match(/^staff\/([0-9a-f-]+)\/deactivate$/);
+    if (staffDeactivate && method === 'POST') {
+      const auth = await authorizeAfHomes(req, 'organization.staff', 'update');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = staffDeactivate[1]!;
+      if (id === auth.userId)
+        return fail(res, 'FORBIDDEN', 'You cannot deactivate your own account', 403);
+      const before = (await staffCatalog(db)).find((staff: { id: string }) => staff.id === id);
+      if (!before) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+      const targetRole = await staffRole(db, id);
+      if (targetRole?.slug === 'super_admin') {
+        if (auth.roleSlug !== 'super_admin')
+          return fail(res, 'FORBIDDEN', 'Only Super Admin can deactivate a Super Admin', 403);
+        const superRole = (await roleCatalog(db)).find(
+          (role: { slug: string }) => role.slug === 'super_admin',
+        );
+        const activeSuperAdmins = (await staffCatalog(db)).filter(
+          (staff: { roleId: string; status: string }) =>
+            staff.roleId === superRole?.id && staff.status === 'active',
+        ).length;
+        if (activeSuperAdmins <= 1)
+          return fail(res, 'CONFLICT', 'The last active Super Admin cannot be deactivated', 409);
+      }
+      const { error } = await db
+        .from('staff_users')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      await audit(db, auth.userId, 'STAFF_DEACTIVATED', 'staff_user', id, before, {
+        status: 'inactive',
+      });
+      return res.status(200).json({ deactivated: true });
+    }
+    if (staffMatch && method === 'DELETE') {
+      const auth = await authorizeAfHomes(req, 'organization.staff', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      if (auth.roleSlug !== 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Only Super Admin can permanently delete staff', 403);
+      const id = staffMatch[1]!;
+      if (id === auth.userId)
+        return fail(res, 'FORBIDDEN', 'You cannot permanently delete your own account', 403);
+      const before = (await staffCatalog(db)).find((staff: { id: string }) => staff.id === id);
+      if (!before) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+      if ((await staffRole(db, id))?.slug === 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Super Admin accounts cannot be permanently deleted', 403);
+      const blockers = await staffDeleteBlockers(db, id);
+      if (blockers.length)
+        return res.status(409).json({
+          error: {
+            code: 'PROTECTED_HISTORY',
+            message:
+              'This staff account has historical business records and cannot be permanently deleted. Deactivate the account instead.',
+            details: { canDelete: false, blockers },
+          },
+        });
+      await db.from('staff_invitations').delete().eq('auth_user_id', id);
+      await db.from('staff_permission_restrictions').delete().eq('staff_id', id);
+      await db.from('staff_role_assignments').delete().eq('staff_id', id);
+      const { error: profileError } = await db.from('staff_users').delete().eq('id', id);
+      if (profileError) throw profileError;
+      const { error: authError } = await db.auth.admin.deleteUser(id);
+      if (authError) throw authError;
+      await audit(db, auth.userId, 'STAFF_DELETED', 'staff_user', id, before, {
+        deleted: true,
+      });
+      return res.status(200).json({ deleted: true });
     }
     if (path === 'dashboard' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'dashboard.view');

@@ -409,6 +409,160 @@ describe('customers', () => {
     });
     expect(state.status).toBe(404);
   });
+
+  it('hard-deletes an unused customer and removes its Auth user', async () => {
+    const id = 'aaaaaaaa-0000-4000-8000-000000000099';
+    const authId = '99999999-0000-4000-8000-000000000099';
+    const db = install({
+      tables: {
+        customers: [
+          {
+            id,
+            auth_user_id: authId,
+            customer_number: 'CUS-UNUSED',
+            first_name: 'Unused',
+            middle_name: null,
+            last_name: 'Customer',
+            email: 'unused@example.test',
+            phone: '09170000000',
+            birth_date: '1990-01-01',
+            address: {},
+            status: 'prospect',
+          },
+        ],
+        card_sales: [],
+        payments: [],
+        memberships: [],
+        redemptions: [],
+        identity_documents: [],
+      },
+    });
+    const state = await call('customers', {
+      method: 'DELETE',
+      path: id,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('customers')).toHaveLength(0);
+    expect(db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === authId)).toBe(true);
+    expect(db.rows('audit_events').some((row) => row.action === 'CUSTOMER_DELETED')).toBe(true);
+  });
+
+  it('deactivates login while preserving the customer and business history', async () => {
+    const db = install({
+      tables: {
+        customers: [
+          {
+            id: CUSTOMER.active,
+            auth_user_id: '99999999-0000-4000-8000-000000000088',
+            customer_number: 'CUS-ACTIVE',
+            first_name: 'Active',
+            middle_name: null,
+            last_name: 'Customer',
+            email: 'active@example.test',
+            phone: '09170000002',
+            address: {},
+            status: 'active',
+          },
+        ],
+      },
+    });
+    const state = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.active}/deactivate`,
+      token: TOKEN.admin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('customers').find((row) => row.id === CUSTOMER.active)).toMatchObject({
+      status: 'suspended',
+      auth_user_id: null,
+    });
+    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(true);
+    expect(db.rows('audit_events').some((row) => row.action === 'CUSTOMER_DEACTIVATED')).toBe(true);
+  });
+
+  it('denies customer account actions without the existing customer permissions', async () => {
+    const state = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.active}/deactivate`,
+      token: TOKEN.viewer,
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it.each([
+    ['sales', 'card_sales', 'customer_id'],
+    ['payments', 'payments', 'customer_id'],
+    ['memberships', 'memberships', 'customer_id'],
+    ['redemptions', 'redemptions', 'customer_id'],
+    ['documents', 'identity_documents', 'customer_id'],
+  ])('blocks customer deletion when protected %s exist', async (label, table, column) => {
+    const id = 'aaaaaaaa-0000-4000-8000-000000000098';
+    install({
+      tables: {
+        customers: [
+          {
+            id,
+            auth_user_id: null,
+            customer_number: 'CUS-PROTECTED',
+            first_name: 'Protected',
+            middle_name: null,
+            last_name: 'Customer',
+            email: 'protected@example.test',
+            phone: '09170000001',
+            address: {},
+            status: 'active',
+          },
+        ],
+        card_sales: [],
+        payments: [],
+        memberships: [],
+        redemptions: [],
+        identity_documents: [],
+        [table]: [{ id: `${label}-protected`, [column]: id }],
+      },
+    });
+    const state = await call('customers', {
+      method: 'DELETE',
+      path: id,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(
+      (state.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
+    ).toContain(label);
+  });
+
+  it('blocks deletion but permits anonymization when customer history exists', async () => {
+    const db = install();
+    const blocked = await call('customers', {
+      method: 'DELETE',
+      path: CUSTOMER.active,
+      token: TOKEN.superAdmin,
+    });
+    expect(blocked.status).toBe(409);
+    expect(
+      (blocked.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
+    ).toContain('memberships');
+
+    const anonymized = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.active}/anonymize`,
+      token: TOKEN.superAdmin,
+    });
+    expect(anonymized.status).toBe(200);
+    const row = db.rows('customers').find((customer) => customer.id === CUSTOMER.active)!;
+    expect(row).toMatchObject({
+      first_name: 'Deleted',
+      last_name: 'Customer',
+      auth_user_id: null,
+      status: 'cancelled',
+    });
+    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(true);
+    expect(db.rows('audit_events').some((event) => event.action === 'CUSTOMER_ANONYMIZED')).toBe(
+      true,
+    );
+  });
 });
 
 /* ================================================================== */
