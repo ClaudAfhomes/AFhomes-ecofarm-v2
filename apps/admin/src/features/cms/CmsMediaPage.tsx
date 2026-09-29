@@ -47,7 +47,14 @@ export function CmsMediaPage() {
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Delete failed.'),
   });
   if (media.isLoading) return <p role="status">Loading media…</p>;
-  if (media.isError) return <ErrorState title="Media could not be loaded" />;
+  if (media.isError)
+    return (
+      <ErrorState
+        title="Media could not be loaded"
+        error={media.error}
+        onRetry={() => void media.refetch()}
+      />
+    );
   return (
     <>
       <PageHeader

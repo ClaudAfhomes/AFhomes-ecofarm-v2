@@ -3,6 +3,7 @@ import { cmsPageSchema, type CmsSection } from '@jad/contracts';
 import { Navigate, useParams } from 'react-router';
 
 import { request } from '../../lib/api/client';
+import { safeHref, safeSrc } from '../lib/safeUrl';
 import { Container } from '../components/ui/Container';
 import { PageHeader } from '../components/ui/PageHeader';
 import NotFound from './NotFound';
@@ -13,20 +14,24 @@ function Section({ section }: { section: CmsSection }) {
   const content = section.content;
   const title = typeof content.title === 'string' ? content.title : '';
   const text = typeof content.text === 'string' ? content.text : '';
-  const url = typeof content.url === 'string' ? content.url : '';
+  const url = safeSrc(typeof content.url === 'string' ? content.url : '');
   const alt = typeof content.alt === 'string' ? content.alt : title;
   if (section.blockType === 'divider') return <hr />;
-  if (section.blockType === 'image' && url) return <img src={url} alt={alt} loading="lazy" />;
-  if (section.blockType === 'video' && url)
-    return <video src={url} controls aria-label={title || 'Video'} />;
+  // An unsafe or missing source degrades to nothing: no broken-image icon and
+  // no attacker-controlled bytes in a loading context.
+  if (section.blockType === 'image') return url ? <img src={url} alt={alt} loading="lazy" /> : null;
+  if (section.blockType === 'video')
+    return url ? <video src={url} controls aria-label={title || 'Video'} /> : null;
   if (section.blockType === 'cta') {
-    const href = typeof content.href === 'string' ? content.href : '#';
+    const href = safeHref(typeof content.href === 'string' ? content.href : '') ?? '#';
     const label = typeof content.label === 'string' ? content.label : 'Learn more';
     return (
       <section>
         <h2>{title}</h2>
         {text && <p>{text}</p>}
-        <a href={href}>{label}</a>
+        <a href={href} rel="noopener noreferrer">
+          {label}
+        </a>
       </section>
     );
   }

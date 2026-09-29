@@ -21,7 +21,14 @@ export function CmsPagesPage() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'pages'] }),
   });
   if (pages.isLoading) return <p role="status">Loading CMS pages…</p>;
-  if (pages.isError) return <ErrorState title="CMS pages could not be loaded" />;
+  if (pages.isError)
+    return (
+      <ErrorState
+        title="CMS pages could not be loaded"
+        error={pages.error}
+        onRetry={() => void pages.refetch()}
+      />
+    );
   return (
     <>
       <PageHeader
@@ -37,16 +44,17 @@ export function CmsPagesPage() {
           description="The Phase 3 routes continue using repository defaults."
         />
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Page</th>
-              <th>Slug</th>
-              <th>Status</th>
-              <th>Version</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
+        <div className="table-scroll">
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Page</th>
+                <th>Slug</th>
+                <th>Status</th>
+                <th>Version</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
           <tbody>
             {pages.data.map((page) => (
               <tr key={page.id}>
@@ -81,7 +89,8 @@ export function CmsPagesPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
       {(creating || editing) && (
         <PageEditor

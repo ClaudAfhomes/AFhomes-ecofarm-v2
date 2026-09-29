@@ -297,7 +297,7 @@ function WorkingCopyFields({
           <input value={value} onChange={(e) => onChange({ ...working, [key]: e.target.value })} />
         </label>
       ))}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'end' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
         <label>
           Add a field
           <input

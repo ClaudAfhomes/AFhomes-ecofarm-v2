@@ -42,6 +42,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         module: 'finance.card_activation',
       },
       {
+        to: '/admin/finance/commissions',
+        label: 'Commissions',
+        module: 'network.commissions',
+      },
+      {
         to: '/admin/memberships',
         label: 'Memberships',
         module: 'finance.card_activation',

@@ -57,7 +57,9 @@ export function CustomerMembershipPage() {
             value={<StatusChip label={card.status} tone={toneFor(card.status)} />}
           />
           <Field label="Activated" value={formatDate(card.activatedAt)} />
-          <Field label="Renews" value={formatDate(card.renewalDueAt)} />
+          {/* "Valid until", not "Renews": the date is the enforced expiry and
+              no renewal flow exists. Matches the membership print page. */}
+          <Field label="Valid until" value={formatDate(card.renewalDueAt)} />
           <Field label="Points balance" value={card.pointsBalance.toLocaleString('en-PH')} />
         </FieldList>
       </Card>

@@ -4,6 +4,7 @@ import { Reveal } from "../components/ui/Reveal";
 import { Button } from "../components/ui/Button";
 import { Seo } from "../lib/seo";
 import { cmsRepository } from "../lib/cms";
+import { safeHref } from "../lib/safeUrl";
 import { ContactForm } from "../components/contact/ContactForm";
 import { getPlaceholder } from "../lib/images";
 
@@ -78,16 +79,16 @@ export default function Contact() {
                           <p key={line}>{line}</p>
                         ))}
                       </address>
-                      {office.mapUrl && (
+                      {office.mapUrl && safeHref(office.mapUrl) ? (
                         <a
-                          href={office.mapUrl}
+                          href={safeHref(office.mapUrl) as string}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="mt-4 inline-flex text-sm font-semibold text-pine-800 underline decoration-leaf-400 underline-offset-4"
                         >
                           Open directions
                         </a>
-                      )}
+                      ) : null}
                     </div>
                   </Reveal>
                 ))}

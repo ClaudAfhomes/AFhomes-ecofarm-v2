@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import { Container } from "../../components/ui/Container";
 import { ChevronDown } from "../../components/ui/icons";
 import { cmsRepository } from "../../lib/cms";
+import { safeHref } from "../../lib/safeUrl";
 
 const footerLink =
   "link-underline text-cream-200/80 transition-colors hover:text-leaf-300";
@@ -54,6 +55,9 @@ export function Footer() {
   const explore = siteConfig.nav.main.filter((item) => item.path !== "/");
   const socialLinks = [...siteConfig.socialLinks]
     .filter((item) => item.enabled)
+    // A hostile or mistaken editor must never get a clickable attacker URL:
+    // unsafe destinations are dropped from the list, not linked.
+    .filter((item) => safeHref(item.url) !== null)
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const year = new Date().getFullYear();
   const [openGroups, setOpenGroups] = useState<string[]>(["explore"]);
@@ -130,7 +134,11 @@ export function Footer() {
                     {line}
                   </span>
                 ))}
-                {office.mapUrl && <a href={office.mapUrl} target="_blank" rel="noopener noreferrer" className={cn(footerLink, "mt-1 text-sm")}>Directions</a>}
+                {office.mapUrl && safeHref(office.mapUrl) ? (
+                  <a href={safeHref(office.mapUrl) as string} target="_blank" rel="noopener noreferrer" className={cn(footerLink, "mt-1 text-sm")}>
+                    Directions
+                  </a>
+                ) : null}
               </li>
             ))}
           </FooterGroup>
@@ -139,7 +147,14 @@ export function Footer() {
         <div className="mt-10 border-t border-white/10 pt-8">
           <p className="label-caps text-cream-300">Follow AFhomes</p>
           <div className="mt-4 flex flex-wrap gap-x-6 gap-y-3 text-sm">
-            {socialLinks.map((item) => <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" className={footerLink}>{item.label}</a>)}
+          {socialLinks.map((item) => {
+            const href = safeHref(item.url);
+            return href ? (
+              <a key={item.id} href={href} target="_blank" rel="noopener noreferrer" className={footerLink}>
+                {item.label}
+              </a>
+            ) : null;
+          })}
           </div>
         </div>
 

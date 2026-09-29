@@ -6,6 +6,7 @@ import { AfHomesDepartmentsPage } from '../features/afhomes/AfHomesDepartmentsPa
 import { AfHomesRolesPage } from '../features/afhomes/AfHomesRolesPage';
 import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
 import { BusinessActivationQueuePage } from '../features/business/BusinessActivationQueuePage';
+import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
@@ -60,6 +61,10 @@ export default function App() {
           <Route
             path="/admin/finance/activation"
             element={protectedPage(<BusinessActivationQueuePage />)}
+          />
+          <Route
+            path="/admin/finance/commissions"
+            element={protectedPage(<BusinessCommissionsPage />)}
           />
           {/* Redemption. Each route is gated on the module key declared for it in
               ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree: the

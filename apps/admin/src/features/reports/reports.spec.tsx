@@ -74,8 +74,27 @@ describe('reports navigation', () => {
     expect(paths).toContain('/admin/audit');
   });
 
-  it('opens /admin/reports to every role with dashboard.view', () => {
+  it('denies /admin/reports to a bare dashboard role (no report grant)', () => {
+    // Deliberate Phase 30 correction (was: "opens to every role with
+    // dashboard.view"). Three independent controls agree a bare dashboard
+    // role sees no reports, aligned intentionally since Phase 25
+    // (`canViewReports`, commit cbc61ed):
+    //   1. navItemsForPermissions filters the /admin/reports child by
+    //      canViewReports, so the sidebar hides it;
+    //   2. canAccessNavTarget answers /admin/reports with canViewReports, so
+    //      RequireRole shows Access denied (asserted here);
+    //   3. availableReports([] for bare dashboard) offers zero report types.
+    // Opening the section anyway would show an empty selector while implying
+    // access - the denial below is the secure, consistent behavior. Report
+    // authorization itself is NOT weakened: the server re-checks every
+    // report's module grant on each request.
     renderPath([view('dashboard.view')], '/admin/reports');
+    expect(screen.queryByText('Reports screen')).toBeNull();
+    expect(screen.getByText('Access denied')).toBeTruthy();
+  });
+
+  it('opens /admin/reports with dashboard.view plus a report grant', () => {
+    renderPath([view('dashboard.view'), view('sales.card_sales')], '/admin/reports');
     expect(screen.getByText('Reports screen')).toBeTruthy();
   });
 

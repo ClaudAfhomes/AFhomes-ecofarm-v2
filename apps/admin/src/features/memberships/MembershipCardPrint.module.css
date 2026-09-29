@@ -7,6 +7,10 @@
 
 .card {
   width: 85.6mm;
+  /* Screen-only guard: the fixed CR80 width overflows sub-360px viewports, so
+     the on-screen preview shrinks while print keeps exact proportions. */
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 54mm;
   padding: 6mm;
   border: 1px solid #1f2937;
@@ -53,6 +57,7 @@
   margin: 0;
   font-size: 9pt;
   letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
 }
 
 .cardBody {
@@ -79,6 +84,7 @@
   font-size: 11pt;
   font-weight: 700;
   letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
 }
 
 .noCodes {

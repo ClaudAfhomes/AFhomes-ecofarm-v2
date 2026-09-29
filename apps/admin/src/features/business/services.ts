@@ -29,6 +29,7 @@ import {
   type CreateSaleRequest,
   type Customer,
   type FinanceQueueItem,
+  type MarkCommissionPaidRequest,
   type Membership,
   type Payment,
   type QualifyCommissionRequest,
@@ -135,13 +136,23 @@ export const recordPayment = (saleId: string, input: RecordPaymentRequest): Prom
 export const verifyPayment = (
   paymentId: string,
   input: VerifyPaymentRequest,
-): Promise<{ saleId: string; verifiedTotal: string; fullyPaid: boolean }> =>
+): Promise<{
+  saleId: string;
+  status: string;
+  verifiedTotal: string;
+  remainingBalance: string;
+  fullyPaid: boolean;
+  spotCashDeadline: string | null;
+}> =>
   post(
     `/payments/${paymentId}/verify`,
     z.object({
       saleId: z.string(),
+      status: z.string(),
       verifiedTotal: z.string(),
+      remainingBalance: z.string(),
       fullyPaid: z.boolean(),
+      spotCashDeadline: z.string().nullable(),
     }),
     input,
   );
@@ -176,12 +187,21 @@ export const getReferrals = (): Promise<ReferralRelationship[]> =>
 /* Commissions                                                         */
 /* ------------------------------------------------------------------ */
 
-export const getCommissions = (params: { status?: string } = {}): Promise<Commission[]> => {
-  const suffix = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
-  return requestList(`/commissions${suffix}`, commissionSchema);
+export const getCommissions = (params: { status?: string; search?: string; seller?: string } = {}): Promise<Commission[]> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.search) query.set('search', params.search);
+  if (params.seller) query.set('seller', params.seller);
+  const suffix = query.toString();
+  return requestList(`/commissions${suffix ? `?${suffix}` : ''}`, commissionSchema);
 };
 
 export const qualifyCommission = (
   id: string,
   input: QualifyCommissionRequest,
 ): Promise<Commission> => post(`/commissions/${id}/qualify`, commissionSchema, input);
+
+export const markCommissionPaid = (
+  id: string,
+  input: MarkCommissionPaidRequest = {},
+): Promise<Commission> => post(`/commissions/${id}/pay`, commissionSchema, input);

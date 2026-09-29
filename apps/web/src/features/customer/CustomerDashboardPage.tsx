@@ -60,7 +60,8 @@ export function CustomerDashboardPage() {
               }
             />
             <Field label="Activated" value={formatDate(membership.data.activatedAt)} />
-            <Field label="Renews" value={formatDate(membership.data.renewalDueAt)} />
+            {/* See CustomerMembershipPage: expiry wording, never "Renews". */}
+            <Field label="Valid until" value={formatDate(membership.data.renewalDueAt)} />
             <Field label="Annual points" value={membership.data.yearlyPointsAllocated.toLocaleString('en-PH')} />
           </FieldList>
         )}

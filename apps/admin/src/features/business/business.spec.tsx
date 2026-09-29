@@ -91,6 +91,14 @@ function renderPath(permissions: AfHomesPermission[], path: string) {
               </RequireRole>
             }
           />
+          <Route
+            path="/admin/finance/commissions"
+            element={
+              <RequireRole>
+                <p>Commissions screen</p>
+              </RequireRole>
+            }
+          />
           <Route path="*" element={<p>Not found</p>} />
         </Routes>
       </MemoryRouter>
@@ -115,6 +123,11 @@ const BUSINESS_ROUTES = [
     path: '/admin/finance/activation',
     module: 'finance.card_activation',
     label: 'Activation Queue screen',
+  },
+  {
+    path: '/admin/finance/commissions',
+    module: 'network.commissions',
+    label: 'Commissions screen',
   },
 ] as const;
 

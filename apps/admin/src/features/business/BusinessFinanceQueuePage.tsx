@@ -53,6 +53,7 @@ export function BusinessFinanceQueuePage() {
                 <th>Verified</th>
                 <th>Balance</th>
                 <th>Min. down met</th>
+                <th>First verified</th>
                 <th>Spot cash</th>
                 <th>Deadline</th>
                 <th>Actions</th>
@@ -68,6 +69,7 @@ export function BusinessFinanceQueuePage() {
                   <td>{formatMoney(item.verifiedTotal)}</td>
                   <td>{formatMoney(item.remainingBalance)}</td>
                   <td>{item.downPaymentSatisfied ? 'Yes' : 'No'}</td>
+                  <td>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</td>
                   <td>
                     <StatusChip
                       label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}

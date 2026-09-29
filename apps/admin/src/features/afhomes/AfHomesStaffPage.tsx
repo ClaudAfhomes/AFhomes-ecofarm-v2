@@ -91,7 +91,7 @@ export function AfHomesStaffPage() {
           </Button>
         }
       />
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <input
           type="search"
           aria-label="Search staff"

@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
 import type { ActivationResult } from '@jad/contracts';
 
-import { formatMoney, formatPoints } from './format';
+import { formatDateTime } from '../../lib/format';
+import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';
 import { activateSale, getActivationQueue, getCommissions, qualifyCommission } from './services';
 
 /**
@@ -51,6 +52,9 @@ export function BusinessActivationQueuePage() {
                 <th>Total</th>
                 <th>Verified</th>
                 <th>Balance</th>
+                <th>First verified</th>
+                <th>Spot cash</th>
+                <th>Deadline</th>
                 <th>Ready</th>
                 <th>Actions</th>
               </tr>
@@ -64,6 +68,14 @@ export function BusinessActivationQueuePage() {
                   <td>{formatMoney(item.cashPrice)}</td>
                   <td>{formatMoney(item.verifiedTotal)}</td>
                   <td>{formatMoney(item.remainingBalance)}</td>
+                  <td>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</td>
+                  <td>
+                    <StatusChip
+                      label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
+                      tone={SPOT_CASH_TONE[item.spotCashState] ?? 'neutral'}
+                    />
+                  </td>
+                  <td>{item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}</td>
                   <td>
                     <StatusChip
                       label={item.activatable ? 'Eligible' : 'Not eligible'}

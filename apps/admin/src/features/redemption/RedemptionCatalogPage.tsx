@@ -92,7 +92,7 @@ export function RedemptionCatalogPage() {
       )}
 
       <form
-        style={{ display: 'flex', gap: 8, marginBottom: 16 }}
+        style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
         onSubmit={(e) => {
           e.preventDefault();
           setAppliedSearch(search.trim());
@@ -128,6 +128,7 @@ export function RedemptionCatalogPage() {
           }
         />
       ) : (
+        <div className="table-scroll">
         <table className={styles.table}>
           <thead>
             <tr>
@@ -181,6 +182,7 @@ export function RedemptionCatalogPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {creating && (

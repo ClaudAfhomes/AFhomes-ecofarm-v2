@@ -4,7 +4,7 @@ import styles from './portal.module.css';
  * Presentation helpers shared by the customer screens.
  *
  * `formatDate` is deliberately locale-fixed and timezone-free-ish: a member
- * seeing an activation or renewal date should read the same date the server
+ * seeing an activation or valid-until date should read the same date the server
  * recorded, not a value shifted by the browser's zone. A stored
  * `2026-03-01T00:00:00Z` therefore renders as the UTC calendar date.
  */

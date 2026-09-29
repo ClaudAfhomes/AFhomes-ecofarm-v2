@@ -290,7 +290,7 @@ export function BusinessProductsPage() {
         }
       />
 
-      <div role="tablist" aria-label="Card catalogue" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div role="tablist" aria-label="Card catalogue" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <Button variant={tab === 'plans' ? 'primary' : 'secondary'} onClick={() => setTab('plans')}>
           Plans
         </Button>
@@ -305,7 +305,7 @@ export function BusinessProductsPage() {
       {tab === 'plans' ? (
         <>
           <form
-            style={{ display: 'flex', gap: 8, marginBottom: 16 }}
+            style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
             onSubmit={(e) => {
               e.preventDefault();
               setAppliedSearch(search.trim());

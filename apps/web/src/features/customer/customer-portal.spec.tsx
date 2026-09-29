@@ -272,13 +272,13 @@ describe('customer dashboard', () => {
     expect(screen.getByText('Annual Allocation')).toBeInTheDocument();
   });
 
-  it('renders an activation and renewal date', async () => {
+  it('renders an activation and valid-until date', async () => {
     render('/customer');
     const activated = await screen.findByText('Activated');
     const row = activated.closest('div');
     expect(row).toHaveTextContent('Jan 5, 2026');
-    const renews = screen.getByText('Renews').closest('div');
-    expect(renews).toHaveTextContent('Jan 5, 2027');
+    const until = screen.getByText('Valid until').closest('div');
+    expect(until).toHaveTextContent('Jan 5, 2027');
   });
 });
 

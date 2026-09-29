@@ -23,7 +23,14 @@ export function CmsDocumentPage({
     [documents.data, documentKey],
   );
   if (documents.isLoading) return <p role="status">Loading CMS content…</p>;
-  if (documents.isError) return <ErrorState title="CMS content could not be loaded" />;
+  if (documents.isError)
+    return (
+      <ErrorState
+        title="CMS content could not be loaded"
+        error={documents.error}
+        onRetry={() => void documents.refetch()}
+      />
+    );
   const permission = documentKey === 'site' ? 'cms.settings' : 'cms.pages';
   const canUpdate =
     user?.afHomesPermissions.some((item) => item.moduleKey === permission && item.canUpdate) ===
