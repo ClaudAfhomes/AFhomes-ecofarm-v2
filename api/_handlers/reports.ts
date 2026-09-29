@@ -754,6 +754,17 @@ async function buildGenealogy(ctx: Ctx): Promise<ReportData> {
   if (q.seller) nodes = nodes.filter((node) => node.sellerId === q.seller);
   if (q.status) nodes = nodes.filter((node) => node.status === q.status);
   if (kind === 'redemption') nodes = [];
+  // The performance table is ordered by measured facts only, documented here
+  // so no reader mistakes position for a subjective score: frozen historical
+  // value descending (exact cents via the shared helper, never float), then
+  // historical sale count descending, then seller name ascending. No
+  // weighting, no labels.
+  nodes.sort((a, b) => {
+    const byValue = centsOf(b.historicalValue) - centsOf(a.historicalValue);
+    if (byValue !== 0n) return byValue < 0n ? -1 : 1;
+    if (b.historicalSales !== a.historicalSales) return b.historicalSales - a.historicalSales;
+    return a.seller.localeCompare(b.seller);
+  });
   const totalValue = sumMoney(nodes.map((node) => node.historicalValue));
   return {
     rows: nodes,

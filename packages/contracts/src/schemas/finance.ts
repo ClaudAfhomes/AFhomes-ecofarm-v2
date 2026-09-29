@@ -190,6 +190,17 @@ export const qualifyCommissionSchema = z.object({
 });
 export type QualifyCommissionRequest = z.infer<typeof qualifyCommissionSchema>;
 
+/**
+ * Explicit paid decision. This is the ONLY way a commission reaches `paid`:
+ * `earned -> paid`, permission-gated and audited. The amount and the
+ * seller/upline snapshot never change here. `reference` is an optional
+ * payout reference stored as `paid_reference` when the column exists.
+ */
+export const markCommissionPaidSchema = z.object({
+  reference: z.string().trim().max(100).optional(),
+});
+export type MarkCommissionPaidRequest = z.infer<typeof markCommissionPaidSchema>;
+
 /* ================================================================== */
 /* Customer account onboarding                                         */
 /* ================================================================== */
@@ -226,6 +237,8 @@ export const financeQueueItemSchema = z.object({
   fullyPaid: z.boolean(),
   spotCashState: spotCashStateSchema,
   spotCashDeadline: z.string().nullable(),
+  /** First VERIFIED payment instant (spot_cash_started_at). Null until one exists. */
+  firstVerifiedPayment: z.string().nullable(),
   activatable: z.boolean(),
 });
 export type FinanceQueueItem = z.infer<typeof financeQueueItemSchema>;

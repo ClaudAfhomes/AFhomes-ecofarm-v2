@@ -204,6 +204,39 @@ const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
   };
 };
 
+/** Current money state for an idempotent verification retry (no RPC, no audit). */
+async function idempotentVerifyResult(db: Db, saleId: string) {
+  const { data: sale, error } = await db
+    .from('card_sales')
+    .select(
+      'id, status, cash_price_snapshot, minimum_down_payment_snapshot, spot_cash_started_at, spot_cash_deadline',
+    )
+    .eq('id', saleId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!sale) return null;
+  const { data: payments, error: payError } = await db
+    .from('payments')
+    .select('amount, status')
+    .eq('sale_id', saleId);
+  if (payError) throw payError;
+  const totals = summarizePayments({
+    cashPrice: (sale as Record<string, unknown>).cash_price_snapshot as string,
+    minimumDownPayment: (sale as Record<string, unknown>).minimum_down_payment_snapshot as string,
+    payments: ((payments ?? []) as { amount: string; status: 'recorded' | 'verified' | 'rejected' | 'voided' }[]),
+    spotCashStartedAt: isoOrNull((sale as Record<string, unknown>).spot_cash_started_at),
+    spotCashDeadline: isoOrNull((sale as Record<string, unknown>).spot_cash_deadline),
+  });
+  return {
+    saleId,
+    status: (sale as Record<string, unknown>).status,
+    verifiedTotal: totals.verifiedTotal,
+    remainingBalance: totals.remainingBalance,
+    fullyPaid: totals.fullyPaid,
+    spotCashDeadline: totals.spotCashDeadline,
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
@@ -280,6 +313,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!customer) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
       if (customer.status === 'cancelled')
         return fail(res, 'CONFLICT', 'A cancelled customer cannot buy a card', 409);
+
+      // Launch restriction D-12: one membership per customer. The schema
+      // enforces a single membership row per customer, so without this
+      // creation-time guard a second sale could reach full payment and then
+      // strand at activation with money attached. Refuse before any sale row
+      // (and therefore any payment) exists. Any status counts: even a
+      // non-active membership row would still collide at activation.
+      const { data: existingMembership, error: membershipError } = await db
+        .from('memberships')
+        .select('id')
+        .eq('customer_id', input.customerId)
+        .maybeSingle();
+      if (membershipError) throw membershipError;
+      if (existingMembership)
+        return fail(
+          res,
+          'CONFLICT',
+          'This customer already has an active membership. Only one membership per customer is supported at launch.',
+          409,
+        );
 
       // Seller resolution - the anti-spoofing gate.
       const downline = await downlineOf(db, auth.userId);
@@ -534,13 +587,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid verification decision', 400);
 
+      const paymentId = verify[1]!;
+      const decision = parsed.data.decision;
+
+      // Idempotency: when the payment row is visible and already carries the
+      // requested decision, return the current totals without re-running the
+      // RPC (which would double-count, reset the spot-cash window, or duplicate
+      // the audit event). A mismatched decision on a decided payment is still
+      // a conflict. When the row is not visible here, fall through to the RPC:
+      // it remains authoritative for existence (PAYMENT_NOT_FOUND) and for the
+      // first transition, so scripted doubles and real races behave alike.
+      const { data: existing, error: readError } = await db
+        .from('payments')
+        .select('id, sale_id, status')
+        .eq('id', paymentId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (existing) {
+        const existingStatus = String((existing as Record<string, unknown>).status ?? '');
+        const existingSaleId = String((existing as Record<string, unknown>).sale_id ?? '');
+        if (existingStatus === decision) {
+          const current = await idempotentVerifyResult(db, existingSaleId);
+          if (current) return res.status(200).json(current);
+          // The sale vanished between reads: fall through to the RPC so its
+          // authoritative error (SALE_NOT_FOUND) is what the caller sees.
+        } else if (existingStatus !== 'recorded') {
+          return fail(res, 'CONFLICT', 'payment not pending', 409);
+        }
+      }
+
       const { data, error } = await db.rpc('verify_card_payment', {
-        p_payment_id: verify[1]!,
-        p_decision: parsed.data.decision,
+        p_payment_id: paymentId,
+        p_decision: decision,
         p_reason: parsed.data.reason ?? null,
         p_actor_id: auth.userId,
       });
-      if (error) return mapRpcError(res, error);
+      if (error) {
+        // A concurrent verifier may have decided the payment first. If the
+        // stored decision now matches the request, the retry is a success.
+        if (String((error as { message?: string }).message ?? '').startsWith('PAYMENT_NOT_PENDING')) {
+          const { data: raced } = await db
+            .from('payments')
+            .select('id, sale_id, status')
+            .eq('id', paymentId)
+            .maybeSingle();
+          if (raced && String((raced as Record<string, unknown>).status ?? '') === decision) {
+            const current = await idempotentVerifyResult(
+              db,
+              String((raced as Record<string, unknown>).sale_id ?? ''),
+            );
+            if (current) return res.status(200).json(current);
+          }
+        }
+        return mapRpcError(res, error);
+      }
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
       return res.status(200).json({
         saleId: row?.sale_id,

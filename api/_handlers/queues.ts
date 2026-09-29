@@ -63,6 +63,7 @@ function shape(row: QueueRow) {
     status: row.status,
     cashPrice: row.cash_price_snapshot ?? '0.00',
     ...totals,
+    firstVerifiedPayment: isoOrNull(row.spot_cash_started_at),
     activatable: SALE_ACTIVATABLE.includes(row.status as never) && totals.fullyPaid,
   };
 }
