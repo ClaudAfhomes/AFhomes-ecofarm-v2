@@ -33,6 +33,12 @@ const SERVER_ONLY = [
   'AFHOMES_ADMIN_URL',
   'EMAIL_FROM',
   'RESEND_API_KEY',
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASSWORD',
+  'SMTP_FROM',
+  'SMTP_FROM_NAME',
   'DOCUMENT_HASH_PEPPER',
   'OCR_PROVIDER_URL',
   'OCR_PROVIDER_API_KEY',
@@ -91,7 +97,11 @@ for (const root of BROWSER_ROOTS) {
       while ((m = access.exec(line)) !== null) {
         const name = m[1];
         if (!name.startsWith('VITE_') && !VITE_BUILTINS.has(name)) {
-          violations.push({ file: rel, line: i + 1, detail: `import.meta.env.${name} is not VITE_-prefixed` });
+          violations.push({
+            file: rel,
+            line: i + 1,
+            detail: `import.meta.env.${name} is not VITE_-prefixed`,
+          });
         }
       }
       // Destructuring a whole env object would bypass the checks above. The one
