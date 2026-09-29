@@ -407,7 +407,7 @@ describe('Phase 26 activation queue and gating', () => {
     install({ rpcErrors: { activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=15000.00 price=40000.00' } } });
     const state = await callSales({ method: 'POST', path: `${SALE.downPaid}/activate`, token: TOKEN.admin, body: { validityMonths: 12 } });
     expect(state.status).toBe(409);
-    expect(err(state.body).message).toMatch(/not fully paid/);
+    expect(err(state.body).message).toMatch(/not activatable/);
   });
 
   it('18/19. activation after fully paid succeeds and is idempotent', async () => {

@@ -101,6 +101,18 @@ export const analyticsOverviewSchema = z.object({
       value: moneySchema,
     }),
   ),
+  /**
+   * Sales grouped by frozen payment scheme (VIP Stage 1). Every scoped sale
+   * carries exactly one frozen scheme, so the counts partition the scoped
+   * sales; pre-scheme rows read as `spot_cash` via the column default.
+   */
+  salesByScheme: z.array(
+    z.object({
+      scheme: z.string(),
+      count: countSchema,
+      value: moneySchema,
+    }),
+  ),
   trends: z.array(analyticsTrendPointSchema),
 });
 

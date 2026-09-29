@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { paymentSchemeLabel } from '@jad/contracts';
 import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
 import type { PaymentType } from '@jad/contracts';
 
@@ -9,7 +10,7 @@ import {
   SPOT_CASH_TONE,
   formatMoney,
 } from './format';
-import { getFinanceQueue, getSalePayments, recordPayment, verifyPayment } from './services';
+import { getFinanceQueue, getSalePayments, getSaleSummary, recordPayment, verifyPayment } from './services';
 
 /**
  * Finance payment queue.
@@ -49,10 +50,14 @@ export function BusinessFinanceQueuePage() {
                 <th>Sale</th>
                 <th>Customer</th>
                 <th>Card</th>
+                <th>Scheme</th>
                 <th>Total</th>
                 <th>Verified</th>
                 <th>Balance</th>
-                <th>Min. down met</th>
+                <th>Reservation</th>
+                <th>Required initial</th>
+                <th>Monthly target</th>
+                <th>Required initial met</th>
                 <th>First verified</th>
                 <th>Spot cash</th>
                 <th>Deadline</th>
@@ -65,9 +70,17 @@ export function BusinessFinanceQueuePage() {
                   <td>{item.saleNumber}</td>
                   <td>{item.customerName}</td>
                   <td>{item.productName}</td>
+                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
                   <td>{formatMoney(item.cashPrice)}</td>
                   <td>{formatMoney(item.verifiedTotal)}</td>
                   <td>{formatMoney(item.remainingBalance)}</td>
+                  <td>{formatMoney(item.reservationFee)}</td>
+                  <td>{formatMoney(item.requiredInitial)}</td>
+                  <td>
+                    {item.installmentMonths && item.monthlyAmount
+                      ? `${formatMoney(item.monthlyAmount)} × ${item.installmentMonths}`
+                      : '—'}
+                  </td>
                   <td>{item.downPaymentSatisfied ? 'Yes' : 'No'}</td>
                   <td>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</td>
                   <td>
@@ -114,6 +127,11 @@ function RecordPaymentDialog({
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
 
+  const summary = useQuery({
+    queryKey: ['business', 'sale-summary', saleId],
+    queryFn: () => getSaleSummary(saleId),
+  });
+
   const save = useMutation({
     mutationFn: () =>
       recordPayment(saleId, {
@@ -146,6 +164,48 @@ function RecordPaymentDialog({
           The payment is saved as <strong>recorded</strong> and does not count toward the price until it
           is verified. The resulting balance is recalculated on the server.
         </p>
+        {summary.data ? (
+          <dl
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+              gap: 8,
+              margin: 0,
+              padding: 12,
+              border: '1px solid var(--color-border, #ddd)',
+              borderRadius: 8,
+            }}
+          >
+            <div>
+              <dt>Scheme</dt>
+              <dd>{paymentSchemeLabel(summary.data.paymentScheme)}</dd>
+            </div>
+            <div>
+              <dt>Frozen total</dt>
+              <dd>{formatMoney(summary.data.cashPrice)}</dd>
+            </div>
+            <div>
+              <dt>Reservation</dt>
+              <dd>{formatMoney(summary.data.reservationFee)}</dd>
+            </div>
+            <div>
+              <dt>Required initial</dt>
+              <dd>{formatMoney(summary.data.requiredInitial)}</dd>
+            </div>
+            <div>
+              <dt>Monthly target</dt>
+              <dd>
+                {summary.data.installmentMonths && summary.data.monthlyAmount
+                  ? `${formatMoney(summary.data.monthlyAmount)} × ${summary.data.installmentMonths}`
+                  : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt>Verified so far</dt>
+              <dd>{formatMoney(summary.data.verifiedTotal)}</dd>
+            </div>
+          </dl>
+        ) : null}
         <label>
           Amount
           <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />

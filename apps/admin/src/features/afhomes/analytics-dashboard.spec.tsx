@@ -7,7 +7,7 @@
  * unauthorized sections, and a 390px render without breakage. Every figure
  * asserted comes from the mocked server payload, never a constant.
  */
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +18,34 @@ import type { SessionUser } from '../../lib/session';
 type Route = { status?: number; body: unknown };
 const routes = new Map<string, Route>();
 const requests: { path: string; method: string; query: string }[] = [];
+
+/**
+ * jsdom has no ResizeObserver; recharts ResponsiveContainer needs one. The
+ * stub reports a fixed 800x280 viewport on observe so the chart renders
+ * synchronously enough for assertions.
+ */
+class ResizeObserverStub {
+  private cb: ResizeObserverCallback;
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb;
+  }
+  observe = () => {
+    this.cb(
+      [
+        {
+          target: { clientWidth: 800, clientHeight: 280 } as unknown as Element,
+          contentRect: { width: 800, height: 280 } as unknown as DOMRectReadOnly,
+        } as ResizeObserverEntry,
+      ],
+      this as unknown as ResizeObserver,
+    );
+  };
+  unobserve = () => {};
+  disconnect = () => {};
+}
+
+const g = globalThis as unknown as { ResizeObserver?: unknown };
+g.ResizeObserver = g.ResizeObserver ?? ResizeObserverStub;
 
 const financeOverview = (over: Record<string, unknown> = {}) => ({
   period: 'month',
@@ -62,6 +90,7 @@ const financeOverview = (over: Record<string, unknown> = {}) => ({
   salesByPlan: [
     { planId: '33333333-3333-4333-8333-333333333333', planName: 'Gold', count: 1, value: '60000.00' },
   ],
+  salesByScheme: [{ scheme: 'spot_cash', count: 1, value: '60000.00' }],
   trends: [
     {
       period: '2026-09-15',
@@ -156,9 +185,11 @@ describe('Phase 29 role dashboard', () => {
     expect(screen.queryByText('Sales by card plan')).toBeNull();
   });
 
-  it('renders a single trend point as a bar', async () => {
-    render();
-    expect(await screen.findByRole('img', { name: 'Authorized operational activity chart' })).toBeInTheDocument();
+  it('renders a single trend point as a line chart', async () => {
+    const { container } = render();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
   });
 
   it('41. recovers from a load error through retry', async () => {

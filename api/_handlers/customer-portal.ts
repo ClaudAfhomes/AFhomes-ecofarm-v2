@@ -54,7 +54,7 @@ const activeMembershipOf = async (db: Db, customerId: string) => {
   const { data, error } = await db
     .from('memberships')
     .select(
-      'id, membership_number, status, product_id, activated_at, expires_at, renewal_due_at, yearly_points_allocated, points_balance, card_plans!inner(name, code)',
+      'id, sale_id, membership_number, status, product_id, activated_at, expires_at, renewal_due_at, yearly_points_allocated, points_balance, card_plans!inner(name, code)',
     )
     .eq('customer_id', customerId)
     .eq('status', 'active')
@@ -65,8 +65,42 @@ const activeMembershipOf = async (db: Db, customerId: string) => {
   return (data ?? null) as Record<string, unknown> | null;
 };
 
-const toMembership = (row: Record<string, unknown>, hasIssued: boolean) => {
+/**
+ * The member's OWN agreed scheme + frozen validity, resolved from their sale.
+ * Only this one scheme is ever exposed - never the move playbook, never
+ * prices, never other tiers. A second, narrow sale read (service role, inside
+ * the ownership-established principal) keeps the membership select minimal.
+ */
+const schemeOfSale = async (
+  db: Db,
+  saleId: unknown,
+): Promise<{ paymentScheme: string; validityMonths: number | null }> => {
+  const fallback = { paymentScheme: 'spot_cash', validityMonths: null as number | null };
+  if (typeof saleId !== 'string' || !saleId) return fallback;
+  const { data, error } = await db
+    .from('card_sales')
+    .select('payment_scheme,validity_months_snapshot')
+    .eq('id', saleId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = (data ?? {}) as Record<string, unknown>;
+  const months =
+    row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
+      ? null
+      : Number(row.validity_months_snapshot);
+  return {
+    paymentScheme: typeof row.payment_scheme === 'string' ? row.payment_scheme : 'spot_cash',
+    validityMonths: months,
+  };
+};
+
+const toMembership = (
+  row: Record<string, unknown>,
+  hasIssued: boolean,
+  scheme: { paymentScheme: string; validityMonths: number | null },
+) => {
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
+  const months = scheme.validityMonths;
   return {
     id: row.id,
     membershipNumber: row.membership_number,
@@ -78,6 +112,8 @@ const toMembership = (row: Record<string, unknown>, hasIssued: boolean) => {
     renewalDueAt: isoOrNull(row.renewal_due_at),
     yearlyPointsAllocated: Number(row.yearly_points_allocated ?? 0),
     pointsBalance: Number(row.points_balance ?? 0),
+    paymentScheme: scheme.paymentScheme,
+    validityYears: months !== null && months > 0 && months % 12 === 0 ? months / 12 : null,
     // Always false by design: a readable code is never available on demand.
     credentialsAvailable: false as const,
     credentialsNote: hasIssued ? CREDENTIALS_NOTE : CREDENTIALS_NEED_REASON,
@@ -159,7 +195,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('customer_id', principal.customerId);
       void count;
 
-      return res.status(200).json(toMembership(row, true));
+      return res.status(200).json(toMembership(row, true, await schemeOfSale(db, row.sale_id)));
     }
 
     /* ---------------- points summary ---------------- */

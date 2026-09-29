@@ -257,6 +257,23 @@ describe('creating a card plan', () => {
     expect(state.status).toBe(400);
   });
 
+  it('defaults an omitted legacy floor to the reservation fee', async () => {
+    const db = holder.db as FakeSupabase;
+    const { minimumDownPayment: _omitted, ...withoutFloor } = JADE;
+    const state = await call('cards', {
+      method: 'POST',
+      path: '',
+      token: TOKEN.superAdmin,
+      body: { ...withoutFloor, code: 'NOFLOOR', name: 'No Floor' },
+    });
+    expect(state.status).toBe(201);
+    // JADE carries the default reservation fee (10000.00 fixtures omit it).
+    expect(state.body).toMatchObject({ minimumDownPayment: '10000.00' });
+    expect(
+      db.rows('card_plans').find((r) => r.code === 'NOFLOOR')!.minimum_down_payment,
+    ).toBe('10000.00');
+  });
+
   it('rejects negative yearly points with 400', async () => {
     const state = await call('cards', {
       method: 'POST',

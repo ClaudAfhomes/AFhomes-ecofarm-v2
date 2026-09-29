@@ -1,5 +1,14 @@
 import { Link } from 'react-router';
-import { ErrorState, StatusChip, type StatusTone } from '@jad/ui';
+import { paymentSchemeLabel } from '@jad/contracts';
+import {
+  EmptyState,
+  ErrorState,
+  MetricCard,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  type StatusTone,
+} from '@jad/ui';
 
 import { useCustomerLedgerQuery, useCustomerMembershipQuery, useCustomerProfileQuery, useCustomerPointsQuery } from './queries';
 import { isForbidden, isNotFound } from './http';
@@ -8,10 +17,12 @@ import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './po
 /**
  * Customer dashboard: the member's own position in one screen.
  *
- * Deliberately read-only and deliberately narrow - name, card, status,
- * activation and renewal dates, points balance, and recent points activity.
- * No staff-only field, no finance data, and no card code (the membership screen
- * explains why a code is never simply displayed).
+ * JAD member-dashboard structure (page header, KPI grid, membership panel,
+ * recent activity) with AF Homes content: deliberately read-only and
+ * deliberately narrow - name, card, status, activation and renewal dates,
+ * points balance, and recent points activity. No staff-only field, no finance
+ * data, and no card code (the membership screen explains why a code is never
+ * simply displayed).
  *
  * React Query dedupes by key, so the profile fetch here is the same request the
  * shell already made.
@@ -24,16 +35,80 @@ export function CustomerDashboardPage() {
 
   if (profile.isLoading) return <p role="status">Loading your account…</p>;
 
+  const kpiLoading = membership.isLoading || points.isLoading;
+
   return (
     <>
-      <Card title="Welcome">
-        <p className={styles.notice}>
-          Signed in as <strong>{profile.data?.fullName}</strong> ({profile.data?.customerNumber}).
-        </p>
-        <p className={styles.notice}>
-          This portal shows your own account only. For anything else, contact AF Homes Ecofarm.
-        </p>
-      </Card>
+      <PageHeader
+        title="Dashboard"
+        description={
+          profile.data
+            ? `Welcome back, ${profile.data.fullName}.`
+            : 'Your membership, points, and recent activity.'
+        }
+      />
+
+      {kpiLoading ? (
+        <div role="status" aria-label="Loading summary">
+          <ul className={styles.kpiGrid} aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <li key={index}>
+                <Skeleton className={styles.kpiSkeleton} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <ul className={styles.kpiGrid}>
+          <li>
+            <MetricCard
+              label="Membership"
+              value={membership.data?.productName ?? 'No active card'}
+              icon="user-check"
+              description={
+                membership.data
+                  ? `${paymentSchemeLabel(membership.data.paymentScheme)}`
+                  : 'You do not have an active membership yet.'
+              }
+              chip={
+                membership.data
+                  ? {
+                      label: membership.data.status,
+                      tone: toneFor(membership.data.status),
+                    }
+                  : undefined
+              }
+              to="/customer/membership"
+            />
+          </li>
+          <li>
+            <MetricCard
+              label="Points balance"
+              value={(points.data?.balance ?? 0).toLocaleString('en-PH')}
+              icon="wallet"
+              description={
+                points.data
+                  ? `${points.data.lifetimeAllocated.toLocaleString('en-PH')} allocated all time`
+                  : 'Points are not available right now.'
+              }
+              to="/customer/points"
+            />
+          </li>
+          <li>
+            <MetricCard
+              label="Valid until"
+              value={formatDate(membership.data?.renewalDueAt)}
+              icon="clock"
+              description={
+                membership.data?.validityYears
+                  ? `Valid for ${membership.data.validityYears} year${membership.data.validityYears === 1 ? '' : 's'}`
+                  : 'Membership validity.'
+              }
+              to="/customer/membership"
+            />
+          </li>
+        </ul>
+      )}
 
       <Card title="Your card">
         {membership.isLoading && <p role="status">Loading your card…</p>}
@@ -53,6 +128,7 @@ export function CustomerDashboardPage() {
           <FieldList>
             <Field label="Membership number" value={membership.data.membershipNumber} />
             <Field label="Product" value={membership.data.productName ?? 'AF Homes card'} />
+            <Field label="Payment scheme" value={paymentSchemeLabel(membership.data.paymentScheme)} />
             <Field
               label="Status"
               value={
@@ -78,30 +154,14 @@ export function CustomerDashboardPage() {
         )}
       </Card>
 
-      <Card title="Your points">
-        {points.isLoading && <p role="status">Loading your points…</p>}
-        {points.isError && (
-          <p className={styles.notice}>
-            Points are not available right now.{' '}
-            {isForbidden(points.error) ? 'Your account is not active.' : ''}
-          </p>
-        )}
-        {points.data && (
-          <>
-            <p className={styles.balance}>{points.data.balance.toLocaleString('en-PH')}</p>
-            <p className={styles.balanceCaption}>
-              points available · {points.data.lifetimeAllocated.toLocaleString('en-PH')} allocated
-              all time
-            </p>
-          </>
-        )}
-      </Card>
-
       <Card title="Recent points activity">
         {ledger.isLoading && <p role="status">Loading your points activity…</p>}
         {ledger.isError && <p className={styles.notice}>Your points activity is not available right now.</p>}
         {ledger.data && ledger.data.length === 0 && (
-          <p className={styles.notice}>No points activity yet.</p>
+          <EmptyState
+            title="No points activity"
+            description="Your allocations and redemptions will appear here."
+          />
         )}
         {ledger.data && ledger.data.length > 0 && (
           <table className={styles.table}>

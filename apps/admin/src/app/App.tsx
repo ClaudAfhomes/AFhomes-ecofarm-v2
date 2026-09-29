@@ -11,6 +11,7 @@ import { BusinessCustomersPage } from '../features/business/BusinessCustomersPag
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
+import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
 import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
@@ -54,6 +55,13 @@ export default function App() {
         <Route element={<AdminLayout />}>
           <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
           <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
+          {/* Internal IST payment-scheme reference. Gated on the
+              sales.card_sales nav key like the sales list; customers and
+              anonymous visitors never reach the staff app at all. */}
+          <Route
+            path="/admin/sales/payment-scheme-guide"
+            element={protectedPage(<PaymentSchemeGuidePage />)}
+          />
           <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
           <Route path="/admin/products" element={protectedPage(<BusinessProductsPage />)} />
           <Route

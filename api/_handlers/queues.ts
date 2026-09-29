@@ -35,6 +35,12 @@ type QueueRow = {
   status: string;
   cash_price_snapshot: string | null;
   minimum_down_payment_snapshot: string | null;
+  payment_scheme: string | null;
+  reservation_fee_snapshot: string | null;
+  required_initial_snapshot: string | null;
+  installment_months_snapshot: number | null;
+  monthly_amount_snapshot: string | null;
+  validity_months_snapshot: number | null;
   spot_cash_started_at: string | null;
   spot_cash_deadline: string | null;
   customer_id: string;
@@ -44,12 +50,13 @@ type QueueRow = {
 };
 
 const SELECT_QUEUE =
-  'id, sale_number, status, cash_price_snapshot, minimum_down_payment_snapshot, spot_cash_started_at, spot_cash_deadline, customer_id, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name)';
+  'id, sale_number, status, cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amount_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_id, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name)';
 
 function shape(row: QueueRow) {
   const totals = summarizePayments({
     cashPrice: row.cash_price_snapshot ?? '0.00',
     minimumDownPayment: row.minimum_down_payment_snapshot ?? '0.00',
+    requiredInitial: row.required_initial_snapshot ?? null,
     payments: row.payments,
     spotCashStartedAt: isoOrNull(row.spot_cash_started_at),
     spotCashDeadline: isoOrNull(row.spot_cash_deadline),
@@ -62,6 +69,12 @@ function shape(row: QueueRow) {
     productName: row.productName,
     status: row.status,
     cashPrice: row.cash_price_snapshot ?? '0.00',
+    paymentScheme: row.payment_scheme ?? 'spot_cash',
+    reservationFee: row.reservation_fee_snapshot ?? '0.00',
+    requiredInitial: row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
+    installmentMonths: row.installment_months_snapshot,
+    monthlyAmount: row.monthly_amount_snapshot,
+    validityMonths: row.validity_months_snapshot,
     ...totals,
     firstVerifiedPayment: isoOrNull(row.spot_cash_started_at),
     activatable: SALE_ACTIVATABLE.includes(row.status as never) && totals.fullyPaid,
@@ -105,6 +118,18 @@ async function buildQueue(db: Db, statuses: string[], limit: number, offset: num
       status: String(row.status),
       cash_price_snapshot: (row.cash_price_snapshot as string | null) ?? null,
       minimum_down_payment_snapshot: (row.minimum_down_payment_snapshot as string | null) ?? null,
+      payment_scheme: (row.payment_scheme as string | null) ?? null,
+      reservation_fee_snapshot: (row.reservation_fee_snapshot as string | null) ?? null,
+      required_initial_snapshot: (row.required_initial_snapshot as string | null) ?? null,
+      installment_months_snapshot:
+        row.installment_months_snapshot === null || row.installment_months_snapshot === undefined
+          ? null
+          : Number(row.installment_months_snapshot),
+      monthly_amount_snapshot: (row.monthly_amount_snapshot as string | null) ?? null,
+      validity_months_snapshot:
+        row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
+          ? null
+          : Number(row.validity_months_snapshot),
       spot_cash_started_at: isoOrNull(row.spot_cash_started_at),
       spot_cash_deadline: isoOrNull(row.spot_cash_deadline),
       customer_id: String(row.customer_id),

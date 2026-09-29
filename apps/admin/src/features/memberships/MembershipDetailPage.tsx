@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Button, Dialog, ErrorState, PageHeader, QrCode, StatusChip } from '@jad/ui';
+import { Button, ConfirmDialog, Dialog, ErrorState, PageHeader, QrCode, StatusChip } from '@jad/ui';
 import type { ReissuedMembershipCard } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
@@ -35,6 +35,7 @@ export function MembershipDetailPage() {
   const [reason, setReason] = useState('');
   const [issued, setIssued] = useState<ReissuedMembershipCard | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
+  const [confirmReissue, setConfirmReissue] = useState(false);
 
   const canReissue =
     user?.afHomesPermissions.some(
@@ -132,6 +133,16 @@ export function MembershipDetailPage() {
           <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
         </div>
         <div>
+          <dt>Valid until</dt>
+          <dd>{data.expiresAt ? formatDateTime(data.expiresAt) : '—'}</dd>
+        </div>
+        <div>
+          <dt>Validity</dt>
+          <dd>
+            {data.validityYears ? `Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}` : '—'}
+          </dd>
+        </div>
+        <div>
           <dt>Card issued</dt>
           <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
         </div>
@@ -186,18 +197,25 @@ export function MembershipDetailPage() {
           <Button
             onClick={() => {
               setOutcome(null);
-              if (
-                window.confirm(
-                  'Rotate the credentials for this card? The previous codes stop working immediately.',
-                )
-              ) {
-                reissue.mutate();
-              }
+              setConfirmReissue(true);
             }}
             disabled={reissue.isPending || reason.trim().length < 5}
           >
             {reissue.isPending ? 'Rotating…' : 'Reissue credentials'}
           </Button>
+          <ConfirmDialog
+            open={confirmReissue}
+            onCancel={() => setConfirmReissue(false)}
+            onConfirm={() => {
+              setConfirmReissue(false);
+              reissue.mutate();
+            }}
+            title="Reissue credentials?"
+            message="Rotate the credentials for this card? The previous codes stop working immediately."
+            confirmLabel="Reissue"
+            cancelLabel="Cancel"
+            confirmLoading={reissue.isPending}
+          />
         </div>
       ) : (
         <p style={{ marginTop: 24 }}>

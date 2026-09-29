@@ -97,7 +97,9 @@ function install(
       },
       {
         fn: 'issue_customer_onboarding_token',
-        result: [{ token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' }],
+        result: [
+          { token: 'raw-once-onboarding-token-0001', expires_at: '2026-10-01T00:00:00.000Z' },
+        ],
       },
     ],
     rpcErrors: options.rpcErrors,
@@ -426,7 +428,7 @@ describe('activation and customer onboarding', () => {
       body: {},
     });
     expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({ token: 'raw-once' });
+    expect(state.body).toMatchObject({ token: 'raw-once-onboarding-token-0001' });
     const audits = db
       .rows('audit_events')
       .filter((a) => a.action === 'CUSTOMER_ONBOARDING_TOKEN_ISSUED');

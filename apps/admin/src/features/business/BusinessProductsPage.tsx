@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CardCategory, CardProduct } from '@jad/contracts';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 
 import { formatMoney, formatPoints, formatRate } from './format';
 import {
@@ -23,7 +33,14 @@ type PlanForm = {
   description: string;
   categoryId: string;
   price: string;
-  down: string;
+  installment: string;
+  reservation: string;
+  spotDays: string;
+  installMonths: string;
+  validityYears: string;
+  moveA: boolean;
+  moveB1: boolean;
+  moveB2: boolean;
   points: string;
   rate: string;
   sortOrder: string;
@@ -36,7 +53,14 @@ const EMPTY_PLAN_FORM: PlanForm = {
   description: '',
   categoryId: '',
   price: '',
-  down: '',
+  installment: '',
+  reservation: '10000.00',
+  spotDays: '7',
+  installMonths: '4',
+  validityYears: '1',
+  moveA: true,
+  moveB1: true,
+  moveB2: true,
   points: '',
   rate: '0.04',
   sortOrder: '0',
@@ -65,7 +89,14 @@ const planFormFromProduct = (product: CardProduct): PlanForm => ({
   description: product.description ?? '',
   categoryId: product.categoryId,
   price: product.cashPrice,
-  down: product.minimumDownPayment,
+  installment: product.installmentPrice,
+  reservation: product.reservationFee,
+  spotDays: String(product.spotCashDays),
+  installMonths: String(product.standardInstallmentMonths),
+  validityYears: String(product.validityYears),
+  moveA: product.moveAEnabled,
+  moveB1: product.moveB1Enabled,
+  moveB2: product.moveB2Enabled,
   points: String(product.yearlyPoints),
   rate: product.commissionRate,
   sortOrder: String(product.sortOrder),
@@ -84,13 +115,23 @@ function validatePlanForm(form: PlanForm): string | null {
   if (!form.name.trim()) return 'Name is required';
   if (!form.code.trim()) return 'Code is required';
   if (!form.categoryId) return 'Category is required';
-  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0) return 'Cash price must be greater than zero';
-  if (!MONEY_RE.test(form.down)) return 'Minimum down payment must be a valid amount';
-  if (Number(form.down) > Number(form.price))
-    return 'Minimum down payment cannot exceed the cash price';
+  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0) return 'Spot cash price must be greater than zero';
   if (!/^\d+$/.test(form.points)) return 'Yearly points must be a whole number';
   if (!RATE_RE.test(form.rate) || Number(form.rate) < 0 || Number(form.rate) > 1)
     return 'Commission rate must be between 0 and 1 (0.04 = 4%)';
+  if (!MONEY_RE.test(form.installment) || Number(form.installment) <= 0)
+    return 'Installment price must be greater than zero';
+  if (!MONEY_RE.test(form.reservation)) return 'Reservation fee must be a valid amount';
+  if (Number(form.reservation) > Number(form.price))
+    return 'Reservation fee cannot exceed the spot cash price';
+  if (Number(form.reservation) > Number(form.installment))
+    return 'Reservation fee cannot exceed the installment price';
+  if (!/^\d+$/.test(form.spotDays) || Number(form.spotDays) <= 0)
+    return 'Spot cash days must be a positive whole number';
+  if (!/^\d+$/.test(form.installMonths) || Number(form.installMonths) <= 0)
+    return 'Standard installment months must be a positive whole number';
+  if (!/^\d+$/.test(form.validityYears) || Number(form.validityYears) <= 0)
+    return 'Validity years must be a positive whole number';
   if (!/^-?\d+$/.test(form.sortOrder)) return 'Display order must be a whole number';
   return null;
 }
@@ -168,7 +209,14 @@ export function BusinessProductsPage() {
         description: planForm.description.trim() || undefined,
         categoryId: planForm.categoryId,
         cashPrice: planForm.price,
-        minimumDownPayment: planForm.down,
+        installmentPrice: planForm.installment,
+        reservationFee: planForm.reservation,
+        spotCashDays: Number(planForm.spotDays),
+        standardInstallmentMonths: Number(planForm.installMonths),
+        validityYears: Number(planForm.validityYears),
+        moveAEnabled: planForm.moveA,
+        moveB1Enabled: planForm.moveB1,
+        moveB2Enabled: planForm.moveB2,
         yearlyPoints: Number(planForm.points),
         commissionRate: planForm.rate,
         sortOrder: Number(planForm.sortOrder),
@@ -188,7 +236,14 @@ export function BusinessProductsPage() {
         description: planForm.description.trim() ? planForm.description.trim() : null,
         categoryId: planForm.categoryId,
         cashPrice: planForm.price,
-        minimumDownPayment: planForm.down,
+        installmentPrice: planForm.installment,
+        reservationFee: planForm.reservation,
+        spotCashDays: Number(planForm.spotDays),
+        standardInstallmentMonths: Number(planForm.installMonths),
+        validityYears: Number(planForm.validityYears),
+        moveAEnabled: planForm.moveA,
+        moveB1Enabled: planForm.moveB1,
+        moveB2Enabled: planForm.moveB2,
         yearlyPoints: Number(planForm.points),
         commissionRate: planForm.rate,
         sortOrder: Number(planForm.sortOrder),
@@ -305,30 +360,38 @@ export function BusinessProductsPage() {
       {tab === 'plans' ? (
         <>
           <form
-            style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
             onSubmit={(e) => {
               e.preventDefault();
               setAppliedSearch(search.trim());
             }}
           >
-            <input
-              aria-label="Search card plans"
-              placeholder="Name or code"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+            <FilterBar
+              search={
+                <SearchField
+                  label="Search card plans"
+                  placeholder="Name or code"
+                  value={search}
+                  onChange={setSearch}
+                />
+              }
+              filters={
+                <Select
+                  aria-label="Filter by status"
+                  value={visibility}
+                  onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
+                  options={[
+                    { value: 'active', label: 'Active' },
+                    { value: 'inactive', label: 'Inactive' },
+                    { value: 'all', label: 'All' },
+                  ]}
+                />
+              }
+              actions={
+                <Button type="submit" variant="secondary">
+                  Search
+                </Button>
+              }
             />
-            <select
-              aria-label="Filter by status"
-              value={visibility}
-              onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
-            >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="all">All</option>
-            </select>
-            <Button type="submit" variant="secondary">
-              Search
-            </Button>
           </form>
 
           {plans.isPending ? (
@@ -352,8 +415,11 @@ export function BusinessProductsPage() {
                     <th>Name</th>
                     <th>Code</th>
                     <th>Category</th>
-                    <th>Price</th>
-                    <th>Minimum DP</th>
+                    <th>Spot Cash</th>
+                    <th>Installment</th>
+                    <th>Reservation</th>
+                    <th>Validity</th>
+                    <th>Moves</th>
                     <th>Yearly Points</th>
                     <th>Commission</th>
                     <th>Status</th>
@@ -368,7 +434,20 @@ export function BusinessProductsPage() {
                       <td>{product.code}</td>
                       <td>{product.categoryName ?? '—'}</td>
                       <td>{formatMoney(product.cashPrice)}</td>
-                      <td>{formatMoney(product.minimumDownPayment)}</td>
+                      <td>{formatMoney(product.installmentPrice)}</td>
+                      <td>{formatMoney(product.reservationFee)}</td>
+                      <td>
+                        {product.validityYears} year{product.validityYears === 1 ? '' : 's'}
+                      </td>
+                      <td>
+                        {[
+                          product.moveAEnabled ? 'A' : null,
+                          product.moveB1Enabled ? 'B1' : null,
+                          product.moveB2Enabled ? 'B2' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || '—'}
+                      </td>
                       <td>{formatPoints(product.yearlyPoints)}</td>
                       <td>{formatRate(product.commissionRate)}</td>
                       <td>
@@ -486,8 +565,9 @@ export function BusinessProductsPage() {
       >
         <div style={{ display: 'grid', gap: 12 }}>
           <p>
-            Changing these values affects only <strong>future</strong> sales. Sales already created keep
-            the price, minimum down payment, points and commission they were created with.
+            Changing these values affects only <strong>future</strong> sales. Existing sales retain
+            their frozen pricing: scheme, total, reservation, schedule, validity and commission stay
+            exactly as created.
           </p>
           <label>
             Name
@@ -533,7 +613,7 @@ export function BusinessProductsPage() {
             />
           </label>
           <label>
-            Cash price
+            Spot cash price
             <input
               value={planForm.price}
               onChange={(e) => setPlanForm({ ...planForm, price: e.target.value })}
@@ -541,13 +621,76 @@ export function BusinessProductsPage() {
             />
           </label>
           <label>
-            Minimum down payment
+            4-month installment price
             <input
-              value={planForm.down}
-              onChange={(e) => setPlanForm({ ...planForm, down: e.target.value })}
+              value={planForm.installment}
+              onChange={(e) => setPlanForm({ ...planForm, installment: e.target.value })}
               inputMode="decimal"
             />
           </label>
+          <label>
+            Reservation fee (included in every total)
+            <input
+              value={planForm.reservation}
+              onChange={(e) => setPlanForm({ ...planForm, reservation: e.target.value })}
+              inputMode="decimal"
+            />
+          </label>
+          <label>
+            Spot cash days
+            <input
+              value={planForm.spotDays}
+              onChange={(e) => setPlanForm({ ...planForm, spotDays: e.target.value.replace(/\D/g, '') })}
+              inputMode="numeric"
+            />
+          </label>
+          <label>
+            Standard installment months
+            <input
+              value={planForm.installMonths}
+              onChange={(e) =>
+                setPlanForm({ ...planForm, installMonths: e.target.value.replace(/\D/g, '') })
+              }
+              inputMode="numeric"
+            />
+          </label>
+          <label>
+            Validity years
+            <input
+              value={planForm.validityYears}
+              onChange={(e) =>
+                setPlanForm({ ...planForm, validityYears: e.target.value.replace(/\D/g, '') })
+              }
+              inputMode="numeric"
+            />
+          </label>
+          <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend>Allowed internal moves</legend>
+            <label>
+              <input
+                type="checkbox"
+                checked={planForm.moveA}
+                onChange={(e) => setPlanForm({ ...planForm, moveA: e.target.checked })}
+              />{' '}
+              Move A — pay over 4 months
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={planForm.moveB1}
+                onChange={(e) => setPlanForm({ ...planForm, moveB1: e.target.checked })}
+              />{' '}
+              Move B1 — 40% DP + 12 months
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={planForm.moveB2}
+                onChange={(e) => setPlanForm({ ...planForm, moveB2: e.target.checked })}
+              />{' '}
+              Move B2 — 25% DP + 12 months
+            </label>
+          </fieldset>
           <label>
             Yearly points
             <input

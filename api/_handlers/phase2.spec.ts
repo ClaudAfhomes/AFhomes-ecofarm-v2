@@ -111,7 +111,9 @@ function install(
       { fn: 'correct_referral_upline', result: 'eeeeeeee-0000-4000-8000-0000000000ff' },
       {
         fn: 'issue_customer_onboarding_token',
-        result: [{ token: 'raw-once', expires_at: '2026-10-01T00:00:00.000Z' }],
+        result: [
+          { token: 'raw-once-onboarding-token-0001', expires_at: '2026-10-01T00:00:00.000Z' },
+        ],
       },
     ],
     rpcErrors: options.rpcErrors,
@@ -453,9 +455,9 @@ describe('card sales', () => {
 
   it('creates an SM-owned sale with the same server-side commercial snapshot', async () => {
     const db = install();
-    db.rows('staff_role_assignments').find(
-      (assignment) => assignment.staff_id === UUID.viewerStaff,
-    )!.role_id = UUID.role.custom;
+    db
+      .rows('staff_role_assignments')
+      .find((assignment) => assignment.staff_id === UUID.viewerStaff)!.role_id = UUID.role.custom;
     db.rows('role_permissions').push({
       role_id: UUID.role.custom,
       module_id: 'module:sales.card_sales',
@@ -875,9 +877,35 @@ describe('activation requires confirmed full payment', () => {
       qrToken: 'opaque-random-token',
       pointsAllocated: 60000,
       alreadyActive: false,
+      onboarding: {
+        status: 'manual_required',
+        emailStatus: 'failed',
+        token: 'raw-once-onboarding-token-0001',
+        expiresAt: '2026-10-01T00:00:00.000Z',
+      },
     });
     const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'activate_card_sale');
     expect(rpc?.arg).toMatchObject({ p_sale_id: SALE.fullyPaid, p_validity_months: 12 });
+    const tokenRpc = db.calls.find(
+      (c) => c.op === 'rpc' && c.table === 'issue_customer_onboarding_token',
+    );
+    expect(tokenRpc?.arg).toMatchObject({
+      p_customer_id: CUSTOMER.active,
+      p_purpose: 'account_activation',
+      p_valid_hours: 72,
+    });
+    const onboardingAudit = db
+      .rows('audit_events')
+      .find((entry) => entry.action === 'CUSTOMER_ONBOARDING_TOKEN_ISSUED');
+    const deliveryAudit = db
+      .rows('audit_events')
+      .find((entry) => entry.action === 'CUSTOMER_ACTIVATION_EMAIL_FAILED');
+    expect(onboardingAudit).toBeDefined();
+    expect(deliveryAudit).toBeDefined();
+    expect(JSON.stringify([onboardingAudit, deliveryAudit])).not.toContain(
+      'raw-once-onboarding-token-0001',
+    );
+    expect(JSON.stringify([onboardingAudit, deliveryAudit])).not.toContain('/customer/activate');
   });
 
   it('refuses to activate an unpaid sale', async () => {
@@ -893,7 +921,7 @@ describe('activation requires confirmed full payment', () => {
       body: { validityMonths: 12 },
     });
     expect(state.status).toBe(409);
-    expect(err(state.body).message).toMatch(/not fully paid/);
+    expect(err(state.body).message).toMatch(/not activatable/);
   });
 
   it('refuses to activate a partially paid sale', async () => {
@@ -946,9 +974,39 @@ describe('activation requires confirmed full payment', () => {
       body: { validityMonths: 12 },
     });
     expect(state.status).toBe(200);
-    expect(state.body).toMatchObject({ alreadyActive: true, membershipNumber: 'MBS-000001' });
+    expect(state.body).toMatchObject({
+      alreadyActive: true,
+      membershipNumber: 'MBS-000001',
+      onboarding: {
+        status: 'already_active',
+        emailStatus: 'not_attempted',
+        token: null,
+      },
+    });
     // Only one activation attempt reached the RPC - no retry loop.
     expect(db.calls.filter((c) => c.table === 'activate_card_sale')).toHaveLength(1);
+    expect(db.calls.filter((c) => c.table === 'issue_customer_onboarding_token')).toHaveLength(0);
+  });
+
+  it('keeps the membership activation successful when onboarding token issuance fails', async () => {
+    install({
+      rpcErrors: { issue_customer_onboarding_token: { message: 'TOKEN_ISSUE_FAILED: detail' } },
+    });
+    const state = await call('sales', {
+      method: 'POST',
+      path: `${SALE.fullyPaid}/activate`,
+      token: TOKEN.admin,
+      body: { validityMonths: 12 },
+    });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      membershipNumber: 'MBS-000009',
+      onboarding: {
+        status: 'not_issued',
+        emailStatus: 'not_attempted',
+        token: null,
+      },
+    });
   });
 
   it('rejects a nonsense validity period', async () => {
@@ -1332,7 +1390,7 @@ describe('customer account onboarding', () => {
       body: { purpose: 'account_activation', validHours: 24 },
     });
     expect(state.status).toBe(201);
-    expect((state.body as { token: string }).token).toBe('raw-once');
+    expect((state.body as { token: string }).token).toBe('raw-once-onboarding-token-0001');
   });
 
   it('denies issuing without finance.card_activation', async () => {

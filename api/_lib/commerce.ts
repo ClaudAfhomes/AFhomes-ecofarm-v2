@@ -10,8 +10,9 @@
  * Money is an exact-decimal STRING end to end. Arithmetic goes through
  * `@jad/shared`, which uses BigInt centavo - no float ever participates.
  */
-import { addMoney, compareMoney, multiplyMoney, subtractMoney } from '@jad/shared';
+import { addMoney, compareMoney, divideMoneyExact, multiplyMoney, subtractMoney } from '@jad/shared';
 import type {
+  PaymentScheme,
   PaymentStatus,
   SaleFinancialSummary,
   SpotCashState,
@@ -54,6 +55,13 @@ export function summarizePayments(input: {
   spotCashStartedAt?: string | null;
   spotCashDeadline?: string | null;
   now?: Date;
+  /**
+   * Frozen scheme required initial (reservation for the standard tracks, the
+   * DP for B1/B2). When present it is the down-payment threshold; otherwise
+   * the legacy minimum down payment snapshot applies. Old sales (no scheme
+   * snapshot) therefore behave exactly as before.
+   */
+  requiredInitial?: string | null;
 }): {
   recordedTotal: string;
   verifiedTotal: string;
@@ -66,6 +74,7 @@ export function summarizePayments(input: {
   spotCashState: SpotCashState;
 } {
   const now = input.now ?? new Date();
+  const downThreshold = input.requiredInitial ?? input.minimumDownPayment;
 
   const sumWhere = (predicate: (p: PaymentLike) => boolean) =>
     input.payments
@@ -91,8 +100,8 @@ export function summarizePayments(input: {
     rejectedTotal,
     remainingBalance,
     overpaidAmount,
-    // Minimum down payment is judged on VERIFIED money only.
-    downPaymentSatisfied: compareMoney(verifiedTotal, input.minimumDownPayment) >= 0,
+    // The required initial is judged on VERIFIED money only.
+    downPaymentSatisfied: compareMoney(verifiedTotal, downThreshold) >= 0,
     fullyPaid: compareMoney(verifiedTotal, input.cashPrice) >= 0,
     spotCashDeadline: input.spotCashDeadline ?? null,
     spotCashState: deriveSpotCashState({
@@ -138,6 +147,12 @@ export type SellableProduct = {
   id: string;
   isActive: boolean;
   cashPrice: string;
+  /**
+   * Legacy plan floor (pre-Stage-1 "minimum down payment"). Still the
+   * coherence guard for sellability and the historical snapshot value, but
+   * NOT the Stage 1 required initial - see `requiredInitial` on
+   * `summarizePayments` and the frozen scheme snapshot on each sale.
+   */
   minimumDownPayment: string;
   yearlyPoints: number;
   commissionRate: string;
@@ -168,7 +183,13 @@ export function productSaleRejection(
   return null;
 }
 
-/** Snapshot the commercial terms of a sale so later price changes cannot alter it. */
+/** Snapshot the commercial terms of a sale so later price changes cannot alter it.
+ *
+ * `minimumDownPaymentSnapshot` keeps the legacy plan floor for historical
+ * meaning. The live Stage 1 threshold is the frozen scheme-specific required
+ * initial (`snapshotSchemeTerms`), which `summarizePayments` prefers whenever
+ * the sale carries it.
+ */
 export function snapshotSaleTerms(product: SellableProduct) {
   return {
     cashPriceSnapshot: product.cashPrice,
@@ -176,6 +197,206 @@ export function snapshotSaleTerms(product: SellableProduct) {
     yearlyPointsSnapshot: product.yearlyPoints,
     commissionRateSnapshot: product.commissionRate,
     expectedCommissionSnapshot: calculateCommission(product.cashPrice, product.commissionRate),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* VIP payment schemes (Stage 1 pre-opening value)                     */
+/* ------------------------------------------------------------------ */
+
+export type SchemePlan = {
+  /** Spot Cash price - the base of the spot track. */
+  cashPrice: string;
+  /** Standard 4-month installment total (different from Spot Cash). */
+  installmentPrice?: string | null;
+  /** Reservation fee, included in every total, never added on top. */
+  reservationFee?: string | null;
+  spotCashDays?: number | null;
+  standardInstallmentMonths?: number | null;
+  /** Membership validity in years, frozen onto each sale. */
+  validityYears?: number | null;
+  moveAEnabled?: boolean | null;
+  moveB1Enabled?: boolean | null;
+  moveB2Enabled?: boolean | null;
+};
+
+export type SchemeEconomics = {
+  scheme: PaymentScheme;
+  /** Frozen selected total: Spot Cash total on the spot track, installment total otherwise. */
+  total: string;
+  /** Frozen reservation fee included in the total. */
+  reservationFee: string;
+  /** Frozen required initial: reservation for the standard tracks, DP for B1/B2. */
+  requiredInitial: string;
+  /** Frozen installment month count (null when the scheme has no installments). */
+  installmentMonths: number | null;
+  /** Frozen monthly amount (null when the scheme has no installments). */
+  monthlyAmount: string | null;
+  /** Frozen membership validity in months (validity years x 12). */
+  validityMonths: number;
+};
+
+export type SchemeRejection =
+  | 'SCHEME_NOT_ALLOWED_FOR_TIER'
+  | 'INSTALLMENT_PRICE_NOT_SET'
+  | 'INEXACT_SCHEDULE';
+
+/** Database defaults for plan columns older rows may lack. */
+const SCHEME_DEFAULTS = {
+  reservationFee: '10000.00',
+  spotCashDays: 7,
+  standardInstallmentMonths: 4,
+  validityYears: 1,
+  moveAEnabled: true,
+  moveB1Enabled: true,
+  moveB2Enabled: true,
+} as const;
+
+/**
+ * Exact division of an exact-decimal amount by a positive integer month count.
+ * Single implementation lives in `@jad/shared` (also used for display math);
+ * it throws rather than rounding, so an inexact schedule is a loud error.
+ */
+function divideSchedule(amount: string, months: number): string {
+  try {
+    return divideMoneyExact(amount, months);
+  } catch {
+    throw new Error(`divideSchedule: ${amount} / ${months} is inexact`);
+  }
+}
+
+function schemePlanDefaults(plan: SchemePlan) {
+  return {
+    installmentPrice: plan.installmentPrice ?? '0.00',
+    reservationFee: plan.reservationFee ?? SCHEME_DEFAULTS.reservationFee,
+    standardInstallmentMonths:
+      plan.standardInstallmentMonths ?? SCHEME_DEFAULTS.standardInstallmentMonths,
+    validityYears: plan.validityYears ?? SCHEME_DEFAULTS.validityYears,
+    moveAEnabled: plan.moveAEnabled ?? SCHEME_DEFAULTS.moveAEnabled,
+    moveB1Enabled: plan.moveB1Enabled ?? SCHEME_DEFAULTS.moveB1Enabled,
+    moveB2Enabled: plan.moveB2Enabled ?? SCHEME_DEFAULTS.moveB2Enabled,
+  };
+}
+
+/**
+ * Resolve the frozen economics for a plan + scheme pair.
+ *
+ * Pure and exact-decimal end to end (BigInt centavos; no float). The client
+ * sends only the scheme code; every figure comes from the plan row, so a
+ * tampered body cannot change what a sale costs. Bronze (Move B1/B2 flags
+ * off) is rejected here - the UI hiding the options is never the control.
+ */
+export function resolveSchemeEconomics(
+  plan: SchemePlan,
+  scheme: PaymentScheme,
+): { economics: SchemeEconomics } | { error: SchemeRejection } {
+  const d = schemePlanDefaults(plan);
+  const validityMonths = d.validityYears * 12;
+
+  if (scheme === 'spot_cash') {
+    return {
+      economics: {
+        scheme,
+        total: plan.cashPrice,
+        reservationFee: d.reservationFee,
+        requiredInitial: d.reservationFee,
+        installmentMonths: null,
+        monthlyAmount: null,
+        validityMonths,
+      },
+    };
+  }
+
+  if (scheme === 'move_a') {
+    if (!d.moveAEnabled) return { error: 'SCHEME_NOT_ALLOWED_FOR_TIER' };
+    const balance = subtractMoney(plan.cashPrice, d.reservationFee);
+    let monthly: string;
+    try {
+      monthly = divideSchedule(balance, 4);
+    } catch {
+      return { error: 'INEXACT_SCHEDULE' };
+    }
+    return {
+      economics: {
+        scheme,
+        total: plan.cashPrice,
+        reservationFee: d.reservationFee,
+        requiredInitial: d.reservationFee,
+        installmentMonths: 4,
+        monthlyAmount: monthly,
+        validityMonths,
+      },
+    };
+  }
+
+  // Every installment-track scheme shares the installment total. A plan with
+  // no installment price configured cannot be sold on this track.
+  if (compareMoney(d.installmentPrice, '0.00') <= 0) return { error: 'INSTALLMENT_PRICE_NOT_SET' };
+
+  if (scheme === 'installment_4_month') {
+    const balance = subtractMoney(d.installmentPrice, d.reservationFee);
+    let monthly: string;
+    try {
+      monthly = divideSchedule(balance, d.standardInstallmentMonths);
+    } catch {
+      return { error: 'INEXACT_SCHEDULE' };
+    }
+    return {
+      economics: {
+        scheme,
+        total: d.installmentPrice,
+        reservationFee: d.reservationFee,
+        requiredInitial: d.reservationFee,
+        installmentMonths: d.standardInstallmentMonths,
+        monthlyAmount: monthly,
+        validityMonths,
+      },
+    };
+  }
+
+  if (scheme === 'move_b1_40_12' || scheme === 'move_b2_25_12') {
+    const allowed = scheme === 'move_b1_40_12' ? d.moveB1Enabled : d.moveB2Enabled;
+    if (!allowed) return { error: 'SCHEME_NOT_ALLOWED_FOR_TIER' };
+    const rate = scheme === 'move_b1_40_12' ? '0.40' : '0.25';
+    const downPayment = multiplyMoney(d.installmentPrice, rate);
+    const balance = subtractMoney(d.installmentPrice, downPayment);
+    let monthly: string;
+    try {
+      monthly = divideSchedule(balance, 12);
+    } catch {
+      return { error: 'INEXACT_SCHEDULE' };
+    }
+    return {
+      economics: {
+        scheme,
+        total: d.installmentPrice,
+        reservationFee: d.reservationFee,
+        requiredInitial: downPayment,
+        installmentMonths: 12,
+        monthlyAmount: monthly,
+        validityMonths,
+      },
+    };
+  }
+
+  return { error: 'SCHEME_NOT_ALLOWED_FOR_TIER' };
+}
+
+/**
+ * Snapshot the selected scheme economics onto a sale so later plan edits
+ * cannot alter it. `cashPriceSnapshot` carries the frozen SELECTED total and
+ * `minimumDownPaymentSnapshot` keeps the plan floor; the scheme figures ride
+ * in their own columns.
+ */
+export function snapshotSchemeTerms(economics: SchemeEconomics) {
+  return {
+    paymentScheme: economics.scheme,
+    schemeTotalSnapshot: economics.total,
+    reservationFeeSnapshot: economics.reservationFee,
+    requiredInitialSnapshot: economics.requiredInitial,
+    installmentMonthsSnapshot: economics.installmentMonths,
+    monthlyAmountSnapshot: economics.monthlyAmount,
+    validityMonthsSnapshot: economics.validityMonths,
   };
 }
 
@@ -248,7 +469,15 @@ export function resolveSeller(input: {
 
 /** Merge the pure summary into the API response shape. */
 export function toSummaryResponse(
-  input: Parameters<typeof summarizePayments>[0] & { saleId: string; status: string },
+  input: Parameters<typeof summarizePayments>[0] & {
+    saleId: string;
+    status: string;
+    paymentScheme?: string;
+    reservationFee?: string;
+    requiredInitial?: string;
+    installmentMonths?: number | null;
+    monthlyAmount?: string | null;
+  },
 ): SaleFinancialSummary {
   const totals = summarizePayments(input);
   return {
@@ -256,6 +485,11 @@ export function toSummaryResponse(
     status: input.status as SaleFinancialSummary['status'],
     cashPrice: input.cashPrice,
     minimumDownPayment: input.minimumDownPayment,
+    paymentScheme: (input.paymentScheme ?? 'spot_cash') as SaleFinancialSummary['paymentScheme'],
+    reservationFee: input.reservationFee ?? '0.00',
+    requiredInitial: input.requiredInitial ?? input.minimumDownPayment,
+    installmentMonths: input.installmentMonths ?? null,
+    monthlyAmount: input.monthlyAmount ?? null,
     recordedTotal: totals.recordedTotal,
     verifiedTotal: totals.verifiedTotal,
     rejectedTotal: totals.rejectedTotal,

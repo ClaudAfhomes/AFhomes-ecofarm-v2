@@ -10,6 +10,7 @@ import { exactDecimalRateSchema, exactDecimalStringSchema } from './money.js';
 import {
   customerStatusSchema,
   hierarchyRoleSchema,
+  paymentSchemeSchema,
   saleStatusSchema,
   spotCashStateSchema,
 } from './lifecycle.js';
@@ -28,7 +29,29 @@ export const cardProductSchema = z.object({
   code: z.string().min(1).max(40),
   name: z.string().min(1).max(80),
   description: z.string().max(2000).nullable(),
+  /** Spot Cash price (Stage 1 pre-opening value). */
   cashPrice: exactDecimalStringSchema,
+  /** Standard 4-month installment total (a different total from Spot Cash). */
+  installmentPrice: exactDecimalStringSchema,
+  /** Reservation fee, included in every total (never added on top). */
+  reservationFee: exactDecimalStringSchema,
+  /** Days to settle a Spot Cash sale (informational; no auto-cancellation). */
+  spotCashDays: z.number().int().positive(),
+  /** Month count of the standard installment track. */
+  standardInstallmentMonths: z.number().int().positive(),
+  /** Membership validity in years, frozen onto each sale at creation. */
+  validityYears: z.number().int().positive(),
+  /** Internal moves allowed for this tier (Bronze: Move A only). */
+  moveAEnabled: z.boolean(),
+  moveB1Enabled: z.boolean(),
+  moveB2Enabled: z.boolean(),
+  /**
+   * Legacy plan floor (pre-Stage-1 "minimum down payment"). Retained for
+   * backward compatibility: the sellability coherence guard and historical
+   * snapshots still reference it, but it is NOT authoritative for Stage 1
+   * sale economics - the frozen scheme-specific required initial payment
+   * governs new sales instead.
+   */
   minimumDownPayment: exactDecimalStringSchema,
   yearlyPoints: z.number().int().nonnegative(),
   commissionRate: exactDecimalRateSchema,
@@ -46,6 +69,14 @@ export const updateCardProductSchema = z
     description: z.string().trim().max(2000).nullable().optional(),
     categoryId: z.string().uuid().optional(),
     cashPrice: exactDecimalStringSchema.optional(),
+    installmentPrice: exactDecimalStringSchema.optional(),
+    reservationFee: exactDecimalStringSchema.optional(),
+    spotCashDays: z.number().int().positive().optional(),
+    standardInstallmentMonths: z.number().int().positive().optional(),
+    validityYears: z.number().int().positive().optional(),
+    moveAEnabled: z.boolean().optional(),
+    moveB1Enabled: z.boolean().optional(),
+    moveB2Enabled: z.boolean().optional(),
     minimumDownPayment: exactDecimalStringSchema.optional(),
     yearlyPoints: z.number().int().nonnegative().optional(),
     commissionRate: exactDecimalRateSchema.optional(),
@@ -97,12 +128,22 @@ export function assertCommissionRateInRange(rate: string): string | null {
  * cash_price > 0, minimum_down_payment in 0..price, yearly_points >= 0,
  * commission_rate in 0..1. Shape errors (regex, int) are reported by Zod;
  * this reports the cross-field and range errors.
+ *
+ * VIP Stage 1 adds optional scheme-economics validation: when the new pricing
+ * fields are supplied they must be coherent (installment total > 0, the
+ * reservation inside both totals, positive day/month/year counts). Absent
+ * fields are not validated here - the database defaults fill them.
  */
 export function assertCardPlanEconomicsSane(input: {
   cashPrice: string;
   minimumDownPayment: string;
   yearlyPoints: number;
   commissionRate: string;
+  installmentPrice?: string;
+  reservationFee?: string;
+  spotCashDays?: number;
+  standardInstallmentMonths?: number;
+  validityYears?: number;
 }): string | null {
   const toCentavos = (v: string) => BigInt(v.replace('.', '').padEnd(3, '0').slice(0, -1) || '0');
   if (toCentavos(input.cashPrice) <= 0n) return 'Cash price must be greater than zero';
@@ -112,7 +153,27 @@ export function assertCardPlanEconomicsSane(input: {
     return 'Minimum down payment cannot exceed the cash price';
   if (!Number.isInteger(input.yearlyPoints) || input.yearlyPoints < 0)
     return 'Yearly points cannot be negative';
-  return assertCommissionRateInRange(input.commissionRate);
+  const rateError = assertCommissionRateInRange(input.commissionRate);
+  if (rateError) return rateError;
+  if (input.installmentPrice !== undefined && toCentavos(input.installmentPrice) <= 0n)
+    return 'Installment price must be greater than zero';
+  if (input.reservationFee !== undefined) {
+    if (toCentavos(input.reservationFee) < 0n) return 'Reservation fee cannot be negative';
+    if (toCentavos(input.reservationFee) > toCentavos(input.cashPrice))
+      return 'Reservation fee cannot exceed the cash price';
+    if (
+      input.installmentPrice !== undefined &&
+      toCentavos(input.reservationFee) > toCentavos(input.installmentPrice)
+    )
+      return 'Reservation fee cannot exceed the installment price';
+  }
+  if (input.spotCashDays !== undefined && input.spotCashDays <= 0)
+    return 'Spot cash days must be positive';
+  if (input.standardInstallmentMonths !== undefined && input.standardInstallmentMonths <= 0)
+    return 'Standard installment months must be positive';
+  if (input.validityYears !== undefined && input.validityYears <= 0)
+    return 'Validity years must be positive';
+  return null;
 }
 
 export const createCardProductSchema = z.object({  name: z.string().trim().min(1).max(80),
@@ -120,7 +181,21 @@ export const createCardProductSchema = z.object({  name: z.string().trim().min(1
   description: z.string().trim().max(2000).optional(),
   categoryId: z.string().uuid().optional(),
   cashPrice: exactDecimalStringSchema,
-  minimumDownPayment: exactDecimalStringSchema,
+  installmentPrice: exactDecimalStringSchema.optional(),
+  reservationFee: exactDecimalStringSchema.optional(),
+  spotCashDays: z.number().int().positive().optional(),
+  standardInstallmentMonths: z.number().int().positive().optional(),
+  validityYears: z.number().int().positive().optional(),
+  moveAEnabled: z.boolean().optional(),
+  moveB1Enabled: z.boolean().optional(),
+  moveB2Enabled: z.boolean().optional(),
+  /**
+   * Legacy plan floor, kept for backward compatibility only. It is NOT the
+   * Stage 1 required initial payment (that is scheme-specific and frozen per
+   * sale). Omitted values default to the reservation fee server-side; the
+   * management UI no longer offers this field.
+   */
+  minimumDownPayment: exactDecimalStringSchema.optional(),
   yearlyPoints: z.number().int().nonnegative(),
   commissionRate: exactDecimalRateSchema,
   isActive: z.boolean().optional(),
@@ -295,6 +370,14 @@ export const createSaleSchema = z.object({
    * This is a request, never an assertion of identity.
    */
   sellerStaffId: z.string().uuid().optional(),
+  /**
+   * Selected VIP payment scheme. The client sends the scheme code only - every
+   * figure (total, reservation, required initial, months, monthly amount,
+   * validity) is resolved server-side from the plan row and frozen onto the
+   * sale, so a tampered body cannot change what a sale costs. Defaults to
+   * Spot Cash, preserving the pre-scheme request shape.
+   */
+  paymentScheme: paymentSchemeSchema.default('spot_cash'),
 });
 export type CreateSaleRequest = z.infer<typeof createSaleSchema>;
 
@@ -309,9 +392,30 @@ export const saleSchema = z.object({
   status: saleStatusSchema,
   sellerStaffId: z.string().uuid().nullable(),
   sellerName: z.string().nullable(),
-  // Commercial terms are snapshots taken at sale creation.
+  // Commercial terms are snapshots taken at sale creation. `cashPrice` is the
+  // frozen SELECTED total (Spot Cash total on the spot track, installment
+  // total on the installment track) - never re-read from the plan. The column
+  // keeps its historical name; for Stage 1 sales read it as "selected frozen
+  // sale total", not a literal cash price.
   cashPrice: exactDecimalStringSchema,
+  /**
+   * Legacy floor snapshot (pre-Stage-1 "minimum down payment"). Retained so
+   * historical sales keep their meaning; the live threshold for new sales is
+   * `requiredInitial` below.
+   */
   minimumDownPayment: exactDecimalStringSchema,
+  /** Frozen scheme code (lifecycle paymentSchemeSchema). */
+  paymentScheme: paymentSchemeSchema,
+  /** Frozen reservation fee included in the total (never added on top). */
+  reservationFee: exactDecimalStringSchema,
+  /** Frozen required initial payment (reservation for standard tracks, DP for B1/B2). */
+  requiredInitial: exactDecimalStringSchema,
+  /** Frozen installment month count (null when the scheme has no installments). */
+  installmentMonths: z.number().int().positive().nullable(),
+  /** Frozen monthly amount (null when the scheme has no installments). */
+  monthlyAmount: exactDecimalStringSchema.nullable(),
+  /** Frozen membership validity in months, from the plan's validity years. */
+  validityMonths: z.number().int().positive().nullable(),
   yearlyPoints: z.number().int().nonnegative(),
   commissionRate: exactDecimalRateSchema,
   expectedCommission: exactDecimalStringSchema,
@@ -335,6 +439,11 @@ export const saleFinancialSummarySchema = z.object({
   status: saleStatusSchema,
   cashPrice: exactDecimalStringSchema,
   minimumDownPayment: exactDecimalStringSchema,
+  paymentScheme: paymentSchemeSchema,
+  reservationFee: exactDecimalStringSchema,
+  requiredInitial: exactDecimalStringSchema,
+  installmentMonths: z.number().int().positive().nullable(),
+  monthlyAmount: exactDecimalStringSchema.nullable(),
   recordedTotal: exactDecimalStringSchema,
   verifiedTotal: exactDecimalStringSchema,
   rejectedTotal: exactDecimalStringSchema,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { paymentSchemeLabel } from '@jad/contracts';
+import { Button, EmptyState, ErrorState, FilterBar, PageHeader, Select, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import {
@@ -34,16 +35,22 @@ export function BusinessSalesPage() {
         description="Applications and their financial state. Every amount below is calculated server-side from the payment records."
       />
 
-      <label style={{ display: 'block', marginBottom: 16, maxWidth: 260 }}>
-        Status
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {value ? SALE_STATUS_LABEL[value] : 'All statuses'}
-            </option>
-          ))}
-        </select>
-      </label>
+      <FilterBar
+        filters={
+          <label style={{ display: 'grid', gap: 4, fontSize: 14, fontWeight: 600 }}>
+            Status
+            <Select
+              aria-label="Status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              options={STATUSES.map((value) => ({
+                value,
+                label: value ? (SALE_STATUS_LABEL[value] ?? value) : 'All statuses',
+              }))}
+            />
+          </label>
+        }
+      />
 
       {query.isPending ? (
         <p role="status">Loading sales…</p>
@@ -62,6 +69,7 @@ export function BusinessSalesPage() {
                 <th>Sale</th>
                 <th>Customer</th>
                 <th>Card</th>
+                <th>Scheme</th>
                 <th>Seller</th>
                 <th>Total</th>
                 <th>Paid</th>
@@ -78,6 +86,7 @@ export function BusinessSalesPage() {
                   <td>{sale.saleNumber}</td>
                   <td>{sale.customerName}</td>
                   <td>{sale.productName}</td>
+                  <td>{paymentSchemeLabel(sale.paymentScheme)}</td>
                   <td>{sale.sellerName ?? '—'}</td>
                   <td>{formatMoney(sale.cashPrice)}</td>
                   <td>{formatMoney(sale.paidAmount)}</td>
@@ -125,8 +134,28 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
       ) : summary.data ? (
         <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
           <div>
-            <dt>Cash price</dt>
+            <dt>Payment scheme</dt>
+            <dd>{paymentSchemeLabel(summary.data.paymentScheme)}</dd>
+          </div>
+          <div>
+            <dt>Frozen total</dt>
             <dd>{formatMoney(summary.data.cashPrice)}</dd>
+          </div>
+          <div>
+            <dt>Reservation fee</dt>
+            <dd>{formatMoney(summary.data.reservationFee)}</dd>
+          </div>
+          <div>
+            <dt>Required initial</dt>
+            <dd>{formatMoney(summary.data.requiredInitial)}</dd>
+          </div>
+          <div>
+            <dt>Installments</dt>
+            <dd>
+              {summary.data.installmentMonths && summary.data.monthlyAmount
+                ? `${formatMoney(summary.data.monthlyAmount)} × ${summary.data.installmentMonths}`
+                : '—'}
+            </dd>
           </div>
           <div>
             <dt>Recorded (awaiting verification)</dt>
@@ -149,7 +178,7 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
             <dd>{formatMoney(summary.data.overpaidAmount)}</dd>
           </div>
           <div>
-            <dt>Minimum down payment met</dt>
+            <dt>Required initial met</dt>
             <dd>{summary.data.downPaymentSatisfied ? 'Yes' : 'No'}</dd>
           </div>
           <div>

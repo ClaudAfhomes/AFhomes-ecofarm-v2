@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addMoney, compareMoney, formatMoney, isExactDecimal, subtractMoney } from '../src/index';
+import { addMoney, compareMoney, divideMoneyExact, formatMoney, isExactDecimal, subtractMoney } from '../src/index';
 
 describe('isExactDecimal', () => {
   it('accepts integers and exact decimals', () => {
@@ -64,5 +64,26 @@ describe('addMoney / subtractMoney', () => {
   it('throws on invalid input', () => {
     expect(() => addMoney('abc', '1.00')).toThrow();
     expect(() => subtractMoney('1.00', '1.234')).toThrow();
+  });
+});
+
+describe('divideMoneyExact', () => {
+  it('splits every approved VIP schedule exactly', () => {
+    expect(divideMoneyExact('44000.00', 4)).toBe('11000.00');
+    expect(divideMoneyExact('182000.00', 4)).toBe('45500.00');
+    expect(divideMoneyExact('302000.00', 4)).toBe('75500.00');
+    expect(divideMoneyExact('62000.00', 4)).toBe('15500.00');
+    expect(divideMoneyExact('230000.00', 4)).toBe('57500.00');
+    expect(divideMoneyExact('380000.00', 4)).toBe('95000.00');
+    expect(divideMoneyExact('144000.00', 12)).toBe('12000.00');
+    expect(divideMoneyExact('234000.00', 12)).toBe('19500.00');
+    expect(divideMoneyExact('180000.00', 12)).toBe('15000.00');
+    expect(divideMoneyExact('292500.00', 12)).toBe('24375.00');
+  });
+
+  it('throws rather than rounding an inexact split', () => {
+    expect(() => divideMoneyExact('100.00', 3)).toThrow();
+    expect(() => divideMoneyExact('10.00', 0)).toThrow();
+    expect(() => divideMoneyExact('abc', 4)).toThrow();
   });
 });

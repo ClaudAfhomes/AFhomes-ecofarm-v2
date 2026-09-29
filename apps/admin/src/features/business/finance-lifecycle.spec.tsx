@@ -6,7 +6,7 @@
  * status filtering, and per-state actions (a paid commission offers no
  * mutation).
  */
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +18,10 @@ type Route = { status?: number; body: unknown };
 const routes = new Map<string, Route>();
 const requests: { path: string; method: string; body: unknown; query: string }[] = [];
 
-const list = (data: unknown[]): Route => ({ status: 200, body: { data, meta: { total: data.length } } });
+const list = (data: unknown[]): Route => ({
+  status: 200,
+  body: { data, meta: { total: data.length } },
+});
 
 const QUEUE_ITEM = {
   saleId: 'bbbbbbbb-0000-4000-8000-000000002601',
@@ -28,6 +31,12 @@ const QUEUE_ITEM = {
   productName: 'Gold',
   status: 'payment_in_progress',
   cashPrice: '60000.00',
+  paymentScheme: 'spot_cash',
+  reservationFee: '0.00',
+  requiredInitial: '20000.00',
+  installmentMonths: null,
+  monthlyAmount: null,
+  validityMonths: null,
   verifiedTotal: '20000.00',
   remainingBalance: '40000.00',
   downPaymentSatisfied: true,
@@ -109,11 +118,41 @@ const FINANCE_USER: SessionUser = {
   roleName: 'Finance',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_sales', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.payment_verification',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.card_activation',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_sales',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -201,7 +240,10 @@ describe('Phase 26 finance queue states', () => {
   it('43. shows an error with retry and recovers', async () => {
     const user = userEvent.setup();
     install({
-      'GET /queues/finance': { status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } },
+      'GET /queues/finance': {
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'boom' } },
+      },
     });
     render('/admin/finance/payments');
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
@@ -215,7 +257,7 @@ describe('Phase 26 finance queue states', () => {
     // The server-sent exact-decimal strings, formatted without float math.
     expect(await screen.findByText('SALE-260001')).toBeInTheDocument();
     expect(screen.getByText('₱60,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₱20,000.00')).toBeInTheDocument();
+    expect(screen.getAllByText('₱20,000.00')).toHaveLength(2);
     expect(screen.getByText('₱40,000.00')).toBeInTheDocument();
     const get = requests.find((r) => r.method === 'GET' && r.path === '/queues/finance');
     expect(get).toBeDefined();
@@ -240,6 +282,53 @@ describe('Phase 26 activation queue', () => {
     expect(screen.getByText('Eligible')).toBeInTheDocument();
     expect(screen.getByText('Settled')).toBeInTheDocument();
   });
+
+  it('shows and copies the one-time onboarding fallback when email delivery fails', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    install({
+      [`POST /sales/${ACTIVATION_ITEM.saleId}/activate`]: {
+        body: {
+          membershipId: '33333333-3333-4333-8333-333333333333',
+          membershipNumber: 'MBS-000026',
+          fallbackCode: 'AFH-2626-0001',
+          qrToken: 'opaque-26-token',
+          pointsAllocated: 60000,
+          alreadyActive: false,
+          onboarding: {
+            status: 'manual_required',
+            emailStatus: 'failed',
+            token: 'customer-onboarding-token-0001',
+            activationUrl:
+              'https://afhomes.example/customer/activate#token=customer-onboarding-token-0001',
+            expiresAt: '2026-10-02T00:00:00.000Z',
+          },
+        },
+      },
+    });
+    render('/admin/finance/activation');
+    const row = (await screen.findByText('SALE-260002')).closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Activate' }));
+    const confirmation = await screen.findByRole('dialog', { name: 'Activate membership' });
+    await user.click(within(confirmation).getByRole('button', { name: 'Activate' }));
+
+    expect(
+      await screen.findByText(/membership activation succeeded, but email delivery failed/i),
+    ).toBeInTheDocument();
+    const code = screen.getByLabelText('Customer activation code') as HTMLInputElement;
+    const link = screen.getByLabelText('Customer activation link') as HTMLInputElement;
+    expect(code.value).toBe('customer-onboarding-token-0001');
+    expect(link.value).toContain('/customer/activate#token=');
+    await user.click(screen.getByRole('button', { name: 'Copy activation code' }));
+    expect(writeText).toHaveBeenCalledWith('customer-onboarding-token-0001');
+    expect(
+      screen.getByText(/closing this dialog removes the plaintext onboarding code/i),
+    ).toBeInTheDocument();
+  });
 });
 
 /* ================================================================== */
@@ -256,7 +345,9 @@ describe('Phase 26 commission management UI', () => {
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       const gets = requests.filter((r) => r.method === 'GET' && r.path === '/commissions');
-      const filtered = gets.find((g) => g.query.includes('search=') && g.query.includes('status=paid'));
+      const filtered = gets.find(
+        (g) => g.query.includes('search=') && g.query.includes('status=paid'),
+      );
       expect(filtered?.query).toMatch(/search=SALE-260001/);
       expect(filtered?.query).toMatch(/status=paid/);
     });

@@ -54,6 +54,7 @@ const overview = (kind: AnalyticsOverview['scope']['kind']): AnalyticsOverview =
   commissions: null,
   redemptions: kind === 'redemption' ? { count: 5, pointsRedeemed: 1000, recent: [] } : null,
   salesByPlan: [],
+  salesByScheme: [],
   trends: [],
 });
 

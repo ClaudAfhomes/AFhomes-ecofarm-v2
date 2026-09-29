@@ -7,6 +7,7 @@ import { exactDecimalRateSchema, exactDecimalStringSchema } from './money.js';
 import {
   commissionStatusSchema,
   membershipStatusSchema,
+  paymentSchemeSchema,
   paymentStatusSchema,
   paymentTypeSchema,
   pointsEntryTypeSchema,
@@ -69,9 +70,24 @@ export type VerifyPaymentRequest = z.infer<typeof verifyPaymentSchema>;
 /* ================================================================== */
 
 export const activateSaleSchema = z.object({
-  validityMonths: z.number().int().min(1).max(60).default(12),
+  /**
+   * Membership validity in months. New VIP sales carry a frozen validity on
+   * the sale row and the RPC prefers it; this parameter remains the fallback
+   * for pre-scheme sales. The ceiling covers the frozen 22-year Gold term
+   * (264 months) with headroom.
+   */
+  validityMonths: z.number().int().min(1).max(360).default(12),
 });
 export type ActivateSaleRequest = z.infer<typeof activateSaleSchema>;
+
+export const onboardingDeliverySchema = z.object({
+  status: z.enum(['email_sent', 'manual_required', 'not_issued', 'already_active']),
+  emailStatus: z.enum(['sent', 'failed', 'not_attempted']),
+  token: z.string().min(20).max(400).nullable(),
+  activationUrl: z.string().url().nullable(),
+  expiresAt: z.string().nullable(),
+});
+export type OnboardingDelivery = z.infer<typeof onboardingDeliverySchema>;
 
 /**
  * Result of a successful activation. The plaintext fallback code and QR token
@@ -84,6 +100,7 @@ export const activationResultSchema = z.object({
   qrToken: z.string().nullable(),
   pointsAllocated: z.number().int().nonnegative(),
   alreadyActive: z.boolean(),
+  onboarding: onboardingDeliverySchema,
 });
 export type ActivationResult = z.infer<typeof activationResultSchema>;
 
@@ -102,6 +119,8 @@ export const membershipSchema = z.object({
   productName: z.string().nullable(),
   categoryName: z.string().nullable(),
   status: membershipStatusSchema,
+  /** Frozen scheme of the originating sale (display only, never economics). */
+  paymentScheme: paymentSchemeSchema.nullable(),
   pointsBalance: z.number().int().nonnegative(),
   yearlyPointsAllocated: z.number().int().nonnegative(),
   activatedAt: z.string().nullable(),
@@ -231,6 +250,12 @@ export const financeQueueItemSchema = z.object({
   productName: z.string(),
   status: z.string(),
   cashPrice: exactDecimalStringSchema,
+  paymentScheme: paymentSchemeSchema,
+  reservationFee: exactDecimalStringSchema,
+  requiredInitial: exactDecimalStringSchema,
+  installmentMonths: z.number().int().positive().nullable(),
+  monthlyAmount: exactDecimalStringSchema.nullable(),
+  validityMonths: z.number().int().positive().nullable(),
   verifiedTotal: exactDecimalStringSchema,
   remainingBalance: exactDecimalStringSchema,
   downPaymentSatisfied: z.boolean(),

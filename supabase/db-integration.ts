@@ -564,24 +564,56 @@ async function main(): Promise<void> {
       id: string;
       code: string;
       cash_price: string;
+      installment_price: string;
+      reservation_fee: string;
+      spot_cash_days: number;
+      standard_installment_months: number;
+      validity_years: number;
+      move_a_enabled: boolean;
+      move_b1_enabled: boolean;
+      move_b2_enabled: boolean;
       minimum_down_payment: string;
       yearly_points: number;
       commission_rate: string;
       is_active: boolean;
     }>(
-      'select id, code, cash_price, minimum_down_payment, yearly_points, commission_rate, is_active from public.card_plans order by sort_order',
+      `select id, code, cash_price, installment_price, reservation_fee, spot_cash_days,
+              standard_installment_months, validity_years, move_a_enabled, move_b1_enabled,
+              move_b2_enabled, minimum_down_payment, yearly_points, commission_rate, is_active
+         from public.card_plans order by sort_order`,
     );
     const byCode = new Map(plans.rows.map((p) => [p.code, p]));
 
-    for (const [code, price, down, points] of [
-      ['BRONZE', '30000.00', '10000.00', 25000],
-      ['SILVER', '40000.00', '15000.00', 40000],
-      ['GOLD', '60000.00', '20000.00', 60000],
+    // VIP Stage 1 pre-opening values (migration 20261014000001): dual totals,
+    // a 10k reservation inside every total, a 7-day spot window, frozen
+    // validity years, and Bronze locked out of B1/B2.
+    for (const [code, spot, inst, validity, b1, b2] of [
+      ['BRONZE', '54000.00', '72000.00', 7, false, false],
+      ['SILVER', '192000.00', '240000.00', 12, true, true],
+      ['GOLD', '312000.00', '390000.00', 22, true, true],
     ] as const) {
       const p = byCode.get(code);
       check(`${code} exists`, !!p);
       if (!p) continue;
-      eq(`  ${code} cash price`, p.cash_price, price);
+      eq(`  ${code} spot cash price`, p.cash_price, spot);
+      eq(`  ${code} installment price`, p.installment_price, inst);
+      eq(`  ${code} reservation fee`, p.reservation_fee, '10000.00');
+      eq(`  ${code} spot cash days`, p.spot_cash_days, 7);
+      eq(`  ${code} standard installment months`, p.standard_installment_months, 4);
+      eq(`  ${code} validity years`, p.validity_years, validity);
+      eq(`  ${code} move A enabled`, p.move_a_enabled, true);
+      eq(`  ${code} move B1 enabled`, p.move_b1_enabled, b1);
+      eq(`  ${code} move B2 enabled`, p.move_b2_enabled, b2);
+    }
+
+    for (const [code, down, points] of [
+      ['BRONZE', '10000.00', 25000],
+      ['SILVER', '15000.00', 40000],
+      ['GOLD', '20000.00', 60000],
+    ] as const) {
+      const p = byCode.get(code);
+      check(`${code} exists`, !!p);
+      if (!p) continue;
       eq(`  ${code} minimum down payment`, p.minimum_down_payment, down);
       eq(`  ${code} yearly points`, p.yearly_points, points);
       eq(`  ${code} commission rate`, p.commission_rate, '0.04');
@@ -692,6 +724,14 @@ async function main(): Promise<void> {
       minimum_down_payment: string;
       yearly_points: number;
       commission_rate: string;
+      installment_price?: string;
+      reservation_fee?: string;
+      spot_cash_days?: number;
+      standard_installment_months?: number;
+      validity_years?: number;
+      move_a_enabled?: boolean;
+      move_b1_enabled?: boolean;
+      move_b2_enabled?: boolean;
     };
 
     /**
@@ -942,7 +982,7 @@ async function main(): Promise<void> {
     eq(
       '  expected_commission_snapshot is 4% of Gold',
       snapshotBefore.expected_commission_snapshot,
-      '2400.00',
+      commissionAmount.v,
     );
 
     // Reprice the product; the historical sale must not move.
@@ -1073,7 +1113,7 @@ async function main(): Promise<void> {
       ])
     ).rows.map((r) => camel<Record<string, string | boolean>>(r));
     eq('verified total now counts', verified[0]!.verifiedTotal, '20000.00');
-    eq('  remaining balance is recomputed', verified[0]!.remainingBalance, '40000.00');
+    eq('  remaining balance is recomputed', verified[0]!.remainingBalance, '292000.00');
     check('  not fully paid yet', verified[0]!.fullyPaid === false);
 
     const deadline = verified[0]!.spotCashDeadline as string;
@@ -1113,7 +1153,7 @@ async function main(): Promise<void> {
     );
 
     const over = await summaryOf(saleId);
-    eq('  remaining balance is price - verified', over.remainingBalance, '39999.00');
+    eq('  remaining balance is price - verified', over.remainingBalance, '291999.00');
     eq('  rejected money is reported separately', over.rejectedTotal, '20000.00');
     eq('  rejected money is not in the verified total', over.verifiedTotal, '20001.00');
 
@@ -1371,11 +1411,11 @@ async function main(): Promise<void> {
     section('10. full payment transition');
     /* ---------------------------------------------------------------- */
     const beforeFull = await summaryOf(saleId);
-    check('verified 20,001.00 < 60,000.00 -> fully_paid = false', beforeFull.fullyPaid === false);
+    check('verified 20,001.00 < 312,000.00 -> fully_paid = false', beforeFull.fullyPaid === false);
 
     const remainId = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'39999.00','full','bank_transfer',$2,null,null,$3) as id`,
+        `select public.record_card_payment($1,'291999.00','full','bank_transfer',$2,null,null,$3) as id`,
         [saleId, `${RUN}-TRF-REMAIN`, staff['finance']],
       )
     ).id;
@@ -1422,7 +1462,7 @@ async function main(): Promise<void> {
       commission.status,
       'payment_verified',
     );
-    eq('  commission amount is 4% of the snapshotted Gold price', commission.amount, '2400.00');
+    eq('  commission amount is 4% of the snapshotted Gold price', commission.amount, commissionAmount.v);
 
     /* ---------------------------------------------------------------- */
     section('11. ACTIVATION - unpaid is refused');
@@ -4593,7 +4633,7 @@ async function main(): Promise<void> {
           `returned ${verifyRow.length} rows`,
         );
         eq('  and it reports the verified total', verifyRow[0]?.verifiedTotal, '20000.00');
-        eq('  and the remaining balance', verifyRow[0]?.remainingBalance, '40000.00');
+        eq('  and the remaining balance', verifyRow[0]?.remainingBalance, '292000.00');
 
         const spot = await one<{ started: string | null; deadline: string | null }>(
           `select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline
@@ -5203,7 +5243,7 @@ async function main(): Promise<void> {
       const gold = await one<Record<string, string | number>>(
         `select * from public.card_plans where code = 'GOLD'`,
       );
-      eq('Gold cash price seed', String(gold.cash_price), '60000.00');
+      eq('Gold cash price seed', String(gold.cash_price), '312000.00');
       eq('Gold minimum down payment seed', String(gold.minimum_down_payment), '20000.00');
       eq('Gold yearly points seed', String(gold.yearly_points), '60000');
       eq('Gold commission rate seed', String(gold.commission_rate), '0.04');
@@ -5222,7 +5262,7 @@ async function main(): Promise<void> {
         'select round($1::numeric * $2::numeric, 2)::text as v',
         [String(gold.cash_price), String(gold.commission_rate)],
       );
-      eq('expected commission is 4% of the frozen price', expectedComm.v, '2400.00');
+      eq('expected commission is 4% of the frozen price', expectedComm.v, '12480.00');
       await db.query(
         `insert into public.card_sales
            (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
@@ -5263,7 +5303,7 @@ async function main(): Promise<void> {
       eq('snapshot: frozen minimum down', String(frozen.minimum_down_payment_snapshot), String(gold.minimum_down_payment));
       eq('snapshot: frozen yearly points', String(frozen.yearly_points_snapshot), String(gold.yearly_points));
       eq('snapshot: frozen commission rate', String(frozen.commission_rate_snapshot), String(gold.commission_rate));
-      eq('snapshot: frozen expected commission', String(frozen.expected_commission_snapshot), '2400.00');
+      eq('snapshot: frozen expected commission', String(frozen.expected_commission_snapshot), '12480.00');
       eq('snapshot: seller is the OST of record', String(frozen.seller_staff_id), ost);
       eq('snapshot: customer linked', String(frozen.customer_id), custA);
       const snapRows = await db.query<{ depth: number; ancestor_staff_id: string }>(
@@ -5293,26 +5333,26 @@ async function main(): Promise<void> {
         'select cash_price_snapshot as p from public.card_sales where id = $1',
         [saleId],
       );
-      eq('frozen price ignores the live plan', afterReprice.p, '60000.00');
-      await db.query(`update public.card_plans set cash_price = '60000.00' where id = $1`, [String(gold.id)]);
+      eq('frozen price ignores the live plan', afterReprice.p, '312000.00');
+      await db.query(`update public.card_plans set cash_price = '312000.00' where id = $1`, [String(gold.id)]);
       const restored = await one<{ p: string }>(
         'select cash_price::text as p from public.card_plans where id = $1',
         [String(gold.id)],
       );
-      eq('Gold seed restored for later sections', restored.p, '60000.00');
+      eq('Gold seed restored for later sections', restored.p, '312000.00');
 
-      // -- Flow C: 20,000 verified, then 40,000 to fully paid.
+      // -- Flow C: 100,000 verified, then 212,000 to fully paid (312,000 Gold).
       const pay1 = (
         await one<{ id: string }>(
           `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-          [saleId, '20000.00', `${RUN}-E2E-PAY-1`, fin],
+          [saleId, '100000.00', `${RUN}-E2E-PAY-1`, fin],
         )
       ).id;
       const verify1 = await one<Record<string, string | boolean>>(
         'select * from public.verify_card_payment($1,$2,$3,$4)',
         [pay1, 'verified', null, fin],
       );
-      eq('first verified total is 20000.00', String(verify1.verified_total), '20000.00');
+      eq('first verified total is 100000.00', String(verify1.verified_total), '100000.00');
       eq('not fully paid yet', verify1.fully_paid, false);
       const window1 = await one<{ started: string; deadline: string }>(
         `select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline
@@ -5326,7 +5366,7 @@ async function main(): Promise<void> {
       );
       check('deadline is exactly first verified + 7 days', sevenDays.ok === true);
       const midSummary = await summaryOf(saleId);
-      eq('unverified nothing: verified total from rows only', midSummary.verifiedTotal, '20000.00');
+      eq('unverified nothing: verified total from rows only', midSummary.verifiedTotal, '100000.00');
       check('sale is not activation-ready yet', midSummary.fullyPaid === false);
       const commMid = await one<{ status: string }>(
         'select status from public.commissions where sale_id = $1',
@@ -5336,14 +5376,14 @@ async function main(): Promise<void> {
       const pay2 = (
         await one<{ id: string }>(
           `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
-          [saleId, '40000.00', `${RUN}-E2E-PAY-2`, fin],
+          [saleId, '212000.00', `${RUN}-E2E-PAY-2`, fin],
         )
       ).id;
       const verify2 = await one<Record<string, string | boolean>>(
         'select * from public.verify_card_payment($1,$2,$3,$4)',
         [pay2, 'verified', null, fin],
       );
-      eq('verified total is now 60000.00', String(verify2.verified_total), '60000.00');
+      eq('verified total is now 312000.00', String(verify2.verified_total), '312000.00');
       eq('fully paid', verify2.fully_paid, true);
       const window2 = await one<{ started: string; deadline: string }>(
         `select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline
@@ -5366,7 +5406,7 @@ async function main(): Promise<void> {
         db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [pay1, 'verified', null, fin]),
       );
       check('  PAYMENT_NOT_PENDING, totals untouched', /PAYMENT_NOT_PENDING/.test(reverify), reverify.split('\n')[0]);
-      eq('  verified total still 60000.00', (await summaryOf(saleId)).verifiedTotal, '60000.00');
+      eq('  verified total still 312000.00', (await summaryOf(saleId)).verifiedTotal, '312000.00');
 
       // -- Flow D: activation creates each dependent row exactly once.
       const activated = await one<Record<string, string | number | boolean>>(
@@ -5410,7 +5450,7 @@ async function main(): Promise<void> {
       );
       eq('commission awaits final qualification', commActivated.status, 'final_qualification_pending');
       check('never auto-earned', commActivated.earned === null);
-      eq('commission amount is 2400.00', commActivated.amount, '2400.00');
+      eq('commission amount is 12480.00', commActivated.amount, '12480.00');
       const again = await one<Record<string, string | number | boolean>>(
         'select * from public.activate_card_sale($1,$2,$3)',
         [saleId, fin, 12],
@@ -5717,7 +5757,7 @@ async function main(): Promise<void> {
          values ($1,'COMMISSION_QUALIFIED','commission',
            (select id::text from public.commissions where sale_id = $2),
            jsonb_build_object('status','final_qualification_pending'),
-           jsonb_build_object('status','earned','amount','2400.00'),
+           jsonb_build_object('status','earned','amount','12480.00'),
            'E2E manual qualification with notes.')`,
         [admin, saleId],
       );
@@ -5730,7 +5770,7 @@ async function main(): Promise<void> {
         'select status, amount::text as amount, rate_snapshot as rate, basis_amount_snapshot as basis, beneficiary_staff_id as beneficiary from public.commissions where sale_id = $1',
         [saleId],
       );
-      eq('earned, amount frozen', earnedRow.amount, '2400.00');
+      eq('earned, amount frozen', earnedRow.amount, '12480.00');
       eq('rate frozen', earnedRow.rate, String(gold.commission_rate));
       eq('basis frozen', earnedRow.basis, String(gold.cash_price));
       eq('beneficiary still the OST seller', earnedRow.beneficiary, ost);
@@ -5745,8 +5785,8 @@ async function main(): Promise<void> {
         `insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data)
          values ($1,'COMMISSION_PAID','commission',
            (select id::text from public.commissions where sale_id = $2),
-           jsonb_build_object('status','earned','amount','2400.00'),
-           jsonb_build_object('status','paid','amount','2400.00','reference','${RUN}-E2E-PAYOUT-1'))`,
+           jsonb_build_object('status','earned','amount','12480.00'),
+           jsonb_build_object('status','paid','amount','12480.00','reference','${RUN}-E2E-PAYOUT-1'))`,
         [admin, saleId],
       );
       const paidRow = await one<{ status: string; ref: string; by: string }>(
@@ -5818,7 +5858,7 @@ async function main(): Promise<void> {
 
       // -- Flow K: scoped reads for the whole chain.
       const e2eSummary = await summaryOf(saleId);
-      eq('report-equivalent: verified 60000.00', e2eSummary.verifiedTotal, '60000.00');
+      eq('report-equivalent: verified 312000.00', e2eSummary.verifiedTotal, '312000.00');
       eq('report-equivalent: fully paid', e2eSummary.fullyPaid, true);
       eq('report-equivalent: remaining 0.00', e2eSummary.remainingBalance, '0.00');
       eq('snapshot rows still exactly seller + 3 uplines', (await one<{ n: number }>('select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1', [saleId])).n, 4);
@@ -5869,7 +5909,7 @@ async function main(): Promise<void> {
       eq('one membership for the sale', (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [saleId])).n, 1);
       eq('membership number stable end to end', (await one<{ no: string }>('select membership_number as no from public.memberships where id = $1', [membershipId])).no, membershipNumber);
       eq('final points balance 58000', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
-      eq('frozen sale price still 60000.00', (await one<{ p: string }>('select cash_price_snapshot as p from public.card_sales where id = $1', [saleId])).p, '60000.00');
+      eq('frozen sale price still 312000.00', (await one<{ p: string }>('select cash_price_snapshot as p from public.card_sales where id = $1', [saleId])).p, '312000.00');
       eq('frozen commission rate still matches Gold', (await one<{ r: string }>('select commission_rate_snapshot as r from public.card_sales where id = $1', [saleId])).r, String(gold.commission_rate));
 
       // -- Failure rollback: an underpaid second sale activates nothing.
@@ -5920,9 +5960,157 @@ async function main(): Promise<void> {
         (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [sale2])).n,
         0,
       );
+
+      /* ---------------------------------------------------------------- */
+      section('43. VIP Stage 1 payment schemes and frozen validity');
+      /* ---------------------------------------------------------------- */
+      // The handler owns scheme selection (Bronze B1/B2 rejection, schedule
+      // math); the database owns what the handler freezes: the scheme CHECK,
+      // the snapshot columns, the frozen-total payment gate, and the frozen
+      // validity at activation. All money here is plan-agnostic except the
+      // seeded tier economics asserted in section 3.
+      const vipPlans = await db.query<{
+        id: string;
+        code: string;
+        cash_price: string;
+        installment_price: string;
+        reservation_fee: string;
+        minimum_down_payment: string;
+        yearly_points: number;
+        validity_years: number;
+        move_b1_enabled: boolean;
+        move_b2_enabled: boolean;
+      }>(
+        `select id, code, cash_price, installment_price, reservation_fee, minimum_down_payment,
+                yearly_points, validity_years, move_b1_enabled, move_b2_enabled
+           from public.card_plans where code in ('BRONZE','SILVER','GOLD')`,
+      );
+      const vipByCode = new Map(vipPlans.rows.map((p) => [p.code, p]));
+      const vipBronze = vipByCode.get('BRONZE')!;
+      const vipSilver = vipByCode.get('SILVER')!;
+      const vipGold = vipByCode.get('GOLD')!;
+      check('Bronze never allows B1/B2 (plan flags)', vipBronze.move_b1_enabled === false && vipBronze.move_b2_enabled === false);
+      check('Silver allows B1/B2', vipSilver.move_b1_enabled === true && vipSilver.move_b2_enabled === true);
+      check('Gold allows B1/B2', vipGold.move_b1_enabled === true && vipGold.move_b2_enabled === true);
+
+      // The scheme CHECK rejects free-text schemes at the database boundary.
+      const badSaleId = uuidFor('vip:bad-scheme');
+      const badSaleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      const badCust = await mkCustomer('bad-scheme', 'vip');
+      const schemeRefused = await throws('unknown scheme code is refused by CHECK', () =>
+        db.query(
+          `insert into public.card_sales
+            (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+             cash_price_snapshot, payment_scheme, status, submitted_at, balance_due_at)
+           values ($1,$2,$3,$4,'staff',$5,$6,$6,'move_c','submitted', now(), now() + interval '365 days')`,
+          [badSaleId, badSaleNo, badCust, vipGold.id, staff['ost']!, vipGold.cash_price],
+        ),
+      );
+      check('  CHECK violation, nothing persisted', /check|23514|23505|new row/i.test(schemeRefused), schemeRefused.split('\n')[0]);
+
+      // A Silver B1 sale freezes the B1 economics; full payment is judged
+      // against the FROZEN installment total, and activation uses the FROZEN
+      // validity (144 months), not the caller parameter.
+      const vipCust = await mkCustomer('b1', 'vip');
+      const vipSale = uuidFor('vip:sale:silver-b1');
+      const vipSaleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      await db.query(
+        `insert into public.card_sales
+          (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+           cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme,
+           reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot,
+           monthly_amount_snapshot, validity_months_snapshot, yearly_points_snapshot,
+           commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at,
+           created_by, referral_relationship_id)
+         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,'move_b1_40_12','10000.00','96000.00',12,'12000.00',144,$8,$9,'9600.00','submitted', now(), now() + interval '365 days', $5, $10)`,
+        [
+          vipSale, vipSaleNo, vipCust, vipSilver.id, staff['ost']!,
+          vipSilver.installment_price, vipSilver.minimum_down_payment,
+          Number(vipSilver.yearly_points),
+          '0.04', ostEdge.id,
+        ],
+      );
+      await db.query(
+        `insert into public.commissions
+          (sale_id, beneficiary_type, beneficiary_staff_id, amount, rate_snapshot, basis_amount_snapshot, status)
+         values ($1,'staff',$2,'9600.00','0.04','240000.00','pending')`,
+        [vipSale, staff['ost']],
+      );
+      const vipFrozen = await one<{
+        scheme: string; total: string; reservation: string; initial: string;
+        months: number; monthly: string; validity: number; commission: string;
+      }>(
+        `select payment_scheme as scheme, cash_price_snapshot as total,
+                reservation_fee_snapshot as reservation, required_initial_snapshot as initial,
+                installment_months_snapshot as months, monthly_amount_snapshot as monthly,
+                validity_months_snapshot as validity, expected_commission_snapshot as commission
+           from public.card_sales where id = $1`,
+        [vipSale],
+      );
+      eq('frozen scheme is move_b1_40_12', vipFrozen.scheme, 'move_b1_40_12');
+      eq('frozen total is the installment total', vipFrozen.total, '240000.00');
+      eq('frozen reservation 10000.00', vipFrozen.reservation, '10000.00');
+      eq('frozen required initial is the 40% DP', vipFrozen.initial, '96000.00');
+      eq('frozen months 12', vipFrozen.months, 12);
+      eq('frozen monthly 12000.00', vipFrozen.monthly, '12000.00');
+      eq('frozen validity 144 months', vipFrozen.validity, 144);
+      eq('frozen commission 9600.00', vipFrozen.commission, '9600.00');
+
+      // B1 economics re-add exactly: 96000 + 12 x 12000 = 240000.
+      const vipMath = await one<{ ok: boolean }>(
+        `select ('96000.00'::numeric + 12 * '12000.00'::numeric) = '240000.00'::numeric as ok`,
+      );
+      check('B1 schedule re-adds to the frozen total exactly', vipMath.ok === true);
+      const goldB2Math = await one<{ ok: boolean }>(
+        `select ('97500.00'::numeric + 12 * '24375.00'::numeric) = '390000.00'::numeric as ok`,
+      );
+      check('Gold B2 schedule re-adds to the frozen total exactly', goldB2Math.ok === true);
+
+      // Pay the frozen total in two verified payments, then activate with a
+      // DECOY parameter: the frozen 144-month term must win.
+      const vipPay1 = (
+        await one<{ id: string }>(
+          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
+          [vipSale, '96000.00', `${RUN}-VIP-PAY-1`, staff['finance']],
+        )
+      ).id;
+      await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [vipPay1, staff['finance']]);
+      const vipPay2 = (
+        await one<{ id: string }>(
+          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
+          [vipSale, '144000.00', `${RUN}-VIP-PAY-2`, staff['finance']],
+        )
+      ).id;
+      const vipVerify = await one<Record<string, string | boolean>>(
+        'select * from public.verify_card_payment($1,$2,$3,$4)',
+        [vipPay2, 'verified', null, staff['finance']],
+      );
+      eq('frozen-total gate: 240000.00 verified', String(vipVerify.verified_total), '240000.00');
+      eq('frozen-total gate: fully paid', vipVerify.fully_paid, true);
+      const vipActivated = await one<Record<string, string | number | boolean>>(
+        'select * from public.activate_card_sale($1,$2,$3)',
+        [vipSale, staff['finance'], 12],
+      );
+      const vipMembershipId = String(vipActivated.membership_id);
+      check('VIP membership created', !!vipMembershipId);
+      const vipWindow = await one<{ months: number }>(
+        `select ((extract(year from age(expires_at, activated_at)) * 12
+                + extract(month from age(expires_at, activated_at)))::int) as months
+           from public.memberships where id = $1`,
+        [vipMembershipId],
+      );
+      eq('expiry uses the frozen 144-month term, not the 12-month decoy', vipWindow.months, 144);
+
+      // A pre-scheme sale (NULL validity snapshot) keeps the parameter path:
+      // the section-5 sale activates with the caller-supplied term.
+      const legacyValidity = await one<{ v: number | null }>(
+        'select validity_months_snapshot as v from public.card_sales where id = $1',
+        [saleId],
+      );
+      check('pre-scheme sale carries no frozen validity', legacyValidity.v === null);
     }
   } catch (error) {
-    // An unexpected exception anywhere in sections 1-42 is a SUITE FAILURE. It
+    // An unexpected exception anywhere in sections 1-43 is a SUITE FAILURE. It
     // used to be reported from inside section 37's own handler, which meant a
     // throw in sections 1-36 produced a short, entirely green run and a zero
     // exit code. `check(..., false, ...)` records a failed result, the verdict

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
-import type { ActivationResult } from '@jad/contracts';
+import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';
@@ -20,8 +20,11 @@ import { activateSale, getActivationQueue, getCommissions, qualifyCommission } f
  */
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
-  const queue = useQuery({ queryKey: ['business', 'queue', 'activation'], queryFn: getActivationQueue });
-  const [activating, setActivating] = useState<string | null>(null);
+  const queue = useQuery({
+    queryKey: ['business', 'queue', 'activation'],
+    queryFn: getActivationQueue,
+  });
+  const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
 
   const refresh = async () => {
@@ -49,9 +52,11 @@ export function BusinessActivationQueuePage() {
                 <th>Sale</th>
                 <th>Customer</th>
                 <th>Card</th>
+                <th>Scheme</th>
                 <th>Total</th>
                 <th>Verified</th>
                 <th>Balance</th>
+                <th>Validity</th>
                 <th>First verified</th>
                 <th>Spot cash</th>
                 <th>Deadline</th>
@@ -65,10 +70,18 @@ export function BusinessActivationQueuePage() {
                   <td>{item.saleNumber}</td>
                   <td>{item.customerName}</td>
                   <td>{item.productName}</td>
+                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
                   <td>{formatMoney(item.cashPrice)}</td>
                   <td>{formatMoney(item.verifiedTotal)}</td>
                   <td>{formatMoney(item.remainingBalance)}</td>
-                  <td>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</td>
+                  <td>
+                    {item.validityMonths
+                      ? `${item.validityMonths} mo${item.validityMonths % 12 === 0 ? ` (${item.validityMonths / 12}y)` : ''}`
+                      : '—'}
+                  </td>
+                  <td>
+                    {item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}
+                  </td>
                   <td>
                     <StatusChip
                       label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
@@ -86,7 +99,7 @@ export function BusinessActivationQueuePage() {
                     <Button
                       disabled={!item.activatable}
                       onClick={() => {
-                        setActivating(item.saleId);
+                        setActivating(item);
                         setResult(null);
                       }}
                     >
@@ -102,7 +115,7 @@ export function BusinessActivationQueuePage() {
 
       {activating ? (
         <ActivateDialog
-          saleId={activating}
+          item={activating}
           onClose={() => setActivating(null)}
           onDone={async (activation) => {
             setResult(activation);
@@ -118,17 +131,21 @@ export function BusinessActivationQueuePage() {
 }
 
 function ActivateDialog({
-  saleId,
+  item,
   onClose,
   onDone,
 }: {
-  saleId: string;
+  item: FinanceQueueItem;
   onClose: () => void;
   onDone: (result: ActivationResult) => Promise<void>;
 }) {
-  const [months, setMonths] = useState('12');
+  // VIP Stage 1: new sales carry a frozen validity and the server prefers it;
+  // the field is shown read-only. Pre-scheme sales (no snapshot) keep the
+  // editable 12-month default.
+  const frozen = item.validityMonths;
+  const [months, setMonths] = useState(frozen ? String(frozen) : '12');
   const activate = useMutation({
-    mutationFn: () => activateSale(saleId, Number(months)),
+    mutationFn: () => activateSale(item.saleId, Number(months)),
     onSuccess: onDone,
   });
 
@@ -153,27 +170,64 @@ function ActivateDialog({
           The server recomputes the verified total inside the transaction. If it does not reach the
           snapshotted price, the activation is refused and nothing is created.
         </p>
-        <label>
-          Validity (months)
-          <input
-            value={months}
-            onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
-            inputMode="numeric"
-          />
-        </label>
+        <dl
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: 8,
+            margin: 0,
+          }}
+        >
+          <div>
+            <dt>Scheme</dt>
+            <dd>{paymentSchemeLabel(item.paymentScheme)}</dd>
+          </div>
+          <div>
+            <dt>Frozen total</dt>
+            <dd>{formatMoney(item.cashPrice)}</dd>
+          </div>
+        </dl>
+        {frozen ? (
+          <p>
+            Membership validity: <strong>{frozen} months</strong>
+            {frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''} — frozen from the sale.
+          </p>
+        ) : (
+          <label>
+            Validity (months)
+            <input
+              value={months}
+              onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
+              inputMode="numeric"
+            />
+          </label>
+        )}
         {activate.error ? <p role="alert">{activate.error.message}</p> : null}
       </div>
     </Dialog>
   );
 }
 
-function IdentifiersDialog({
+export function IdentifiersDialog({
   result,
   onClose,
 }: {
   result: ActivationResult;
   onClose: () => void;
 }) {
+  const [copied, setCopied] = useState<'token' | 'link' | null>(null);
+  const [copyError, setCopyError] = useState(false);
+
+  const copy = async (kind: 'token' | 'link', value: string) => {
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
+    } catch {
+      setCopyError(true);
+    }
+  };
+
   return (
     <Dialog
       open
@@ -197,13 +251,81 @@ function IdentifiersDialog({
           </p>
         ) : null}
         {result.alreadyActive ? (
-          <p>This membership was already active, so no new identifiers were issued.</p>
+          <p>
+            This membership was already active, so no new identifiers or onboarding token were
+            issued. If the customer already created a sign-in, direct them to{' '}
+            <a href="/customer/forgot-password">Forgot Password</a>.
+          </p>
         ) : (
           <p>
-            <strong>Shown once.</strong> Only hashes of these identifiers are stored, so they cannot be
-            displayed again. Hand them to the member now; a replacement can be issued if lost.
+            <strong>Shown once.</strong> Only hashes of these identifiers are stored, so they cannot
+            be displayed again. Hand them to the member now; a replacement can be issued if lost.
           </p>
         )}
+
+        {!result.alreadyActive && result.onboarding.status === 'email_sent' ? (
+          <p role="status">
+            The customer activation email was accepted by the configured mail server. Keep the
+            one-time fallback below until the customer confirms receipt.
+          </p>
+        ) : null}
+        {!result.alreadyActive && result.onboarding.status === 'manual_required' ? (
+          <p role="alert">
+            <strong>Membership activation succeeded, but email delivery failed.</strong> Give the
+            customer the one-time activation code or secure link below now.
+          </p>
+        ) : null}
+        {!result.alreadyActive && result.onboarding.status === 'not_issued' ? (
+          <p role="alert">
+            <strong>Membership activation succeeded, but no onboarding code was issued.</strong> Do
+            not activate the sale again. Contact an administrator to issue a customer onboarding
+            token through the authorized customer workflow.
+          </p>
+        ) : null}
+
+        {result.onboarding.token ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label htmlFor="customer-onboarding-token">Customer activation code</label>
+            <input
+              id="customer-onboarding-token"
+              value={result.onboarding.token}
+              readOnly
+              spellCheck={false}
+            />
+            <Button variant="secondary" onClick={() => copy('token', result.onboarding.token!)}>
+              {copied === 'token' ? 'Activation code copied' : 'Copy activation code'}
+            </Button>
+          </div>
+        ) : null}
+        {result.onboarding.activationUrl ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label htmlFor="customer-activation-link">Customer activation link</label>
+            <input
+              id="customer-activation-link"
+              value={result.onboarding.activationUrl}
+              readOnly
+              spellCheck={false}
+            />
+            <Button
+              variant="secondary"
+              onClick={() => copy('link', result.onboarding.activationUrl!)}
+            >
+              {copied === 'link' ? 'Activation link copied' : 'Copy activation link'}
+            </Button>
+          </div>
+        ) : null}
+        {result.onboarding.expiresAt ? (
+          <p>The customer activation code expires {formatDateTime(result.onboarding.expiresAt)}.</p>
+        ) : null}
+        {copyError ? (
+          <p role="alert">Copy failed. Select the code or link manually before closing.</p>
+        ) : null}
+        {result.onboarding.token ? (
+          <p>
+            <strong>Shown once.</strong> Closing this dialog removes the plaintext onboarding code
+            from this screen. It is never stored in readable form and cannot be retrieved later.
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );
@@ -220,7 +342,10 @@ function IdentifiersDialog({
  */
 function CommissionReview() {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ['business', 'commissions'], queryFn: () => getCommissions() });
+  const query = useQuery({
+    queryKey: ['business', 'commissions'],
+    queryFn: () => getCommissions(),
+  });
   const [deciding, setDeciding] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [decision, setDecision] = useState<'earned' | 'cancelled'>('earned');
@@ -295,7 +420,10 @@ function CommissionReview() {
             <Button variant="secondary" onClick={() => setDeciding(null)}>
               Cancel
             </Button>
-            <Button disabled={notes.trim().length < 5 || decide.isPending} onClick={() => decide.mutate()}>
+            <Button
+              disabled={notes.trim().length < 5 || decide.isPending}
+              onClick={() => decide.mutate()}
+            >
               Record decision
             </Button>
           </>
@@ -303,12 +431,15 @@ function CommissionReview() {
       >
         <div style={{ display: 'grid', gap: 12 }}>
           <p>
-            This decision is the only way a commission becomes earned. It is recorded in the audit trail
-            with your notes and your identity.
+            This decision is the only way a commission becomes earned. It is recorded in the audit
+            trail with your notes and your identity.
           </p>
           <label>
             Decision
-            <select value={decision} onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}>
+            <select
+              value={decision}
+              onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
+            >
               <option value="earned">Qualify — commission earned</option>
               <option value="cancelled">Cancel — commission cancelled</option>
             </select>

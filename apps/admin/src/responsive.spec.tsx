@@ -436,7 +436,9 @@ describe('Phase 33 forms stack and dialogs fit', () => {
     expect(await screen.findByText('TEPPANYAKI')).not.toBeNull();
     const form = container.querySelector('form');
     expect(form).not.toBeNull();
-    expect((form as HTMLElement).style.flexWrap).toBe('wrap');
+    // Canonical FilterBar grammar (wrapping lives in the shared stylesheet,
+    // not an inline style, so it cannot be lost per page).
+    expect(form!.querySelector('[role="search"]')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /add item/i }));
     expect(await screen.findByRole('dialog')).not.toBeNull();
   });

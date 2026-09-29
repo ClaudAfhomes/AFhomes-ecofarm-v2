@@ -39,11 +39,13 @@ export const hashIdentifier = (value: string) => createHash('sha256').update(val
 
 type CategoryInfo = { name: string | null };
 type IssuerInfo = { name: string | null };
+type SchemeInfo = { paymentScheme: string | null; validityMonths: number | null };
 
 const toMembership = (
   row: Record<string, unknown>,
   categories: Map<string, CategoryInfo>,
   issuers: Map<string, IssuerInfo>,
+  schemes: Map<string, SchemeInfo>,
 ) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
@@ -61,6 +63,7 @@ const toMembership = (
     productName: isoOrNull(product.name),
     categoryName: categories.get(String(product.category_id ?? ''))?.name ?? null,
     status: row.status,
+    paymentScheme: schemes.get(String(row.sale_id ?? ''))?.paymentScheme ?? null,
     pointsBalance: Number(row.points_balance ?? 0),
     yearlyPointsAllocated: Number(row.yearly_points_allocated ?? 0),
     activatedAt: isoOrNull(row.activated_at),
@@ -90,6 +93,35 @@ async function categoryDirectory(db: Db): Promise<Map<string, CategoryInfo>> {
     out.set(String(row.id), { name: (row.name as string | null) ?? null });
   }
   return out;
+}
+
+/** Frozen scheme + validity per sale, for membership display (never economics). */
+async function saleSchemeDirectory(db: Db, saleIds: string[]): Promise<Map<string, SchemeInfo>> {
+  const out = new Map<string, SchemeInfo>();
+  const distinct = [...new Set(saleIds.filter((id) => id))];
+  if (distinct.length === 0) return out;
+  const { data, error } = await db
+    .from('card_sales')
+    .select('id,payment_scheme,validity_months_snapshot')
+    .in('id', distinct);
+  if (error) throw error;
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    const months =
+      row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
+        ? null
+        : Number(row.validity_months_snapshot);
+    out.set(String(row.id), {
+      paymentScheme: (row.payment_scheme as string | null) ?? null,
+      validityMonths: months,
+    });
+  }
+  return out;
+}
+
+/** Frozen validity in whole years (customer-safe duration, never economics). */
+function validityYearsOf(months: number | null | undefined): number | null {
+  if (months === null || months === undefined || months <= 0) return null;
+  return months % 12 === 0 ? months / 12 : null;
 }
 
 /** Issuer display names for `card_issued_by` staff ids. */
@@ -130,6 +162,7 @@ const toCard = (
   row: Record<string, unknown>,
   categories: Map<string, CategoryInfo>,
   issuers: Map<string, IssuerInfo>,
+  schemes: Map<string, SchemeInfo>,
 ) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
@@ -149,6 +182,7 @@ const toCard = (
     yearlyPointsAllocated: Number(row.yearly_points_allocated ?? 0),
     activatedAt: isoOrNull(row.activated_at),
     expiresAt: isoOrNull(row.expires_at),
+    validityYears: validityYearsOf(schemes.get(String(row.sale_id ?? ''))?.validityMonths),
     cardIssuedAt: isoOrNull(row.card_issued_at),
     issuedBy: issuers.get(String(row.card_issued_by ?? ''))?.name ?? null,
     lastPrintedAt: isoOrNull(row.last_printed_at),
@@ -225,8 +259,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         db,
         rows.map((row) => String(row.card_issued_by ?? '')),
       );
+      const schemes = await saleSchemeDirectory(
+        db,
+        rows.map((row) => String(row.sale_id ?? '')),
+      );
       return res.status(200).json({
-        data: rows.map((row) => toMembership(row, categories, issuers)),
+        data: rows.map((row) => toMembership(row, categories, issuers, schemes)),
         meta: { total: count ?? rows.length, limit, offset },
       });
     }
@@ -246,7 +284,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const row = data as Record<string, unknown>;
       const categories = await categoryDirectory(db);
       const issuers = await issuerDirectory(db, [String(row.card_issued_by ?? '')]);
-      return res.status(200).json(toMembership(row, categories, issuers));
+      const schemes = await saleSchemeDirectory(db, [String(row.sale_id ?? '')]);
+      return res.status(200).json(toMembership(row, categories, issuers, schemes));
     }
 
     /* ---------------- points account ---------------- */
@@ -316,7 +355,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const row = data as Record<string, unknown>;
       const categories = await categoryDirectory(db);
       const issuers = await issuerDirectory(db, [String(row.card_issued_by ?? '')]);
-      const parsed = membershipCardSchema.safeParse(toCard(row, categories, issuers));
+      const schemes = await saleSchemeDirectory(db, [String(row.sale_id ?? '')]);
+      const parsed = membershipCardSchema.safeParse(toCard(row, categories, issuers, schemes));
       if (!parsed.success) return fail(res, 'INTERNAL', 'Card data is unavailable', 500);
       return res.status(200).json(parsed.data);
     }

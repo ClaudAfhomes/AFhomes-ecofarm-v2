@@ -23,6 +23,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
       { to: '/admin/documents', label: 'ID Documents', module: 'sales.id_documents' },
+      {
+        to: '/admin/sales/payment-scheme-guide',
+        label: 'Payment Scheme Guide',
+        module: 'sales.card_sales',
+      },
     ],
   },
   {

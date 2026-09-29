@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button, Dialog, ErrorState, QrCode, StatusChip, type StatusTone } from '@jad/ui';
+import { paymentSchemeLabel } from '@jad/contracts';
 
 import { useCustomerMembershipQuery, useReissueCredentials } from './queries';
 import { isForbidden, isNotFound } from './http';
@@ -52,6 +53,8 @@ export function CustomerMembershipPage() {
         <FieldList>
           <Field label="Membership number" value={card.membershipNumber} />
           <Field label="Product" value={card.productName ?? 'AF Homes card'} />
+          {/* The member's OWN agreed scheme - never the internal move playbook. */}
+          <Field label="Payment scheme" value={paymentSchemeLabel(card.paymentScheme)} />
           <Field
             label="Status"
             value={<StatusChip label={card.status} tone={toneFor(card.status)} />}
@@ -60,6 +63,12 @@ export function CustomerMembershipPage() {
           {/* "Valid until", not "Renews": the date is the enforced expiry and
               no renewal flow exists. Matches the membership print page. */}
           <Field label="Valid until" value={formatDate(card.renewalDueAt)} />
+          {card.validityYears ? (
+            <Field
+              label="Validity"
+              value={`Valid for ${card.validityYears} year${card.validityYears === 1 ? '' : 's'}`}
+            />
+          ) : null}
           <Field label="Points balance" value={card.pointsBalance.toLocaleString('en-PH')} />
         </FieldList>
       </Card>

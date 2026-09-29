@@ -331,7 +331,7 @@ describe('sales report', () => {
     const row = parsed.data.find((r) => r.saleNumber === 'SALE-000002') as Record<string, unknown>;
     expect(row).toMatchObject({
       frozenPrice: '40000.00',
-      minDownSnapshot: '15000.00',
+      requiredDown: '15000.00',
       yearlyPointsSnapshot: 40000,
       verifiedPaid: '15000.00',
       remaining: '25000.00',

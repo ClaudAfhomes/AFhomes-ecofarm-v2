@@ -32,6 +32,11 @@ export const membershipCardSchema = z.object({
   yearlyPointsAllocated: z.number().int().nonnegative(),
   activatedAt: z.string().nullable(),
   expiresAt: z.string().nullable(),
+  /**
+   * Frozen membership validity in whole years, from the sale snapshot
+   * (validity months / 12). Customer-safe: a duration, never economics.
+   */
+  validityYears: z.number().int().positive().nullable(),
   cardIssuedAt: z.string().nullable(),
   issuedBy: z.string().nullable(),
   lastPrintedAt: z.string().nullable(),

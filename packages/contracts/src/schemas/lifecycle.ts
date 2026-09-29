@@ -91,6 +91,81 @@ export const spotCashStateSchema = z.enum([
 ]);
 export type SpotCashState = z.infer<typeof spotCashStateSchema>;
 
+/* ------------------------------------------------------------------ */
+/* VIP payment schemes (Stage 1 pre-opening value)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Authoritative payment-scheme enumeration. Free-text scheme names are never
+ * used for business enforcement: every sale freezes one of these values in
+ * `card_sales.payment_scheme`, and the economics for the value come from the
+ * plan row through `resolveSchemeEconomics` (api/_lib/commerce.ts).
+ *
+ * - `spot_cash`: standard Spot Cash price, settle within 7 days.
+ * - `move_a`: same Spot Cash total; ₱10,000 reservation upfront, balance / 4.
+ * - `installment_4_month`: standard 4-month installment total (different from
+ *   Spot Cash); ₱10,000 reservation, balance / 4.
+ * - `move_b1_40_12`: same installment total; 40% DP (reservation included),
+ *   balance / 12. Silver/Gold only.
+ * - `move_b2_25_12`: same installment total; 25% DP (reservation included),
+ *   balance / 12. Silver/Gold only, only when B1 does not fit.
+ */
+export const paymentSchemeSchema = z.enum([
+  'spot_cash',
+  'move_a',
+  'installment_4_month',
+  'move_b1_40_12',
+  'move_b2_25_12',
+]);
+export type PaymentScheme = z.infer<typeof paymentSchemeSchema>;
+
+export const PAYMENT_SCHEMES: readonly PaymentScheme[] = [
+  'spot_cash',
+  'move_a',
+  'installment_4_month',
+  'move_b1_40_12',
+  'move_b2_25_12',
+];
+
+/** User-facing labels. The client sends codes; labels are display only. */
+export const PAYMENT_SCHEME_LABELS: Record<PaymentScheme, string> = {
+  spot_cash: 'Spot Cash',
+  move_a: 'Move A — Pay Over 4 Months',
+  installment_4_month: '4-Month Installment',
+  move_b1_40_12: 'Move B1 — 40% DP + 12 Months',
+  move_b2_25_12: 'Move B2 — 25% DP + 12 Months',
+};
+
+export function paymentSchemeLabel(scheme: string): string {
+  return (
+    (PAYMENT_SCHEMES as readonly string[]).includes(scheme)
+      ? PAYMENT_SCHEME_LABELS[scheme as PaymentScheme]
+      : scheme
+  );
+}
+
+/**
+ * Golden-rule transition guard (VIP rules 2-4).
+ *
+ * A sale's scheme is frozen at creation and there is no endpoint that changes
+ * it, so the only legal "transition" is staying on the same scheme. In
+ * particular Move A may never chain into B1/B2. This validator pins that rule
+ * wherever a transition could ever be contemplated, so the rule is tested
+ * rather than implied.
+ */
+export type SchemeTransitionRejection = 'SCHEME_FROZEN' | 'MOVE_A_CANNOT_CHAIN';
+
+export function validateSchemeTransition(
+  from: PaymentScheme,
+  to: PaymentScheme,
+): { ok: true } | { error: SchemeTransitionRejection } {
+  if (from === to) return { ok: true };
+  if (from === 'move_a' && (to === 'move_b1_40_12' || to === 'move_b2_25_12')) {
+    return { error: 'MOVE_A_CANNOT_CHAIN' };
+  }
+  return { error: 'SCHEME_FROZEN' };
+}
+
 /** The legal order of the selling hierarchy, upline -> downline. */
 export const HIERARCHY_ORDER: readonly HierarchyRole[] = [
   'vice_director',

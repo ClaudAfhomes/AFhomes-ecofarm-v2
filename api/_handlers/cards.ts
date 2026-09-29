@@ -51,6 +51,23 @@ const toProduct = (
     name: row.name,
     description: (row.description as string | null | undefined) ?? null,
     cashPrice: row.cash_price,
+    installmentPrice: (row.installment_price as string | null | undefined) ?? '0.00',
+    reservationFee: (row.reservation_fee as string | null | undefined) ?? '10000.00',
+    spotCashDays:
+      row.spot_cash_days === null || row.spot_cash_days === undefined
+        ? 7
+        : Number(row.spot_cash_days),
+    standardInstallmentMonths:
+      row.standard_installment_months === null || row.standard_installment_months === undefined
+        ? 4
+        : Number(row.standard_installment_months),
+    validityYears:
+      row.validity_years === null || row.validity_years === undefined
+        ? 1
+        : Number(row.validity_years),
+    moveAEnabled: (row.move_a_enabled as boolean | null | undefined) ?? true,
+    moveB1Enabled: (row.move_b1_enabled as boolean | null | undefined) ?? true,
+    moveB2Enabled: (row.move_b2_enabled as boolean | null | undefined) ?? true,
     minimumDownPayment: row.minimum_down_payment,
     yearlyPoints: row.yearly_points,
     commissionRate: row.commission_rate,
@@ -167,11 +184,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Plan code may only contain letters, digits, _ and -',
           400,
         );
+      const reservationFee = parsed.data.reservationFee ?? '10000.00';
+      // Legacy floor default: omitted minimums fall back to the reservation
+      // fee (the smallest Stage 1 initial), never to zero. The floor keeps
+      // its coherence-guard role; it is not a sale requirement.
+      const minimumDownPayment = parsed.data.minimumDownPayment ?? reservationFee;
       const sane = assertCardPlanEconomicsSane({
         cashPrice: parsed.data.cashPrice,
-        minimumDownPayment: parsed.data.minimumDownPayment,
+        minimumDownPayment,
         yearlyPoints: parsed.data.yearlyPoints,
         commissionRate: parsed.data.commissionRate,
+        installmentPrice: parsed.data.installmentPrice,
+        reservationFee: parsed.data.reservationFee,
+        spotCashDays: parsed.data.spotCashDays,
+        standardInstallmentMonths: parsed.data.standardInstallmentMonths,
+        validityYears: parsed.data.validityYears,
       });
       if (sane) return fail(res, 'VALIDATION_ERROR', sane, 400);
 
@@ -206,7 +233,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         name: parsed.data.name,
         description: parsed.data.description?.trim() ? parsed.data.description.trim() : null,
         cash_price: parsed.data.cashPrice,
-        minimum_down_payment: parsed.data.minimumDownPayment,
+        installment_price: parsed.data.installmentPrice ?? '0.00',
+        reservation_fee: reservationFee,
+        spot_cash_days: parsed.data.spotCashDays ?? 7,
+        standard_installment_months: parsed.data.standardInstallmentMonths ?? 4,
+        validity_years: parsed.data.validityYears ?? 1,
+        move_a_enabled: parsed.data.moveAEnabled ?? true,
+        move_b1_enabled: parsed.data.moveB1Enabled ?? true,
+        move_b2_enabled: parsed.data.moveB2Enabled ?? true,
+        minimum_down_payment: minimumDownPayment,
         yearly_points: parsed.data.yearlyPoints,
         commission_rate: parsed.data.commissionRate,
         is_active: parsed.data.isActive ?? true,
@@ -284,6 +319,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const nextRate = parsed.data.commissionRate ?? (before.commission_rate as string);
       const rateError = assertCommissionRateInRange(nextRate);
       if (rateError) return fail(res, 'VALIDATION_ERROR', rateError, 400);
+      // VIP economics merge with the stored row the same way: only supplied
+      // fields are validated, so legacy rows (or partial edits) keep working.
+      const mergedEconomics = assertCardPlanEconomicsSane({
+        cashPrice: nextPrice,
+        minimumDownPayment: nextDown,
+        yearlyPoints:
+          parsed.data.yearlyPoints ?? (before.yearly_points as number),
+        commissionRate: nextRate,
+        installmentPrice: parsed.data.installmentPrice,
+        reservationFee: parsed.data.reservationFee,
+        spotCashDays: parsed.data.spotCashDays,
+        standardInstallmentMonths: parsed.data.standardInstallmentMonths,
+        validityYears: parsed.data.validityYears,
+      });
+      if (mergedEconomics) return fail(res, 'VALIDATION_ERROR', mergedEconomics, 400);
 
       // Snapshot pre-update state NOW: the row reference may be live (the
       // in-memory double mutates it in place on update), so anything read
@@ -322,6 +372,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (parsed.data.description !== undefined)
         patch.description = parsed.data.description?.trim() ? parsed.data.description.trim() : null;
       if (parsed.data.cashPrice !== undefined) patch.cash_price = parsed.data.cashPrice;
+      if (parsed.data.installmentPrice !== undefined)
+        patch.installment_price = parsed.data.installmentPrice;
+      if (parsed.data.reservationFee !== undefined)
+        patch.reservation_fee = parsed.data.reservationFee;
+      if (parsed.data.spotCashDays !== undefined) patch.spot_cash_days = parsed.data.spotCashDays;
+      if (parsed.data.standardInstallmentMonths !== undefined)
+        patch.standard_installment_months = parsed.data.standardInstallmentMonths;
+      if (parsed.data.validityYears !== undefined) patch.validity_years = parsed.data.validityYears;
+      if (parsed.data.moveAEnabled !== undefined) patch.move_a_enabled = parsed.data.moveAEnabled;
+      if (parsed.data.moveB1Enabled !== undefined) patch.move_b1_enabled = parsed.data.moveB1Enabled;
+      if (parsed.data.moveB2Enabled !== undefined) patch.move_b2_enabled = parsed.data.moveB2Enabled;
       if (parsed.data.minimumDownPayment !== undefined)
         patch.minimum_down_payment = parsed.data.minimumDownPayment;
       if (parsed.data.yearlyPoints !== undefined) patch.yearly_points = parsed.data.yearlyPoints;

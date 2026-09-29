@@ -44,7 +44,15 @@ const GOLD: CardProduct = {
   code: 'GOLD',
   name: 'Gold',
   description: null,
-  cashPrice: '60000.00',
+  cashPrice: '312000.00',
+  installmentPrice: '390000.00',
+  reservationFee: '10000.00',
+  spotCashDays: 7,
+  standardInstallmentMonths: 4,
+  validityYears: 22,
+  moveAEnabled: true,
+  moveB1Enabled: true,
+  moveB2Enabled: true,
   minimumDownPayment: '20000.00',
   yearlyPoints: 60000,
   commissionRate: '0.04',
@@ -156,8 +164,11 @@ describe('Card Plans states', () => {
       'Name',
       'Code',
       'Category',
-      'Price',
-      'Minimum DP',
+      'Spot Cash',
+      'Installment',
+      'Reservation',
+      'Validity',
+      'Moves',
       'Yearly Points',
       'Commission',
       'Status',
@@ -168,8 +179,12 @@ describe('Card Plans states', () => {
     }
     expect(screen.getByText('Gold')).toBeInTheDocument();
     expect(screen.getByText('Membership Cards')).toBeInTheDocument();
-    expect(screen.getByText('₱60,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₱20,000.00')).toBeInTheDocument();
+    expect(screen.getByText('₱312,000.00')).toBeInTheDocument();
+    expect(screen.getByText('₱390,000.00')).toBeInTheDocument();
+    expect(screen.getByText('₱10,000.00')).toBeInTheDocument();
+    expect(screen.getByText('22 years')).toBeInTheDocument();
+    expect(screen.getByText('A · B1 · B2')).toBeInTheDocument();
+    expect(screen.queryByText('₱20,000.00')).not.toBeInTheDocument();
     expect(screen.getByText('60,000')).toBeInTheDocument();
     expect(screen.getByText('4.00%')).toBeInTheDocument();
     expect(screen.getAllByText('Active')).toHaveLength(2);
@@ -189,7 +204,7 @@ describe('Card Plans states', () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     renderWithProviders(<BusinessProductsPage />);
     await screen.findByText('GOLD');
-    expect(screen.getByRole('textbox', { name: 'Search card plans' })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search card plans' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
   });
 
@@ -206,9 +221,9 @@ describe('Card Plans states', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Cash price'), { target: { value: '80000.00' } });
-    fireEvent.change(screen.getByLabelText('Minimum down payment'), {
-      target: { value: '25000.00' },
+    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '80000.00' } });
+    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+      target: { value: '100000.00' },
     });
     fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create plan' }));
@@ -234,11 +249,14 @@ describe('Card Plans states', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Cash price'), { target: { value: '10000.00' } });
-    fireEvent.change(screen.getByLabelText('Minimum down payment'), {
-      target: { value: '20000.00' },
+    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '5000.00' } });
+    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+      target: { value: '12000.00' },
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed the cash price');
+    fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Reservation fee cannot exceed the spot cash price',
+    );
     expect(mockedCreateCardProduct).not.toHaveBeenCalled();
   });
 

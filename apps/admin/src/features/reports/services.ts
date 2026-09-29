@@ -83,7 +83,7 @@ export function formatCell(key: string, value: unknown): string {
   if (typeof value !== 'string') return JSON.stringify(value);
   if (
     /^(0|[1-9][0-9]*)\.\d{2}$/.test(value) &&
-    /price|paid|remaining|value|amount|total/i.test(key)
+    /price|paid|remaining|value|amount|total|fee|down|monthly/i.test(key)
   ) {
     return formatMoney(value);
   }

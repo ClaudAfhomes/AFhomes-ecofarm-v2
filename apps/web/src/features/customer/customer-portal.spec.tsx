@@ -52,8 +52,11 @@ const MEMBERSHIP = {
   renewalDueAt: '2027-01-05T02:00:00.000Z',
   yearlyPointsAllocated: 60000,
   pointsBalance: 60000,
+  paymentScheme: 'spot_cash' as const,
+  validityYears: 1,
   credentialsAvailable: false as const,
-  credentialsNote: 'Your card code is stored only as a one-way hash, so it cannot be displayed again.',
+  credentialsNote:
+    'Your card code is stored only as a one-way hash, so it cannot be displayed again.',
 };
 
 const POINTS = {
@@ -126,8 +129,12 @@ const PAYMENTS = {
 type RouteHandler = () => { status: number; body: unknown };
 const routes = new Map<string, RouteHandler>();
 
-const ok = (body: unknown): RouteHandler => () => ({ status: 200, body });
-const list = (data: unknown[]): RouteHandler => () => ({ status: 200, body: { data, meta: {} } });
+const ok =
+  (body: unknown): RouteHandler =>
+  () => ({ status: 200, body });
+const list =
+  (data: unknown[]): RouteHandler =>
+  () => ({ status: 200, body: { data, meta: {} } });
 
 const SIGNED_IN = { authUserId: 'ffffffff-0000-4000-8000-000000000001', email: CUSTOMER.email };
 
@@ -145,7 +152,10 @@ const requests: string[] = [];
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0]!;
+    const path = url
+      .replace(/^https?:\/\/[^/]+/, '')
+      .replace(/^\/api\/v1/, '')
+      .split('?')[0]!;
     requests.push(`${path}`);
     const handler = routes.get(path);
     if (!handler) {
@@ -169,6 +179,7 @@ const render = (route: string, signedIn = true) =>
   });
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   resetSupabaseClientForTest();
   requests.length = 0;
   installRoutes();
@@ -197,7 +208,7 @@ describe('customer guard', () => {
 
   it('lets an active customer into the dashboard', async () => {
     render('/customer');
-    expect(await screen.findByRole('heading', { name: 'Welcome', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument();
     expect(await screen.findByText('CUS-000777')).toBeInTheDocument();
   });
 
@@ -209,9 +220,7 @@ describe('customer guard', () => {
       }),
     });
     render('/customer');
-    expect(
-      await screen.findByText('This is not a customer account'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('This is not a customer account')).toBeInTheDocument();
     // A staff member must not be offered a customer sign-in form here.
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
@@ -256,7 +265,7 @@ describe('customer dashboard', () => {
   it('shows the member their own card and points, and nothing else', async () => {
     render('/customer');
     expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
-    expect(screen.getByText('Gold')).toBeInTheDocument();
+    expect(screen.getAllByText('Gold')).toHaveLength(2);
     expect(screen.getAllByText('60,000').length).toBeGreaterThan(0);
     // Card details, not staff or finance information - and no payment figures
     // leak onto the dashboard (amounts live on the Payments screen only).
@@ -274,11 +283,34 @@ describe('customer dashboard', () => {
 
   it('renders an activation and valid-until date', async () => {
     render('/customer');
-    const activated = await screen.findByText('Activated');
-    const row = activated.closest('div');
-    expect(row).toHaveTextContent('Jan 5, 2026');
-    const until = screen.getByText('Valid until').closest('div');
+    const card = (await screen.findByText('MBS-000777')).closest('section')!;
+    const activated = within(card).getByText('Activated').closest('div')!;
+    expect(activated).toHaveTextContent('Jan 5, 2026');
+    const until = within(card).getByText('Valid until').closest('div')!;
     expect(until).toHaveTextContent('Jan 5, 2027');
+  });
+
+  it('summarizes the account in MetricCard KPIs that link to their screens', async () => {
+    render('/customer');
+    await screen.findByText('MBS-000777');
+    expect(screen.getByRole('link', { name: /Membership: Gold/ })).toHaveAttribute(
+      'href',
+      '/customer/membership',
+    );
+    expect(screen.getByRole('link', { name: /Points balance: 60,000/ })).toHaveAttribute(
+      'href',
+      '/customer/points',
+    );
+    expect(screen.getByRole('link', { name: /Valid until:/ })).toHaveAttribute(
+      'href',
+      '/customer/membership',
+    );
+  });
+
+  it('shows card-shaped skeletons while the summary loads', async () => {
+    render('/customer');
+    expect(await screen.findByLabelText('Loading summary')).toBeInTheDocument();
+    await screen.findByText('MBS-000777');
   });
 });
 
@@ -374,6 +406,15 @@ describe('membership screen', () => {
     expect(container.innerHTML).not.toContain('a'.repeat(64));
     expect(container.innerHTML).not.toContain('b'.repeat(64));
   });
+
+  it('shows the member’s own agreed scheme and validity, never the move playbook', async () => {
+    render('/customer/membership');
+    expect(await screen.findByText('Spot Cash')).toBeInTheDocument();
+    expect(screen.getByText('Valid for 1 year')).toBeInTheDocument();
+    const { container } = render('/customer/membership');
+    await screen.findByText('MBS-000777');
+    expect(container.innerHTML).not.toMatch(/Move B1|Move B2|40% DP|25% DP/);
+  });
 });
 
 /* ================================================================== */
@@ -383,7 +424,9 @@ describe('membership screen', () => {
 describe('points screen', () => {
   it('shows the balance, lifetime totals and history', async () => {
     render('/customer/points');
-    const balanceCard = (await screen.findByRole('heading', { name: 'Balance' })).closest('section')!;
+    const balanceCard = (await screen.findByRole('heading', { name: 'Balance' })).closest(
+      'section',
+    )!;
     // "60,000" legitimately appears as both the current balance and the lifetime
     // allocation, so assert the presence and the labelled totals rather than
     // counting occurrences.
@@ -420,7 +463,14 @@ describe('activation screen', () => {
     expect(await screen.findByLabelText('Activation code')).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
     expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
-    for (const forbidden of ['Email', 'Customer number', 'Customer ID', 'Membership', 'Role', 'Status']) {
+    for (const forbidden of [
+      'Email',
+      'Customer number',
+      'Customer ID',
+      'Membership',
+      'Role',
+      'Status',
+    ]) {
       expect(screen.queryByLabelText(new RegExp(forbidden, 'i'))).toBeNull();
     }
   });
@@ -431,6 +481,18 @@ describe('activation screen', () => {
     render('/customer/activate?token=secret-in-query-string-0000', false);
     const input = (await screen.findByLabelText('Activation code')) as HTMLInputElement;
     expect(input.value).toBe('');
+  });
+
+  it('prefills an emailed token from the URL fragment and removes it from the address bar', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/customer/activate#token=customer-onboarding-token-0001',
+    );
+    render('/customer/activate', false);
+    const input = (await screen.findByLabelText('Activation code')) as HTMLInputElement;
+    expect(input.value).toBe('customer-onboarding-token-0001');
+    expect(window.location.hash).toBe('');
   });
 });
 
@@ -451,9 +513,10 @@ describe('sign-in screen', () => {
 
   it('points staff at the administration console instead of a second login form', async () => {
     render('/customer/login', false);
-    expect(
-      await screen.findByRole('link', { name: /administration console/i }),
-    ).toHaveAttribute('href', expect.stringContaining('5174'));
+    expect(await screen.findByRole('link', { name: /administration console/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('5174'),
+    );
   });
 });
 
@@ -508,9 +571,7 @@ describe('error handling', () => {
       '/customer': () => ({ status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } }),
     });
     render('/customer');
-    expect(
-      await screen.findByText('We could not load your account'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('We could not load your account')).toBeInTheDocument();
   });
 
   it('does not echo a server error message that contains a staff identifier', async () => {
@@ -670,7 +731,9 @@ describe('portal navigation', () => {
     render('/customer');
     // The card section is independent of the ledger section.
     expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
-    expect(screen.getByText('Your points activity is not available right now.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Your points activity is not available right now.'),
+    ).toBeInTheDocument();
   });
 });
 
@@ -687,7 +750,9 @@ describe('activation password policy', () => {
     await user.type(screen.getByLabelText('Confirm password'), 'weakpassword');
     await user.click(screen.getByRole('button', { name: 'Activate my account' }));
     expect(
-      await screen.findByText('Password must contain a lowercase letter, an uppercase letter and a digit.'),
+      await screen.findByText(
+        'Password must contain a lowercase letter, an uppercase letter and a digit.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -712,7 +777,9 @@ describe('public recovery routes', () => {
   it('renders an invalid-link state for reset without a recovery session', async () => {
     render('/customer/reset-password', false);
     expect(
-      await screen.findByText('This recovery link is invalid or has expired. Recovery links are single-use.'),
+      await screen.findByText(
+        'This recovery link is invalid or has expired. Recovery links are single-use.',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Request a new link' })).toBeInTheDocument();
   });

@@ -123,6 +123,7 @@ export function MembershipCardPrintPage() {
         <p className={styles.cardFoot}>
           Activated {data.activatedAt ? formatDateTime(data.activatedAt) : '—'}
           {data.expiresAt ? ` · Valid until ${formatDateTime(data.expiresAt)}` : ''}
+          {data.validityYears ? ` · Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}` : ''}
         </p>
       </div>
     </section>

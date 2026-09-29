@@ -86,7 +86,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       sales: await rows(
         db,
         'card_sales',
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       ),
       attributed: 0,
       legacy: [] as Row[],
@@ -96,7 +96,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
     const result = await db
       .from('card_sales')
       .select(
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
       .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`);
     if (result.error) throw result.error;
@@ -121,7 +121,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
     const result = await db
       .from('card_sales')
       .select(
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
       .in('id', saleIds);
     if (result.error) throw result.error;
@@ -366,6 +366,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const grouped = new Map<string, Row[]>();
     for (const sale of periodSales)
       grouped.set(String(sale.plan_id), [...(grouped.get(String(sale.plan_id)) ?? []), sale]);
+    // VIP Stage 1: partition the same period sales by frozen scheme. Every
+    // sale carries exactly one frozen scheme, so the counts partition the
+    // period sales; pre-scheme rows read as `spot_cash`.
+    const byScheme = new Map<string, Row[]>();
+    for (const sale of periodSales) {
+      const scheme = String(sale.payment_scheme ?? 'spot_cash');
+      byScheme.set(scheme, [...(byScheme.get(scheme) ?? []), sale]);
+    }
     const commissionCounts = Object.fromEntries(
       COMMISSION_STATUSES.map((status) => [
         status,
@@ -505,6 +513,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         count: sales.length,
         value: decimalCents(sales.map((sale) => sale.cash_price_snapshot)),
       })),
+      salesByScheme: [...byScheme.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([scheme, sales]) => ({
+          scheme,
+          count: sales.length,
+          value: decimalCents(sales.map((sale) => sale.cash_price_snapshot)),
+        })),
       trends: [...trend.values()]
         .sort((a, b) => a.period.localeCompare(b.period))
         .map((item) => ({

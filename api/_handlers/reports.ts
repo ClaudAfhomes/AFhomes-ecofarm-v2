@@ -21,6 +21,7 @@
 import {
   REPORT_EXPORT_CAP,
   auditQuerySchema,
+  paymentSchemeLabel,
   reportExportSchema,
   reportQuerySchema,
   reportResponseSchema,
@@ -199,6 +200,10 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
   }
   const rows = sales.map((row) => {
     const verified = moneyOf(verifiedBySale.get(String(row.id)) ?? 0n);
+    const months =
+      row.installment_months_snapshot === null || row.installment_months_snapshot === undefined
+        ? null
+        : Number(row.installment_months_snapshot);
     return {
       saleNumber: row.sale_number,
       date: row.created_at,
@@ -209,8 +214,17 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
         (row.seller_ost_id ? 'OST seller' : 'Unknown seller'),
       sellerRole: row.seller_type ?? null,
       plan: String(plans.get(String(row.plan_id))?.name ?? 'Unknown plan'),
+      paymentScheme: paymentSchemeLabel(String(row.payment_scheme ?? 'spot_cash')),
       frozenPrice: row.cash_price_snapshot ?? '0.00',
-      minDownSnapshot: row.minimum_down_payment_snapshot ?? '0.00',
+      reservationFee: row.reservation_fee_snapshot ?? '0.00',
+      requiredDown:
+        row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
+      installmentMonths: months,
+      monthlyAmount: row.monthly_amount_snapshot ?? null,
+      validityMonths:
+        row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
+          ? null
+          : Number(row.validity_months_snapshot),
       yearlyPointsSnapshot: Number(row.yearly_points_snapshot ?? 0),
       status: row.status,
       verifiedPaid: verified,
@@ -236,8 +250,13 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
       { key: 'seller', label: 'Seller', type: 'text' },
       { key: 'sellerRole', label: 'Seller type', type: 'text' },
       { key: 'plan', label: 'Card plan', type: 'text' },
+      { key: 'paymentScheme', label: 'Payment scheme', type: 'text' },
       { key: 'frozenPrice', label: 'Frozen price', type: 'money' },
-      { key: 'minDownSnapshot', label: 'Min. down snapshot', type: 'money' },
+      { key: 'reservationFee', label: 'Reservation fee', type: 'money' },
+      { key: 'requiredDown', label: 'Required initial', type: 'money' },
+      { key: 'installmentMonths', label: 'Months', type: 'number' },
+      { key: 'monthlyAmount', label: 'Monthly amount', type: 'money' },
+      { key: 'validityMonths', label: 'Validity (months)', type: 'number' },
       { key: 'yearlyPointsSnapshot', label: 'Yearly points snapshot', type: 'number' },
       { key: 'status', label: 'Status', type: 'text' },
       { key: 'verifiedPaid', label: 'Verified paid', type: 'money' },
@@ -1056,7 +1075,12 @@ async function buildPlans(ctx: Ctx): Promise<ReportData> {
     name: row.name,
     category: categories.get(String(row.category_id ?? ''))?.name ?? null,
     cashPrice: row.cash_price ?? '0.00',
-    minDown: row.minimum_down_payment ?? '0.00',
+    installmentPrice: row.installment_price ?? '0.00',
+    reservationFee: row.reservation_fee ?? '0.00',
+    validityYears:
+      row.validity_years === null || row.validity_years === undefined
+        ? null
+        : Number(row.validity_years),
     yearlyPoints: Number(row.yearly_points ?? 0),
     commissionRate: row.commission_rate ?? null,
     isActive: row.is_active === true,
@@ -1075,8 +1099,10 @@ async function buildPlans(ctx: Ctx): Promise<ReportData> {
       { key: 'code', label: 'Code', type: 'text' },
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'category', label: 'Category', type: 'text' },
-      { key: 'cashPrice', label: 'Cash price', type: 'money' },
-      { key: 'minDown', label: 'Min. down', type: 'money' },
+      { key: 'cashPrice', label: 'Spot cash price', type: 'money' },
+      { key: 'installmentPrice', label: 'Installment price', type: 'money' },
+      { key: 'reservationFee', label: 'Reservation fee', type: 'money' },
+      { key: 'validityYears', label: 'Validity (years)', type: 'number' },
       { key: 'yearlyPoints', label: 'Yearly points', type: 'number' },
       { key: 'commissionRate', label: 'Commission rate', type: 'text' },
       { key: 'isActive', label: 'Active', type: 'text' },

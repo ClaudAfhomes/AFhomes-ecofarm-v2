@@ -5,6 +5,7 @@ export {
   addMoney,
   multiplyMoney,
   subtractMoney,
+  divideMoneyExact,
 } from './money.js';
 export {
   RECOVERY_PASSWORD_MIN_LENGTH,

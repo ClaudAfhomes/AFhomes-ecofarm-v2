@@ -116,3 +116,24 @@ export function multiplyMoney(amount: string, rate: string): string {
   const estCents = (cents * rateBp + 5000n) / 10000n;
   return fromCents(estCents);
 }
+
+/**
+ * Divide an exact-decimal money string into `divisor` equal parts, keeping
+ * two decimals. Throws (never floats, never rounds silently) when the amount
+ * does not split exactly - every approved VIP schedule divides exactly, so an
+ * inexact result is a data bug, not a display decision.
+ */
+export function divideMoneyExact(amount: string, divisor: number): string {
+  if (!isExactDecimal(amount)) {
+    throw new Error(`divideMoneyExact: expected exact-decimal amount, got "${amount}"`);
+  }
+  if (!Number.isInteger(divisor) || divisor <= 0) {
+    throw new Error(`divideMoneyExact: expected a positive integer divisor, got "${divisor}"`);
+  }
+  const cents = toCents(amount);
+  const by = BigInt(divisor);
+  if (cents % by !== 0n) {
+    throw new Error(`divideMoneyExact: ${amount} does not split into ${divisor} exact parts`);
+  }
+  return fromCents(cents / by);
+}

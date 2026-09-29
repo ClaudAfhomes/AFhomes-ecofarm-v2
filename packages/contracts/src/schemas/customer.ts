@@ -10,7 +10,7 @@
 import { z } from 'zod';
 
 import { listResponseSchema } from './collection.js';
-import { membershipStatusSchema, pointsEntryTypeSchema } from './lifecycle.js';
+import { membershipStatusSchema, paymentSchemeSchema, pointsEntryTypeSchema } from './lifecycle.js';
 
 /* ================================================================== */
 /* Activation                                                          */
@@ -102,6 +102,17 @@ export const customerMembershipSchema = z.object({
   renewalDueAt: z.string().nullable(),
   yearlyPointsAllocated: z.number().int().nonnegative(),
   pointsBalance: z.number().int().nonnegative(),
+  /**
+   * The member's OWN agreed payment scheme (frozen on their sale). Only this
+   * one scheme is ever exposed here - never the internal move playbook, never
+   * other tiers' economics.
+   */
+  paymentScheme: paymentSchemeSchema,
+  /**
+   * Frozen membership validity in whole years (customer-safe duration, never
+   * economics).
+   */
+  validityYears: z.number().int().positive().nullable(),
   /**
    * Whether a readable QR / fallback code is currently available. It is NOT:
    * only hashes are stored at rest, so the plaintext exists exactly once, at

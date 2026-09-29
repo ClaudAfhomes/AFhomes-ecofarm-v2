@@ -1,9 +1,19 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  StatusChip,
+} from '@jad/ui';
 import type { CreateCustomerRequest } from '@jad/contracts';
 
-import { createCustomer, createSale, getCardProducts, getCustomers } from './services';
+import { createCustomer, getCardProducts, getCustomers } from './services';
+import { SaleApplicationDialog } from './SaleApplicationDialog';
 
 const EMPTY: CreateCustomerRequest = {
   firstName: '',
@@ -17,10 +27,10 @@ const EMPTY: CreateCustomerRequest = {
 /**
  * Customer registration and card application.
  *
- * A seller may choose which customer record to attach, but never the money:
- * price, minimum down payment, points and commission all come from the product
- * and are snapshotted server-side. The form therefore has no financial inputs
- * at all, by design.
+ * A seller may choose which customer record, tier, and authorized payment
+ * scheme to attach, but never the money: every figure is resolved from the
+ * product and frozen server-side. The form therefore has no financial inputs
+ * at all, by design - only selections whose economics the server owns.
  */
 export function BusinessCustomersPage() {
   const client = useQueryClient();
@@ -41,7 +51,6 @@ export function BusinessCustomersPage() {
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateCustomerRequest>(EMPTY);
-  const [productId, setProductId] = useState('');
   const [selling, setSelling] = useState<string | null>(null);
 
   const set = <K extends keyof CreateCustomerRequest>(key: K, value: CreateCustomerRequest[K]) =>
@@ -56,14 +65,6 @@ export function BusinessCustomersPage() {
     },
   });
 
-  const sell = useMutation({
-    mutationFn: () => createSale({ customerId: selling!, productId }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['business', 'sales'] });
-      setSelling(null);
-    },
-  });
-
   return (
     <section>
       <PageHeader
@@ -75,21 +76,26 @@ export function BusinessCustomersPage() {
       />
 
       <form
-        style={{ display: 'flex', gap: 8, marginBottom: 16 }}
         onSubmit={(e) => {
           e.preventDefault();
           setApplied(search.trim());
         }}
       >
-        <input
-          aria-label="Search customers"
-          placeholder="Name, email or customer number"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+        <FilterBar
+          search={
+            <SearchField
+              label="Search customers"
+              placeholder="Name, email or customer number"
+              value={search}
+              onChange={setSearch}
+            />
+          }
+          actions={
+            <Button type="submit" variant="secondary">
+              Search
+            </Button>
+          }
         />
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
       </form>
 
       {customers.isPending ? (
@@ -133,7 +139,6 @@ export function BusinessCustomersPage() {
                       disabled={customer.status === 'cancelled'}
                       onClick={() => {
                         setSelling(customer.id);
-                        setProductId(activeProducts[0]?.id ?? '');
                       }}
                     >
                       New application
@@ -255,51 +260,16 @@ export function BusinessCustomersPage() {
         </div>
       </Dialog>
 
-      <Dialog
-        open={selling !== null}
-        onClose={() => setSelling(null)}
-        title="Open a card application"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setSelling(null)}>
-              Cancel
-            </Button>
-            <Button disabled={!productId || sell.isPending} onClick={() => sell.mutate()}>
-              Submit application
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p>
-            The price, minimum down payment, yearly points and commission are copied from the product
-            onto the sale now, and will not change if the catalogue is edited later.
-          </p>
-          <label>
-            Card product
-            <select
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              disabled={products.isPending || activeProducts.length === 0}
-            >
-              <option value="">Select a card</option>
-              {activeProducts.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name} — {product.code}
-                </option>
-              ))}
-            </select>
-          </label>
-          {products.isPending ? <p role="status">Loading card plans…</p> : null}
-          {products.isError ? (
-            <p role="alert">Could not load card plans. Close and retry.</p>
-          ) : null}
-          {!products.isPending && !products.isError && activeProducts.length === 0 ? (
-            <p role="status">No active card plans available.</p>
-          ) : null}
-          {sell.error ? <p role="alert">{sell.error.message}</p> : null}
-        </div>
-      </Dialog>
+      {selling !== null ? (
+        <SaleApplicationDialog
+          customerId={selling}
+          products={activeProducts}
+          productsPending={products.isPending}
+          productsError={products.error}
+          onClose={() => setSelling(null)}
+          onCreated={() => setSelling(null)}
+        />
+      ) : null}
     </section>
   );
 }

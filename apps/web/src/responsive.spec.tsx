@@ -46,6 +46,8 @@ const MEMBERSHIP = {
   renewalDueAt: '2027-01-05T02:00:00.000Z',
   yearlyPointsAllocated: 60000,
   pointsBalance: 60000,
+  paymentScheme: 'spot_cash' as const,
+  validityYears: 1,
   credentialsAvailable: false as const,
   credentialsNote: 'Your card code is stored only as a one-way hash.',
 };

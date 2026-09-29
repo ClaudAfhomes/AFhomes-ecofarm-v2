@@ -16,11 +16,19 @@ import {
   verifyPaymentSchema,
   activateSaleSchema,
   hierarchyAllowsUpline,
+  paymentSchemeLabel,
   SALE_ACTIVATABLE,
 } from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
-import { productSaleRejection, resolveSeller, snapshotSaleTerms } from '../_lib/commerce.js';
+import {
+  calculateCommission,
+  productSaleRejection,
+  resolveSeller,
+  resolveSchemeEconomics,
+  snapshotSaleTerms,
+  snapshotSchemeTerms,
+} from '../_lib/commerce.js';
 import { summarizePayments } from '../_lib/commerce.js';
 import {
   audit,
@@ -33,9 +41,13 @@ import {
   mapRpcError,
   method,
   route,
+  singleRpcRow,
   singleRpcText,
   subPath,
 } from '../_lib/handler-kit.js';
+import { DEFAULT_ONBOARDING_TOKEN_VALID_HOURS } from '../_lib/constants.js';
+import { sendCustomerOnboardingEmail } from '../_lib/customer-onboarding-email.js';
+import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -98,7 +110,10 @@ async function loadSaleView(db: Db, id: string) {
 
 type SaleMoney = { paidAmount: string; balance: string };
 
-async function moneyBySale(db: Db, rows: Record<string, unknown>[]): Promise<Map<string, SaleMoney>> {
+async function moneyBySale(
+  db: Db,
+  rows: Record<string, unknown>[],
+): Promise<Map<string, SaleMoney>> {
   const ids = rows.map((row) => String(row.id));
   if (ids.length === 0) return new Map();
   const { data, error } = await db
@@ -175,6 +190,14 @@ const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   const seller = (row.staff_users ?? {}) as Record<string, unknown>;
+  const months =
+    row.installment_months_snapshot === null || row.installment_months_snapshot === undefined
+      ? null
+      : Number(row.installment_months_snapshot);
+  const validity =
+    row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
+      ? null
+      : Number(row.validity_months_snapshot);
   return {
     id: row.id,
     saleNumber: row.sale_number,
@@ -191,6 +214,12 @@ const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
     sellerName: isoOrNull(seller.full_name),
     cashPrice: row.cash_price_snapshot ?? row.cash_price ?? '0.00',
     minimumDownPayment: row.minimum_down_payment_snapshot ?? '0.00',
+    paymentScheme: row.payment_scheme ?? 'spot_cash',
+    reservationFee: row.reservation_fee_snapshot ?? '0.00',
+    requiredInitial: row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
+    installmentMonths: months,
+    monthlyAmount: (row.monthly_amount_snapshot as string | null | undefined) ?? null,
+    validityMonths: validity,
     yearlyPoints: row.yearly_points_snapshot ?? 0,
     commissionRate: row.commission_rate_snapshot ?? '0.0400',
     expectedCommission: row.expected_commission_snapshot ?? '0.00',
@@ -223,7 +252,13 @@ async function idempotentVerifyResult(db: Db, saleId: string) {
   const totals = summarizePayments({
     cashPrice: (sale as Record<string, unknown>).cash_price_snapshot as string,
     minimumDownPayment: (sale as Record<string, unknown>).minimum_down_payment_snapshot as string,
-    payments: ((payments ?? []) as { amount: string; status: 'recorded' | 'verified' | 'rejected' | 'voided' }[]),
+    requiredInitial:
+      ((sale as Record<string, unknown>).required_initial_snapshot as string | null | undefined) ??
+      null,
+    payments: (payments ?? []) as {
+      amount: string;
+      status: 'recorded' | 'verified' | 'rejected' | 'voided';
+    }[],
     spotCashStartedAt: isoOrNull((sale as Record<string, unknown>).spot_cash_started_at),
     spotCashDeadline: isoOrNull((sale as Record<string, unknown>).spot_cash_deadline),
   });
@@ -395,6 +430,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         yearlyPoints: product.yearly_points,
         commissionRate: product.commission_rate,
       });
+      // VIP Stage 1: the client selects only the scheme code. Every figure is
+      // resolved server-side from the plan row and frozen below, so a tampered
+      // body cannot change what a sale costs. Bronze B1/B2 is rejected here -
+      // the UI hiding those options is never the control.
+      const scheme = resolveSchemeEconomics(
+        {
+          cashPrice: product.cash_price,
+          installmentPrice: product.installment_price,
+          reservationFee: product.reservation_fee,
+          spotCashDays: product.spot_cash_days,
+          standardInstallmentMonths: product.standard_installment_months,
+          validityYears: product.validity_years,
+          moveAEnabled: product.move_a_enabled,
+          moveB1Enabled: product.move_b1_enabled,
+          moveB2Enabled: product.move_b2_enabled,
+        },
+        input.paymentScheme,
+      );
+      if ('error' in scheme) {
+        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
+          return fail(
+            res,
+            'CONFLICT',
+            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
+            409,
+          );
+        }
+        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
+          return fail(
+            res,
+            'CONFLICT',
+            'The installment price is not configured for this card plan',
+            409,
+          );
+        }
+        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
+      }
+      const schemeTerms = snapshotSchemeTerms(scheme.economics);
+      // The frozen SELECTED total is the commercial record: commission basis
+      // and every payment threshold derive from it, never from the live plan.
+      const frozenTotal = schemeTerms.schemeTotalSnapshot;
+      const expectedCommission = calculateCommission(frozenTotal, product.commission_rate);
       const now = new Date().toISOString();
 
       const { data: sale, error: saleError } = await db
@@ -408,12 +485,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           seller_ost_id: null,
           // Snapshot columns are written explicitly, never spread: the commercial
           // terms must be frozen on the sale at creation.
-          cash_price: terms.cashPriceSnapshot,
-          cash_price_snapshot: terms.cashPriceSnapshot,
+          cash_price: frozenTotal,
+          cash_price_snapshot: frozenTotal,
           minimum_down_payment_snapshot: terms.minimumDownPaymentSnapshot,
+          payment_scheme: schemeTerms.paymentScheme,
+          reservation_fee_snapshot: schemeTerms.reservationFeeSnapshot,
+          required_initial_snapshot: schemeTerms.requiredInitialSnapshot,
+          installment_months_snapshot: schemeTerms.installmentMonthsSnapshot,
+          monthly_amount_snapshot: schemeTerms.monthlyAmountSnapshot,
+          validity_months_snapshot: schemeTerms.validityMonthsSnapshot,
           yearly_points_snapshot: terms.yearlyPointsSnapshot,
           commission_rate_snapshot: terms.commissionRateSnapshot,
-          expected_commission_snapshot: terms.expectedCommissionSnapshot,
+          expected_commission_snapshot: expectedCommission,
           status: 'submitted',
           submitted_at: now,
           balance_due_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
@@ -433,15 +516,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         throw saleError;
       }
 
-      // One commission per sale, created pending. Never earned here.
+      // One commission per sale, created pending. Never earned here. The basis
+      // is the frozen SELECTED total (Stage 1 §19), not the live plan price.
       const { error: commissionError } = await db.from('commissions').insert({
         sale_id: sale.id,
         ost_id: null,
         beneficiary_type: 'staff',
         beneficiary_staff_id: seller.staffId,
-        amount: terms.expectedCommissionSnapshot,
+        amount: expectedCommission,
         rate_snapshot: terms.commissionRateSnapshot,
-        basis_amount_snapshot: terms.cashPriceSnapshot,
+        basis_amount_snapshot: frozenTotal,
         status: 'pending',
       });
       if (commissionError) throw commissionError;
@@ -451,7 +535,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         customerId: input.customerId,
         productId: input.productId,
         sellerStaffId: seller.staffId,
-        expectedCommission: terms.expectedCommissionSnapshot,
+        paymentScheme: schemeTerms.paymentScheme,
+        frozenTotal,
+        expectedCommission,
       });
 
       const view = await loadSaleView(db, String(sale.id));
@@ -482,7 +568,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: sale, error } = await db
         .from('card_sales')
         .select(
-          'id, status, seller_staff_id, seller_ost_id, cash_price_snapshot, minimum_down_payment_snapshot, spot_cash_started_at, spot_cash_deadline',
+          'id, status, seller_staff_id, seller_ost_id, cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amount_snapshot, spot_cash_started_at, spot_cash_deadline',
         )
         .eq('id', id)
         .maybeSingle();
@@ -496,9 +582,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('sale_id', id);
       if (payError) throw payError;
 
+      const months =
+        sale.installment_months_snapshot === null || sale.installment_months_snapshot === undefined
+          ? null
+          : Number(sale.installment_months_snapshot);
       const totals = summarizePayments({
         cashPrice: sale.cash_price_snapshot ?? '0.00',
         minimumDownPayment: sale.minimum_down_payment_snapshot ?? '0.00',
+        requiredInitial: (sale.required_initial_snapshot as string | null | undefined) ?? null,
         payments: (payments ?? []) as {
           amount: string;
           status: 'recorded' | 'verified' | 'rejected' | 'voided';
@@ -511,6 +602,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: sale.status,
         cashPrice: sale.cash_price_snapshot ?? '0.00',
         minimumDownPayment: sale.minimum_down_payment_snapshot ?? '0.00',
+        paymentScheme: (sale.payment_scheme as string | null | undefined) ?? 'spot_cash',
+        reservationFee: (sale.reservation_fee_snapshot as string | null | undefined) ?? '0.00',
+        requiredInitial:
+          (sale.required_initial_snapshot as string | null | undefined) ??
+          sale.minimum_down_payment_snapshot ??
+          '0.00',
+        installmentMonths: months,
+        monthlyAmount: (sale.monthly_amount_snapshot as string | null | undefined) ?? null,
         ...totals,
       });
     }
@@ -625,7 +724,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) {
         // A concurrent verifier may have decided the payment first. If the
         // stored decision now matches the request, the retry is a success.
-        if (String((error as { message?: string }).message ?? '').startsWith('PAYMENT_NOT_PENDING')) {
+        if (
+          String((error as { message?: string }).message ?? '').startsWith('PAYMENT_NOT_PENDING')
+        ) {
           const { data: raced } = await db
             .from('payments')
             .select('id, sale_id, status')
@@ -660,6 +761,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = activateSaleSchema.safeParse(jsonBody(req) ?? {});
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid activation request', 400);
 
+      // Read only what the delivery step needs before the transactional RPC.
+      // An active sale is allowed through so the RPC can return its idempotent
+      // already_active result; every other illegal transition is refused here
+      // for a clear message and re-checked authoritatively inside the RPC.
+      const { data: sale, error: saleReadError } = await db
+        .from('card_sales')
+        .select('status, customer_id')
+        .eq('id', activate[1]!)
+        .maybeSingle();
+      if (saleReadError) throw saleReadError;
+      if (!sale) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      const status = String((sale as Record<string, unknown>).status ?? '');
+      if (status !== 'active' && !SALE_ACTIVATABLE.includes(status as never)) {
+        return fail(res, 'CONFLICT', `Sale is not activatable from status "${status}"`, 409);
+      }
+
       const { data, error } = await db.rpc('activate_card_sale', {
         p_sale_id: activate[1]!,
         p_actor_id: auth.userId,
@@ -669,16 +786,118 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
       if (!row) return fail(res, 'INTERNAL', 'Activation returned no result', 500);
 
-      // Server-side pre-check for a clearer message; the RPC re-verifies inside
-      // the transaction, so this is UX only and can never be the gate.
-      const { data: sale } = await db
-        .from('card_sales')
-        .select('status')
-        .eq('id', activate[1]!)
-        .maybeSingle();
-      const status = String((sale as { status?: string } | null)?.status ?? '');
-      if (!SALE_ACTIVATABLE.includes(status as never) && row.already_active !== true) {
-        return fail(res, 'CONFLICT', `Sale is not activatable from status "${status}"`, 409);
+      type OnboardingDelivery = {
+        status: 'email_sent' | 'manual_required' | 'not_issued' | 'already_active';
+        emailStatus: 'sent' | 'failed' | 'not_attempted';
+        token: string | null;
+        activationUrl: string | null;
+        expiresAt: string | null;
+      };
+      let onboarding: OnboardingDelivery = {
+        status: row.already_active === true ? 'already_active' : 'not_issued',
+        emailStatus: 'not_attempted',
+        token: null,
+        activationUrl: null,
+        expiresAt: null,
+      };
+
+      // Customer onboarding is deliberately outside the financial transaction:
+      // membership/points/commission activation must remain successful even if
+      // token issuance or SMTP delivery fails. A fresh activation issues once;
+      // an idempotent retry never silently rotates or replaces a credential.
+      if (row.already_active !== true) {
+        const customerId = String((sale as Record<string, unknown>).customer_id ?? '');
+        const issued = await db.rpc('issue_customer_onboarding_token', {
+          p_customer_id: customerId,
+          p_purpose: 'account_activation',
+          p_valid_hours: DEFAULT_ONBOARDING_TOKEN_VALID_HOURS,
+          p_actor_id: auth.userId,
+        });
+        const issuedRow = issued.error ? null : singleRpcRow(issued.data);
+        const rawToken = issuedRow?.token;
+        const expiresAt = issuedRow?.expires_at;
+
+        if (
+          typeof rawToken === 'string' &&
+          rawToken.length >= 20 &&
+          typeof expiresAt === 'string'
+        ) {
+          const activationUrl = customerActivationUrl(rawToken);
+          const { data: customer, error: customerError } = await db
+            .from('customers')
+            .select('email, first_name, middle_name, last_name, suffix')
+            .eq('id', customerId)
+            .maybeSingle();
+          const customerRecord = (customer ?? {}) as Record<string, unknown>;
+          const customerName = [
+            customerRecord.first_name,
+            customerRecord.middle_name,
+            customerRecord.last_name,
+            customerRecord.suffix,
+          ]
+            .filter((part): part is string => typeof part === 'string' && part.length > 0)
+            .join(' ');
+          const email = typeof customerRecord.email === 'string' ? customerRecord.email : '';
+          const delivery =
+            !customerError && email && activationUrl
+              ? await sendCustomerOnboardingEmail({
+                  to: email,
+                  customerName,
+                  membershipNumber: String(row.membership_number ?? ''),
+                  activationUrl,
+                  expiresAt,
+                })
+              : { status: 'failed' as const, reason: 'not_configured' as const };
+
+          onboarding = {
+            status: delivery.status === 'sent' ? 'email_sent' : 'manual_required',
+            emailStatus: delivery.status === 'sent' ? 'sent' : 'failed',
+            token: rawToken,
+            activationUrl,
+            expiresAt,
+          };
+
+          // The audit payload intentionally contains only lifecycle metadata.
+          // Never include the token, token hash, recipient, or activation URL.
+          try {
+            await audit(
+              db,
+              auth.userId,
+              'CUSTOMER_ONBOARDING_TOKEN_ISSUED',
+              'customer',
+              customerId,
+              null,
+              {
+                purpose: 'account_activation',
+                validHours: DEFAULT_ONBOARDING_TOKEN_VALID_HOURS,
+                expiresAt,
+                emailStatus: onboarding.emailStatus,
+              },
+            );
+            await audit(
+              db,
+              auth.userId,
+              onboarding.emailStatus === 'sent'
+                ? 'CUSTOMER_ACTIVATION_EMAIL_SENT'
+                : 'CUSTOMER_ACTIVATION_EMAIL_FAILED',
+              'customer',
+              customerId,
+              null,
+              {
+                membershipId: row.membership_id,
+                deliveryStatus: onboarding.emailStatus,
+              },
+            );
+          } catch {
+            // Activation and token issuance are already committed. Do not turn
+            // a safe one-time response into a false failure or lose the token.
+            console.error('[api] sales: onboarding audit write failed');
+          }
+        } else {
+          // Do not log the RPC error: it could contain database detail. The UI
+          // receives a safe status and can report that activation still worked.
+          console.error('[api] sales: onboarding token issuance failed');
+        }
       }
 
       // Phase 10 card issuance stamp. Informational only and best-effort: the
@@ -706,6 +925,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         qrToken: row.qr_token,
         pointsAllocated: Number(row.points_allocated ?? 0),
         alreadyActive: row.already_active === true,
+        onboarding,
       });
     }
 

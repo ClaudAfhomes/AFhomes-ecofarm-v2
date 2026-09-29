@@ -1,0 +1,115 @@
+.body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+  line-height: 1.5;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-3);
+}
+
+.offer {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.offerActive {
+  border-color: var(--color-brand-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.offerTitle {
+  font-weight: 700;
+  font-size: var(--text-body);
+}
+
+.offerValue {
+  font-size: var(--text-body-l);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-brand-primary);
+}
+
+.offerHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.moves {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.move {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+}
+
+.move input {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-brand-primary);
+}
+
+.moveTitle {
+  display: block;
+  font-weight: 600;
+  font-size: var(--text-body-s);
+}
+
+.moveHint {
+  display: block;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}

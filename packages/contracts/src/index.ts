@@ -100,6 +100,11 @@ export {
   pointsEntryTypeSchema,
   hierarchyRoleSchema,
   spotCashStateSchema,
+  paymentSchemeSchema,
+  PAYMENT_SCHEMES,
+  PAYMENT_SCHEME_LABELS,
+  paymentSchemeLabel,
+  validateSchemeTransition,
   HIERARCHY_ORDER,
   SALE_ACCEPTS_PAYMENT,
   SALE_AWAITING_FULL_PAYMENT,
@@ -121,6 +126,8 @@ export type {
   PointsEntryType,
   HierarchyRole,
   SpotCashState,
+  PaymentScheme,
+  SchemeTransitionRejection,
 } from './schemas/lifecycle.js';
 
 export {
@@ -174,6 +181,7 @@ export {
   recordPaymentSchema,
   verifyPaymentSchema,
   activateSaleSchema,
+  onboardingDeliverySchema,
   activationResultSchema,
   membershipSchema,
   membershipResolutionSchema,
@@ -191,6 +199,7 @@ export type {
   RecordPaymentRequest,
   VerifyPaymentRequest,
   ActivateSaleRequest,
+  OnboardingDelivery,
   ActivationResult,
   Membership,
   MembershipResolution,
