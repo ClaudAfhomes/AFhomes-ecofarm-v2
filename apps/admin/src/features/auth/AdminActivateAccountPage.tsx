@@ -11,13 +11,37 @@ import styles from './AdminLoginPage.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done' | 'password-created';
 
-function inviteLinkHasError(): boolean {
-  if (typeof window === 'undefined') return false;
+type InviteFragment =
+  | { kind: 'tokens'; accessToken: string; refreshToken: string }
+  | { kind: 'none' }
+  | { kind: 'invalid' };
+
+function readInviteFragment(): InviteFragment {
+  if (typeof window === 'undefined') return { kind: 'none' };
   const search = new URLSearchParams(window.location.search);
-  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  return (
-    search.has('error') || search.has('error_code') || hash.has('error') || hash.has('error_code')
-  );
+  const hashText = window.location.hash.replace(/^#/, '');
+  const hash = new URLSearchParams(hashText);
+  if (
+    search.has('error') ||
+    search.has('error_code') ||
+    hash.has('error') ||
+    hash.has('error_code')
+  ) {
+    return { kind: 'invalid' };
+  }
+  if (!hashText) return { kind: 'none' };
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
+  if (!accessToken && !refreshToken) return { kind: 'none' };
+  if (!accessToken || !refreshToken || hash.get('type') !== 'invite') return { kind: 'invalid' };
+  return { kind: 'tokens', accessToken, refreshToken };
+}
+
+function removeCallbackCredentials(): void {
+  if (typeof window === 'undefined') return;
+  if (window.location.hash || window.location.search) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
 }
 
 /**
@@ -27,10 +51,7 @@ function inviteLinkHasError(): boolean {
  * from a freshly password-authenticated session.
  */
 export function AdminActivateAccountPage() {
-  const linkError = inviteLinkHasError();
-  const [phase, setPhase] = useState<Phase>(() =>
-    !getSupabaseClient() || linkError ? 'invalid' : 'checking',
-  );
+  const [phase, setPhase] = useState<Phase>(() => (!getSupabaseClient() ? 'invalid' : 'checking'));
   const [candidate, setCandidate] = useState<StaffAccountSetup | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -41,18 +62,49 @@ export function AdminActivateAccountPage() {
   useEffect(() => {
     let mounted = true;
     const client = getSupabaseClient();
-    if (!client || linkError) return;
+    if (!client) return;
+    let observedSession: unknown = null;
+    let resolveObserved: (() => void) | null = null;
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      if (!session) return;
+      observedSession = session;
+      resolveObserved?.();
+    });
+
     const check = async () => {
       try {
-        const { data } = await client.auth.getSession();
-        if (!mounted) return;
-        if (!data.session) {
-          setPhase('invalid');
-          return;
+        const fragment = readInviteFragment();
+        // Remove credentials before any network call or render can expose them.
+        removeCallbackCredentials();
+        if (fragment.kind === 'invalid') throw new Error('Invalid invitation callback');
+
+        let session: unknown = null;
+        if (fragment.kind === 'tokens') {
+          const { data, error } = await client.auth.setSession({
+            access_token: fragment.accessToken,
+            refresh_token: fragment.refreshToken,
+          });
+          if (error || !data.session) throw new Error('Invalid invitation session');
+          session = data.session;
+        } else {
+          const { data, error } = await client.auth.getSession();
+          if (error) throw error;
+          session = data.session;
         }
+
+        if (!session && !observedSession) {
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              resolveObserved = resolve;
+            }),
+            new Promise<void>((resolve) => window.setTimeout(resolve, 500)),
+          ]);
+          session = observedSession;
+        }
+        if (!session) throw new Error('Invitation session missing');
+
         const setup = await request('/admin/afhomes/account-activation', staffAccountSetupSchema);
         if (!mounted) return;
-        window.history.replaceState(null, '', window.location.pathname);
         setCandidate(setup);
         setPhase('ready');
       } catch {
@@ -62,8 +114,10 @@ export function AdminActivateAccountPage() {
     void check();
     return () => {
       mounted = false;
+      listener.subscription.unsubscribe();
+      resolveObserved?.();
     };
-  }, [linkError]);
+  }, []);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();

@@ -17,6 +17,7 @@ vi.mock('../../lib/supabase', () => ({
 
 const authMock = vi.hoisted(() => ({
   getSession: vi.fn(),
+  setSession: vi.fn(),
   onAuthStateChange: vi.fn(),
   updateUser: vi.fn(),
   signOut: vi.fn(),
@@ -63,6 +64,7 @@ const installFetch = (activationStatus = 200) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, '', '/admin/activate-account');
   accessToken = 'invite-token';
   authMock.getSession.mockImplementation(async () => ({
     data: {
@@ -73,6 +75,12 @@ beforeEach(() => {
   }));
   authMock.onAuthStateChange.mockReturnValue({
     data: { subscription: { unsubscribe: vi.fn() } },
+  });
+  authMock.setSession.mockResolvedValue({
+    data: {
+      session: { access_token: 'ACCESS', user: { id: STAFF_ID, email: 'invitee@afhomes.test' } },
+    },
+    error: null,
   });
   authMock.updateUser.mockResolvedValue({ error: null });
   authMock.signOut.mockImplementation(async () => {
@@ -91,6 +99,64 @@ const renderActivation = () =>
   renderWithProviders(<AdminActivateAccountPage />, { route: '/admin/activate-account' });
 
 describe('staff account activation', () => {
+  it('consumes the real invite fragment, removes its tokens, and shows the setup form', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/admin/activate-account#access_token=ACCESS&refresh_token=REFRESH&type=invite',
+    );
+    const fetchMock = installFetch();
+    renderActivation();
+
+    expect(await screen.findByLabelText('New Password')).toBeInTheDocument();
+    expect(authMock.setSession).toHaveBeenCalledWith({
+      access_token: 'ACCESS',
+      refresh_token: 'REFRESH',
+    });
+    expect(window.location.pathname).toBe('/admin/activate-account');
+    expect(window.location.hash).toBe('');
+    expect(window.location.href).not.toContain('ACCESS');
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).endsWith('/admin/afhomes/account-activation'),
+      ),
+    ).toBe(true);
+    expect(
+      screen.queryByText('Invitation link is invalid or has expired.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['missing refresh token', '#access_token=ACCESS&type=invite'],
+    ['malformed callback type', '#access_token=ACCESS&refresh_token=REFRESH&type=recovery'],
+    ['explicit callback error', '#error=access_denied&error_code=otp_expired'],
+  ])('rejects a %s and removes callback data', async (_label, hash) => {
+    window.history.replaceState(null, '', `/admin/activate-account${hash}`);
+    renderActivation();
+    expect(
+      await screen.findByText('Invitation link is invalid or has expired.'),
+    ).toBeInTheDocument();
+    expect(window.location.hash).toBe('');
+    expect(authMock.setSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects a callback when Supabase cannot establish its session', async () => {
+    authMock.setSession.mockResolvedValue({
+      data: { session: null },
+      error: { message: 'invalid token' },
+    });
+    window.history.replaceState(
+      null,
+      '',
+      '/admin/activate-account#access_token=BAD&refresh_token=BAD&type=invite',
+    );
+    renderActivation();
+    expect(
+      await screen.findByText('Invitation link is invalid or has expired.'),
+    ).toBeInTheDocument();
+    expect(window.location.hash).toBe('');
+  });
+
   it('is a real route outside the normal admin guard and renders the password fields', async () => {
     renderWithProviders(<App />, { route: '/admin/activate-account' });
     expect(

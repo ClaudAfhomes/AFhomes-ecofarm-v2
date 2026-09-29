@@ -8,7 +8,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export function isSupabaseConfigured(): boolean {
   const env = import.meta.env as Record<string, string | undefined>;
-  return Boolean(env.VITE_SUPABASE_URL?.trim() && (env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || env.VITE_SUPABASE_ANON_KEY?.trim()));
+  return Boolean(
+    env.VITE_SUPABASE_URL?.trim() &&
+    (env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || env.VITE_SUPABASE_ANON_KEY?.trim()),
+  );
 }
 
 let cached: SupabaseClient | null = null;
@@ -42,7 +45,6 @@ export function getSupabaseClient(): SupabaseClient | null {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      flowType: 'pkce',
       storage: import.meta.env.DEV ? (cookieStorage as never) : undefined,
     },
   });
