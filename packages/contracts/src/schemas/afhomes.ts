@@ -103,6 +103,18 @@ export const afHomesSessionSchema = z.object({
 });
 export type AfHomesSession = z.infer<typeof afHomesSessionSchema>;
 
+/**
+ * Safe preflight payload for the staff invitation landing page. It contains
+ * only the identity already bound to the verified Supabase invite session;
+ * role and permission data stay server-side until password authentication.
+ */
+export const staffAccountSetupSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  fullName: z.string(),
+});
+export type StaffAccountSetup = z.infer<typeof staffAccountSetupSchema>;
+
 export const afHomesDashboardPointSchema = z.object({
   period: z.string(),
   verifiedSales: z.number().int().nonnegative(),

@@ -7,10 +7,15 @@ import type { GoTrueClient } from '@supabase/auth-js';
  * stable boundary, and the real `anon.auth` extends it by construction.
  */
 export type SupabaseGetUser = GoTrueClient['getUser'];
+export type SupabaseGetClaims = GoTrueClient['getClaims'];
 
 /** Anything exposing the real `getUser` — the concrete client or a test double. */
 export type AuthSessionVerifier = {
   getUser: SupabaseGetUser;
+};
+
+export type AuthClaimsVerifier = AuthSessionVerifier & {
+  getClaims: SupabaseGetClaims;
 };
 
 /** Exactly what authorization consumes from a verified session. */
@@ -40,4 +45,28 @@ export async function verifySessionToken(
   }
   const { id, email, email_confirmed_at } = data.user;
   return { data: { user: { id, email, email_confirmed_at } }, error: null };
+}
+
+export type VerifiedAuthenticationMethod = 'invite' | 'password' | 'recovery' | string;
+
+/**
+ * Read the authentication methods from a separately verified JWT. Supabase
+ * may encode AMR as strings or `{ method, timestamp }` records; normalize both
+ * representations and fail closed on a missing/invalid claim.
+ */
+export async function verifiedAuthenticationMethods(
+  auth: AuthClaimsVerifier,
+  jwt: string,
+): Promise<VerifiedAuthenticationMethod[]> {
+  const { data, error } = await auth.getClaims(jwt);
+  if (error || !data?.claims || data.claims.sub === undefined) return [];
+  const methods = data.claims.amr;
+  if (!Array.isArray(methods)) return [];
+  return methods.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry];
+    if (entry && typeof entry === 'object' && typeof entry.method === 'string') {
+      return [entry.method];
+    }
+    return [];
+  });
 }

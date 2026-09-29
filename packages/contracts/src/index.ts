@@ -17,6 +17,7 @@ export {
   afHomesDepartmentSchema,
   afHomesStaffSchema,
   afHomesSessionSchema,
+  staffAccountSetupSchema,
   afHomesDashboardPointSchema,
   afHomesDashboardSchema,
   createAfHomesRoleSchema,
@@ -30,6 +31,7 @@ export type {
   AfHomesDepartment,
   AfHomesStaff,
   AfHomesSession,
+  StaffAccountSetup,
   AfHomesDashboard,
 } from './schemas/afhomes.js';
 

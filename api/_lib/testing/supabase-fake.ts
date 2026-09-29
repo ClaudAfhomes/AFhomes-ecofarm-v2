@@ -23,6 +23,8 @@ export type FakeAuthUser = {
   email: string;
   email_confirmed_at?: string | null;
   user_metadata?: Record<string, unknown>;
+  /** Verified JWT authentication method(s); active fixtures default to password. */
+  amr?: (string | { method: string; timestamp: number })[];
 };
 
 /** Recorded writes, so tests can assert on side effects (audit rows, inserts). */
@@ -238,6 +240,21 @@ export class FakeSupabase {
       if (!user) return { data: { user: null }, error: authError('Invalid JWT') };
       return { data: { user }, error: null };
     },
+    getClaims: async (token: string) => {
+      const user = this.tokens[token];
+      if (!user) return { data: null, error: authError('Invalid JWT') };
+      return {
+        data: {
+          claims: {
+            sub: user.id,
+            amr: user.amr ?? [{ method: 'password', timestamp: 1 }],
+          },
+          header: { alg: 'RS256' },
+          signature: new Uint8Array(),
+        },
+        error: null,
+      };
+    },
     admin: {
       inviteUserByEmail: async (email: string, opts: unknown) => {
         this.calls.push({ op: 'inviteUserByEmail', table: 'auth', arg: { email, opts } });
@@ -374,7 +391,11 @@ export class FakeSupabase {
         if (error) return { data: null, error, count: null };
         const rows = data ?? [];
         if (rows.length > 1) {
-          return { data: null, error: authError('multiple rows returned for maybeSingle'), count: null };
+          return {
+            data: null,
+            error: authError('multiple rows returned for maybeSingle'),
+            count: null,
+          };
         }
         return { data: rows[0] ?? null, error: null };
       },
@@ -480,7 +501,11 @@ export class FakeSupabase {
 
       // PostgREST order() clauses form ONE comparator, most significant first
       // (`ORDER BY a, b`), not a chain of independent sorts.
-      const orders = ops.filter((o) => o.t === 'order') as { t: 'order'; col: string; asc: boolean }[];
+      const orders = ops.filter((o) => o.t === 'order') as {
+        t: 'order';
+        col: string;
+        asc: boolean;
+      }[];
       if (orders.length > 0) {
         out = [...out].sort((a, b) => {
           for (const order of orders) {
@@ -494,11 +519,9 @@ export class FakeSupabase {
         });
       }
       const range = [...ops].reverse().find((o) => o.t === 'range') as
-        | { t: 'range'; from: number; to: number }
-        | undefined;
+        { t: 'range'; from: number; to: number } | undefined;
       const limit = [...ops].reverse().find((o) => o.t === 'limit') as
-        | { t: 'limit'; n: number }
-        | undefined;
+        { t: 'limit'; n: number } | undefined;
 
       // PostgREST's `count: 'exact'` is the TOTAL number of matching rows, taken
       // BEFORE range/limit. Returning the page length instead makes every
@@ -511,8 +534,7 @@ export class FakeSupabase {
 
       // Resolve `!`-separated embedded selects against the configured links.
       const selectOp = ops.find((o) => o.t === 'select') as
-        | { t: 'select'; cols: string; count: boolean }
-        | undefined;
+        { t: 'select'; cols: string; count: boolean } | undefined;
       if (selectOp && selectOp.cols.includes('!')) {
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols) }));
       }
@@ -552,24 +574,21 @@ export class FakeSupabase {
       // the kind of gap that lets a test pass without testing anything.
       const [embedTable, constraint] = target.split('!');
       const byName = (l: FakeLink) =>
-        constraint && constraint !== 'inner'
-          ? `${embedTable}_${l.fk}_fkey` === constraint
-          : false;
+        constraint && constraint !== 'inner' ? `${embedTable}_${l.fk}_fkey` === constraint : false;
       const asParent = (l: FakeLink) =>
-        constraint && constraint !== 'inner' ? false : l.parent === embedTable && row[l.fk] !== undefined;
-      const asChild = (l: FakeLink) => constraint && constraint !== 'inner' ? false : l.child === embedTable;
+        constraint && constraint !== 'inner'
+          ? false
+          : l.parent === embedTable && row[l.fk] !== undefined;
+      const asChild = (l: FakeLink) =>
+        constraint && constraint !== 'inner' ? false : l.child === embedTable;
       const link = this.links.find((l) => byName(l) || asParent(l) || asChild(l));
       if (!link) continue;
       const parentSide = link.parent === embedTable;
       const match = parentSide
         ? // Embedded table is the PARENT: this row holds the FK.
-          (this.tables[link.parent] ?? []).find(
-            (r) => r[link.pk ?? 'id'] === row[link.fk],
-          )
+          (this.tables[link.parent] ?? []).find((r) => r[link.pk ?? 'id'] === row[link.fk])
         : // Embedded table is the CHILD: it holds the FK pointing back here.
-          (this.tables[link.child] ?? []).find(
-            (r) => r[link.fk] === row[link.pk ?? 'id'],
-          );
+          (this.tables[link.child] ?? []).find((r) => r[link.fk] === row[link.pk ?? 'id']);
       if (match) attached[alias] = match;
     }
     return attached;
@@ -585,7 +604,10 @@ export class FakeSupabase {
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
     if (!entry) return { data: null, error: { code: '42883', message: `${fn} does not exist` } };
-    return { data: typeof entry.result === 'function' ? entry.result(args) : entry.result, error: null };
+    return {
+      data: typeof entry.result === 'function' ? entry.result(args) : entry.result,
+      error: null,
+    };
   }
 }
 
@@ -633,7 +655,7 @@ export function makeReq(options: {
 }) {
   const headers: Record<string, string> = { ...options.headers };
   if (options.token) headers.authorization = `Bearer ${options.token}`;
-    return {
+  return {
     method: options.method ?? 'GET',
     query: {
       afPath: options.afPath ?? '',

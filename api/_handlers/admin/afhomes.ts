@@ -10,6 +10,7 @@ import {
   authorizeAfHomes,
   permissionsAreSubset,
   resolveAfHomesPrincipal,
+  resolveStaffAccountSetup,
 } from '../../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../../_lib/envelope.js';
 import type { VercelRequest, VercelResponse } from '../../_lib/http.js';
@@ -326,6 +327,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const path = String(req.query.afPath ?? '');
   const method = req.method ?? 'GET';
   try {
+    if (path === 'account-activation' && method === 'GET') {
+      const candidate = await resolveStaffAccountSetup(req);
+      if ('error' in candidate)
+        return res.status(candidate.error.status).json({ error: candidate.error.error });
+      return res.status(200).json({
+        id: candidate.userId,
+        email: candidate.email,
+        fullName: candidate.fullName,
+      });
+    }
     if (path === 'session' && method === 'GET') {
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal)
@@ -529,7 +540,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
           auth_user_id: invited.user.id,
         });
-        if (invitationError) throw new Error(`staff_invitations insert failed: ${invitationError.message}`);
+        if (invitationError)
+          throw new Error(`staff_invitations insert failed: ${invitationError.message}`);
         await audit(
           db,
           auth.userId,

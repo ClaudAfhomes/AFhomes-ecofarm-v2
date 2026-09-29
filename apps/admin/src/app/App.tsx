@@ -15,6 +15,7 @@ import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogP
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import { AdminForgotPasswordPage } from '../features/auth/AdminForgotPasswordPage';
+import { AdminActivateAccountPage } from '../features/auth/AdminActivateAccountPage';
 import { AdminLoginPage } from '../features/auth/AdminLoginPage';
 import { AdminResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
 import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
@@ -45,6 +46,7 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/admin/activate-account" element={<AdminActivateAccountPage />} />
         {/* Phase 16 recovery: public by necessity (the visitor has no usable
             session), outside RequireRole like the login screen. */}
         <Route path="/admin/forgot-password" element={<AdminForgotPasswordPage />} />

@@ -10,7 +10,7 @@ describe('resolveAdminUrl', () => {
         VERCEL_URL: 'afhomes-preview-abc.vercel.app',
         VERCEL_PROJECT_PRODUCTION_URL: 'afhomes.example',
       }),
-    ).toBe('https://afhomes-preview-abc.vercel.app/admin');
+    ).toBe('https://afhomes-preview-abc.vercel.app/admin/activate-account');
   });
 
   it('uses the stable project URL in Production', () => {
@@ -20,12 +20,12 @@ describe('resolveAdminUrl', () => {
         VERCEL_URL: 'afhomes-deployment-abc.vercel.app',
         VERCEL_PROJECT_PRODUCTION_URL: 'afhomes.example',
       }),
-    ).toBe('https://afhomes.example/admin');
+    ).toBe('https://afhomes.example/admin/activate-account');
   });
 
   it('lets a valid explicit operator URL win and rejects unsafe values', () => {
     expect(resolveAdminUrl({ AFHOMES_ADMIN_URL: 'https://admin.afhomes.example/admin/' })).toBe(
-      'https://admin.afhomes.example/admin',
+      'https://admin.afhomes.example/admin/activate-account',
     );
     expect(resolveAdminUrl({ AFHOMES_ADMIN_URL: 'javascript:alert(1)' })).toBeNull();
     expect(resolveAdminUrl({ VERCEL_URL: 'good.vercel.app@evil.example' })).toBeNull();

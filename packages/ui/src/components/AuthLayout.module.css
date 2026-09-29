@@ -1,0 +1,189 @@
+/*
+ * AF Homes auth editorial split shell - JAD AuthLayout parity.
+ * Desktop: sticky full-height deep-green brand panel beside the form.
+ * Below 1024px: imagery is dropped, a slim deep-green masthead carries the
+ * brand eyebrow, and the form column is centered on the canvas background.
+ * Brand mapping: forest green + harvest gold; no JAD imagery or wordmark.
+ */
+
+.page {
+  background-color: var(--color-bg-canvas);
+  min-height: 100vh;
+}
+
+/* Mobile/tablet brand masthead - the only auth branding below lg. */
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) var(--space-4);
+  background-color: var(--color-brand-deep);
+}
+
+.masthead::before,
+.masthead::after {
+  content: '';
+  flex: 1;
+  max-width: 64px;
+  height: 1px;
+  background-color: rgba(220, 192, 106, 0.45);
+}
+
+.mastheadText {
+  margin: 0;
+  padding-inline: var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-accent-light);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Desktop: two-column editorial split. */
+@media (min-width: 1024px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  }
+
+  .masthead {
+    display: none;
+  }
+}
+
+/* Brand panel - full-height sticky column, deep-green ecofarm gradient. */
+.brandPanel {
+  position: relative;
+  display: none;
+  overflow: hidden;
+  background-color: var(--color-brand-deep);
+  background-image:
+    radial-gradient(120% 90% at 15% 10%, rgba(31, 107, 79, 0.55) 0%, transparent 55%),
+    radial-gradient(100% 80% at 90% 90%, rgba(176, 131, 40, 0.28) 0%, transparent 50%),
+    linear-gradient(200deg, #163a2c 0%, #0e2b20 60%, #0a2018 100%);
+}
+
+@media (min-width: 1024px) {
+  .brandPanel {
+    display: block;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    200deg,
+    rgba(14, 43, 32, 0.25) 0%,
+    rgba(14, 43, 32, 0.55) 45%,
+    rgba(14, 43, 32, 0.85) 100%
+  );
+}
+
+.brandContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-height: 100%;
+  padding: var(--space-12) var(--space-10) var(--space-16);
+  color: var(--color-on-dark);
+}
+
+.brandWordmark {
+  align-self: flex-start;
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 2px solid var(--color-accent-light);
+  font-family: var(--font-family-display);
+  font-size: var(--text-body-l);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-on-dark);
+}
+
+.brandEyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-accent-light);
+}
+
+.brandTitle {
+  margin: 0;
+  font-family: var(--font-family-display);
+  font-size: clamp(1.75rem, 1.4rem + 1.2vw, 2.5rem);
+  line-height: var(--line-height-tight);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  max-width: 18ch;
+}
+
+.brandLead {
+  margin: 0;
+  color: var(--color-on-dark-muted);
+  max-width: 44ch;
+}
+
+/* Form column - centered, constrained, strongly spaced. */
+.formColumn {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  padding: var(--space-10) var(--space-4) var(--space-16);
+}
+
+@media (min-width: 640px) {
+  .formColumn {
+    padding-inline: var(--space-8);
+  }
+}
+
+.formPanel {
+  display: grid;
+  gap: var(--space-6);
+  width: 100%;
+  max-width: 440px;
+}
+
+/* Wide variant for complex multi-field forms - opt-in per screen. */
+.formPanelWide {
+  max-width: 680px;
+}
+
+.heading {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-accent-strong);
+}
+
+.heading h1 {
+  margin: 0;
+  font-size: var(--text-h2);
+}
+
+.lead {
+  margin: 0;
+  color: var(--color-text-secondary);
+  max-width: 42ch;
+}

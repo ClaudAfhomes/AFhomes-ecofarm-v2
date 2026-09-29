@@ -37,6 +37,8 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import fs from 'node:fs';
 import { loadEnvFile } from 'node:process';
 
+import { resolveAdminUrl } from '../api/_lib/admin-url.js';
+
 if (fs.existsSync('.env.local')) loadEnvFile('.env.local');
 
 const EXPECTED_PROJECT_HOST = 'ikaevepedpqygdlipsei.supabase.co';
@@ -70,7 +72,8 @@ function readConfig(): BootstrapConfig | null {
   const url = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const email = process.env.AFHOMES_SUPERADMIN_EMAIL?.trim().toLowerCase();
-  const redirectTo = process.env.AFHOMES_ADMIN_URL;
+  const adminBase = process.env.AFHOMES_ADMIN_URL;
+  const redirectTo = adminBase ? resolveAdminUrl({ AFHOMES_ADMIN_URL: adminBase }) : null;
 
   const problems: string[] = [];
   if (!url) problems.push('SUPABASE_URL is required.');
@@ -78,7 +81,7 @@ function readConfig(): BootstrapConfig | null {
   if (!email) problems.push('AFHOMES_SUPERADMIN_EMAIL is required.');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     problems.push('AFHOMES_SUPERADMIN_EMAIL is not a valid email address.');
-  if (!redirectTo) problems.push('AFHOMES_ADMIN_URL is required (invite redirect target).');
+  if (!redirectTo) problems.push('AFHOMES_ADMIN_URL is required (safe invite redirect base).');
   if (url && !url.includes(EXPECTED_PROJECT_HOST))
     problems.push(`Refusing to run: SUPABASE_URL is not ${EXPECTED_PROJECT_HOST}.`);
 

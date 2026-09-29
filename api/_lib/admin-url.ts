@@ -31,11 +31,14 @@ export function resolveAdminUrl(env: VercelUrlEnv = process.env): string | null 
       const parsed = new URL(configured);
       if (
         (parsed.protocol === 'https:' ||
-          (parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname))) &&
+          (parsed.protocol === 'http:' &&
+            ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname))) &&
         !parsed.username &&
         !parsed.password
       ) {
-        return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '') || ''}`;
+        const basePath = parsed.pathname.replace(/\/+$/, '');
+        const adminPath = basePath === '/admin' ? basePath : '/admin';
+        return `${parsed.origin}${adminPath}/activate-account`;
       }
     } catch {
       return null;
@@ -45,8 +48,8 @@ export function resolveAdminUrl(env: VercelUrlEnv = process.env): string | null 
 
   const host =
     env.VERCEL_ENV === 'production'
-      ? env.VERCEL_PROJECT_PRODUCTION_URL ?? env.VERCEL_URL
-      : env.VERCEL_URL ?? env.VERCEL_PROJECT_PRODUCTION_URL;
+      ? (env.VERCEL_PROJECT_PRODUCTION_URL ?? env.VERCEL_URL)
+      : (env.VERCEL_URL ?? env.VERCEL_PROJECT_PRODUCTION_URL);
   const origin = host ? httpsUrl(host) : null;
-  return origin ? `${origin}/admin` : null;
+  return origin ? `${origin}/admin/activate-account` : null;
 }

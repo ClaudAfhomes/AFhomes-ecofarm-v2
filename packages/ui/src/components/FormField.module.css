@@ -1,0 +1,92 @@
+/*
+ * Auth form field primitives (JAD FormField parity).
+ * Inputs are 48px tall with AA contrast, visible focus ring, and inline
+ * error styling. Shared across auth and admin forms.
+ */
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Required is marked visually via `::after` (keeps label text clean for
+   accessible-name/label matching); optional is labeled "(Optional)". */
+.label::after {
+  content: '*';
+  color: var(--color-accent-strong);
+}
+
+.labelOptional::after {
+  content: none;
+}
+
+.optionalMark {
+  font-weight: 400;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  max-width: 55ch;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-danger);
+}
+
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--color-state-focus);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.inputError {
+  border-color: var(--color-danger);
+}
+
+.inputError:focus-visible {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(166, 58, 50, 0.18);
+}
+
+/* Reserve room for the inline password toggle button. */
+.inputWithSuffix {
+  padding-right: 52px;
+}
+
+.readOnlyInput {
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  cursor: default;
+  user-select: none;
+}

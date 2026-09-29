@@ -23,6 +23,7 @@ const afhomes = (await import('./admin/afhomes.js')).default;
 const ost = (await import('./ost.js')).default;
 
 const ADMIN_URL = 'https://afhomes.test/admin';
+const ACTIVATION_URL = `${ADMIN_URL}/activate-account`;
 
 beforeEach(() => {
   vi.stubEnv('AFHOMES_ADMIN_URL', ADMIN_URL);
@@ -62,7 +63,7 @@ const inviteCall = (db: FakeSupabase) =>
     { op: string; table: string; arg: { email: string; opts: { redirectTo: string } } } | undefined;
 
 describe('staff invitation readiness', () => {
-  it('passes the configured admin URL as the invite redirect, verbatim', async () => {
+  it('sends staff invitations to the dedicated account activation route', async () => {
     const db = staffWorld();
     const state = await inviteStaff({
       email: 'new.hire@afhomes.test',
@@ -73,9 +74,9 @@ describe('staff invitation readiness', () => {
     expect(state.status).toBe(201);
     const call = inviteCall(db);
     expect(call?.arg.email).toBe('new.hire@afhomes.test');
-    // The redirect is the server env value exactly: no body field, no user
-    // input, and no per-request construction that could be injected into.
-    expect(call?.arg.opts.redirectTo).toBe(ADMIN_URL);
+    // The server derives the route from its configured admin base: no body
+    // field, user input, or request host can become an Auth redirect.
+    expect(call?.arg.opts.redirectTo).toBe(ACTIVATION_URL);
   });
 
   it('commits no staff or invitation rows when the Auth invite fails', async () => {
@@ -218,7 +219,7 @@ describe('OST invitation readiness', () => {
     expect(state.status).toBe(201);
     const call = inviteCall(db);
     expect(call?.arg.email).toBe('oscar@example.invalid');
-    expect(call?.arg.opts.redirectTo).toBe(ADMIN_URL);
+    expect(call?.arg.opts.redirectTo).toBe(ACTIVATION_URL);
     // Staff profile, role, invitation, member, and genealogy edge all point
     // at the invited Auth user; the frozen sponsor is the stored one.
     expect(db.rows('staff_users').find((row) => row.id === NEW_OST_ID)?.status).toBe('invited');

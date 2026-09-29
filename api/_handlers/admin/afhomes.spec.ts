@@ -24,11 +24,14 @@ vi.mock('../../_lib/rest.js', () => ({
     return holder.db;
   },
   okList: (res: { status: (c: number) => { json: (b: unknown) => void } }, rows: unknown[]) =>
-    res.status(200).json({ data: rows, meta: { page: 1, pageSize: rows.length, total: rows.length } }),
+    res
+      .status(200)
+      .json({ data: rows, meta: { page: 1, pageSize: rows.length, total: rows.length } }),
   methodNotAllowed: (
     res: { status: (c: number) => { json: (b: unknown) => void } },
     method?: string,
-  ) => res.status(405).json({ error: { code: 'NOT_FOUND', message: `Method ${method} not allowed` } }),
+  ) =>
+    res.status(405).json({ error: { code: 'NOT_FOUND', message: `Method ${method} not allowed` } }),
   readJsonBody: (req: { body?: unknown }) => ({ ok: true as const, body: req.body }),
 }));
 
@@ -64,7 +67,15 @@ function install(
     tables?: Record<string, unknown[]>;
     errors?: Record<string, { code?: string; message: string }>;
     writeErrors?: Record<string, { code?: string; message: string }>;
-    tokens?: Record<string, { id: string; email: string; email_confirmed_at?: string | null }>;
+    tokens?: Record<
+      string,
+      {
+        id: string;
+        email: string;
+        email_confirmed_at?: string | null;
+        amr?: (string | { method: string; timestamp: number })[];
+      }
+    >;
     invite?: (email: string, options: unknown) => Promise<unknown>;
   } = {},
 ) {
@@ -170,8 +181,11 @@ describe('GET /admin/afhomes/session', () => {
     },
   );
 
-  it('activates an invited staff member on first confirmed sign-in and accepts the invitation', async () => {
+  it('activates an invited staff member only from a password-authenticated session', async () => {
     const db = install();
+    const roleId = db
+      .rows('staff_role_assignments')
+      .find((row) => row.staff_id === UUID.adminStaff)!.role_id;
     db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status = 'invited';
     db.rows('staff_invitations').push({
       id: 'inv-1',
@@ -187,6 +201,43 @@ describe('GET /admin/afhomes/session', () => {
     expect((state.body as Json).status).toBe('active');
     expect(db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status).toBe('active');
     expect(db.rows('staff_invitations')[0]!.status).toBe('accepted');
+    expect(
+      db.rows('staff_role_assignments').find((row) => row.staff_id === UUID.adminStaff)!.role_id,
+    ).toBe(roleId);
+    const activationAudit = db
+      .rows('audit_events')
+      .find((row) => row.action === 'STAFF_ACCOUNT_ACTIVATED');
+    expect(activationAudit).toBeDefined();
+    expect(activationAudit?.after_data).toEqual({ authenticationMethod: 'password' });
+  });
+
+  it('does not activate an invited staff member from the invitation session', async () => {
+    const db = install({
+      tokens: {
+        [TOKEN.admin]: {
+          id: UUID.adminStaff,
+          email: 'admin@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: [{ method: 'invite', timestamp: 1 }],
+        },
+      },
+    });
+    db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status = 'invited';
+    db.rows('staff_invitations').push({
+      id: 'inv-setup',
+      email: 'admin@afhomes.test',
+      full_name: 'Ops Admin',
+      role_id: UUID.role.admin,
+      status: 'pending',
+      auth_user_id: UUID.adminStaff,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+
+    const state = await call({ afPath: 'session', token: TOKEN.admin });
+    expect(state.status).toBe(403);
+    expect(err(state.body)?.message).toMatch(/account setup required/i);
+    expect(db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status).toBe('invited');
+    expect(db.rows('staff_invitations')[0]!.status).toBe('pending');
   });
 
   it('does not activate an invited staff member whose email is unconfirmed', async () => {
@@ -286,6 +337,90 @@ describe('GET /admin/afhomes/session', () => {
   });
 });
 
+describe('GET /admin/afhomes/account-activation', () => {
+  it('returns only the invited profile bound to a verified invite session', async () => {
+    const db = install({
+      tokens: {
+        'token-invite': {
+          id: UUID.adminStaff,
+          email: 'admin@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: ['invite'],
+        },
+      },
+    });
+    db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status = 'invited';
+    db.rows('staff_invitations').push({
+      id: 'inv-candidate',
+      email: 'admin@afhomes.test',
+      full_name: 'Ops Admin',
+      role_id: UUID.role.admin,
+      status: 'pending',
+      auth_user_id: UUID.adminStaff,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+
+    const state = await call({ afPath: 'account-activation', token: 'token-invite' });
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual({
+      id: UUID.adminStaff,
+      email: 'admin@afhomes.test',
+      fullName: expect.any(String),
+    });
+    expect(JSON.stringify(state.body)).not.toMatch(/role|permission|password/i);
+  });
+
+  it('denies customer, normal staff, expired, and non-invite sessions without changing state', async () => {
+    const db = install({
+      tokens: {
+        'token-customer': {
+          id: '00000000-0000-4000-8000-00000000c001',
+          email: 'customer@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: ['invite'],
+        },
+        'token-active': {
+          id: UUID.adminStaff,
+          email: 'admin@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: ['invite'],
+        },
+        'token-password': {
+          id: UUID.viewerStaff,
+          email: 'viewer@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: ['password'],
+        },
+        'token-expired': {
+          id: UUID.viewerStaff,
+          email: 'viewer@afhomes.test',
+          email_confirmed_at: new Date().toISOString(),
+          amr: ['invite'],
+        },
+      },
+    });
+    db.rows('staff_users').find((s) => s.id === UUID.viewerStaff)!.status = 'invited';
+    db.rows('staff_invitations').push({
+      id: 'inv-expired',
+      email: 'viewer@afhomes.test',
+      full_name: 'Viewer',
+      role_id: UUID.role.employee,
+      status: 'pending',
+      auth_user_id: UUID.viewerStaff,
+      expires_at: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    for (const token of ['token-customer', 'token-active', 'token-password', 'token-expired']) {
+      expect((await call({ afPath: 'account-activation', token })).status).toBeGreaterThanOrEqual(
+        400,
+      );
+    }
+    expect(db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.status).toBe('active');
+    expect(db.rows('staff_users').find((s) => s.id === UUID.viewerStaff)!.status).toBe('invited');
+    expect(db.rows('staff_invitations')[0]!.status).toBe('pending');
+  });
+});
+
 /* ================================================================== */
 /* Roles                                                              */
 /* ================================================================== */
@@ -361,7 +496,9 @@ describe('roles', () => {
     });
     expect(state.status).toBe(201);
     expect((state.body as Json).slug).toBe('sales_reviewer');
-    expect(db.rows('role_permissions').filter((r) => r.role_id === (state.body as Json).id)).toHaveLength(1);
+    expect(
+      db.rows('role_permissions').filter((r) => r.role_id === (state.body as Json).id),
+    ).toHaveLength(1);
     expect(db.rows('audit_events').some((e) => e.action === 'ROLE_CREATED')).toBe(true);
   });
 
@@ -413,7 +550,9 @@ describe('roles', () => {
   });
 
   it('rolls the role back when the permission write fails', async () => {
-    const db = install({ writeErrors: { role_permissions: { message: 'permission write failed' } } });
+    const db = install({
+      writeErrors: { role_permissions: { message: 'permission write failed' } },
+    });
     const before = db.rows('roles').length;
     const state = await call({
       method: 'POST',
@@ -422,7 +561,13 @@ describe('roles', () => {
       body: {
         name: 'Rollback Me',
         permissions: [
-          { moduleKey: 'sales.card_sales', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+          {
+            moduleKey: 'sales.card_sales',
+            canView: true,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: false,
+          },
         ],
       },
     });
@@ -479,7 +624,13 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         permissions: [
-          { moduleKey: 'organization.roles', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+          {
+            moduleKey: 'organization.roles',
+            canView: true,
+            canCreate: true,
+            canUpdate: true,
+            canDelete: true,
+          },
         ],
       },
     });
@@ -495,7 +646,11 @@ describe('roles', () => {
       body: { name: 'Ghost' },
     });
     expect(unknown.status).toBe(404);
-    const del = await call({ method: 'DELETE', afPath: `roles/${UUID.role.custom}`, token: TOKEN.superAdmin });
+    const del = await call({
+      method: 'DELETE',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.superAdmin,
+    });
     expect(del.status).toBe(404);
   });
 
@@ -623,7 +778,13 @@ describe('staff', () => {
     expect(restricted.departmentName).toBe('Sales');
     expect(restricted.roleName).toBe('Admin');
     expect(restricted.restrictions).toEqual([
-      { moduleKey: 'organization.roles', denyView: true, denyCreate: false, denyUpdate: false, denyDelete: false },
+      {
+        moduleKey: 'organization.roles',
+        denyView: true,
+        denyCreate: false,
+        denyUpdate: false,
+        denyDelete: false,
+      },
     ]);
   });
 
@@ -653,7 +814,9 @@ describe('staff', () => {
     });
     expect(state.status).toBe(201);
     expect(db.rows('staff_users').some((s) => s.email === 'new.hire@afhomes.test')).toBe(true);
-    expect(db.rows('staff_role_assignments').some((r) => r.role_id === UUID.role.employee)).toBe(true);
+    expect(db.rows('staff_role_assignments').some((r) => r.role_id === UUID.role.employee)).toBe(
+      true,
+    );
     const invitation = db.rows('staff_invitations')[0]!;
     expect(invitation.status).toBe('pending');
     expect(invitation.invited_by).toBe(UUID.adminStaff);
@@ -667,7 +830,12 @@ describe('staff', () => {
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'solo@afhomes.test', fullName: 'Solo', departmentId: null, roleId: UUID.role.employee },
+      body: {
+        email: 'solo@afhomes.test',
+        fullName: 'Solo',
+        departmentId: null,
+        roleId: UUID.role.employee,
+      },
     });
     expect(state.status).toBe(201);
     expect((state.body as Json).departmentId).toBeNull();
@@ -675,13 +843,21 @@ describe('staff', () => {
 
   it('rejects a duplicate invitation with 409 and creates no auth user', async () => {
     const db = install({
-      invite: async () => ({ data: null, error: { message: 'A user with this email address has already been registered' } }),
+      invite: async () => ({
+        data: null,
+        error: { message: 'A user with this email address has already been registered' },
+      }),
     });
     const state = await call({
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'admin@afhomes.test', fullName: 'Impostor', departmentId: null, roleId: UUID.role.employee },
+      body: {
+        email: 'admin@afhomes.test',
+        fullName: 'Impostor',
+        departmentId: null,
+        roleId: UUID.role.employee,
+      },
     });
     expect(state.status).toBe(409);
     expect(db.rows('staff_users').some((s) => s.full_name === 'Impostor')).toBe(false);
@@ -705,7 +881,12 @@ describe('staff', () => {
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'retired@afhomes.test', fullName: 'Retired Role', departmentId: null, roleId: UUID.role.retired },
+      body: {
+        email: 'retired@afhomes.test',
+        fullName: 'Retired Role',
+        departmentId: null,
+        roleId: UUID.role.retired,
+      },
     });
     expect(state.status).toBe(400);
     expect(err(state.body)?.message).toMatch(/role is not active/i);
@@ -764,7 +945,12 @@ describe('staff', () => {
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.viewer,
-      body: { email: 'x@afhomes.test', fullName: 'X Y', departmentId: null, roleId: UUID.role.employee },
+      body: {
+        email: 'x@afhomes.test',
+        fullName: 'X Y',
+        departmentId: null,
+        roleId: UUID.role.employee,
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -775,7 +961,12 @@ describe('staff', () => {
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'rollback@afhomes.test', fullName: 'Roll Back', departmentId: null, roleId: UUID.role.employee },
+      body: {
+        email: 'rollback@afhomes.test',
+        fullName: 'Roll Back',
+        departmentId: null,
+        roleId: UUID.role.employee,
+      },
     });
     expect(state.status).toBe(500);
     expect(db.deletedAuthUsers).toHaveLength(1);
@@ -848,12 +1039,20 @@ describe('staff', () => {
       token: TOKEN.admin,
       body: {
         restrictions: [
-          { moduleKey: 'dashboard.view', denyView: true, denyCreate: false, denyUpdate: false, denyDelete: false },
+          {
+            moduleKey: 'dashboard.view',
+            denyView: true,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
         ],
       },
     });
     expect(state.status).toBe(200);
-    expect(db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.viewerStaff)).toBe(true);
+    expect(
+      db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.viewerStaff),
+    ).toBe(true);
     expect(db.rows('audit_events').some((e) => e.action === 'STAFF_ACCESS_UPDATED')).toBe(true);
   });
 
@@ -866,7 +1065,9 @@ describe('staff', () => {
       body: { restrictions: [] },
     });
     expect(state.status).toBe(200);
-    expect(db.rows('staff_permission_restrictions').filter((r) => r.staff_id === UUID.restrictedStaff)).toHaveLength(0);
+    expect(
+      db.rows('staff_permission_restrictions').filter((r) => r.staff_id === UUID.restrictedStaff),
+    ).toHaveLength(0);
   });
 
   it('ignores an all-false restriction row (deny-only invariant)', async () => {
@@ -877,11 +1078,19 @@ describe('staff', () => {
       token: TOKEN.admin,
       body: {
         restrictions: [
-          { moduleKey: 'dashboard.view', denyView: false, denyCreate: false, denyUpdate: false, denyDelete: false },
+          {
+            moduleKey: 'dashboard.view',
+            denyView: false,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
         ],
       },
     });
-    expect(db.rows('staff_permission_restrictions').filter((r) => r.staff_id === UUID.viewerStaff)).toHaveLength(0);
+    expect(
+      db.rows('staff_permission_restrictions').filter((r) => r.staff_id === UUID.viewerStaff),
+    ).toHaveLength(0);
   });
 
   it('rejects an unknown module key in restrictions', async () => {
@@ -892,7 +1101,13 @@ describe('staff', () => {
       token: TOKEN.admin,
       body: {
         restrictions: [
-          { moduleKey: 'made.up.module', denyView: true, denyCreate: false, denyUpdate: false, denyDelete: false },
+          {
+            moduleKey: 'made.up.module',
+            denyView: true,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
         ],
       },
     });
@@ -920,7 +1135,9 @@ describe('staff', () => {
       body: { status: 'suspended' },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe('active');
+    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe(
+      'active',
+    );
   });
 
   it('refuses an Admin locking the Super Admin out with restrictions (Invariant C)', async () => {
@@ -931,12 +1148,20 @@ describe('staff', () => {
       token: TOKEN.admin,
       body: {
         restrictions: [
-          { moduleKey: 'dashboard.view', denyView: true, denyCreate: false, denyUpdate: false, denyDelete: false },
+          {
+            moduleKey: 'dashboard.view',
+            denyView: true,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
         ],
       },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.superAdminStaff)).toBe(false);
+    expect(
+      db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.superAdminStaff),
+    ).toBe(false);
   });
 
   it('refuses an Admin moving the Super Admin to another department (Invariant C)', async () => {
@@ -975,9 +1200,9 @@ describe('staff', () => {
       body: { roleId: UUID.role.superAdmin },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id).toBe(
-      UUID.role.employee,
-    );
+    expect(
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id,
+    ).toBe(UUID.role.employee);
   });
 
   it('refuses reassigning a role the actor cannot grant (Invariant B)', async () => {
@@ -990,9 +1215,9 @@ describe('staff', () => {
     });
     expect(state.status).toBe(403);
     expect(err(state.body)?.message).toMatch(/do not possess/i);
-    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id).toBe(
-      UUID.role.employee,
-    );
+    expect(
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id,
+    ).toBe(UUID.role.employee);
   });
 
   it('refuses to assign an inactive role', async () => {
@@ -1061,7 +1286,7 @@ describe('dashboard', () => {
     expect((body.totals as Json).verifiedSales).toBe(0);
     expect((body.totals as Json).verifiedCollections).toBe('0.00');
     expect((body.totals as Json).activeMemberships).toBe(0);
-    expect((body.trend as unknown[])).toEqual([]);
+    expect(body.trend as unknown[]).toEqual([]);
   });
 
   it('denies the dashboard without dashboard.view', async () => {
@@ -1190,7 +1415,11 @@ describe('dashboard', () => {
 
   it('falls back to the month window for an unknown range', async () => {
     install();
-    const state = await call({ afPath: 'dashboard', token: TOKEN.admin, query: { range: 'nonsense' } });
+    const state = await call({
+      afPath: 'dashboard',
+      token: TOKEN.admin,
+      query: { range: 'nonsense' },
+    });
     expect(state.status).toBe(200);
   });
 });
@@ -1245,7 +1474,12 @@ describe('handler surface', () => {
         method: 'POST',
         afPath: 'staff',
         token: TOKEN.admin,
-        body: { email: 'nowhere@afhomes.test', fullName: 'No Redirect', departmentId: null, roleId: UUID.role.employee },
+        body: {
+          email: 'nowhere@afhomes.test',
+          fullName: 'No Redirect',
+          departmentId: null,
+          roleId: UUID.role.employee,
+        },
       });
       expect(state.status).toBe(500);
       expect(err(state.body)?.message).toMatch(/AFHOMES_ADMIN_URL/);
