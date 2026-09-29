@@ -169,32 +169,56 @@ describe('no plaintext secret handling', () => {
     }
   });
 
-  it('no test or source file contains a real-looking credential', () => {
-    // A structural guard, not a scanner: this repo must never gain a committed
-    // service key or connection string.
-    //
-    // The two allowlisted files are reviewed, and the reason is recorded here so
-    // the next reader checks rather than widens the pattern:
-    //   packages/config/src/env.spec.ts  - an obvious dummy fixture
-    //     (`user:pass@pooler`) proving the env parser rejects/keeps a value. Not
-    //     a credential for anything.
-    //   scripts/lib/local-postgres.mjs   - the DISPOSABLE loopback test server's
-    //     own URL, built from a hardcoded throwaway password for a database that
-    //     is created and deleted inside the test run. It is 127.0.0.1 and it
-    //     grants nothing.
-    const ALLOWED = new Set([
-      'packages/config/src/env.spec.ts',
-      'packages/db-testing/scripts/lib/local-postgres.mjs',
-    ]);
-    const offenders: string[] = [];
-    for (const file of FILES) {
-      const p = rel(file);
-      if (p.startsWith('docs/') || ALLOWED.has(p)) continue;
-      const hits = read(file).match(
-        /(?:eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})|(?:postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@)/g,
-      );
-      if (hits) offenders.push(`${p}: ${hits.length} match(es)`);
-    }
-    expect(offenders).toEqual([]);
+  it(
+    'no test or source file contains a real-looking credential',
+    // Phase 30: the walk below reads ~1k files synchronously, which exceeds
+    // the 5s default under a loaded parallel run (observed repeatedly in
+    // Phases 26-29 while passing solo in ~3s). The timeout is raised WITHOUT
+    // touching what is scanned or matched; the liveness test that follows
+    // proves the pattern still fires.
+    { timeout: 30000 },
+    () => {
+      // A structural guard, not a scanner: this repo must never gain a committed
+      // service key or connection string.
+      //
+      // The two allowlisted files are reviewed, and the reason is recorded here so
+      // the next reader checks rather than widens the pattern:
+      //   packages/config/src/env.spec.ts  - an obvious dummy fixture
+      //     (`user:pass@pooler`) proving the env parser rejects/keeps a value. Not
+      //     a credential for anything.
+      //   scripts/lib/local-postgres.mjs   - the DISPOSABLE loopback test server's
+      //     own URL, built from a hardcoded throwaway password for a database that
+      //     is created and deleted inside the test run. It is 127.0.0.1 and it
+      //     grants nothing.
+      const ALLOWED = new Set([
+        'packages/config/src/env.spec.ts',
+        'packages/db-testing/scripts/lib/local-postgres.mjs',
+      ]);
+      const offenders: string[] = [];
+      for (const file of FILES) {
+        const p = rel(file);
+        if (p.startsWith('docs/') || ALLOWED.has(p)) continue;
+        const hits = read(file).match(
+          /(?:eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})|(?:postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@)/g,
+        );
+        if (hits) offenders.push(`${p}: ${hits.length} match(es)`);
+      }
+      expect(offenders).toEqual([]);
+    },
+  );
+
+  it('proves the credential pattern still fires on planted secrets', () => {
+    // The pattern is duplicated from the scan above (pointing at it, not
+    // weakening it): this test fails if the regex ever stops matching, so a
+    // vacuous green scan is impossible. Fragments are assembled at runtime so
+    // this file itself never contains a contiguous match for the scan to trip
+    // on - the scan must keep passing alongside this test.
+    const pattern = /(?:eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})|(?:postgres(?:ql)?:\/\/[^:\s]+:[^@\s]+@)/g;
+    const plantedJwt = ['eyJ', 'A'.repeat(20), '.', 'B'.repeat(20)].join('');
+    const plantedUrl = ['postgres', '://', 'user', ':', 's3cret', '@db.example.com'].join('');
+    expect(plantedJwt.match(pattern)).not.toBeNull();
+    expect(plantedUrl.match(pattern)).not.toBeNull();
+    expect('postgres:// without credentials'.match(pattern)).toBeNull();
+    expect('no secrets here'.match(pattern)).toBeNull();
   });
 });

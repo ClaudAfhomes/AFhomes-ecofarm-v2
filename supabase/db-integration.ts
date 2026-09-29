@@ -5115,8 +5115,814 @@ async function main(): Promise<void> {
       const auditReadable = await db.query('select id from public.audit_events limit 1');
       check('audit_events is readable through the service role', Array.isArray(auditReadable.rows));
     }
+
+    section('42. Phase 31 full end-to-end business workflow');
+    /* ---------------------------------------------------------------- */
+    // One realistic Gold chain on disposable data: hierarchy -> customer +
+    // sale -> payments -> activation -> onboarding -> card ops -> redemption
+    // -> commission -> genealogy move -> scoped reads. Every actor is the role
+    // that would act in production (sellers sell, finance moves money,
+    // employees redeem, admins qualify); the permission checks themselves live
+    // in the handlers and are proven in the api suite, while the RPCs below
+    // re-validate actor and data at the database boundary.
+    //
+    // Where this section performs a handler-owned write directly (commission
+    // qualify/pay, card print), it mirrors the handler semantics exactly -
+    // same guarded transitions, same audit action names - so the database
+    // behavior is proven without pretending to test handler code.
+    //
+    // Cleanup: every person carries a RUN-prefixed email and a recorded id,
+    // so section 21 removes the staff, customers, auth users, sales,
+    // payments, memberships, points, commissions, redemptions, snapshots,
+    // tokens, edges and audits below. The catalog item is RUN-prefixed. The
+    // Gold plan row is borrowed and RESTORED in this section (re-verified).
+    {
+      // -- Flow A: hierarchy VD -> SSM -> SM -> OST, plus a second VD/SSM
+      // -- branch that the genealogy move later targets.
+      const e2eStaff = async (label: string, role: string) => mkStaff(`e2e-${label}`, role);
+      const vd = await e2eStaff('vd', 'vice_director');
+      const ssm = await e2eStaff('ssm', 'senior_sales_manager');
+      const sm = await e2eStaff('sm', 'sales_manager');
+      const ost = await e2eStaff('ost', 'ost');
+      const fin = await e2eStaff('finance', 'finance');
+      const emp = await e2eStaff('employee', 'employee');
+      const admin = await e2eStaff('admin', 'admin');
+      const vdB = await e2eStaff('vd-b', 'vice_director');
+      const ssmB = await e2eStaff('ssm-b', 'senior_sales_manager');
+      const mkEdge = (subject: string, upline: string, role: string) =>
+        one<{ id: string }>(
+          `insert into public.referral_relationships
+             (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+           values ($1,$2,$3,true,true,$4) returning id`,
+          [subject, upline, role, staff['super-admin']],
+        );
+      await mkEdge(ssm, vd, 'senior_sales_manager');
+      await mkEdge(sm, ssm, 'sales_manager');
+      const ostEdge = await mkEdge(ost, sm, 'ost');
+      await mkEdge(ssmB, vdB, 'senior_sales_manager');
+      for (const [subject, role] of [
+        [ssm, 'senior_sales_manager'],
+        [sm, 'sales_manager'],
+        [ost, 'ost'],
+      ] as Array<[string, string]>) {
+        const edges = await one<{ n: number }>(
+          `select count(*)::int as n from public.referral_relationships
+            where subject_staff_id = $1 and is_active and hierarchy_role = $2`,
+          [subject, role],
+        );
+        eq(`hierarchy edge holds for ${role}`, edges.n, 1);
+      }
+      const vdTop = await one<{ n: number }>(
+        `select count(*)::int as n from public.referral_relationships
+          where subject_staff_id = $1 and is_active`,
+        [vd],
+      );
+      eq('the VD sits at the top with no upline', vdTop.n, 0);
+      // Spot-check the grant basis for the actors used below (the grants
+      // themselves are proven in section 38; this documents which grant each
+      // E2E actor relies on).
+      for (const [slug, key, action] of [
+        ['finance', 'finance.payment_verification', 'update'],
+        ['admin', 'network.commissions', 'update'],
+        ['employee', 'operations.redemption', 'create'],
+      ] as Array<[string, string, string]>) {
+        const grant = await one<{ n: number }>(
+          `select count(*)::int as n
+             from public.role_permissions rp
+             join public.staff_role_assignments a on a.role_id = rp.role_id
+             join public.roles r on r.id = a.role_id
+             join public.modules m on m.id = rp.module_id
+            where a.staff_id = $1 and m.key = $2 and rp.can_${action} is true`,
+          [(slug === 'finance' ? fin : slug === 'admin' ? admin : emp) as string, key],
+        );
+        // The column name is interpolated from a literal triple above, never input.
+        check(`grant basis: ${slug} holds ${key}/${action}`, grant.n >= 1, String(grant.n));
+      }
+
+      // -- Flow B: Gold plan economics are read from the seed, never typed.
+      const gold = await one<Record<string, string | number>>(
+        `select * from public.card_plans where code = 'GOLD'`,
+      );
+      eq('Gold cash price seed', String(gold.cash_price), '60000.00');
+      eq('Gold minimum down payment seed', String(gold.minimum_down_payment), '20000.00');
+      eq('Gold yearly points seed', String(gold.yearly_points), '60000');
+      eq('Gold commission rate seed', String(gold.commission_rate), '0.04');
+      const custA = await mkCustomer('buyer', 'e2e');
+      const custB = await mkCustomer('isolation', 'e2e');
+      eq(
+        'isolation customer starts with no sale',
+        (await one<{ n: number }>('select count(*)::int as n from public.card_sales where customer_id = $1', [custB])).n,
+        0,
+      );
+      const saleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
+        .sale_number;
+      check('sale number is non-blank and sequenced', /^SALE-/.test(saleNo), saleNo);
+      const saleId = uuidFor('e2e:sale:gold');
+      const expectedComm = await one<{ v: string }>(
+        'select round($1::numeric * $2::numeric, 2)::text as v',
+        [String(gold.cash_price), String(gold.commission_rate)],
+      );
+      eq('expected commission is 4% of the frozen price', expectedComm.v, '2400.00');
+      await db.query(
+        `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+            cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
+            commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at,
+            created_by, referral_relationship_id)
+         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted', now(), now() + interval '365 days', $5, $11)`,
+        [
+          saleId,
+          saleNo,
+          custA,
+          String(gold.id),
+          ost,
+          String(gold.cash_price),
+          String(gold.minimum_down_payment),
+          Number(gold.yearly_points),
+          String(gold.commission_rate),
+          expectedComm.v,
+          ostEdge.id,
+        ],
+      );
+      // The sale-creation handler also opens the commission as pending; the
+      // trigger owns the hierarchy snapshots, so both are asserted, not built.
+      await db.query(
+        `insert into public.commissions
+           (sale_id, beneficiary_type, beneficiary_staff_id, amount, rate_snapshot, basis_amount_snapshot, status)
+         values ($1,'staff',$2,$3,$4,$5,'pending')`,
+        [saleId, ost, expectedComm.v, String(gold.commission_rate), String(gold.cash_price)],
+      );
+      const frozen = await one<Record<string, string | number>>(
+        `select cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
+                commission_rate_snapshot, expected_commission_snapshot, status, seller_staff_id,
+                customer_id, plan_id, referral_relationship_id
+           from public.card_sales where id = $1`,
+        [saleId],
+      );
+      eq('snapshot: frozen price', String(frozen.cash_price_snapshot), String(gold.cash_price));
+      eq('snapshot: frozen minimum down', String(frozen.minimum_down_payment_snapshot), String(gold.minimum_down_payment));
+      eq('snapshot: frozen yearly points', String(frozen.yearly_points_snapshot), String(gold.yearly_points));
+      eq('snapshot: frozen commission rate', String(frozen.commission_rate_snapshot), String(gold.commission_rate));
+      eq('snapshot: frozen expected commission', String(frozen.expected_commission_snapshot), '2400.00');
+      eq('snapshot: seller is the OST of record', String(frozen.seller_staff_id), ost);
+      eq('snapshot: customer linked', String(frozen.customer_id), custA);
+      const snapRows = await db.query<{ depth: number; ancestor_staff_id: string }>(
+        `select depth, ancestor_staff_id from public.card_sale_hierarchy_snapshots
+          where sale_id = $1 order by depth`,
+        [saleId],
+      );
+      eq('the insert trigger captured seller + 3 uplines', snapRows.rows.length, 4);
+      eq('depth 0 is the seller', String(snapRows.rows[0]!.ancestor_staff_id), ost);
+      eq('depth 3 is the VD', String(snapRows.rows[3]!.ancestor_staff_id), vd);
+      // A duplicate open application for the same customer and plan is refused
+      // by the partial unique index: no partial row, no second sale number.
+      const dupeRefused = await throws('duplicate open application refused', () =>
+        db.query(
+          `insert into public.card_sales
+             (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+              cash_price_snapshot, status, submitted_at, balance_due_at)
+           values ($1,$2,$3,$4,'staff',$5,$6,$6,'submitted', now(), now() + interval '365 days')`,
+          [uuidFor('e2e:sale:dupe'), `${saleNo}-DUPE`, custA, String(gold.id), ost, String(gold.cash_price)],
+        ),
+      );
+      check('  unique violation, nothing persisted', /23505|duplicate|unique/i.test(dupeRefused), dupeRefused.split('\n')[0]);
+      // A live repricing cannot move the frozen sale; the seed is restored in
+      // the same section with a re-verification, so later sections are safe.
+      await db.query(`update public.card_plans set cash_price = '99999.99' where id = $1`, [String(gold.id)]);
+      const afterReprice = await one<{ p: string }>(
+        'select cash_price_snapshot as p from public.card_sales where id = $1',
+        [saleId],
+      );
+      eq('frozen price ignores the live plan', afterReprice.p, '60000.00');
+      await db.query(`update public.card_plans set cash_price = '60000.00' where id = $1`, [String(gold.id)]);
+      const restored = await one<{ p: string }>(
+        'select cash_price::text as p from public.card_plans where id = $1',
+        [String(gold.id)],
+      );
+      eq('Gold seed restored for later sections', restored.p, '60000.00');
+
+      // -- Flow C: 20,000 verified, then 40,000 to fully paid.
+      const pay1 = (
+        await one<{ id: string }>(
+          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
+          [saleId, '20000.00', `${RUN}-E2E-PAY-1`, fin],
+        )
+      ).id;
+      const verify1 = await one<Record<string, string | boolean>>(
+        'select * from public.verify_card_payment($1,$2,$3,$4)',
+        [pay1, 'verified', null, fin],
+      );
+      eq('first verified total is 20000.00', String(verify1.verified_total), '20000.00');
+      eq('not fully paid yet', verify1.fully_paid, false);
+      const window1 = await one<{ started: string; deadline: string }>(
+        `select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline
+           from public.card_sales where id = $1`,
+        [saleId],
+      );
+      check('first verified payment instant recorded', !!window1.started, window1.started);
+      const sevenDays = await one<{ ok: boolean }>(
+        'select ($1::timestamptz - $2::timestamptz) = interval \'7 days\' as ok',
+        [window1.deadline, window1.started],
+      );
+      check('deadline is exactly first verified + 7 days', sevenDays.ok === true);
+      const midSummary = await summaryOf(saleId);
+      eq('unverified nothing: verified total from rows only', midSummary.verifiedTotal, '20000.00');
+      check('sale is not activation-ready yet', midSummary.fullyPaid === false);
+      const commMid = await one<{ status: string }>(
+        'select status from public.commissions where sale_id = $1',
+        [saleId],
+      );
+      eq('commission is still pending before full payment', commMid.status, 'pending');
+      const pay2 = (
+        await one<{ id: string }>(
+          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
+          [saleId, '40000.00', `${RUN}-E2E-PAY-2`, fin],
+        )
+      ).id;
+      const verify2 = await one<Record<string, string | boolean>>(
+        'select * from public.verify_card_payment($1,$2,$3,$4)',
+        [pay2, 'verified', null, fin],
+      );
+      eq('verified total is now 60000.00', String(verify2.verified_total), '60000.00');
+      eq('fully paid', verify2.fully_paid, true);
+      const window2 = await one<{ started: string; deadline: string }>(
+        `select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline
+           from public.card_sales where id = $1`,
+        [saleId],
+      );
+      eq('first verified instant never moves', window2.started, window1.started);
+      eq('deadline never extends', window2.deadline, window1.deadline);
+      const fullSummary = await summaryOf(saleId);
+      eq('remaining balance is 0.00', fullSummary.remainingBalance, '0.00');
+      eq('summary reports fully paid', fullSummary.fullyPaid, true);
+      const commFull = await one<{ status: string }>(
+        'select status from public.commissions where sale_id = $1',
+        [saleId],
+      );
+      eq('commission advanced to payment_verified', commFull.status, 'payment_verified');
+      // DB-level retry of a decided payment is refused (the handler turns
+      // this into an idempotent success; the database itself never recounts).
+      const reverify = await throws('re-verifying a decided payment is refused', () =>
+        db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [pay1, 'verified', null, fin]),
+      );
+      check('  PAYMENT_NOT_PENDING, totals untouched', /PAYMENT_NOT_PENDING/.test(reverify), reverify.split('\n')[0]);
+      eq('  verified total still 60000.00', (await summaryOf(saleId)).verifiedTotal, '60000.00');
+
+      // -- Flow D: activation creates each dependent row exactly once.
+      const activated = await one<Record<string, string | number | boolean>>(
+        'select * from public.activate_card_sale($1,$2,$3)',
+        [saleId, fin, 12],
+      );
+      const membershipId = String(activated.membership_id);
+      check('membership created', !!membershipId);
+      check('membership number issued', String(activated.membership_number).length > 0, String(activated.membership_number));
+      check('QR token issued exactly once', typeof activated.qr_token === 'string' && String(activated.qr_token).length > 0);
+      check('fallback code issued exactly once', typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0);
+      eq('yearly allocation is 60000', String(activated.points_allocated), '60000');
+      check('not already active on first activation', activated.already_active === false);
+      const membershipNumber = String(activated.membership_number);
+      const memberRow = await one<Record<string, string | number>>(
+        'select * from public.memberships where id = $1',
+        [membershipId],
+      );
+      eq('membership is active', String(memberRow.status), 'active');
+      eq('same customer', String(memberRow.customer_id), custA);
+      eq('same sale', String(memberRow.sale_id), saleId);
+      eq('QR stored as a 64-hex hash', String(memberRow.qr_token_hash).length, 64);
+      check('QR plaintext not stored', String(memberRow.qr_token_hash) !== String(activated.qr_token));
+      eq('fallback stored as a 64-hex hash', String(memberRow.fallback_code_hash).length, 64);
+      const acct = await one<{ balance: string; lifetime: string }>(
+        'select balance::text as balance, lifetime_allocated::text as lifetime from public.points_accounts where membership_id = $1',
+        [membershipId],
+      );
+      eq('points account balance 60000', acct.balance, '60000');
+      eq('lifetime allocated 60000', acct.lifetime, '60000');
+      const ledgerAfterActivate = await db.query(
+        `select entry_type, amount from public.points_ledger
+          where account_id = (select id from public.points_accounts where membership_id = $1)`,
+        [membershipId],
+      );
+      eq('exactly one allocation ledger row', ledgerAfterActivate.rows.length, 1);
+      eq('allocation amount', String(ledgerAfterActivate.rows[0]!.amount), '60000');
+      const commActivated = await one<{ status: string; earned: string | null; amount: string }>(
+        'select status, earned_at::text as earned, amount::text as amount from public.commissions where sale_id = $1',
+        [saleId],
+      );
+      eq('commission awaits final qualification', commActivated.status, 'final_qualification_pending');
+      check('never auto-earned', commActivated.earned === null);
+      eq('commission amount is 2400.00', commActivated.amount, '2400.00');
+      const again = await one<Record<string, string | number | boolean>>(
+        'select * from public.activate_card_sale($1,$2,$3)',
+        [saleId, fin, 12],
+      );
+      check('repeat activation is already_active', again.already_active === true);
+      eq('same membership returned', String(again.membership_id), membershipId);
+      check('no new plaintext on retry', again.qr_token === null && again.fallback_code === null);
+      const dupCounts = await one<{ m: number; a: number; l: number; c: number }>(
+        `select (select count(*)::int from public.memberships where sale_id = $1) as m,
+                (select count(*)::int from public.points_accounts where membership_id = $2) as a,
+                (select count(*)::int from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $2)) as l,
+                (select count(*)::int from public.commissions where sale_id = $1) as c`,
+        [saleId, membershipId],
+      );
+      eq('still one membership', dupCounts.m, 1);
+      eq('still one points account', dupCounts.a, 1);
+      eq('still one ledger entry', dupCounts.l, 1);
+      eq('still one commission', dupCounts.c, 1);
+
+      // -- Flow E: onboarding token issue, claim, and portal isolation.
+      const authA = uuidFor('e2e:auth:customer-a');
+      await db.query('insert into auth.users (id, email) values ($1, $2)', [authA, `${RUN}-e2e-buyer@example.invalid`]);
+      createdAuthIds.push(authA);
+      const rawToken = (
+        await one<{ token: string }>(
+          'select * from public.issue_customer_onboarding_token($1,$2,$3,$4)',
+          [custA, 'account_activation', 72, fin],
+        )
+      ).token;
+      check('a one-time token is issued', typeof rawToken === 'string' && rawToken.length > 0);
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+      const claimed = await one<Record<string, string>>(
+        'select * from public.claim_customer_onboarding_token($1,$2,$3)',
+        [tokenHash, authA, 'account_activation'],
+      );
+      eq('claim outcome is CLAIMED', claimed.outcome, 'CLAIMED');
+      eq('claim returns the customer', claimed.customer_id, custA);
+      const linked = await one<{ auth: string; consumed: boolean }>(
+        `select auth_user_id::text as auth,
+                (select consumed_at is not null from public.customer_onboarding_tokens where token_hash = $2) as consumed
+           from public.customers where id = $1`,
+        [custA, tokenHash],
+      );
+      eq('customer Auth identity linked', linked.auth, authA);
+      check('token consumed, single-use', linked.consumed === true);
+      const relink = await one<Record<string, string>>(
+        'select * from public.claim_customer_onboarding_token($1,$2,$3)',
+        [tokenHash, authA, 'account_activation'],
+      );
+      eq('token reuse is idempotent, not a second link', relink.outcome, 'ALREADY_LINKED');
+      // Portal isolation through RLS impersonation: the member reads exactly
+      // their own rows; payments stay invisible to the browser role (the
+      // portal serves history server-side, proven at handler level).
+      eq(
+        'customer reads exactly their own customer row',
+        await visibleRows(target.url, 'authenticated', authA, `select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`),
+        1,
+      );
+      eq(
+        'customer reads exactly their own membership',
+        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.memberships'),
+        1,
+      );
+      eq(
+        'customer reads their own ledger entries',
+        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.points_ledger'),
+        1,
+      );
+      eq(
+        'customer cannot read payment rows directly (server-mediated portal)',
+        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.payments'),
+        0,
+      );
+      eq(
+        'finance reads the scenario payments through RLS',
+        await visibleRows(target.url, 'authenticated', fin, `select count(*)::int as n from public.payments where reference like '${RUN}-E2E-%'`),
+        2,
+      );
+      eq(
+        'anonymous reads no payments',
+        await visibleRows(target.url, 'anon', null, 'select count(*)::int as n from public.payments'),
+        0,
+      );
+      // An unauthorized browser write is refused and changes nothing.
+      const payCountBefore = await one<{ n: number }>(
+        `select count(*)::int as n from public.payments where sale_id = $1`,
+        [saleId],
+      );
+      const writeRefused = await asBrowserRole(target.url, 'authenticated', authA, async (c) => {
+        try {
+          await c.query(
+            `insert into public.payments (sale_id, customer_id, amount, method, recorded_by)
+             values ($1,$2,'1.00','cash',$3)`,
+            [saleId, custA, fin],
+          );
+          return '';
+        } catch (error) {
+          return (error as { code?: string }).code ?? 'no-code';
+        }
+      });
+      check('browser-role insert into payments is refused', writeRefused === '42501', writeRefused);
+      const payCountAfter = await one<{ n: number }>(
+        `select count(*)::int as n from public.payments where sale_id = $1`,
+        [saleId],
+      );
+      eq('refused write left no row behind', payCountAfter.n, payCountBefore.n);
+
+      // -- Flow F: card detail, print stamp, credential rotation.
+      const hashesBefore = await one<{ qr: string; fb: string; printed: number }>(
+        'select qr_token_hash as qr, fallback_code_hash as fb, print_count as printed from public.memberships where id = $1',
+        [membershipId],
+      );
+      check('no print recorded yet', hashesBefore.printed === 0 || hashesBefore.printed === null, String(hashesBefore.printed));
+      await db.query(
+        `update public.memberships set last_printed_at = now(), print_count = coalesce(print_count, 0) + 1 where id = $1`,
+        [membershipId],
+      );
+      await db.query(
+        `insert into public.audit_events (actor_id, action, entity_type, entity_id, after_data)
+         values ($1,'MEMBERSHIP_CARD_PRINTED','membership',$2,jsonb_build_object('printCount',1))`,
+        [fin, membershipId],
+      );
+      const afterPrint1 = await one<{ n: number; at: string }>(
+        'select print_count as n, last_printed_at::text as at from public.memberships where id = $1',
+        [membershipId],
+      );
+      eq('first print recorded', afterPrint1.n, 1);
+      check('print timestamp stamped', !!afterPrint1.at);
+      await db.query(
+        `update public.memberships set last_printed_at = now(), print_count = print_count + 1 where id = $1`,
+        [membershipId],
+      );
+      await db.query(
+        `insert into public.audit_events (actor_id, action, entity_type, entity_id, after_data)
+         values ($1,'MEMBERSHIP_CARD_REPRINTED','membership',$2,jsonb_build_object('printCount',2))`,
+        [fin, membershipId],
+      );
+      const afterPrint2 = await one<{ n: number }>(
+        'select print_count as n from public.memberships where id = $1',
+        [membershipId],
+      );
+      eq('reprint increments, never rotates', afterPrint2.n, 2);
+      const hashesAfterPrint = await one<{ qr: string; fb: string }>(
+        'select qr_token_hash as qr, fallback_code_hash as fb from public.memberships where id = $1',
+        [membershipId],
+      );
+      eq('printing leaves the QR hash alone', hashesAfterPrint.qr, hashesBefore.qr);
+      eq('printing leaves the fallback hash alone', hashesAfterPrint.fb, hashesBefore.fb);
+      // points_balance on the membership row is a denormalized cache that only
+      // moves on redemption (activation writes the authoritative balance to
+      // points_accounts; Phase 4 keeps the cache in step afterwards). Capture
+      // both now so rotation can be proven to move neither.
+      const pointsBeforeRotate = await one<{ account: number; cache: number }>(
+        `select (select balance from public.points_accounts where membership_id = $1) as account,
+                (select points_balance from public.memberships where id = $1) as cache`,
+        [membershipId],
+      );
+      eq('authoritative balance is 60000 before rotation', Number(pointsBeforeRotate.account), 60000);
+      const rotated = await one<{ membership_id: string; fallback_code: string; qr_token: string }>(
+        'select * from public.reissue_membership_credentials($1,$2,$3)',
+        [membershipId, custA, fin],
+      );
+      eq('rotation returns the same membership', rotated.membership_id, membershipId);
+      check('fresh QR issued', typeof rotated.qr_token === 'string' && rotated.qr_token.length > 0);
+      check('fresh fallback issued', typeof rotated.fallback_code === 'string' && rotated.fallback_code.length > 0);
+      const hashesAfterRotate = await one<{ qr: string; fb: string }>(
+        'select qr_token_hash as qr, fallback_code_hash as fb from public.memberships where id = $1',
+        [membershipId],
+      );
+      check('QR hash replaced', hashesAfterRotate.qr !== hashesBefore.qr);
+      check('fallback hash replaced', hashesAfterRotate.fb !== hashesBefore.fb);
+      const oldQrHits = await one<{ n: number }>(
+        'select count(*)::int as n from public.memberships where qr_token_hash = $1',
+        [hashesBefore.qr],
+      );
+      eq('old QR resolves to nothing', oldQrHits.n, 0);
+      const newQrHits = await one<{ id: string }>(
+        'select id from public.memberships where qr_token_hash = $1',
+        [hashesAfterRotate.qr],
+      );
+      eq('new QR resolves to the membership', newQrHits.id, membershipId);
+      const sameNumber = await one<{ no: string; sale: string }>(
+        'select membership_number as no, sale_id::text as sale from public.memberships where id = $1',
+        [membershipId],
+      );
+      eq('membership number unchanged by rotation', sameNumber.no, membershipNumber);
+      // Rotation must move neither the authoritative balance nor the cache.
+      const pointsAfterRotate = await one<{ account: number; cache: number }>(
+        `select (select balance from public.points_accounts where membership_id = $1) as account,
+                (select points_balance from public.memberships where id = $1) as cache`,
+        [membershipId],
+      );
+      eq('authoritative balance still 60000', Number(pointsAfterRotate.account), 60000);
+      eq('denormalized cache untouched by rotation', Number(pointsAfterRotate.cache), Number(pointsBeforeRotate.cache));
+      eq('sale link untouched by rotation', sameNumber.sale, saleId);
+      const rotationAudit = await one<{ n: number }>(
+        `select count(*)::int as n from public.audit_events
+          where action = 'CUSTOMER_CREDENTIALS_REISSUED' and entity_id = $1`,
+        [membershipId],
+      );
+      eq('rotation audited inside the RPC', rotationAudit.n, 1);
+
+      // -- Flow G: redemption of 2000 points, then an idempotent replay.
+      // The code is E2E-namespaced: section 25 already owns ${RUN}-TEPPANYAKI
+      // for the whole run, and the code column is globally unique.
+      const itemId = uuidFor('e2e:item:teppanyaki');
+      await db.query(
+        `insert into public.redemption_items (id, code, name, description, category, points_cost, is_active, sort_order)
+         values ($1,$2,'Teppanyaki','Grill dinner','dining',2000,true,0)`,
+        [itemId, `${RUN}-E2E-TEPPANYAKI`],
+      );
+      const resolveHit = await one<{ id: string }>(
+        'select id from public.memberships where qr_token_hash = $1',
+        [hashesAfterRotate.qr],
+      );
+      eq('current QR resolves the membership', resolveHit.id, membershipId);
+      const resolveMiss = await one<{ id: string } | undefined>(
+        'select id from public.memberships where qr_token_hash = $1',
+        ['0'.repeat(64)],
+      );
+      eq('an unknown identifier resolves to nothing', resolveMiss, undefined);
+      const receipt = camel<Record<string, string | number>>(
+        (
+          await db.query('select * from public.redeem_membership_points($1,$2,$3,$4,$5)', [
+            membershipId,
+            itemId,
+            1,
+            `${RUN}-E2E-KEY-1`,
+            emp,
+          ])
+        ).rows[0],
+      );
+      eq('receipt charges the catalog cost', String(receipt.totalPoints), '2000');
+      eq('balance before 60000', String(receipt.balanceBefore), '60000');
+      eq('balance after 58000', String(receipt.balanceAfter), '58000');
+      check('redemption number issued', /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)), String(receipt.redemptionNumber));
+      const balanceAfter = await one<{ b: number }>(
+        'select balance as b from public.points_accounts where membership_id = $1',
+        [membershipId],
+      );
+      eq('account balance is 58000', Number(balanceAfter.b), 58000);
+      const redemptionRow = await one<Record<string, string | number>>(
+        'select * from public.redemptions where id = $1',
+        [String(receipt.redemptionId)],
+      );
+      eq('item name frozen on the row', String(redemptionRow.item_name_snapshot), 'Teppanyaki');
+      eq('item cost frozen on the row', String(redemptionRow.points_cost_snapshot), '2000');
+      eq('redemption completed', String(redemptionRow.status), 'completed');
+      const ledgerAfterRedeem = await db.query<{ amount: string }>(
+        `select amount::text as amount from public.points_ledger
+          where account_id = (select id from public.points_accounts where membership_id = $1)
+          order by id`,
+        [membershipId],
+      );
+      eq('ledger holds allocation + one debit', ledgerAfterRedeem.rows.length, 2);
+      eq('debit is exactly -2000', ledgerAfterRedeem.rows[1]!.amount, '-2000');
+      const replay = camel<Record<string, string | number>>(
+        (
+          await db.query('select * from public.redeem_membership_points($1,$2,$3,$4,$5)', [
+            membershipId,
+            itemId,
+            1,
+            `${RUN}-E2E-KEY-1`,
+            emp,
+          ])
+        ).rows[0],
+      );
+      eq('replay returns the original receipt', String(replay.redemptionId), String(receipt.redemptionId));
+      eq('balance still 58000 after replay', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+      const replays = await one<{ n: number }>(
+        'select count(*)::int as n from public.redemptions where customer_id = $1',
+        [custA],
+      );
+      eq('no second redemption row', replays.n, 1);
+      // Failure rollback: an unaffordable redemption moves nothing (quantity 30
+      // is a legal quantity whose 60,000 total exceeds the 58,000 balance).
+      const poorAttempt = await throws('oversized redemption refused', () =>
+        db.query('select * from public.redeem_membership_points($1,$2,$3,$4,$5)', [
+          membershipId,
+          itemId,
+          30,
+          `${RUN}-E2E-KEY-POOR`,
+          emp,
+        ]),
+      );
+      check('  INSUFFICIENT_POINTS', /INSUFFICIENT_POINTS/.test(poorAttempt), poorAttempt.split('\n')[0]);
+      eq('  balance unchanged by the refusal', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+
+      // -- Flow H: commission to earned, then paid, with guards.
+      const payTooEarly = await db.query(
+        `update public.commissions set status = 'paid' where id = (select id from public.commissions where sale_id = $1) and status = 'earned'`,
+        [saleId],
+      );
+      eq('earned-only pay guard: 0 rows while awaiting qualification', payTooEarly.rowCount, 0);
+      const qualified = await db.query(
+        `update public.commissions
+            set status = 'earned', qualification_notes = $2, qualified_by = $3, qualified_at = now(), earned_at = now()
+          where sale_id = $1 and status = 'final_qualification_pending'`,
+        [saleId, 'E2E manual qualification with notes.', admin],
+      );
+      eq('qualification applies exactly once', qualified.rowCount, 1);
+      await db.query(
+        `insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data, reason)
+         values ($1,'COMMISSION_QUALIFIED','commission',
+           (select id::text from public.commissions where sale_id = $2),
+           jsonb_build_object('status','final_qualification_pending'),
+           jsonb_build_object('status','earned','amount','2400.00'),
+           'E2E manual qualification with notes.')`,
+        [admin, saleId],
+      );
+      const qualifyAgain = await db.query(
+        `update public.commissions set status = 'earned' where sale_id = $1 and status = 'final_qualification_pending'`,
+        [saleId],
+      );
+      eq('re-qualification touches 0 rows', qualifyAgain.rowCount, 0);
+      const earnedRow = await one<Record<string, string>>(
+        'select status, amount::text as amount, rate_snapshot as rate, basis_amount_snapshot as basis, beneficiary_staff_id as beneficiary from public.commissions where sale_id = $1',
+        [saleId],
+      );
+      eq('earned, amount frozen', earnedRow.amount, '2400.00');
+      eq('rate frozen', earnedRow.rate, String(gold.commission_rate));
+      eq('basis frozen', earnedRow.basis, String(gold.cash_price));
+      eq('beneficiary still the OST seller', earnedRow.beneficiary, ost);
+      const paid = await db.query(
+        `update public.commissions
+            set status = 'paid', paid_at = now(), paid_by = $2, paid_reference = $3
+          where sale_id = $1 and status = 'earned'`,
+        [saleId, admin, `${RUN}-E2E-PAYOUT-1`],
+      );
+      eq('pay applies exactly once', paid.rowCount, 1);
+      await db.query(
+        `insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data)
+         values ($1,'COMMISSION_PAID','commission',
+           (select id::text from public.commissions where sale_id = $2),
+           jsonb_build_object('status','earned','amount','2400.00'),
+           jsonb_build_object('status','paid','amount','2400.00','reference','${RUN}-E2E-PAYOUT-1'))`,
+        [admin, saleId],
+      );
+      const paidRow = await one<{ status: string; ref: string; by: string }>(
+        'select status, paid_reference as ref, paid_by::text as by from public.commissions where sale_id = $1',
+        [saleId],
+      );
+      eq('commission paid', paidRow.status, 'paid');
+      check('payout reference recorded', paidRow.ref === `${RUN}-E2E-PAYOUT-1`, paidRow.ref);
+      eq('paid by the admin actor', paidRow.by, admin);
+      const payAgain = await db.query(
+        `update public.commissions set status = 'paid' where sale_id = $1 and status = 'earned'`,
+        [saleId],
+      );
+      eq('repeat pay is a no-op', payAgain.rowCount, 0);
+      eq('still paid exactly once', (await one<{ n: number }>(`select count(*)::int as n from public.commissions where sale_id = $1 and status = 'paid'`, [saleId])).n, 1);
+
+      // -- Flow I: move SM-A under SSM-B; history must not follow.
+      const smEdge = await one<{ id: string }>(
+        'select id from public.referral_relationships where subject_staff_id = $1 and is_active',
+        [sm],
+      );
+      const movedRel = await one<{ id: string }>(
+        'select public.correct_referral_upline($1,$2,$3,$4) as id',
+        [smEdge.id, ssmB, 'E2E restructure: SM-A joins SSM-B.', admin],
+      );
+      check('correction returned a new relationship', !!movedRel.id);
+      const saleRef = await one<{ ref: string }>(
+        'select referral_relationship_id::text as ref from public.card_sales where id = $1',
+        [saleId],
+      );
+      eq('sale still points at its creation-time relationship', saleRef.ref, String(ostEdge.id));
+      eq('commission beneficiary unchanged by the move', (await one<{ b: string }>('select beneficiary_staff_id::text as b from public.commissions where sale_id = $1', [saleId])).b, ost);
+      const vdSnaps = await one<{ n: number }>(
+        'select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1 and ancestor_staff_id = $2',
+        [saleId, vd],
+      );
+      eq('VD-A snapshot attribution unchanged', vdSnaps.n, 1);
+      const ssmSnaps = await one<{ n: number }>(
+        'select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1 and ancestor_staff_id = $2',
+        [saleId, ssm],
+      );
+      eq('SSM-A snapshot attribution unchanged', ssmSnaps.n, 1);
+      const teamNow = async (upline: string) =>
+        one<{ n: number }>(
+          `with recursive down as (
+             select subject_staff_id as id from public.referral_relationships where upline_staff_id = $1 and is_active
+             union
+             select r.subject_staff_id from public.referral_relationships r join down d on r.upline_staff_id = d.id where r.is_active
+           ) select count(*)::int as n from down`,
+          [upline],
+        );
+      eq('VD-A current descendants reflect the move', (await teamNow(vd)).n, 1);
+      eq('VD-B current descendants reflect the move', (await teamNow(vdB)).n, 3);
+      eq('SSM-A current descendants reflect the move', (await teamNow(ssm)).n, 0);
+      eq('SSM-B current descendants reflect the move', (await teamNow(ssmB)).n, 2);
+
+      // -- Flow J: CMS smoke - public reads work and own no economics.
+      const publishedDocs = await one<{ n: number }>(
+        `select count(*)::int as n from public.cms_documents where status = 'published'`,
+      );
+      check('published CMS documents are publicly readable (zero or more)', publishedDocs.n >= 0, String(publishedDocs.n));
+      const priceCols = await one<{ n: number }>(
+        `select count(*)::int as n from information_schema.columns
+          where table_schema = 'public'
+            and table_name in ('cms_documents','cms_document_versions','cms_pages','cms_page_sections','cms_page_versions','cms_media_assets')
+            and (column_name like '%price%' or column_name like '%commission%' or column_name like '%cash%')`,
+      );
+      eq('no CMS table can own price or commission fields', priceCols.n, 0);
+
+      // -- Flow K: scoped reads for the whole chain.
+      const e2eSummary = await summaryOf(saleId);
+      eq('report-equivalent: verified 60000.00', e2eSummary.verifiedTotal, '60000.00');
+      eq('report-equivalent: fully paid', e2eSummary.fullyPaid, true);
+      eq('report-equivalent: remaining 0.00', e2eSummary.remainingBalance, '0.00');
+      eq('snapshot rows still exactly seller + 3 uplines', (await one<{ n: number }>('select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1', [saleId])).n, 4);
+      eq('ledger holds allocation + redemption', (await one<{ n: number }>(`select count(*)::int as n from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $1)`, [membershipId])).n, 2);
+
+      // -- Flow L: audit presence for every step, with no secrets anywhere.
+      const e2eActors = [vd, ssm, sm, ost, fin, emp, admin, vdB, ssmB, authA];
+      for (const action of [
+        'PAYMENT_RECORDED',
+        'PAYMENT_VERIFIED',
+        'SALE_FULLY_PAID',
+        'MEMBERSHIP_ACTIVATED',
+        'CUSTOMER_AUTH_ACTIVATED',
+        'CUSTOMER_ONBOARDING_TOKEN_CONSUMED',
+        'CUSTOMER_ACCOUNT_LINKED',
+        'MEMBERSHIP_CARD_PRINTED',
+        'MEMBERSHIP_CARD_REPRINTED',
+        'CUSTOMER_CREDENTIALS_REISSUED',
+        'REDEMPTION_COMPLETED',
+        'COMMISSION_QUALIFIED',
+        'COMMISSION_PAID',
+        'UPLINE_CORRECTED',
+      ]) {
+        const found = await one<{ n: number }>(
+          'select count(*)::int as n from public.audit_events where action = $1 and actor_id = any($2::uuid[])',
+          [action, e2eActors],
+        );
+        check(`audit contains ${action}`, found.n >= 1, String(found.n));
+      }
+      // Sale creation itself is handler-audited (APPLICATION_SUBMITTED), so
+      // its absence here is by architecture, not a gap: the database owns
+      // the snapshot, the handler owns the event.
+      const secretScan = await one<{ n: number }>(
+        `select count(*)::int as n from public.audit_events
+          where actor_id = any($1::uuid[])
+            and (coalesce(before_data::text,'') ~ '[0-9a-f]{64}'
+              or coalesce(after_data::text,'') ~ '[0-9a-f]{64}'
+              or after_data::text ilike '%AFH-%' or before_data::text ilike '%AFH-%'
+              or after_data::text ilike '%eyJ%' or before_data::text ilike '%eyJ%'
+              or after_data::text ilike '%BEGIN %' or before_data::text ilike '%BEGIN %')`,
+        [e2eActors],
+      );
+      eq('no hashes, codes, tokens, or keys in E2E audit payloads', secretScan.n, 0);
+
+      // -- Cross-module invariants: exactly one of everything intended.
+      eq('one intended customer chain (A + isolation B)', (await one<{ n: number }>(`select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`, [])).n, 2);
+      eq('one Gold sale', (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [saleId])).n, 1);
+      eq('one membership for the sale', (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [saleId])).n, 1);
+      eq('membership number stable end to end', (await one<{ no: string }>('select membership_number as no from public.memberships where id = $1', [membershipId])).no, membershipNumber);
+      eq('final points balance 58000', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+      eq('frozen sale price still 60000.00', (await one<{ p: string }>('select cash_price_snapshot as p from public.card_sales where id = $1', [saleId])).p, '60000.00');
+      eq('frozen commission rate still matches Gold', (await one<{ r: string }>('select commission_rate_snapshot as r from public.card_sales where id = $1', [saleId])).r, String(gold.commission_rate));
+
+      // -- Failure rollback: an underpaid second sale activates nothing.
+      const bronze = await one<Record<string, string | number>>(`select * from public.card_plans where code = 'BRONZE'`);
+      const sale2 = uuidFor('e2e:sale:bronze-partial');
+      const sn2 = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      await db.query(
+        `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+            cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
+            commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at, created_by)
+         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days', $5)`,
+        [sale2, sn2, custA, String(bronze.id), ost, String(bronze.cash_price), String(bronze.minimum_down_payment), Number(bronze.yearly_points), String(bronze.commission_rate)],
+      );
+      const payPartial = (
+        await one<{ id: string }>(
+          `select public.record_card_payment($1,$2,'down_payment','cash',$3,null,null,$4) as id`,
+          [sale2, '5000.00', `${RUN}-E2E-PAY-PARTIAL`, fin],
+        )
+      ).id;
+      await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [payPartial, 'verified', null, fin]);
+      // A partially paid sale never reaches `payment_verified`, so activation
+      // refuses at the status gate before the funds gate: either refusal code
+      // proves money was never enough to activate, and no membership exists.
+      const underpaidFail = await throws('underpaid activation fails', () =>
+        db.query('select * from public.activate_card_sale($1,$2,$3)', [sale2, fin, 12]),
+      );
+      check('  activation refused, no partial membership', /SALE_NOT_(FULLY_PAID|ACTIVATABLE)/.test(underpaidFail), underpaidFail.split('\n')[0]);
+      eq(
+        '  no membership row for the underpaid sale',
+        (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [sale2])).n,
+        0,
+      );
+      // Explicit tidy-up for the rollback fixture (shared cleanup would also
+      // catch it through the customer set). Snapshots go first, under the
+      // harness-only maintenance flag: the immutability trigger refuses all
+      // snapshot writes otherwise, and the RESTRICT foreign key refuses the
+      // sale delete while snapshots reference it. Both guards prove history
+      // cannot be removed by accident - only deliberate, flagged maintenance.
+      await db.query('begin');
+      await db.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
+      await db.query('delete from public.card_sale_hierarchy_snapshots where sale_id = $1', [sale2]);
+      await db.query('delete from public.payments where id = $1', [payPartial]);
+      await db.query('delete from public.card_sales where id = $1', [sale2]);
+      await db.query('commit');
+      eq(
+        'rollback fixture fully removed',
+        (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [sale2])).n,
+        0,
+      );
+    }
   } catch (error) {
-    // An unexpected exception anywhere in sections 1-40 is a SUITE FAILURE. It
+    // An unexpected exception anywhere in sections 1-42 is a SUITE FAILURE. It
     // used to be reported from inside section 37's own handler, which meant a
     // throw in sections 1-36 produced a short, entirely green run and a zero
     // exit code. `check(..., false, ...)` records a failed result, the verdict
