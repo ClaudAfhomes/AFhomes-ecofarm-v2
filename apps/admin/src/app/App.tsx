@@ -3,7 +3,9 @@ import type { ReactNode } from 'react';
 import { NotFound } from '@jad/ui';
 import { AfHomesDashboardPage } from '../features/afhomes/AfHomesDashboardPage';
 import { AfHomesDepartmentsPage } from '../features/afhomes/AfHomesDepartmentsPage';
+import { AfHomesRoleDetailPage } from '../features/afhomes/AfHomesRoleDetailPage';
 import { AfHomesRolesPage } from '../features/afhomes/AfHomesRolesPage';
+import { AfHomesStaffDetailPage } from '../features/afhomes/AfHomesStaffDetailPage';
 import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
 import { BusinessActivationQueuePage } from '../features/business/BusinessActivationQueuePage';
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
@@ -19,6 +21,7 @@ import { AdminForgotPasswordPage } from '../features/auth/AdminForgotPasswordPag
 import { AdminActivateAccountPage } from '../features/auth/AdminActivateAccountPage';
 import { AdminLoginPage } from '../features/auth/AdminLoginPage';
 import { AdminResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
+import { MyAccountPage } from '../features/account/MyAccountPage';
 import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
 import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
 import { CmsMediaPage } from '../features/cms/CmsMediaPage';
@@ -125,6 +128,9 @@ export default function App() {
           />
           <Route path="/admin/departments" element={protectedPage(<AfHomesDepartmentsPage />)} />
           <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+          {/* My Account: the forced first-login password change lives here, so
+              the guard must let a gated session through (see RequireRole). */}
+          <Route path="/admin/profile" element={protectedPage(<MyAccountPage />)} />
           {/* Phase 15 Reports and Audit Center. `/admin/reports` is visible to
               every role with `dashboard.view`; the screen offers only the
               reports the session allows. `/admin/audit` needs
@@ -175,8 +181,8 @@ export default function App() {
             )}
           />
           <Route path="/admin/cms/history" element={protectedPage(<CmsHistoryPage />)} />
-          <Route path="/admin/staff/:id" element={<Navigate to="/admin/staff" replace />} />
-          <Route path="/admin/roles/:id" element={<Navigate to="/admin/roles" replace />} />
+          <Route path="/admin/staff/:id" element={protectedPage(<AfHomesStaffDetailPage />)} />
+          <Route path="/admin/roles/:id" element={protectedPage(<AfHomesRoleDetailPage />)} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

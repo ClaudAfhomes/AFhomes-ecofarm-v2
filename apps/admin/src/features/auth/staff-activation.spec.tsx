@@ -53,6 +53,7 @@ const installFetch = (activationStatus = 200) => {
         roleId: '22222222-2222-4222-8222-222222222222',
         roleSlug: 'finance',
         roleName: 'Finance',
+        mustChangePassword: false,
         permissions: [],
       });
     }

@@ -7,12 +7,15 @@ import {
   afHomesRoleSchema,
   afHomesSessionSchema,
   afHomesStaffSchema,
+  changeAfHomesStaffPasswordSchema,
   createAfHomesRoleSchema,
+  createAfHomesStaffSchema,
   errorEnvelopeSchema,
   exactDecimalRateSchema,
   exactDecimalStringSchema,
   inviteAfHomesStaffSchema,
   listResponseSchema,
+  updateAfHomesStaffProfileSchema,
 } from './index';
 
 const UUID_A = '00000000-0000-4000-8000-000000000001';
@@ -146,11 +149,23 @@ describe('afHomesSessionSchema', () => {
     roleId: UUID_B,
     roleSlug: 'admin',
     roleName: 'Admin',
+    mustChangePassword: false,
     permissions: [{ moduleKey: 'dashboard.view', ...viewAll }],
   };
 
   it('accepts the server-resolved principal', () => {
     expect(afHomesSessionSchema.safeParse(session).success).toBe(true);
+  });
+
+  it('accepts a forced-change session', () => {
+    expect(
+      afHomesSessionSchema.safeParse({ ...session, mustChangePassword: true }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a session without the forced-change flag', () => {
+    const { mustChangePassword: _dropped, ...noFlag } = session;
+    expect(afHomesSessionSchema.safeParse(noFlag).success).toBe(false);
   });
 
   it('rejects an unknown staff status', () => {
@@ -197,11 +212,19 @@ describe('afHomesStaffSchema', () => {
     roleId: UUID_B,
     roleName: 'Admin',
     restrictions: [],
+    mustChangePassword: false,
+    invitedAt: null,
+    activatedAt: '2026-01-02T00:00:00.000Z',
     createdAt: '2026-01-01T00:00:00.000Z',
   };
 
   it('accepts an unassigned staff member', () => {
     expect(afHomesStaffSchema.safeParse(staff).success).toBe(true);
+  });
+
+  it('rejects a staff row without the forced-change flag', () => {
+    const { mustChangePassword: _dropped, ...noFlag } = staff;
+    expect(afHomesStaffSchema.safeParse(noFlag).success).toBe(false);
   });
 
   it('rejects a bad email', () => {
@@ -244,6 +267,56 @@ describe('inviteAfHomesStaffSchema', () => {
     expect(inviteAfHomesStaffSchema.safeParse({ ...base, email: 'bad' }).success).toBe(false);
     expect(
       inviteAfHomesStaffSchema.safeParse({ ...base, email: 'a@b.co', roleId: 'x' }).success,
+    ).toBe(false);
+  });
+});
+
+describe('createAfHomesStaffSchema', () => {
+  const base = {
+    email: 'new@example.com',
+    fullName: 'New Hire',
+    departmentId: null,
+    roleId: UUID_B,
+  };
+
+  it('accepts creation with a temporary password', () => {
+    expect(
+      createAfHomesStaffSchema.safeParse({ ...base, temporaryPassword: 'TempPass1' }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a missing or weak temporary password', () => {
+    expect(createAfHomesStaffSchema.safeParse(base).success).toBe(false);
+    expect(createAfHomesStaffSchema.safeParse({ ...base, temporaryPassword: 'short' }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('updateAfHomesStaffProfileSchema', () => {
+  it('accepts a display name and rejects a blank one', () => {
+    expect(updateAfHomesStaffProfileSchema.safeParse({ name: 'New Name' }).success).toBe(true);
+    expect(updateAfHomesStaffProfileSchema.safeParse({ name: ' ' }).success).toBe(false);
+  });
+});
+
+describe('changeAfHomesStaffPasswordSchema', () => {
+  it('accepts current + new and rejects a short new password', () => {
+    expect(
+      changeAfHomesStaffPasswordSchema.safeParse({
+        currentPassword: 'TempPass1',
+        newPassword: 'BrandNew1',
+      }).success,
+    ).toBe(true);
+    expect(
+      changeAfHomesStaffPasswordSchema.safeParse({
+        currentPassword: 'TempPass1',
+        newPassword: 'short',
+      }).success,
+    ).toBe(false);
+    expect(
+      changeAfHomesStaffPasswordSchema.safeParse({ currentPassword: '', newPassword: 'BrandNew1' })
+        .success,
     ).toBe(false);
   });
 });

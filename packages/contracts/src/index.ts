@@ -22,6 +22,9 @@ export {
   afHomesDashboardSchema,
   createAfHomesRoleSchema,
   inviteAfHomesStaffSchema,
+  createAfHomesStaffSchema,
+  updateAfHomesStaffProfileSchema,
+  changeAfHomesStaffPasswordSchema,
 } from './schemas/afhomes.js';
 export type {
   AfHomesAction,

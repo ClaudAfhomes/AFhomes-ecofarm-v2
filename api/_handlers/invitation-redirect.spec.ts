@@ -1,12 +1,17 @@
 /**
- * Phase 16 invitation-readiness audit, executed as tests.
+ * Phase 1 (JAD parity) staff-creation integrity, executed as tests.
  *
- * Both invitation paths (staff onboarding and OST approval) call
- * `inviteUserByEmail` FIRST with the server-configured admin redirect and
- * only then write database rows, deleting the orphan Auth user when later
- * writes fail. These tests pin the redirect value, the Auth-first ordering,
- * and the failure semantics, so a future change cannot silently weaken
- * invitation integrity. They do not send email and never touch the network.
+ * Standard staff onboarding creates the Supabase Auth identity FIRST with an
+ * administrator-set temporary password (`auth.admin.createUser`,
+ * email pre-confirmed) and only then writes database rows, deleting the
+ * orphan Auth user when later writes fail. The legacy invitation callback
+ * (`inviteUserByEmail` + redirect) is NOT part of this path: creation works
+ * with no admin redirect configured, writes no `staff_invitations` row, and
+ * never stores or logs the secret. (The OST approval flow below still uses
+ * invitations - that surface is out of scope for Phase 1.)
+ *
+ * These tests pin the redirect-independence, the Auth-first ordering, and
+ * the failure semantics. They do not send email and never touch the network.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,7 +39,13 @@ afterEach(() => {
 
 function staffWorld(
   options: {
-    invite?: (email: string, opts: unknown) => Promise<unknown>;
+    createUser?: (attrs: {
+      email: string;
+      password?: string;
+      email_confirm?: boolean;
+      user_metadata?: unknown;
+    }) => Promise<unknown>;
+    writeErrors?: Record<string, { code?: string; message: string }>;
   } = {},
 ) {
   holder.db = new FakeSupabase({
@@ -46,51 +57,67 @@ function staffWorld(
       staff_invitations: [['email', 'status']],
     },
     defaults: { staff_invitations: { status: 'pending' } },
-    invite: options.invite,
-    inviteUserId: 'new-staff-0001',
+    createUser: options.createUser,
+    createUserId: 'new-staff-0001',
+    writeErrors: options.writeErrors,
   });
   return holder.db as FakeSupabase;
 }
 
-async function inviteStaff(body: unknown, token: string = TOKEN.admin) {
+async function createStaff(body: unknown, token: string = TOKEN.admin) {
   const { res, state } = makeRes();
   await afhomes(makeReq({ method: 'POST', afPath: 'staff', body, token }) as never, res as never);
   return state;
 }
 
+const createCall = (db: FakeSupabase) =>
+  db.calls.find((call) => call.op === 'createUser') as
+    { op: string; table: string; arg: { email: string; email_confirm?: boolean } } | undefined;
+
 const inviteCall = (db: FakeSupabase) =>
   db.calls.find((call) => call.op === 'inviteUserByEmail') as
     { op: string; table: string; arg: { email: string; opts: { redirectTo: string } } } | undefined;
 
-describe('staff invitation readiness', () => {
-  it('sends staff invitations to the dedicated account activation route', async () => {
+const TEMP_PASSWORD = 'TempPass123';
+
+describe('staff creation integrity (temporary-password onboarding)', () => {
+  it('creates the Auth identity pre-confirmed with no invitation and no redirect', async () => {
+    vi.stubEnv('AFHOMES_ADMIN_URL', '');
+    delete process.env.AFHOMES_ADMIN_URL;
     const db = staffWorld();
-    const state = await inviteStaff({
+    const state = await createStaff({
       email: 'new.hire@afhomes.test',
       fullName: 'New Hire',
       departmentId: null,
       roleId: UUID.role.employee,
+      temporaryPassword: TEMP_PASSWORD,
     });
     expect(state.status).toBe(201);
-    const call = inviteCall(db);
+    const call = createCall(db);
     expect(call?.arg.email).toBe('new.hire@afhomes.test');
-    // The server derives the route from its configured admin base: no body
-    // field, user input, or request host can become an Auth redirect.
-    expect(call?.arg.opts.redirectTo).toBe(ACTIVATION_URL);
+    // Pre-confirmed: the member signs in with the temporary password, so no
+    // email round-trip and no redirect value can influence the flow.
+    expect(call?.arg.email_confirm).toBe(true);
+    expect(db.calls.some((call) => call.op === 'inviteUserByEmail')).toBe(false);
+    expect(db.rows('staff_invitations')).toHaveLength(0);
+    const row = db.rows('staff_users').find((r) => r.email === 'new.hire@afhomes.test')!;
+    expect(row.status).toBe('active');
+    expect(row.must_change_password).toBe(true);
   });
 
-  it('commits no staff or invitation rows when the Auth invite fails', async () => {
+  it('commits no staff rows when Auth creation fails', async () => {
     const db = staffWorld({
-      invite: async () => ({
-        data: null,
-        error: { message: 'Error sending invite email' },
+      createUser: async () => ({
+        data: { user: null },
+        error: { message: 'Error creating user' },
       }),
     });
-    const state = await inviteStaff({
+    const state = await createStaff({
       email: 'unlucky@afhomes.test',
       fullName: 'Unlucky',
       departmentId: null,
       roleId: UUID.role.employee,
+      temporaryPassword: TEMP_PASSWORD,
     });
     expect(state.status).toBe(409);
     expect(db.rows('staff_users').some((row) => row.email === 'unlucky@afhomes.test')).toBe(false);
@@ -98,23 +125,22 @@ describe('staff invitation readiness', () => {
     expect(db.createdAuthUsers).toHaveLength(0);
   });
 
-  it('refuses without an admin redirect target and creates no Auth user (invite 500 root cause)', async () => {
+  it('creates staff with no admin redirect target and no Auth side effects on duplicates', async () => {
     vi.stubEnv('AFHOMES_ADMIN_URL', '');
     delete process.env.AFHOMES_ADMIN_URL;
     const db = staffWorld();
-    const state = await inviteStaff({
+    const state = await createStaff({
       email: 'noroute@afhomes.test',
       fullName: 'No Route',
       departmentId: null,
       roleId: UUID.role.employee,
+      temporaryPassword: TEMP_PASSWORD,
     });
-    expect(state.status).toBe(500);
-    expect(JSON.stringify(state.body)).toMatch(/AFHOMES_ADMIN_URL/);
-    expect(db.createdAuthUsers).toHaveLength(0);
-    expect(db.rows('staff_users').some((row) => row.email === 'noroute@afhomes.test')).toBe(false);
+    expect(state.status).toBe(201);
+    expect(db.createdAuthUsers).toHaveLength(1);
   });
 
-  it('removes the orphan Auth user when a later staff write fails', async () => {
+  it('rejects a duplicate email before touching Auth and removes the orphan on a later write failure', async () => {
     const db = staffWorld();
     db.rows('staff_users').push({
       id: 'clash-0001',
@@ -122,13 +148,32 @@ describe('staff invitation readiness', () => {
       full_name: 'Clash',
       status: 'active',
     });
-    const state = await inviteStaff({
+    const clash = await createStaff({
       email: 'clash@afhomes.test',
       fullName: 'Clash Two',
       departmentId: null,
       roleId: UUID.role.employee,
+      temporaryPassword: TEMP_PASSWORD,
     });
-    expect([409, 500]).toContain(state.status);
+    expect(clash.status).toBe(409);
+    // The duplicate is refused up front: no Auth user is created, so none
+    // needs deleting.
+    expect(db.createdAuthUsers).toHaveLength(0);
+    expect(db.deletedAuthUsers).toHaveLength(0);
+  });
+
+  it('removes the orphan Auth user when a later staff write fails', async () => {
+    const db = staffWorld({
+      writeErrors: { staff_role_assignments: { message: 'assignment failed' } },
+    });
+    const state = await createStaff({
+      email: 'orphan@afhomes.test',
+      fullName: 'Orphan Annie',
+      departmentId: null,
+      roleId: UUID.role.employee,
+      temporaryPassword: TEMP_PASSWORD,
+    });
+    expect(state.status).toBe(500);
     expect(db.deletedAuthUsers).toContain('new-staff-0001');
   });
 });

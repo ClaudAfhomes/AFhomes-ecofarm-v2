@@ -87,6 +87,9 @@ export const afHomesStaffSchema = z.object({
   roleId: z.string().uuid(),
   roleName: z.string(),
   restrictions: z.array(afHomesRestrictionSchema),
+  mustChangePassword: z.boolean(),
+  invitedAt: z.string().nullable(),
+  activatedAt: z.string().nullable(),
   createdAt: z.string(),
 });
 export type AfHomesStaff = z.infer<typeof afHomesStaffSchema>;
@@ -99,6 +102,7 @@ export const afHomesSessionSchema = z.object({
   roleId: z.string().uuid(),
   roleSlug: z.string(),
   roleName: z.string(),
+  mustChangePassword: z.boolean(),
   permissions: z.array(afHomesPermissionSchema),
 });
 export type AfHomesSession = z.infer<typeof afHomesSessionSchema>;
@@ -162,3 +166,32 @@ export const inviteAfHomesStaffSchema = z.object({
   departmentId: z.string().uuid().nullable(),
   roleId: z.string().uuid(),
 });
+
+/**
+ * JAD-parity staff creation (Phase 20). Same identity fields as the legacy
+ * invitation, plus the administrator-set temporary password. The password is
+ * server-validated, passed only to Supabase Auth (`auth.admin.createUser`),
+ * and never stored in any AF Homes table. The confirm field is client-only
+ * (the dialog compares it before submitting) so it has no server schema.
+ */
+export const createAfHomesStaffSchema = inviteAfHomesStaffSchema.extend({
+  temporaryPassword: z.string().min(8).max(128),
+});
+export type CreateAfHomesStaff = z.infer<typeof createAfHomesStaffSchema>;
+
+/** My Account display-name update (PATCH own session). */
+export const updateAfHomesStaffProfileSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+});
+export type UpdateAfHomesStaffProfile = z.infer<typeof updateAfHomesStaffProfileSchema>;
+
+/**
+ * My Account / forced first-login password change. The current password is
+ * re-verified with a fresh `signInWithPassword` (Supabase does not require
+ * it by default); the new password follows the JAD >= 8 rule.
+ */
+export const changeAfHomesStaffPasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(128),
+});
+export type ChangeAfHomesStaffPassword = z.infer<typeof changeAfHomesStaffPasswordSchema>;

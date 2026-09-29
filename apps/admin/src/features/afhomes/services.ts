@@ -2,6 +2,7 @@ import {
   afHomesDashboardSchema,
   afHomesDepartmentSchema,
   afHomesRoleSchema,
+  afHomesSessionSchema,
   afHomesStaffSchema,
   analyticsOverviewSchema,
   type AfHomesDashboard,
@@ -46,15 +47,31 @@ const auditEventSchema = z.object({
   created_at: z.string(),
   actor_id: z.string().nullable(),
 });
+export type AfHomesAuditEvent = z.infer<typeof auditEventSchema>;
 export const getAfHomesRoleAudit = (id: string) =>
   requestList(`/admin/afhomes/roles/${id}/audit`, auditEventSchema);
+export const getAfHomesStaffAudit = (id: string) =>
+  requestList(`/admin/afhomes/staff/${id}/audit`, auditEventSchema);
+export const getAfHomesRoleById = (id: string): Promise<AfHomesRole> =>
+  request(`/admin/afhomes/roles/${id}`, afHomesRoleSchema);
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
   requestList('/admin/afhomes/staff', afHomesStaffSchema);
-export const inviteAfHomesStaff = (input: {
+export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
+  request(`/admin/afhomes/staff/${id}`, afHomesStaffSchema);
+/**
+ * JAD-parity staff creation: the administrator sets a temporary password and
+ * the account starts gated on `mustChangePassword`. The secret travels to
+ * Supabase Auth only and is never stored in an AF Homes table. (The legacy
+ * `inviteAfHomesStaff` invitation callback is retired for standard
+ * onboarding; pre-existing invited accounts still activate through
+ * `/admin/activate-account`.)
+ */
+export const createAfHomesStaff = (input: {
   email: string;
   fullName: string;
   departmentId: string | null;
   roleId: string;
+  temporaryPassword: string;
 }) =>
   request('/admin/afhomes/staff', afHomesStaffSchema, {
     method: 'POST',
@@ -83,6 +100,24 @@ export const createAfHomesDepartment = (input: { code: string; name: string }) =
   });
 export const getAfHomesDashboard = (range: string): Promise<AfHomesDashboard> =>
   request(`/admin/afhomes/dashboard?range=${encodeURIComponent(range)}`, afHomesDashboardSchema);
+
+/** My Account display-name update (PATCH own session; reachable while gated). */
+export const updateAfHomesStaffProfile = (input: { name: string }) =>
+  request('/admin/afhomes/session', afHomesSessionSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+
+const passwordChangedSchema = z.object({ changed: z.literal(true) });
+/** My Account / forced first-login password change. */
+export const changeAfHomesStaffPassword = (input: {
+  currentPassword: string;
+  newPassword: string;
+}) =>
+  request('/admin/afhomes/session/password', passwordChangedSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 
 export const getAnalyticsOverview = (period: AnalyticsPeriod): Promise<AnalyticsOverview> =>
   request(`/analytics?period=${encodeURIComponent(period)}`, analyticsOverviewSchema);

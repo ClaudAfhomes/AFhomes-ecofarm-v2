@@ -10,6 +10,9 @@ export function AdminLayout() {
   const location = useLocation();
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(() => breadcrumbItems(location.pathname), [location.pathname]);
+  // JAD parity: while the temporary password is still in force the normal
+  // navigation stays hidden (RequireRole parks the session on My Account).
+  const gated = user?.mustChangePassword === true;
   return (
     <>
       <AppShell
@@ -21,7 +24,7 @@ export function AdminLayout() {
             </div>
           </div>
         }
-        navItems={navItemsForPermissions(user?.afHomesPermissions)}
+        navItems={gated ? [] : navItemsForPermissions(user?.afHomesPermissions)}
         navLabel="AF Homes administration"
         menuLabel="Open navigation"
         menuPosition="right"
@@ -30,6 +33,8 @@ export function AdminLayout() {
             name={user?.name}
             role={user?.roleName}
             items={[
+              { label: 'My Account', icon: 'user', to: '/admin/profile' },
+              { label: '-', icon: 'user' },
               { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
             ]}
           />

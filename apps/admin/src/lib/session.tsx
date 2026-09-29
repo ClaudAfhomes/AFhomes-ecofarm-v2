@@ -27,6 +27,12 @@ export interface SessionUser {
   roleName: string;
   afHomesPermissions: AfHomesPermission[];
   status: 'active' | 'invited' | 'inactive' | 'suspended';
+  /**
+   * JAD parity: true while the account still runs on its administrator-set
+   * temporary password. Optional (older test fixtures omit it) - only an
+   * explicit `true` gates; `undefined` behaves as `false`.
+   */
+  mustChangePassword?: boolean;
 }
 interface SessionContextValue {
   status: SessionStatus;
@@ -110,6 +116,7 @@ export function SessionProvider({
         roleName: parsed.roleName,
         afHomesPermissions: parsed.permissions,
         status: parsed.status,
+        mustChangePassword: parsed.mustChangePassword,
       });
       setStatus('authenticated');
       setSessionError(false);

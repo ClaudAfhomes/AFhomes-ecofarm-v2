@@ -32,13 +32,18 @@ function mockMatchMedia(matches: boolean): void {
 
 vi.mock('./features/afhomes/services', () => ({
   getAfHomesStaff: vi.fn(),
+  getAfHomesStaffById: vi.fn(),
+  getAfHomesStaffAudit: vi.fn(),
   getAfHomesRoles: vi.fn(),
+  getAfHomesRoleById: vi.fn(),
   getAfHomesDepartments: vi.fn(),
   getAfHomesDashboard: vi.fn(),
   getAnalyticsOverview: vi.fn(),
   getAfHomesRoleAudit: vi.fn(),
-  inviteAfHomesStaff: vi.fn(),
+  createAfHomesStaff: vi.fn(),
   updateAfHomesStaff: vi.fn(),
+  updateAfHomesStaffProfile: vi.fn(),
+  changeAfHomesStaffPassword: vi.fn(),
   createAfHomesRole: vi.fn(),
   updateAfHomesRole: vi.fn(),
 }));
@@ -420,14 +425,15 @@ describe('Phase 33 tables scroll instead of breaking', () => {
 });
 
 describe('Phase 33 forms stack and dialogs fit', () => {
-  it('staff invite dialog opens with associated labels at 390px', async () => {
+  it('staff creation dialog opens with associated labels at 390px', async () => {
     atWidth(390, false);
     renderApp('/admin/staff');
     expect(await screen.findByText('Ana Reyes Santos Dela Cruz')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /invite staff/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new staff/i }));
     expect(await screen.findByRole('dialog')).not.toBeNull();
     expect(screen.getByText('Full name')).not.toBeNull();
-    expect(screen.getByRole('button', { name: /send secure invite/i })).not.toBeNull();
+    expect(screen.getByText('Temporary password')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /create staff/i })).not.toBeNull();
   });
 
   it('catalog search row wraps and the add-item dialog fits at 320px', async () => {

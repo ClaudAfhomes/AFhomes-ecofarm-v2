@@ -77,6 +77,16 @@ function install(
       }
     >;
     invite?: (email: string, options: unknown) => Promise<unknown>;
+    createUser?: (attrs: {
+      email: string;
+      password?: string;
+      email_confirm?: boolean;
+      user_metadata?: unknown;
+    }) => Promise<unknown>;
+    createUserId?: string;
+    existingAuthEmails?: string[];
+    updateUser?: (id: string, attrs: { password?: string; user_metadata?: unknown }) => Promise<unknown>;
+    signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   } = {},
 ) {
   holder.db = new FakeSupabase({
@@ -87,6 +97,11 @@ function install(
     unique: UNIQUE,
     defaults: { staff_invitations: { status: 'pending' } },
     invite: options.invite,
+    createUser: options.createUser,
+    createUserId: options.createUserId,
+    existingAuthEmails: options.existingAuthEmails,
+    updateUser: options.updateUser,
+    signIn: options.signIn,
   });
   return holder.db as FakeSupabase;
 }
@@ -908,7 +923,7 @@ describe('staff', () => {
     expect(state.status).toBe(403);
   });
 
-  it('invites staff with a role and department, and audits it', async () => {
+  it('creates staff with a temporary password, active and gated, and audits it', async () => {
     const db = install();
     const state = await call({
       method: 'POST',
@@ -919,21 +934,35 @@ describe('staff', () => {
         fullName: 'New Hire',
         departmentId: UUID.department.sales,
         roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(201);
-    expect(db.rows('staff_users').some((s) => s.email === 'new.hire@afhomes.test')).toBe(true);
+    const row = db.rows('staff_users').find((s) => s.email === 'new.hire@afhomes.test')!;
+    expect(row.status).toBe('active');
+    expect(row.must_change_password).toBe(true);
+    expect(row.activated_at).toBeTruthy();
+    expect(row.invited_at ?? null).toBeNull();
     expect(db.rows('staff_role_assignments').some((r) => r.role_id === UUID.role.employee)).toBe(
       true,
     );
-    const invitation = db.rows('staff_invitations')[0]!;
-    expect(invitation.status).toBe('pending');
-    expect(invitation.invited_by).toBe(UUID.adminStaff);
-    expect(new Date(invitation.expires_at as string).getTime()).toBeGreaterThan(Date.now());
-    expect(db.rows('audit_events').some((e) => e.action === 'STAFF_INVITED')).toBe(true);
+    // The invitation path is not used for standard onboarding: no row, and
+    // the legacy invited-account flow is untouched.
+    expect(db.rows('staff_invitations')).toHaveLength(0);
+    const audits = db.rows('audit_events').filter((e) => e.action === 'STAFF_CREATED');
+    expect(audits).toHaveLength(1);
+    // The temporary password lives in Supabase Auth only: never in a table,
+    // never in the audit payload, never in a recorded call argument.
+    expect(JSON.stringify(row)).not.toContain('TempPass123');
+    expect(JSON.stringify(audits)).not.toContain('TempPass123');
+    expect(JSON.stringify(db.calls)).not.toContain('TempPass123');
+    // ...but it WAS passed through to Auth (the test-only capture point).
+    expect(db.passwordsSeen).toContain('TempPass123');
+    expect((state.body as Json).mustChangePassword).toBe(true);
+    expect((state.body as Json).invitedAt).toBeNull();
   });
 
-  it('invites staff with no department', async () => {
+  it('creates staff with no department', async () => {
     install();
     const state = await call({
       method: 'POST',
@@ -944,19 +973,49 @@ describe('staff', () => {
         fullName: 'Solo',
         departmentId: null,
         roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(201);
     expect((state.body as Json).departmentId).toBeNull();
   });
 
-  it('rejects a duplicate invitation with 409 and creates no auth user', async () => {
-    const db = install({
-      invite: async () => ({
-        data: null,
-        error: { message: 'A user with this email address has already been registered' },
-      }),
+  it('requires the temporary password', async () => {
+    install();
+    const state = await call({
+      method: 'POST',
+      afPath: 'staff',
+      token: TOKEN.admin,
+      body: {
+        email: 'nopass@afhomes.test',
+        fullName: 'No Pass',
+        departmentId: null,
+        roleId: UUID.role.employee,
+      },
     });
+    expect(state.status).toBe(400);
+  });
+
+  it('rejects a weak temporary password', async () => {
+    install();
+    const state = await call({
+      method: 'POST',
+      afPath: 'staff',
+      token: TOKEN.admin,
+      body: {
+        email: 'weak@afhomes.test',
+        fullName: 'Weak Pass',
+        departmentId: null,
+        roleId: UUID.role.employee,
+        temporaryPassword: 'short',
+      },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects a duplicate email with 409 and creates no auth user', async () => {
+    const db = install();
     const state = await call({
       method: 'POST',
       afPath: 'staff',
@@ -966,25 +1025,63 @@ describe('staff', () => {
         fullName: 'Impostor',
         departmentId: null,
         roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(409);
     expect(db.rows('staff_users').some((s) => s.full_name === 'Impostor')).toBe(false);
+    expect(db.createdAuthUsers).toHaveLength(0);
   });
 
-  it('rejects an invalid email or missing role', async () => {
+  it('rejects an Auth-side duplicate email with 409 and writes no staff row', async () => {
+    const db = install({ existingAuthEmails: ['ghost@afhomes.test'] });
+    const state = await call({
+      method: 'POST',
+      afPath: 'staff',
+      token: TOKEN.admin,
+      body: {
+        email: 'ghost@afhomes.test',
+        fullName: 'Ghost',
+        departmentId: null,
+        roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
+      },
+    });
+    expect(state.status).toBe(409);
+    expect(db.rows('staff_users').some((s) => s.email === 'ghost@afhomes.test')).toBe(false);
+  });
+
+  it('rejects an invalid email, missing name, or missing role', async () => {
     install();
     for (const body of [
-      { email: 'not-an-email', fullName: 'X Y', departmentId: null, roleId: UUID.role.employee },
-      { email: 'ok@afhomes.test', fullName: '', departmentId: null, roleId: UUID.role.employee },
-      { email: 'ok@afhomes.test', fullName: 'Ok Person', departmentId: null, roleId: 'nope' },
+      {
+        email: 'not-an-email',
+        fullName: 'X Y',
+        departmentId: null,
+        roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
+      },
+      {
+        email: 'ok@afhomes.test',
+        fullName: '',
+        departmentId: null,
+        roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
+      },
+      {
+        email: 'ok@afhomes.test',
+        fullName: 'Ok Person',
+        departmentId: null,
+        roleId: 'nope',
+        temporaryPassword: 'TempPass123',
+      },
     ]) {
       const state = await call({ method: 'POST', afPath: 'staff', token: TOKEN.admin, body });
       expect(state.status).toBe(400);
     }
   });
 
-  it('refuses an inactive role at invitation time', async () => {
+  it('refuses an inactive role at creation time', async () => {
     install();
     const state = await call({
       method: 'POST',
@@ -995,6 +1092,7 @@ describe('staff', () => {
         fullName: 'Retired Role',
         departmentId: null,
         roleId: UUID.role.retired,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(400);
@@ -1012,6 +1110,7 @@ describe('staff', () => {
         fullName: 'Rival',
         departmentId: null,
         roleId: UUID.role.superAdmin,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(403);
@@ -1029,12 +1128,13 @@ describe('staff', () => {
         fullName: 'Finance Guy',
         departmentId: null,
         roleId: UUID.role.superAdmin,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(403);
   });
 
-  it('lets a Super Admin invite another Super Admin', async () => {
+  it('lets a Super Admin create another Super Admin', async () => {
     const state = await call({
       method: 'POST',
       afPath: 'staff',
@@ -1044,12 +1144,13 @@ describe('staff', () => {
         fullName: 'Second Owner',
         departmentId: null,
         roleId: UUID.role.superAdmin,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(201);
   });
 
-  it('denies invitation without organization.staff create', async () => {
+  it('denies creation without organization.staff create', async () => {
     const state = await call({
       method: 'POST',
       afPath: 'staff',
@@ -1059,12 +1160,13 @@ describe('staff', () => {
         fullName: 'X Y',
         departmentId: null,
         roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(403);
   });
 
-  it('removes the invited auth user when the staff row write fails', async () => {
+  it('removes the created auth user when the staff row write fails', async () => {
     const db = install({ writeErrors: { staff_users: { message: 'insert failed' } } });
     const state = await call({
       method: 'POST',
@@ -1075,6 +1177,7 @@ describe('staff', () => {
         fullName: 'Roll Back',
         departmentId: null,
         roleId: UUID.role.employee,
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(500);
@@ -1574,26 +1677,26 @@ describe('handler surface', () => {
     expect(JSON.stringify(state.body)).not.toMatch(/audit table unavailable/);
   });
 
-  it('refuses to invite staff when no admin redirect target is configured', async () => {
+  it('creates staff with a temporary password without any admin redirect target', async () => {
+    // JAD parity: creation no longer depends on the invitation callback, so
+    // no redirect URL is required at all.
     const saved = process.env.AFHOMES_ADMIN_URL;
     delete process.env.AFHOMES_ADMIN_URL;
     try {
-      const db = install();
+      install();
       const state = await call({
         method: 'POST',
         afPath: 'staff',
         token: TOKEN.admin,
         body: {
-          email: 'nowhere@afhomes.test',
+          email: 'norely@afhomes.test',
           fullName: 'No Redirect',
           departmentId: null,
           roleId: UUID.role.employee,
+          temporaryPassword: 'TempPass123',
         },
       });
-      expect(state.status).toBe(500);
-      expect(err(state.body)?.message).toMatch(/AFHOMES_ADMIN_URL/);
-      // Nothing may be created when the send is refused.
-      expect(db.rows('staff_users').some((s) => s.email === 'nowhere@afhomes.test')).toBe(false);
+      expect(state.status).toBe(201);
     } finally {
       process.env.AFHOMES_ADMIN_URL = saved;
     }

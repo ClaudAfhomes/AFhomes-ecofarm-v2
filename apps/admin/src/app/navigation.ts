@@ -221,6 +221,8 @@ export function findNavSubItem(pathname: string) {
 }
 export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
   if (pathname === '/admin') return [{ label: 'Dashboard' }];
+  if (pathname === '/admin/profile')
+    return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
   const found = findNavSubItem(pathname);
   if (!found) return null;
   const exact = pathname === found.sub.to;

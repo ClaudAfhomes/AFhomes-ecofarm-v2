@@ -528,6 +528,7 @@ describe('Super Admin protection on the baseline', () => {
         fullName: 'Heir Apparent',
         departmentId: null,
         roleId: roleId('super_admin'),
+        temporaryPassword: 'TempPass123',
       },
     });
     expect(state.status).toBe(403);

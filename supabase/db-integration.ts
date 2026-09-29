@@ -6325,6 +6325,104 @@ async function main(): Promise<void> {
     await db.query('delete from public.referral_codes where id = $1', [codeId]);
     check('phase 41 synthetics removed', true);
 
+    /* ---------------------------------------------------------------- */
+    section('44. Phase 20 staff temporary-password lifecycle columns');
+    /* ---------------------------------------------------------------- */
+    // The forced first-login change is recorded on staff_users, never in
+    // Auth: must_change_password gates, password_changed_at audits. The
+    // temporary password itself lives in Supabase Auth only - no secret
+    // column may ever exist here.
+    {
+      const cols = await db.query<{
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+        column_default: string | null;
+      }>(
+        `select column_name, data_type, is_nullable, column_default
+           from information_schema.columns
+          where table_schema = 'public' and table_name = 'staff_users'
+            and column_name in ('must_change_password', 'password_changed_at')
+          order by column_name`,
+      );
+      eq('both lifecycle columns exist', cols.rowCount, 2);
+      const flag = cols.rows.find((r) => r.column_name === 'must_change_password')!;
+      check(
+        'must_change_password is boolean NOT NULL with a false default',
+        flag.data_type === 'boolean' &&
+          flag.is_nullable === 'NO' &&
+          /false/i.test(flag.column_default ?? ''),
+        JSON.stringify(flag),
+      );
+      const stamped = cols.rows.find((r) => r.column_name === 'password_changed_at')!;
+      check(
+        'password_changed_at is a nullable timestamptz with no default',
+        stamped.data_type === 'timestamp with time zone' &&
+          stamped.is_nullable === 'YES' &&
+          stamped.column_default === null,
+        JSON.stringify(stamped),
+      );
+      // No secret column: the temporary password must have nowhere to live.
+      const secrets = await one<{ n: number }>(
+        `select count(*)::int as n from information_schema.columns
+          where table_schema = 'public' and table_name = 'staff_users'
+            and (column_name like '%password%' or column_name like '%secret%')
+            and column_name not in ('must_change_password', 'password_changed_at')`,
+      );
+      eq('no password/secret storage column exists on staff_users', secrets.n, 0);
+      // Pre-existing and default-constructed rows are ungated, never null.
+      const nullFlags = await one<{ n: number }>(
+        'select count(*)::int as n from public.staff_users where must_change_password is null',
+      );
+      eq('no staff row has a null flag', nullFlags.n, 0);
+      // The handler's write path, end to end at the SQL level: gate, stamp, clear.
+      const lifecycleId = uuidFor('staff:phase44-lifecycle');
+      const lifecycleEmail = `${RUN}-phase44-lifecycle@example.invalid`;
+      await db.query('insert into auth.users (id, email) values ($1, $2)', [
+        lifecycleId,
+        lifecycleEmail,
+      ]);
+      await db.query(
+        `insert into public.staff_users (id, email, full_name, status)
+         values ($1, $2, 'Synthetic phase44', 'active')`,
+        [lifecycleId, lifecycleEmail],
+      );
+      createdStaffIds.push(lifecycleId);
+      const fresh = await one<{
+        must_change_password: boolean;
+        password_changed_at: string | null;
+      }>('select must_change_password, password_changed_at from public.staff_users where id = $1', [
+        lifecycleId,
+      ]);
+      check('a new row defaults to ungated', fresh.must_change_password === false);
+      check('a new row has no rotation stamp', fresh.password_changed_at === null);
+      await db.query('update public.staff_users set must_change_password = true where id = $1', [
+        lifecycleId,
+      ]);
+      const gated = await one<{ must_change_password: boolean }>(
+        'select must_change_password from public.staff_users where id = $1',
+        [lifecycleId],
+      );
+      check(
+        'the flag can be set (temporary-password onboarding)',
+        gated.must_change_password === true,
+      );
+      await db.query(
+        `update public.staff_users
+            set must_change_password = false, password_changed_at = now(), updated_at = now()
+          where id = $1`,
+        [lifecycleId],
+      );
+      const cleared = await one<{
+        must_change_password: boolean;
+        password_changed_at: string | null;
+      }>('select must_change_password, password_changed_at from public.staff_users where id = $1', [
+        lifecycleId,
+      ]);
+      check('the flag clears on password change', cleared.must_change_password === false);
+      check('clearing stamps the rotation', cleared.password_changed_at !== null);
+    }
+
     section('21. cleanup');
     try {
       // Every synthetic row is reachable either by an id this process recorded or

@@ -69,6 +69,15 @@ export type FakeOptions = {
   }) => Promise<unknown>;
   /** Id handed back by `createUser`. */
   createUserId?: string;
+  /** Override `auth.admin.updateUserById`, e.g. to inject a GoTrue failure. */
+  updateUser?: (id: string, attrs: { password?: string; user_metadata?: unknown }) => Promise<unknown>;
+  /**
+   * Override `auth.signInWithPassword` (the current-password re-verification
+   * used by the staff password-change endpoint). Defaults to success; a test
+   * that needs a wrong-password rejection supplies an impl that returns
+   * `{ data: { user: null }, error }` unless the password matches.
+   */
+  signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   /** Addresses that already exist in GoTrue, to exercise duplicate conflicts. */
   existingAuthEmails?: string[];
 };
@@ -211,6 +220,8 @@ export class FakeSupabase {
   createUserId?: string;
   private inviteImpl?: FakeOptions['invite'];
   private createUserImpl?: FakeOptions['createUser'];
+  private updateUserImpl?: FakeOptions['updateUser'];
+  private signInImpl?: FakeOptions['signIn'];
 
   constructor(options: FakeOptions = {}) {
     this.tables = options.tables ? structuredClone(options.tables) : {};
@@ -226,6 +237,8 @@ export class FakeSupabase {
     this.inviteUserId = options.inviteUserId ?? 'invited-user-0001';
     this.createUserImpl = options.createUser;
     this.createUserId = options.createUserId;
+    this.updateUserImpl = options.updateUser;
+    this.signInImpl = options.signIn;
     for (const email of options.existingAuthEmails ?? []) this.createdAuthEmails.add(email);
   }
 
@@ -252,6 +265,20 @@ export class FakeSupabase {
           header: { alg: 'RS256' },
           signature: new Uint8Array(),
         },
+        error: null,
+      };
+    },
+    /**
+     * Password re-verification for the staff password-change endpoint. The
+     * password itself is never recorded in the call log (only the email), so
+     * a test asserting "no secret in any recorded call" stays meaningful;
+     * `passwordsSeen` remains the single capture point.
+     */
+    signInWithPassword: async (creds: { email: string; password: string }) => {
+      this.calls.push({ op: 'signInWithPassword', table: 'auth', arg: { email: creds.email } });
+      if (this.signInImpl) return this.signInImpl(creds);
+      return {
+        data: { user: { id: 'signed-in', email: creds.email }, session: { access_token: 'x' } },
         error: null,
       };
     },
@@ -307,6 +334,22 @@ export class FakeSupabase {
         this.deletedAuthUsers.push(id);
         this.calls.push({ op: 'deleteUser', table: 'auth', arg: id });
         return { data: {}, error: null };
+      },
+      /**
+       * GoTrue's admin password/metadata rotation. The secret is captured in
+       * `passwordsSeen` only (the same test-only point as `createUser`); the
+       * recorded call arg carries the id and non-secret flags so "no password
+       * in logs/calls" assertions remain possible.
+       */
+      updateUserById: async (id: string, attrs: { password?: string; user_metadata?: unknown }) => {
+        this.calls.push({
+          op: 'updateUserById',
+          table: 'auth',
+          arg: { id, hasUserMetadata: attrs.user_metadata !== undefined },
+        });
+        if (attrs.password !== undefined) this.passwordsSeen.push(attrs.password);
+        if (this.updateUserImpl) return this.updateUserImpl(id, attrs);
+        return { data: { user: { id } }, error: null };
       },
     },
   };

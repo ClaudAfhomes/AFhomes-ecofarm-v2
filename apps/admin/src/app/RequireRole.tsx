@@ -22,6 +22,12 @@ export function RequireRole({ children }: { children: ReactNode }) {
   if (status !== 'authenticated') {
     return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />;
   }
+  // JAD parity: a session still on its temporary password can only visit
+  // My Account until the forced change completes (the server 403s every
+  // module-guarded endpoint in the meantime).
+  if (user?.mustChangePassword === true && location.pathname !== '/admin/profile') {
+    return <Navigate to="/admin/profile" replace />;
+  }
   if (!canAccessNavTarget(user?.afHomesPermissions, location.pathname))
     return (
       <Forbidden

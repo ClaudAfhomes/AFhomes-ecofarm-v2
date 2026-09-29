@@ -193,7 +193,7 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'x@afhomes.test', fullName: 'X Y', departmentId: null, roleId: UUID.role.finance },
+      body: { email: 'x@afhomes.test', fullName: 'X Y', departmentId: null, roleId: UUID.role.finance, temporaryPassword: 'TempPass123' },
     });
     expect(state.status).toBe(403);
     expect(db.rows('staff_users').some((s) => s.email === 'x@afhomes.test')).toBe(false);
@@ -273,7 +273,7 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'rival@afhomes.test', fullName: 'Rival', departmentId: null, roleId: UUID.role.superAdmin },
+      body: { email: 'rival@afhomes.test', fullName: 'Rival', departmentId: null, roleId: UUID.role.superAdmin, temporaryPassword: 'TempPass123' },
     });
     expect(state.status).toBe(403);
     expect(db.rows('staff_users').some((s) => s.email === 'rival@afhomes.test')).toBe(false);

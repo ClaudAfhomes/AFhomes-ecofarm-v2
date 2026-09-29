@@ -1,7 +1,9 @@
 import {
   afHomesModuleKeySchema,
+  changeAfHomesStaffPasswordSchema,
   createAfHomesRoleSchema,
-  inviteAfHomesStaffSchema,
+  createAfHomesStaffSchema,
+  updateAfHomesStaffProfileSchema,
   type AfHomesPermission,
 } from '@jad/contracts';
 import { z } from 'zod';
@@ -14,8 +16,7 @@ import {
 } from '../../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../../_lib/envelope.js';
 import type { VercelRequest, VercelResponse } from '../../_lib/http.js';
-import { resolveAdminUrl } from '../../_lib/admin-url.js';
-import { serviceClient } from '../../_lib/rest.js';
+import { anonClient, serviceClient } from '../../_lib/rest.js';
 
 // All database access in this handler uses the server-only service client after authorization.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,7 +159,6 @@ async function staffCatalog(db: Db) {
         departmentName: deptById.get(String(row.department_id)) ?? null,
         roleId,
         roleName: role.name,
-        createdAt: row.created_at,
         restrictions: (restrictions ?? [])
           .filter((r: Record<string, unknown>) => r.staff_id === row.id)
           .map((r: Record<string, unknown>) => ({
@@ -168,6 +168,10 @@ async function staffCatalog(db: Db) {
             denyUpdate: r.deny_update,
             denyDelete: r.deny_delete,
           })),
+        mustChangePassword: row.must_change_password === true,
+        invitedAt: row.invited_at ?? null,
+        activatedAt: row.activated_at ?? null,
+        createdAt: row.created_at,
       },
     ];
   });
@@ -425,8 +429,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         roleId: principal.roleId,
         roleSlug: principal.roleSlug,
         roleName: principal.roleName,
+        mustChangePassword: principal.mustChangePassword,
         permissions: principal.permissions,
       });
+    }
+    // My Account display-name update (JAD parity: PATCH /admin/session).
+    // Self-service: resolves the principal directly so it stays reachable
+    // while `mustChangePassword` gates every module-guarded endpoint.
+    if (path === 'session' && method === 'PATCH') {
+      const principal = await resolveAfHomesPrincipal(req);
+      if ('error' in principal)
+        return res.status(principal.error.status).json({ error: principal.error.error });
+      const parsed = updateAfHomesStaffProfileSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Enter a display name', 400);
+      const now = new Date().toISOString();
+      const { error: profileError } = await db
+        .from('staff_users')
+        .update({ full_name: parsed.data.name, updated_at: now })
+        .eq('id', principal.userId);
+      if (profileError) throw profileError;
+      // Best-effort Auth metadata sync: the staff row is authoritative, so a
+      // GoTrue failure must not fail the rename.
+      await db.auth.admin.updateUserById(principal.userId, {
+        user_metadata: { full_name: parsed.data.name },
+      });
+      await audit(db, principal.userId, 'STAFF_PROFILE_UPDATED', 'staff_user', principal.userId, null, {
+        fullName: parsed.data.name,
+      });
+      return res.status(200).json({
+        id: principal.userId,
+        email: principal.email,
+        fullName: parsed.data.name,
+        status: principal.status,
+        roleId: principal.roleId,
+        roleSlug: principal.roleSlug,
+        roleName: principal.roleName,
+        mustChangePassword: principal.mustChangePassword,
+        permissions: principal.permissions,
+      });
+    }
+    // My Account / forced first-login password change (JAD parity:
+    // POST /admin/session/password). Verifies the current password with a
+    // fresh `signInWithPassword` (Supabase does not require it by default),
+    // rotates via the Admin API, then clears the temporary-password flag.
+    // Reachable while gated: it resolves the principal directly.
+    if (path === 'session/password' && method === 'POST') {
+      const principal = await resolveAfHomesPrincipal(req);
+      if ('error' in principal)
+        return res.status(principal.error.status).json({ error: principal.error.error });
+      const parsed = changeAfHomesStaffPasswordSchema.safeParse(req.body);
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Enter the current and a new password', 400);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('id,email')
+        .eq('id', principal.userId)
+        .maybeSingle();
+      if (staffError || !staff) return fail(res, 'NOT_FOUND', 'Staff profile not found', 404);
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const { error: reauthError } = await anon.auth.signInWithPassword({
+        email: staff.email,
+        password: parsed.data.currentPassword,
+      });
+      if (reauthError) return fail(res, 'UNAUTHORIZED', 'Current password is incorrect', 401);
+      const { error: updateError } = await db.auth.admin.updateUserById(principal.userId, {
+        password: parsed.data.newPassword,
+      });
+      if (updateError) return fail(res, 'INTERNAL', 'Unable to update the password', 500);
+      const now = new Date().toISOString();
+      const { error: flagError } = await db
+        .from('staff_users')
+        .update({ must_change_password: false, password_changed_at: now, updated_at: now })
+        .eq('id', principal.userId);
+      if (flagError) throw flagError;
+      await audit(db, principal.userId, 'STAFF_PASSWORD_CHANGED', 'staff_user', principal.userId, null, {
+        email: staff.email,
+      });
+      return res.status(200).json({ changed: true });
     }
     if (path === 'roles' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'organization.roles');
@@ -468,6 +548,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json((await roleCatalog(db)).find((r: { id: string }) => r.id === role.id));
     }
     const roleMatch = path.match(/^roles\/([0-9a-f-]+)$/);
+    if (roleMatch && method === 'GET') {
+      const auth = await authorizeAfHomes(req, 'organization.roles');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const role = (await roleCatalog(db)).find((r: { id: string }) => r.id === roleMatch[1]);
+      if (!role) return fail(res, 'NOT_FOUND', 'Role not found', 404);
+      return res.status(200).json(role);
+    }
     if (roleMatch && method === 'PATCH') {
       const auth = await authorizeAfHomes(req, 'organization.roles', 'update');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
@@ -564,8 +651,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'staff' && method === 'POST') {
       const auth = await authorizeAfHomes(req, 'organization.staff', 'create');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
-      const parsed = inviteAfHomesStaffSchema.safeParse(req.body);
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid staff invitation', 400);
+      const parsed = createAfHomesStaffSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid staff details', 400);
       const target = (await roleCatalog(db)).find(
         (r: { id: string }) => r.id === parsed.data.roleId,
       );
@@ -579,63 +666,98 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Cannot assign a role with permissions you do not possess',
           403,
         );
-      const redirectTo = resolveAdminUrl();
-      if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
-      const { data: invited, error: inviteError } = await db.auth.admin.inviteUserByEmail(
-        parsed.data.email,
-        { redirectTo, data: { full_name: parsed.data.fullName } },
-      );
-      if (inviteError || !invited.user)
-        return fail(res, 'CONFLICT', 'Unable to invite this email address', 409);
+      // JAD parity: the Auth identity is created server-side with an
+      // administrator-set temporary password (`auth.admin.createUser`), never
+      // through the invitation callback. The account starts `active` but
+      // gated on `must_change_password` until the forced first-login change.
+      // No `staff_invitations` row is written for this path: the invitation
+      // tables remain only for pre-existing invited accounts that have not
+      // yet completed the legacy activation.
+      const email = parsed.data.email.toLowerCase();
+      const { data: duplicate } = await db
+        .from('staff_users')
+        .select('id')
+        .eq('email', email)
+        .limit(1);
+      if ((duplicate ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'A staff member with this email already exists', 409);
+      const { data: created, error: createError } = await db.auth.admin.createUser({
+        email,
+        password: parsed.data.temporaryPassword,
+        email_confirm: true,
+        user_metadata: { full_name: parsed.data.fullName },
+      });
+      if (createError || !created?.user)
+        return fail(res, 'CONFLICT', 'Unable to create an account for this email address', 409);
       try {
         // Every write is checked: a silent insert failure would leave an
         // orphaned auth user plus a role assignment pointing at a staff row
         // that does not exist.
+        const now = new Date().toISOString();
         const { error: staffError } = await db.from('staff_users').insert({
-          id: invited.user.id,
-          email: parsed.data.email,
+          id: created.user.id,
+          email,
           full_name: parsed.data.fullName,
           department_id: parsed.data.departmentId,
-          status: 'invited',
-          invited_at: new Date().toISOString(),
+          status: 'active',
+          must_change_password: true,
+          activated_at: now,
         });
         if (staffError) throw new Error(`staff_users insert failed: ${staffError.message}`);
         const { error: assignmentError } = await db.from('staff_role_assignments').insert({
-          staff_id: invited.user.id,
+          staff_id: created.user.id,
           role_id: parsed.data.roleId,
           assigned_by: auth.userId,
         });
         if (assignmentError)
           throw new Error(`staff_role_assignments insert failed: ${assignmentError.message}`);
-        const { error: invitationError } = await db.from('staff_invitations').insert({
-          email: parsed.data.email,
-          full_name: parsed.data.fullName,
-          role_id: parsed.data.roleId,
-          department_id: parsed.data.departmentId,
-          invited_by: auth.userId,
-          expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-          auth_user_id: invited.user.id,
-        });
-        if (invitationError)
-          throw new Error(`staff_invitations insert failed: ${invitationError.message}`);
+        // The temporary password is NEVER persisted or logged: the audit
+        // payload carries identity only, and Supabase Auth holds the secret.
         await audit(
           db,
           auth.userId,
-          'STAFF_INVITED',
+          'STAFF_CREATED',
           'staff_user',
-          invited.user.id,
+          created.user.id,
           null,
-          parsed.data,
+          {
+            email,
+            fullName: parsed.data.fullName,
+            departmentId: parsed.data.departmentId,
+            roleId: parsed.data.roleId,
+          },
         );
       } catch (error) {
-        await db.auth.admin.deleteUser(invited.user.id);
+        await db.auth.admin.deleteUser(created.user.id);
         throw error;
       }
       return res
         .status(201)
-        .json((await staffCatalog(db)).find((s: { id: string }) => s.id === invited.user.id));
+        .json((await staffCatalog(db)).find((s: { id: string }) => s.id === created.user.id));
     }
     const staffMatch = path.match(/^staff\/([0-9a-f-]+)$/);
+    if (staffMatch && method === 'GET') {
+      const auth = await authorizeAfHomes(req, 'organization.staff');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const entry = (await staffCatalog(db)).find(
+        (staff: { id: string }) => staff.id === staffMatch[1],
+      );
+      if (!entry) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+      return res.status(200).json(entry);
+    }
+    const staffAudit = path.match(/^staff\/([0-9a-f-]+)\/audit$/);
+    if (staffAudit && method === 'GET') {
+      const auth = await authorizeAfHomes(req, 'organization.staff');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const { data, error } = await db
+        .from('audit_events')
+        .select('*')
+        .eq('entity_type', 'staff_user')
+        .eq('entity_id', staffAudit[1])
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return list(res, data ?? []);
+    }
     if (staffMatch && method === 'PATCH') {
       const auth = await authorizeAfHomes(req, 'organization.staff', 'update');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });

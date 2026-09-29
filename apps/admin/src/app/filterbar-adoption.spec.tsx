@@ -31,10 +31,16 @@ import { ReportsPage } from '../features/reports/ReportsPage';
 
 vi.mock('../features/afhomes/services', () => ({
   getAfHomesStaff: vi.fn(async () => []),
+  getAfHomesStaffById: vi.fn(),
+  getAfHomesStaffAudit: vi.fn(async () => []),
   getAfHomesRoles: vi.fn(async () => []),
+  getAfHomesRoleById: vi.fn(),
+  getAfHomesRoleAudit: vi.fn(async () => []),
   getAfHomesDepartments: vi.fn(async () => []),
-  inviteAfHomesStaff: vi.fn(),
+  createAfHomesStaff: vi.fn(),
   updateAfHomesStaff: vi.fn(),
+  updateAfHomesStaffProfile: vi.fn(),
+  changeAfHomesStaffPassword: vi.fn(),
 }));
 vi.mock('../features/business/services', () => ({
   getCardProducts: vi.fn(async () => []),

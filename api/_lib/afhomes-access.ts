@@ -18,6 +18,7 @@ export type AfHomesPrincipal = {
   roleId: string;
   roleSlug: string;
   roleName: string;
+  mustChangePassword: boolean;
   permissions: AfHomesPermission[];
 };
 
@@ -140,7 +141,7 @@ export async function resolveAfHomesPrincipal(
 
   const { data: staff, error: staffError } = await svc
     .from('staff_users')
-    .select('id,email,full_name,status')
+    .select('id,email,full_name,status,must_change_password')
     .eq('id', user.id)
     .maybeSingle();
   if (staffError || !staff)
@@ -283,6 +284,7 @@ export async function resolveAfHomesPrincipal(
     roleId: role.id,
     roleSlug: role.slug,
     roleName: role.name,
+    mustChangePassword: staff.must_change_password === true,
     permissions,
   };
 }
@@ -294,6 +296,20 @@ export async function authorizeAfHomes(
 ) {
   const principal = await resolveAfHomesPrincipal(req);
   if ('error' in principal) return principal;
+  // JAD parity: an account still running on its administrator-set temporary
+  // password may only use the self-service session endpoints (GET/PATCH
+  // session, POST session/password), which resolve the principal directly
+  // and never pass through here. Every module-guarded endpoint refuses until
+  // the forced password change completes.
+  if (principal.mustChangePassword) {
+    return {
+      error: toErrorEnvelope(
+        'FORBIDDEN',
+        'Set a new password to continue. The rest of the admin panel unlocks once it is changed.',
+        403,
+      ),
+    };
+  }
   if (
     !actionAllowed(
       principal.permissions.find((permission) => permission.moduleKey === moduleKey),
