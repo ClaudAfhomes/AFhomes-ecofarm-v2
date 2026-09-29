@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { validateRecoveryPassword } from '@jad/shared';
-import { Button } from '@jad/ui';
+import { Alert, AuthLayout, Button, PasswordField } from '@jad/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
-import { styles } from './portal-ui';
-import authStyles from './auth.module.css';
+import styles from './auth.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
 
@@ -111,90 +110,76 @@ export function CustomerResetPasswordPage() {
   };
 
   return (
-    <main className={authStyles.auth}>
-      <div className={authStyles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={authStyles.title}>Choose a new password</h1>
-
-        {phase === 'done' ? (
-          <>
-            <p className={authStyles.body} role="status">
-              Your password has been updated. Sign in with your new password.
-            </p>
-            <p className={authStyles.body}>
-              <Link to="/customer/login">Back to sign in</Link>
-            </p>
-          </>
-        ) : phase === 'checking' ? (
-          <p className={authStyles.body} role="status">
-            Checking your recovery link…
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Choose a new password"
+      brandTitle="Your farm membership, in your pocket."
+      brandLead="Track points, view your digital membership card, and follow your payments."
+    >
+      {phase === 'done' ? (
+        <div className={styles.resultPanel}>
+          <Alert variant="success" title="Password updated">
+            Your password has been updated. Sign in with your new password.
+          </Alert>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/customer/login">
+              Back to sign in
+            </Link>
           </p>
-        ) : phase === 'ready' ? (
-          <>
-            {serverError && (
-              <p className={authStyles.error} role="alert">
-                {serverError}
-              </p>
-            )}
-            <form onSubmit={onSubmit} className={authStyles.form}>
-              <label className={authStyles.label} htmlFor="customer-reset-password">
-                New password
-              </label>
-              <input
-                id="customer-reset-password"
-                name="customer-reset-password"
-                className={authStyles.input}
-                type="password"
-                value={password}
-                onChange={(event) => {
-                  setPassword(event.target.value);
-                  setFieldError(null);
-                }}
-                autoComplete="new-password"
-                required
-                minLength={10}
-              />
-              <label className={authStyles.label} htmlFor="customer-reset-confirm">
-                Confirm new password
-              </label>
-              <input
-                id="customer-reset-confirm"
-                name="customer-reset-confirm"
-                className={authStyles.input}
-                type="password"
-                value={confirm}
-                onChange={(event) => {
-                  setConfirm(event.target.value);
-                  setFieldError(null);
-                }}
-                autoComplete="new-password"
-                required
-                minLength={10}
-              />
-              {fieldError && (
-                <p className={authStyles.error} role="alert">
-                  {fieldError}
-                </p>
-              )}
-              <p className={authStyles.hint}>
-                At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
-              </p>
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Updating…' : 'Update password'}
-              </Button>
-            </form>
-          </>
-        ) : (
-          <>
-            <p className={authStyles.body} role="alert">
-              This recovery link is invalid or has expired. Recovery links are single-use.
-            </p>
-            <p className={authStyles.body}>
-              <Link to="/customer/forgot-password">Request a new link</Link>
-            </p>
-          </>
-        )}
-      </div>
-    </main>
+        </div>
+      ) : phase === 'checking' ? (
+        <p className={styles.prompt} role="status">
+          Checking your recovery link…
+        </p>
+      ) : phase === 'ready' ? (
+        <form onSubmit={onSubmit} noValidate className={styles.form}>
+          {serverError && (
+            <Alert variant="danger" title="We could not update your password">
+              {serverError}
+            </Alert>
+          )}
+          <PasswordField
+            id="customer-reset-password"
+            label="New password"
+            value={password}
+            onChange={(value) => {
+              setPassword(value);
+              setFieldError(null);
+            }}
+            autoComplete="new-password"
+            error={fieldError ?? undefined}
+          />
+          <PasswordField
+            id="customer-reset-confirm"
+            label="Confirm new password"
+            value={confirm}
+            onChange={(value) => {
+              setConfirm(value);
+              setFieldError(null);
+            }}
+            autoComplete="new-password"
+          />
+          <p className={styles.note}>
+            At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
+          </p>
+          <div className={styles.submitRow}>
+            <Button type="submit" loading={pending} disabled={pending}>
+              Update password
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className={styles.resultPanel}>
+          <Alert variant="danger" title="Recovery link expired">
+            This recovery link is invalid or has expired. Recovery links are single-use.
+          </Alert>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/customer/forgot-password">
+              Request a new link
+            </Link>
+          </p>
+        </div>
+      )}
+    </AuthLayout>
   );
 }

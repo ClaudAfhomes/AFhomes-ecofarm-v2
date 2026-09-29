@@ -139,7 +139,7 @@ describe('Phase 28 CMS pages list', () => {
       vi.fn(() => new Promise(() => {})),
     );
     render('/admin/cms/pages');
-    expect(await screen.findByText('Loading CMS pages…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Loading CMS pages')).toBeInTheDocument();
   });
 
   it('39. shows an empty state when no custom page exists', async () => {

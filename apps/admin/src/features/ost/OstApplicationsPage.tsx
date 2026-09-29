@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { EmptyState, ErrorState, FilterBar, PageHeader, Select, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getOstApplications } from './services';
@@ -35,16 +35,22 @@ export function OstApplicationsPage() {
         description="Registration applications under your Sales Manager referral. The sponsor is frozen at submission and cannot be changed here."
       />
 
-      <label style={{ display: 'block', marginBottom: 16, maxWidth: 260 }}>
-        Status
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {value ? value.replace(/_/g, ' ') : 'All statuses'}
-            </option>
-          ))}
-        </select>
-      </label>
+      <FilterBar
+        filters={
+          <label style={{ display: 'grid', gap: 4, fontSize: 14, fontWeight: 600 }}>
+            Status
+            <Select
+              aria-label="Status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              options={STATUSES.map((value) => ({
+                value,
+                label: value ? value.replace(/_/g, ' ') : 'All statuses',
+              }))}
+            />
+          </label>
+        }
+      />
 
       {query.isPending ? (
         <p role="status">Loading applications…</p>

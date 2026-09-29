@@ -880,7 +880,7 @@ describe('redemption catalog search and filter', () => {
       vi.fn(() => new Promise(() => {})),
     );
     render('/admin/redemption/items');
-    expect(await screen.findByText('Loading the catalog…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Loading the catalog')).toBeInTheDocument();
   });
 
   it('recovers from a load error through retry', async () => {

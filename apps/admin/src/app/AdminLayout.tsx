@@ -34,6 +34,11 @@ export function AdminLayout() {
             ]}
           />
         }
+        topbarLeading={
+          <div className={styles.topbarBrand} aria-hidden="true">
+            <span className={styles.topbarWordmark}>AF Homes</span>
+          </div>
+        }
       >
         <div className={styles.content}>
           {crumbs ? <Breadcrumbs items={crumbs} /> : null}

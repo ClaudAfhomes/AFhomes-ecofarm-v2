@@ -1,6 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 import type { Commission } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
@@ -76,64 +86,67 @@ export function BusinessCommissionsPage() {
         description="4% sale commissions from frozen sale snapshots. Qualification and payout are explicit audited decisions; historical attribution never moves."
       />
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, maxWidth: 900 }}>
-        <label style={{ minWidth: 220, flex: 1 }}>
-          Search (sale number or beneficiary)
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+      <FilterBar
+        search={
+          <SearchField
+            label="Search commissions"
             placeholder="SALE-000001 or seller name"
-            aria-label="Search commissions"
+            value={search}
+            onChange={setSearch}
           />
-        </label>
-        <label style={{ minWidth: 200 }}>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
-            <option value="">All statuses</option>
-            {STATUSES.filter(Boolean).map((value) => (
-              <option key={value} value={value}>
-                {STATUS_LABEL[value] ?? value}
-              </option>
-            ))}
-          </select>
-        </label>
-        {mayFilterBySeller ? (
-          <label style={{ minWidth: 220 }}>
-            Seller (beneficiary ID)
-            <input
-              value={seller}
-              onChange={(e) => setSeller(e.target.value)}
-              placeholder="Staff or OST id"
-              aria-label="Filter by seller"
+        }
+        filters={
+          <>
+            <Select
+              aria-label="Filter by status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              options={[
+                { value: '', label: 'All statuses' },
+                ...STATUSES.filter(Boolean).map((value) => ({
+                  value,
+                  label: STATUS_LABEL[value] ?? value,
+                })),
+              ]}
             />
-          </label>
-        ) : null}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <Button
-            variant="secondary"
-            onClick={() =>
-              setApplied({
-                ...(status ? { status } : {}),
-                ...(search.trim() ? { search: search.trim() } : {}),
-                ...(seller.trim() ? { seller: seller.trim() } : {}),
-              })
-            }
-          >
-            Apply
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setSearch('');
-              setStatus('');
-              setSeller('');
-              setApplied({});
-            }}
-          >
-            Clear
-          </Button>
-        </div>
-      </div>
+            {mayFilterBySeller ? (
+              <SearchField
+                label="Filter by seller"
+                placeholder="Staff or OST id"
+                value={seller}
+                onChange={setSeller}
+              />
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setApplied({
+                  ...(status ? { status } : {}),
+                  ...(search.trim() ? { search: search.trim() } : {}),
+                  ...(seller.trim() ? { seller: seller.trim() } : {}),
+                })
+              }
+            >
+              Apply
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSearch('');
+                setStatus('');
+                setSeller('');
+                setApplied({});
+              }}
+            >
+              Clear
+            </Button>
+          </>
+        }
+      />
 
       {query.isPending ? (
         <p role="status">Loading commissions…</p>

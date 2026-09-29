@@ -4,7 +4,10 @@ import {
   Button,
   EmptyState,
   ErrorState,
+  FilterBar,
   PageHeader,
+  SearchField,
+  Select,
   StatusChip,
   Table,
   TableBody,
@@ -64,75 +67,57 @@ export function RedemptionHistoryPage() {
         description="Every points redemption, with the item name and price as they were at the time."
       />
 
-      <div className={styles.filters}>
-        <div>
-          <label className={styles.label} htmlFor="filter-membership">
-            Membership number
-          </label>
-          <input
-            id="filter-membership"
-            name="filter-membership"
-            className={styles.input}
-            value={membershipNumber}
-            onChange={(event) => setMembershipNumber(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') setAppliedNumber(membershipNumber.trim());
-            }}
-            placeholder="MBS-…"
-          />
-        </div>
-        <div>
-          <label className={styles.label} htmlFor="filter-item">
-            Item
-          </label>
-          <select
-            id="filter-item"
-            name="filter-item"
-            className={styles.input}
-            value={itemId}
-            onChange={(event) => setItemId(event.target.value)}
-          >
-            <option value="">All items</option>
-            {(items.data ?? []).map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={styles.label} htmlFor="filter-from">
-            From
-          </label>
-          <input
-            id="filter-from"
-            name="filter-from"
-            className={styles.input}
-            type="date"
-            value={from}
-            onChange={(event) => setFrom(event.target.value)}
-          />
-        </div>
-        <div>
-          <label className={styles.label} htmlFor="filter-to">
-            To
-          </label>
-          <input
-            id="filter-to"
-            name="filter-to"
-            className={styles.input}
-            type="date"
-            value={to}
-            onChange={(event) => setTo(event.target.value)}
-          />
-        </div>
-        <div className={styles.filterActions}>
-          <Button onClick={() => setAppliedNumber(membershipNumber.trim())}>Apply</Button>
-          <Button variant="secondary" onClick={clear}>
-            Clear
-          </Button>
-        </div>
-      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setAppliedNumber(membershipNumber.trim());
+        }}
+      >
+        <FilterBar
+          search={
+            <SearchField
+              id="filter-membership"
+              label="Membership number"
+              placeholder="MBS-…"
+              value={membershipNumber}
+              onChange={setMembershipNumber}
+            />
+          }
+          filters={
+            <>
+              <Select
+                aria-label="Item"
+                value={itemId}
+                onChange={(event) => setItemId(event.target.value)}
+                options={[
+                  { value: '', label: 'All items' },
+                  ...(items.data ?? []).map((item) => ({ value: item.id, label: item.name })),
+                ]}
+              />
+              <input
+                aria-label="From"
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+              <input
+                aria-label="To"
+                type="date"
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </>
+          }
+          actions={
+            <>
+              <Button type="submit">Apply</Button>
+              <Button variant="ghost" onClick={clear}>
+                Clear
+              </Button>
+            </>
+          }
+        />
+      </form>
 
       {history.isLoading && <p role="status">Loading redemptions…</p>}
       {history.isError && <ErrorState title="The history could not be loaded" />}

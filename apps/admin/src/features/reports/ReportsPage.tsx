@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader } from '@jad/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  Skeleton,
+} from '@jad/ui';
 
 import { useSession } from '../../lib/session';
 import { REPORT_DEFS, availableReports } from './reports';
@@ -63,88 +72,98 @@ export function ReportsPage() {
         description="Role-scoped operational reports. Every figure is computed server-side from your authorized scope."
       />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-        <label>
-          Report
-          <select
-            value={type}
-            onChange={(e) => {
-              setType(e.target.value);
-              resetPage();
-            }}
-          >
-            {defs.map((d) => (
-              <option key={d.type} value={d.type}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          From
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => {
-              setFrom(e.target.value);
+      <FilterBar
+        search={
+          <SearchField
+            label="Search report"
+            placeholder="name / number"
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
               resetPage();
             }}
           />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-        <label>
-          Status
-          <input
-            value={status}
-            placeholder="exact status"
-            onChange={(e) => {
-              setStatus(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-        {type === 'ost' ? (
-          <label>
-            Kind
-            <select
-              value={kind}
+        }
+        filters={
+          <>
+            <Select
+              aria-label="Report"
+              value={type}
               onChange={(e) => {
-                setKind(e.target.value);
+                setType(e.target.value);
                 resetPage();
               }}
-            >
-              <option value="">Applications</option>
-              <option value="members">Members</option>
-            </select>
-          </label>
-        ) : null}
-        <label>
-          Search
-          <input
-            value={search}
-            placeholder="name / number"
-            onChange={(e) => {
-              setSearch(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-      </div>
+              options={defs.map((d) => ({ value: d.type, label: d.label }))}
+            />
+            <input
+              aria-label="From"
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                resetPage();
+              }}
+            />
+            <input
+              aria-label="To"
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                resetPage();
+              }}
+            />
+            <SearchField
+              label="Status"
+              placeholder="exact status"
+              value={status}
+              onChange={(value) => {
+                setStatus(value);
+                resetPage();
+              }}
+            />
+            {type === 'ost' ? (
+              <Select
+                aria-label="Kind"
+                value={kind}
+                onChange={(e) => {
+                  setKind(e.target.value);
+                  resetPage();
+                }}
+                options={[
+                  { value: '', label: 'Applications' },
+                  { value: 'members', label: 'Members' },
+                ]}
+              />
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
+              <Button
+                key={format}
+                variant="secondary"
+                disabled={exporting !== null}
+                onClick={() => void runExport(format)}
+              >
+                {exporting === format
+                  ? `Exporting ${format.toUpperCase()}…`
+                  : `Export ${format.toUpperCase()}`}
+              </Button>
+            ))}
+          </>
+        }
+      />
 
       <p style={{ opacity: 0.8 }}>{def.description}</p>
 
       {query.isPending ? (
-        <p role="status">Loading report…</p>
+        <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading report">
+          <Skeleton style={{ height: 48 }} />
+          <Skeleton style={{ height: 48 }} />
+          <Skeleton style={{ height: 48 }} />
+        </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data.data.length === 0 ? (
@@ -221,20 +240,6 @@ export function ReportsPage() {
         </>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-        {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
-          <Button
-            key={format}
-            variant="secondary"
-            disabled={exporting !== null}
-            onClick={() => void runExport(format)}
-          >
-            {exporting === format
-              ? `Exporting ${format.toUpperCase()}…`
-              : `Export ${format.toUpperCase()}`}
-          </Button>
-        ))}
-      </div>
       {exportError ? (
         <ErrorState error={new Error(exportError)} onRetry={() => setExportError(null)} />
       ) : null}

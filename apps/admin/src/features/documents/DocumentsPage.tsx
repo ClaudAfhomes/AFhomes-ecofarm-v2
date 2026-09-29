@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import {
@@ -80,36 +90,43 @@ export function DocumentsPage() {
         description="Upload identity scans to private storage, extract suggestions with OCR where available, and confirm them by human review."
       />
 
-      <div
-        style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'end' }}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setAppliedId(subjectId.trim());
+        }}
       >
-        <label>
-          Records for
-          <select
-            value={subjectType}
-            onChange={(e) => {
-              setSubjectType(e.target.value as 'customer' | 'ost_application');
-              setAppliedId('');
-              setSubjectId('');
-            }}
-          >
-            <option value="customer">Customer</option>
-            <option value="ost_application">OST application</option>
-          </select>
-        </label>
-        <label>
-          {subjectType === 'customer' ? 'Customer ID' : 'Application ID'}
-          <input
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-            placeholder="UUID of the record"
-            spellCheck={false}
-          />
-        </label>
-        <Button variant="secondary" onClick={() => setAppliedId(subjectId.trim())}>
-          Show
-        </Button>
-      </div>
+        <FilterBar
+          filters={
+            <Select
+              aria-label="Records for"
+              value={subjectType}
+              onChange={(e) => {
+                setSubjectType(e.target.value as 'customer' | 'ost_application');
+                setAppliedId('');
+                setSubjectId('');
+              }}
+              options={[
+                { value: 'customer', label: 'Customer' },
+                { value: 'ost_application', label: 'OST application' },
+              ]}
+            />
+          }
+          search={
+            <SearchField
+              label={subjectType === 'customer' ? 'Customer ID' : 'Application ID'}
+              placeholder="UUID of the record"
+              value={subjectId}
+              onChange={setSubjectId}
+            />
+          }
+          actions={
+            <Button type="submit" variant="secondary">
+              Show
+            </Button>
+          }
+        />
+      </form>
 
       <div
         style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}
@@ -126,11 +143,7 @@ export function DocumentsPage() {
           {upload.isPending ? 'Uploading…' : 'Upload scan'}
         </Button>
       </div>
-      {error ? (
-        <p role="alert" style={{ color: 'var(--color-danger)' }}>
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert variant="danger">{error}</Alert> : null}
       {uploadedId ? (
         <p role="status">
           Uploaded. <Link to={`/admin/documents/${uploadedId}`}>Review it now</Link> — nothing is

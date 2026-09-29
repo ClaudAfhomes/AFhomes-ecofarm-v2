@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@jad/ui';
 import type { CmsDocument, CmsDocumentKey } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
@@ -22,7 +22,14 @@ export function CmsDocumentPage({
     () => documents.data?.find((item) => item.key === documentKey),
     [documents.data, documentKey],
   );
-  if (documents.isLoading) return <p role="status">Loading CMS content…</p>;
+  if (documents.isLoading)
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS content">
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+      </div>
+    );
   if (documents.isError)
     return (
       <ErrorState

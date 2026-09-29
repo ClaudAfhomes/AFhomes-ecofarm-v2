@@ -98,3 +98,11 @@
   max-width: 100%;
   flex-shrink: 0;
 }
+
+.topbarWordmark {
+  font-family: var(--font-family-display);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  color: var(--color-on-dark);
+  white-space: nowrap;
+}

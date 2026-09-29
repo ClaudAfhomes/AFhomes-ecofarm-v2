@@ -29,7 +29,7 @@ const salesRows = [
     sellerRole: 'staff',
     plan: 'Gold',
     frozenPrice: '60000.00',
-    minDownSnapshot: '20000.00',
+    requiredDown: '20000.00',
     yearlyPointsSnapshot: 60000,
     status: 'submitted',
     verifiedPaid: '20000.00',
@@ -143,7 +143,7 @@ describe('Phase 30 reports page', () => {
       vi.fn(() => new Promise(() => {})),
     );
     const loading = render('/admin/reports');
-    expect(await screen.findByText('Loading report…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Loading report')).toBeInTheDocument();
     loading.unmount();
 
     // Restore the routed mock: the hanging fetch above is still installed.
@@ -214,7 +214,7 @@ describe('Phase 30 audit page', () => {
       vi.fn(() => new Promise(() => {})),
     );
     const loading = render('/admin/audit');
-    expect(await screen.findByText('Loading audit events…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Loading audit events')).toBeInTheDocument();
     loading.unmount();
 
     // Restore the routed mock: the hanging fetch above is still installed.

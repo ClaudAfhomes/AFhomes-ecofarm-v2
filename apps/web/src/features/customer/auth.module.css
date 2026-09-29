@@ -44,14 +44,69 @@
 }
 
 .form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  display: grid;
+  gap: var(--space-5);
   margin-bottom: var(--space-4);
+}
+
+/* Make the shared Button fill the form column (grid stretch). */
+.submitRow {
+  display: grid;
 }
 
 .form button {
   margin-top: var(--space-3);
+}
+
+.submitRow button {
+  margin-top: 0;
+}
+
+.utilityRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.textLink {
+  color: var(--color-brand-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.textLink:hover {
+  text-decoration: underline;
+}
+
+.prompt {
+  margin: 0;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+.promptLink {
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.promptLink:hover {
+  text-decoration: underline;
+}
+
+.note {
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  max-width: 42ch;
+  justify-self: center;
+}
+
+.resultPanel {
+  display: grid;
+  gap: var(--space-6);
 }
 
 .label {

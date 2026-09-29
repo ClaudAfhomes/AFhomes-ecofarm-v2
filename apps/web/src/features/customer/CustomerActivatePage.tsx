@@ -1,12 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Button } from '@jad/ui';
+import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
 import { validateRecoveryPassword } from '@jad/shared';
 
 import { useActivateMutation } from './queries';
 import { useCustomerSession } from '../../lib/customer-session';
-import { styles } from './portal-ui';
-import authStyles from './auth.module.css';
+import styles from './auth.module.css';
 
 /**
  * Account activation: redeem a staff-issued onboarding token and choose a
@@ -47,6 +46,7 @@ export function CustomerActivatePage() {
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -55,13 +55,14 @@ export function CustomerActivatePage() {
     // before they ever leave the browser. The server re-validates regardless.
     const policyError = validateRecoveryPassword(password);
     if (policyError) {
-      setError(policyError);
+      setFieldError(policyError);
       return;
     }
     if (password !== passwordConfirmation) {
-      setError('The passwords do not match');
+      setFieldError('The passwords do not match');
       return;
     }
+    setFieldError(null);
     const secret = token.trim();
     try {
       const result = await activation.mutateAsync({
@@ -81,79 +82,66 @@ export function CustomerActivatePage() {
   };
 
   return (
-    <main className={authStyles.auth}>
-      <div className={authStyles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={authStyles.title}>Activate your account</h1>
-        <p className={authStyles.body}>
-          Use the activation code you received from the AF Homes Ecofarm branch that registered you,
-          then choose a password.
-        </p>
-
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Activate your account"
+      lead="Use the activation code you received from the AF Homes Ecofarm branch that registered you, then choose a password."
+      brandTitle="Your farm membership, in your pocket."
+      brandLead="Track points, view your digital membership card, and follow your payments."
+    >
+      <form onSubmit={onSubmit} noValidate className={styles.form}>
         {error && (
-          <p className={authStyles.error} role="alert">
+          <Alert variant="danger" title="We could not activate your account">
             {error}
-          </p>
+          </Alert>
         )}
 
-        <form onSubmit={onSubmit} className={authStyles.form}>
-          <label className={authStyles.label} htmlFor="activation-token">
-            Activation code
-          </label>
-          <input
-            id="activation-token"
-            name="activation-token"
-            className={authStyles.input}
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            autoComplete="one-time-code"
-            required
-            minLength={20}
-            spellCheck={false}
-          />
+        <TextField
+          id="activation-token"
+          name="activation-token"
+          label="Activation code"
+          value={token}
+          onChange={(value) => setToken(value)}
+          autoComplete="one-time-code"
+        />
 
-          <label className={authStyles.label} htmlFor="activation-password">
-            Password
-          </label>
-          <input
-            id="activation-password"
-            name="activation-password"
-            className={authStyles.input}
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="new-password"
-            required
-            minLength={10}
-          />
-          <p className={authStyles.hint}>
-            At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
-          </p>
+        <PasswordField
+          id="activation-password"
+          label="Password"
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            setFieldError(null);
+          }}
+          autoComplete="new-password"
+          hint="At least 10 characters, with a lowercase letter, an uppercase letter and a digit."
+          error={fieldError ?? undefined}
+        />
 
-          <label className={authStyles.label} htmlFor="activation-password-confirm">
-            Confirm password
-          </label>
-          <input
-            id="activation-password-confirm"
-            name="activation-password-confirm"
-            className={authStyles.input}
-            type="password"
-            value={passwordConfirmation}
-            onChange={(event) => setPasswordConfirmation(event.target.value)}
-            autoComplete="new-password"
-            required
-            minLength={10}
-          />
+        <PasswordField
+          id="activation-password-confirm"
+          label="Confirm password"
+          value={passwordConfirmation}
+          onChange={(value) => {
+            setPasswordConfirmation(value);
+            setFieldError(null);
+          }}
+          autoComplete="new-password"
+        />
 
-          <Button type="submit" disabled={activation.isPending}>
-            {activation.isPending ? 'Activating…' : 'Activate my account'}
+        <div className={styles.submitRow}>
+          <Button type="submit" loading={activation.isPending} disabled={activation.isPending}>
+            Activate my account
           </Button>
-        </form>
+        </div>
 
-        <p className={authStyles.body}>
-          Already activated? <Link to="/customer/login">Sign in</Link>
+        <p className={styles.prompt}>
+          Already activated?{' '}
+          <Link className={styles.promptLink} to="/customer/login">
+            Sign in
+          </Link>
         </p>
-      </div>
-    </main>
+      </form>
+    </AuthLayout>
   );
 }

@@ -212,7 +212,6 @@ describe('OST application review', () => {
 
   beforeEach(() => {
     mockedGetOstApplication.mockResolvedValue(APP);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
   it('shows the frozen sponsor with no way to change it', async () => {
@@ -227,6 +226,7 @@ describe('OST application review', () => {
     renderDetail();
     await screen.findByText('Oscar Trainee');
     fireEvent.click(screen.getByRole('button', { name: 'Approve as OST' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByText(/Approved\. OST member OST-000001/)).toBeInTheDocument();
     expect(mockedApprove).toHaveBeenCalledWith(APP_ID);
   });

@@ -6,7 +6,7 @@ import {
   classifyRecoveryRequestError,
   isValidRecoveryEmail,
 } from '@jad/shared';
-import { Button } from '@jad/ui';
+import { Alert, AuthLayout, Button, TextField } from '@jad/ui';
 
 import { env } from '../../lib/env';
 import { useSession } from '../../lib/session';
@@ -80,60 +80,58 @@ export function AdminForgotPasswordPage() {
   };
 
   return (
-    <main className={styles.auth}>
-      <div className={styles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={styles.title}>Reset your password</h1>
-        {sent ? (
-          <>
-            <p className={styles.body} role="status">
-              {RECOVERY_SENT_MESSAGE}
-            </p>
-            <p className={styles.body}>
-              <Link to="/admin/login">Back to sign in</Link>
-            </p>
-          </>
-        ) : (
-          <>
-            <p className={styles.body}>
-              Enter your staff email and we will send you a link to choose a new password.
-            </p>
-            {serverError && (
-              <p className={styles.error} role="alert">
-                {serverError}
-              </p>
-            )}
-            <form onSubmit={onSubmit} noValidate className={styles.form}>
-              <label className={styles.label} htmlFor="admin-forgot-email">
-                Email
-              </label>
-              <input
-                id="admin-forgot-email"
-                className={styles.input}
-                type="email"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setEmailError(null);
-                }}
-                autoComplete="email"
-                required
-              />
-              {emailError && (
-                <p className={styles.error} role="alert">
-                  {emailError}
-                </p>
-              )}
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Sending…' : 'Send reset link'}
-              </Button>
-            </form>
-            <p className={styles.body}>
-              <Link to="/admin/login">Back to sign in</Link>
-            </p>
-          </>
-        )}
-      </div>
-    </main>
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Reset your password"
+      lead="Enter your staff email and we will send you a link to choose a new password."
+      brandTitle="Grow with the farm you own a card in."
+      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+    >
+      {sent ? (
+        <div className={styles.resultPanel}>
+          <Alert variant="success" title="Check your inbox">
+            {RECOVERY_SENT_MESSAGE}
+          </Alert>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/admin/login">
+              Back to sign in
+            </Link>
+          </p>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} noValidate className={styles.form}>
+          {serverError && (
+            <Alert variant="danger" title="We could not send the reset email">
+              {serverError}
+            </Alert>
+          )}
+          <TextField
+            id="admin-forgot-email"
+            name="email"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(value) => {
+              setEmail(value);
+              setEmailError(null);
+            }}
+            autoComplete="email"
+            inputMode="email"
+            placeholder="you@example.com"
+            error={emailError ?? undefined}
+          />
+          <div className={styles.submitRow}>
+            <Button type="submit" loading={pending} disabled={pending}>
+              Send reset link
+            </Button>
+          </div>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/admin/login">
+              Back to sign in
+            </Link>
+          </p>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

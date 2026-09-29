@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { Button, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, ConfirmDialog, ErrorState, PageHeader, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import {
@@ -34,6 +34,7 @@ export function OstApplicationDetailPage() {
   });
   const [reason, setReason] = useState('');
   const [outcome, setOutcome] = useState<string | null>(null);
+  const [confirmApprove, setConfirmApprove] = useState(false);
 
   const approve = useMutation({
     mutationFn: () => approveOstApplication(id),
@@ -138,15 +139,25 @@ export function OstApplicationDetailPage() {
           <Button
             onClick={() => {
               setOutcome(null);
-              if (
-                window.confirm(`Approve ${app.applicantName} as an OST under ${app.sponsorName}?`)
-              )
-                approve.mutate();
+              setConfirmApprove(true);
             }}
             disabled={approve.isPending || reject.isPending || requestChanges.isPending}
           >
             {approve.isPending ? 'Approving…' : 'Approve as OST'}
           </Button>
+          <ConfirmDialog
+            open={confirmApprove}
+            onCancel={() => setConfirmApprove(false)}
+            onConfirm={() => {
+              setConfirmApprove(false);
+              approve.mutate();
+            }}
+            title="Approve this application?"
+            message={`Approve ${app.applicantName} as an OST under ${app.sponsorName}?`}
+            confirmLabel="Approve"
+            cancelLabel="Cancel"
+            confirmLoading={approve.isPending}
+          />
           <label>
             Review notes (required for rejection or requested changes, min 5 characters)
             <textarea

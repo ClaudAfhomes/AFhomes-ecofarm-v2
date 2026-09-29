@@ -1,6 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader } from '@jad/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Skeleton,
+} from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { downloadExport, exportAudit, getAudit } from './services';
@@ -57,55 +65,62 @@ export function AuditPage() {
         description="Append-only governance trail. Metadata is redacted server-side before it reaches this screen."
       />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-        <label>
-          Action
-          <input
-            value={action}
+      <FilterBar
+        search={
+          <SearchField
+            label="Action"
             placeholder="e.g. COMMISSION_QUALIFIED"
-            onChange={(e) => {
-              setAction(e.target.value);
+            value={action}
+            onChange={(value) => {
+              setAction(value);
               resetPage();
             }}
           />
-        </label>
-        <label>
-          Entity type
-          <input
-            value={entityType}
-            placeholder="e.g. card_sale"
-            onChange={(e) => {
-              setEntityType(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-        <label>
-          From
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => {
-              setFrom(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value);
-              resetPage();
-            }}
-          />
-        </label>
-      </div>
+        }
+        filters={
+          <>
+            <SearchField
+              label="Entity type"
+              placeholder="e.g. card_sale"
+              value={entityType}
+              onChange={(value) => {
+                setEntityType(value);
+                resetPage();
+              }}
+            />
+            <input
+              aria-label="From"
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                resetPage();
+              }}
+            />
+            <input
+              aria-label="To"
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                resetPage();
+              }}
+            />
+          </>
+        }
+        actions={
+          <Button variant="secondary" disabled={exporting} onClick={() => void runExport()}>
+            {exporting ? 'Exporting CSV…' : 'Export CSV'}
+          </Button>
+        }
+      />
 
       {query.isPending ? (
-        <p role="status">Loading audit events…</p>
+        <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading audit events">
+          <Skeleton style={{ height: 48 }} />
+          <Skeleton style={{ height: 48 }} />
+          <Skeleton style={{ height: 48 }} />
+        </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data.data.length === 0 ? (
@@ -183,11 +198,6 @@ export function AuditPage() {
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-        <Button variant="secondary" disabled={exporting} onClick={() => void runExport()}>
-          {exporting ? 'Exporting CSV…' : 'Export CSV'}
-        </Button>
-      </div>
       {exportError ? (
         <ErrorState error={new Error(exportError)} onRetry={() => setExportError(null)} />
       ) : null}

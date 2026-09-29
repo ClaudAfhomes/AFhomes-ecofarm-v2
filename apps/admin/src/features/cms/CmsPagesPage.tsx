@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@jad/ui';
 import type { CmsPage } from '@jad/contracts';
 import { useSession } from '../../lib/session';
 import { createCmsPage, getCmsPages, publishCmsPage, updateCmsPage } from './services';
@@ -20,7 +20,14 @@ export function CmsPagesPage() {
     mutationFn: ({ id, publish }: { id: string; publish: boolean }) => publishCmsPage(id, publish),
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'pages'] }),
   });
-  if (pages.isLoading) return <p role="status">Loading CMS pages…</p>;
+  if (pages.isLoading)
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS pages">
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+      </div>
+    );
   if (pages.isError)
     return (
       <ErrorState

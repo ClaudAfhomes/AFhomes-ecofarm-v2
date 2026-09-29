@@ -5,7 +5,11 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  FilterBar,
   PageHeader,
+  SearchField,
+  Select,
+  Skeleton,
   StatusChip,
 } from '@jad/ui';
 import {
@@ -71,7 +75,14 @@ export function RedemptionCatalogPage() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['redemption', 'items'] }),
   });
 
-  if (items.isLoading) return <p role="status">Loading the catalog…</p>;
+  if (items.isLoading)
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading the catalog">
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+      </div>
+    );
   if (items.isError)
     return <ErrorState title="The catalog could not be loaded" onRetry={() => items.refetch()} />;
 
@@ -92,30 +103,38 @@ export function RedemptionCatalogPage() {
       )}
 
       <form
-        style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
         onSubmit={(e) => {
           e.preventDefault();
           setAppliedSearch(search.trim());
         }}
       >
-        <input
-          aria-label="Search catalog items"
-          placeholder="Name, code or category"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+        <FilterBar
+          search={
+            <SearchField
+              label="Search catalog items"
+              placeholder="Name, code or category"
+              value={search}
+              onChange={setSearch}
+            />
+          }
+          filters={
+            <Select
+              aria-label="Filter by status"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as 'active' | 'inactive' | 'all')}
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+                { value: 'all', label: 'All' },
+              ]}
+            />
+          }
+          actions={
+            <Button type="submit" variant="secondary">
+              Search
+            </Button>
+          }
         />
-        <select
-          aria-label="Filter by status"
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value as 'active' | 'inactive' | 'all')}
-        >
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="all">All</option>
-        </select>
-        <Button type="submit" variant="secondary">
-          Search
-        </Button>
       </form>
 
       {(items.data ?? []).length === 0 ? (

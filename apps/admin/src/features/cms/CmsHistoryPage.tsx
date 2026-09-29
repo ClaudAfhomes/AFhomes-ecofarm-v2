@@ -1,10 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { EmptyState, ErrorState, PageHeader } from '@jad/ui';
+import { EmptyState, ErrorState, PageHeader, Skeleton } from '@jad/ui';
 import { getCmsHistory } from './services';
 import styles from './cms.module.css';
 export function CmsHistoryPage() {
   const history = useQuery({ queryKey: ['cms', 'history'], queryFn: getCmsHistory });
-  if (history.isLoading) return <p role="status">Loading CMS history…</p>;
+  if (history.isLoading)
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS history">
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+      </div>
+    );
   if (history.isError)
     return (
       <ErrorState

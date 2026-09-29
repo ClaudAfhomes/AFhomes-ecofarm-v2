@@ -6,12 +6,11 @@ import {
   classifyRecoveryRequestError,
   isValidRecoveryEmail,
 } from '@jad/shared';
-import { Button } from '@jad/ui';
+import { Alert, AuthLayout, Button, TextField } from '@jad/ui';
 
 import { env } from '../../lib/env';
 import { getSupabaseClient } from '../../lib/supabase';
-import { styles } from './portal-ui';
-import authStyles from './auth.module.css';
+import styles from './auth.module.css';
 
 /**
  * Customer forgot-password: request a Supabase Auth recovery email.
@@ -79,62 +78,58 @@ export function CustomerForgotPasswordPage() {
   };
 
   return (
-    <main className={authStyles.auth}>
-      <div className={authStyles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={authStyles.title}>Reset your password</h1>
-        {sent ? (
-          <>
-            <p className={authStyles.body} role="status">
-              {RECOVERY_SENT_MESSAGE}
-            </p>
-            <p className={authStyles.body}>
-              <Link to="/customer/login">Back to sign in</Link>
-            </p>
-          </>
-        ) : (
-          <>
-            <p className={authStyles.body}>
-              Enter the email you signed up with and we will send you a link to choose a new
-              password.
-            </p>
-            {serverError && (
-              <p className={authStyles.error} role="alert">
-                {serverError}
-              </p>
-            )}
-            <form onSubmit={onSubmit} noValidate className={authStyles.form}>
-              <label className={authStyles.label} htmlFor="customer-forgot-email">
-                Email
-              </label>
-              <input
-                id="customer-forgot-email"
-                name="customer-forgot-email"
-                className={authStyles.input}
-                type="email"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setEmailError(null);
-                }}
-                autoComplete="email"
-                required
-              />
-              {emailError && (
-                <p className={authStyles.error} role="alert">
-                  {emailError}
-                </p>
-              )}
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Sending…' : 'Send reset link'}
-              </Button>
-            </form>
-            <p className={authStyles.body}>
-              <Link to="/customer/login">Back to sign in</Link>
-            </p>
-          </>
-        )}
-      </div>
-    </main>
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Reset your password"
+      lead="Enter the email you signed up with and we will send you a link to choose a new password."
+      brandTitle="Your farm membership, in your pocket."
+      brandLead="Track points, view your digital membership card, and follow your payments."
+    >
+      {sent ? (
+        <div className={styles.resultPanel}>
+          <Alert variant="success" title="Check your inbox">
+            {RECOVERY_SENT_MESSAGE}
+          </Alert>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/customer/login">
+              Back to sign in
+            </Link>
+          </p>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} noValidate className={styles.form}>
+          {serverError && (
+            <Alert variant="danger" title="We could not send the reset email">
+              {serverError}
+            </Alert>
+          )}
+          <TextField
+            id="customer-forgot-email"
+            name="customer-forgot-email"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(value) => {
+              setEmail(value);
+              setEmailError(null);
+            }}
+            autoComplete="email"
+            inputMode="email"
+            placeholder="you@example.com"
+            error={emailError ?? undefined}
+          />
+          <div className={styles.submitRow}>
+            <Button type="submit" loading={pending} disabled={pending}>
+              Send reset link
+            </Button>
+          </div>
+          <p className={styles.prompt}>
+            <Link className={styles.promptLink} to="/customer/login">
+              Back to sign in
+            </Link>
+          </p>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

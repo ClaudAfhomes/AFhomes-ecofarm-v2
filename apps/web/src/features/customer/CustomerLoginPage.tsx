@@ -1,11 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Button } from '@jad/ui';
+import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { env } from '../../lib/env';
-import { styles } from './portal-ui';
-import authStyles from './auth.module.css';
+import styles from './auth.module.css';
 
 /**
  * Customer sign-in.
@@ -26,8 +25,11 @@ export function CustomerLoginPage() {
   const { signIn } = useCustomerSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const from =
     (location.state as { from?: string } | null)?.from?.startsWith('/customer')
@@ -36,7 +38,20 @@ export function CustomerLoginPage() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
+    if (pending) return;
+    const nextErrors: { email?: string; password?: string } = {};
+    if (!email.trim()) nextErrors.email = 'Enter your email address.';
+    if (!password) nextErrors.password = 'Enter your password.';
+    setErrors(nextErrors);
+    if (nextErrors.email) {
+      emailRef.current?.focus();
+      return;
+    }
+    if (nextErrors.password) {
+      passwordRef.current?.focus();
+      return;
+    }
+    setServerError(null);
     setPending(true);
     try {
       await signIn(email, password);
@@ -46,72 +61,90 @@ export function CustomerLoginPage() {
       // rendered: distinguishing "no such user" from "wrong password" would let
       // anyone enumerate registered customers. Nothing is logged either - the
       // submitted password must never reach a log sink.
-      setError('We could not sign you in with that email and password.');
+      setServerError('We could not sign you in with that email and password.');
       setPending(false);
     }
   };
 
   return (
-    <main className={authStyles.auth}>
-      <div className={authStyles.panel}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={authStyles.title}>Sign in</h1>
-        <p className={authStyles.body}>Access your membership card and points.</p>
-
-        {error && (
-          <p className={authStyles.error} role="alert">
-            {error}
-          </p>
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Sign in"
+      lead="Access your membership card and points."
+      brandTitle="Your farm membership, in your pocket."
+      brandLead="Track points, view your digital membership card, and follow your payments."
+    >
+      <form onSubmit={onSubmit} noValidate className={styles.form}>
+        {serverError && (
+          <Alert variant="danger" title="We could not sign you in">
+            {serverError}
+          </Alert>
         )}
 
-        <form onSubmit={onSubmit} className={authStyles.form}>
-          <label className={authStyles.label} htmlFor="login-email">
-            Email
-          </label>
-          <input
-            id="login-email"
-            name="login-email"
-            className={authStyles.input}
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="username"
-            required
-          />
+        <TextField
+          id="login-email"
+          name="login-email"
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            setErrors((current) =>
+              current.email !== undefined ? { ...current, email: undefined } : current,
+            );
+            setServerError(null);
+          }}
+          autoComplete="username"
+          inputMode="email"
+          inputRef={emailRef}
+          placeholder="you@example.com"
+          error={errors.email}
+        />
 
-          <label className={authStyles.label} htmlFor="login-password">
-            Password
-          </label>
-          <input
-            id="login-password"
-            name="login-password"
-            className={authStyles.input}
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
+        <PasswordField
+          id="login-password"
+          label="Password"
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            setErrors((current) =>
+              current.password !== undefined ? { ...current, password: undefined } : current,
+            );
+            setServerError(null);
+          }}
+          autoComplete="current-password"
+          inputRef={passwordRef}
+          placeholder="Password"
+          error={errors.password}
+        />
 
-          <Button type="submit" disabled={pending}>
-            {pending ? 'Signing in…' : 'Sign in'}
+        <div className={styles.utilityRow}>
+          <Link className={styles.textLink} to="/customer/forgot-password">
+            Forgot your password?
+          </Link>
+        </div>
+
+        <div className={styles.submitRow}>
+          <Button type="submit" loading={pending} disabled={pending}>
+            Sign in
           </Button>
-        </form>
+        </div>
 
-        <p className={authStyles.body}>
-          Received an activation code? <Link to="/customer/activate">Activate your account</Link>
+        <p className={styles.prompt}>
+          Received an activation code?{' '}
+          <Link className={styles.promptLink} to="/customer/activate">
+            Activate your account
+          </Link>
         </p>
-        <p className={authStyles.body}>
-          <Link to="/customer/forgot-password">Forgot your password?</Link>
-        </p>
-        <p className={authStyles.footnote}>
+
+        <p className={styles.footnote}>
           Staff member? Use the{' '}
           <a href={env.VITE_ADMIN_URL} rel="noreferrer">
             administration console
           </a>{' '}
           instead.
         </p>
-      </div>
-    </main>
+      </form>
+    </AuthLayout>
   );
 }

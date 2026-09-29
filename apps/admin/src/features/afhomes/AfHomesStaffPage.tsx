@@ -1,6 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, Select, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 import type { AfHomesStaff } from '@jad/contracts';
 import {
   getAfHomesDepartments,
@@ -91,24 +101,27 @@ export function AfHomesStaffPage() {
           </Button>
         }
       />
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input
-          type="search"
-          aria-label="Search staff"
-          placeholder="Search name or email"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Select
-          aria-label="Filter status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          options={['all', 'invited', 'active', 'inactive', 'suspended'].map((value) => ({
-            value,
-            label: value[0]!.toUpperCase() + value.slice(1),
-          }))}
-        />
-      </div>
+      <FilterBar
+        search={
+          <SearchField
+            label="Search staff"
+            placeholder="Search name or email"
+            value={search}
+            onChange={setSearch}
+          />
+        }
+        filters={
+          <Select
+            aria-label="Filter status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            options={['all', 'invited', 'active', 'inactive', 'suspended'].map((value) => ({
+              value,
+              label: value[0]!.toUpperCase() + value.slice(1),
+            }))}
+          />
+        }
+      />
       {staff.isPending ? (
         <p role="status">Loading staff…</p>
       ) : staff.isError ? (

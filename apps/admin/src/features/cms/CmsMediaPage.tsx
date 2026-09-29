@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader } from '@jad/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton } from '@jad/ui';
 import { useSession } from '../../lib/session';
 import { deleteCmsMedia, getCmsMedia, uploadCmsMedia } from './services';
 import styles from './cms.module.css';
@@ -46,7 +46,14 @@ export function CmsMediaPage() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'media'] }),
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Delete failed.'),
   });
-  if (media.isLoading) return <p role="status">Loading media…</p>;
+  if (media.isLoading)
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading media">
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
+      </div>
+    );
   if (media.isError)
     return (
       <ErrorState

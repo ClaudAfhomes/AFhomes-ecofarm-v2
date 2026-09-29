@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { EmptyState, ErrorState, FilterBar, PageHeader, SearchField, Select, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getMemberships } from './services';
@@ -36,28 +36,27 @@ export function MembershipsPage() {
         description="Issued member cards. Open a card to print it or to rotate its credentials."
       />
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <label>
-          Search member or number
-          <input
-            aria-label="Search member or number"
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+      <FilterBar
+        search={
+          <SearchField
+            label="Search member or number"
             placeholder="Name or MBS-…"
+            value={search}
+            onChange={setSearch}
           />
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            {STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {value || 'All statuses'}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        }
+        filters={
+          <Select
+            aria-label="Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            options={[
+              { value: '', label: 'All statuses' },
+              ...STATUSES.filter(Boolean).map((value) => ({ value, label: value })),
+            ]}
+          />
+        }
+      />
 
       {query.isPending ? (
         <p role="status">Loading memberships…</p>
@@ -77,6 +76,7 @@ export function MembershipsPage() {
                 <th>Status</th>
                 <th>Points</th>
                 <th>Activated</th>
+                <th>Valid until</th>
                 <th>Card Issued</th>
                 <th>Last Printed</th>
                 <th>Prints</th>
@@ -98,6 +98,7 @@ export function MembershipsPage() {
                   </td>
                   <td>{m.pointsBalance.toLocaleString('en-PH')}</td>
                   <td>{m.activatedAt ? formatDateTime(m.activatedAt) : '—'}</td>
+                  <td>{m.expiresAt ? formatDateTime(m.expiresAt) : '—'}</td>
                   <td>{m.cardIssuedAt ? formatDateTime(m.cardIssuedAt) : '—'}</td>
                   <td>{m.lastPrintedAt ? formatDateTime(m.lastPrintedAt) : '—'}</td>
                   <td>{m.printCount}</td>
