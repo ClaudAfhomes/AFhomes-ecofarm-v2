@@ -123,8 +123,27 @@ const FINANCE_USER: SessionUser = {
 function install(over: Record<string, Route> = {}) {
   routes.clear();
   routes.set('GET /analytics', { status: 200, body: financeOverview() });
+  routes.set('GET /analytics/sales-trend', { status: 200, body: salesTrendReport() });
   for (const [k, v] of Object.entries(over)) routes.set(k, v);
 }
+
+/** Dedicated Sales Overview series stub (independent of the overview payload). */
+const salesTrendReport = (periods = defaultTrendPeriods()) => ({
+  granularity: 'month',
+  generatedAt: '2026-09-30T00:00:00.000Z',
+  periods,
+});
+
+const defaultTrendPeriods = () => [
+  { key: '2026-07', count: 1, total: '60000.00' },
+  { key: '2026-08', count: 2, total: '55000.00' },
+  { key: '2026-09', count: 1, total: '60000.00' },
+];
+
+const emptyTrendPeriods = () => [
+  { key: '2026-08', count: 0, total: '0.00' },
+  { key: '2026-09', count: 0, total: '0.00' },
+];
 
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -179,17 +198,41 @@ describe('Phase 29 role dashboard', () => {
   });
 
   it('39/40. renders empty and single-point chart states without crashing', async () => {
-    install({ 'GET /analytics': { status: 200, body: financeOverview({ trends: [], salesByPlan: [] }) } });
+    install({
+      'GET /analytics': { status: 200, body: financeOverview({ trends: [], salesByPlan: [] }) },
+      'GET /analytics/sales-trend': { status: 200, body: salesTrendReport(emptyTrendPeriods()) },
+    });
     render();
-    expect(await screen.findByText('No activity in this period')).toBeInTheDocument();
+    // The Sales Overview owns its data: an all-zero qualifying series shows
+    // its empty state instead of a fake flat line.
+    expect(await screen.findByText('No qualifying sales yet')).toBeInTheDocument();
     expect(screen.queryByText('Sales by card plan')).toBeNull();
   });
 
   it('renders a single trend point as a line chart', async () => {
     const { container } = render();
+    await screen.findByText('Sales Overview');
     await waitFor(() => {
       expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
     });
+  });
+
+  it('20. keeps the Sales Overview independent of the page-level period selector', async () => {
+    const user = userEvent.setup();
+    render();
+    await screen.findByText('Sales Overview');
+    await user.selectOptions(screen.getByLabelText('Analytics period'), 'week');
+    await waitFor(() => {
+      expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=week'))).toBe(
+        true,
+      );
+    });
+    // The overview refetched for the new window; the Sales Overview stayed on
+    // its own Monthly series and never followed the page selector.
+    const trendCalls = requests.filter((r) => r.path === '/analytics/sales-trend');
+    expect(trendCalls.length).toBeGreaterThan(0);
+    for (const call of trendCalls) expect(call.query).toContain('granularity=month');
+    expect(await screen.findByText('Value this month')).toBeInTheDocument();
   });
 
   it('41. recovers from a load error through retry', async () => {

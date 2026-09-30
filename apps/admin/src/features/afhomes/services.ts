@@ -5,6 +5,7 @@ import {
   afHomesSessionSchema,
   afHomesStaffSchema,
   analyticsOverviewSchema,
+  salesTrendReportSchema,
   type AfHomesDashboard,
   type AfHomesDepartment,
   type AfHomesPermission,
@@ -12,6 +13,8 @@ import {
   type AfHomesStaff,
   type AnalyticsOverview,
   type AnalyticsPeriod,
+  type SalesTrendGranularity,
+  type SalesTrendReport,
 } from '@jad/contracts';
 import { z } from 'zod';
 import { request, requestList } from '../../lib/api/client';
@@ -121,3 +124,16 @@ export const changeAfHomesStaffPassword = (input: {
 
 export const getAnalyticsOverview = (period: AnalyticsPeriod): Promise<AnalyticsOverview> =>
   request(`/analytics?period=${encodeURIComponent(period)}`, analyticsOverviewSchema);
+
+/**
+ * JAD-parity Sales Overview trend: a dedicated per-granularity series of
+ * qualifying-sale counts and exact-decimal frozen-value totals. Independent of
+ * the page-level analytics period selector.
+ */
+export const getAfHomesSalesTrend = (
+  granularity: SalesTrendGranularity,
+): Promise<SalesTrendReport> =>
+  request(
+    `/analytics/sales-trend?granularity=${encodeURIComponent(granularity)}`,
+    salesTrendReportSchema,
+  );

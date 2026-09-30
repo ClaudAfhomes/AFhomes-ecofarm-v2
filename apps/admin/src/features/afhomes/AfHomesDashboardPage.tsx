@@ -165,8 +165,8 @@ function MetricCardSkeletons({ count = 6 }: { count?: number }) {
   );
 }
 
-function Trend({ data }: { data: AnalyticsOverview }) {
-  return <AfHomesTrendChart data={data} />;
+function Trend() {
+  return <AfHomesTrendChart />;
 }
 
 export function AfHomesDashboardPage() {
@@ -254,7 +254,7 @@ export function AfHomesDashboardPage() {
               />
             </section>
           ) : null}
-          {query.data.scope.kind !== 'organization' ? <Trend data={query.data} /> : null}
+          {query.data.scope.kind !== 'organization' ? <Trend /> : null}
           {query.data.salesByScheme.length ? (
             <section aria-label="Sales by payment scheme">
               <h2 className={styles.sectionTitle}>Sales by payment scheme</h2>

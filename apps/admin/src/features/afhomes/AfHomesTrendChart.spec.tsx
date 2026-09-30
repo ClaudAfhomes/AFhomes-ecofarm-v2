@@ -1,8 +1,16 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import type { AnalyticsOverview } from '@jad/contracts';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SalesTrendReport } from '@jad/contracts';
 
-import { AfHomesTrendChart, TrendChartSkeleton, trendLabel } from './AfHomesTrendChart';
+import { renderWithProviders } from '../../test/utils';
+import { AfHomesTrendChart, TrendChartSkeleton, periodLabel } from './AfHomesTrendChart';
+
+const getTrend = vi.hoisted(() => vi.fn());
+vi.mock('./services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./services')>();
+  return { ...actual, getAfHomesSalesTrend: getTrend };
+});
 
 /**
  * jsdom has no ResizeObserver; recharts ResponsiveContainer needs one. The
@@ -32,98 +40,220 @@ class ResizeObserverStub {
 const g = globalThis as unknown as { ResizeObserver?: unknown };
 g.ResizeObserver = g.ResizeObserver ?? ResizeObserverStub;
 
-const overview = (periods: { period: string; sales: number; saleValue: string; verifiedPayments: string }[]): AnalyticsOverview => ({
-  period: 'month',
-  window: { from: '2026-09-01T00:00:00.000Z', to: '2026-10-01T00:00:00.000Z', timezone: 'UTC' },
-  scope: {
-    kind: 'global',
-    viewerStaffId: '00000000-0000-4000-8000-000000000001',
-    viewerRole: 'test',
-    attributedSaleCount: 0,
-    unattributedLegacySaleCount: 0,
-    unattributedLegacySaleValue: '0.00',
-  },
-  headline: {
-    totalCustomers: 0,
-    newCustomers: 0,
-    totalCardSales: 0,
-    periodSales: 0,
-    grossFrozenSaleValue: '0.00',
-    periodVerifiedPayments: '0.00',
-    activatedMemberships: 0,
-  },
-  queues: {
-    pendingPaymentVerification: 0,
-    activationReadySales: 0,
-    fullPaidSales: 0,
-    rejectedPayments: 0,
-    spotCashActive: 0,
-    spotCashExpired: 0,
-  },
-  sellers: null,
-  organization: null,
-  networkContext: null,
-  commissions: null,
-  redemptions: null,
-  salesByPlan: [],
-  salesByScheme: [],
-  trends: periods.map((p) => ({
-    ...p,
-    activations: 0,
-    redemptions: 0,
-    pointsRedeemed: 0,
-  })),
+const monthKey = (monthsBack: number) => {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - monthsBack);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+
+const thisYear = () => String(new Date().getUTCFullYear());
+
+/** Monthly series: exact-cent fractions prove string arithmetic (0.10 + 0.20). */
+const monthlyReport = (): SalesTrendReport => ({
+  granularity: 'month',
+  generatedAt: new Date().toISOString(),
+  periods: [
+    { key: monthKey(2), count: 1, total: '60000.00' },
+    { key: monthKey(1), count: 2, total: '0.30' },
+    { key: monthKey(0), count: 1, total: '1200000.00' },
+  ],
 });
 
-describe('trendLabel', () => {
-  it('labels hourly, daily, and monthly buckets', () => {
-    expect(trendLabel('2026-09-15T09:00')).toBe('09:00');
-    expect(trendLabel('2026-09-15')).toBe('Sep 15');
-    expect(trendLabel('2026-09')).toBe("Sep '26");
+const yearlyReport = (): SalesTrendReport => ({
+  granularity: 'year',
+  generatedAt: new Date().toISOString(),
+  periods: [
+    { key: String(Number(thisYear()) - 1), count: 1, total: '1000.00' },
+    { key: thisYear(), count: 2, total: '2000.00' },
+  ],
+});
+
+const emptyReport = (): SalesTrendReport => ({
+  granularity: 'month',
+  generatedAt: new Date().toISOString(),
+  periods: [
+    { key: monthKey(1), count: 0, total: '0.00' },
+    { key: monthKey(0), count: 0, total: '0.00' },
+  ],
+});
+
+beforeEach(() => {
+  getTrend.mockReset();
+  getTrend.mockResolvedValue(monthlyReport());
+});
+
+const renderChart = () => renderWithProviders(<AfHomesTrendChart />);
+/** Plotted line geometry. Axis tick *labels* never paint text in jsdom, but
+ *  the line path carries the real scaled values, so a metric switch must
+ *  change it while a refetch-free toggle keeps the fetch count at one. */
+const lineD = (container: HTMLElement) =>
+  (container.querySelector('.recharts-line path') as unknown as { getAttribute?: (n: string) => string } | null)?.getAttribute?.('d') ?? '';
+
+describe('periodLabel (JAD grammar)', () => {
+  it('7. labels monthly keys as "Sep \'26"', () => {
+    expect(periodLabel('2026-09')).toBe("Sep '26");
+    expect(periodLabel('2026-01')).toBe("Jan '26");
+  });
+
+  it('8. labels yearly keys as the bare year', () => {
+    expect(periodLabel('2026')).toBe('2026');
   });
 });
 
-describe('AfHomesTrendChart (JAD chart grammar)', () => {
-  const data = overview([
-    { period: '2026-09-01', sales: 2, saleValue: '60000.00', verifiedPayments: '25000.00' },
-    { period: '2026-09-15', sales: 1, saleValue: '30000.00', verifiedPayments: '30000.00' },
-  ]);
-
-  it('renders the line/area chart with KPIs and the metric toggle', async () => {
-    const { container } = render(<AfHomesTrendChart data={data} />);
-    expect(screen.getByText('Activity trend')).toBeInTheDocument();
+describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
+  it('1. renders the "Sales Overview" title', async () => {
+    const { container } = renderChart();
+    expect(screen.getByText('Sales Overview')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sales overview')).toBeInTheDocument();
     await waitFor(() => {
       expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
     });
-    // Line + area geometry, no bar columns.
+  });
+
+  it('2. defaults to the Value (₱) metric', async () => {
+    const { container } = renderChart();
+    expect(getTrend).toHaveBeenCalledWith('month');
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    const valueGeometry = lineD(container);
+    expect(valueGeometry).not.toBe('');
+    // The initial geometry is the value mapping: switching to Count replotted it.
+    fireEvent.click(screen.getByRole('button', { name: 'Count' }));
+    await waitFor(() => {
+      expect(lineD(container)).not.toBe(valueGeometry);
+    });
+    expect(getTrend).toHaveBeenCalledTimes(1);
+  });
+
+  it('3. switches between Count and Value (₱) without refetching', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    const valueGeometry = lineD(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Count' }));
+    await waitFor(() => {
+      expect(lineD(container)).not.toBe(valueGeometry);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Value (₱)' }));
+    await waitFor(() => {
+      expect(lineD(container)).toBe(valueGeometry);
+    });
+    expect(getTrend).toHaveBeenCalledTimes(1);
+    // JAD KPIs stay money/count aggregates regardless of the plotted metric.
+    expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
+  });
+
+  it('4/5. toggles Monthly and Yearly granularity with a refetch each way', async () => {
+    const user = userEvent.setup();
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    getTrend.mockResolvedValue(yearlyReport());
+    await user.click(screen.getByRole('button', { name: 'Yearly' }));
+    expect(getTrend).toHaveBeenCalledWith('year');
+    await waitFor(() => {
+      expect(screen.getByText(`Value in ${thisYear()}`)).toBeInTheDocument();
+    });
+    getTrend.mockResolvedValue(monthlyReport());
+    await user.click(screen.getByRole('button', { name: 'Monthly' }));
+    expect(getTrend).toHaveBeenCalledWith('month');
+    await waitFor(() => {
+      expect(screen.getByText('Value this month')).toBeInTheDocument();
+    });
+  });
+
+  it('6. no longer offers Verified (₱) or the old sale-value label as a chart metric', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    expect(screen.queryByRole('button', { name: 'Verified (₱)' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sale value (₱)' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Value (₱)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Count' })).toBeInTheDocument();
+  });
+
+  it('9/10/11. shows current, previous, and current-year KPIs from server facts', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    expect(screen.getByText('Value this month')).toBeInTheDocument();
+    expect(screen.getByText('₱1,200,000.00')).toBeInTheDocument();
+    expect(screen.getByText('Previous period')).toBeInTheDocument();
+    expect(screen.getByText('₱0.30')).toBeInTheDocument();
+    expect(screen.getByText('Qualifying sales this year')).toBeInTheDocument();
+    expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
+  });
+
+  it('12. keeps money exact through the KPI aggregation', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    // 60000.00 + 0.30 + 1200000.00 as strings - a float sum would print
+    // 1260000.3000000003-style residue instead.
+    expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
+  });
+
+  it('13. shows an empty state instead of a fake zero line when nothing qualifies', async () => {
+    getTrend.mockResolvedValue(emptyReport());
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(screen.getByText('No qualifying sales yet')).toBeInTheDocument();
+    });
+    expect(container.querySelector('svg.recharts-surface')).toBeNull();
+  });
+
+  it('14. owns its loading state in the chart region', () => {
+    getTrend.mockReturnValue(new Promise(() => {}));
+    renderChart();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
+  });
+
+  it('15/17. surfaces API errors with retry and renders no figures until then', async () => {
+    const user = userEvent.setup();
+    getTrend.mockRejectedValueOnce(new Error('boom'));
+    getTrend.mockResolvedValue(monthlyReport());
+    const { container } = renderChart();
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(container.querySelector('svg.recharts-surface')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    expect(screen.getByText('₱1,200,000.00')).toBeInTheDocument();
+  });
+
+  it('18. uses AF brand tokens, never JAD blue', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
+    const html = container.innerHTML;
+    expect(html).toContain('var(--color-brand-primary)');
+    expect(html).toContain('afhomesSalesTrendFill');
+    expect(html).not.toMatch(/#(3b82f6|2563eb|1d4ed8)/i);
+  });
+
+  it('renders line + area geometry with a horizontal dashed grid only', async () => {
+    const { container } = renderChart();
+    await waitFor(() => {
+      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
+    });
     expect(container.querySelector('.recharts-line')).not.toBeNull();
     expect(container.querySelector('.recharts-area')).not.toBeNull();
     expect(container.querySelector('.recharts-xAxis')).not.toBeNull();
     expect(container.querySelector('.recharts-yAxis')).not.toBeNull();
-    expect(screen.getByText('Current bucket')).toBeInTheDocument();
-    expect(screen.getByText('Previous bucket')).toBeInTheDocument();
-    expect(screen.getByText('₱30,000.00')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sale value (₱)' })).toBeInTheDocument();
-  });
-
-  it('switches the plotted metric without refetching', async () => {
-    const { container } = render(<AfHomesTrendChart data={data} />);
-    await waitFor(() => {
-      expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Verified (₱)' }));
-    expect(screen.getByText('₱30,000.00')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Count' }));
-    expect(screen.getByText('3 sales')).toBeInTheDocument();
-  });
-
-  it('renders the no-data state when the period is empty', () => {
-    render(<AfHomesTrendChart data={overview([])} />);
-    expect(screen.getByText('No activity in this period')).toBeInTheDocument();
+    expect(container.querySelector('.recharts-bar')).toBeNull();
   });
 
   it('shows a chart-shaped loading skeleton', () => {
-    render(<TrendChartSkeleton />);
+    renderWithProviders(<TrendChartSkeleton />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
   });
 });

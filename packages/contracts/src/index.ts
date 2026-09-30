@@ -245,8 +245,17 @@ export {
   analyticsPeriodSchema,
   analyticsScopeSchema,
   analyticsTrendPointSchema,
+  salesTrendGranularitySchema,
+  salesTrendPeriodSchema,
+  salesTrendReportSchema,
 } from './schemas/analytics.js';
-export type { AnalyticsOverview, AnalyticsPeriod } from './schemas/analytics.js';
+export type {
+  AnalyticsOverview,
+  AnalyticsPeriod,
+  SalesTrendGranularity,
+  SalesTrendPeriod,
+  SalesTrendReport,
+} from './schemas/analytics.js';
 
 /* ---- Phase 15: role-scoped reports and the audit center ----
    Exports are generated from the same scoped server-side query as the

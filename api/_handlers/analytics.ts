@@ -1,5 +1,9 @@
 /** Phase 14 role-scoped, database-backed analytics. */
-import { analyticsPeriodSchema, type AnalyticsPeriod } from '@jad/contracts';
+import {
+  analyticsPeriodSchema,
+  salesTrendReportSchema,
+  type AnalyticsPeriod,
+} from '@jad/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { deny, fail, type Db } from '../_lib/handler-kit.js';
@@ -86,7 +90,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       sales: await rows(
         db,
         'card_sales',
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,submitted_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       ),
       attributed: 0,
       legacy: [] as Row[],
@@ -96,7 +100,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
     const result = await db
       .from('card_sales')
       .select(
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,submitted_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
       .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`);
     if (result.error) throw result.error;
@@ -121,7 +125,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
     const result = await db
       .from('card_sales')
       .select(
-        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
+        'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,submitted_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
       .in('id', saleIds);
     if (result.error) throw result.error;
@@ -243,9 +247,118 @@ function bucketKey(value: unknown, period: AnalyticsPeriod) {
   return date.toISOString().slice(0, 10);
 }
 
+/* ------------------------------------------------------------------ */
+/* Sales Overview trend (JAD SalesTrendChart parity)                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The single AF Homes state that counts as a recognized sale for the Sales
+ * Overview. Activation is the explicit, permission-gated recognition decision
+ * after full verified payment - the same role JAD's `QUALIFYING_SALE`
+ * transition plays after `PAYMENT_VERIFIED`. Pipeline states and cancelled
+ * sales are working-pipeline items or invalid sales, never recognized sales.
+ */
+const QUALIFYING_SALE_STATUS = 'active';
+
+/** Money the trend accepts: the `card_sales` CHECK form (1-2dp or whole). */
+const TREND_MONEY_RE = /^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/;
+
+function trendMonthKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Continuous `YYYY-MM` keys for the last 12 months ending now, oldest first. */
+function lastTwelveMonths(now = new Date()): string[] {
+  const keys: string[] = [];
+  for (let back = 11; back >= 0; back -= 1) {
+    const d = new Date(now);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - back);
+    keys.push(trendMonthKey(d));
+  }
+  return keys;
+}
+
+async function salesTrend(req: VercelRequest, res: VercelResponse) {
+  const principal = await authorizeAfHomes(req, 'dashboard.view');
+  if ('error' in principal) return deny(res, principal);
+  const granularityRaw = Array.isArray(req.query.granularity)
+    ? req.query.granularity[0]
+    : req.query.granularity;
+  if (granularityRaw !== undefined && granularityRaw !== 'month' && granularityRaw !== 'year')
+    return fail(res, 'VALIDATION_ERROR', 'granularity must be month or year', 400);
+  const granularity = granularityRaw === 'year' ? 'year' : 'month';
+  const db = serviceClient() as Db;
+  if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+  try {
+    const kind = roleScope(principal);
+    const scoped = await scopedSales(db, principal, kind);
+    // Only qualifying sales feed the chart. The submission instant buckets the
+    // sale (JAD `submittedAt` semantics); a corrupt row is skipped so one bad
+    // row can never fail the whole dashboard read. The yearly range starts at
+    // the earliest qualifying submission even when its money is unreadable.
+    const qualified = scoped.sales.filter((sale) => sale.status === QUALIFYING_SALE_STATUS);
+    const submittedDate = (sale: Row): Date | null => {
+      const date = new Date(String(sale.submitted_at ?? sale.created_at ?? ''));
+      return Number.isFinite(date.valueOf()) ? date : null;
+    };
+    const dated = qualified
+      .map((sale) => {
+        const date = submittedDate(sale);
+        if (!date) return null;
+        const money = String(sale.cash_price_snapshot ?? '');
+        if (!TREND_MONEY_RE.test(money)) return null;
+        return { date, money };
+      })
+      .filter((row): row is { date: Date; money: string } => row !== null);
+
+    const keys =
+      granularity === 'month'
+        ? lastTwelveMonths()
+        : (() => {
+            const currentYear = new Date().getUTCFullYear();
+            let firstYear: number | null = null;
+            for (const sale of qualified) {
+              const date = submittedDate(sale);
+              if (!date) continue;
+              const year = date.getUTCFullYear();
+              if (firstYear === null || year < firstYear) firstYear = year;
+            }
+            const start = firstYear ?? currentYear;
+            const out: string[] = [];
+            for (let year = start; year <= currentYear; year += 1) out.push(String(year));
+            return out;
+          })();
+    const keyOf = (date: Date) => (granularity === 'month' ? trendMonthKey(date) : String(date.getUTCFullYear()));
+    const buckets = new Map(keys.map((key) => [key, { count: 0, values: [] as unknown[] }]));
+    for (const row of dated) {
+      const bucket = buckets.get(keyOf(row.date));
+      if (!bucket) continue;
+      bucket.count += 1;
+      bucket.values.push(row.money);
+    }
+    const periods = keys.map((key) => {
+      const bucket = buckets.get(key) ?? { count: 0, values: [] as unknown[] };
+      return { key, count: bucket.count, total: decimalCents(bucket.values) };
+    });
+    const parsed = salesTrendReportSchema.safeParse({
+      granularity,
+      generatedAt: new Date().toISOString(),
+      periods,
+    });
+    if (!parsed.success) return fail(res, 'INTERNAL', 'Internal server error', 500);
+    return res.status(200).json(parsed.data);
+  } catch (error) {
+    console.error('[api] analytics:', error instanceof Error ? error.message : error);
+    return fail(res, 'INTERNAL', 'Internal server error', 500);
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if ((req.method ?? 'GET') !== 'GET' || String(req.query.familyPath ?? '') !== '')
-    return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
+  if ((req.method ?? 'GET') !== 'GET') return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
+  const familyPath = String(req.query.familyPath ?? '');
+  if (familyPath === 'sales-trend') return salesTrend(req, res);
+  if (familyPath !== '') return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
   const principal = await authorizeAfHomes(req, 'dashboard.view');
   if ('error' in principal) return deny(res, principal);
   const parsed = analyticsPeriodSchema.safeParse(req.query.period ?? 'month');
