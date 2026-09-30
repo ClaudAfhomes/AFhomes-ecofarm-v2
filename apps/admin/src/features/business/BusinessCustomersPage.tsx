@@ -224,7 +224,7 @@ export function BusinessCustomersPage() {
                           onClick={() => issueActivation.mutate(customer.id)}
                         >
                           {issueActivation.isPending && activationCustomerId === customer.id
-                            ? 'Issuing activation linkâ€¦'
+                            ? 'Issuing activation link…'
                             : 'Issue / Reissue activation link'}
                         </Button>
                       </>
