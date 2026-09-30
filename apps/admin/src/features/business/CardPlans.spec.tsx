@@ -224,6 +224,78 @@ describe('Customer onboarding recovery', () => {
       screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
     ).not.toBeInTheDocument();
   });
+
+  it('does not show activation recovery for a prospect without an active membership', async () => {
+    const { getCustomers } = await import('./services');
+    vi.mocked(getCustomers).mockResolvedValue([CUSTOMER]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
+    await screen.findByText('Ada Customer');
+    expect(
+      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not show activation recovery when membership flags are unknown', async () => {
+    const { getCustomers } = await import('./services');
+    const { hasActiveMembership: _ham, portalAccountActivated: _paa, ...bare } = ACTIVE_CUSTOMER;
+    void _ham;
+    void _paa;
+    vi.mocked(getCustomers).mockResolvedValue([{ ...bare }]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
+    await screen.findByText('Pedro Reyes');
+    expect(
+      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not show activation recovery without sales.customers:update', async () => {
+    const { getCustomers } = await import('./services');
+    vi.mocked(getCustomers).mockResolvedValue([ACTIVE_CUSTOMER]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    const viewer: SessionUser = {
+      ...CUSTOMER_ADMIN,
+      id: '00000000-0000-4000-8000-0000000000cc',
+      roleSlug: 'employee',
+      afHomesPermissions: [
+        { moduleKey: 'sales.customers', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      ],
+    };
+    renderWithProviders(<BusinessCustomersPage />, { user: viewer });
+    await screen.findByText('Pedro Reyes');
+    expect(
+      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('calls the onboarding-token endpoint for the row customer and reports email_sent', async () => {
+    const { getCustomers, createSale, deactivateCustomer, anonymizeCustomer, deleteCustomer } =
+      await import('./services');
+    vi.mocked(getCustomers).mockResolvedValue([ACTIVE_CUSTOMER]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    mockedIssueCustomerAccountActivation.mockResolvedValue({
+      status: 'email_sent',
+      emailStatus: 'sent',
+      email: 'pedro@example.com',
+      activationUrl: 'https://members.afhomes.test/customer/activate#token=sent-token',
+      expiresAt: '2026-10-03T00:00:00.000Z',
+    });
+    renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
+    fireEvent.click(await screen.findByRole('button', { name: 'Issue / Reissue activation link' }));
+    await waitFor(() =>
+      expect(mockedIssueCustomerAccountActivation).toHaveBeenCalledWith(ACTIVE_CUSTOMER.id),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Customer activation ready' });
+    expect(dialog).toHaveTextContent('Activation email sent.');
+    expect(dialog).toHaveTextContent('pedro@example.com');
+    // The recovery action is read-only for business state: no sale, membership,
+    // points, commission, or credential mutation is reachable from this page.
+    expect(vi.mocked(createSale)).not.toHaveBeenCalled();
+    expect(vi.mocked(deactivateCustomer)).not.toHaveBeenCalled();
+    expect(vi.mocked(anonymizeCustomer)).not.toHaveBeenCalled();
+    expect(vi.mocked(deleteCustomer)).not.toHaveBeenCalled();
+  });
 });
 
 describe('Card Plans states', () => {
