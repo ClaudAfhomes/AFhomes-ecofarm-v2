@@ -1,0 +1,32 @@
+-- AF Homes onboarding token: resolve pgcrypto outside the pinned search_path.
+--
+-- Live failure: POST /api/v1/customers/:id/onboarding-token died inside
+-- issue_customer_onboarding_token because the unqualified randomness call
+-- could not be resolved (pgcrypto is not on the function's search_path).
+-- The function pins `set search_path = public, private, pg_temp`, but on
+-- Supabase pgcrypto lives in the `extensions` schema. The sibling generators
+-- (private.new_qr_token, private.new_fallback_code) survive only because the
+-- Phase 17 hardening widened their search_path to include `extensions`; this
+-- function was not in that list.
+--
+-- Fix: widen this function's search_path to the same hardened list Phase 17
+-- established, instead of schema-qualifying the call. Qualification alone was
+-- proven insufficient by execution: on a fresh/vanilla database the
+-- foundation migration installs pgcrypto into `public` (no `extensions`
+-- schema exists there), so a qualified call fails there while the
+-- unqualified call fails on Supabase. The widened path resolves in both
+-- environments. No entropy change (still 32 cryptographically secure bytes,
+-- still base64), no signature change, no grant change, no body change.
+--
+-- Validation (run where the migration is applied):
+--   select p.proname, p.proconfig
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'issue_customer_onboarding_token';
+--   -- proconfig must report the hardened path below, and section 18 of the
+--   -- database integration suite must pass.
+--
+-- Down: forward-fix only. Restoring the narrow search_path reintroduces the
+-- live failure and is not a safe rollback.
+
+alter function public.issue_customer_onboarding_token(uuid, text, integer, uuid)
+  set search_path = pg_catalog, extensions, private, public, pg_temp;

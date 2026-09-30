@@ -50,6 +50,8 @@ const schema = read('20260927000001');
 const rls = read('20260927000002');
 const rpc = read('20260927000003');
 const support = read('20260927000004');
+/** Onboarding-token pgcrypto path fix: schema-qualified randomness source. */
+const tokenPathFix = read('20261016');
 /** Every function body, whichever migration declares it. */
 const allSql = `${rpc}\n${support}`;
 /** SQL with `--` line comments and `comment on ...` statements removed. */
@@ -511,6 +513,38 @@ describe('the RPC migration keeps money server-computed and activation gated', (
   it('requires an active customer before an account-activation token', () => {
     const fn = support.slice(support.indexOf('function public.issue_customer_onboarding_token'));
     expect(fn).toMatch(/p_purpose = 'account_activation' and v_customer\.status <> 'active'/);
+  });
+
+  it('resolves pgcrypto outside the pinned search_path (live randomness fix)', () => {
+    // The function pins `set search_path = public, private, pg_temp`, but on
+    // Supabase pgcrypto lives in `extensions` - the unqualified randomness
+    // call died there. The fix widens the path to the Phase 17 hardened
+    // list (proven by execution to resolve on Supabase AND on vanilla
+    // PostgreSQL, where a schema-qualified call instead fails).
+    expect(tokenPathFix).toContain(
+      'alter function public.issue_customer_onboarding_token(uuid, text, integer, uuid)',
+    );
+    expect(tokenPathFix).toContain(
+      'set search_path = pg_catalog, extensions, private, public, pg_temp',
+    );
+    // The function body itself is untouched: same entropy source, same
+    // contract. Only resolution changes.
+    expect(tokenPathFix).not.toMatch(
+      /create or replace function public\.issue_customer_onboarding_token/,
+    );
+    expect(tokenPathFix).not.toMatch(/security definer|revoke all/);
+  });
+
+  it('keeps the onboarding-token contract while fixing the randomness path', () => {
+    // Contract lives in the original migration and is re-asserted here so
+    // this fix cannot silently narrow it: hash-only storage, single-use
+    // retirement, active-customer gate, service-role-only grants.
+    expect(tokenPathFix).not.toMatch(/Math\.random|uuid_substr|now\(\)::text/);
+    expect(support).toContain('private.hash_token(v_raw)');
+    expect(support).toMatch(/set consumed_at = now\(\)[\s\S]*?and consumed_at is null/);
+    expect(support).toContain(
+      'revoke all on function public.issue_customer_onboarding_token(uuid, text, integer, uuid)',
+    );
   });
 
   it('allocates customer and sale numbers from sequences, not counts', () => {
