@@ -608,6 +608,142 @@ describe('staff account deletion safety', () => {
   });
 });
 
+describe('staff deletion blockers on tables without an id column', () => {
+  beforeEach(() => install());
+
+  /** Live row shapes: neither table has an `id` column. */
+  const HIERARCHY_ROW = {
+    sale_id: 'bbbbbbbb-0000-4000-8000-000000000001',
+    ancestor_staff_id: UUID.viewerStaff,
+    ancestor_role: 'sales_manager',
+    depth: 2,
+    captured_at: '2026-09-01T00:00:00.000Z',
+  };
+  const CMS_DOC_ROW = {
+    key: 'site',
+    draft_value: {},
+    published_value: null,
+    status: 'draft',
+    version: 1,
+    created_by: UUID.adminStaff,
+    updated_by: UUID.adminStaff,
+    published_by: null,
+    created_at: '2026-09-01T00:00:00.000Z',
+    updated_at: '2026-09-01T00:00:00.000Z',
+    published_at: null,
+  };
+
+  it('probes the checked column, never a presumed id', async () => {
+    const db = install();
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    const selects = db.calls.filter((entry) => entry.op === 'select');
+    const colsFor = (table: string) =>
+      selects.filter((entry) => entry.table === table).map((entry) => (entry.arg as { cols: string }).cols);
+    // The two tables without `id` must be probed on their reference column;
+    // `select('id')` fails live with a 400 that surfaces as a 500.
+    expect(colsFor('card_sale_hierarchy_snapshots')).toContain('ancestor_staff_id');
+    expect(colsFor('card_sale_hierarchy_snapshots')).not.toContain('id');
+    expect(colsFor('cms_documents')).toEqual(
+      expect.arrayContaining(['created_by', 'updated_by', 'published_by']),
+    );
+    expect(colsFor('cms_documents')).not.toContain('id');
+  });
+
+  it('scans id-less tables without throwing for a clean target', async () => {
+    const db = install({
+      tables: {
+        card_sale_hierarchy_snapshots: [{ ...HIERARCHY_ROW, ancestor_staff_id: UUID.adminStaff }],
+        cms_documents: [{ ...CMS_DOC_ROW }],
+      },
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual({ deleted: true });
+  });
+
+  it('blocks on a hierarchy snapshot reference with 409, not 500', async () => {
+    install({ tables: { card_sale_hierarchy_snapshots: [{ ...HIERARCHY_ROW }] } });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({
+      error: { code: 'PROTECTED_HISTORY', details: { blockers: ['genealogy'] } },
+    });
+  });
+
+  it.each(['created_by', 'updated_by', 'published_by'] as const)(
+    'blocks on a CMS %s reference with 409, not 500',
+    async (column) => {
+      const row: Record<string, unknown> = { ...CMS_DOC_ROW };
+      for (const col of ['created_by', 'updated_by'] as const) row[col] = UUID.adminStaff;
+      row.published_by = null;
+      row[column] = UUID.viewerStaff;
+      install({ tables: { cms_documents: [row] } });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(
+        (state.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
+      ).toContain('CMS history');
+    },
+  );
+
+  it('logs a PostgREST-shaped failure meaningfully while hiding it from the client', async () => {
+    const { describeServerError } = await import('./afhomes.js');
+    const logged: unknown[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    try {
+      install({
+        errors: {
+          card_sales: { code: 'PGRST301', message: 'column "id" does not exist' },
+        },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(500);
+      // The client sees only the generic envelope.
+      expect(state.body).toEqual({
+        error: expect.objectContaining({ code: 'INTERNAL', message: 'Internal server error' }),
+      });
+      expect(JSON.stringify(state.body)).not.toMatch(/column "id" does not exist/);
+      // ...while the server log names the failure.
+      expect(logged.flat(2).join(' ')).toMatch(/column "id" does not exist/);
+      // Unit proofs for the extractor itself.
+      expect(describeServerError(new Error('boom'))).toBe('boom');
+      expect(describeServerError({ message: 'm', code: 'c', details: 'd', hint: 'h' })).toBe(
+        'message=m code=c details=d hint=h',
+      );
+      expect(describeServerError({ message: 'm', headers: { authorization: 'Bearer x' } })).toBe(
+        'message=m',
+      );
+      expect(describeServerError(null)).toBe('Unknown server error');
+      expect(describeServerError('oops')).toBe('Unknown server error');
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
 describe('GET /admin/afhomes/account-activation', () => {
   it('returns only the invited profile bound to a verified invite session', async () => {
     const db = install({

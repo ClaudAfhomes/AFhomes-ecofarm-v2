@@ -627,6 +627,11 @@ export class FakeSupabase {
       if (selectOp) {
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols) }));
       }
+      // Record the read shape (columns only, never row data) so tests can
+      // assert a probe selected the column it filters on. A blocker probe
+      // that selects a column its table does not have fails live with a 400
+      // that surfaces as a 500 - this record is the tripwire for that class.
+      self.calls.push({ op: 'select', table, arg: { cols: selectOp?.cols ?? '*' } });
       return {
         data: out,
         error: null,

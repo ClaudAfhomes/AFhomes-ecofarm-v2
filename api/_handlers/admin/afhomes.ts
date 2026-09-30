@@ -178,7 +178,11 @@ async function staffCatalog(db: Db) {
 }
 
 async function hasReference(db: Db, table: string, column: string, id: string) {
-  const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
+  // Existence probe on the CHECKED column itself. Several blocker tables
+  // (card_sale_hierarchy_snapshots, cms_documents) have NO `id` column, so
+  // `select('id')` fails closed-live with a 400-turned-500 on EVERY delete
+  // instead of answering whether the reference exists.
+  const { data, error } = await db.from(table).select(column).eq(column, id).limit(1);
   if (error) throw error;
   return (data ?? []).length > 0;
 }
@@ -906,6 +910,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await db.from('staff_role_assignments').delete().eq('staff_id', id);
       const { error: profileError } = await db.from('staff_users').delete().eq('id', id);
       if (profileError) throw profileError;
+      // Crash window, documented deliberately: the public rows above are
+      // already gone when the Auth user is deleted. There is no safe
+      // cross-system transaction between Postgres and GoTrue, so this order
+      // is kept (orphaned public rows would resurrect a deleted login; an
+      // orphaned Auth user without a profile cannot authenticate to anything)
+      // and the ordering is pinned by regression test, not redesigned here.
       const { error: authError } = await db.auth.admin.deleteUser(id);
       if (authError) throw authError;
       await audit(db, auth.userId, 'STAFF_DELETED', 'staff_user', id, before, {
@@ -920,7 +930,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     return fail(res, 'NOT_FOUND', 'AF Homes endpoint not found', 404);
   } catch (error) {
-    console.error('[afhomes-api]', error instanceof Error ? error.message : 'Unknown server error');
+    console.error('[afhomes-api]', describeServerError(error));
     return fail(res, 'INTERNAL', 'Internal server error', 500);
   }
+}
+
+/**
+ * Server-only diagnostics. Supabase/PostgREST failures are usually plain
+ * objects ({ message, code, details, hint }), not Errors, so logging
+ * `error.message` alone printed "Unknown server error" for every real
+ * database failure. Only database-shape fields are extracted - never
+ * headers, keys, tokens, bodies or anything request-shaped - and the client
+ * still receives the generic envelope below.
+ */
+export function describeServerError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+    const parts = ['message', 'code', 'details', 'hint']
+      .map((key) =>
+        typeof record[key] === 'string' && record[key] !== ''
+          ? `${key}=${record[key] as string}`
+          : null,
+      )
+      .filter((part): part is string => part !== null);
+    if (parts.length > 0) return parts.join(' ');
+  }
+  return 'Unknown server error';
 }
