@@ -5,7 +5,10 @@ import {
   cmsPageSchema,
   type CmsDocumentKey,
 } from '@jad/contracts';
-import { request, requestList } from '../../lib/api/client';
+import {
+  protectedRequest as request,
+  protectedRequestList as requestList,
+} from '../../lib/api/client';
 
 const json = (method: string, body?: unknown): RequestInit => ({
   method,

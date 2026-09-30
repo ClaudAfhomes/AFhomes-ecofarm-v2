@@ -42,7 +42,10 @@ import {
   type VerifyPaymentRequest,
 } from '@jad/contracts';
 import { z } from 'zod';
-import { request, requestList } from '../../lib/api/client';
+import {
+  protectedRequest as request,
+  protectedRequestList as requestList,
+} from '../../lib/api/client';
 
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });

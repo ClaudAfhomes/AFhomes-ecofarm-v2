@@ -2,7 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, type RenderOptions } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
+import { afterEach } from 'vitest';
 
+import { setApiAccessTokenForTests } from '../lib/api/client';
 import { SessionProvider, type SessionUser } from '../lib/session';
 
 type ProvidersOptions = Omit<RenderOptions, 'wrapper'> & {
@@ -26,6 +28,10 @@ export function renderWithProviders(
   ui: ReactElement,
   { route = '/admin', user, queryClient = createTestQueryClient(), ...renderOptions }: ProvidersOptions = {},
 ) {
+  // Auth-flow tests render without an injected user and exercise their own
+  // Supabase mock. Only resolved application-session fixtures need this token.
+  setApiAccessTokenForTests(user ? 'test-access-token' : undefined);
+
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <SessionProvider initialUser={user}>
@@ -39,5 +45,7 @@ export function renderWithProviders(
   const result = render(ui, { wrapper: Wrapper, ...renderOptions });
   return { ...result, client: queryClient };
 }
+
+afterEach(() => setApiAccessTokenForTests(undefined));
 
 export * from '@testing-library/react';

@@ -183,6 +183,8 @@ describe('Invariant F - client permission state cannot authorize a server action
   });
 
   it('never substitutes cached or mock data for a denied response', async () => {
+    const { setApiAccessTokenForTests } = await import('../lib/api/client');
+    setApiAccessTokenForTests('test-access-token');
     let calls = 0;
     vi.stubGlobal(
       'fetch',

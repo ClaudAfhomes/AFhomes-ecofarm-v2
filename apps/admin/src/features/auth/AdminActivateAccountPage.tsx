@@ -5,7 +5,7 @@ import type { StaffAccountSetup } from '@jad/contracts';
 import { validateRecoveryPassword } from '@jad/shared';
 import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
 
-import { request } from '../../lib/api/client';
+import { protectedRequest as request } from '../../lib/api/client';
 import { getSupabaseClient } from '../../lib/supabase';
 import styles from './AdminLoginPage.module.css';
 

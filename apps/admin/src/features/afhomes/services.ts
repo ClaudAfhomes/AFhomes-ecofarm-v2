@@ -19,7 +19,10 @@ import {
   type SalesTrendReport,
 } from '@jad/contracts';
 import { z } from 'zod';
-import { request, requestList } from '../../lib/api/client';
+import {
+  protectedRequest as request,
+  protectedRequestList as requestList,
+} from '../../lib/api/client';
 
 export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);

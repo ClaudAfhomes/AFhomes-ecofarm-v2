@@ -9,7 +9,8 @@ import {
 } from 'react';
 import type { AfHomesPermission } from '@jad/contracts';
 import { afHomesSessionSchema } from '@jad/contracts';
-import { env } from './env';
+import { protectedRequest } from './api/client';
+import { ApiError } from './api/errors';
 import { getSupabaseClient } from './supabase';
 
 export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
@@ -97,16 +98,7 @@ export function SessionProvider({
       return;
     }
     try {
-      const response = await fetch(`${env.VITE_API_BASE_URL}/admin/afhomes/session`, {
-        headers: { Authorization: `Bearer ${data.session.access_token}` },
-      });
-      if (!response.ok) {
-        setUser(null);
-        setStatus('unauthenticated');
-        setSessionError(response.status >= 500);
-        return;
-      }
-      const parsed = afHomesSessionSchema.parse(await response.json());
+      const parsed = await protectedRequest('/admin/afhomes/session', afHomesSessionSchema);
       setUser({
         id: parsed.id,
         name: parsed.fullName,
@@ -120,10 +112,10 @@ export function SessionProvider({
       });
       setStatus('authenticated');
       setSessionError(false);
-    } catch {
+    } catch (error) {
       setUser(null);
       setStatus('unauthenticated');
-      setSessionError(true);
+      setSessionError(!(error instanceof ApiError && error.status === 401));
     }
   }, [client]);
 

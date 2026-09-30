@@ -13,7 +13,7 @@ import {
   type ReportExport,
   type ReportResponse,
 } from '@jad/contracts';
-import { request } from '../../lib/api/client';
+import { protectedRequest as request } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { formatMoney, formatPoints } from '../business/format';
 

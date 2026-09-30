@@ -254,6 +254,17 @@ describe('permanent staff deletion', () => {
     expect(screen.queryByText('Internal server error')).toBeNull();
   });
 
+  it('shows an expired-session message without exposing authorization details', async () => {
+    vi.mocked(deleteAfHomesStaff).mockRejectedValueOnce(
+      new Error('Your session has expired. Please sign in again.'),
+    );
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await confirmPermanentDelete();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your session has expired. Please sign in again.');
+    expect(alert).not.toHaveTextContent(/Authorization|Bearer|token/i);
+  });
+
   it('removes the deleted row after invalidating and refetching the staff query', async () => {
     vi.mocked(deleteAfHomesStaff).mockResolvedValueOnce({ deleted: true });
     vi.mocked(getAfHomesStaff)
