@@ -767,6 +767,65 @@ describe('activation password policy', () => {
   });
 });
 
+describe('activation existing-account recovery', () => {
+  const RECOVERY_RESULT = {
+    customerId: 'cccccccc-0000-4000-8000-000000000001',
+    customerNumber: 'CUS-000777',
+    email: 'ana.buyer@example.invalid',
+    fullName: 'Ana R Buyer',
+    nextStep: 'sign_in',
+    linkedExistingAuth: true,
+  };
+
+  it('links instead of signing in, and points at sign-in / forgot-password', async () => {
+    const user = userEvent.setup();
+    installRoutes({
+      '/auth/customer/activate': () => ({ status: 201, body: RECOVERY_RESULT }),
+    });
+    render('/customer/activate', false);
+    await user.type(screen.getByLabelText('Activation code'), 'a-valid-token-value-0000000001');
+    await user.type(screen.getByLabelText('Password'), 'StrongPass123');
+    await user.type(screen.getByLabelText('Confirm password'), 'StrongPass123');
+    await user.click(screen.getByRole('button', { name: 'Activate my account' }));
+    // The typed password was never set on the pre-existing account, so the
+    // page must not attempt a sign-in with it (which would fail) - it
+    // explains the link and offers the password-owning flows instead.
+    expect(
+      await screen.findByText(/An account already exists for this email/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/customer/login',
+    );
+    expect(screen.getByRole('link', { name: 'Forgot password' })).toHaveAttribute(
+      'href',
+      '/customer/forgot-password',
+    );
+    expect(requests.filter((r) => r === '/auth/customer/activate')).toHaveLength(1);
+    expect(screen.queryByText('We could not activate your account')).toBeNull();
+  });
+
+  it('still signs in normally when the account was newly created', async () => {
+    const user = userEvent.setup();
+    installRoutes({
+      '/auth/customer/activate': () => ({
+        status: 201,
+        body: { ...RECOVERY_RESULT, linkedExistingAuth: false },
+      }),
+    });
+    render('/customer/activate', false);
+    await user.type(screen.getByLabelText('Activation code'), 'a-valid-token-value-0000000001');
+    await user.type(screen.getByLabelText('Password'), 'StrongPass123');
+    await user.type(screen.getByLabelText('Confirm password'), 'StrongPass123');
+    await user.click(screen.getByRole('button', { name: 'Activate my account' }));
+    // No Supabase client is configured in tests, so the normal sign-in
+    // attempt surfaces its configuration error instead of navigating - which
+    // still proves the recovery panel was NOT shown for a fresh account.
+    expect(await screen.findByText('We could not activate your account')).toBeInTheDocument();
+    expect(screen.queryByText(/An account already exists for this email/)).toBeNull();
+  });
+});
+
 describe('public recovery routes', () => {
   it('renders forgot-password without a session', async () => {
     render('/customer/forgot-password', false);

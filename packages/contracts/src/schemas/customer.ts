@@ -52,6 +52,13 @@ export const customerActivationResultSchema = z.object({
   fullName: z.string(),
   /** Tells the UI which screen to send the customer to next. */
   nextStep: z.literal('sign_in'),
+  /**
+   * True when the sign-in already existed for this email and the activation
+   * only linked it to the membership. The UI must NOT try to sign in with
+   * the just-typed password (it was never set on that account) and must
+   * instead point at sign-in / forgot-password.
+   */
+  linkedExistingAuth: z.boolean().default(false),
 });
 export type CustomerActivationResult = z.infer<typeof customerActivationResultSchema>;
 

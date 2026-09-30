@@ -14,7 +14,12 @@
  *   3. Pre-flight every rule that does not need a write, so an obviously bad
  *      request never causes an Auth user to be created.
  *   4. Create the Auth user with the ADMIN API using the email from the
- *      customer record - never from the request body.
+ *      customer record - never from the request body. When GoTrue reports the
+ *      address is already registered AND the existing account is a provable
+ *      orphan (same email, linked to no customer and no staff identity), link
+ *      it instead: the existing password is never read, set or overwritten,
+ *      and the response is marked so the UI points at sign-in /
+ *      forgot-password rather than the just-typed password.
  *   5. Claim the token atomically. This is where the link, the token
  *      consumption and the audit trail land in ONE transaction.
  *   6. If (5) fails, delete the Auth user that (4) just created. A PRE-EXISTING
@@ -38,6 +43,163 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 /** Must match private.hash_token(text) exactly. */
 export const hashOnboardingToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');
+
+/** Normalised email comparison: GoTrue matches addresses case-insensitively. */
+const normalizeEmail = (email: unknown) =>
+  typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+/**
+ * Server-side lookup of the GoTrue user holding an address, for duplicate-
+ * email recovery only. Pages the admin directory (capped) and compares
+ * normalised emails; the caller re-verifies everything before linking.
+ */
+async function findAuthUserByEmail(
+  db: Db,
+  email: string,
+): Promise<{ id: string; email: string } | null> {
+  const wanted = normalizeEmail(email);
+  if (!wanted) return null;
+  for (let page = 1; page <= 20; page += 1) {
+    const listed = await db.auth.admin.listUsers({ page, perPage: 100 });
+    if (listed?.error) throw listed.error;
+    const users = (listed?.data?.users ?? []) as { id: string; email?: string }[];
+    const hit = users.find((u) => normalizeEmail(u.email) === wanted);
+    if (hit?.id) return { id: String(hit.id), email: String(hit.email ?? email) };
+    if (users.length < 100) return null;
+  }
+  return null;
+}
+
+async function readDisplayName(
+  db: Db,
+  customerId: string,
+): Promise<{ fullName: string; activatedAt: string | null }> {
+  const names = await db
+    .from('customers')
+    .select('first_name, middle_name, last_name, suffix, updated_at')
+    .eq('id', customerId)
+    .maybeSingle();
+  const n = (names.data ?? {}) as Record<string, string | null>;
+  return {
+    fullName: [n.first_name, n.middle_name, n.last_name, n.suffix]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .join(' '),
+    activatedAt: isoOrNull(n.updated_at),
+  };
+}
+
+/**
+ * Duplicate-email recovery: the address already has a GoTrue account, so no
+ * new user is created and the existing password is never touched. The
+ * pre-existing account is linked only when it is provably unclaimed - not
+ * attached to another customer, not a staff identity - and the atomic claim
+ * RPC remains the final guard: it links, consumes the token and audits in
+ * ONE transaction, and refuses (without consuming) when the customer was
+ * linked concurrently.
+ */
+async function recoverExistingAuthUser(
+  db: Db,
+  res: VercelResponse,
+  input: { tokenHash: string; customerId: string; email: string },
+) {
+  const existing = await findAuthUserByEmail(db, input.email);
+  if (!existing) {
+    return fail(
+      res,
+      'CONFLICT',
+      'A sign-in already exists for this email address. Contact staff for help.',
+      409,
+    );
+  }
+
+  // Re-read the customer: it may have been linked since pre-flight, and the
+  // link below must never move an account between customers.
+  const { data: fresh, error: freshError } = await db
+    .from('customers')
+    .select('id, auth_user_id')
+    .eq('id', input.customerId)
+    .maybeSingle();
+  if (freshError) throw freshError;
+  if (!fresh || (fresh as { auth_user_id: string | null }).auth_user_id) {
+    return fail(res, 'CONFLICT', 'This customer already has a sign-in.', 409);
+  }
+
+  const claimedElsewhere = async (table: string, column: string) => {
+    const { data, error } = await db.from(table).select('id').eq(column, existing.id).limit(1);
+    if (error) throw error;
+    return (data ?? []).length > 0;
+  };
+  // The account must be an orphan: another customer's sign-in, a staff
+  // identity, or a pending staff invitation each ends recovery here with the
+  // token untouched. The reason stays generic - an anonymous caller holding a
+  // valid token must not learn which kind of identity holds the address.
+  if (
+    (await claimedElsewhere('customers', 'auth_user_id')) ||
+    (await claimedElsewhere('staff_users', 'id')) ||
+    (await claimedElsewhere('staff_invitations', 'auth_user_id'))
+  ) {
+    return fail(
+      res,
+      'CONFLICT',
+      'A sign-in already exists for this email address. Contact staff for help.',
+      409,
+    );
+  }
+
+  const claimed = await db.rpc('claim_customer_onboarding_token', {
+    p_token_hash: input.tokenHash,
+    p_auth_user_id: existing.id,
+    p_purpose: 'account_activation',
+  });
+  if (claimed.error) {
+    // Never created, so never deleted; the token is untouched by the RPC on
+    // these refusals, preserving recoverability.
+    const code = splitCode(claimed.error.message ?? '');
+    const mapped = REFUSALS[code];
+    if (mapped) return fail(res, mapped[0], mapped[1], mapped[2]);
+    return fail(res, 'INTERNAL', 'The account could not be linked. Nothing was changed.', 500);
+  }
+  const row = (Array.isArray(claimed.data) ? claimed.data[0] : claimed.data) as
+    | { customer_id: string; customer_number: string; email: string; outcome: string }
+    | undefined;
+  if (!row) {
+    return fail(res, 'INTERNAL', 'The account could not be linked. Nothing was changed.', 500);
+  }
+
+  // Non-secret recovery audit. Issuance is already committed, so a failed
+  // audit write must not discard the success - same posture as the staff
+  // onboarding-token endpoint.
+  try {
+    await db.from('audit_events').insert({
+      actor_id: existing.id,
+      action: 'CUSTOMER_EXISTING_AUTH_LINKED',
+      entity_type: 'customer',
+      entity_id: row.customer_id,
+      after_data: {
+        customerId: row.customer_id,
+        purpose: 'account_activation',
+        via: 'activation_recovery',
+        tokenConsumed: true,
+      },
+    });
+  } catch {
+    // eslint-disable-next-line no-console
+    console.error('[api] customer activation: recovery audit write failed');
+  }
+
+  const display = await readDisplayName(db, row.customer_id);
+  return res.status(201).json({
+    customerId: row.customer_id,
+    customerNumber: row.customer_number,
+    email: row.email,
+    fullName: display.fullName,
+    nextStep: 'sign_in' as const,
+    // The password typed on the activation page was never set on this
+    // account. The UI must point at sign-in / forgot-password instead of
+    // trying the fresh password.
+    linkedExistingAuth: true,
+  });
+}
 
 /** Stable, safe-to-show mapping from a database refusal to a client message. */
 const REFUSALS: Record<string, [string, string, number]> = {
@@ -158,16 +320,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const authUserId = created?.data?.user?.id;
     if (created?.error || !authUserId) {
       // GoTrue reports a duplicate email here when some other Auth user already
-      // holds this address. That is a conflict we must never resolve by
-      // attaching that user to this customer.
+      // holds this address. When that account is a provable orphan, link it
+      // instead of failing; otherwise refuse without touching anything.
       const raw = created?.error?.message ?? '';
       if (/already (been )?registered|already exists|duplicate/i.test(raw)) {
-        return fail(
-          res,
-          'CONFLICT',
-          'A sign-in already exists for this email address. Contact staff for help.',
-          409,
-        );
+        return recoverExistingAuthUser(db, res, {
+          tokenHash,
+          customerId: customer.id,
+          email,
+        });
       }
       return fail(res, 'INTERNAL', 'The account could not be created. Nothing was changed.', 500);
     }
@@ -217,6 +378,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email: row.email,
       fullName,
       nextStep: 'sign_in' as const,
+      linkedExistingAuth: false,
       // The customer must sign in to receive a session. Nothing token-shaped is
       // returned from this endpoint.
       activatedAt: isoOrNull(n.updated_at),

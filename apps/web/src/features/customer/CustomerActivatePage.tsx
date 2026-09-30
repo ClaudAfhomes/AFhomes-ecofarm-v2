@@ -47,6 +47,10 @@ export function CustomerActivatePage() {
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  // True when the activation linked a sign-in that already existed for this
+  // email. The typed password was never set on that account, so the page must
+  // not attempt a sign-in with it - it points at sign-in / forgot-password.
+  const [recovered, setRecovered] = useState(false);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -72,6 +76,10 @@ export function CustomerActivatePage() {
       });
       // The token has served its purpose. Drop it from memory immediately.
       setToken('');
+      if (result.linkedExistingAuth) {
+        setRecovered(true);
+        return;
+      }
       // Now sign in through the normal Supabase Auth password flow.
       await signIn(result.email, password);
       navigate('/customer', { replace: true });
@@ -80,6 +88,34 @@ export function CustomerActivatePage() {
       setError(cause instanceof Error ? cause.message : 'We could not activate your account.');
     }
   };
+
+  if (recovered) {
+    return (
+      <AuthLayout
+        eyebrow="AF Homes Ecofarm"
+        title="Account linked"
+        lead="Your membership is ready."
+        brandTitle="Your farm membership, in your pocket."
+        brandLead="Track points, view your digital membership card, and follow your payments."
+      >
+        <Alert
+          variant="success"
+          title="An account already exists for this email. Your membership has been linked."
+        >
+          Use Sign in with your existing password, or reset your password if needed.
+        </Alert>
+        <p className={styles.prompt}>
+          <Link className={styles.promptLink} to="/customer/login">
+            Sign in
+          </Link>{' '}
+          ·{' '}
+          <Link className={styles.promptLink} to="/customer/forgot-password">
+            Forgot password
+          </Link>
+        </p>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

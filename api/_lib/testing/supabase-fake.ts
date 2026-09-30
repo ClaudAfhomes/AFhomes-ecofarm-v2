@@ -80,6 +80,13 @@ export type FakeOptions = {
   signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   /** Addresses that already exist in GoTrue, to exercise duplicate conflicts. */
   existingAuthEmails?: string[];
+  /**
+   * Pre-existing GoTrue users, to exercise safe-link recovery of an Auth
+   * account that already holds the customer email. Each entry is `{ id,
+   * email }`; `createUser` refuses these addresses exactly like GoTrue, and
+   * `auth.admin.listUsers` returns them alongside users created in-test.
+   */
+  authUsers?: { id: string; email: string }[];
 };
 
 type Op =
@@ -222,6 +229,8 @@ export class FakeSupabase {
   private createUserImpl?: FakeOptions['createUser'];
   private updateUserImpl?: FakeOptions['updateUser'];
   private signInImpl?: FakeOptions['signIn'];
+  /** Pre-existing GoTrue users (see `FakeOptions.authUsers`). Never logged. */
+  private seededAuthUsers: { id: string; email: string }[];
 
   constructor(options: FakeOptions = {}) {
     this.tables = options.tables ? structuredClone(options.tables) : {};
@@ -239,7 +248,19 @@ export class FakeSupabase {
     this.createUserId = options.createUserId;
     this.updateUserImpl = options.updateUser;
     this.signInImpl = options.signIn;
+    this.seededAuthUsers = (options.authUsers ?? []).map((u) => ({ ...u }));
     for (const email of options.existingAuthEmails ?? []) this.createdAuthEmails.add(email);
+  }
+
+  /**
+   * Every GoTrue user this fake knows: seeded pre-existing accounts plus
+   * users created in-test. Emails only - no secret ever lives here.
+   */
+  authUsers(): { id: string; email: string }[] {
+    return [
+      ...this.seededAuthUsers.map((u) => ({ ...u })),
+      ...this.createdAuthUsers.map((u) => ({ ...u })),
+    ];
   }
 
   /** Every row currently in a table (live reference - mutate via helpers). */
@@ -310,7 +331,13 @@ export class FakeSupabase {
         });
         if (attrs.password !== undefined) this.passwordsSeen.push(attrs.password);
         if (this.createUserImpl) return this.createUserImpl(attrs);
-        if (this.createdAuthEmails.has(attrs.email)) {
+        // GoTrue matches addresses case-insensitively; seeded pre-existing
+        // accounts refuse exactly like live ones.
+        const wanted = attrs.email.trim().toLowerCase();
+        const taken =
+          this.createdAuthEmails.has(attrs.email) ||
+          this.seededAuthUsers.some((u) => u.email.trim().toLowerCase() === wanted);
+        if (taken) {
           return {
             data: { user: null },
             error: authError('A user with this email address has already been registered'),
@@ -334,6 +361,21 @@ export class FakeSupabase {
         this.deletedAuthUsers.push(id);
         this.calls.push({ op: 'deleteUser', table: 'auth', arg: id });
         return { data: {}, error: null };
+      },
+      /**
+       * GoTrue's admin user directory. Paginated like the live API
+       * (`{ page, perPage }`, 1-based page); the recorded call carries only
+       * the pagination, never the returned addresses.
+       */
+      listUsers: async (params?: { page?: number; perPage?: number }) => {
+        const page = Math.max(1, params?.page ?? 1);
+        const perPage = Math.min(1000, Math.max(1, params?.perPage ?? 50));
+        this.calls.push({ op: 'listUsers', table: 'auth', arg: { page, perPage } });
+        const users = this.authUsers().map((u) => ({ id: u.id, email: u.email }));
+        return {
+          data: { users: users.slice((page - 1) * perPage, page * perPage) },
+          error: null,
+        };
       },
       /**
        * GoTrue's admin password/metadata rotation. The secret is captured in

@@ -221,6 +221,7 @@ type Setup = {
   createUser?: (attrs: { email: string; password?: string }) => Promise<unknown>;
   createUserId?: string;
   existingAuthEmails?: string[];
+  authUsers?: { id: string; email: string }[];
   tokens?: Record<string, { id: string; email: string; email_confirmed_at: string }>;
 };
 
@@ -240,6 +241,7 @@ function install(options: Setup = {}) {
     createUser: options.createUser,
     createUserId: options.createUserId ?? 'new-auth-user-0001',
     existingAuthEmails: options.existingAuthEmails,
+    authUsers: options.authUsers,
     rpcErrors: options.rpcErrors,
     rpcs: options.rpcs,
     links: [
@@ -583,6 +585,169 @@ describe('customer Auth account creation', () => {
     expect(s.status).toBe(500);
     expect(db.rows('audit_events')).toHaveLength(0);
     expect(db.rows('customer_onboarding_tokens')[0]!.consumed_at).toBeNull();
+  });
+
+  it('reports an unresolvable duplicate as a conflict and never reuses that user', async () => {
+    // GoTrue refuses the address but the admin directory holds no matching
+    // user (e.g. eventual consistency): fail closed with the token untouched.
+    const db = install({
+      tables: { ...UNLINKED_TABLES(), customer_onboarding_tokens: [TOKEN_ROW()] },
+      existingAuthEmails: ['ana.buyer@example.invalid'],
+    });
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(409);
+    expect(db.deletedAuthUsers).toHaveLength(0);
+    expect(db.rows('customer_onboarding_tokens')[0]!.consumed_at).toBeNull();
+    expect(db.rows('customers')[0]!.auth_user_id).toBeNull();
+  });
+});
+
+/* ================================================================== */
+/* Existing Auth account recovery (duplicate-email safe link)          */
+/* ================================================================== */
+
+describe('existing Auth account recovery', () => {
+  const ORPHAN_AUTH_ID = 'aaaaaaaa-0000-4000-8000-0000000000a1';
+  const CLASH_AUTH_ID = 'aaaaaaaa-0000-4000-8000-0000000000a2';
+
+  const orphanSetup = () => ({
+    tables: { ...UNLINKED_TABLES(), customer_onboarding_tokens: [TOKEN_ROW()] },
+    authUsers: [{ id: ORPHAN_AUTH_ID, email: 'ana.buyer@example.invalid' }],
+  });
+
+  it('links a provable orphan instead of failing, and marks the recovery', async () => {
+    const db = install(orphanSetup());
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(201);
+    expect(body(s)).toMatchObject({
+      customerId: CUSTOMER_ID,
+      email: 'ana.buyer@example.invalid',
+      nextStep: 'sign_in',
+      linkedExistingAuth: true,
+    });
+    expect(db.rows('customers')[0]!.auth_user_id).toBe(ORPHAN_AUTH_ID);
+    // No second Auth account was created.
+    expect(db.createdAuthUsers).toHaveLength(0);
+  });
+
+  it('returns linkedExistingAuth false for a normal creation', async () => {
+    install({ tables: { ...UNLINKED_TABLES(), customer_onboarding_tokens: [TOKEN_ROW()] } });
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(201);
+    expect(body(s).linkedExistingAuth).toBe(false);
+  });
+
+  it('consumes the token exactly once on recovery, then refuses reuse', async () => {
+    const db = install(orphanSetup());
+    expect((await callActivate({ body: PASSWORD_REQUEST })).status).toBe(201);
+    const token = db.rows('customer_onboarding_tokens')[0]!;
+    expect(token.consumed_at).not.toBeNull();
+    expect(token.consumed_by).toBe(ORPHAN_AUTH_ID);
+    // The link is now idempotent at the pre-flight: the customer has a sign-in.
+    const second = await callActivate({ body: PASSWORD_REQUEST });
+    expect(second.status).toBe(409);
+    expect(db.createdAuthUsers).toHaveLength(0);
+  });
+
+  it('never sets, overwrites or logs a password for the existing account', async () => {
+    const db = install(orphanSetup());
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(201);
+    // The typed password reached GoTrue exactly once, inside the create
+    // attempt whose duplicate refusal triggered recovery - that is how a
+    // duplicate is discovered. It was never SET anywhere: no password
+    // rotation, no second use, and no trace in tables, calls or audits.
+    expect(db.calls.filter((c) => c.op === 'updateUserById')).toHaveLength(0);
+    expect(db.calls.filter((c) => c.op === 'createUser')).toHaveLength(1);
+    expect(JSON.stringify(db.calls)).not.toContain(VALID_PASSWORD);
+    expect(JSON.stringify(db.rows('customers'))).not.toContain(VALID_PASSWORD);
+    expect(JSON.stringify(db.rows('audit_events'))).not.toContain(VALID_PASSWORD);
+    expect(JSON.stringify(s.body)).not.toContain(VALID_PASSWORD);
+  });
+
+  it('audits the recovery without secrets', async () => {
+    const db = install(orphanSetup());
+    await callActivate({ body: PASSWORD_REQUEST });
+    const recovery = db.rows('audit_events').find((e) => e.action === 'CUSTOMER_EXISTING_AUTH_LINKED');
+    expect(recovery).toMatchObject({
+      actor_id: ORPHAN_AUTH_ID,
+      entity_type: 'customer',
+      entity_id: CUSTOMER_ID,
+    });
+    const serialised = JSON.stringify(db.rows('audit_events'));
+    expect(serialised).not.toContain(RAW_TOKEN);
+    expect(serialised).not.toContain(VALID_PASSWORD);
+  });
+
+  it('refuses when the address belongs to another customer, leaving everything untouched', async () => {
+    const t = UNLINKED_TABLES();
+    t.customers[1]!.auth_user_id = CLASH_AUTH_ID;
+    const db = install({
+      tables: { ...t, customer_onboarding_tokens: [TOKEN_ROW()] },
+      authUsers: [{ id: CLASH_AUTH_ID, email: 'ana.buyer@example.invalid' }],
+    });
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(409);
+    expect(db.rows('customers')[0]!.auth_user_id).toBeNull();
+    expect(db.rows('customer_onboarding_tokens')[0]!.consumed_at).toBeNull();
+    expect(
+      db.rows('audit_events').filter((e) => e.action === 'CUSTOMER_EXISTING_AUTH_LINKED'),
+    ).toHaveLength(0);
+  });
+
+  it('refuses when the address belongs to a staff identity', async () => {
+    const t = UNLINKED_TABLES();
+    (t as Record<string, Row[]>).staff_users = [{ id: CLASH_AUTH_ID, email: 'staff@afhomes.test' }];
+    const db = install({
+      tables: { ...t, customer_onboarding_tokens: [TOKEN_ROW()] },
+      authUsers: [{ id: CLASH_AUTH_ID, email: 'ana.buyer@example.invalid' }],
+    });
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(409);
+    expect(db.rows('customers')[0]!.auth_user_id).toBeNull();
+    expect(db.rows('customer_onboarding_tokens')[0]!.consumed_at).toBeNull();
+  });
+
+  it('refuses when the address holds a pending staff invitation', async () => {
+    const t = UNLINKED_TABLES();
+    (t as Record<string, Row[]>).staff_invitations = [
+      { id: 'inv-1', email: 'ana.buyer@example.invalid', auth_user_id: CLASH_AUTH_ID, status: 'pending' },
+    ];
+    const db = install({
+      tables: { ...t, customer_onboarding_tokens: [TOKEN_ROW()] },
+      authUsers: [{ id: CLASH_AUTH_ID, email: 'ana.buyer@example.invalid' }],
+    });
+    const s = await callActivate({ body: PASSWORD_REQUEST });
+    expect(s.status).toBe(409);
+    expect(db.rows('customers')[0]!.auth_user_id).toBeNull();
+    expect(db.rows('customer_onboarding_tokens')[0]!.consumed_at).toBeNull();
+  });
+
+  it('leaves membership, points and ledger state unchanged by recovery', async () => {
+    const db = install(orphanSetup());
+    const before = JSON.stringify({
+      memberships: db.rows('memberships'),
+      points: db.rows('points_accounts'),
+      ledger: db.rows('points_ledger'),
+    });
+    await callActivate({ body: PASSWORD_REQUEST });
+    expect(
+      JSON.stringify({
+        memberships: db.rows('memberships'),
+        points: db.rows('points_accounts'),
+        ledger: db.rows('points_ledger'),
+      }),
+    ).toBe(before);
+    expect(
+      db.rows('audit_events').map((e) => e.action).sort(),
+    ).toEqual(
+      [
+        'CUSTOMER_AUTH_ACTIVATED',
+        'CUSTOMER_ACCOUNT_LINKED',
+        'CUSTOMER_EXISTING_AUTH_LINKED',
+        'CUSTOMER_ONBOARDING_TOKEN_CONSUMED',
+      ].sort(),
+    );
   });
 });
 
