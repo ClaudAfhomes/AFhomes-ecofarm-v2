@@ -127,13 +127,24 @@ type Dispatch = { handled: boolean; status: number; body: unknown };
 
 async function dispatch(
   url: string,
-  options: { method?: string; token?: string; body?: unknown } = {},
+  options: {
+    method?: string;
+    token?: string;
+    body?: unknown;
+    query?: Record<string, string | string[] | undefined>;
+  } = {},
 ): Promise<Dispatch> {
   const { res, state } = makeRes();
   const headers: Record<string, string> = {};
   if (options.token) headers.authorization = `Bearer ${options.token}`;
   const handled = await routeRequest(
-    { method: options.method ?? 'GET', url, query: {}, headers, body: options.body } as never,
+    {
+      method: options.method ?? 'GET',
+      url,
+      query: options.query ?? {},
+      headers,
+      body: options.body,
+    } as never,
     res as never,
   );
   return { handled, status: state.status, body: state.body };
@@ -325,6 +336,91 @@ describe('router -> handler contract matrix', () => {
       expect(r.status, url).toBe(404);
       expect(message(r.body), url).not.toMatch(/No handler for/);
     }
+  });
+});
+
+/* ================================================================== */
+/* Customer onboarding-token routing (live 404 regression)            */
+/* ================================================================== */
+
+describe('customer onboarding-token routing', () => {
+  // The exact live-failure UUID shape. No fixture customer carries it, so a
+  // correctly routed request must answer `Customer not found` (the onboarding
+  // branch ran and looked the customer up) - never `Customer endpoint not
+  // found` (no branch matched). That distinction is the whole diagnosis.
+  const LIVE_UUID = '45c202ac-72b4-41a5-9814-2908bb2bd136';
+
+  it('routes POST /api/v1/customers/<uuid>/onboarding-token to the onboarding branch', async () => {
+    const r = await dispatch(`/api/v1/customers/${LIVE_UUID}/onboarding-token`, {
+      method: 'POST',
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(404);
+    expect(code(r.body)).toBe('NOT_FOUND');
+    expect(message(r.body)).toBe('Customer not found');
+  });
+
+  it('resolves the Vercel rewritten form identically (string and array path)', async () => {
+    const sub = `customers/${LIVE_UUID}/onboarding-token`;
+    for (const query of [{ path: sub }, { path: sub.split('/') }]) {
+      const r = await dispatch('/api/router', {
+        method: 'POST',
+        token: TOKEN.admin,
+        body: {},
+        query,
+      });
+      expect(r.handled).toBe(true);
+      expect(r.status).toBe(404);
+      expect(message(r.body)).toBe('Customer not found');
+    }
+  });
+
+  it('keeps the sibling customer routes working', async () => {
+    let r = await dispatch('/api/v1/customers', { token: TOKEN.admin });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(200);
+
+    r = await dispatch(`/api/v1/customers/${CUSTOMER.prospect}`, { token: TOKEN.admin });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(200);
+
+    r = await dispatch(`/api/v1/customers/${CUSTOMER.prospect}/deactivate`, {
+      method: 'POST',
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(200);
+
+    r = await dispatch(`/api/v1/customers/${CUSTOMER.cancelled}`, {
+      method: 'DELETE',
+      token: TOKEN.superAdmin,
+    });
+    expect(r.handled).toBe(true);
+    // Cancelled fixture has no sales/memberships, so a clean delete succeeds.
+    expect(r.status).toBe(200);
+  });
+
+  it('still 404s an invalid customer subroute inside the handler', async () => {
+    const r = await dispatch(`/api/v1/customers/${CUSTOMER.prospect}/bogus-action`, {
+      method: 'POST',
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(404);
+    expect(message(r.body)).toBe('Customer endpoint not found');
+  });
+
+  it('does not match the onboarding branch on the wrong HTTP method', async () => {
+    const r = await dispatch(`/api/v1/customers/${CUSTOMER.active}/onboarding-token`, {
+      token: TOKEN.admin,
+    });
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(404);
+    expect(message(r.body)).toBe('Customer endpoint not found');
   });
 });
 
