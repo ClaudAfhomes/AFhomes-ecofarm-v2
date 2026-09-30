@@ -124,6 +124,10 @@ function install(over: Record<string, Route> = {}) {
   routes.clear();
   routes.set('GET /analytics', { status: 200, body: financeOverview() });
   routes.set('GET /analytics/sales-trend', { status: 200, body: salesTrendReport() });
+  routes.set('GET /queues/dashboard', {
+    status: 200,
+    body: { ostMembers: 25, ostApplications: 3, paymentVerification: 5 },
+  });
   for (const [k, v] of Object.entries(over)) routes.set(k, v);
 }
 
@@ -169,6 +173,21 @@ function mockFetch() {
 
 const render = (user: SessionUser = FINANCE_USER) =>
   renderWithProviders(<App />, { route: '/admin', user });
+
+const ADMIN_USER: SessionUser = {
+  ...FINANCE_USER,
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'Ada Admin',
+  email: 'admin@afhomes.test',
+  roleName: 'Admin',
+  afHomesPermissions: [
+    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    { moduleKey: 'network.ost_members', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    { moduleKey: 'network.ost_registrations', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+  ],
+};
 
 beforeEach(() => {
   requests.length = 0;
@@ -261,5 +280,38 @@ describe('Phase 29 role dashboard', () => {
     await screen.findByText('Gold');
     expect(document.querySelector('.table-scroll')).not.toBeNull();
     window.innerWidth = 1024;
+  });
+
+  it('2B. renders operational queue cards above the metrics with server counts', async () => {
+    render(ADMIN_USER);
+    expect(await screen.findByRole('link', { name: 'OST Members: 25 total' })).toHaveAttribute(
+      'href',
+      '/admin/ost/members',
+    );
+    expect(screen.getByText('registered')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('link', { name: 'OST Applications: 3 pending' }),
+    ).toHaveAttribute('href', '/admin/ost/applications');
+    expect(
+      await screen.findByRole('link', { name: 'Payment Verification: 5 pending' }),
+    ).toHaveAttribute('href', '/admin/finance/payments');
+    expect(screen.getAllByText('action needed')).toHaveLength(2);
+    // No withdrawals card: the payout workflow does not exist yet.
+    expect(screen.queryByText(/withdrawal/i)).toBeNull();
+    // 18/19. Queue cards coexist with the metric sections and Sales Overview.
+    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
+    expect(await screen.findByText('Sales Overview')).toBeInTheDocument();
+    const html = document.body.innerHTML;
+    expect(html.indexOf('OST Members')).toBeLessThan(html.indexOf('Pending payments'));
+    expect(html.indexOf('OST Members')).toBeLessThan(html.indexOf('Sales Overview'));
+  });
+
+  it('2B. shows only the permitted queue card to a finance user', async () => {
+    render();
+    expect(
+      await screen.findByRole('link', { name: 'Payment Verification: 5 pending' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('OST Members')).toBeNull();
+    expect(screen.queryByText('OST Applications')).toBeNull();
   });
 });

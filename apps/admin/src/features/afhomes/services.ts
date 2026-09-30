@@ -5,6 +5,7 @@ import {
   afHomesSessionSchema,
   afHomesStaffSchema,
   analyticsOverviewSchema,
+  dashboardQueuesSchema,
   salesTrendReportSchema,
   type AfHomesDashboard,
   type AfHomesDepartment,
@@ -13,6 +14,7 @@ import {
   type AfHomesStaff,
   type AnalyticsOverview,
   type AnalyticsPeriod,
+  type DashboardQueues,
   type SalesTrendGranularity,
   type SalesTrendReport,
 } from '@jad/contracts';
@@ -137,3 +139,11 @@ export const getAfHomesSalesTrend = (
     `/analytics/sales-trend?granularity=${encodeURIComponent(granularity)}`,
     salesTrendReportSchema,
   );
+
+/**
+ * Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+ * Server-side counts; a `null` count means the caller may not know that queue
+ * and its card stays hidden. Never fetch full lists to count client-side.
+ */
+export const getAfHomesDashboardQueues = (): Promise<DashboardQueues> =>
+  request('/queues/dashboard', dashboardQueuesSchema);

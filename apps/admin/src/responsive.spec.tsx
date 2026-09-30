@@ -39,6 +39,8 @@ vi.mock('./features/afhomes/services', () => ({
   getAfHomesDepartments: vi.fn(),
   getAfHomesDashboard: vi.fn(),
   getAnalyticsOverview: vi.fn(),
+  getAfHomesSalesTrend: vi.fn(),
+  getAfHomesDashboardQueues: vi.fn(),
   getAfHomesRoleAudit: vi.fn(),
   createAfHomesStaff: vi.fn(),
   updateAfHomesStaff: vi.fn(),
@@ -103,7 +105,7 @@ vi.mock('./features/ost/services', () => ({
   getMyReferralCodes: vi.fn(),
 }));
 
-import { getAfHomesDepartments, getAfHomesRoles, getAfHomesStaff, getAnalyticsOverview } from './features/afhomes/services';import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
+import { getAfHomesDepartments, getAfHomesRoles, getAfHomesStaff, getAnalyticsOverview, getAfHomesDashboardQueues, getAfHomesSalesTrend } from './features/afhomes/services';import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
 import { getMemberships } from './features/memberships/services';
 import { getRedemptionItems, getRedemptions } from './features/redemption/services';
 import { getAudit, getReport } from './features/reports/services';
@@ -321,6 +323,8 @@ function install() {
   // dashboard shell proves the shared error state instead of crashing.
   vi.mocked(getAfHomesDepartments).mockRejectedValue(new Error('stub'));
   vi.mocked(getAnalyticsOverview).mockRejectedValue(new Error('stub'));
+  vi.mocked(getAfHomesDashboardQueues).mockRejectedValue(new Error('stub'));
+  vi.mocked(getAfHomesSalesTrend).mockRejectedValue(new Error('stub'));
   vi.mocked(getSales).mockResolvedValue([SALE_ROW] as never);
   vi.mocked(getFinanceQueue).mockResolvedValue([QUEUE_ROW] as never);
   vi.mocked(getMemberships).mockResolvedValue([MEMBER_ROW] as never);

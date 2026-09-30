@@ -257,6 +257,12 @@ export type {
   SalesTrendReport,
 } from './schemas/analytics.js';
 
+/* ---- Phase 2B: operational dashboard queue cards (JAD QueueCard parity) ----
+   Three server-side counts (null when unauthorized); no withdrawals until the
+   payout workflow exists. */
+export { dashboardQueuesSchema } from './schemas/queues.js';
+export type { DashboardQueues } from './schemas/queues.js';
+
 /* ---- Phase 15: role-scoped reports and the audit center ----
    Exports are generated from the same scoped server-side query as the
    on-screen table and returned as base64-in-JSON, so the browser never

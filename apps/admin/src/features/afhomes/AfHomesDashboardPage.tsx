@@ -26,6 +26,7 @@ import {
 import type { IconName } from '@jad/ui';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
+import { AfHomesQueueCards } from './AfHomesQueueCards';
 import { AfHomesTrendChart, TrendChartSkeleton } from './AfHomesTrendChart';
 import { getAnalyticsOverview } from './services';
 import styles from './AfHomesDashboardPage.module.css';
@@ -200,6 +201,7 @@ export function AfHomesDashboardPage() {
           ))}
         </nav>
       ) : null}
+      <AfHomesQueueCards />
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard">
           <p className={styles.loadingRow} aria-live="polite" aria-busy="true">

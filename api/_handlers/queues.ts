@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import { summarizePayments } from '../_lib/commerce.js';
-import { SALE_ACTIVATABLE } from '@jad/contracts';
+import { dashboardQueuesSchema, OST_REVIEWABLE_STATUSES, SALE_ACTIVATABLE } from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
@@ -51,6 +51,19 @@ type QueueRow = {
 
 const SELECT_QUEUE =
   'id, sale_number, status, cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amount_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_id, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name)';
+
+/**
+ * Sales awaiting money, or with money recorded but not yet verified. The
+ * single authoritative definition of the Finance payment queue: the
+ * `/queues/finance` list below and the dashboard Payment Verification card
+ * both read this set, so the two can never disagree.
+ */
+const PAYMENT_VERIFICATION_STATUSES = [
+  'submitted',
+  'payment_pending',
+  'payment_in_progress',
+  'overdue',
+];
 
 function shape(row: QueueRow) {
   const totals = summarizePayments({
@@ -162,12 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification');
       if ('error' in auth) return deny(res, auth);
       // Awaiting money, or money that has been recorded but not yet verified.
-      const queue = await buildQueue(
-        db,
-        ['submitted', 'payment_pending', 'payment_in_progress', 'overdue'],
-        limit,
-        offset,
-      );
+      const queue = await buildQueue(db, PAYMENT_VERIFICATION_STATUSES, limit, offset);
       return res.status(200).json(queue);
     }
 
@@ -177,6 +185,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Fully paid, awaiting activation.
       const queue = await buildQueue(db, ['payment_verified', 'activation_pending'], limit, offset);
       return res.status(200).json(queue);
+    }
+
+    // Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+    // Pattern A: each count additionally requires its own module, and an
+    // unauthorized count reads as null - never as a zero that would hide an
+    // action queue or leak a depth the caller may not know.
+    if (subPath(req) === 'dashboard') {
+      const auth = await authorizeAfHomes(req, 'dashboard.view');
+      if ('error' in auth) return deny(res, auth);
+      const canView = (moduleKey: string) =>
+        auth.permissions.some(
+          (permission) => permission.moduleKey === moduleKey && permission.canView,
+        );
+      const counts: Record<'ostMembers' | 'ostApplications' | 'paymentVerification', number | null> = {
+        ostMembers: null,
+        ostApplications: null,
+        paymentVerification: null,
+      };
+      if (canView('network.ost_members')) {
+        const members = await db.from('ost_members').select('id', { count: 'exact', head: true });
+        if (members.error) throw members.error;
+        counts.ostMembers = members.count ?? 0;
+      }
+      if (canView('network.ost_registrations')) {
+        const applications = await db
+          .from('ost_applications')
+          .select('id', { count: 'exact', head: true })
+          .in('status', [...OST_REVIEWABLE_STATUSES]);
+        if (applications.error) throw applications.error;
+        counts.ostApplications = applications.count ?? 0;
+      }
+      if (canView('finance.payment_verification')) {
+        const verifying = await db
+          .from('card_sales')
+          .select('id', { count: 'exact', head: true })
+          .in('status', PAYMENT_VERIFICATION_STATUSES);
+        if (verifying.error) throw verifying.error;
+        counts.paymentVerification = verifying.count ?? 0;
+      }
+      const parsed = dashboardQueuesSchema.safeParse(counts);
+      if (!parsed.success) return fail(res, 'INTERNAL', 'Internal server error', 500);
+      return res.status(200).json(parsed.data);
     }
 
     return fail(res, 'NOT_FOUND', 'Queue endpoint not found', 404);
