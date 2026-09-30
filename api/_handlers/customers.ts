@@ -9,6 +9,9 @@ import { z } from 'zod';
 import { createCustomerSchema, maskGovernmentId, updateCustomerSchema } from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { DEFAULT_ONBOARDING_TOKEN_VALID_HOURS } from '../_lib/constants.js';
+import * as onboardingEmail from '../_lib/customer-onboarding-email.js';
+import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
 import {
   audit,
   deny,
@@ -45,6 +48,16 @@ const toCustomer = (row: Record<string, unknown>) => ({
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked: maskGovernmentId(isoOrNull(row.government_id_number)),
   status: row.status,
+  hasActiveMembership:
+    Array.isArray(row.memberships) &&
+    row.memberships.some(
+      (membership) =>
+        typeof membership === 'object' &&
+        membership !== null &&
+        (membership as Record<string, unknown>).status === 'active',
+    ),
+  portalAccountActivated:
+    typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,
   createdBy: isoOrNull(row.created_by),
   createdAt: isoOrNull(row.created_at) ?? '',
   updatedAt: isoOrNull(row.updated_at) ?? '',
@@ -100,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
       const { search, status, limit, offset } = parsed.data;
 
-      let query = db.from('customers').select('*', { count: 'exact' });
+      let query = db.from('customers').select('*, memberships(id,status)', { count: 'exact' });
       if (status) query = query.eq('status', status);
       if (search) {
         // Postgres full-text style OR across the name parts, email and number.
@@ -189,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return deny(res, auth);
       const { data, error } = await db
         .from('customers')
-        .select('*')
+        .select('*, memberships(id,status)')
         .eq('id', detail[1]!)
         .maybeSingle();
       if (error) throw error;
@@ -260,29 +273,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const token = route(req, 'POST', /^([0-9a-f-]+)\/onboarding-token$/);
     if (token) {
-      const auth = await authorizeAfHomes(req, 'finance.card_activation', 'update');
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
       const id = token[1]!;
 
       const { data: customer, error: readError } = await db
         .from('customers')
-        .select('id, email, status')
+        .select('id, email, first_name, middle_name, last_name, suffix, status, auth_user_id')
         .eq('id', id)
         .maybeSingle();
       if (readError) throw readError;
       if (!customer) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
 
-      const body = (jsonBody(req) ?? {}) as { purpose?: string; validHours?: number };
-      const purpose = body.purpose === 'password_reset' ? 'password_reset' : 'account_activation';
-      const validHours = Number.isInteger(body.validHours)
-        ? Math.min(Math.max(body.validHours!, 1), 168)
-        : 72;
+      if (customer.auth_user_id) {
+        return fail(res, 'CONFLICT', 'Customer portal account is already activated', 409);
+      }
+      if (customer.status !== 'active') {
+        return fail(res, 'CONFLICT', 'Customer must be active before account activation', 409);
+      }
+
+      const { data: membership, error: membershipError } = await db
+        .from('memberships')
+        .select('id, membership_number, status')
+        .eq('customer_id', id)
+        .eq('status', 'active')
+        .order('activated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (membershipError) throw membershipError;
+      if (!membership) return fail(res, 'CONFLICT', 'Customer has no active membership', 409);
+
+      // Refuse before rotating an existing token if the server cannot produce
+      // the only recoverable plaintext form: the fragment-based activation URL.
+      if (!customerActivationUrl('configuration-check')) {
+        return fail(res, 'INTERNAL', 'Customer portal URL is not configured', 500);
+      }
 
       // Raw token is generated here, returned once, and only its hash stored.
       const { data: issued, error } = await db.rpc('issue_customer_onboarding_token', {
         p_customer_id: id,
-        p_purpose: purpose,
-        p_valid_hours: validHours,
+        p_purpose: 'account_activation',
+        p_valid_hours: DEFAULT_ONBOARDING_TOKEN_VALID_HOURS,
         p_actor_id: auth.userId,
       });
       if (error) return mapRpcError(res, error);
@@ -291,19 +322,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // credential: required byte-exact (never trimmed) and non-empty.
       const issuedRow = singleRpcRow(issued);
       const rawToken = issuedRow?.token;
-      if (typeof rawToken !== 'string' || rawToken.length === 0)
+      const expiresAt = issuedRow?.expires_at;
+      if (typeof rawToken !== 'string' || rawToken.length === 0 || typeof expiresAt !== 'string')
         return fail(res, 'INTERNAL', 'Token issue failed', 500);
-      const result = { token: rawToken, expires_at: issuedRow?.expires_at };
+      const activationUrl = customerActivationUrl(rawToken);
+      if (!activationUrl) return fail(res, 'INTERNAL', 'Activation link generation failed', 500);
 
-      await audit(db, auth.userId, 'CUSTOMER_ONBOARDING_TOKEN_ISSUED', 'customer', id, null, {
-        purpose,
-        validHours,
-        expiresAt: result.expires_at ?? null,
+      const customerName = [
+        customer.first_name,
+        customer.middle_name,
+        customer.last_name,
+        customer.suffix,
+      ]
+        .filter((part): part is string => typeof part === 'string' && part.length > 0)
+        .join(' ');
+      const delivery = await onboardingEmail.sendCustomerOnboardingEmail({
+        to: String(customer.email ?? ''),
+        customerName,
+        membershipNumber: String(membership.membership_number ?? ''),
+        activationUrl,
+        expiresAt,
       });
-      // The token is returned to the authorized staff member exactly once.
-      return res
-        .status(201)
-        .json({ token: result.token, purpose, expiresAt: result.expires_at ?? null });
+      const emailStatus = delivery.status === 'sent' ? 'sent' : 'failed';
+      const status = delivery.status === 'sent' ? 'email_sent' : 'manual_required';
+
+      // Token issuance is already committed. Audit failure must not discard the
+      // sole authorized response containing the one-time activation link.
+      try {
+        await audit(db, auth.userId, 'CUSTOMER_ONBOARDING_TOKEN_ISSUED', 'customer', id, null, {
+          customerId: id,
+          purpose: 'account_activation',
+          validHours: DEFAULT_ONBOARDING_TOKEN_VALID_HOURS,
+          expiresAt,
+          deliveryStatus: emailStatus,
+        });
+        await audit(
+          db,
+          auth.userId,
+          emailStatus === 'sent'
+            ? 'CUSTOMER_ACTIVATION_EMAIL_SENT'
+            : 'CUSTOMER_ACTIVATION_EMAIL_FAILED',
+          'customer',
+          id,
+          null,
+          { customerId: id, purpose: 'account_activation', expiresAt, deliveryStatus: emailStatus },
+        );
+      } catch {
+        console.error('[api] customers: onboarding audit write failed');
+      }
+
+      return res.status(201).json({
+        status,
+        emailStatus,
+        email: customer.email,
+        activationUrl,
+        expiresAt,
+      });
     }
 
     const deactivate = route(req, 'POST', /^([0-9a-f-]+)\/deactivate$/);

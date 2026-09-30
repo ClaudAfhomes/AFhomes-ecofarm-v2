@@ -343,6 +343,9 @@ export const customerSchema = z.object({
   governmentIdType: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
   status: customerStatusSchema,
+  /** Safe lifecycle flags; auth user IDs and membership rows are never exposed. */
+  hasActiveMembership: z.boolean().optional(),
+  portalAccountActivated: z.boolean().optional(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

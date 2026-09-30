@@ -195,6 +195,7 @@ export {
   markCommissionPaidSchema,
   issueOnboardingTokenSchema,
   onboardingTokenSchema,
+  customerOnboardingRecoverySchema,
   financeQueueItemSchema,
 } from './schemas/finance.js';
 export type {
@@ -213,6 +214,7 @@ export type {
   MarkCommissionPaidRequest,
   IssueOnboardingTokenRequest,
   OnboardingToken,
+  CustomerOnboardingRecovery,
   FinanceQueueItem,
 } from './schemas/finance.js';
 

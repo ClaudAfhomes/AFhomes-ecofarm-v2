@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CardCategory, CardProduct, Customer } from '@jad/contracts';
 
 import { renderWithProviders } from '../../test/utils';
+import type { SessionUser } from '../../lib/session';
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { BusinessProductsPage } from './BusinessProductsPage';
 import {
@@ -10,6 +11,7 @@ import {
   createCardProduct,
   getCardCategories,
   getCardProducts,
+  issueCustomerAccountActivation,
   updateCardCategory,
   updateCardProduct,
 } from './services';
@@ -25,6 +27,10 @@ vi.mock('./services', () => ({
   getCustomers: vi.fn(),
   createCustomer: vi.fn(),
   createSale: vi.fn(),
+  issueCustomerAccountActivation: vi.fn(),
+  deactivateCustomer: vi.fn(),
+  anonymizeCustomer: vi.fn(),
+  deleteCustomer: vi.fn(),
 }));
 
 const mockedGetCardProducts = vi.mocked(getCardProducts);
@@ -33,6 +39,7 @@ const mockedUpdateCardProduct = vi.mocked(updateCardProduct);
 const mockedGetCardCategories = vi.mocked(getCardCategories);
 const mockedCreateCardCategory = vi.mocked(createCardCategory);
 const mockedUpdateCardCategory = vi.mocked(updateCardCategory);
+const mockedIssueCustomerAccountActivation = vi.mocked(issueCustomerAccountActivation);
 
 const MEMBERSHIP_CATEGORY_ID = '99999999-9999-4999-8999-999999999999';
 
@@ -129,6 +136,36 @@ const CUSTOMER: Customer = {
   updatedAt: '2026-09-28T00:00:00.000Z',
 };
 
+const ACTIVE_CUSTOMER: Customer = {
+  ...CUSTOMER,
+  id: 'aaaaaaaa-0000-4000-8000-000000000003',
+  customerNumber: 'CUS-000003',
+  fullName: 'Pedro Reyes',
+  email: 'pedro@example.com',
+  status: 'active',
+  hasActiveMembership: true,
+  portalAccountActivated: false,
+};
+
+const CUSTOMER_ADMIN: SessionUser = {
+  id: '00000000-0000-4000-8000-0000000000bb',
+  name: 'Customer Admin',
+  email: 'admin@afhomes.test',
+  roleId: '00000000-0000-4000-8000-000000000aa2',
+  roleSlug: 'admin',
+  roleName: 'Admin',
+  status: 'active',
+  afHomesPermissions: [
+    {
+      moduleKey: 'sales.customers',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+  ],
+};
+
 async function openApplicationDialog() {
   const { getCustomers } = await import('./services');
   vi.mocked(getCustomers).mockResolvedValue([CUSTOMER]);
@@ -140,6 +177,53 @@ afterEach(() => vi.clearAllMocks());
 
 beforeEach(() => {
   mockedGetCardCategories.mockResolvedValue([]);
+});
+
+describe('Customer onboarding recovery', () => {
+  it('shows, copies, and clears the one-time activation link for an eligible customer', async () => {
+    const { getCustomers } = await import('./services');
+    vi.mocked(getCustomers).mockResolvedValue([ACTIVE_CUSTOMER]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    mockedIssueCustomerAccountActivation.mockResolvedValue({
+      status: 'manual_required',
+      emailStatus: 'failed',
+      email: 'pedro@example.com',
+      activationUrl: 'https://members.afhomes.test/customer/activate#token=one-time-token',
+      expiresAt: '2026-10-03T00:00:00.000Z',
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
+    fireEvent.click(await screen.findByRole('button', { name: 'Issue / Reissue activation link' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Customer activation ready' });
+    expect(dialog).toHaveTextContent('Email could not be sent');
+    expect(dialog).toHaveTextContent('This activation link is shown once');
+    expect(screen.getByLabelText('Customer activation link')).toHaveValue(
+      'https://members.afhomes.test/customer/activate#token=one-time-token',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy activation link' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('token=')));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByLabelText('Customer activation link')).not.toBeInTheDocument();
+  });
+
+  it('does not show activation recovery after the portal account is linked', async () => {
+    const { getCustomers } = await import('./services');
+    vi.mocked(getCustomers).mockResolvedValue([
+      { ...ACTIVE_CUSTOMER, portalAccountActivated: true },
+    ]);
+    mockedGetCardProducts.mockResolvedValue([]);
+    renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
+    await screen.findByText('Pedro Reyes');
+    expect(
+      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('Card Plans states', () => {

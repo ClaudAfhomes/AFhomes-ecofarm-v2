@@ -19,7 +19,7 @@
  *   record -> verify -> summary -> activate -> onboarding token, with every
  *   audit carrying IDs and no secrets.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   CUSTOMER,
@@ -49,6 +49,15 @@ const customers = (await import('./customers.js')).default;
 const sales = (await import('./sales.js')).default;
 const queues = (await import('./queues.js')).default;
 const { selectHandler } = await import('../_lib/router.js');
+
+const ORIGINAL_WEB_URL = process.env.AFHOMES_WEB_URL;
+beforeAll(() => {
+  process.env.AFHOMES_WEB_URL = 'https://afhomes.test';
+});
+afterAll(() => {
+  if (ORIGINAL_WEB_URL === undefined) delete process.env.AFHOMES_WEB_URL;
+  else process.env.AFHOMES_WEB_URL = ORIGINAL_WEB_URL;
+});
 
 let counter = 0;
 function install(
@@ -424,11 +433,15 @@ describe('activation and customer onboarding', () => {
     const state = await call(customers, {
       method: 'POST',
       path: `${CUSTOMER.active}/onboarding-token`,
-      token: TOKEN2.finance,
+      token: TOKEN2.salesManager,
       body: {},
     });
     expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({ token: 'raw-once-onboarding-token-0001' });
+    expect(state.body).toMatchObject({
+      status: 'manual_required',
+      emailStatus: 'failed',
+      activationUrl: 'https://afhomes.test/customer/activate#token=raw-once-onboarding-token-0001',
+    });
     const audits = db
       .rows('audit_events')
       .filter((a) => a.action === 'CUSTOMER_ONBOARDING_TOKEN_ISSUED');

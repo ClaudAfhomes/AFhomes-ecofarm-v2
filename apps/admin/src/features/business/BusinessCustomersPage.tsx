@@ -11,7 +11,7 @@ import {
   SearchField,
   StatusChip,
 } from '@jad/ui';
-import type { CreateCustomerRequest, Customer } from '@jad/contracts';
+import type { CreateCustomerRequest, Customer, CustomerOnboardingRecovery } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
 import {
@@ -21,6 +21,7 @@ import {
   deleteCustomer,
   getCardProducts,
   getCustomers,
+  issueCustomerAccountActivation,
 } from './services';
 import { SaleApplicationDialog } from './SaleApplicationDialog';
 
@@ -61,6 +62,11 @@ export function BusinessCustomersPage() {
   const activeProducts = (products.data ?? []).filter(
     (product) => product.isActive && product.categoryIsActive,
   );
+  const canIssueActivation =
+    user?.roleSlug === 'super_admin' ||
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
+    ) === true;
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateCustomerRequest>(EMPTY);
@@ -70,6 +76,9 @@ export function BusinessCustomersPage() {
     customer: Customer;
   } | null>(null);
   const [confirmation, setConfirmation] = useState('');
+  const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
+  const [activationCustomerId, setActivationCustomerId] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState('');
 
   const set = <K extends keyof CreateCustomerRequest>(key: K, value: CreateCustomerRequest[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -95,6 +104,26 @@ export function BusinessCustomersPage() {
       setConfirmation('');
     },
   });
+  const issueActivation = useMutation({
+    mutationFn: (customerId: string) => issueCustomerAccountActivation(customerId),
+    onMutate: (customerId) => {
+      setActivationCustomerId(customerId);
+      setCopyStatus('');
+    },
+    onSuccess: (result) => {
+      setActivationResult(result);
+      setActivationCustomerId(null);
+    },
+    onError: () => setActivationCustomerId(null),
+  });
+
+  const closeActivationResult = () => {
+    // The URL contains the plaintext bearer token and is deliberately removed
+    // from component state when the one-time dialog closes.
+    setActivationResult(null);
+    setCopyStatus('');
+    issueActivation.reset();
+  };
 
   return (
     <section>
@@ -182,6 +211,24 @@ export function BusinessCustomersPage() {
                     >
                       Deactivate Account
                     </Button>
+                    {canIssueActivation &&
+                    customer.hasActiveMembership &&
+                    !customer.portalAccountActivated ? (
+                      <>
+                        {' '}
+                        <Button
+                          variant="secondary"
+                          disabled={
+                            issueActivation.isPending && activationCustomerId === customer.id
+                          }
+                          onClick={() => issueActivation.mutate(customer.id)}
+                        >
+                          {issueActivation.isPending && activationCustomerId === customer.id
+                            ? 'Issuing activation linkâ€¦'
+                            : 'Issue / Reissue activation link'}
+                        </Button>
+                      </>
+                    ) : null}
                     {user?.roleSlug === 'super_admin' ? (
                       <>
                         {' '}
@@ -331,6 +378,57 @@ export function BusinessCustomersPage() {
           onClose={() => setSelling(null)}
           onCreated={() => setSelling(null)}
         />
+      ) : null}
+      <Dialog
+        open={activationResult !== null}
+        onClose={closeActivationResult}
+        title="Customer activation ready"
+        footer={<Button onClick={closeActivationResult}>Done</Button>}
+      >
+        {activationResult ? (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <p>
+              {activationResult.emailStatus === 'sent'
+                ? 'Activation email sent.'
+                : 'Email could not be sent. Copy this link and give it to the customer.'}
+            </p>
+            <p>
+              <strong>This activation link is shown once.</strong> Closing this dialog removes it
+              from this screen.
+            </p>
+            <dl>
+              <dt>Email</dt>
+              <dd>{activationResult.email}</dd>
+              <dt>Expires</dt>
+              <dd>{new Date(activationResult.expiresAt).toLocaleString()}</dd>
+            </dl>
+            <label>
+              Activation link
+              <input
+                aria-label="Customer activation link"
+                readOnly
+                value={activationResult.activationUrl}
+              />
+            </label>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(activationResult.activationUrl);
+                  setCopyStatus('Activation link copied.');
+                } catch {
+                  setCopyStatus('Copy failed. Select and copy the link manually.');
+                }
+              }}
+            >
+              Copy activation link
+            </Button>
+            {copyStatus ? <p role="status">{copyStatus}</p> : null}
+          </div>
+        ) : null}
+      </Dialog>
+      {issueActivation.error && !activationResult ? (
+        <p role="alert">{issueActivation.error.message}</p>
       ) : null}
       <ConfirmDialog
         open={accountAction !== null}

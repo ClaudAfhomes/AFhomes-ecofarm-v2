@@ -119,6 +119,7 @@ function install() {
 }
 
 beforeEach(() => {
+  vi.stubEnv('AFHOMES_WEB_URL', 'https://members.afhomes.test');
   install();
 });
 
@@ -199,7 +200,7 @@ describe('router -> handler contract matrix', () => {
 
     r = await dispatch(`/api/v1/customers/${CUSTOMER.active}/onboarding-token`, {
       method: 'POST',
-      token: TOKEN2.finance,
+      token: TOKEN.admin,
       body: {},
     });
     expect(r.handled).toBe(true);

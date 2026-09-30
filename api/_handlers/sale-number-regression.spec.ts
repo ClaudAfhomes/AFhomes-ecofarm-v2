@@ -230,6 +230,7 @@ describe('sibling sequence RPCs follow the same live shape', () => {
   });
 
   it('issues an onboarding token from a one-row array response', async () => {
+    vi.stubEnv('AFHOMES_WEB_URL', 'https://members.afhomes.test');
     install([
       {
         fn: 'issue_customer_onboarding_token',
@@ -238,11 +239,13 @@ describe('sibling sequence RPCs follow the same live shape', () => {
     ]);
     const state = await call('customers', {
       method: 'POST',
-      path: `${CUSTOMER.prospect}/onboarding-token`,
+      path: `${CUSTOMER.active}/onboarding-token`,
       token: TOKEN.admin,
-      body: { purpose: 'password_reset' },
+      body: {},
     });
     expect(state.status).toBe(201);
-    expect((state.body as Record<string, unknown>).token).toBe('raw-live-shape');
+    expect((state.body as Record<string, unknown>).activationUrl).toBe(
+      'https://members.afhomes.test/customer/activate#token=raw-live-shape',
+    );
   });
 });

@@ -7,7 +7,7 @@
  * in `phase2-migration.spec.ts` and the handler contract with each RPC - the
  * arguments it sends and how it maps the result - is asserted here.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CUSTOMER,
@@ -26,6 +26,7 @@ import {
   UNIQUE,
 } from '../_lib/testing/phase2-fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
+import * as onboardingEmail from '../_lib/customer-onboarding-email.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown }));
 
@@ -50,13 +51,18 @@ const handlers = {
 };
 
 const ORIGINAL_ADMIN_URL = process.env.AFHOMES_ADMIN_URL;
+const ORIGINAL_WEB_URL = process.env.AFHOMES_WEB_URL;
 beforeAll(() => {
   process.env.AFHOMES_ADMIN_URL = 'https://afhomes.test/admin';
+  process.env.AFHOMES_WEB_URL = 'https://members.afhomes.test';
 });
 afterAll(() => {
   if (ORIGINAL_ADMIN_URL === undefined) delete process.env.AFHOMES_ADMIN_URL;
   else process.env.AFHOMES_ADMIN_URL = ORIGINAL_ADMIN_URL;
+  if (ORIGINAL_WEB_URL === undefined) delete process.env.AFHOMES_WEB_URL;
+  else process.env.AFHOMES_WEB_URL = ORIGINAL_WEB_URL;
 });
+afterEach(() => vi.restoreAllMocks());
 
 let counter = 0;
 function install(
@@ -1536,18 +1542,53 @@ describe('finance and activation queues', () => {
 describe('customer account onboarding', () => {
   beforeEach(() => install());
 
-  it('issues a single-use token and returns it once', async () => {
+  it('issues a single-use activation link for an active membership without reactivation', async () => {
+    const db = install();
+    const before = JSON.stringify({
+      sales: db.rows('card_sales'),
+      memberships: db.rows('memberships'),
+      points: db.rows('points_accounts'),
+      commissions: db.rows('commissions'),
+    });
     const state = await call('customers', {
       method: 'POST',
       path: `${CUSTOMER.active}/onboarding-token`,
       token: TOKEN.admin,
-      body: { purpose: 'account_activation', validHours: 24 },
+      body: {},
     });
     expect(state.status).toBe(201);
-    expect((state.body as { token: string }).token).toBe('raw-once-onboarding-token-0001');
+    expect(state.body).toMatchObject({
+      status: 'manual_required',
+      emailStatus: 'failed',
+      email: 'pedro@example.com',
+      expiresAt: '2026-10-01T00:00:00.000Z',
+    });
+    expect((state.body as { activationUrl: string }).activationUrl).toContain(
+      '/customer/activate#token=raw-once-onboarding-token-0001',
+    );
+    expect(db.calls.some((call) => call.op === 'rpc' && call.table === 'activate_card_sale')).toBe(
+      false,
+    );
+    expect(
+      JSON.stringify({
+        sales: db.rows('card_sales'),
+        memberships: db.rows('memberships'),
+        points: db.rows('points_accounts'),
+        commissions: db.rows('commissions'),
+      }),
+    ).toBe(before);
+    const audits = db
+      .rows('audit_events')
+      .filter((entry) => String(entry.action).startsWith('CUSTOMER_'));
+    expect(audits.map((entry) => entry.action)).toEqual([
+      'CUSTOMER_ONBOARDING_TOKEN_ISSUED',
+      'CUSTOMER_ACTIVATION_EMAIL_FAILED',
+    ]);
+    expect(JSON.stringify(audits)).not.toContain('raw-once-onboarding-token-0001');
+    expect(JSON.stringify(audits)).not.toContain('/customer/activate');
   });
 
-  it('denies issuing without finance.card_activation', async () => {
+  it('denies issuing without sales.customers update permission', async () => {
     const state = await call('customers', {
       method: 'POST',
       path: `${CUSTOMER.active}/onboarding-token`,
@@ -1555,5 +1596,73 @@ describe('customer account onboarding', () => {
       body: {},
     });
     expect(state.status).toBe(403);
+  });
+
+  it('allows Super Admin and reports successful email separately from token issuance', async () => {
+    vi.spyOn(onboardingEmail, 'sendCustomerOnboardingEmail').mockResolvedValueOnce({
+      status: 'sent',
+    });
+    const db = install();
+    const state = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.active}/onboarding-token`,
+      token: TOKEN.superAdmin,
+      body: {},
+    });
+    expect(state.status).toBe(201);
+    expect(state.body).toMatchObject({ status: 'email_sent', emailStatus: 'sent' });
+    expect(
+      db.rows('audit_events').some((entry) => entry.action === 'CUSTOMER_ACTIVATION_EMAIL_SENT'),
+    ).toBe(true);
+  });
+
+  it('returns 404 for an unknown customer without issuing a token', async () => {
+    const db = install();
+    const state = await call('customers', {
+      method: 'POST',
+      path: 'aaaaaaaa-0000-4000-8000-999999999999/onboarding-token',
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(state.status).toBe(404);
+    expect(
+      db.calls.some(
+        (call) => call.op === 'rpc' && call.table === 'issue_customer_onboarding_token',
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a prospect without an active membership before issuing a token', async () => {
+    const db = install();
+    const state = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.prospect}/onboarding-token`,
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(state.status).toBe(409);
+    expect(
+      db.calls.some(
+        (call) => call.op === 'rpc' && call.table === 'issue_customer_onboarding_token',
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses to replace activation with a second portal account', async () => {
+    const db = install();
+    db.rows('customers').find((row) => row.id === CUSTOMER.active)!.auth_user_id =
+      '99999999-0000-4000-8000-000000000001';
+    const state = await call('customers', {
+      method: 'POST',
+      path: `${CUSTOMER.active}/onboarding-token`,
+      token: TOKEN.admin,
+      body: {},
+    });
+    expect(state.status).toBe(409);
+    expect(
+      db.calls.some(
+        (call) => call.op === 'rpc' && call.table === 'issue_customer_onboarding_token',
+      ),
+    ).toBe(false);
   });
 });

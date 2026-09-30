@@ -12,6 +12,7 @@ import {
   cardCategorySchema,
   cardProductSchema,
   commissionSchema,
+  customerOnboardingRecoverySchema,
   customerSchema,
   financeQueueItemSchema,
   membershipSchema,
@@ -23,6 +24,7 @@ import {
   type CardCategory,
   type CardProduct,
   type Commission,
+  type CustomerOnboardingRecovery,
   type CreateCardCategoryRequest,
   type CreateCardProductRequest,
   type CreateCustomerRequest,
@@ -118,6 +120,9 @@ export const getCustomers = (
 
 export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> =>
   post('/customers', customerSchema, input);
+
+export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnboardingRecovery> =>
+  post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
 
 const customerDeactivationSchema = z.object({ deactivated: z.literal(true) });
 const customerAnonymizationSchema = z.object({ anonymized: z.literal(true) });
