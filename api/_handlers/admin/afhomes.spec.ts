@@ -6,7 +6,7 @@
  * Zod schemas, and the real Supabase query chains - only the Supabase client is
  * replaced by the in-memory fake in `_lib/testing/supabase-fake.ts`.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { baseTables, baseTokens, TOKEN, UUID, moduleId } from '../../_lib/testing/fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../../_lib/testing/supabase-fake.js';
@@ -740,6 +740,385 @@ describe('staff deletion blockers on tables without an id column', () => {
       expect(describeServerError('oops')).toBe('Unknown server error');
     } finally {
       error.mockRestore();
+    }
+  });
+});
+
+describe('staff test-account purge', () => {
+  const ENV_KEY = 'AFHOMES_ENABLE_TEST_PURGE';
+  const TEST_STAFF_ID = 'aaaaaaaa-0000-4000-8000-0000000000a1';
+  const REAL_STAFF_ID = 'aaaaaaaa-0000-4000-8000-0000000000a2';
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    install();
+    savedEnv = process.env[ENV_KEY];
+    delete process.env[ENV_KEY];
+  });
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = savedEnv;
+  });
+
+  const enablePurge = () => {
+    process.env[ENV_KEY] = 'true';
+  };
+
+  /** A resolvable staff row (assignment required by staffCatalog). */
+  function addStaff(
+    db: FakeSupabase,
+    id: string,
+    email: string,
+    roleId: string = UUID.role.employee,
+  ) {
+    db.rows('staff_users').push({
+      id,
+      email,
+      full_name: 'Test Person',
+      department_id: null,
+      status: 'active',
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+    });
+    db.rows('staff_role_assignments').push({ staff_id: id, role_id: roleId });
+  }
+
+  function addTestStaff(db: FakeSupabase) {
+    addStaff(db, TEST_STAFF_ID, 'qa.purge@example.invalid');
+  }
+
+  const purge = (id: string, token: string = TOKEN.superAdmin) =>
+    call({ method: 'POST', afPath: `staff/${id}/purge-test-data`, token });
+
+  it('returns 404 when the environment flag is not explicitly true', async () => {
+    const db = install();
+    addTestStaff(db);
+    for (const value of [undefined, '', 'false', '1', 'yes']) {
+      if (value === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = value;
+      const state = await purge(TEST_STAFF_ID);
+      expect(state.status, String(value)).toBe(404);
+    }
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+  });
+
+  it('rejects a non-Super Admin even with the flag on', async () => {
+    enablePurge();
+    const state = await purge(UUID.viewerStaff, TOKEN.admin);
+    expect(state.status).toBe(403);
+  });
+
+  it('rejects self-purge', async () => {
+    enablePurge();
+    const state = await purge(UUID.superAdminStaff);
+    expect(state.status).toBe(403);
+  });
+
+  it('rejects a Super Admin target', async () => {
+    enablePurge();
+    const db = install();
+    addStaff(db, 'aaaaaaaa-0000-4000-8000-0000000000a9', 'qa.second@example.invalid', UUID.role.superAdmin);
+    const state = await purge('aaaaaaaa-0000-4000-8000-0000000000a9');
+    expect(state.status).toBe(403);
+    expect(db.rows('staff_users').some((row) => row.id === 'aaaaaaaa-0000-4000-8000-0000000000a9')).toBe(
+      true,
+    );
+  });
+
+  it('rejects a non-test account with 409 and changes nothing', async () => {
+    enablePurge();
+    const db = install();
+    addStaff(db, REAL_STAFF_ID, 'real.officer@afhomes.ph');
+    const state = await purge(REAL_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /Only test accounts can be purged/,
+    );
+    expect(db.rows('staff_users').some((row) => row.id === REAL_STAFF_ID)).toBe(true);
+  });
+
+  it('rejects an unknown target with 404', async () => {
+    enablePurge();
+    const state = await purge('aaaaaaaa-0000-4000-8000-000000000099');
+    expect(state.status).toBe(404);
+  });
+
+  it('purges a clean test account with counts and Auth deletion', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('staff_invitations').push({
+      id: 'invite-qa',
+      email: 'qa.purge@example.invalid',
+      status: 'pending',
+      auth_user_id: TEST_STAFF_ID,
+      invited_by: UUID.superAdminStaff,
+    });
+    db.rows('staff_permission_restrictions').push({
+      staff_id: TEST_STAFF_ID,
+      module_id: moduleId('organization.roles'),
+    });
+    db.rows('audit_events').push({
+      id: 9001,
+      actor_id: TEST_STAFF_ID,
+      action: 'STAFF_CREATED',
+      entity_type: 'staff_user',
+      entity_id: TEST_STAFF_ID,
+      created_at: '2026-09-01T00:00:00.000Z',
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      purged: true,
+      counts: {
+        staff: 1,
+        restrictions: 1,
+        assignments: 1,
+        invitations: 1,
+        sales: 0,
+        customers: 0,
+        payments: 0,
+        memberships: 0,
+        history: 1,
+      },
+      authUserDeleted: true,
+    });
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(false);
+    expect(db.rows('staff_role_assignments').some((row) => row.staff_id === TEST_STAFF_ID)).toBe(
+      false,
+    );
+    expect(
+      db.rows('staff_permission_restrictions').some((row) => row.staff_id === TEST_STAFF_ID),
+    ).toBe(false);
+    expect(db.rows('staff_invitations').some((row) => row.auth_user_id === TEST_STAFF_ID)).toBe(
+      false,
+    );
+    expect(db.rows('audit_events').some((row) => row.actor_id === TEST_STAFF_ID)).toBe(false);
+    expect(
+      db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID),
+    ).toBe(true);
+    const actions = db.rows('audit_events').map((row) => row.action);
+    expect(actions).toContain('TEST_ACCOUNT_PURGE_STARTED');
+    expect(actions).toContain('TEST_ACCOUNT_PURGED');
+  });
+
+  it('purges a disposable test customer owned by the staff graph', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('customers').push({
+      id: 'cccccccc-0000-4000-8000-0000000000a1',
+      customer_number: 'CUS-QA-001',
+      email: 'qa.customer@example.invalid',
+      status: 'prospect',
+      created_by: TEST_STAFF_ID,
+      referred_by_staff_id: null,
+      auth_user_id: null,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(200);
+    expect((state.body as { counts: { customers: number } }).counts).toMatchObject({
+      customers: 1,
+    });
+    expect(
+      db.rows('customers').some((row) => row.id === 'cccccccc-0000-4000-8000-0000000000a1'),
+    ).toBe(false);
+  });
+
+  it('preserves a real customer and still purges the staff', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('customers').push({
+      id: 'cccccccc-0000-4000-8000-0000000000a2',
+      customer_number: 'CUS-REAL-001',
+      email: 'real.person@example.ph',
+      status: 'active',
+      created_by: TEST_STAFF_ID,
+      referred_by_staff_id: null,
+      auth_user_id: null,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(200);
+    expect(
+      db.rows('customers').some((row) => row.id === 'cccccccc-0000-4000-8000-0000000000a2'),
+    ).toBe(true);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(false);
+  });
+
+  it('blocks on a test customer with business activity', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('customers').push({
+      id: 'cccccccc-0000-4000-8000-0000000000a3',
+      customer_number: 'CUS-QA-002',
+      email: 'qa.busy@example.invalid',
+      status: 'active',
+      created_by: TEST_STAFF_ID,
+      referred_by_staff_id: null,
+      auth_user_id: null,
+    });
+    db.rows('memberships').push({
+      id: 'dddddddd-0000-4000-8000-0000000000a3',
+      customer_id: 'cccccccc-0000-4000-8000-0000000000a3',
+      status: 'active',
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(/CUS-QA-002/);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+    expect(
+      db.rows('customers').some((row) => row.id === 'cccccccc-0000-4000-8000-0000000000a3'),
+    ).toBe(true);
+  });
+
+  it('preserves a payment the target only verified, clearing attribution', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('payments').push({
+      id: 'pay-qa-1',
+      sale_id: 'bbbbbbbb-0000-4000-8000-000000000001',
+      recorded_by: UUID.adminStaff,
+      verified_by: TEST_STAFF_ID,
+      status: 'verified',
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(200);
+    expect(db.rows('payments').find((row) => row.id === 'pay-qa-1')!.verified_by).toBeNull();
+  });
+
+  it('blocks on a membership the target activated', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('memberships').push({
+      id: 'dddddddd-0000-4000-8000-0000000000a4',
+      customer_id: 'cccccccc-0000-4000-8000-000000000001',
+      status: 'active',
+      activated_by: TEST_STAFF_ID,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(/membership/);
+    expect(db.rows('memberships').some((row) => row.id === 'dddddddd-0000-4000-8000-0000000000a4')).toBe(
+      true,
+    );
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+  });
+
+  it('preserves a dual staff+customer Auth user and the customer login', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('customers').push({
+      id: 'cccccccc-0000-4000-8000-0000000000a5',
+      customer_number: 'CUS-QA-005',
+      email: 'qa.dual@example.invalid',
+      status: 'active',
+      created_by: null,
+      referred_by_staff_id: null,
+      auth_user_id: TEST_STAFF_ID,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ purged: true, authUserDeleted: false });
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(false);
+    expect(
+      db.rows('customers').some((row) => row.id === 'cccccccc-0000-4000-8000-0000000000a5'),
+    ).toBe(true);
+    expect(
+      db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID),
+    ).toBe(false);
+  });
+
+  it('blocks when the target created published CMS content, preserving the page', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('cms_pages').push({
+      id: 'dddddddd-0000-4000-8000-0000000000a6',
+      slug: 'qa-page',
+      title: 'QA Page',
+      status: 'published',
+      created_by: TEST_STAFF_ID,
+      updated_by: TEST_STAFF_ID,
+      published_by: null,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(/CMS/);
+    expect(
+      db.rows('cms_pages').some((row) => row.id === 'dddddddd-0000-4000-8000-0000000000a6'),
+    ).toBe(true);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+  });
+
+  it('answers a repeated purge with 404', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    expect((await purge(TEST_STAFF_ID)).status).toBe(200);
+    expect((await purge(TEST_STAFF_ID)).status).toBe(404);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(false);
+  });
+
+  it('leaves normal Delete Permanently semantics untouched', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('audit_events').push({
+      id: 9002,
+      actor_id: TEST_STAFF_ID,
+      action: 'STAFF_CREATED',
+      entity_type: 'staff_user',
+      entity_id: TEST_STAFF_ID,
+      created_at: '2026-09-01T00:00:00.000Z',
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${TEST_STAFF_ID}`,
+      token: TOKEN.superAdmin,
+    });
+    // A test address does not exempt the conservative path: history blocks.
+    expect(state.status).toBe(409);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+  });
+
+  it('exposes the purge flag on the session only when enabled', async () => {
+    const off = await call({ afPath: 'session', token: TOKEN.superAdmin });
+    expect((off.body as Record<string, unknown>).testPurgeEnabled).toBe(false);
+    enablePurge();
+    const on = await call({ afPath: 'session', token: TOKEN.superAdmin });
+    expect((on.body as Record<string, unknown>).testPurgeEnabled).toBe(true);
+  });
+
+  it('classifies reserved test domains and nothing else', async () => {
+    const { isTestAccountEmail } = await import('./afhomes.js');
+    for (const email of [
+      'qa@example.com',
+      'QA@EXAMPLE.INVALID',
+      '  qa.purge@afhomes.test  ',
+      'member@sub.example.org',
+      'a@localhost',
+      'a@sub.localhost',
+    ]) {
+      expect(isTestAccountEmail(email), email).toBe(true);
+    }
+    for (const email of [
+      'real.officer@afhomes.ph',
+      'staff@gmail.com',
+      'qa@example.com.evil.ph',
+      'qa@notexample.com',
+      'qa@example.co',
+      '',
+      null,
+      undefined,
+      'not-an-email',
+      'a@b@c.invalid',
+    ]) {
+      expect(isTestAccountEmail(email), String(email)).toBe(false);
     }
   });
 });

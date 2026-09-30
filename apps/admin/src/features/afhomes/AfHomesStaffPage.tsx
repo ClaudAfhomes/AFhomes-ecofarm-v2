@@ -27,6 +27,8 @@ import {
   getAfHomesDepartments,
   getAfHomesRoles,
   getAfHomesStaff,
+  isTestStaffEmail,
+  purgeTestAfHomesStaff,
   updateAfHomesStaff,
 } from './services';
 
@@ -41,8 +43,7 @@ function statusTone(status: AfHomesStaff['status']): 'success' | 'danger' | 'neu
 export function AfHomesStaffPage() {
   const client = useQueryClient();
   const navigate = useNavigate();
-  const { user } = useSession();
-  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
+  const { user } = useSession();  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
   const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
   const departments = useQuery({
     queryKey: ['afhomes', 'departments'],
@@ -66,6 +67,10 @@ export function AfHomesStaffPage() {
     staff: AfHomesStaff;
   } | null>(null);
   const [confirmation, setConfirmation] = useState('');
+  const [purgeTarget, setPurgeTarget] = useState<AfHomesStaff | null>(null);
+  const [purgeConfirmation, setPurgeConfirmation] = useState('');
+  const canPurgeTest =
+    user?.roleSlug === 'super_admin' && user.testPurgeEnabled === true;
 
   const resetCreate = () => {
     setFullName('');
@@ -128,6 +133,14 @@ export function AfHomesStaffPage() {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
       setAccountAction(null);
       setConfirmation('');
+    },
+  });
+  const purgeTestAccount = useMutation({
+    mutationFn: () => purgeTestAfHomesStaff(purgeTarget!.id),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
+      setPurgeTarget(null);
+      setPurgeConfirmation('');
     },
   });
   const filtered = useMemo(
@@ -313,6 +326,14 @@ export function AfHomesStaffPage() {
                           </Button>
                         </>
                       ) : null}
+                      {canPurgeTest && item.id !== user?.id && isTestStaffEmail(item.email) ? (
+                        <>
+                          {' '}
+                          <Button variant="danger" onClick={() => setPurgeTarget(item)}>
+                            Purge Test Account
+                          </Button>
+                        </>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -492,6 +513,38 @@ export function AfHomesStaffPage() {
         confirmLabel={accountAction?.kind === 'delete' ? 'Delete Permanently' : 'Confirm'}
         confirmDisabled={accountAction?.kind === 'delete' && confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}
+      />
+      <ConfirmDialog
+        open={purgeTarget !== null}
+        onCancel={() => {
+          setPurgeTarget(null);
+          setPurgeConfirmation('');
+        }}
+        onConfirm={() => purgeTestAccount.mutate()}
+        title="Purge Test Account"
+        message={
+          <div>
+            <p>
+              TEST DATA PURGE. This permanently deletes the test account
+              {purgeTarget ? ` ${purgeTarget.email}` : ''} and related test records. This
+              action cannot be undone. Real business data is never purged: anything
+              shared or non-test blocks the purge instead.
+            </p>
+            <label>
+              Type PURGE to confirm
+              <input
+                aria-label="Type PURGE to confirm test account purge"
+                value={purgeConfirmation}
+                onChange={(event) => setPurgeConfirmation(event.target.value)}
+              />
+            </label>
+            {purgeTestAccount.error ? <p role="alert">{purgeTestAccount.error.message}</p> : null}
+          </div>
+        }
+        danger
+        confirmLabel="Purge Test Account"
+        confirmDisabled={purgeConfirmation !== 'PURGE'}
+        confirmLoading={purgeTestAccount.isPending}
       />
     </section>
   );

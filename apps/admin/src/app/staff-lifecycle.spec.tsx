@@ -13,23 +13,28 @@ import { renderWithProviders } from '../test/utils';
 import App from './App';
 import type { SessionUser } from '../lib/session';
 
-vi.mock('../features/afhomes/services', () => ({
-  getAfHomesStaff: vi.fn(),
-  getAfHomesStaffById: vi.fn(),
-  getAfHomesStaffAudit: vi.fn(),
-  getAfHomesRoles: vi.fn(),
-  getAfHomesRoleById: vi.fn(),
-  getAfHomesRoleAudit: vi.fn(),
-  getAfHomesDepartments: vi.fn(),
-  createAfHomesStaff: vi.fn(),
-  updateAfHomesStaff: vi.fn(),
-  deactivateAfHomesStaff: vi.fn(),
-  deleteAfHomesStaff: vi.fn(),
-  updateAfHomesStaffProfile: vi.fn(),
-  changeAfHomesStaffPassword: vi.fn(),
-  createAfHomesRole: vi.fn(),
-  updateAfHomesRole: vi.fn(),
-}));
+vi.mock('../features/afhomes/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/afhomes/services')>();
+  return {
+    ...actual,
+    getAfHomesStaff: vi.fn(),
+    getAfHomesStaffById: vi.fn(),
+    getAfHomesStaffAudit: vi.fn(),
+    getAfHomesRoles: vi.fn(),
+    getAfHomesRoleById: vi.fn(),
+    getAfHomesRoleAudit: vi.fn(),
+    getAfHomesDepartments: vi.fn(),
+    createAfHomesStaff: vi.fn(),
+    updateAfHomesStaff: vi.fn(),
+    deactivateAfHomesStaff: vi.fn(),
+    deleteAfHomesStaff: vi.fn(),
+    purgeTestAfHomesStaff: vi.fn(),
+    updateAfHomesStaffProfile: vi.fn(),
+    changeAfHomesStaffPassword: vi.fn(),
+    createAfHomesRole: vi.fn(),
+    updateAfHomesRole: vi.fn(),
+  };
+});
 
 import {
   changeAfHomesStaffPassword,
@@ -42,6 +47,7 @@ import {
   getAfHomesStaff,
   getAfHomesStaffAudit,
   getAfHomesStaffById,
+  purgeTestAfHomesStaff,
 } from '../features/afhomes/services';
 
 const grant = (
@@ -64,6 +70,7 @@ const SUPER: SessionUser = {
   roleSlug: 'super_admin',
   roleName: 'Super Admin',
   status: 'active',
+  testPurgeEnabled: true,
   afHomesPermissions: [
     grant('dashboard.view'),
     grant('organization.staff', { canCreate: true, canUpdate: true, canDelete: true }),
@@ -275,6 +282,96 @@ describe('permanent staff deletion', () => {
     await waitFor(() => expect(deleteAfHomesStaff).toHaveBeenCalledWith(STAFF_ROW.id));
     await waitFor(() => expect(screen.queryByText('Ana Reyes')).toBeNull());
     expect(await screen.findByText('No staff found')).toBeTruthy();
+  });
+});
+
+describe('test-account purge', () => {
+  const PURGE_RESULT = {
+    purged: true as const,
+    counts: {
+      staff: 1,
+      restrictions: 0,
+      assignments: 1,
+      invitations: 0,
+      sales: 0,
+      customers: 0,
+      payments: 0,
+      memberships: 0,
+      history: 0,
+    },
+    authUserDeleted: true,
+  };
+
+  async function confirmTestPurge() {
+    await screen.findByText('Ana Reyes');
+    const purgeButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
+    fireEvent.click(purgeButtons[purgeButtons.length - 1]!);
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+      target: { value: 'PURGE' },
+    });
+    const confirmButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
+  }
+
+  it('shows Purge Test Account for a test-domain row when the flag is on', async () => {
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await screen.findByText('Ana Reyes');
+    // ana@afhomes.test is RFC-reserved: eligible. The normal delete stays too.
+    expect(screen.getAllByRole('button', { name: 'Purge Test Account' }).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('hides Purge Test Account for a real-domain row', async () => {
+    vi.mocked(getAfHomesStaff).mockResolvedValue([
+      { ...STAFF_ROW, email: 'ana.reyes@afhomes.ph' },
+    ] as never);
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await screen.findByText('Ana Reyes');
+    expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('hides Purge Test Account when the server flag is off', async () => {
+    renderWithProviders(<App />, { route: '/admin/staff', user: { ...SUPER, testPurgeEnabled: false } });
+    await screen.findByText('Ana Reyes');
+    expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
+  });
+
+  it('requires the exact PURGE confirmation and removes the row on success', async () => {
+    vi.mocked(purgeTestAfHomesStaff).mockResolvedValueOnce(PURGE_RESULT);
+    vi.mocked(getAfHomesStaff)
+      .mockResolvedValueOnce([STAFF_ROW] as never)
+      .mockResolvedValueOnce([] as never);
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await screen.findByText('Ana Reyes');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Purge Test Account' })[0]!);
+    // Any other confirmation text keeps the destructive action disabled.
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+      target: { value: 'DELETE' },
+    });
+    const confirm = screen.getAllByRole('button', { name: 'Purge Test Account' }).pop()!;
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+      target: { value: 'PURGE' },
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(purgeTestAfHomesStaff).toHaveBeenCalledWith(STAFF_ROW.id));
+    await waitFor(() => expect(screen.queryByText('Ana Reyes')).toBeNull());
+  });
+
+  it('surfaces a non-test refusal without a generic error', async () => {
+    vi.mocked(purgeTestAfHomesStaff).mockRejectedValueOnce(
+      new Error('Only test accounts can be purged.'),
+    );
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await confirmTestPurge();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only test accounts can be purged.');
   });
 });
 

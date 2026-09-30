@@ -7,6 +7,7 @@ import {
   analyticsOverviewSchema,
   dashboardQueuesSchema,
   salesTrendReportSchema,
+  staffTestPurgeResponseSchema,
   type AfHomesDashboard,
   type AfHomesDepartment,
   type AfHomesPermission,
@@ -17,6 +18,7 @@ import {
   type DashboardQueues,
   type SalesTrendGranularity,
   type SalesTrendReport,
+  type StaffTestPurgeResponse,
 } from '@jad/contracts';
 import { z } from 'zod';
 import {
@@ -99,6 +101,32 @@ export const deactivateAfHomesStaff = (id: string) =>
   request(`/admin/afhomes/staff/${id}/deactivate`, staffDeactivationSchema, { method: 'POST' });
 export const deleteAfHomesStaff = (id: string) =>
   request(`/admin/afhomes/staff/${id}`, deletionSchema, { method: 'DELETE' });
+
+/**
+ * Client-side mirror of the server's test-account eligibility, for SHOWING
+ * the purge control only. RFC-reserved, undeliverable domains (including
+ * example.* subdomains) can never be a functional real account. The server
+ * re-checks authoritatively on every call, so this can never authorize
+ * anything.
+ */
+export function isTestStaffEmail(email: unknown): boolean {
+  if (typeof email !== 'string') return false;
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  const host = parts[1]!;
+  if (host === 'localhost' || host === 'example.com' || host === 'example.net' || host === 'example.org')
+    return true;
+  if (host.endsWith('.example.com') || host.endsWith('.example.net') || host.endsWith('.example.org'))
+    return true;
+  return host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost');
+}
+
+/** Super-admin-only test-data purge. Never used for real accounts. */
+export const purgeTestAfHomesStaff = (id: string): Promise<StaffTestPurgeResponse> =>
+  request(`/admin/afhomes/staff/${id}/purge-test-data`, staffTestPurgeResponseSchema, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 export const getAfHomesDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
 export const createAfHomesDepartment = (input: { code: string; name: string }) =>

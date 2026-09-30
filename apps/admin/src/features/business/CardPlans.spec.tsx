@@ -155,6 +155,7 @@ const CUSTOMER_ADMIN: SessionUser = {
   roleSlug: 'admin',
   roleName: 'Admin',
   status: 'active',
+  testPurgeEnabled: false,
   afHomesPermissions: [
     {
       moduleKey: 'sales.customers',

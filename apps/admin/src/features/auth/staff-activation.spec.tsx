@@ -55,6 +55,7 @@ const installFetch = (activationStatus = 200) => {
         roleName: 'Finance',
         mustChangePassword: false,
         permissions: [],
+        testPurgeEnabled: false,
       });
     }
     return jsonResponse({ error: { code: 'NOT_FOUND', message: 'Not found' } }, 404);

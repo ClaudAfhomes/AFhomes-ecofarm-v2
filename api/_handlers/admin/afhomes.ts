@@ -242,6 +242,257 @@ async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
   return [...new Set(results.filter((result) => result.blocked).map((result) => result.label))];
 }
 
+/* ================================================================== */
+/* Test-account purge (super-admin-only, env-gated, fail-closed)        */
+/* ================================================================== */
+/**
+ * Explicit test-account eligibility. ONLY RFC-reserved, undeliverable
+ * domains qualify (`example.com/net/org`, any `.invalid` / `.test` /
+ * `.localhost` host): such an address can never be a functional real
+ * account, so a real staffer cannot be purged by accident. There is no
+ * `is_test` column anywhere in the schema - email domain is the marker,
+ * and every other safeguard (env flag, Super Admin, typed PURGE, server
+ * re-check) still applies. Anything else fails closed with a blocker.
+ */
+const TEST_EXACT_HOSTS = new Set(['localhost']);
+const TEST_BARE_DOMAINS = new Set(['example.com', 'example.net', 'example.org']);
+
+export function isTestAccountEmail(email: unknown): boolean {
+  if (typeof email !== 'string') return false;
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  const host = parts[1]!;
+  if (TEST_EXACT_HOSTS.has(host)) return true;
+  // The whole example.com/net/org zone is reserved, including subdomains.
+  if (
+    TEST_BARE_DOMAINS.has(host) ||
+    [...TEST_BARE_DOMAINS].some((domain) => host.endsWith(`.${domain}`))
+  ) {
+    return true;
+  }
+  return (
+    host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost')
+  );
+}
+
+/**
+ * Server environment gate. Anything but an explicit `'true'` fails closed,
+ * so production (where the variable is unset) can never serve the endpoint.
+ */
+export function isTestPurgeEnabled(): boolean {
+  return process.env.AFHOMES_ENABLE_TEST_PURGE === 'true';
+}
+
+type PurgeBlocker = { blocked: string };
+type PurgeCounts = {
+  staff: number;
+  restrictions: number;
+  assignments: number;
+  invitations: number;
+  sales: number;
+  customers: number;
+  payments: number;
+  memberships: number;
+  history: number;
+};
+
+async function countWhere(
+  db: Db,
+  table: string,
+  column: string,
+  id: string,
+): Promise<number> {
+  // Same rule as hasReference: select the checked column, never a presumed
+  // `id` (staff_permission_restrictions and staff_role_assignments key on
+  // staff_id and have no id column at all).
+  const { data, error } = await db.from(table).select(column).eq(column, id);
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+async function customerHasActivity(db: Db, customerId: string): Promise<boolean> {
+  const probes: Array<[string, string]> = [
+    ['card_sales', 'customer_id'],
+    ['payments', 'customer_id'],
+    ['memberships', 'customer_id'],
+    ['redemptions', 'customer_id'],
+    ['identity_documents', 'customer_id'],
+  ];
+  const results = await Promise.all(
+    probes.map(async ([table, column]) => {
+      const { data, error } = await db.from(table).select('id').eq(column, customerId).limit(1);
+      if (error) throw error;
+      return (data ?? []).length > 0;
+    }),
+  );
+  return results.some(Boolean);
+}
+
+/**
+ * Plan a test-account purge: read everything first, then either return the
+ * first blocker (fail closed, nothing deleted) or a complete execution plan.
+ * Shared/real records are NEVER deleted here - a NOT NULL staff reference on
+ * a record that must survive becomes a blocker naming the exact dependency.
+ */
+async function planTestPurge(
+  db: Db,
+  targetId: string,
+): Promise<{ blockers: PurgeBlocker[]; plan: Omit<PurgeCounts, 'staff'> & { disposableCustomers: string[] } }> {
+  const blockers: PurgeBlocker[] = [];
+  const block = (reason: string) => blockers.push({ blocked: reason });
+  const plan = {
+    restrictions: 0,
+    assignments: 0,
+    invitations: 0,
+    sales: 0,
+    customers: 0,
+    payments: 0,
+    memberships: 0,
+    history: 0,
+    disposableCustomers: [] as string[],
+  };
+
+  // Owned sale graphs always block: every live sale carries immutable
+  // hierarchy snapshots (the database forbids their deletion), so the sale
+  // - and therefore the staff - cannot be purged without destroying them.
+  const { data: ownedSales, error: salesError } = await db
+    .from('card_sales')
+    .select('id,sale_number')
+    .eq('seller_staff_id', targetId)
+    .limit(1);
+  if (salesError) throw salesError;
+  if ((ownedSales ?? []).length > 0) {
+    block(
+      `test sale ${(ownedSales as { sale_number: string }[])[0]!.sale_number} cannot be purged ` +
+        'while immutable sale hierarchy snapshots exist',
+    );
+  }
+
+  // Financial/member records where the target is an actor: a NOT NULL
+  // reference on a record that must survive blocks; nullable ones are nulled
+  // at execution (the row itself is always preserved).
+  const mustSurvive: Array<[string, string, string]> = [
+    ['payments', 'recorded_by', 'payment'],
+    ['memberships', 'activated_by', 'membership'],
+    ['redemptions', 'redeemed_by', 'redemption'],
+    ['commissions', 'beneficiary_staff_id', 'commission'],
+  ];
+  for (const [table, column, kind] of mustSurvive) {
+    if (await hasReference(db, table, column, targetId)) {
+      block(`a ${kind} record references this account and must be preserved`);
+    }
+  }
+
+  // Genealogy: the target's own placement row is their history (purged);
+  // rows where others point at the target would break their lineage.
+  if (await hasReference(db, 'referral_relationships', 'upline_staff_id', targetId)) {
+    block('other staff genealogy points at this account as upline');
+  }
+  if (await hasReference(db, 'card_sale_hierarchy_snapshots', 'ancestor_staff_id', targetId)) {
+    block('immutable sale hierarchy snapshots reference this account');
+  }
+
+  // OST persons are real accounts: sponsorship or a dual member identity
+  // never purges, and sponsors are never reassigned automatically.
+  for (const [table, column] of [
+    ['ost_applications', 'sponsor_staff_id'],
+    ['ost_members', 'sponsor_staff_id'],
+    ['ost_members', 'approved_by'],
+  ] as const) {
+    if (await hasReference(db, table, column, targetId)) {
+      block(`an OST record references this account (${table}.${column})`);
+    }
+  }
+  if (await hasReference(db, 'ost_members', 'id', targetId)) {
+    block('this account is also an OST member');
+  }
+
+  // Referral codes are the target's own objects - unless an application
+  // already used one, which drags a real applicant in.
+  const { data: codes, error: codesError } = await db
+    .from('referral_codes')
+    .select('id')
+    .or(`sponsor_staff_id.eq.${targetId},created_by.eq.${targetId}`);
+  if (codesError) throw codesError;
+  for (const code of ((codes ?? []) as { id: string }[])) {
+    if (await hasReference(db, 'ost_applications', 'referral_code_id', String(code.id))) {
+      block('a referral code of this account is in use by an application');
+    } else {
+      plan.history += 1;
+    }
+  }
+
+  // Customers attributed to the target: test + disposable => purge; test +
+  // active => blocker (its graph cannot purge, see sales above); real =>
+  // preserved (the database nulls the attribution itself).
+  const { data: attributed, error: attributedError } = await db
+    .from('customers')
+    .select('id,customer_number,email,auth_user_id')
+    .or(`created_by.eq.${targetId},referred_by_staff_id.eq.${targetId}`);
+  if (attributedError) throw attributedError;
+  for (const customer of ((attributed ?? []) as {
+    id: string;
+    customer_number: string;
+    email: string;
+    auth_user_id: string | null;
+  }[])) {
+    // A linked portal login is a real identity even on a test address: the
+    // dual-auth rule below preserves it, so it is never disposable here.
+    if (customer.auth_user_id) continue;
+    if (!isTestAccountEmail(customer.email)) continue;
+    if (await customerHasActivity(db, String(customer.id))) {
+      block(`test customer ${customer.customer_number} has business activity`);
+    } else {
+      plan.disposableCustomers.push(String(customer.id));
+      plan.customers += 1;
+    }
+  }
+
+  // CMS: versions are pure history (purged); live documents/pages and media
+  // assets are preserved - and their NOT NULL creator columns block instead.
+  for (const [table, column] of [
+    ['cms_documents', 'created_by'],
+    ['cms_documents', 'updated_by'],
+    ['cms_documents', 'published_by'],
+    ['cms_pages', 'created_by'],
+    ['cms_pages', 'updated_by'],
+    ['cms_pages', 'published_by'],
+    ['cms_media_assets', 'created_by'],
+  ] as const) {
+    if (await hasReference(db, table, column, targetId)) {
+      block(`published CMS content references this account (${table}.${column})`);
+    }
+  }
+  plan.history += await countWhere(db, 'cms_document_versions', 'created_by', targetId);
+  plan.history += await countWhere(db, 'cms_page_versions', 'created_by', targetId);
+
+  // Invitations: the target's own invite record purges; invites the target
+  // sent purge only when the invitee is also a test account.
+  plan.invitations += await countWhere(db, 'staff_invitations', 'auth_user_id', targetId);
+  const { data: sent, error: sentError } = await db
+    .from('staff_invitations')
+    .select('id,email')
+    .eq('invited_by', targetId);
+  if (sentError) throw sentError;
+  for (const invite of ((sent ?? []) as { id: string; email: string }[])) {
+    if (!isTestAccountEmail(invite.email)) {
+      block(`an invitation sent to non-test address ${invite.email} must stay`);
+    } else {
+      plan.invitations += 1;
+    }
+  }
+
+  // Own history rows: audit trail, own genealogy placement, onboarding
+  // tokens the target issued (pending links other staff can reissue).
+  plan.history += await countWhere(db, 'audit_events', 'actor_id', targetId);
+  plan.history += await countWhere(db, 'referral_relationships', 'subject_staff_id', targetId);
+  plan.history += await countWhere(db, 'customer_onboarding_tokens', 'created_by', targetId);
+  plan.restrictions += await countWhere(db, 'staff_permission_restrictions', 'staff_id', targetId);
+  plan.assignments += await countWhere(db, 'staff_role_assignments', 'staff_id', targetId);
+
+  return { blockers, plan };
+}
+
 async function staffRole(db: Db, id: string) {
   const { data: assignment, error } = await db
     .from('staff_role_assignments')
@@ -437,6 +688,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         roleName: principal.roleName,
         mustChangePassword: principal.mustChangePassword,
         permissions: principal.permissions,
+        testPurgeEnabled: isTestPurgeEnabled(),
       });
     }
     // My Account display-name update (JAD parity: PATCH /admin/session).
@@ -922,6 +1174,134 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         deleted: true,
       });
       return res.status(200).json({ deleted: true });
+    }
+    const purgeMatch = path.match(/^staff\/([0-9a-f-]+)\/purge-test-data$/);
+    if (purgeMatch && method === 'POST') {
+      // Fail closed when the environment does not explicitly allow test
+      // purges: the surface does not exist in production.
+      if (!isTestPurgeEnabled()) return fail(res, 'NOT_FOUND', 'Not found', 404);
+      const auth = await authorizeAfHomes(req, 'organization.staff', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      if (auth.roleSlug !== 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Only Super Admin can purge test accounts', 403);
+      const id = purgeMatch[1]!;
+      if (id === auth.userId)
+        return fail(res, 'FORBIDDEN', 'You cannot purge your own account', 403);
+      const target = (await staffCatalog(db)).find((staff: { id: string }) => staff.id === id);
+      if (!target) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+      if ((await staffRole(db, id))?.slug === 'super_admin')
+        return fail(res, 'FORBIDDEN', 'Super Admin accounts cannot be purged', 403);
+      if (!isTestAccountEmail((target as { email: string }).email))
+        return fail(res, 'CONFLICT', 'Only test accounts can be purged.', 409);
+      // Abort before any destruction when the audit itself cannot be written.
+      await audit(db, auth.userId, 'TEST_ACCOUNT_PURGE_STARTED', 'staff_user', id, target, null);
+      const { blockers, plan } = await planTestPurge(db, id);
+      if (blockers.length > 0) {
+        return fail(
+          res,
+          'CONFLICT',
+          `Test account cannot be purged: ${blockers[0]!.blocked}.`,
+          409,
+        );
+      }
+      // Nullable attributions on preserved rows. Every row itself survives;
+      // only the deleted test account's authorship is cleared.
+      for (const [table, column] of [
+        ['payments', 'verified_by'],
+        ['commissions', 'qualified_by'],
+        ['commissions', 'paid_by'],
+        ['final_qualifications', 'reviewed_by'],
+        ['identity_documents', 'reviewed_by'],
+        ['redemptions', 'voided_by'],
+        ['ost_applications', 'reviewed_by'],
+      ] as const) {
+        const { error } = await db.from(table).update({ [column]: null }).eq(column, id);
+        if (error) throw error;
+      }
+      const remove = async (table: string, column: string, value: string) => {
+        const { error } = await db.from(table).delete().eq(column, value);
+        if (error) throw error;
+      };
+      // Test-only history and owned objects, children before parents. The
+      // plan already verified each of these is safe to remove.
+      await remove('cms_document_versions', 'created_by', id);
+      await remove('cms_page_versions', 'created_by', id);
+      const { data: ownedCodes, error: ownedCodesError } = await db
+        .from('referral_codes')
+        .select('id')
+        .or(`sponsor_staff_id.eq.${id},created_by.eq.${id}`);
+      if (ownedCodesError) throw ownedCodesError;
+      for (const code of ((ownedCodes ?? []) as { id: string }[])) {
+        if (await hasReference(db, 'ost_applications', 'referral_code_id', String(code.id))) {
+          throw new Error(
+            `Test account cannot be purged: a referral code gained an application mid-purge.`,
+          );
+        }
+        await remove('referral_codes', 'id', String(code.id));
+      }
+      await remove('referral_relationships', 'subject_staff_id', id);
+      await remove('audit_events', 'actor_id', id);
+      await remove('staff_invitations', 'auth_user_id', id);
+      const { data: sentInvites, error: sentInvitesError } = await db
+        .from('staff_invitations')
+        .select('id,email')
+        .eq('invited_by', id);
+      if (sentInvitesError) throw sentInvitesError;
+      for (const invite of ((sentInvites ?? []) as { id: string; email: string }[])) {
+        if (!isTestAccountEmail(invite.email)) {
+          throw new Error(
+            `Test account cannot be purged: invitation to non-test address ${invite.email} appeared mid-purge.`,
+          );
+        }
+        await remove('staff_invitations', 'id', String(invite.id));
+      }
+      for (const customerId of plan.disposableCustomers) {
+        if (await customerHasActivity(db, customerId)) {
+          throw new Error(
+            'Test account cannot be purged: a disposable customer gained activity mid-purge.',
+          );
+        }
+        await remove('customers', 'id', customerId);
+      }
+      await remove('staff_permission_restrictions', 'staff_id', id);
+      await remove('staff_role_assignments', 'staff_id', id);
+      const { error: profileError } = await db.from('staff_users').delete().eq('id', id);
+      if (profileError) throw profileError;
+      // Dual identity: an Auth user that also signs into the customer portal
+      // is preserved along with the customer login; staff-only users are
+      // removed. Auth deletion is outside any DB transaction - a failure here
+      // is a controlled 500 after the public purge, logged meaningfully.
+      const dual = await hasReference(db, 'customers', 'auth_user_id', id);
+      let authUserDeleted = false;
+      if (!dual) {
+        const { error: authError } = await db.auth.admin.deleteUser(id);
+        if (authError) throw authError;
+        authUserDeleted = true;
+      }
+      // Post-commit record. Best-effort like the staff onboarding-token
+      // endpoint: a failed write must not turn a completed purge into a 500.
+      try {
+        await audit(db, auth.userId, 'TEST_ACCOUNT_PURGED', 'staff_user', id, target, {
+          authUserDeleted,
+        });
+      } catch {
+        console.error('[afhomes-api]', 'test purge final audit write failed');
+      }
+      return res.status(200).json({
+        purged: true,
+        counts: {
+          staff: 1,
+          restrictions: plan.restrictions,
+          assignments: plan.assignments,
+          invitations: plan.invitations,
+          sales: plan.sales,
+          customers: plan.customers,
+          payments: plan.payments,
+          memberships: plan.memberships,
+          history: plan.history,
+        },
+        authUserDeleted,
+      });
     }
     if (path === 'dashboard' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'dashboard.view');

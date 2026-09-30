@@ -151,6 +151,7 @@ describe('afHomesSessionSchema', () => {
     roleName: 'Admin',
     mustChangePassword: false,
     permissions: [{ moduleKey: 'dashboard.view', ...viewAll }],
+    testPurgeEnabled: false,
   };
 
   it('accepts the server-resolved principal', () => {

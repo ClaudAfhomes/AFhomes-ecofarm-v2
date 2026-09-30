@@ -34,6 +34,13 @@ export interface SessionUser {
    * explicit `true` gates; `undefined` behaves as `false`.
    */
   mustChangePassword?: boolean;
+  /**
+   * Server environment flag, UX gating only: whether the test-account purge
+   * endpoint is enabled. Optional (older test fixtures omit it) - only an
+   * explicit `true` shows the purge control; `undefined` behaves as `false`.
+   * The server re-checks it authoritatively on every call.
+   */
+  testPurgeEnabled?: boolean;
 }
 interface SessionContextValue {
   status: SessionStatus;
@@ -109,6 +116,7 @@ export function SessionProvider({
         afHomesPermissions: parsed.permissions,
         status: parsed.status,
         mustChangePassword: parsed.mustChangePassword,
+        testPurgeEnabled: parsed.testPurgeEnabled,
       });
       setStatus('authenticated');
       setSessionError(false);

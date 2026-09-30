@@ -104,8 +104,36 @@ export const afHomesSessionSchema = z.object({
   roleName: z.string(),
   mustChangePassword: z.boolean(),
   permissions: z.array(afHomesPermissionSchema),
+  /**
+   * Server environment flag surfaced for UX gating only. True when
+   * AFHOMES_ENABLE_TEST_PURGE=true; the purge endpoint re-checks it
+   * authoritatively on every call.
+   */
+  testPurgeEnabled: z.boolean(),
 });
 export type AfHomesSession = z.infer<typeof afHomesSessionSchema>;
+
+/**
+ * Super-admin-only test-account purge result. Counts only - no record
+ * contents, no identities, no secrets.
+ */
+export const staffTestPurgeCountsSchema = z.object({
+  staff: z.number().int().nonnegative(),
+  restrictions: z.number().int().nonnegative(),
+  assignments: z.number().int().nonnegative(),
+  invitations: z.number().int().nonnegative(),
+  sales: z.number().int().nonnegative(),
+  customers: z.number().int().nonnegative(),
+  payments: z.number().int().nonnegative(),
+  memberships: z.number().int().nonnegative(),
+  history: z.number().int().nonnegative(),
+});
+export const staffTestPurgeResponseSchema = z.object({
+  purged: z.literal(true),
+  counts: staffTestPurgeCountsSchema,
+  authUserDeleted: z.boolean(),
+});
+export type StaffTestPurgeResponse = z.infer<typeof staffTestPurgeResponseSchema>;
 
 /**
  * Safe preflight payload for the staff invitation landing page. It contains
