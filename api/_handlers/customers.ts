@@ -36,6 +36,21 @@ const fullName = (row: Record<string, unknown>) =>
     .join(' ');
 
 /** Read model. Never includes the raw government ID number. */
+export function customerHasActiveMembership(row: Record<string, unknown>): boolean {
+  // PostgREST cardinality, not a guess: `memberships.customer_id` is UNIQUE
+  // (one membership per customer), so the `memberships` embed on a customer
+  // row is a to-one OBJECT (or null when there is none) - never an array.
+  // Requiring an array reported every member as having no active membership.
+  // Accept the object form, and arrays defensively.
+  const embedded = row.memberships;
+  const list: Record<string, unknown>[] = Array.isArray(embedded)
+    ? (embedded as Record<string, unknown>[])
+    : embedded !== null && typeof embedded === 'object'
+      ? [embedded as Record<string, unknown>]
+      : [];
+  return list.some((membership) => membership.status === 'active');
+}
+
 const toCustomer = (row: Record<string, unknown>) => ({
   id: row.id,
   customerNumber: row.customer_number,
@@ -48,14 +63,7 @@ const toCustomer = (row: Record<string, unknown>) => ({
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked: maskGovernmentId(isoOrNull(row.government_id_number)),
   status: row.status,
-  hasActiveMembership:
-    Array.isArray(row.memberships) &&
-    row.memberships.some(
-      (membership) =>
-        typeof membership === 'object' &&
-        membership !== null &&
-        (membership as Record<string, unknown>).status === 'active',
-    ),
+  hasActiveMembership: customerHasActiveMembership(row),
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,
   createdBy: isoOrNull(row.created_by),

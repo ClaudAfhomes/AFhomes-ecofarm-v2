@@ -572,6 +572,90 @@ describe('customers', () => {
 });
 
 /* ================================================================== */
+/* Customer active-membership mapping (live CUS-000003 regression)    */
+/* ================================================================== */
+
+describe('customer active-membership mapping', () => {
+  beforeEach(() => install());
+
+  it('reports an active member with no portal account as eligible (live CUS-000003 shape)', async () => {
+    const state = await call('customers', { path: '', token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    const rows = data(state.body) as Record<string, unknown>[];
+    const active = rows.find((row) => row.customerNumber === 'CUS-000003')!;
+    expect(active.status).toBe('active');
+    expect(active.hasActiveMembership).toBe(true);
+    expect(active.portalAccountActivated).toBe(false);
+  });
+
+  it('reports false for a prospect with no memberships', async () => {
+    const state = await call('customers', { path: '', token: TOKEN.admin });
+    const rows = data(state.body) as Record<string, unknown>[];
+    const prospect = rows.find((row) => row.customerNumber === 'CUS-000001')!;
+    expect(prospect.hasActiveMembership).toBe(false);
+    expect(prospect.portalAccountActivated).toBe(false);
+  });
+
+  it('reports false when the only linked membership is inactive', async () => {
+    install({
+      tables: {
+        memberships: [
+          {
+            id: 'dddddddd-0000-4000-8000-000000000002',
+            customer_id: CUSTOMER.prospect,
+            sale_id: SALE.submitted,
+            membership_number: 'MBS-000002',
+            status: 'suspended',
+          },
+        ],
+      },
+    });
+    const state = await call('customers', { path: '', token: TOKEN.admin });
+    const rows = data(state.body) as Record<string, unknown>[];
+    expect(
+      rows.find((row) => row.customerNumber === 'CUS-000001')!.hasActiveMembership,
+    ).toBe(false);
+  });
+
+  it('matches list behavior on the detail endpoint', async () => {
+    const state = await call('customers', { path: `${CUSTOMER.active}`, token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    const body = state.body as Record<string, unknown>;
+    expect(body.status).toBe('active');
+    expect(body.hasActiveMembership).toBe(true);
+    expect(body.portalAccountActivated).toBe(false);
+  });
+
+  it('reports a linked portal account without changing the membership flag', async () => {
+    const db = install();
+    db.rows('customers').find((row) => row.id === CUSTOMER.active)!.auth_user_id =
+      'auth-user-0001';
+    const state = await call('customers', { path: `${CUSTOMER.active}`, token: TOKEN.admin });
+    const body = state.body as Record<string, unknown>;
+    expect(body.portalAccountActivated).toBe(true);
+    expect(body.hasActiveMembership).toBe(true);
+    expect(JSON.stringify(state.body)).not.toContain('auth-user-0001');
+  });
+
+  it.each([
+    ['to-one object (live PostgREST shape)', { memberships: { id: 'm1', status: 'active' } }, true],
+    [
+      'to-many array with one active',
+      { memberships: [{ id: 'm1', status: 'suspended' }, { id: 'm2', status: 'active' }] },
+      true,
+    ],
+    ['to-many array all inactive', { memberships: [{ id: 'm1', status: 'expired' }] }, false],
+    ['empty array', { memberships: [] }, false],
+    ['to-one object inactive', { memberships: { id: 'm1', status: 'cancelled' } }, false],
+    ['null embed', { memberships: null }, false],
+    ['missing embed', {}, false],
+  ])('maps %s to %s', async (_name, row, expected) => {
+    const { customerHasActiveMembership } = await import('./customers.js');
+    expect(customerHasActiveMembership(row as Record<string, unknown>)).toBe(expected);
+  });
+});
+
+/* ================================================================== */
 /* Card sales                                                         */
 /* ================================================================== */
 

@@ -575,10 +575,14 @@ export class FakeSupabase {
       if (range) out = out.slice(range.from, range.to + 1);
       if (limit) out = out.slice(0, limit.n);
 
-      // Resolve `!`-separated embedded selects against the configured links.
+      // Resolve embedded selects against the configured links. Both the
+      // explicit `child!constraint(cols)` form and the bare `child(cols)`
+      // form (resolved by PostgREST through the single FK) must attach -
+      // gating on `'!'` left every bare embed as `undefined` in silence, so
+      // handlers reading the embed were green while testing nothing.
       const selectOp = ops.find((o) => o.t === 'select') as
         { t: 'select'; cols: string; count: boolean } | undefined;
-      if (selectOp && selectOp.cols.includes('!')) {
+      if (selectOp) {
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols) }));
       }
       return {
