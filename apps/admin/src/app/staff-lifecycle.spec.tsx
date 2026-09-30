@@ -34,6 +34,7 @@ vi.mock('../features/afhomes/services', () => ({
 import {
   changeAfHomesStaffPassword,
   createAfHomesStaff,
+  deleteAfHomesStaff,
   getAfHomesDepartments,
   getAfHomesRoleAudit,
   getAfHomesRoleById,
@@ -115,7 +116,7 @@ function install() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   install();
 });
 
@@ -226,6 +227,43 @@ describe('temporary-password staff creation', () => {
         temporaryPassword: 'TempPass123',
       }),
     );
+  });
+});
+
+describe('permanent staff deletion', () => {
+  async function confirmPermanentDelete() {
+    await screen.findByText('Ana Reyes');
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete Permanently' });
+    fireEvent.click(deleteButtons[deleteButtons.length - 1]!);
+    fireEvent.change(screen.getByLabelText('Type DELETE to confirm staff deletion'), {
+      target: { value: 'DELETE' },
+    });
+    const confirmButtons = screen.getAllByRole('button', { name: 'Delete Permanently' });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
+  }
+
+  it('shows the protected-history message instead of a generic server error', async () => {
+    vi.mocked(deleteAfHomesStaff).mockRejectedValueOnce(
+      new Error(
+        'This staff account has historical business records and cannot be permanently deleted. Deactivate the account instead.',
+      ),
+    );
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await confirmPermanentDelete();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/historical business records/i);
+    expect(screen.queryByText('Internal server error')).toBeNull();
+  });
+
+  it('removes the deleted row after invalidating and refetching the staff query', async () => {
+    vi.mocked(deleteAfHomesStaff).mockResolvedValueOnce({ deleted: true });
+    vi.mocked(getAfHomesStaff)
+      .mockResolvedValueOnce([STAFF_ROW] as never)
+      .mockResolvedValueOnce([] as never);
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    await confirmPermanentDelete();
+    await waitFor(() => expect(deleteAfHomesStaff).toHaveBeenCalledWith(STAFF_ROW.id));
+    await waitFor(() => expect(screen.queryByText('Ana Reyes')).toBeNull());
+    expect(await screen.findByText('No staff found')).toBeTruthy();
   });
 });
 

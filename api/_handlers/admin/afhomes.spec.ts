@@ -35,7 +35,7 @@ vi.mock('../../_lib/rest.js', () => ({
   readJsonBody: (req: { body?: unknown }) => ({ ok: true as const, body: req.body }),
 }));
 
-const { default: handler } = await import('./afhomes.js');
+const { default: handler, STAFF_DELETE_BLOCKER_CHECKS } = await import('./afhomes.js');
 
 // The staff-invite branch refuses to send an Auth invitation without an explicit
 // admin redirect target. Set (and restore) so the test exercises the real path.
@@ -355,6 +355,48 @@ describe('GET /admin/afhomes/session', () => {
 describe('staff account deletion safety', () => {
   beforeEach(() => install());
 
+  const blockerSchema: Record<string, readonly string[]> = {
+    card_sales: ['seller_staff_id', 'created_by'],
+    commissions: ['beneficiary_staff_id', 'qualified_by', 'paid_by'],
+    referral_relationships: ['subject_staff_id', 'upline_staff_id', 'assigned_by'],
+    card_sale_hierarchy_snapshots: ['ancestor_staff_id'],
+    customers: ['referred_by_staff_id', 'created_by'],
+    ost_members: ['id', 'sponsor_staff_id', 'approved_by'],
+    referral_codes: ['sponsor_staff_id', 'created_by'],
+    ost_applications: ['sponsor_staff_id', 'reviewed_by'],
+    redemptions: ['redeemed_by', 'voided_by'],
+    identity_documents: ['uploaded_by', 'reviewed_by'],
+    payments: ['recorded_by', 'verified_by'],
+    memberships: ['activated_by', 'card_issued_by'],
+    final_qualifications: ['reviewed_by'],
+    points_ledger: ['actor_id'],
+    customer_onboarding_tokens: ['created_by'],
+    cms_documents: ['created_by', 'updated_by', 'published_by'],
+    cms_document_versions: ['created_by'],
+    cms_pages: ['created_by', 'updated_by', 'published_by'],
+    cms_page_versions: ['created_by'],
+    cms_media_assets: ['created_by'],
+    audit_events: ['actor_id'],
+    staff_invitations: ['invited_by'],
+  };
+
+  it('keeps every blocker probe inside the current migration-backed schema contract', () => {
+    for (const [, table, column] of STAFF_DELETE_BLOCKER_CHECKS) {
+      expect(blockerSchema[table], `${table}.${column}`).toContain(column);
+    }
+    expect(STAFF_DELETE_BLOCKER_CHECKS).not.toContainEqual([
+      'OST records',
+      'ost_referral_codes',
+      'sponsor_staff_id',
+    ]);
+    expect(STAFF_DELETE_BLOCKER_CHECKS).toEqual(
+      expect.arrayContaining([
+        ['OST records', 'referral_codes', 'sponsor_staff_id'],
+        ['OST records', 'referral_codes', 'created_by'],
+      ]),
+    );
+  });
+
   it('deactivates another staff member without deleting their profile', async () => {
     const db = install();
     const state = await call({
@@ -412,6 +454,15 @@ describe('staff account deletion safety', () => {
     expect(state.status).toBe(403);
   });
 
+  it('returns 404 for an unknown staff member', async () => {
+    const state = await call({
+      method: 'DELETE',
+      afPath: 'staff/aaaaaaaa-0000-4000-8000-000000000099',
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(404);
+  });
+
   it('blocks hard deletion when protected sales exist', async () => {
     install({
       tables: {
@@ -432,6 +483,9 @@ describe('staff account deletion safety', () => {
   it.each([
     ['commissions', 'commissions', 'beneficiary_staff_id'],
     ['genealogy', 'referral_relationships', 'upline_staff_id'],
+    ['OST records', 'referral_codes', 'sponsor_staff_id'],
+    ['payments', 'payments', 'recorded_by'],
+    ['audit history', 'audit_events', 'actor_id'],
   ])('blocks hard deletion when protected %s exist', async (label, table, column) => {
     install({ tables: { [table]: [{ id: `${label}-1`, [column]: UUID.viewerStaff }] } });
     const state = await call({
@@ -443,21 +497,114 @@ describe('staff account deletion safety', () => {
     expect(
       (state.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
     ).toContain(label);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /historical business records/i,
+    );
   });
 
-  it('hard-deletes an unused non-Super-Admin profile and its Auth user', async () => {
+  it('hard-deletes a clean account in FK-safe order and audits the acting Super Admin', async () => {
     const db = install();
+    db.rows('staff_invitations').push({
+      id: 'legacy-invite',
+      email: 'viewer@afhomes.test',
+      status: 'pending',
+      auth_user_id: UUID.viewerStaff,
+      invited_by: UUID.superAdminStaff,
+    });
+    db.rows('staff_permission_restrictions').push({
+      id: 'viewer-restriction',
+      staff_id: UUID.viewerStaff,
+      module_id: moduleId('organization.roles'),
+    });
     const state = await call({
       method: 'DELETE',
       afPath: `staff/${UUID.viewerStaff}`,
       token: TOKEN.superAdmin,
     });
     expect(state.status).toBe(200);
+    expect(state.body).toEqual({ deleted: true });
+    expect(db.rows('staff_invitations').some((row) => row.auth_user_id === UUID.viewerStaff)).toBe(
+      false,
+    );
+    expect(
+      db.rows('staff_permission_restrictions').some((row) => row.staff_id === UUID.viewerStaff),
+    ).toBe(false);
+    expect(db.rows('staff_role_assignments').some((row) => row.staff_id === UUID.viewerStaff)).toBe(
+      false,
+    );
     expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(false);
     expect(
       db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === UUID.viewerStaff),
     ).toBe(true);
-    expect(db.rows('audit_events').some((row) => row.action === 'STAFF_DELETED')).toBe(true);
+    const auditRow = db.rows('audit_events').find((row) => row.action === 'STAFF_DELETED');
+    expect(auditRow).toMatchObject({
+      actor_id: UUID.superAdminStaff,
+      entity_type: 'staff_user',
+      entity_id: UUID.viewerStaff,
+    });
+    const invitationDelete = db.calls.findIndex(
+      (entry) => entry.op === 'delete' && entry.table === 'staff_invitations',
+    );
+    const restrictionDelete = db.calls.findIndex(
+      (entry) => entry.op === 'delete' && entry.table === 'staff_permission_restrictions',
+    );
+    const assignmentDelete = db.calls.findIndex(
+      (entry) => entry.op === 'delete' && entry.table === 'staff_role_assignments',
+    );
+    const profileDelete = db.calls.findIndex(
+      (entry) => entry.op === 'delete' && entry.table === 'staff_users',
+    );
+    const authDelete = db.calls.findIndex(
+      (entry) => entry.op === 'deleteUser' && entry.arg === UUID.viewerStaff,
+    );
+    const auditInsert = db.calls.findIndex(
+      (entry) => entry.op === 'insert' && entry.table === 'audit_events',
+    );
+    const orderedCalls = [
+      invitationDelete,
+      restrictionDelete,
+      assignmentDelete,
+      profileDelete,
+      authDelete,
+      auditInsert,
+    ];
+    expect(orderedCalls.every((index) => index >= 0)).toBe(true);
+    expect(orderedCalls).toEqual([...orderedCalls].sort((a, b) => a - b));
+  });
+
+  it.each(['inactive', 'invited'] as const)(
+    'hard-deletes a clean %s legacy account without activation prerequisites',
+    async (status) => {
+      const db = install();
+      db.rows('staff_users').find((row) => row.id === UUID.viewerStaff)!.status = status;
+      if (status === 'invited') {
+        db.rows('staff_invitations').push({
+          id: 'legacy-invite',
+          email: 'viewer@afhomes.test',
+          status: 'pending',
+          auth_user_id: UUID.viewerStaff,
+          invited_by: UUID.superAdminStaff,
+        });
+      }
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(200);
+      expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(false);
+      expect(db.deletedAuthUsers).toContain(UUID.viewerStaff);
+    },
+  );
+
+  it('does not turn a clean deletion into a generic 500', async () => {
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(state.body).not.toMatchObject({ error: { code: 'INTERNAL' } });
   });
 });
 
