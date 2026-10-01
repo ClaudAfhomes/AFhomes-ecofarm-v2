@@ -47,7 +47,8 @@ function canDecideCommissions(permissions: { moduleKey: string; canUpdate: boole
 /**
  * Commission management.
  *
- * Amounts come from the frozen sale snapshot (4% of the snapshotted price) and
+ * Amounts come from the frozen sale snapshot and the single applicable
+ * account/role rule (or 0% default), and
  * never move after creation. Only the status moves, through explicit audited
  * decisions: `final_qualification_pending -> earned` (qualification) and
  * `earned -> paid` (payout record). Every other transition is rejected by the
@@ -83,7 +84,7 @@ export function BusinessCommissionsPage() {
     <section>
       <PageHeader
         title="Commissions"
-        description="4% sale commissions from frozen sale snapshots. Qualification and payout are explicit audited decisions; historical attribution never moves."
+        description="Single-level commissions from frozen sale snapshots. Account rules override role rules; no matching rule means 0%. Qualification and payout remain explicit audited decisions."
       />
 
       <FilterBar

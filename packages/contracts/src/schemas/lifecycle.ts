@@ -65,6 +65,37 @@ export const commissionStatusSchema = z.enum([
 ]);
 export type CommissionStatus = z.infer<typeof commissionStatusSchema>;
 
+/* ------------------------------------------------------------------ */
+/* Official paper-form transaction lifecycles (single source)          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Customer application = TRANSACTION HEADER. Explicit status, never
+ * overlapping booleans. `submitted_at`/`approved_at`/`rejected_at` are the
+ * authoritative instants; `updated_at` is never a substitute.
+ */
+export const customerApplicationStatusSchema = z.enum([
+  'draft',
+  'submitted',
+  'approved',
+  'rejected',
+  'cancelled',
+]);
+export type CustomerApplicationStatus = z.infer<typeof customerApplicationStatusSchema>;
+
+/**
+ * IST reservation agreement = TRANSACTION HEADER. `submitted` is under review,
+ * `executed` is the finalized contract. Schedule rows are obligations, never
+ * received payments.
+ */
+export const reservationAgreementStatusSchema = z.enum([
+  'draft',
+  'submitted',
+  'executed',
+  'cancelled',
+]);
+export type ReservationAgreementStatus = z.infer<typeof reservationAgreementStatusSchema>;
+
 export const pointsEntryTypeSchema = z.enum([
   'annual_allocation',
   'redemption',
@@ -222,6 +253,27 @@ const COMMISSION_TRANSITIONS: Record<CommissionStatus, readonly CommissionStatus
   cancelled: [],
 };
 
+const CUSTOMER_APPLICATION_TRANSITIONS: Record<
+  CustomerApplicationStatus,
+  readonly CustomerApplicationStatus[]
+> = {
+  draft: ['submitted', 'cancelled'],
+  submitted: ['approved', 'rejected', 'cancelled', 'draft'],
+  approved: ['cancelled'],
+  rejected: ['draft', 'cancelled'],
+  cancelled: [],
+};
+
+const RESERVATION_AGREEMENT_TRANSITIONS: Record<
+  ReservationAgreementStatus,
+  readonly ReservationAgreementStatus[]
+> = {
+  draft: ['submitted', 'cancelled'],
+  submitted: ['executed', 'cancelled', 'draft'],
+  executed: [],
+  cancelled: [],
+};
+
 function canTransition<T extends string>(
   table: Record<T, readonly T[]>,
   from: T,
@@ -240,6 +292,14 @@ export const canTransitionMembership = (f: MembershipStatus, t: MembershipStatus
   canTransition(MEMBERSHIP_TRANSITIONS, f, t);
 export const canTransitionCommission = (f: CommissionStatus, t: CommissionStatus) =>
   canTransition(COMMISSION_TRANSITIONS, f, t);
+export const canTransitionCustomerApplication = (
+  f: CustomerApplicationStatus,
+  t: CustomerApplicationStatus,
+) => canTransition(CUSTOMER_APPLICATION_TRANSITIONS, f, t);
+export const canTransitionReservationAgreement = (
+  f: ReservationAgreementStatus,
+  t: ReservationAgreementStatus,
+) => canTransition(RESERVATION_AGREEMENT_TRANSITIONS, f, t);
 
 /** States a sale may still receive money in. */
 export const SALE_ACCEPTS_PAYMENT: readonly SaleStatus[] = [

@@ -15,7 +15,12 @@
  * clawback rule exists in this codebase and none is invented here.
  */
 import { z } from 'zod';
-import { markCommissionPaidSchema, qualifyCommissionSchema } from '@jad/contracts';
+import {
+  createCommissionRuleSchema,
+  markCommissionPaidSchema,
+  qualifyCommissionSchema,
+  updateCommissionRuleSchema,
+} from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
@@ -96,11 +101,186 @@ const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+const toRule = (row: Record<string, unknown>) => ({
+  id: row.id,
+  targetType: row.target_type,
+  targetId: row.target_id,
+  targetName: null,
+  rate: row.rate,
+  effectiveFrom: row.effective_from,
+  effectiveUntil: row.effective_until ?? null,
+  accreditedOnOrAfter: row.accredited_on_or_after ?? null,
+  isActive: row.is_active === true,
+  createdAt: isoOrNull(row.created_at) ?? '',
+  updatedAt: isoOrNull(row.updated_at) ?? '',
+});
+
+async function commissionRuleTargetExists(
+  db: Db,
+  targetType: 'role' | 'staff' | 'ost',
+  targetId: string,
+): Promise<boolean> {
+  const table =
+    targetType === 'role' ? 'roles' : targetType === 'staff' ? 'staff_users' : 'ost_members';
+  const { data, error } = await db.from(table).select('id').eq('id', targetId).maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (subPath(req) === 'rules' && method(req) === 'GET') {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const { data, error } = await db
+        .from('commission_rules')
+        .select('*')
+        .order('effective_from', { ascending: false });
+      if (error) throw error;
+      return res
+        .status(200)
+        .json({
+          data: (data ?? []).map((row: Record<string, unknown>) => toRule(row)),
+          meta: { total: (data ?? []).length },
+        });
+    }
+
+    if (subPath(req) === 'rules' && method(req) === 'POST') {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = createCommissionRuleSchema.safeParse(jsonBody(req));
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid commission rule', 400);
+      const input = parsed.data;
+      if (!(await commissionRuleTargetExists(db, input.targetType, input.targetId)))
+        return fail(res, 'VALIDATION_ERROR', 'Commission rule target does not exist', 400);
+      const { data, error } = await db
+        .from('commission_rules')
+        .insert({
+          target_type: input.targetType,
+          target_id: input.targetId,
+          rate: input.rate,
+          effective_from: input.effectiveFrom,
+          effective_until: input.effectiveUntil ?? null,
+          accredited_on_or_after: input.accreditedOnOrAfter ?? null,
+          created_by: auth.userId,
+          updated_by: auth.userId,
+        })
+        .select('*')
+        .single();
+      if (error) {
+        if (
+          String((error as { message?: string }).message ?? '').includes('COMMISSION_RULE_OVERLAP')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'An active rule already overlaps this target and date range',
+            409,
+          );
+        throw error;
+      }
+      await audit(
+        db,
+        auth.userId,
+        'COMMISSION_RULE_CREATED',
+        'commission_rule',
+        String((data as { id: string }).id),
+        null,
+        toRule(data as Record<string, unknown>),
+      );
+      return res.status(201).json(toRule(data as Record<string, unknown>));
+    }
+
+    const ruleHistory = route(req, 'GET', /^rules\/([0-9a-f-]+)\/history$/);
+    if (ruleHistory) {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const { data, error } = await db
+        .from('audit_events')
+        .select('id, action, actor_id, before_data, after_data, reason, created_at')
+        .eq('entity_type', 'commission_rule')
+        .eq('entity_id', ruleHistory[1]!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return res.status(200).json({
+        data: (data ?? []).map((row: Record<string, unknown>) => ({
+          id: row.id,
+          action: row.action,
+          actorId: row.actor_id,
+          before: row.before_data ?? null,
+          after: row.after_data ?? null,
+          reason: row.reason ?? null,
+          createdAt: isoOrNull(row.created_at) ?? '',
+        })),
+        meta: { total: (data ?? []).length },
+      });
+    }
+
+    const updateRule = route(req, 'PATCH', /^rules\/([0-9a-f-]+)$/);
+    if (updateRule) {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = updateCommissionRuleSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid commission rule update', 400);
+      const id = updateRule[1]!;
+      const { data: before, error: readError } = await db
+        .from('commission_rules')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!before) return fail(res, 'NOT_FOUND', 'Commission rule not found', 404);
+      const patch: Record<string, unknown> = {
+        updated_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      };
+      const input = parsed.data;
+      if (input.rate !== undefined) patch.rate = input.rate;
+      if (input.effectiveFrom !== undefined) patch.effective_from = input.effectiveFrom;
+      if (input.effectiveUntil !== undefined) patch.effective_until = input.effectiveUntil;
+      if (input.accreditedOnOrAfter !== undefined)
+        patch.accredited_on_or_after = input.accreditedOnOrAfter;
+      if (input.isActive !== undefined) patch.is_active = input.isActive;
+      const effectiveFrom = String(patch.effective_from ?? before.effective_from);
+      const effectiveUntil = (patch.effective_until ?? before.effective_until) as string | null;
+      if (effectiveUntil && effectiveUntil < effectiveFrom)
+        return fail(res, 'VALIDATION_ERROR', 'Effective until cannot precede effective from', 400);
+      const { error } = await db.from('commission_rules').update(patch).eq('id', id);
+      if (error) {
+        if (
+          String((error as { message?: string }).message ?? '').includes('COMMISSION_RULE_OVERLAP')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'An active rule already overlaps this target and date range',
+            409,
+          );
+        throw error;
+      }
+      const disabled = input.isActive === false && before.is_active === true;
+      await audit(
+        db,
+        auth.userId,
+        disabled ? 'COMMISSION_RULE_DISABLED' : 'COMMISSION_RULE_UPDATED',
+        'commission_rule',
+        id,
+        toRule(before as Record<string, unknown>),
+        { ...toRule(before as Record<string, unknown>), ...input },
+      );
+      const { data: after, error: afterError } = await db
+        .from('commission_rules')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (afterError) throw afterError;
+      return res.status(200).json(toRule(after as Record<string, unknown>));
+    }
+
     if (subPath(req) === '' && method(req) === 'GET') {
       const scope = await resolveCommissionScope(req);
       if ('error' in scope.view) return deny(res, scope.view);
@@ -132,13 +312,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         const needle = search.toLowerCase();
-        const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) =>
-          toCommission(row),
-        );
+        const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) => toCommission(row));
         const filtered = shaped.filter(
           (c) =>
-            String(c.saleNumber ?? '').toLowerCase().includes(needle) ||
-            String(c.beneficiaryName ?? '').toLowerCase().includes(needle),
+            String(c.saleNumber ?? '')
+              .toLowerCase()
+              .includes(needle) ||
+            String(c.beneficiaryName ?? '')
+              .toLowerCase()
+              .includes(needle),
         );
         return res.status(200).json({
           data: filtered.slice(offset, offset + limit),

@@ -422,13 +422,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const saleNumber = singleRpcText(sequence, 'sale_number');
       if (!saleNumber) return fail(res, 'INTERNAL', 'Sale number generation failed', 500);
 
+      const saleDate = new Date().toISOString().slice(0, 10);
+      const { data: resolvedRule, error: ruleError } = await db.rpc('resolve_commission_rule', {
+        p_seller_type: 'staff',
+        p_seller_id: seller.staffId,
+        p_sale_date: saleDate,
+      });
+      // Deployment compatibility only: code may briefly run before the
+      // unapplied migration exists. Once the resolver exists, its explicit
+      // account -> role -> zero result is authoritative. Other RPC failures
+      // still fail closed.
+      if (ruleError && (ruleError as { code?: string }).code !== '42883')
+        return mapRpcError(res, ruleError);
+      const commissionRule = singleRpcRow(resolvedRule) as Record<string, unknown> | null;
+      const resolvedCommissionRate = String(
+        commissionRule?.rate ?? (ruleError ? product.commission_rate : '0'),
+      );
+      const commissionRuleId =
+        typeof commissionRule?.rule_id === 'string' ? commissionRule.rule_id : null;
+
       const terms = snapshotSaleTerms({
         id: product.id,
         isActive: product.is_active === true,
         cashPrice: product.cash_price,
         minimumDownPayment: product.minimum_down_payment,
         yearlyPoints: product.yearly_points,
-        commissionRate: product.commission_rate,
+        commissionRate: resolvedCommissionRate,
       });
       // VIP Stage 1: the client selects only the scheme code. Every figure is
       // resolved server-side from the plan row and frozen below, so a tampered
@@ -471,7 +490,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // The frozen SELECTED total is the commercial record: commission basis
       // and every payment threshold derive from it, never from the live plan.
       const frozenTotal = schemeTerms.schemeTotalSnapshot;
-      const expectedCommission = calculateCommission(frozenTotal, product.commission_rate);
+      const expectedCommission = calculateCommission(frozenTotal, resolvedCommissionRate);
       const now = new Date().toISOString();
 
       const { data: sale, error: saleError } = await db
@@ -496,6 +515,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           validity_months_snapshot: schemeTerms.validityMonthsSnapshot,
           yearly_points_snapshot: terms.yearlyPointsSnapshot,
           commission_rate_snapshot: terms.commissionRateSnapshot,
+          commission_rule_id: commissionRuleId,
+          commission_base_snapshot: frozenTotal,
           expected_commission_snapshot: expectedCommission,
           status: 'submitted',
           submitted_at: now,
@@ -526,6 +547,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         amount: expectedCommission,
         rate_snapshot: terms.commissionRateSnapshot,
         basis_amount_snapshot: frozenTotal,
+        commission_rule_id: commissionRuleId,
         status: 'pending',
       });
       if (commissionError) throw commissionError;

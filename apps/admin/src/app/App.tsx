@@ -9,18 +9,31 @@ import { AfHomesStaffDetailPage } from '../features/afhomes/AfHomesStaffDetailPa
 import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
 import { BusinessActivationQueuePage } from '../features/business/BusinessActivationQueuePage';
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
+import { CommissionSettingsPage } from '../features/business/CommissionSettingsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
+import {
+  CustomerApplicationEditorPage,
+  CustomerApplicationsPage,
+  ReservationAgreementEditorPage,
+  ReservationAgreementsPage,
+} from '../features/business/OfficialFormsPages';
 import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
-import { AdminForgotPasswordPage, StaffForgotPasswordPage } from '../features/auth/AdminForgotPasswordPage';
+import {
+  AdminForgotPasswordPage,
+  StaffForgotPasswordPage,
+} from '../features/auth/AdminForgotPasswordPage';
 import { AdminActivateAccountPage } from '../features/auth/AdminActivateAccountPage';
 import { AdminLoginPage, StaffLoginPage } from '../features/auth/PortalLoginPage';
-import { AdminResetPasswordPage, StaffResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
+import {
+  AdminResetPasswordPage,
+  StaffResetPasswordPage,
+} from '../features/auth/AdminResetPasswordPage';
 import { MyAccountPage } from '../features/account/MyAccountPage';
 import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
 import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
@@ -71,6 +84,30 @@ export default function App() {
             element={protectedPage(<PaymentSchemeGuidePage />)}
           />
           <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+          <Route
+            path="/admin/customers/applications"
+            element={protectedPage(<CustomerApplicationsPage />)}
+          />
+          <Route
+            path="/admin/customers/applications/new"
+            element={protectedPage(<CustomerApplicationEditorPage />)}
+          />
+          <Route
+            path="/admin/customers/applications/:id"
+            element={protectedPage(<CustomerApplicationEditorPage />)}
+          />
+          <Route
+            path="/admin/sales/reservations"
+            element={protectedPage(<ReservationAgreementsPage />)}
+          />
+          <Route
+            path="/admin/sales/reservations/new"
+            element={protectedPage(<ReservationAgreementEditorPage />)}
+          />
+          <Route
+            path="/admin/sales/reservations/:id"
+            element={protectedPage(<ReservationAgreementEditorPage />)}
+          />
           <Route path="/admin/products" element={protectedPage(<BusinessProductsPage />)} />
           <Route
             path="/admin/finance/payments"
@@ -83,6 +120,14 @@ export default function App() {
           <Route
             path="/admin/finance/commissions"
             element={protectedPage(<BusinessCommissionsPage />)}
+          />
+          <Route
+            path="/admin/finance/commissions/settings"
+            element={protectedPage(<CommissionSettingsPage />)}
+          />
+          <Route
+            path="/admin/commissions/settings"
+            element={protectedPage(<CommissionSettingsPage />)}
           />
           {/* Redemption. Each route is gated on the module key declared for it in
               ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree: the

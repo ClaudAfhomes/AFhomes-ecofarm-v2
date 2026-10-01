@@ -197,6 +197,46 @@ export const commissionSchema = z.object({
 });
 export type Commission = z.infer<typeof commissionSchema>;
 
+export const commissionRuleTargetSchema = z.enum(['role', 'staff', 'ost']);
+export const commissionRuleSchema = z.object({
+  id: z.string().uuid(),
+  targetType: commissionRuleTargetSchema,
+  targetId: z.string().uuid(),
+  targetName: z.string().nullable(),
+  rate: exactDecimalRateSchema,
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const createCommissionRuleSchema = z
+  .object({
+    targetType: commissionRuleTargetSchema,
+    targetId: z.string().uuid(),
+    rate: exactDecimalRateSchema,
+    effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  })
+  .refine((v) => !v.effectiveUntil || v.effectiveUntil >= v.effectiveFrom, {
+    message: 'Effective until cannot precede effective from',
+    path: ['effectiveUntil'],
+  });
+export const updateCommissionRuleSchema = z
+  .object({
+    rate: exactDecimalRateSchema.optional(),
+    effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    isActive: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
+export type CommissionRule = z.infer<typeof commissionRuleSchema>;
+export type CreateCommissionRuleRequest = z.infer<typeof createCommissionRuleSchema>;
+export type UpdateCommissionRuleRequest = z.infer<typeof updateCommissionRuleSchema>;
+
 /**
  * Explicit qualification decision. This is the ONLY way a commission reaches
  * `earned`, and it is deliberately a separate, audited, permission-gated

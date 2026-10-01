@@ -12,9 +12,13 @@ import {
   cardCategorySchema,
   cardProductSchema,
   commissionSchema,
+  commissionRuleSchema,
   customerOnboardingRecoverySchema,
   customerSchema,
   financeQueueItemSchema,
+  formImportPreviewSchema,
+  customerApplicationSchema,
+  reservationAgreementSchema,
   membershipSchema,
   paymentSchema,
   referralRelationshipSchema,
@@ -24,6 +28,9 @@ import {
   type CardCategory,
   type CardProduct,
   type Commission,
+  type CommissionRule,
+  type CreateCommissionRuleRequest,
+  type UpdateCommissionRuleRequest,
   type CustomerOnboardingRecovery,
   type CreateCardCategoryRequest,
   type CreateCardProductRequest,
@@ -31,6 +38,11 @@ import {
   type CreateSaleRequest,
   type Customer,
   type FinanceQueueItem,
+  type FormImportPreview,
+  type CustomerApplication,
+  type CreateCustomerApplicationRequest,
+  type ReservationAgreement,
+  type CreateReservationAgreementRequest,
   type MarkCommissionPaidRequest,
   type Membership,
   type Payment,
@@ -134,6 +146,108 @@ export const anonymizeCustomer = (id: string) =>
 export const deleteCustomer = (id: string) =>
   request(`/customers/${id}`, customerDeletionSchema, { method: 'DELETE' });
 
+const generatedFormFileSchema = z.object({
+  filename: z.string(),
+  mime: z.string(),
+  content: z.string(),
+});
+export type GeneratedFormFile = z.infer<typeof generatedFormFileSchema>;
+export const getOfficialFormTemplate = (kind: 'customer' | 'ist'): Promise<GeneratedFormFile> =>
+  request(`/official-forms/${kind}/template`, generatedFormFileSchema);
+export const previewOfficialFormImport = (
+  kind: 'customer_application' | 'reservation_agreement',
+  contentBase64: string,
+): Promise<FormImportPreview> =>
+  post('/official-forms/import', formImportPreviewSchema, { kind, contentBase64 });
+export const generateOfficialFormPdf = (
+  title: string,
+  fields: Record<string, string>,
+  kind?: 'customer_application' | 'reservation_agreement',
+): Promise<GeneratedFormFile> =>
+  post('/official-forms/pdf', generatedFormFileSchema, { title, fields, kind });
+
+export const getCustomerApplications = (params: {
+  status?: string;
+  tier?: string;
+  seller?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+} = {}): Promise<CustomerApplication[]> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.tier) query.set('tier', params.tier);
+  if (params.seller) query.set('seller', params.seller);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.search) query.set('search', params.search);
+  const suffix = query.toString();
+  return requestList(
+    `/official-forms/customer-applications${suffix ? `?${suffix}` : ''}`,
+    customerApplicationSchema,
+  );
+};
+export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
+  request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
+export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
+  post('/official-forms/customer-applications', customerApplicationSchema, input);
+export const updateCustomerApplication = (id: string, input: CreateCustomerApplicationRequest) =>
+  patch(`/official-forms/customer-applications/${id}`, customerApplicationSchema, input);
+export const submitCustomerApplication = (id: string) =>
+  post(`/official-forms/customer-applications/${id}/submit`, customerApplicationSchema, {});
+export const decideCustomerApplication = (
+  id: string,
+  decision: 'approved' | 'rejected' | 'cancelled',
+  notes?: string,
+) =>
+  post(`/official-forms/customer-applications/${id}/decision`, customerApplicationSchema, {
+    decision,
+    ...(notes ? { notes } : {}),
+  });
+export const reopenCustomerApplication = (id: string) =>
+  post(`/official-forms/customer-applications/${id}/reopen`, customerApplicationSchema, {});
+export const exportCustomerApplication = (id: string, format: 'xlsx' | 'pdf') =>
+  request(`/official-forms/customer-applications/${id}/export/${format}`, generatedFormFileSchema);
+
+export const getReservationAgreements = (params: {
+  status?: string;
+  tier?: string;
+  seller?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+} = {}): Promise<ReservationAgreement[]> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.tier) query.set('tier', params.tier);
+  if (params.seller) query.set('seller', params.seller);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.search) query.set('search', params.search);
+  const suffix = query.toString();
+  return requestList(
+    `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,
+    reservationAgreementSchema,
+  );
+};
+export const getReservationAgreement = (id: string): Promise<ReservationAgreement> =>
+  request(`/official-forms/reservations/${id}`, reservationAgreementSchema);
+export const createReservationAgreement = (input: CreateReservationAgreementRequest) =>
+  post('/official-forms/reservations', reservationAgreementSchema, input);
+export const updateReservationAgreement = (id: string, input: CreateReservationAgreementRequest) =>
+  patch(`/official-forms/reservations/${id}`, reservationAgreementSchema, input);
+export const submitReservationAgreement = (id: string) =>
+  post(`/official-forms/reservations/${id}/submit`, reservationAgreementSchema, {});
+export const decideReservationAgreement = (id: string, decision: 'executed' | 'cancelled', notes?: string) =>
+  post(`/official-forms/reservations/${id}/decision`, reservationAgreementSchema, {
+    decision,
+    ...(notes ? { notes } : {}),
+  });
+export const reopenReservationAgreement = (id: string) =>
+  post(`/official-forms/reservations/${id}/reopen`, reservationAgreementSchema, {});
+export const exportReservationAgreement = (id: string, format: 'xlsx' | 'pdf') =>
+  request(`/official-forms/reservations/${id}/export/${format}`, generatedFormFileSchema);
+
 /* ------------------------------------------------------------------ */
 /* Sales                                                               */
 /* ------------------------------------------------------------------ */
@@ -230,3 +344,24 @@ export const markCommissionPaid = (
   id: string,
   input: MarkCommissionPaidRequest = {},
 ): Promise<Commission> => post(`/commissions/${id}/pay`, commissionSchema, input);
+
+export const getCommissionRules = (): Promise<CommissionRule[]> =>
+  requestList('/commissions/rules', commissionRuleSchema);
+export const createCommissionRule = (input: CreateCommissionRuleRequest): Promise<CommissionRule> =>
+  post('/commissions/rules', commissionRuleSchema, input);
+export const updateCommissionRule = (
+  id: string,
+  input: UpdateCommissionRuleRequest,
+): Promise<CommissionRule> => patch(`/commissions/rules/${id}`, commissionRuleSchema, input);
+const commissionRuleHistorySchema = z.object({
+  id: z.union([z.string(), z.number()]),
+  action: z.string(),
+  actorId: z.string().nullable(),
+  before: z.record(z.string(), z.unknown()).nullable(),
+  after: z.record(z.string(), z.unknown()).nullable(),
+  reason: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type CommissionRuleHistory = z.infer<typeof commissionRuleHistorySchema>;
+export const getCommissionRuleHistory = (id: string): Promise<CommissionRuleHistory[]> =>
+  requestList(`/commissions/rules/${id}/history`, commissionRuleHistorySchema);

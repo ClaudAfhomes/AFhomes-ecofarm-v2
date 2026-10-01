@@ -607,16 +607,16 @@ async function main(): Promise<void> {
     }
 
     for (const [code, down, points] of [
-      ['BRONZE', '10000.00', 25000],
-      ['SILVER', '15000.00', 40000],
-      ['GOLD', '20000.00', 60000],
+      ['BRONZE', '10000.00', 10000],
+      ['SILVER', '15000.00', 20000],
+      ['GOLD', '20000.00', 25000],
     ] as const) {
       const p = byCode.get(code);
       check(`${code} exists`, !!p);
       if (!p) continue;
       eq(`  ${code} minimum down payment`, p.minimum_down_payment, down);
       eq(`  ${code} yearly points`, p.yearly_points, points);
-      eq(`  ${code} commission rate`, p.commission_rate, '0.04');
+      eq(`  ${code} commission default`, p.commission_rate, '0');
       check(`  ${code} is active`, p.is_active === true);
     }
 
@@ -1462,7 +1462,11 @@ async function main(): Promise<void> {
       commission.status,
       'payment_verified',
     );
-    eq('  commission amount is 4% of the snapshotted Gold price', commission.amount, commissionAmount.v);
+    eq(
+      '  commission amount matches the snapshotted Gold economics',
+      commission.amount,
+      commissionAmount.v,
+    );
 
     /* ---------------------------------------------------------------- */
     section('11. ACTIVATION - unpaid is refused');
@@ -1554,7 +1558,11 @@ async function main(): Promise<void> {
     );
     check('  QR token was generated', !!activation.qr_token);
     check('  fallback code was generated', !!activation.fallback_code);
-    eq('  annual points allocated from the snapshot', String(activation.points_allocated), '60000');
+    eq(
+      '  annual points allocated from the snapshot',
+      String(activation.points_allocated),
+      String(gold.yearly_points),
+    );
     check('  not flagged as already active', activation.already_active === false);
 
     const membership = await one<Record<string, string | number>>(
@@ -1594,8 +1602,16 @@ async function main(): Promise<void> {
       'select balance::text, lifetime_allocated::text from public.points_accounts where membership_id = $1',
       [membershipId],
     );
-    eq('points account balance = 60,000', pointsAccount.balance, '60000');
-    eq('  lifetime allocated = 60,000', pointsAccount.lifetime_allocated, '60000');
+    eq(
+      'points account balance = official Gold yearly points',
+      pointsAccount.balance,
+      String(gold.yearly_points),
+    );
+    eq(
+      '  lifetime allocated = official Gold yearly points',
+      pointsAccount.lifetime_allocated,
+      String(gold.yearly_points),
+    );
 
     const ledger = await db.query<{
       entry_type: string;
@@ -1610,8 +1626,8 @@ async function main(): Promise<void> {
     );
     eq('exactly one allocation ledger entry', ledger.rows.length, 1);
     eq('  entry type', ledger.rows[0]!.entry_type, 'annual_allocation');
-    eq('  amount', ledger.rows[0]!.amount, '60000');
-    eq('  balance_after', ledger.rows[0]!.balance_after, '60000');
+    eq('  amount', ledger.rows[0]!.amount, String(gold.yearly_points));
+    eq('  balance_after', ledger.rows[0]!.balance_after, String(gold.yearly_points));
     eq('  reference type', ledger.rows[0]!.reference_type, 'membership');
     eq('  reference id is the membership', ledger.rows[0]!.reference_id, membershipId);
 
@@ -5245,8 +5261,8 @@ async function main(): Promise<void> {
       );
       eq('Gold cash price seed', String(gold.cash_price), '312000.00');
       eq('Gold minimum down payment seed', String(gold.minimum_down_payment), '20000.00');
-      eq('Gold yearly points seed', String(gold.yearly_points), '60000');
-      eq('Gold commission rate seed', String(gold.commission_rate), '0.04');
+      eq('Gold yearly points seed (official: 25,000/year)', String(gold.yearly_points), '25000');
+      eq('Gold commission rate seed (official default 0)', String(gold.commission_rate), '0');
       const custA = await mkCustomer('buyer', 'e2e');
       const custB = await mkCustomer('isolation', 'e2e');
       eq(
@@ -5262,7 +5278,7 @@ async function main(): Promise<void> {
         'select round($1::numeric * $2::numeric, 2)::text as v',
         [String(gold.cash_price), String(gold.commission_rate)],
       );
-      eq('expected commission is 4% of the frozen price', expectedComm.v, '12480.00');
+      eq('expected commission resolves from the live Gold rate', expectedComm.v, '0.00');
       await db.query(
         `insert into public.card_sales
            (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
@@ -5303,7 +5319,11 @@ async function main(): Promise<void> {
       eq('snapshot: frozen minimum down', String(frozen.minimum_down_payment_snapshot), String(gold.minimum_down_payment));
       eq('snapshot: frozen yearly points', String(frozen.yearly_points_snapshot), String(gold.yearly_points));
       eq('snapshot: frozen commission rate', String(frozen.commission_rate_snapshot), String(gold.commission_rate));
-      eq('snapshot: frozen expected commission', String(frozen.expected_commission_snapshot), '12480.00');
+      eq(
+        'snapshot: frozen expected commission',
+        String(frozen.expected_commission_snapshot),
+        expectedComm.v,
+      );
       eq('snapshot: seller is the OST of record', String(frozen.seller_staff_id), ost);
       eq('snapshot: customer linked', String(frozen.customer_id), custA);
       const snapRows = await db.query<{ depth: number; ancestor_staff_id: string }>(
@@ -5418,7 +5438,11 @@ async function main(): Promise<void> {
       check('membership number issued', String(activated.membership_number).length > 0, String(activated.membership_number));
       check('QR token issued exactly once', typeof activated.qr_token === 'string' && String(activated.qr_token).length > 0);
       check('fallback code issued exactly once', typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0);
-      eq('yearly allocation is 60000', String(activated.points_allocated), '60000');
+      eq(
+        'yearly allocation is the official Gold yearly points',
+        String(activated.points_allocated),
+        String(gold.yearly_points),
+      );
       check('not already active on first activation', activated.already_active === false);
       const membershipNumber = String(activated.membership_number);
       const memberRow = await one<Record<string, string | number>>(
@@ -5435,22 +5459,22 @@ async function main(): Promise<void> {
         'select balance::text as balance, lifetime_allocated::text as lifetime from public.points_accounts where membership_id = $1',
         [membershipId],
       );
-      eq('points account balance 60000', acct.balance, '60000');
-      eq('lifetime allocated 60000', acct.lifetime, '60000');
+      eq('points account balance is the official allocation', acct.balance, String(gold.yearly_points));
+      eq('lifetime allocated is the official allocation', acct.lifetime, String(gold.yearly_points));
       const ledgerAfterActivate = await db.query(
         `select entry_type, amount from public.points_ledger
           where account_id = (select id from public.points_accounts where membership_id = $1)`,
         [membershipId],
       );
       eq('exactly one allocation ledger row', ledgerAfterActivate.rows.length, 1);
-      eq('allocation amount', String(ledgerAfterActivate.rows[0]!.amount), '60000');
+      eq('allocation amount', String(ledgerAfterActivate.rows[0]!.amount), String(gold.yearly_points));
       const commActivated = await one<{ status: string; earned: string | null; amount: string }>(
         'select status, earned_at::text as earned, amount::text as amount from public.commissions where sale_id = $1',
         [saleId],
       );
       eq('commission awaits final qualification', commActivated.status, 'final_qualification_pending');
       check('never auto-earned', commActivated.earned === null);
-      eq('commission amount is 12480.00', commActivated.amount, '12480.00');
+      eq('commission amount matches the frozen snapshot', commActivated.amount, expectedComm.v);
       const again = await one<Record<string, string | number | boolean>>(
         'select * from public.activate_card_sale($1,$2,$3)',
         [saleId, fin, 12],
@@ -5608,7 +5632,11 @@ async function main(): Promise<void> {
                 (select points_balance from public.memberships where id = $1) as cache`,
         [membershipId],
       );
-      eq('authoritative balance is 60000 before rotation', Number(pointsBeforeRotate.account), 60000);
+      eq(
+        'authoritative balance is the official allocation before rotation',
+        Number(pointsBeforeRotate.account),
+        Number(gold.yearly_points),
+      );
       const rotated = await one<{ membership_id: string; fallback_code: string; qr_token: string }>(
         'select * from public.reissue_membership_credentials($1,$2,$3)',
         [membershipId, custA, fin],
@@ -5643,7 +5671,11 @@ async function main(): Promise<void> {
                 (select points_balance from public.memberships where id = $1) as cache`,
         [membershipId],
       );
-      eq('authoritative balance still 60000', Number(pointsAfterRotate.account), 60000);
+      eq(
+        'authoritative balance still the official allocation',
+        Number(pointsAfterRotate.account),
+        Number(gold.yearly_points),
+      );
       eq('denormalized cache untouched by rotation', Number(pointsAfterRotate.cache), Number(pointsBeforeRotate.cache));
       eq('sale link untouched by rotation', sameNumber.sale, saleId);
       const rotationAudit = await one<{ n: number }>(
@@ -5684,14 +5716,22 @@ async function main(): Promise<void> {
         ).rows[0],
       );
       eq('receipt charges the catalog cost', String(receipt.totalPoints), '2000');
-      eq('balance before 60000', String(receipt.balanceBefore), '60000');
-      eq('balance after 58000', String(receipt.balanceAfter), '58000');
+      eq('balance before is the official allocation', String(receipt.balanceBefore), String(gold.yearly_points));
+      eq(
+        'balance after deducts the catalog cost',
+        String(receipt.balanceAfter),
+        String(Number(gold.yearly_points) - 2000),
+      );
       check('redemption number issued', /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)), String(receipt.redemptionNumber));
       const balanceAfter = await one<{ b: number }>(
         'select balance as b from public.points_accounts where membership_id = $1',
         [membershipId],
       );
-      eq('account balance is 58000', Number(balanceAfter.b), 58000);
+      eq(
+        'account balance deducts the catalog cost',
+        Number(balanceAfter.b),
+        Number(gold.yearly_points) - 2000,
+      );
       const redemptionRow = await one<Record<string, string | number>>(
         'select * from public.redemptions where id = $1',
         [String(receipt.redemptionId)],
@@ -5719,14 +5759,18 @@ async function main(): Promise<void> {
         ).rows[0],
       );
       eq('replay returns the original receipt', String(replay.redemptionId), String(receipt.redemptionId));
-      eq('balance still 58000 after replay', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+      eq(
+        'balance still deducted after replay',
+        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(gold.yearly_points) - 2000,
+      );
       const replays = await one<{ n: number }>(
         'select count(*)::int as n from public.redemptions where customer_id = $1',
         [custA],
       );
       eq('no second redemption row', replays.n, 1);
       // Failure rollback: an unaffordable redemption moves nothing (quantity 30
-      // is a legal quantity whose 60,000 total exceeds the 58,000 balance).
+      // is a legal quantity whose 60,000 total exceeds the remaining balance).
       const poorAttempt = await throws('oversized redemption refused', () =>
         db.query('select * from public.redeem_membership_points($1,$2,$3,$4,$5)', [
           membershipId,
@@ -5737,7 +5781,11 @@ async function main(): Promise<void> {
         ]),
       );
       check('  INSUFFICIENT_POINTS', /INSUFFICIENT_POINTS/.test(poorAttempt), poorAttempt.split('\n')[0]);
-      eq('  balance unchanged by the refusal', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+      eq(
+        '  balance unchanged by the refusal',
+        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(gold.yearly_points) - 2000,
+      );
 
       // -- Flow H: commission to earned, then paid, with guards.
       const payTooEarly = await db.query(
@@ -5757,9 +5805,9 @@ async function main(): Promise<void> {
          values ($1,'COMMISSION_QUALIFIED','commission',
            (select id::text from public.commissions where sale_id = $2),
            jsonb_build_object('status','final_qualification_pending'),
-           jsonb_build_object('status','earned','amount','12480.00'),
+           jsonb_build_object('status','earned','amount', $3::text),
            'E2E manual qualification with notes.')`,
-        [admin, saleId],
+        [admin, saleId, expectedComm.v],
       );
       const qualifyAgain = await db.query(
         `update public.commissions set status = 'earned' where sale_id = $1 and status = 'final_qualification_pending'`,
@@ -5770,7 +5818,7 @@ async function main(): Promise<void> {
         'select status, amount::text as amount, rate_snapshot as rate, basis_amount_snapshot as basis, beneficiary_staff_id as beneficiary from public.commissions where sale_id = $1',
         [saleId],
       );
-      eq('earned, amount frozen', earnedRow.amount, '12480.00');
+      eq('earned, amount frozen', earnedRow.amount, expectedComm.v);
       eq('rate frozen', earnedRow.rate, String(gold.commission_rate));
       eq('basis frozen', earnedRow.basis, String(gold.cash_price));
       eq('beneficiary still the OST seller', earnedRow.beneficiary, ost);
@@ -5785,9 +5833,9 @@ async function main(): Promise<void> {
         `insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data)
          values ($1,'COMMISSION_PAID','commission',
            (select id::text from public.commissions where sale_id = $2),
-           jsonb_build_object('status','earned','amount','12480.00'),
-           jsonb_build_object('status','paid','amount','12480.00','reference','${RUN}-E2E-PAYOUT-1'))`,
-        [admin, saleId],
+           jsonb_build_object('status','earned','amount', $3::text),
+           jsonb_build_object('status','paid','amount', $3::text,'reference','${RUN}-E2E-PAYOUT-1'))`,
+        [admin, saleId, expectedComm.v],
       );
       const paidRow = await one<{ status: string; ref: string; by: string }>(
         'select status, paid_reference as ref, paid_by::text as by from public.commissions where sale_id = $1',
@@ -5908,7 +5956,11 @@ async function main(): Promise<void> {
       eq('one Gold sale', (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [saleId])).n, 1);
       eq('one membership for the sale', (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [saleId])).n, 1);
       eq('membership number stable end to end', (await one<{ no: string }>('select membership_number as no from public.memberships where id = $1', [membershipId])).no, membershipNumber);
-      eq('final points balance 58000', Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b), 58000);
+      eq(
+        'final points balance deducts the catalog cost',
+        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(gold.yearly_points) - 2000,
+      );
       eq('frozen sale price still 312000.00', (await one<{ p: string }>('select cash_price_snapshot as p from public.card_sales where id = $1', [saleId])).p, '312000.00');
       eq('frozen commission rate still matches Gold', (await one<{ r: string }>('select commission_rate_snapshot as r from public.card_sales where id = $1', [saleId])).r, String(gold.commission_rate));
 

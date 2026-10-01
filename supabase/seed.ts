@@ -20,9 +20,9 @@ try {
       v.move_a_enabled, v.move_b1_enabled, v.move_b2_enabled, v.sort_order
     from public.card_categories c
     cross join (values
-      ('GOLD','Gold','312000.00','20000.00',60000,'390000.00','10000.00',7,4,22,true,true,true,10),
-      ('SILVER','Silver','192000.00','15000.00',40000,'240000.00','10000.00',7,4,12,true,true,true,20),
-      ('BRONZE','Bronze','54000.00','10000.00',25000,'72000.00','10000.00',7,4,7,true,false,false,30)
+      ('GOLD','Gold','312000.00','20000.00',25000,'390000.00','10000.00',7,4,22,true,true,true,10),
+      ('SILVER','Silver','192000.00','15000.00',20000,'240000.00','10000.00',7,4,12,true,true,true,20),
+      ('BRONZE','Bronze','54000.00','10000.00',10000,'72000.00','10000.00',7,4,7,true,false,false,30)
     ) v(code,name,cash_price,minimum_down_payment,yearly_points,installment_price,reservation_fee,spot_cash_days,standard_installment_months,validity_years,move_a_enabled,move_b1_enabled,move_b2_enabled,sort_order)
     where c.slug = 'membership'
     on conflict (code) do update set name = excluded.name, cash_price = excluded.cash_price,

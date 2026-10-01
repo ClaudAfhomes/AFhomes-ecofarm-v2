@@ -21,6 +21,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     dropdown: [
       { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
+      {
+        to: '/admin/customers/applications',
+        label: 'Customer Applications',
+        module: 'sales.customers',
+      },
+      { to: '/admin/sales/reservations', label: 'IST Reservations', module: 'sales.card_sales' },
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
       { to: '/admin/documents', label: 'ID Documents', module: 'sales.id_documents' },
       {
@@ -49,6 +55,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       {
         to: '/admin/finance/commissions',
         label: 'Commissions',
+        module: 'network.commissions',
+      },
+      {
+        to: '/admin/commissions/settings',
+        label: 'Commission Settings',
         module: 'network.commissions',
       },
       {

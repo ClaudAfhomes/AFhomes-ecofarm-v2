@@ -60,6 +60,7 @@ const BUSINESS_FAMILIES = [
     load: () => import('../_handlers/card-categories.js'),
   },
   { prefix: 'customers', module: 'customers', load: () => import('../_handlers/customers.js') },
+  { prefix: 'official-forms', module: 'forms', load: () => import('../_handlers/official-forms.js') },
   { prefix: 'sales', module: 'sales', load: () => import('../_handlers/sales.js') },
   { prefix: 'payments', module: 'sales', load: () => import('../_handlers/sales.js') },
   {

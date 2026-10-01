@@ -22,6 +22,8 @@ import {
   getCardProducts,
   getCustomers,
   issueCustomerAccountActivation,
+  getOfficialFormTemplate,
+  previewOfficialFormImport,
 } from './services';
 import { SaleApplicationDialog } from './SaleApplicationDialog';
 
@@ -79,6 +81,51 @@ export function BusinessCustomersPage() {
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [activationCustomerId, setActivationCustomerId] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState('');
+  const [importMessage, setImportMessage] = useState('');
+  const [importErrors, setImportErrors] = useState<{ field: string; message: string }[]>([]);
+
+  const downloadFile = (file: { filename: string; mime: string; content: string }) => {
+    const bytes = Uint8Array.from(atob(file.content), (char) => char.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importXlsx = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const preview = await previewOfficialFormImport('customer_application', btoa(binary));
+    const f = preview.fields;
+    setForm({
+      ...EMPTY,
+      firstName: f.primary_first_name ?? '',
+      middleName: f.primary_middle_name || undefined,
+      lastName: f.primary_last_name ?? '',
+      suffix: f.primary_suffix || undefined,
+      dateOfBirth: f.primary_birth_date ?? '',
+      gender:
+        f.primary_sex?.toLowerCase() === 'male' || f.primary_sex?.toLowerCase() === 'female'
+          ? (f.primary_sex.toLowerCase() as 'male' | 'female')
+          : undefined,
+      email: f.primary_email ?? '',
+      phone: f.primary_mobile ?? '',
+      address: {
+        line1: f.primary_address_line_1 ?? '',
+        line2: f.primary_address_line_2 || undefined,
+        city: f.primary_city_municipality ?? '',
+        province: f.primary_province ?? '',
+        postalCode: f.primary_postal_code || undefined,
+        countryCode: 'PH',
+      },
+    });
+    setImportErrors(preview.errors);
+    setImportMessage('Imported fields are candidates only — review and correct every value before registering.');
+    setOpen(true);
+  };
 
   const set = <K extends keyof CreateCustomerRequest>(key: K, value: CreateCustomerRequest[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -130,7 +177,31 @@ export function BusinessCustomersPage() {
       <PageHeader
         title="Customers"
         description="Register a customer and open a card application. Financial terms are set by the product, not by the seller."
-        actions={<Button onClick={() => setOpen(true)}>Register customer</Button>}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              onClick={async () => downloadFile(await getOfficialFormTemplate('customer'))}
+            >
+              Download import template
+            </Button>
+            <label>
+              <span className="sr-only">Import customer XLSX</span>
+              <input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importXlsx(file);
+                  event.target.value = '';
+                }}
+              />
+            </label>
+            <Button onClick={() => { setImportMessage(''); setImportErrors([]); setOpen(true); }}>
+              Register customer
+            </Button>
+          </>
+        }
       />
 
       <form
@@ -273,6 +344,13 @@ export function BusinessCustomersPage() {
         }
       >
         <div style={{ display: 'grid', gap: 12 }}>
+          {importMessage ? <p role="status">{importMessage}</p> : null}
+          {importErrors.length ? (
+            <div role="alert">
+              <strong>Import needs correction:</strong>
+              <ul>{importErrors.map((error) => <li key={`${error.field}:${error.message}`}>{error.field}: {error.message}</li>)}</ul>
+            </div>
+          ) : null}
           <label>
             First name
             <input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} />

@@ -119,6 +119,8 @@ export {
   paymentTypeSchema,
   membershipStatusSchema,
   commissionStatusSchema,
+  customerApplicationStatusSchema,
+  reservationAgreementStatusSchema,
   pointsEntryTypeSchema,
   hierarchyRoleSchema,
   spotCashStateSchema,
@@ -136,6 +138,8 @@ export {
   canTransitionPayment,
   canTransitionMembership,
   canTransitionCommission,
+  canTransitionCustomerApplication,
+  canTransitionReservationAgreement,
   hierarchyAllowsUpline,
 } from './schemas/lifecycle.js';
 export type {
@@ -145,6 +149,8 @@ export type {
   PaymentType,
   MembershipStatus,
   CommissionStatus,
+  CustomerApplicationStatus,
+  ReservationAgreementStatus,
   PointsEntryType,
   HierarchyRole,
   SpotCashState,
@@ -210,6 +216,10 @@ export {
   pointsAccountSchema,
   pointsLedgerEntrySchema,
   commissionSchema,
+  commissionRuleTargetSchema,
+  commissionRuleSchema,
+  createCommissionRuleSchema,
+  updateCommissionRuleSchema,
   qualifyCommissionSchema,
   markCommissionPaidSchema,
   issueOnboardingTokenSchema,
@@ -229,6 +239,9 @@ export type {
   PointsAccount,
   PointsLedgerEntry,
   Commission,
+  CommissionRule,
+  CreateCommissionRuleRequest,
+  UpdateCommissionRuleRequest,
   QualifyCommissionRequest,
   MarkCommissionPaidRequest,
   IssueOnboardingTokenRequest,
@@ -253,6 +266,34 @@ export {
   customerCredentialsSchema,
   CUSTOMER_ACTIVATION_ERRORS,
 } from './schemas/customer.js';
+
+/* ---- Official paper-form transaction snapshots and review-first imports. ---- */
+export {
+  vipTierSchema,
+  holderTypeSchema,
+  signatureStatusSchema,
+  acquisitionChannelSchema,
+  applicationHolderSchema,
+  reservationHolderSchema,
+  createCustomerApplicationSchema,
+  customerApplicationSchema,
+  customerApplicationDecisionSchema,
+  createReservationAgreementSchema,
+  reservationAgreementSchema,
+  reservationAgreementDecisionSchema,
+  formImportPreviewSchema,
+  officialFormListQuerySchema,
+} from './schemas/official-forms.js';
+export type {
+  ApplicationHolder,
+  CreateCustomerApplicationRequest,
+  CustomerApplication,
+  CustomerApplicationDecision,
+  CreateReservationAgreementRequest,
+  ReservationAgreement,
+  ReservationAgreementDecision,
+  FormImportPreview,
+} from './schemas/official-forms.js';
 
 /* ---- PHASE 7: authorized sales genealogy ---- */
 export {

@@ -421,6 +421,7 @@ export function BusinessProductsPage() {
                     <th>Validity</th>
                     <th>Moves</th>
                     <th>Yearly Points</th>
+                    <th>Official Benefits</th>
                     <th>Commission</th>
                     <th>Status</th>
                     <th>Display Order</th>
@@ -449,6 +450,15 @@ export function BusinessProductsPage() {
                           .join(' · ') || '—'}
                       </td>
                       <td>{formatPoints(product.yearlyPoints)}</td>
+                      <td>
+                        MASTER: {product.discountPercent}% discount; {product.cardholderLimit}{' '}
+                        {product.cardholderLimit === 1 ? 'cardholder' : 'cardholders'} max;{' '}
+                        {formatPoints(product.yearlyPoints)}/year × {product.annualPointsTranches};{' '}
+                        {product.baseValidityYears}+{product.validityExtensionYears} years; ₱
+                        {product.totalLoyaltyValue};{' '}
+                        {product.priorityReservation ? 'priority reservation' : 'no priority'};{' '}
+                        {product.noMonthlyAnnualDues ? 'no monthly/annual dues' : 'dues apply'}
+                      </td>
                       <td>{formatRate(product.commissionRate)}</td>
                       <td>
                         <StatusChip
@@ -567,7 +577,9 @@ export function BusinessProductsPage() {
           <p>
             Changing these values affects only <strong>future</strong> sales. Existing sales retain
             their frozen pricing: scheme, total, reservation, schedule, validity and commission stay
-            exactly as created.
+            exactly as created. MASTER CONFIGURATION below never rewrites TRANSACTION SNAPSHOTS.
+            Benefit edits require Admin/Super Admin, are audited before/after, and apply
+            prospectively only.
           </p>
           <label>
             Name

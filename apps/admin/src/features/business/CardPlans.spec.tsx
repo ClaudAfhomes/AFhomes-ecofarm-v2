@@ -61,8 +61,16 @@ const GOLD: CardProduct = {
   moveB1Enabled: true,
   moveB2Enabled: true,
   minimumDownPayment: '20000.00',
-  yearlyPoints: 60000,
-  commissionRate: '0.04',
+  yearlyPoints: 25000,
+  discountPercent: 25,
+  baseValidityYears: 20,
+  validityExtensionYears: 2,
+  cardholderLimit: 2,
+  annualPointsTranches: 20,
+  totalLoyaltyValue: '500000.00',
+  priorityReservation: true,
+  noMonthlyAnnualDues: true,
+  commissionRate: '0',
   isActive: true,
   sortOrder: 10,
   createdAt: '2026-09-28T00:00:00.000Z',
@@ -342,8 +350,11 @@ describe('Card Plans states', () => {
     expect(screen.getByText('22 years')).toBeInTheDocument();
     expect(screen.getByText('A · B1 · B2')).toBeInTheDocument();
     expect(screen.queryByText('₱20,000.00')).not.toBeInTheDocument();
-    expect(screen.getByText('60,000')).toBeInTheDocument();
-    expect(screen.getByText('4.00%')).toBeInTheDocument();
+    expect(screen.getByText('25,000')).toBeInTheDocument();
+    expect(screen.getByText('0.00%')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Official Benefits' })).toBeInTheDocument();
+    expect(screen.getByText(/MASTER:/)).toBeInTheDocument();
+    expect(screen.getByText(/no monthly\/annual dues/)).toBeInTheDocument();
     expect(screen.getAllByText('Active')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Add Card Plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View/Edit' })).toBeInTheDocument();
