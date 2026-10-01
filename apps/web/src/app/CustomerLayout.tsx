@@ -72,8 +72,11 @@ function CustomerShell() {
       <div className={styles.centered}>
         <ErrorState
           title="This is not a customer account"
-          message="You are signed in, but this sign-in is not linked to an AF Homes Ecofarm customer record. Staff accounts belong in the administration console."
+          message="You are signed in, but this sign-in is not linked to an AF Homes Ecofarm customer record."
         />
+        <div className={styles.centeredActions}>
+          <a href="/staff/login">Go to Staff Login</a>
+        </div>
       </div>
     );
   }

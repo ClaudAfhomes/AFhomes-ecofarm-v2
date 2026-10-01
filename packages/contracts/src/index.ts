@@ -43,6 +43,23 @@ export type {
 export { errorEnvelopeSchema, apiErrorCodeSchema } from './schemas/error.js';
 export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
 
+/* ---- Cross-portal identity (portal routing + OST self-service) ----
+   `GET /auth/portals` answers which AF Homes identities the bearer's own
+   Auth user holds. Login screens route on it; it authorizes nothing. */
+export { authPortalsSchema, ostMeSchema } from './schemas/auth.js';
+export type { AuthPortals, OstMe } from './schemas/auth.js';
+
+export {
+  ADMIN_PORTAL_ROLES,
+  STAFF_PORTAL_ROLES,
+  isAdminPortalRole,
+  isStaffPortalRole,
+  staffPortalRoleSchema,
+  portalDestinationSchema,
+  resolvePortalDestination,
+} from './schemas/portal-routing.js';
+export type { PortalDestination, PortalIdentity } from './schemas/portal-routing.js';
+
 export {
   exactDecimalStringSchema,
   exactDecimalRateSchema,

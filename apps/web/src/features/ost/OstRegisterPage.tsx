@@ -1,11 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Button } from '@jad/ui';
+import { AuthLayout, Button } from '@jad/ui';
 import type { SubmitOstApplicationRequest } from '@jad/contracts';
 
 import { resolveOstReferral, submitOstApplication } from './services';
-import { styles } from '../customer/portal-ui';
 import authStyles from '../customer/auth.module.css';
 
 /**
@@ -75,10 +74,14 @@ export function OstRegisterPage() {
 
   if (submission.isSuccess) {
     return (
-      <main className={authStyles.auth}>
-        <div className={authStyles.panel}>
-          <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-          <h1 className={authStyles.title}>Application received</h1>
+      <AuthLayout
+        eyebrow="AF Homes Ecofarm"
+        title="Application received"
+        brandTitle="Sell the farm you believe in."
+        brandLead="Your application is pending review under your sponsor."
+        wide
+      >
+        <div>
           <p className={authStyles.body}>
             Your OST application is pending review under{' '}
             {resolution.data?.sponsorName ?? 'your sponsor'}. Your reference is{' '}
@@ -92,15 +95,20 @@ export function OstRegisterPage() {
             <Link to="/">Back to the site</Link>
           </p>
         </div>
-      </main>
+      </AuthLayout>
     );
   }
 
   return (
-    <main className={authStyles.auth}>
-      <div className={authStyles.panel} style={{ maxWidth: '32rem' }}>
-        <p className={styles.eyebrow}>AF Homes Ecofarm</p>
-        <h1 className={authStyles.title}>Apply as an OST seller</h1>
+    <AuthLayout
+      eyebrow="AF Homes Ecofarm"
+      title="Apply as an OST seller"
+      lead="Register under your Sales Manager's referral code."
+      brandTitle="Sell the farm you believe in."
+      brandLead="Your pipeline, your referral code, and your network - once your application is approved."
+      wide
+    >
+      <div>
 
         {!code ? (
           <p className={authStyles.error} role="alert">
@@ -256,6 +264,6 @@ export function OstRegisterPage() {
           <Link to="/">Back to the site</Link>
         </p>
       </div>
-    </main>
+    </AuthLayout>
   );
 }

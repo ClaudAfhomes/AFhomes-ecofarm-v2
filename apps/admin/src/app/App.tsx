@@ -17,10 +17,10 @@ import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuideP
 import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
-import { AdminForgotPasswordPage } from '../features/auth/AdminForgotPasswordPage';
+import { AdminForgotPasswordPage, StaffForgotPasswordPage } from '../features/auth/AdminForgotPasswordPage';
 import { AdminActivateAccountPage } from '../features/auth/AdminActivateAccountPage';
-import { AdminLoginPage } from '../features/auth/AdminLoginPage';
-import { AdminResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
+import { AdminLoginPage, StaffLoginPage } from '../features/auth/PortalLoginPage';
+import { AdminResetPasswordPage, StaffResetPasswordPage } from '../features/auth/AdminResetPasswordPage';
 import { MyAccountPage } from '../features/account/MyAccountPage';
 import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
 import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
@@ -50,11 +50,16 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/staff/login" element={<StaffLoginPage />} />
         <Route path="/admin/activate-account" element={<AdminActivateAccountPage />} />
         {/* Phase 16 recovery: public by necessity (the visitor has no usable
-            session), outside RequireRole like the login screen. */}
+            session), outside RequireRole like the login screen. The staff
+            entry has its own forgot/reset pair so recovery returns to the
+            Staff Login, never the Administration Login. */}
         <Route path="/admin/forgot-password" element={<AdminForgotPasswordPage />} />
         <Route path="/admin/reset-password" element={<AdminResetPasswordPage />} />
+        <Route path="/staff/forgot-password" element={<StaffForgotPasswordPage />} />
+        <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
         <Route element={<AdminLayout />}>
           <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
           <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />

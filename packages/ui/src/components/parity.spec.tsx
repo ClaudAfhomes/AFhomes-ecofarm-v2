@@ -32,6 +32,18 @@ describe('AuthLayout (JAD parity shell)', () => {
     expect(screen.getByText('Grow.')).toBeInTheDocument();
   });
 
+  it('marks every auth screen noindex, nofollow', () => {
+    render(
+      <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+        <form />
+      </AuthLayout>,
+    );
+    expect(document.querySelector('meta[name="robots"]')).toHaveAttribute(
+      'content',
+      'noindex, nofollow',
+    );
+  });
+
   it('supports the wide form panel and lead text', () => {
     const { container } = render(
       <AuthLayout

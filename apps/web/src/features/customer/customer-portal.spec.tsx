@@ -195,7 +195,9 @@ beforeEach(() => {
 describe('customer guard', () => {
   it('sends an unauthenticated visitor to the sign-in screen', async () => {
     render('/customer', false);
-    expect(await screen.findByRole('heading', { name: 'Sign in', level: 1 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+    ).toBeInTheDocument();
     // The guard must not even ask for customer data without a session.
     expect(requests).not.toContain('/customer');
   });
@@ -204,7 +206,9 @@ describe('customer guard', () => {
     'protects %s as well',
     async (route) => {
       render(route, false);
-      expect(await screen.findByRole('heading', { name: 'Sign in', level: 1 })).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      ).toBeInTheDocument();
     },
   );
 
@@ -254,7 +258,7 @@ describe('customer guard', () => {
     // Supabase client configured lands on "unauthenticated" without flashing.
     renderWithProviders(<App />, { route: '/customer' });
     expect(
-      await screen.findByRole('heading', { name: 'Sign in', level: 1 }, { timeout: 3000 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }, { timeout: 3000 }),
     ).toBeInTheDocument();
   });
 });
@@ -522,12 +526,15 @@ describe('sign-in screen', () => {
     expect(document.body.textContent).not.toMatch(/invalid login|user not found|unknown/i);
   });
 
-  it('points staff at the administration console instead of a second login form', async () => {
+  it('points staff at the staff portal instead of a second login form', async () => {
     render('/customer/login', false);
-    expect(await screen.findByRole('link', { name: /administration console/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /staff login/i })).toHaveAttribute(
       'href',
-      expect.stringContaining('5174'),
+      '/staff/login',
     );
+    expect(screen.getByRole('link', { name: /ost login/i })).toHaveAttribute('href', '/ost/login');
+    // The administration entry is intentionally undiscoverable here.
+    expect(document.body.textContent).not.toMatch(/administration console|administration login/i);
   });
 });
 
@@ -548,7 +555,7 @@ describe('customer session provider', () => {
     render('/customer');
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(
-      await screen.findByRole('heading', { name: 'Sign in', level: 1 }, { timeout: 3000 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }, { timeout: 3000 }),
     ).toBeInTheDocument();
   });
 });

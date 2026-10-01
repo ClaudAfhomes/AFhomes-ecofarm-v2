@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Button, Forbidden, Skeleton, Spinner } from '@jad/ui';
 import { Navigate, useLocation } from 'react-router';
 import { useSession } from '../lib/session';
+import { entryPortal, loginPathFor } from '../lib/portal';
 import { canAccessNavTarget } from './navigation';
 import styles from './RequireRole.module.css';
 
@@ -20,7 +21,11 @@ export function RequireRole({ children }: { children: ReactNode }) {
   const location = useLocation();
   if (status === 'loading') return <Loading />;
   if (status !== 'authenticated') {
-    return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />;
+    // Return to the entry the user came through, so a staff session that
+    // expired mid-shift lands on the Staff Login, not the admin entry.
+    return (
+      <Navigate to={loginPathFor(entryPortal())} replace state={{ from: location.pathname }} />
+    );
   }
   // JAD parity: a session still on its temporary password can only visit
   // My Account until the forced change completes (the server 403s every

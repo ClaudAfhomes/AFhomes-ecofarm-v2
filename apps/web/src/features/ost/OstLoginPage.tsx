@@ -1,14 +1,21 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
 
-import { useSession } from '../../lib/session';
-import styles from './AdminLoginPage.module.css';
+import { useCustomerSession } from '../../lib/customer-session';
+import { getAuthPortals } from '../../lib/portals';
+import styles from '../customer/auth.module.css';
 
-export function AdminLoginPage() {
+/**
+ * OST sign-in. OST sellers authenticate with the same Supabase Auth as
+ * everyone else, then prove an APPROVED OST record (`GET /ost/me`): a pending
+ * applicant has no member row and cannot enter, and an OST record never
+ * implies a staff capability.
+ */
+export function OstLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { status, signIn } = useSession();
+  const { signIn } = useCustomerSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
@@ -17,17 +24,17 @@ export function AdminLoginPage() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  const requested = (location.state as { from?: string } | null)?.from;
-  const destination =
-    requested?.startsWith('/admin') && requested !== '/admin/login' ? requested : '/admin';
-
-  if (status === 'authenticated') return <Navigate to={destination} replace />;
+  const from =
+    (location.state as { from?: string } | null)?.from?.startsWith('/ost') &&
+    (location.state as { from: string }).from !== '/ost/login'
+      ? (location.state as { from: string }).from
+      : '/ost/dashboard';
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (pending) return;
     const nextErrors: { email?: string; password?: string } = {};
-    if (!email.trim()) nextErrors.email = 'Enter your staff email address.';
+    if (!email.trim()) nextErrors.email = 'Enter your email address.';
     if (!password) nextErrors.password = 'Enter your password.';
     setErrors(nextErrors);
     if (nextErrors.email) {
@@ -42,7 +49,21 @@ export function AdminLoginPage() {
     setPending(true);
     try {
       await signIn(email, password);
-      navigate(destination, { replace: true });
+      const portals = await getAuthPortals();
+      if (portals.ost?.status === 'active') {
+        navigate(from, { replace: true });
+        return;
+      }
+      if (portals.ost) {
+        setServerError(
+          `Your OST record is ${portals.ost.status}. Contact your sponsoring Sales Manager to restore access.`,
+        );
+      } else if (portals.staff || portals.customer) {
+        setServerError('This sign-in has no approved OST record. Use your own portal instead.');
+      } else {
+        setServerError('We could not sign you in with that email and password.');
+      }
+      setPending(false);
     } catch {
       setServerError('We could not sign you in with that email and password.');
       setPending(false);
@@ -52,21 +73,21 @@ export function AdminLoginPage() {
   return (
     <AuthLayout
       eyebrow="AF Homes Ecofarm"
-      title="Staff sign in"
-      lead="Access the administration and operations console."
-      brandTitle="Grow with the farm you own a card in."
-      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+      title="OST Login"
+      lead="Sellers approved under a Sales Manager sign in here."
+      brandTitle="Sell the farm you believe in."
+      brandLead="Your pipeline, your referral code, and your network - once your application is approved."
     >
-      <form className={styles.form} noValidate onSubmit={onSubmit}>
-        {serverError ? (
+      <form onSubmit={onSubmit} noValidate className={styles.form}>
+        {serverError && (
           <Alert variant="danger" title="We could not sign you in">
             {serverError}
           </Alert>
-        ) : null}
+        )}
 
         <TextField
-          id="admin-login-email"
-          name="email"
+          id="ost-login-email"
+          name="ost-login-email"
           label="Email"
           type="email"
           value={email}
@@ -85,7 +106,7 @@ export function AdminLoginPage() {
         />
 
         <PasswordField
-          id="admin-login-password"
+          id="ost-login-password"
           label="Password"
           value={password}
           onChange={(value) => {
@@ -102,16 +123,23 @@ export function AdminLoginPage() {
         />
 
         <div className={styles.utilityRow}>
-          <Link className={styles.textLink} to="/admin/forgot-password">
+          <Link className={styles.textLink} to="/ost/forgot-password">
             Forgot your password?
           </Link>
         </div>
 
         <div className={styles.submitRow}>
-          <Button type="submit" loading={pending} disabled={pending || status === 'loading'}>
+          <Button type="submit" loading={pending} disabled={pending}>
             Sign in
           </Button>
         </div>
+
+        <p className={styles.prompt}>
+          Don&apos;t have an OST account?{' '}
+          <Link className={styles.promptLink} to="/ost/register">
+            Register as OST
+          </Link>
+        </p>
       </form>
     </AuthLayout>
   );

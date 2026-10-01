@@ -4,35 +4,15 @@ import { validateRecoveryPassword } from '@jad/shared';
 import { Alert, AuthLayout, Button, PasswordField } from '@jad/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
-import styles from './AdminLoginPage.module.css';
+import styles from '../customer/auth.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
 
 /**
- * Staff reset-password: the recovery-link landing page.
- *
- * Supabase Auth exchanges the PKCE `code` on load (`detectSessionInUrl`); the
- * page is usable only while a session exists, so an expired link, a missing
- * session, an already-used link, or a plain refresh with no session all land
- * on the invalid state with a link to request a fresh one. Nothing depends on
- * transient frontend state: the persisted session plus the auth subscription
- * survive a direct refresh.
- *
- * After `updateUser` the recovery session is signed out and the passwords are
- * dropped from memory, so nobody is left holding a privileged session and the
- * next step is the ordinary staff sign-in - where `staff_users` status, role
- * assignment and role activity are enforced again. Recovery changes the
- * password only; it cannot reactivate a suspended business account.
- *
- * The `portal` prop reuses this page for the staff entry: the user returns to
- * the Staff Login, never the Administration Login.
+ * OST reset-password: the recovery-link landing page. Same session rules as
+ * the customer reset page; on completion the seller returns to OST Login.
  */
-export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
-  const loginPath = portal === 'staff' ? '/staff/login' : '/admin/login';
-  const forgotPath = portal === 'staff' ? '/staff/forgot-password' : '/admin/forgot-password';
-  // An explicit `?error=` from Supabase wins over any coincidental session:
-  // it means THIS recovery attempt failed, so a stale session must not
-  // upgrade the page to ready.
+export function OstResetPasswordPage() {
   const linkError =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('error') !== null;
@@ -55,8 +35,6 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
       .then(({ data }) => {
         if (!mounted) return;
         if (data.session && !linkError) {
-          // The code has served its purpose: keep it out of the address bar
-          // (and out of history) from here on.
           window.history.replaceState(null, '', window.location.pathname);
           setPhase('ready');
         } else {
@@ -109,7 +87,6 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
         setPending(false);
         return;
       }
-      // Best-effort: the recovery session must not survive the reset.
       await client.auth.signOut().catch(() => undefined);
       setPassword('');
       setConfirm('');
@@ -125,8 +102,8 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
     <AuthLayout
       eyebrow="AF Homes Ecofarm"
       title="Choose a new password"
-      brandTitle="Grow with the farm you own a card in."
-      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+      brandTitle="Sell the farm you believe in."
+      brandLead="Your pipeline, your referral code, and your network."
     >
       {phase === 'done' ? (
         <div className={styles.resultPanel}>
@@ -134,7 +111,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             Your password has been updated. Sign in with your new password.
           </Alert>
           <p className={styles.prompt}>
-            <Link className={styles.promptLink} to={loginPath}>
+            <Link className={styles.promptLink} to="/ost/login">
               Back to sign in
             </Link>
           </p>
@@ -151,7 +128,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             </Alert>
           )}
           <PasswordField
-            id="admin-reset-password"
+            id="ost-reset-password"
             label="New password"
             value={password}
             onChange={(value) => {
@@ -162,7 +139,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             error={fieldError ?? undefined}
           />
           <PasswordField
-            id="admin-reset-confirm"
+            id="ost-reset-confirm"
             label="Confirm new password"
             value={confirm}
             onChange={(value) => {
@@ -186,7 +163,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             Recovery links are single-use.
           </Alert>
           <p className={styles.prompt}>
-            <Link className={styles.promptLink} to={forgotPath}>
+            <Link className={styles.promptLink} to="/ost/forgot-password">
               Request a new link
             </Link>
           </p>
@@ -194,8 +171,4 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
       )}
     </AuthLayout>
   );
-}
-
-export function StaffResetPasswordPage() {
-  return <AdminResetPasswordPage portal="staff" />;
 }

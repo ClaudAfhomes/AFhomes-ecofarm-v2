@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Link } from 'react-router';
 import {
   RECOVERY_SENT_MESSAGE,
   buildRecoveryRedirect,
@@ -9,35 +9,19 @@ import {
 import { Alert, AuthLayout, Button, TextField } from '@jad/ui';
 
 import { env } from '../../lib/env';
-import { useSession } from '../../lib/session';
 import { getSupabaseClient } from '../../lib/supabase';
-import styles from './AdminLoginPage.module.css';
+import styles from '../customer/auth.module.css';
 
 /**
- * Staff forgot-password: request a Supabase Auth recovery email.
- *
- * The redirect is built from the configured admin origin
- * (`VITE_ADMIN_URL` + `/reset-password`) through the shared validator, so a
- * stale localhost default or a crafted value can never become a production
- * redirect. The success sentence is identical whether or not the address
- * exists - distinguishing the two would enumerate staff accounts. No
- * service-role API is involved; delivery is Supabase Auth email only.
- *
- * The `portal` prop reuses this page for the staff entry (`/staff/*`):
- * recovery lands on the staff reset page so the user returns to the Staff
- * Login, never the Administration Login.
+ * OST forgot-password. Recovery lands on `/ost/reset-password` so the seller
+ * returns to OST Login, never to another portal.
  */
-export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
-  const { status } = useSession();
+export function OstForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
-
-  const loginPath = portal === 'staff' ? '/staff/login' : '/admin/login';
-
-  if (status === 'authenticated') return <Navigate to="/admin" replace />;
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -57,16 +41,11 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
         setPending(false);
         return;
       }
-      const redirectTo =
-        portal === 'staff'
-          ? // Same origin as this SPA: the staff entry lives under the same
-            // host as the administration console in production.
-            buildRecoveryRedirect(
-              window.location.origin,
-              '/staff/reset-password',
-              window.location.origin,
-            )
-          : buildRecoveryRedirect(env.VITE_ADMIN_URL, '/reset-password', window.location.origin);
+      const redirectTo = buildRecoveryRedirect(
+        env.VITE_WEB_URL,
+        '/ost/reset-password',
+        window.location.origin,
+      );
       const { error } = await client.auth.resetPasswordForEmail(trimmed, { redirectTo });
       if (error) {
         const outcome = classifyRecoveryRequestError(error);
@@ -94,9 +73,9 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
     <AuthLayout
       eyebrow="AF Homes Ecofarm"
       title="Reset your password"
-      lead="Enter your staff email and we will send you a link to choose a new password."
-      brandTitle="Grow with the farm you own a card in."
-      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+      lead="Enter your OST email and we will send you a link to choose a new password."
+      brandTitle="Sell the farm you believe in."
+      brandLead="Your pipeline, your referral code, and your network."
     >
       {sent ? (
         <div className={styles.resultPanel}>
@@ -104,7 +83,7 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
             {RECOVERY_SENT_MESSAGE}
           </Alert>
           <p className={styles.prompt}>
-            <Link className={styles.promptLink} to={loginPath}>
+            <Link className={styles.promptLink} to="/ost/login">
               Back to sign in
             </Link>
           </p>
@@ -117,8 +96,8 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
             </Alert>
           )}
           <TextField
-            id="admin-forgot-email"
-            name="email"
+            id="ost-forgot-email"
+            name="ost-forgot-email"
             label="Email"
             type="email"
             value={email}
@@ -137,7 +116,7 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
             </Button>
           </div>
           <p className={styles.prompt}>
-            <Link className={styles.promptLink} to={loginPath}>
+            <Link className={styles.promptLink} to="/ost/login">
               Back to sign in
             </Link>
           </p>
@@ -145,8 +124,4 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
       )}
     </AuthLayout>
   );
-}
-
-export function StaffForgotPasswordPage() {
-  return <AdminForgotPasswordPage portal="staff" />;
 }

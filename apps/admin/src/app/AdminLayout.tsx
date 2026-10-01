@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Outlet, useLocation } from 'react-router';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@jad/ui';
 import { useSession } from '../lib/session';
+import { logoutPathForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
 
 export function AdminLayout() {
   const { user, logout } = useSession();
   const location = useLocation();
+  const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(() => breadcrumbItems(location.pathname), [location.pathname]);
   // JAD parity: while the temporary password is still in force the normal
@@ -54,8 +56,10 @@ export function AdminLayout() {
         open={confirm}
         onCancel={() => setConfirm(false)}
         onConfirm={() => {
+          const target = logoutPathForRole(user?.roleSlug);
           setConfirm(false);
           logout();
+          navigate(target);
         }}
         title="Sign out?"
         message="Sign out of AF Homes administration?"

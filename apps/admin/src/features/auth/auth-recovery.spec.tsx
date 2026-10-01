@@ -191,6 +191,34 @@ describe('admin reset-password', () => {
   });
 });
 
+describe('staff recovery pair', () => {
+  it('requests recovery for the staff reset page and links back to staff login', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />, { route: '/staff/forgot-password' });
+    await user.type(screen.getByLabelText(/email/i), 'staff@afhomes.test');
+    await user.click(screen.getByRole('button', { name: /send reset link/i }));
+    await waitFor(() =>
+      expect(authMock.resetPasswordForEmail).toHaveBeenCalledWith('staff@afhomes.test', {
+        redirectTo: expect.stringContaining('/staff/reset-password'),
+      }),
+    );
+    expect(screen.getByRole('link', { name: /back to sign in/i })).toHaveAttribute(
+      'href',
+      '/staff/login',
+    );
+  });
+
+  it('serves the staff reset page with staff return links', async () => {
+    authMock.getSession.mockResolvedValue({ data: { session: null } });
+    renderWithProviders(<App />, { route: '/staff/reset-password' });
+    expect(await screen.findByText(/invalid or has expired/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /request a new link/i })).toHaveAttribute(
+      'href',
+      '/staff/forgot-password',
+    );
+  });
+});
+
 describe('recovery pages never log or persist secrets', () => {
   it('contains no password/token sink in the new auth sources', () => {
     for (const file of ['AdminForgotPasswordPage.tsx', 'AdminResetPasswordPage.tsx']) {

@@ -316,7 +316,11 @@ describe('route precedence', () => {
 
   it('keeps unknown portal paths on the portal not-found screen', async () => {
     renderWithProviders(<App />, { route: '/customer/nope' });
-    expect(await screen.findByRole('heading')).toBeInTheDocument();
+    // The guard bounces to the sign-in screen, which carries its own heading
+    // alongside the hero - assert the sign-in specifically.
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+    ).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
     expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import {
   Alert,
@@ -23,6 +24,7 @@ import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhome
  * first-login change.
  */
 export function MyAccountPage() {
+  const navigate = useNavigate();
   const { user, revalidate } = useSession();
   const mustChangePassword = user?.mustChangePassword === true;
   const [name, setName] = useState<string | null>(null);
@@ -44,10 +46,16 @@ export function MyAccountPage() {
   const password = useMutation({
     mutationFn: () => changeAfHomesStaffPassword({ currentPassword, newPassword }),
     onSuccess: async () => {
+      // Capture the gate BEFORE the refresh: a forced change that cleared the
+      // server flag must leave this screen. Navigating to the dashboard is
+      // safe either way - if the flag were somehow still set, the guard
+      // parks the session right back here instead of stranding it.
+      const wasForced = mustChangePassword;
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       await revalidate();
+      if (wasForced) navigate('/admin', { replace: true });
     },
   });
 

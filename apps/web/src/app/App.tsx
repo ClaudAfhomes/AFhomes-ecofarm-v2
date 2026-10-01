@@ -14,11 +14,16 @@ import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
 import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemptionsPage';
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
+import { OstLoginPage } from '../features/ost/OstLoginPage';
+import { OstDashboardPage } from '../features/ost/OstDashboardPage';
+import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
+import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
 import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
+import { OstGuard } from './OstGuard';
 
-const HomePage = lazy(() => import('../marketing/pages/Home'));
+const HomePage = lazy(() => import('../features/customer/HomeLoginPage').then((m) => ({ default: m.HomeLoginPage })));
 const ExperiencesPage = lazy(() => import('../marketing/pages/Experiences'));
 const SmartWellnessHotelPage = lazy(() => import('../marketing/pages/SmartWellnessHotel'));
 const ALMJapaneseRestaurantPage = lazy(() => import('../marketing/pages/ALMJapaneseRestaurant'));
@@ -37,14 +42,15 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
 /**
  * Public site + customer portal routes.
  *
- * Marketing pages live under the marketing layout (scoped styles, CMS-free
- * static content in Phase 3). The customer portal is untouched: `/customer`
- * screens stay guarded behind `CustomerLayout`, and the portal keeps its own
- * `*` fallback so an unknown portal path never renders marketing chrome.
- * Anything else falls through to the marketing 404.
+ * `/` is the homepage WITH the member sign-in beside the hero (same CMS copy
+ * and imagery as the marketing hero, all other sections unchanged). Customer
+ * auth (`/customer/login`, activate, recovery) and the OST portal
+ * (`/ost/login`, `/ost/register`, `/ost/dashboard`) are public by necessity;
+ * the customer portal stays guarded behind `CustomerLayout`, the OST portal
+ * behind `OstGuard`, and each portal keeps its own `*` fallback.
  *
- * Route precedence note: static segments (`/customer/...`) always outrank
- * the root `*`, so public routes can never swallow `/customer/*` — and
+ * Route precedence note: static segments (`/customer/...`, `/ost/...`)
+ * always outrank the root `*`, so public routes can never swallow them — and
  * `/admin/*` + `/api/*` never reach this SPA at all (Vercel rewrites).
  */
 export default function App() {
@@ -80,9 +86,20 @@ export default function App() {
           swallowed by the CMS routes. */}
       <Route path="/customer/forgot-password" element={<CustomerForgotPasswordPage />} />
       <Route path="/customer/reset-password" element={<CustomerResetPasswordPage />} />
-      {/* Public OST registration. Outside the customer layout on purpose:
-          the applicant has no account yet, so none of the portal guards apply. */}
+      {/* Public OST portal. Registration is referral-first and login needs an
+          approved OST record; the dashboard is guarded separately below. */}
       <Route path="/ost/register" element={<OstRegisterPage />} />
+      <Route path="/ost/login" element={<OstLoginPage />} />
+      <Route path="/ost/forgot-password" element={<OstForgotPasswordPage />} />
+      <Route path="/ost/reset-password" element={<OstResetPasswordPage />} />
+      <Route
+        path="/ost/dashboard"
+        element={
+          <OstGuard>
+            <OstDashboardPage />
+          </OstGuard>
+        }
+      />
 
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<CustomerDashboardPage />} />

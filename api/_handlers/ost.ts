@@ -17,6 +17,7 @@ import {
   OST_REVIEWABLE_STATUSES,
   createOstReferralCodeSchema,
   normalizeOstReferralCode,
+  ostMeSchema,
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
@@ -43,7 +44,9 @@ import {
 } from '../_lib/handler-kit.js';
 import { hashIdentifier } from '../_lib/identifier.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
-import { serviceClient } from '../_lib/rest.js';
+import { serviceClient, anonClient } from '../_lib/rest.js';
+import { extractBearerToken } from '../_lib/token.js';
+import { verifySessionToken } from '../_lib/auth-verify.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { resolveAdminUrl } from '../_lib/admin-url.js';
 
@@ -264,6 +267,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    /* ---------------- authenticated OST self record (OST portal) ---------------- */
+    // The OST portal's own dashboard. Resolves the Auth user directly - an
+    // approved OST may not hold a usable staff session - and returns only
+    // that member's safe fields. Anything else is a 404 with no distinction
+    // between "no such member" and "not yours".
+    if (subPath(req) === 'me' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: member, error } = await db
+        .from('ost_members')
+        .select('id, ost_number, full_name, email, status, sponsor_staff_id, approved_at')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      const { data: sponsor } = await db
+        .from('staff_users')
+        .select('full_name')
+        .eq('id', member.sponsor_staff_id)
+        .maybeSingle();
+      const parsed = ostMeSchema.safeParse({
+        ostNumber: member.ost_number,
+        fullName: member.full_name,
+        status: member.status,
+        sponsorName: String(sponsor?.full_name ?? ''),
+        approvedAt: isoOrNull(member.approved_at) ?? '',
+      });
+      if (!parsed.success) return fail(res, 'INTERNAL', 'OST record is unavailable', 500);
+      return res.status(200).json(parsed.data);
+    }
+
     /* ---------------- public: resolve a referral code ---------------- */
     const resolve = route(req, 'GET', /^referrals\/(.+)$/);
     if (resolve) {

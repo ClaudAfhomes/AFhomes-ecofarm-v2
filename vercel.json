@@ -19,6 +19,7 @@
     { "source": "/health", "destination": "/api/router?path=health" },
     { "source": "/admin", "destination": "/admin/index.html" },
     { "source": "/admin/:path*", "destination": "/admin/index.html" },
+    { "source": "/staff/:path*", "destination": "/admin/index.html" },
     { "source": "/about", "destination": "/about/index.html" },
     { "source": "/experiences", "destination": "/experiences/index.html" },
     {

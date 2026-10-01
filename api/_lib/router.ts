@@ -108,6 +108,12 @@ const BUSINESS_FAMILIES = [
     path: 'customer/activate',
     load: () => import('../_handlers/customer-activation.js'),
   },
+  {
+    prefix: 'auth',
+    module: 'auth',
+    path: 'portals',
+    load: () => import('../_handlers/auth-portals.js'),
+  },
   { prefix: 'customer', module: 'customer', load: () => import('../_handlers/customer-portal.js') },
   // Staff redemption. Reuses the Phase 1 `operations.redemption` and
   // `operations.catalog` module keys, so Phase 4 adds NO new authorization

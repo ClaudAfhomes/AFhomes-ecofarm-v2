@@ -5,8 +5,10 @@
  */
 import {
   ostApplicationSubmittedSchema,
+  ostMeSchema,
   ostReferralResolutionSchema,
   type OstApplicationSubmitted,
+  type OstMe,
   type OstReferralResolution,
   type SubmitOstApplicationRequest,
 } from '@jad/contracts';
@@ -24,4 +26,10 @@ export const submitOstApplication = (
     body: JSON.stringify(body),
   });
 
-export type { OstApplicationSubmitted, OstReferralResolution };
+/**
+ * The signed-in OST member's own record. Authenticated: the bearer token
+ * resolves the member server-side, so there is no id to pass or to spoof.
+ */
+export const getOstMe = (): Promise<OstMe> => request('/ost/me', ostMeSchema);
+
+export type { OstApplicationSubmitted, OstMe, OstReferralResolution };
