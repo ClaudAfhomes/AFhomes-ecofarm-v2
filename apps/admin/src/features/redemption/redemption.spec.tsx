@@ -190,7 +190,7 @@ describe('redemption lookup', () => {
   it('shows the three-step workflow with no member yet', () => {
     render('/admin/redemption');
     expect(screen.getByRole('heading', { name: '1. Identify the member' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Fallback member code')).toBeInTheDocument();
+    expect(screen.getByLabelText('Member code')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeInTheDocument();
     // No item list and no confirm button until a member is identified.
     expect(screen.queryByRole('radiogroup')).toBeNull();
@@ -200,7 +200,7 @@ describe('redemption lookup', () => {
     const user = userEvent.setup();
     install({ '/redemptions/resolve': ok({ ...MEMBER, matchedBy: 'fallback_code' }) });
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
 
     expect(await screen.findByText('Ana R Buyer')).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe('redemption lookup', () => {
   it('says when a member was identified by QR instead', async () => {
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     expect(await screen.findByText('Ana R Buyer')).toBeInTheDocument();
     expect(screen.getByText(/Identified by QR code/i)).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe('redemption lookup', () => {
   it('LOOKING UP A MEMBER SPENDS NOTHING', async () => {
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
 
@@ -240,7 +240,7 @@ describe('redemption lookup', () => {
   it('never sends the identifier anywhere but the resolve endpoint', async () => {
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
 
@@ -258,7 +258,7 @@ describe('redemption lookup', () => {
     });
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-0000-0000');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-0000-0000');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     expect(await screen.findByText('Could not identify that member')).toBeInTheDocument();
   });
@@ -266,7 +266,7 @@ describe('redemption lookup', () => {
   it('refuses to look up a code that is too short to be real', async () => {
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AB');
+    await user.type(screen.getByLabelText('Member code'), 'AB');
     expect(screen.getByRole('button', { name: 'Look up' })).toBeDisabled();
   });
 
@@ -281,7 +281,7 @@ describe('redemption lookup', () => {
     });
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
 
     expect(await screen.findByText('The membership has expired.')).toBeInTheDocument();
@@ -298,7 +298,7 @@ describe('redemption lookup', () => {
     install({ '/redemptions/resolve': ok({ ...MEMBER, pointsBalance: 5000 }) });
     const user = userEvent.setup();
     render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
 
@@ -316,7 +316,7 @@ describe('redemption lookup', () => {
 
 describe('POS till: items, pending confirmation, print safety', () => {
   const identify = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
   };
@@ -408,7 +408,7 @@ describe('POS till: items, pending confirmation, print safety', () => {
 
 describe('redemption confirm', () => {
   const identify = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
   };
@@ -564,7 +564,7 @@ describe('redemption confirm', () => {
     await user.click(screen.getByRole('button', { name: 'Next member' }));
 
     await waitFor(() => expect(screen.queryByText('Ana R Buyer')).toBeNull());
-    expect(screen.getByLabelText('Fallback member code')).toHaveValue('');
+    expect(screen.getByLabelText('Member code')).toHaveValue('');
     expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 
@@ -593,7 +593,7 @@ describe('redemption receipt printing', () => {
     try {
       const user = userEvent.setup();
       render('/admin/redemption');
-      await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+      await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
       await user.click(screen.getByRole('button', { name: 'Look up' }));
       await screen.findByText('Ana R Buyer');
       await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
@@ -620,7 +620,7 @@ describe('redemption workflow permissions', () => {
   it('tells a view-only operator that they cannot create redemptions', async () => {
     const user = userEvent.setup();
     render('/admin/redemption', VIEW_ONLY);
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
     expect(await screen.findByText(/your role cannot create redemptions/i)).toBeInTheDocument();
@@ -645,7 +645,7 @@ describe('redemption screen data hygiene', () => {
     });
     const user = userEvent.setup();
     const { container } = render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
 
@@ -667,7 +667,7 @@ describe('redemption screen data hygiene', () => {
   it('never renders a credential hash', async () => {
     const user = userEvent.setup();
     const { container } = render('/admin/redemption');
-    await user.type(screen.getByLabelText('Fallback member code'), 'AFH-1A2B-3C4D');
+    await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
     await user.click(screen.getByRole('button', { name: 'Look up' }));
     await screen.findByText('Ana R Buyer');
     expect(container.innerHTML).not.toMatch(/[a-f0-9]{64}/);
@@ -681,7 +681,7 @@ describe('redemption screen data hygiene', () => {
 describe('camera scanner safety', () => {
   it('offers manual entry alongside the camera, so a denied camera is not a dead end', () => {
     render('/admin/redemption');
-    expect(screen.getByLabelText('Fallback member code')).toBeInTheDocument();
+    expect(screen.getByLabelText('Member code')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Scan QR code' })).toBeInTheDocument();
   });
 

@@ -49,7 +49,9 @@ const MEMBERSHIP = {
   paymentScheme: 'spot_cash' as const,
   validityYears: 1,
   credentialsAvailable: false as const,
-  credentialsNote: 'Your card code is stored only as a one-way hash.',
+  credentialsNote: 'Your member code and QR below never change.',
+  memberCode: 'MBS-000777',
+  qrPayload: 'AFHOMES:MBS-000777',
 };
 
 const POINTS = {
@@ -176,8 +178,8 @@ describe('Phase 33 customer portal at mobile widths', () => {
   it('digital card fits 320px without clipping the number or plan', async () => {
     atWidth(320);
     render('/customer/membership');
-    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
-    expect(screen.getByText('Gold')).toBeInTheDocument();
+    expect(await screen.findAllByText('MBS-000777')).not.toHaveLength(0);
+    expect(screen.getAllByText('Gold').length).toBeGreaterThanOrEqual(1);
     // No hidden credential is ever rendered alongside the card.
     expect(document.body.textContent).not.toMatch(/qr_token|fallback_code|_hash/);
   });

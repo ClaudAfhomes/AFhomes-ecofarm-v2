@@ -37,6 +37,13 @@ export const membershipCardSchema = z.object({
    * (validity months / 12). Customer-safe: a duration, never economics.
    */
   validityYears: z.number().int().positive().nullable(),
+  /**
+   * Persistent identifiers for print and staff desks: the membership number
+   * itself and the exact QR payload (`AFHOMES:<number>`). Printable because
+   * they authorize nothing - every use is re-validated server-side.
+   */
+  memberCode: z.string(),
+  qrPayload: z.string(),
   cardIssuedAt: z.string().nullable(),
   issuedBy: z.string().nullable(),
   lastPrintedAt: z.string().nullable(),

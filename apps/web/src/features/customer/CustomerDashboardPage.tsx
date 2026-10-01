@@ -20,9 +20,8 @@ import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './po
  * JAD member-dashboard structure (page header, KPI grid, membership panel,
  * recent activity) with AF Homes content: deliberately read-only and
  * deliberately narrow - name, card, status, activation and renewal dates,
- * points balance, and recent points activity. No staff-only field, no finance
- * data, and no card code (the membership screen explains why a code is never
- * simply displayed).
+ * points balance, and recent points activity. No staff-only field and no
+ * finance data; the scannable card itself lives on the membership screen.
  *
  * React Query dedupes by key, so the profile fetch here is the same request the
  * shell already made.
@@ -143,7 +142,7 @@ export function CustomerDashboardPage() {
         )}
         {membership.data && (
           <p className={styles.notice}>
-            <Link to="/customer/membership">Manage your card code</Link>
+            <Link to="/customer/membership">Open your digital VIP card</Link>
             {' · '}
             <Link to="/customer/redemptions">Redemption history</Link>
             {' · '}

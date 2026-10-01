@@ -2,33 +2,44 @@ import { useState } from 'react';
 import { Button, Dialog, ErrorState, QrCode, StatusChip, type StatusTone } from '@jad/ui';
 import { paymentSchemeLabel } from '@jad/contracts';
 
-import { useCustomerMembershipQuery, useReissueCredentials } from './queries';
+import {
+  useCustomerMembershipQuery,
+  useCustomerProfileQuery,
+  useReissueCredentials,
+} from './queries';
 import { isForbidden, isNotFound } from './http';
 import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
+import { tierArtwork, tierLabel } from './tierArtwork';
 import type { CustomerCredentials } from './services';
 
 /**
- * Membership / card screen, including the card credential policy.
+ * Digital VIP card screen.
  *
- * The policy, stated to the member in plain language:
+ * Every active membership carries a persistent, re-displayable card:
  *
- * Only a SHA-256 hash of the QR token and of the fallback member code is stored,
- * so neither can be shown on demand without weakening at-rest security. Instead
- * the codes are ROTATED: the member asks for a new pair, the previous pair stops
- * working immediately, and the new pair is displayed exactly once.
+ * - the membership number IS the member code (stable, typable at any desk);
+ * - the QR encodes `AFHOMES:<member code>` and nothing else - no name, no
+ *   customer number beyond the code itself, no government ID, no token, no
+ *   JWT, no NFC involvement of any kind;
+ * - viewing the card never rotates anything: the code and the QR are the
+ *   same on every visit, and staff resolve them to the same membership.
  *
- * The plaintext therefore lives in React state for exactly as long as the
- * disclosure dialog is open, and is never persisted, never logged and never
- * re-fetched. The re-issue request is a manual, never-retried mutation.
+ * Possession of the code authorizes nothing by itself. The backend still
+ * verifies membership status, expiry, the points account, the item and the
+ * acting staff member on every redemption.
  *
- * The QR payload is the opaque token only - no name, no customer number, no
- * government ID, nothing else. Anyone photographing the QR learns nothing beyond
- * the token itself.
+ * Separate from the card are the ONE-TIME secrets minted at activation (QR
+ * token + fallback member code). Only hashes are stored, so those can never
+ * be displayed - only rotated via the request below, which invalidates the
+ * previous pair immediately.
  */
 export function CustomerMembershipPage() {
   const membership = useCustomerMembershipQuery();
+  const profile = useCustomerProfileQuery();
   const reissue = useReissueCredentials();
   const [issued, setIssued] = useState<CustomerCredentials | null>(null);
+  const [showQr, setShowQr] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   if (membership.isLoading) return <p role="status">Loading your card…</p>;
   if (membership.isError) {
@@ -46,23 +57,95 @@ export function CustomerMembershipPage() {
     );
   }
   const card = membership.data!;
+  const artwork = tierArtwork(card.productCode);
+
+  const copyMemberCode = async () => {
+    try {
+      await navigator.clipboard.writeText(card.memberCode);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <>
-      <Card title="Membership">
+      <Card title="My Digital VIP Card">
+        <div className={styles.digitalCard}>
+          <img
+            className={styles.digitalArt}
+            src={artwork.src}
+            alt={artwork.alt}
+            width={512}
+            height={320}
+          />
+          <dl className={styles.digitalDetails}>
+            <div className={styles.digitalRow}>
+              <dt className={styles.fieldLabel}>Member</dt>
+              <dd className={styles.digitalValue}>
+                {profile.data?.fullName ?? '—'}
+              </dd>
+            </div>
+            <div className={styles.digitalRow}>
+              <dt className={styles.fieldLabel}>Membership</dt>
+              <dd className={`${styles.digitalValue} ${styles.mono}`}>{card.membershipNumber}</dd>
+            </div>
+            <div className={styles.digitalRow}>
+              <dt className={styles.fieldLabel}>Tier</dt>
+              <dd className={styles.digitalValue}>
+                {tierLabel(card.productName, card.productCode)}
+              </dd>
+            </div>
+            <div className={styles.digitalRow}>
+              <dt className={styles.fieldLabel}>Status</dt>
+              <dd className={styles.digitalValue}>
+                <StatusChip label={card.status} tone={toneFor(card.status)} />
+              </dd>
+            </div>
+            <div className={styles.digitalRow}>
+              <dt className={styles.fieldLabel}>Valid until</dt>
+              <dd className={styles.digitalValue}>{formatDate(card.renewalDueAt)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className={styles.credentialBox}>
+          {showQr ? (
+            <QrCode
+              value={card.qrPayload}
+              alt="Your AF Homes Ecofarm member QR code"
+              size={160}
+            />
+          ) : (
+            <p className={styles.notice} role="status">
+              QR hidden. Show it when a desk is ready to scan.
+            </p>
+          )}
+          <div className={styles.credentialText}>
+            <p className={styles.fieldLabel}>Member Code</p>
+            <p className={styles.credentialCode}>{card.memberCode}</p>
+            <p className={styles.notice}>
+              Show this QR or code at any AF Homes Ecofarm desk. It never changes, and viewing
+              it never invalidates anything.
+            </p>
+            <div className={styles.digitalActions}>
+              <Button variant="secondary" onClick={() => setShowQr((visible) => !visible)}>
+                {showQr ? 'Hide QR' : 'Show QR'}
+              </Button>
+              <Button variant="secondary" onClick={() => void copyMemberCode()}>
+                {copied ? 'Copied' : 'Copy Member Code'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="Membership details">
         <FieldList>
-          <Field label="Membership number" value={card.membershipNumber} />
           <Field label="Product" value={card.productName ?? 'AF Homes card'} />
           {/* The member's OWN agreed scheme - never the internal move playbook. */}
           <Field label="Payment scheme" value={paymentSchemeLabel(card.paymentScheme)} />
-          <Field
-            label="Status"
-            value={<StatusChip label={card.status} tone={toneFor(card.status)} />}
-          />
           <Field label="Activated" value={formatDate(card.activatedAt)} />
-          {/* "Valid until", not "Renews": the date is the enforced expiry and
-              no renewal flow exists. Matches the membership print page. */}
-          <Field label="Valid until" value={formatDate(card.renewalDueAt)} />
           {card.validityYears ? (
             <Field
               label="Validity"
@@ -73,11 +156,12 @@ export function CustomerMembershipPage() {
         </FieldList>
       </Card>
 
-      <Card title="Your card code">
-        <p className={`${styles.notice} ${styles.noticeWarning}`}>{card.credentialsNote}</p>
+      <Card title="Lost printed secret?">
+        <p className={styles.notice}>{card.credentialsNote}</p>
         <p className={styles.notice}>
-          Requesting a new code is free and can be done whenever you lose the old one. It replaces
-          the previous code immediately, so do this only if the old one is genuinely lost.
+          Requesting a new secret is free and replaces the previous secret immediately, so do
+          this only if the old printed secret is genuinely lost. Your member code and QR above
+          are unaffected.
         </p>
         <Button
           onClick={() => {
@@ -87,11 +171,11 @@ export function CustomerMembershipPage() {
           }}
           disabled={reissue.isPending}
         >
-          {reissue.isPending ? 'Issuing a new code…' : 'Request a new card code'}
+          {reissue.isPending ? 'Issuing a new secret…' : 'Request a new card secret'}
         </Button>
         {reissue.isError && (
           <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-            We could not issue a new code. Your existing code is unchanged. Please try again.
+            We could not issue a new secret. Your existing codes are unchanged. Please try again.
           </p>
         )}
       </Card>
@@ -99,8 +183,8 @@ export function CustomerMembershipPage() {
       <Dialog
         open={issued !== null}
         onClose={() => setIssued(null)}
-        title="Your new card code"
-        footer={<Button onClick={() => setIssued(null)}>I have saved my code</Button>}
+        title="Your new card secret"
+        footer={<Button onClick={() => setIssued(null)}>I have saved my secret</Button>}
       >
         {issued && <IssuedCredentials credentials={issued} />}
       </Dialog>
@@ -115,8 +199,8 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
       <QrCode value={credentials.qrToken} alt="Your AF Homes Ecofarm member QR code" size={160} />
       <div className={styles.credentialText}>
         <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-          Shown once. Close this and the codes cannot be displayed again — request a new pair if
-          you lose them.
+          Shown once. Close this and the secret cannot be displayed again — request a new pair
+          if you lose it. Your member code and card QR are unaffected.
         </p>
         <p className={styles.fieldLabel}>Fallback member code</p>
         <p className={styles.credentialCode}>{credentials.fallbackCode}</p>
@@ -125,8 +209,7 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
           enter it by hand.
         </p>
         <p className={styles.notice}>
-          Membership {credentials.membershipNumber}. Issued{' '}
-          {formatDate(credentials.issuedAt)}.
+          Membership {credentials.membershipNumber}. Issued {formatDate(credentials.issuedAt)}.
         </p>
       </div>
     </div>

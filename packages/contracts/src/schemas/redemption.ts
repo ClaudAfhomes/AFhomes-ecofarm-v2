@@ -105,8 +105,15 @@ export const redemptionPreviewSchema = z.object({
   blockedReason: z.string().nullable(),
   /** Authoritative balance, read from `points_accounts` - never from the client. */
   pointsBalance: z.number().int().nonnegative(),
-  /** Which identifier matched, for the staff member's reassurance. Never the value. */
-  matchedBy: z.enum(['qr', 'fallback_code']),
+  /**
+   * Which identifier matched, for the staff member's reassurance. Never the value.
+   *
+   * `qr` / `fallback_code` are the one-time secrets; `card_number` is the
+   * persistent membership number (bare or the `AFHOMES:` QR envelope) from a
+   * digital VIP card. All three identify the same row, and none authorizes
+   * anything by itself.
+   */
+  matchedBy: z.enum(['qr', 'fallback_code', 'card_number']),
 });
 export type RedemptionPreview = z.infer<typeof redemptionPreviewSchema>;
 

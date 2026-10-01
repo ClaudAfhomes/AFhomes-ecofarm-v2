@@ -69,6 +69,8 @@ const CARD: MembershipCard = {
   activatedAt: '2026-09-27T09:00:00.000Z',
   expiresAt: '2027-09-27T09:00:00.000Z',
   validityYears: 1,
+  memberCode: 'MBS-000001',
+  qrPayload: 'AFHOMES:MBS-000001',
   cardIssuedAt: '2026-09-28T01:00:00.000Z',
   issuedBy: 'Ops Admin',
   lastPrintedAt: '2026-09-28T02:00:00.000Z',

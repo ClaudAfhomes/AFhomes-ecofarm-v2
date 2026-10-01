@@ -116,10 +116,20 @@ async function nextOstNumber(db: Db): Promise<string> {
 
 type SponsorCheck =
   | { ok: true; id: string; fullName: string; email: string }
-  | { ok: false; status: 404 | 409; message: string };
+  | { ok: false; status: 403 | 404 | 409; message: string };
 
-/** The sponsor must be an active Sales Manager with an active role. */
-async function checkSponsor(db: Db, sponsorStaffId: string): Promise<SponsorCheck> {
+/**
+ * OST sponsorship validation: the sponsor of an OST referral code must be an
+ * ACTIVE SALES MANAGER holding an active role.
+ *
+ * This rule belongs ONLY to the OST sponsorship context (public code
+ * resolution, public application submission, and the approval re-check),
+ * because an approved OST is inserted into the genealogy as `ost` directly
+ * under a `sales_manager`. It must never be reused for customer/card-sale
+ * referrals or for generic referral-code issuance - those contexts have
+ * their own validators below.
+ */
+async function validateOstSponsor(db: Db, sponsorStaffId: string): Promise<SponsorCheck> {
   const { data: staff } = await db
     .from('staff_users')
     .select('id, full_name, email, status')
@@ -150,9 +160,66 @@ async function checkSponsor(db: Db, sponsorStaffId: string): Promise<SponsorChec
   };
 }
 
+/**
+ * Approval-time re-validation of the FROZEN sponsor.
+ *
+ * The sponsor was fixed at submission and is never changed here; when they no
+ * longer qualify, approval is refused with an approval-specific error so an
+ * operator knows the application needs sponsor attention, not a resubmit.
+ */
+async function validateApprovalSponsor(
+  db: Db,
+  sponsorStaffId: string,
+): Promise<SponsorCheck> {
+  const checked = await validateOstSponsor(db, sponsorStaffId);
+  if (checked.ok) return checked;
+  return {
+    ok: false as const,
+    status: checked.status,
+    message:
+      `This application cannot be approved: ${checked.message}. ` +
+      'The sponsor is unchanged - resolve the sponsor first, then re-review.',
+  };
+}
+
+export type ReferralCodeIssuer = { userId: string; roleSlug: string };
+
+/**
+ * Issuance-time validation for OST referral codes.
+ *
+ * An OST referral code IS an OST sponsorship code (it freezes the sponsor
+ * into the application and the genealogy edge), so its sponsor must still be
+ * an active Sales Manager. What differs from public validation is the
+ * perspective: a non-SM staff member opening "My Referral Code" and issuing
+ * for themselves is an ISSUER problem, not a code problem, and gets an
+ * issuance-specific error instead of the public validation message.
+ */
+async function validateReferralCodeIssuer(
+  db: Db,
+  caller: ReferralCodeIssuer,
+  sponsorId: string,
+): Promise<SponsorCheck> {
+  if (sponsorId === caller.userId && caller.roleSlug !== 'sales_manager') {
+    return {
+      ok: false,
+      status: 403,
+      message:
+        'Only an active Sales Manager can sponsor an OST referral code. ' +
+        'Ask a Sales Manager for their code, or have an administrator issue one on their behalf.',
+    };
+  }
+  const checked = await validateOstSponsor(db, sponsorId);
+  if (checked.ok) return checked;
+  return {
+    ok: false as const,
+    status: checked.status,
+    message: `That sponsor cannot back an OST referral code: ${checked.message}.`,
+  };
+}
+
 type CodeCheck =
   | { ok: true; codeRow: Record<string, unknown>; sponsor: Extract<SponsorCheck, { ok: true }> }
-  | { ok: false; status: 404 | 409; message: string };
+  | { ok: false; status: 403 | 404 | 409; message: string };
 
 async function resolveCode(db: Db, rawCode: string): Promise<CodeCheck> {
   const normalized = normalizeOstReferralCode(rawCode);
@@ -170,7 +237,7 @@ async function resolveCode(db: Db, rawCode: string): Promise<CodeCheck> {
     return { ok: false, status: 409, message: 'This referral code has expired' };
   if (Number(codeRow.use_count ?? 0) >= Number(codeRow.max_uses ?? 1))
     return { ok: false, status: 409, message: 'This referral code has reached its usage limit' };
-  const sponsor = await checkSponsor(db, String(codeRow.sponsor_staff_id));
+  const sponsor = await validateOstSponsor(db, String(codeRow.sponsor_staff_id));
   if (!sponsor.ok) return sponsor;
   return { ok: true, codeRow: codeRow as Record<string, unknown>, sponsor };
 }
@@ -444,7 +511,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
 
       // The sponsor is frozen: re-validate the STORED sponsor, never a body value.
-      const sponsor = await checkSponsor(db, String(app.sponsor_staff_id));
+      // An approval-time failure names the approval context and never swaps
+      // the sponsor: the application keeps its sponsor until an operator acts.
+      const sponsor = await validateApprovalSponsor(db, String(app.sponsor_staff_id));
       if (!sponsor.ok) return fail(res, 'CONFLICT', sponsor.message, 409);
 
       const { data: clashMember } = await db
@@ -831,8 +900,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return fail(res, 'FORBIDDEN', 'Sellers may only issue their own code', 403);
         sponsorId = requestedSponsor;
       }
-      const sponsor = await checkSponsor(db, sponsorId);
-      if (!sponsor.ok) return fail(res, 'CONFLICT', sponsor.message, 409);
+      const sponsor = await validateReferralCodeIssuer(
+        db,
+        { userId: auth.userId, roleSlug: auth.roleSlug },
+        sponsorId,
+      );
+      if (!sponsor.ok)
+        return fail(
+          res,
+          sponsor.status === 403 ? 'FORBIDDEN' : 'CONFLICT',
+          sponsor.message,
+          sponsor.status,
+        );
 
       const { data: existing } = await db
         .from('referral_codes')

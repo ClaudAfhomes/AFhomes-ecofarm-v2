@@ -31,6 +31,7 @@ import {
   route,
   subPath,
 } from '../_lib/handler-kit.js';
+import { cardQrPayload, extractMembershipNumber } from '../_lib/identifier.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -155,8 +156,10 @@ async function authorizeCardStaff(req: VercelRequest) {
 /**
  * Printable card data. No hashes, no customer/staff UUIDs: the membership id
  * is already in the URL, the member is a display name, and the tier comes
- * from the product catalogue. Credential codes are NEVER here - hash-only
- * storage means they cannot be recovered, only rotated.
+ * from the product catalogue. The one-time credential secrets are NEVER here -
+ * hash-only storage means they cannot be recovered, only rotated. The
+ * persistent `memberCode` / `qrPayload` ARE here: they authorize nothing and
+ * are meant to be printed.
  */
 const toCard = (
   row: Record<string, unknown>,
@@ -166,9 +169,10 @@ const toCard = (
 ) => {
   const customer = (row.customers ?? {}) as Record<string, unknown>;
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
+  const membershipNumber = String(row.membership_number ?? '');
   return {
     membershipId: row.id,
-    membershipNumber: row.membership_number,
+    membershipNumber,
     memberName:
       [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
         .filter((p) => typeof p === 'string' && p)
@@ -183,6 +187,8 @@ const toCard = (
     activatedAt: isoOrNull(row.activated_at),
     expiresAt: isoOrNull(row.expires_at),
     validityYears: validityYearsOf(schemes.get(String(row.sale_id ?? ''))?.validityMonths),
+    memberCode: membershipNumber,
+    qrPayload: cardQrPayload(membershipNumber),
     cardIssuedAt: isoOrNull(row.card_issued_at),
     issuedBy: issuers.get(String(row.card_issued_by ?? ''))?.name ?? null,
     lastPrintedAt: isoOrNull(row.last_printed_at),
@@ -217,7 +223,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .limit(1);
       if (error) throw error;
 
-      const row = (data ?? [])[0] as Record<string, unknown> | undefined;
+      let row = (data ?? [])[0] as Record<string, unknown> | undefined;
+      if (!row) {
+        // No secret matched: fall through to the persistent card number
+        // (bare or the `AFHOMES:` digital-card envelope) before giving up.
+        const cardNumber = extractMembershipNumber(identifier);
+        if (cardNumber) {
+          const { data: numbered, error: numberError } = await db
+            .from('memberships')
+            .select(
+              'id, membership_number, status, points_balance, expires_at, qr_token_hash, fallback_code_hash',
+            )
+            .eq('membership_number', cardNumber)
+            .maybeSingle();
+          if (numberError) throw numberError;
+          row = (numbered ?? undefined) as Record<string, unknown> | undefined;
+        }
+      }
       if (!row) return fail(res, 'NOT_FOUND', 'No membership matches that identifier', 404);
 
       const expiresAt = isoOrNull(row.expires_at);

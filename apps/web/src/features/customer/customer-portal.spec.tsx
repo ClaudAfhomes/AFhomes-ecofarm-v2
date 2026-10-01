@@ -56,7 +56,9 @@ const MEMBERSHIP = {
   validityYears: 1,
   credentialsAvailable: false as const,
   credentialsNote:
-    'Your card code is stored only as a one-way hash, so it cannot be displayed again.',
+    'Your member code and QR below never change - show them at any AF Homes Ecofarm desk.',
+  memberCode: 'MBS-000777',
+  qrPayload: 'AFHOMES:MBS-000777',
 };
 
 const POINTS = {
@@ -359,14 +361,18 @@ describe('customer profile', () => {
 /* ================================================================== */
 
 describe('membership screen', () => {
-  it('states that a code is not available on demand', async () => {
+  it('shows the persistent digital VIP card without any rotation', async () => {
     render('/customer/membership');
-    expect(await screen.findByText(/one-way hash/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /my digital vip card/i })).toBeInTheDocument();
+    // The member code is the membership number: always visible, never rotated.
+    expect(screen.getAllByText('MBS-000777').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: /copy member code/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
   });
 
-  it('does not display a card code until one is explicitly requested', async () => {
+  it('does not display a one-time secret until one is explicitly requested', async () => {
     render('/customer/membership');
-    await screen.findByText(/one-way hash/i);
+    await screen.findByText(/my digital vip card/i);
     expect(screen.queryByText('AFH-NEWW-WWWW')).not.toBeInTheDocument();
   });
 
@@ -386,10 +392,15 @@ describe('membership screen', () => {
     });
     const user = userEvent.setup();
     render('/customer/membership');
-    await user.click(await screen.findByRole('button', { name: /request a new card code/i }));
+    await user.click(await screen.findByRole('button', { name: /request a new card secret/i }));
 
     expect(await screen.findByText('AFH-NEWW-WWWW')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
+    // The issued secret renders inside the dialog; the persistent card QR
+    // renders on the page, so scope the image query to the dialog.
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByRole('img', { name: /member QR code/i }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText(/cannot be displayed again/i).length).toBeGreaterThan(0);
   });
 
@@ -402,7 +413,7 @@ describe('membership screen', () => {
       }),
     });
     const { container } = render('/customer/membership');
-    await screen.findByText('MBS-000777');
+    await screen.findAllByText('MBS-000777');
     expect(container.innerHTML).not.toContain('a'.repeat(64));
     expect(container.innerHTML).not.toContain('b'.repeat(64));
   });
@@ -412,7 +423,7 @@ describe('membership screen', () => {
     expect(await screen.findByText('Spot Cash')).toBeInTheDocument();
     expect(screen.getByText('Valid for 1 year')).toBeInTheDocument();
     const { container } = render('/customer/membership');
-    await screen.findByText('MBS-000777');
+    await screen.findAllByText('MBS-000777');
     expect(container.innerHTML).not.toMatch(/Move B1|Move B2|40% DP|25% DP/);
   });
 });
@@ -854,7 +865,7 @@ describe('membership status display', () => {
       '/customer/membership': ok({ ...MEMBERSHIP, status: 'cancelled' as const }),
     });
     render('/customer/membership');
-    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(await screen.findAllByText('MBS-000777')).not.toHaveLength(0);
     expect(screen.getByText('cancelled')).toBeInTheDocument();
   });
 
@@ -863,7 +874,7 @@ describe('membership status display', () => {
       '/customer/membership': ok({ ...MEMBERSHIP, status: 'expired' as const }),
     });
     render('/customer/membership');
-    expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
+    expect(await screen.findAllByText('MBS-000777')).not.toHaveLength(0);
     expect(screen.getByText('expired')).toBeInTheDocument();
   });
 });

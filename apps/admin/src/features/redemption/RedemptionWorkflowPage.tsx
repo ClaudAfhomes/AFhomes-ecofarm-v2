@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Dialog, EmptyState, ErrorState, PageHeader, Spinner, StatusChip } from '@jad/ui';
-import type { RedemptionPreview, RedemptionReceipt } from '@jad/contracts';
+import type { RedemptionItem, RedemptionPreview, RedemptionReceipt } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
 import { ApiError } from '../../lib/api/errors';
@@ -36,6 +37,8 @@ export function RedemptionWorkflowPage() {
   const [preview, setPreview] = useState<RedemptionPreview | null>(null);
   const [itemId, setItemId] = useState('');
   const [itemFilter, setItemFilter] = useState('');
+  /** Item whose details are open. Reading details never selects or redeems. */
+  const [detailsItem, setDetailsItem] = useState<RedemptionItem | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [receipt, setReceipt] = useState<RedemptionReceipt | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -135,8 +138,12 @@ export function RedemptionWorkflowPage() {
     <>
       <PageHeader
         title="Redeem Points"
-        description="Scan a member's QR code or enter their fallback code, choose an item, then confirm."
+        description="Scan a member's QR code or enter their member code, choose an item, then confirm."
       />
+      <p className={styles.hint}>
+        The catalog below is the shared admin catalog - items created by an administrator appear
+        here automatically. <Link to="/admin/redemption/history">Transaction history</Link>
+      </p>
 
       {/* ---------------- 1. identify ---------------- */}
       <section className={styles.panel}>
@@ -145,7 +152,7 @@ export function RedemptionWorkflowPage() {
         <div className={styles.identifyRow}>
           <div className={styles.manual}>
             <label className={styles.label} htmlFor="redemption-code">
-              Fallback member code
+              Member code
             </label>
             <div className={styles.manualRow}>
               <input
@@ -154,7 +161,7 @@ export function RedemptionWorkflowPage() {
                 className={styles.input}
                 value={manualCode}
                 onChange={(event) => setManualCode(event.target.value)}
-                placeholder="AFH-XXXX-XXXX"
+                placeholder="MBS-000001 or AFH-XXXX-XXXX"
                 autoComplete="off"
                 spellCheck={false}
                 onKeyDown={(event) => {
@@ -170,6 +177,10 @@ export function RedemptionWorkflowPage() {
                 {lookup.isPending ? 'Looking up…' : 'Look up'}
               </Button>
             </div>
+            <p className={styles.hint}>
+              The member code from the digital VIP card, a fallback code, or a scanned QR all
+              identify the same membership.
+            </p>
           </div>
 
           <div className={styles.divider} aria-hidden="true">
@@ -258,6 +269,9 @@ export function RedemptionWorkflowPage() {
           {preview.matchedBy === 'fallback_code' && (
             <p className={styles.hint}>Identified by fallback member code.</p>
           )}
+          {preview.matchedBy === 'card_number' && (
+            <p className={styles.hint}>Identified by member code.</p>
+          )}
 
           {!preview.redeemable && (
             <div className={styles.blocked} role="alert">
@@ -314,6 +328,9 @@ export function RedemptionWorkflowPage() {
                           {item.pointsCost.toLocaleString('en-PH')}
                         </span>
                       </label>
+                      <Button variant="secondary" onClick={() => setDetailsItem(item)}>
+                        Details
+                      </Button>
                     </li>
                   );
                 })}
@@ -405,6 +422,62 @@ export function RedemptionWorkflowPage() {
           )}
         </section>
       )}
+
+      {/* ---------------- item details ---------------- */}
+      <Dialog
+        open={detailsItem !== null}
+        onClose={() => setDetailsItem(null)}
+        title={detailsItem ? detailsItem.name : 'Item details'}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDetailsItem(null)}>
+              Close
+            </Button>
+            {detailsItem && (
+              <Button
+                disabled={!preview?.redeemable}
+                onClick={() => {
+                  setItemId(detailsItem.id);
+                  setDetailsItem(null);
+                }}
+              >
+                Select this item
+              </Button>
+            )}
+          </>
+        }
+      >
+        {detailsItem && (
+          <dl className={styles.summary}>
+            <div>
+              <dt>Item</dt>
+              <dd>{detailsItem.name}</dd>
+            </div>
+            <div>
+              <dt>Code</dt>
+              <dd>{detailsItem.code}</dd>
+            </div>
+            <div>
+              <dt>Category</dt>
+              <dd>{detailsItem.category}</dd>
+            </div>
+            <div>
+              <dt>Points cost</dt>
+              <dd>{detailsItem.pointsCost.toLocaleString('en-PH')}</dd>
+            </div>
+            {detailsItem.description && (
+              <div>
+                <dt>Description</dt>
+                <dd>{detailsItem.description}</dd>
+              </div>
+            )}
+            <div>
+              <dt>Availability</dt>
+              <dd>{detailsItem.isActive ? 'Available' : 'No longer available'}</dd>
+            </div>
+          </dl>
+        )}
+      </Dialog>
 
       {/* ---------------- 3. receipt ---------------- */}
       <Dialog

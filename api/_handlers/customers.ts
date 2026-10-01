@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { createCustomerSchema, maskGovernmentId, updateCustomerSchema } from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { isSellingRole } from '../_lib/commerce.js';
 import { DEFAULT_ONBOARDING_TOKEN_VALID_HOURS } from '../_lib/constants.js';
 import * as onboardingEmail from '../_lib/customer-onboarding-email.js';
 import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
@@ -79,6 +80,23 @@ const listQuerySchema = z.object({
 });
 const parseListQuery = (req: VercelRequest) => listQuerySchema.safeParse(req.query);
 
+/**
+ * Customer/card-sale referrer validation.
+ *
+ * The registering seller is the referrer of record, so they must hold a role
+ * allowed to register and sell AF Homes VIP cards (VD, SSM, SM, OST, Admin,
+ * Super Admin - see `SELLING_ROLES` in `commerce.ts`). This is deliberately
+ * NOT the OST sponsorship check: an OST referral code requires an active
+ * Sales Manager, while a customer referral requires a seller of record.
+ */
+export function validateCustomerSaleReferrer(roleSlug: string): string | null {
+  if (isSellingRole(roleSlug)) return null;
+  return (
+    'Customer registration requires a selling role ' +
+    '(Vice Director, Senior Sales Manager, Sales Manager, OST, Admin or Super Admin).'
+  );
+}
+
 async function hasReference(db: Db, table: string, column: string, id: string) {
   const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
   if (error) throw error;
@@ -143,6 +161,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === '' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
+
+      // Customer/card-sale referrer validation. The registering seller is the
+      // referrer of record, so they must hold a role allowed to register and
+      // sell AF Homes VIP cards (VD, SSM, SM, OST, Admin, Super Admin). This
+      // is deliberately NOT the OST sponsorship check: an OST referral code
+      // requires an active Sales Manager, while a customer referral requires
+      // a seller of record. Never route this flow through `validateOstSponsor`.
+      const referrerRejection = validateCustomerSaleReferrer(auth.roleSlug);
+      if (referrerRejection) {
+        return fail(res, 'FORBIDDEN', referrerRejection, 403);
+      }
 
       const parsed = createCustomerSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer details', 400);

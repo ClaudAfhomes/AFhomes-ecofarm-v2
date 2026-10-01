@@ -26,29 +26,34 @@ import {
   resolveCustomerPrincipal,
   type CustomerPrincipal,
 } from '../_lib/customer-access.js';
+import { cardQrPayload } from '../_lib/identifier.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 /**
  * Membership credential policy, stated once.
  *
- * Only a SHA-256 hash of the QR token and of the fallback member code is stored,
- * so neither can be reconstructed for display. Rather than storing them in
- * plaintext or adding an encrypted column plus a new secret, they are ROTATED:
- * `POST /customer/membership/credentials` mints fresh values, invalidates the old
- * ones immediately, and returns the new plaintext exactly once.
+ * Two identifier families exist for one membership:
  *
- * The consequence for the UI is deliberate and visible to the member: a code is
- * never displayed on demand, only issued on request, with a warning that the
- * previous one stops working.
+ * - The PERSISTENT card identifiers: the membership number (`memberCode`)
+ *   and the `AFHOMES:` QR payload (`qrPayload`). Stable, displayable and
+ *   re-scannable for the life of the membership. Possession authorizes
+ *   nothing: every redemption re-validates membership status, expiry, points
+ *   and staff permission server-side.
+ * - The ONE-TIME secrets: the QR token and fallback member code minted at
+ *   activation. Only SHA-256 hashes are stored, so neither can be
+ *   reconstructed for display. They are ROTATED, never recovered:
+ *   `POST /customer/membership/credentials` mints fresh values, invalidates
+ *   the old ones immediately, and returns the new plaintext exactly once.
  */
 const CREDENTIALS_NOTE =
-  'Your card code is stored only as a one-way hash, so it cannot be displayed again. ' +
-  'Request a new one to receive it; the previous code stops working immediately.';
+  'Your member code and QR below never change - show them at any AF Homes Ecofarm desk. ' +
+  'Only a SHA-256 hash of the separate one-time card secret is stored, so that secret cannot be displayed again; ' +
+  'request a new one only if the printed secret is lost, and the previous secret stops working immediately.';
 
 const CREDENTIALS_NEED_REASON =
-  'Request a new card code to receive your QR code and fallback member code. ' +
-  'They are shown once and the previous ones stop working.';
+  'Your member code and QR below never change - show them at any AF Homes Ecofarm desk. ' +
+  'The separate one-time card secret is shown once at issuance; request a new pair only if it is lost.';
 
 const activeMembershipOf = async (db: Db, customerId: string) => {
   const { data, error } = await db
@@ -101,9 +106,10 @@ const toMembership = (
 ) => {
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   const months = scheme.validityMonths;
+  const membershipNumber = String(row.membership_number ?? '');
   return {
     id: row.id,
-    membershipNumber: row.membership_number,
+    membershipNumber,
     productName: isoOrNull(product.name),
     productCode: isoOrNull(product.code),
     status: row.status,
@@ -114,9 +120,12 @@ const toMembership = (
     pointsBalance: Number(row.points_balance ?? 0),
     paymentScheme: scheme.paymentScheme,
     validityYears: months !== null && months > 0 && months % 12 === 0 ? months / 12 : null,
-    // Always false by design: a readable code is never available on demand.
+    // Always false by design: a one-time secret is never available on demand.
+    // The persistent card identifiers below are always available instead.
     credentialsAvailable: false as const,
     credentialsNote: hasIssued ? CREDENTIALS_NOTE : CREDENTIALS_NEED_REASON,
+    memberCode: membershipNumber,
+    qrPayload: cardQrPayload(membershipNumber),
   };
 };
 

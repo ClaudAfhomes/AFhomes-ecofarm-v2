@@ -121,13 +121,27 @@ export const customerMembershipSchema = z.object({
    */
   validityYears: z.number().int().positive().nullable(),
   /**
-   * Whether a readable QR / fallback code is currently available. It is NOT:
-   * only hashes are stored at rest, so the plaintext exists exactly once, at
-   * issuance. The UI uses this to offer a re-issue rather than pretending a
-   * code can be displayed.
+   * Whether a readable one-time QR / fallback secret is currently available.
+   * It is NOT: only hashes are stored at rest, so the secret plaintext exists
+   * exactly once, at issuance. The persistent `memberCode` / `qrPayload` below
+   * are what the digital VIP card displays and what staff scan; the UI offers
+   * a re-issue only for a lost printed secret, never for viewing the card.
    */
   credentialsAvailable: z.literal(false),
   credentialsNote: z.string(),
+  /**
+   * Persistent member code: the membership number itself. Displayable and
+   * re-displayable, typable at any desk, and resolvable to the same membership
+   * on every scan. Possession authorizes nothing - the backend still verifies
+   * membership status, expiry, points and staff permission on every use.
+   */
+  memberCode: z.string(),
+  /**
+   * Exact QR payload for the digital VIP card (`AFHOMES:<memberCode>`).
+   * Encodes the membership identifier only: no name, no customer number, no
+   * government ID, no token, no JWT.
+   */
+  qrPayload: z.string(),
 });
 export type CustomerMembership = z.infer<typeof customerMembershipSchema>;
 
