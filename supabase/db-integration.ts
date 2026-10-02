@@ -8004,6 +8004,200 @@ async function main(): Promise<void> {
           'completed_with_errors',
         );
       }
+      section('49. Directory RPC server-role private privileges');
+      {
+        const serverRole = await one<{ usage: boolean; money: boolean; hash: boolean }>(
+          `select has_schema_privilege('service_role','private','USAGE') as usage,
+            has_function_privilege('service_role','private.money(numeric)','EXECUTE') as money,
+            has_function_privilege('service_role','private.hash_token(text)','EXECUTE') as hash`,
+        );
+        check(
+          'server has only required private dependency access',
+          serverRole.usage && serverRole.money && serverRole.hash,
+        );
+        for (const role of ['anon', 'authenticated']) {
+          for (const fn of [
+            'private.money(numeric)',
+            'private.hash_token(text)',
+            'public.customer_directory(jsonb)',
+            'public.search_customer_ids(text)',
+          ]) {
+            const access = await one<{ allowed: boolean }>(
+              "select has_function_privilege($1,$2,'EXECUTE') as allowed",
+              [role, fn],
+            );
+            eq(role + ' cannot execute ' + fn, access.allowed, false);
+          }
+        }
+        const invoker = await one<{ n: number }>(
+          `select count(*)::int as n from pg_proc where oid in ('public.customer_directory(jsonb)'::regprocedure,'public.search_customer_ids(text)'::regprocedure) and not prosecdef`,
+        );
+        eq('both directory functions retain caller privileges', invoker.n, 2);
+        for (const role of ['anon', 'authenticated'] as const) {
+          for (const sql of [
+            "select * from public.customer_directory('{}')",
+            'select private.money(1)',
+            "select private.hash_token('QA')",
+          ]) {
+            const message = await throws(role + ' denied actual call ' + sql, () =>
+              asBrowserRole(target.url, role, null, (client) => client.query(sql)),
+            );
+            check('denial names privilege boundary', /permission denied/.test(message));
+          }
+        }
+
+        const active = await one<{
+          id: string;
+          customer_number: string;
+          membership_id: string;
+          membership_number: string;
+          seller_id: string;
+        }>(
+          `select c.id,c.customer_number,m.id as membership_id,m.membership_number,s.seller_staff_id as seller_id
+           from customers c join memberships m on m.customer_id=c.id join card_sales s on s.id=m.sale_id where c.id=(select customer_id from customer_import_rows where id=$1)`,
+          [uuidFor('import:row48:Active')],
+        );
+        await db.query('begin');
+        try {
+          // Supabase provides service_role table access. Model only these SELECTs
+          // in this disposable transaction; the corrective migration changes no tables.
+          await db.query(
+            'grant select on public.customers,public.memberships,public.points_accounts,public.card_sales,public.card_plans,public.staff_users,public.payments to service_role',
+          );
+          await db.query(
+            "update memberships set fallback_code_hash=private.hash_token('A1B2C3D4') where id=$1",
+            [active.membership_id],
+          );
+          const query = async (filters: Record<string, unknown>) => {
+            await db!.query('set local role service_role');
+            try {
+              return await db!.query<{ record: Record<string, unknown>; total_count: string }>(
+                'select * from public.customer_directory($1::jsonb)',
+                [JSON.stringify(filters)],
+              );
+            } finally {
+              await db!.query('reset role');
+            }
+          };
+          for (const [label, filters] of [
+            ['full name', { search: 'Release Active' }],
+            ['partial name', { search: 'lease Act' }],
+            ['customer number', { search: active.customer_number }],
+            ['membership number', { search: active.membership_number }],
+            ['member code', { search: 'AFHOMES:' + active.membership_number }],
+            ['fallback', { search: 'a1b2-c3d4', identifier: 'A1B2C3D4' }],
+            ['Active VIP', { search: 'Release Active', category: 'ACTIVE_VIP' }],
+            ['tier', { search: 'Release Active', tier: 'GOLD' }],
+            ['date range', { search: 'Release Active', from: '2000-01-01', to: '2099-12-31' }],
+          ] as const) {
+            const r = await query({ ...filters, limit: 5000 });
+            check(
+              'service directory ' + label,
+              r.rows.some((x) => x.record.id === active.id),
+            );
+          }
+          const sellerRecord = (await query({ limit: 5000 })).rows.find(
+            (row) => typeof row.record.seller_id === 'string',
+          );
+          check('seller filter has an actual nonnull fixture seller', Boolean(sellerRecord));
+          if (sellerRecord) {
+            const sellerRows = await query({ seller: sellerRecord.record.seller_id, limit: 5000 });
+            check(
+              'seller filter selects only that seller',
+              sellerRows.rows.length > 0 &&
+                sellerRows.rows.every(
+                  (row) => row.record.seller_id === sellerRecord.record.seller_id,
+                ),
+            );
+          }
+          for (const sort of [
+            'created_at',
+            'name',
+            'tier',
+            'category',
+            'payment_status',
+            'membership_status',
+            'verified_paid',
+          ]) {
+            const r = await query({ search: 'Release', sort, limit: 5000 });
+            check('service directory sort ' + sort, r.rows.length > 0);
+          }
+          for (const status of ['suspended', 'expired', 'cancelled']) {
+            await db.query('update memberships set status=$1 where id=$2', [
+              status,
+              active.membership_id,
+            ]);
+            const r = await query({
+              search: active.customer_number,
+              category: status.toUpperCase(),
+            });
+            eq('service category ' + status, r.rows.length, 1);
+          }
+          await db.query("update memberships set status='active' where id=$1", [
+            active.membership_id,
+          ]);
+          const directory = await query({
+            search: active.customer_number,
+            membersOnly: true,
+            limit: 5000,
+          });
+          const safe = memberLookupFromDirectory(directory.rows[0]!.record);
+          eq(
+            'employee-safe normal imported member',
+            safe.membershipNumber,
+            active.membership_number,
+          );
+          check(
+            'employee-safe fields contain no PII or payment details',
+            !Object.keys(safe).some((k) =>
+              /email|address|tin|document|auth|payment|birth/i.test(k),
+            ),
+          );
+          eq(
+            'CSV export directory query succeeds',
+            (await query({ search: active.customer_number, category: 'ACTIVE_VIP', limit: 5000 }))
+              .rows.length,
+            1,
+          );
+          eq(
+            'XLSX export directory query succeeds',
+            (await query({ search: active.customer_number, tier: 'GOLD', limit: 5000 })).rows
+              .length,
+            1,
+          );
+          const manual = await one<{ customer_number: string }>(
+            'select customer_number from customers where id=$1',
+            [createdCustomerIds[0]],
+          );
+          eq(
+            'manual normal customer appears',
+            (await query({ search: manual.customer_number })).rows.length,
+            1,
+          );
+          await db.query('set local role service_role');
+          try {
+            const found = await db.query('select * from public.search_customer_ids($1)', [
+              'A1B2C3D4',
+            ]);
+            check(
+              'related search RPC can hash fallback',
+              found.rows.some((r) => r.customer_id === active.id),
+            );
+          } finally {
+            await db.query('reset role');
+          }
+        } finally {
+          await db.query('rollback');
+        }
+        const audit = await db.query(
+          readFileSync(join(process.cwd(), 'supabase/security/rls_invariants.sql'), 'utf8'),
+        );
+        const sets = Array.isArray(audit) ? audit : [audit];
+        check(
+          'RLS invariants have zero violations',
+          sets.every((r) => r.rows.length === 0),
+        );
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {

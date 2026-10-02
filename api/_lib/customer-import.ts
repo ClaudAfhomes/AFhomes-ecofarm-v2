@@ -124,12 +124,35 @@ export async function fetchGoogleSheetCsv(sheetUrl: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SHEET_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(googleSheetCsvUrl(ref), {
-      signal: controller.signal,
-      redirect: 'manual',
-    });
-    if (res.status >= 300 && res.status < 400)
-      throw new Error('Google Sheets redirects are not supported');
+    const exportUrl = new URL(googleSheetCsvUrl(ref));
+    let current = exportUrl;
+    const visited = new Set<string>();
+    let res: Response;
+    for (let hops = 0; ; hops++) {
+      visited.add(current.href);
+      res = await fetch(current.href, { signal: controller.signal, redirect: 'manual' });
+      if (![301, 302, 303, 307, 308].includes(res.status)) break;
+      const location = res.headers.get('location');
+      await res.body?.cancel();
+      if (!location) throw new Error('Google Sheets redirect has no destination');
+      let next: URL;
+      try {
+        next = new URL(location, current);
+      } catch {
+        throw new Error('Google Sheets redirect destination is invalid');
+      }
+      // Observed Sheets CSV flow: docs.google.com -> doc-XX-XX-sheets
+      // .googleusercontent.com/export/.... No general Google suffix allowlist.
+      const allowedHost =
+        (next.hostname === 'docs.google.com' && next.pathname === exportUrl.pathname) ||
+        (/^doc-[a-z0-9]{2}-[a-z0-9]{2}-sheets\.googleusercontent\.com$/.test(next.hostname) &&
+          next.pathname.startsWith('/export/'));
+      if (next.protocol !== 'https:' || next.username || next.password || next.port || !allowedHost)
+        throw new Error('Google Sheets redirect destination is not permitted');
+      if (visited.has(next.href)) throw new Error('Google Sheets redirect loop detected');
+      if (hops >= 3) throw new Error('Google Sheets redirect limit exceeded');
+      current = next;
+    }
     if (!res.ok)
       throw new Error(
         res.status === 401 || res.status === 403
@@ -141,8 +164,11 @@ export async function fetchGoogleSheetCsv(sheetUrl: string): Promise<string> {
       throw new Error(
         'Google Sheets export unavailable: private sheets require OAuth configuration',
       );
-    if (Number(res.headers.get('content-length')) > MAX_SHEET_FETCH_BYTES)
+    if (Number(res.headers.get('content-length')) > MAX_SHEET_FETCH_BYTES) {
+      controller.abort();
+      await res.body?.cancel().catch(() => {});
       throw new Error('Google Sheet exceeds the import size limit');
+    }
     if (!res.body) throw new Error('Google Sheets response has no body');
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -153,7 +179,7 @@ export async function fetchGoogleSheetCsv(sheetUrl: string): Promise<string> {
       size += value.byteLength;
       if (size > MAX_SHEET_FETCH_BYTES) {
         controller.abort();
-        await reader.cancel();
+        await reader.cancel().catch(() => {});
         throw new Error('Google Sheet exceeds the import size limit');
       }
       chunks.push(value);
@@ -166,13 +192,15 @@ export async function fetchGoogleSheetCsv(sheetUrl: string): Promise<string> {
     }
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (
-      /^[A-Za-z]/.test(contentType) &&
-      !/text|csv|octet-stream/.test(contentType) &&
-      text.startsWith('<')
+      /^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(text) ||
+      /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)
     )
-      throw new Error('Google Sheets did not return a spreadsheet export');
+      throw new Error(
+        'Google Sheets export unavailable: private sheets require OAuth configuration',
+      );
     return text;
   } catch (error) {
+    controller.abort();
     if (error instanceof Error && error.name === 'AbortError')
       throw new Error('Google Sheets request timed out');
     throw error;
