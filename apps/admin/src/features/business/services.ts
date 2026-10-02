@@ -13,6 +13,10 @@ import {
   cardProductSchema,
   commissionSchema,
   commissionRuleSchema,
+  customerImportCommitResponseSchema,
+  customerImportJobSchema,
+  customerImportParseResponseSchema,
+  customerImportRowSchema,
   customerOnboardingRecoverySchema,
   customerSchema,
   financeQueueItemSchema,
@@ -31,6 +35,10 @@ import {
   type CommissionRule,
   type CreateCommissionRuleRequest,
   type UpdateCommissionRuleRequest,
+  type CustomerImportCommitResponse,
+  type CustomerImportJob,
+  type CustomerImportParseResponse,
+  type CustomerImportRow,
   type CustomerOnboardingRecovery,
   type CreateCardCategoryRequest,
   type CreateCardProductRequest,
@@ -121,11 +129,22 @@ export const updateCardCategory = (
 /* ------------------------------------------------------------------ */
 
 export const getCustomers = (
-  params: { search?: string; status?: string } = {},
+  params: {
+    search?: string;
+    status?: string;
+    category?: string;
+    tier?: string;
+    seller?: string;
+    from?: string;
+    to?: string;
+    sort?: string;
+  } = {},
 ): Promise<Customer[]> => {
   const query = new URLSearchParams();
   if (params.search) query.set('search', params.search);
   if (params.status) query.set('status', params.status);
+  for (const key of ['category', 'tier', 'seller', 'from', 'to', 'sort'] as const)
+    if (params[key]) query.set(key, params[key]);
   const suffix = query.toString();
   return requestList(`/customers${suffix ? `?${suffix}` : ''}`, customerSchema);
 };
@@ -166,14 +185,16 @@ export const generateOfficialFormPdf = (
 ): Promise<GeneratedFormFile> =>
   post('/official-forms/pdf', generatedFormFileSchema, { title, fields, kind });
 
-export const getCustomerApplications = (params: {
-  status?: string;
-  tier?: string;
-  seller?: string;
-  from?: string;
-  to?: string;
-  search?: string;
-} = {}): Promise<CustomerApplication[]> => {
+export const getCustomerApplications = (
+  params: {
+    status?: string;
+    tier?: string;
+    seller?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+  } = {},
+): Promise<CustomerApplication[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.tier) query.set('tier', params.tier);
@@ -209,14 +230,16 @@ export const reopenCustomerApplication = (id: string) =>
 export const exportCustomerApplication = (id: string, format: 'xlsx' | 'pdf') =>
   request(`/official-forms/customer-applications/${id}/export/${format}`, generatedFormFileSchema);
 
-export const getReservationAgreements = (params: {
-  status?: string;
-  tier?: string;
-  seller?: string;
-  from?: string;
-  to?: string;
-  search?: string;
-} = {}): Promise<ReservationAgreement[]> => {
+export const getReservationAgreements = (
+  params: {
+    status?: string;
+    tier?: string;
+    seller?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+  } = {},
+): Promise<ReservationAgreement[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.tier) query.set('tier', params.tier);
@@ -238,7 +261,11 @@ export const updateReservationAgreement = (id: string, input: CreateReservationA
   patch(`/official-forms/reservations/${id}`, reservationAgreementSchema, input);
 export const submitReservationAgreement = (id: string) =>
   post(`/official-forms/reservations/${id}/submit`, reservationAgreementSchema, {});
-export const decideReservationAgreement = (id: string, decision: 'executed' | 'cancelled', notes?: string) =>
+export const decideReservationAgreement = (
+  id: string,
+  decision: 'executed' | 'cancelled',
+  notes?: string,
+) =>
   post(`/official-forms/reservations/${id}/decision`, reservationAgreementSchema, {
     decision,
     ...(notes ? { notes } : {}),
@@ -365,3 +392,62 @@ const commissionRuleHistorySchema = z.object({
 export type CommissionRuleHistory = z.infer<typeof commissionRuleHistorySchema>;
 export const getCommissionRuleHistory = (id: string): Promise<CommissionRuleHistory[]> =>
   requestList(`/commissions/rules/${id}/history`, commissionRuleHistorySchema);
+
+/* ------------------------------------------------------------------ */
+/* Bulk customer import/export (Admin-gated; server is authoritative)   */
+/* ------------------------------------------------------------------ */
+
+const generatedImportFileSchema = z.object({
+  filename: z.string(),
+  mime: z.string(),
+  content: z.string(),
+});
+export type GeneratedImportFile = z.infer<typeof generatedImportFileSchema>;
+
+export const getCustomerImportTemplate = (format: 'xlsx' | 'csv'): Promise<GeneratedImportFile> =>
+  request(`/customer-imports/template/${format}`, generatedImportFileSchema);
+
+export const parseCustomerImport = (input: {
+  source: 'excel' | 'csv' | 'google_sheets';
+  contentBase64?: string;
+  sheetUrl?: string;
+  sourceName?: string;
+}): Promise<CustomerImportParseResponse> =>
+  post('/customer-imports/parse', customerImportParseResponseSchema, input);
+
+export const getCustomerImportJobs = (): Promise<CustomerImportJob[]> =>
+  requestList('/customer-imports/jobs', customerImportJobSchema);
+
+export const getCustomerImportJob = (
+  id: string,
+): Promise<{ job: CustomerImportJob; rows: CustomerImportRow[] }> =>
+  request(
+    `/customer-imports/jobs/${id}`,
+    z.object({ job: customerImportJobSchema, rows: z.array(customerImportRowSchema) }),
+  );
+
+export const confirmCustomerImport = (id: string): Promise<CustomerImportCommitResponse> =>
+  post(`/customer-imports/jobs/${id}/confirm`, customerImportCommitResponseSchema, {});
+
+export const cancelCustomerImport = (id: string): Promise<{ cancelled: boolean }> =>
+  post(`/customer-imports/jobs/${id}/cancel`, z.object({ cancelled: z.boolean() }), {});
+
+export const exportCustomers = (
+  format: 'xlsx' | 'csv',
+  params: {
+    category?: string;
+    tier?: string;
+    seller?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+  } = {},
+): Promise<GeneratedImportFile> => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
+  const suffix = query.toString();
+  return request(
+    `/customer-imports/export/${format}${suffix ? `?${suffix}` : ''}`,
+    generatedImportFileSchema,
+  );
+};

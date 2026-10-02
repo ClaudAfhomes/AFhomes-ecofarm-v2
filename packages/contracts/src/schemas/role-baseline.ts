@@ -101,6 +101,18 @@ export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
   'cms.history',
 ];
 
+/**
+ * Grants seeded by LATER migrations outside this matrix (never by the
+ * baseline file itself). Each entry documents who may hold the module and
+ * why the matrix does not list it: the bulk customer import is an Admin-only
+ * migration-scoped workflow, and folding it into the Phase-2-reviewed matrix
+ * would rewrite settled history. `super_admin` stays implicit everywhere.
+ */
+export const MIGRATION_SEEDED_GRANTS: readonly {
+  moduleKey: AfHomesModuleKey;
+  roles: readonly string[];
+}[] = [{ moduleKey: 'governance.customer_import', roles: ['admin'] }];
+
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {
   admin: [
     v('dashboard.view'),

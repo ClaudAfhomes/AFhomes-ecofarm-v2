@@ -5,6 +5,7 @@
  * number), matching the Phase 1 convention and the DB CHECK regexes.
  */
 import { z } from 'zod';
+import { customerCategorySchema } from './customer-import.js';
 
 import { exactDecimalRateSchema, exactDecimalStringSchema } from './money.js';
 import {
@@ -155,8 +156,7 @@ export function assertCardPlanEconomicsSane(input: {
 }): string | null {
   const toCentavos = (v: string) => BigInt(v.replace('.', '').padEnd(3, '0').slice(0, -1) || '0');
   if (toCentavos(input.cashPrice) <= 0n) return 'Cash price must be greater than zero';
-  if (toCentavos(input.minimumDownPayment) < 0n)
-    return 'Minimum down payment cannot be negative';
+  if (toCentavos(input.minimumDownPayment) < 0n) return 'Minimum down payment cannot be negative';
   if (toCentavos(input.minimumDownPayment) > toCentavos(input.cashPrice))
     return 'Minimum down payment cannot exceed the cash price';
   if (!Number.isInteger(input.yearlyPoints) || input.yearlyPoints < 0)
@@ -184,7 +184,8 @@ export function assertCardPlanEconomicsSane(input: {
   return null;
 }
 
-export const createCardProductSchema = z.object({  name: z.string().trim().min(1).max(80),
+export const createCardProductSchema = z.object({
+  name: z.string().trim().min(1).max(80),
   code: z.string().trim().min(1).max(40),
   description: z.string().trim().max(2000).optional(),
   categoryId: z.string().uuid().optional(),
@@ -353,6 +354,7 @@ export const customerSchema = z.object({
   status: customerStatusSchema,
   /** Safe lifecycle flags; auth user IDs and membership rows are never exposed. */
   hasActiveMembership: z.boolean().optional(),
+  derivedCategory: customerCategorySchema.optional(),
   portalAccountActivated: z.boolean().optional(),
   createdBy: z.string().uuid().nullable(),
   createdAt: z.string(),

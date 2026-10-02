@@ -35,11 +35,11 @@ vi.mock('../_lib/storage.js', () => ({
   storageClient: () => ({}),
   createUploadGrant: async (_storage: unknown, bucket: string, path: string) => ({
     uploadUrl: `https://storage.test/upload/${bucket}/${path}`,
-    expiresAt: '2026-10-01T00:10:00.000Z',
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
   }),
   createDownloadGrant: async (_storage: unknown, bucket: string, path: string, ttl: number) => ({
     url: `https://storage.test/download/${bucket}/${path}?ttl=${ttl}`,
-    expiresAt: '2026-10-01T00:01:00.000Z',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }),
   downloadObject: async (_storage: unknown, bucket: string, path: string) => {
     const bytes = store.objects.get(`${bucket}/${path}`);
@@ -88,10 +88,38 @@ function tables(): Record<string, Row[]> {
       { id: 'r-emp', slug: 'employee', name: 'Employee', is_active: true },
     ],
     role_permissions: [
-      { role_id: 'r-admin', module_id: 'm-docs', can_view: true, can_create: false, can_update: false, can_delete: false },
-      { role_id: 'r-admin', module_id: 'm-ost', can_view: true, can_create: false, can_update: false, can_delete: false },
-      { role_id: 'r-seller', module_id: 'm-docs', can_view: true, can_create: false, can_update: false, can_delete: false },
-      { role_id: 'r-seller', module_id: 'm-ost', can_view: true, can_create: false, can_update: false, can_delete: false },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-docs',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-ost',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-seller',
+        module_id: 'm-docs',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-seller',
+        module_id: 'm-ost',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
       // Finance, HR and Employee hold NO document grant: every document route
       // must fail closed for them. There is no staff-subject document type in
       // the schema, so HR has nothing of its own to read here either.
@@ -114,8 +142,20 @@ function tables(): Record<string, Row[]> {
     ],
     staff_permission_restrictions: [],
     customers: [
-      { id: CUST1, email: 'c1@example.invalid', status: 'prospect', created_by: SM_ID, government_id_number: null },
-      { id: CUST2, email: 'c2@example.invalid', status: 'prospect', created_by: SM2_ID, government_id_number: null },
+      {
+        id: CUST1,
+        email: 'c1@example.invalid',
+        status: 'prospect',
+        created_by: SM_ID,
+        government_id_number: null,
+      },
+      {
+        id: CUST2,
+        email: 'c2@example.invalid',
+        status: 'prospect',
+        created_by: SM2_ID,
+        government_id_number: null,
+      },
     ],
     ost_applications: [
       { id: APP1, sponsor_staff_id: SM_ID, email: 'a1@example.invalid', status: 'submitted' },
@@ -132,12 +172,36 @@ function install() {
   const db = new FakeSupabase({
     tables: tables() as never,
     tokens: {
-      [ADMIN_TOKEN]: { id: ADMIN_ID, email: 'admin@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [SM_TOKEN]: { id: SM_ID, email: 'sm@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [SM2_TOKEN]: { id: SM2_ID, email: 'sm2@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [FIN_TOKEN]: { id: FIN_ID, email: 'fin@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [HR_TOKEN]: { id: HR_ID, email: 'hr@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [EMP_TOKEN]: { id: EMP_ID, email: 'emp@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
+      [ADMIN_TOKEN]: {
+        id: ADMIN_ID,
+        email: 'admin@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [SM_TOKEN]: {
+        id: SM_ID,
+        email: 'sm@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [SM2_TOKEN]: {
+        id: SM2_ID,
+        email: 'sm2@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [FIN_TOKEN]: {
+        id: FIN_ID,
+        email: 'fin@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [HR_TOKEN]: {
+        id: HR_ID,
+        email: 'hr@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [EMP_TOKEN]: {
+        id: EMP_ID,
+        email: 'emp@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
     },
   });
   holder.db = db as unknown;
@@ -227,7 +291,12 @@ describe('Phase 27 PDF intake and validation', () => {
     expect(String(row.mime_type)).toBe('application/pdf');
     // A PDF whose bytes arrive validates by signature at OCR time.
     store.objects.set(String(row.storage_path), PDF);
-    const ocr = await call({ method: 'POST', path: `${grant.documentId}/ocr`, token: SM_TOKEN, body: {} });
+    const ocr = await call({
+      method: 'POST',
+      path: `${grant.documentId}/ocr`,
+      token: SM_TOKEN,
+      body: {},
+    });
     expect(ocr.status).toBe(200);
     expect((ocr.body as { ocrStatus: string }).ocrStatus).not.toBe('failed');
   });
@@ -263,7 +332,16 @@ describe('Phase 27 PDF intake and validation', () => {
     const { path } = await uploaded();
     expect(path).toMatch(new RegExp(`^afhomes-customer-ids/customer/${CUST1}/[0-9a-f-]+\\.jpg$`));
     expect(path).not.toContain('..');
-    expect(serialised(await (await call({ path: `${(holder.db as FakeSupabase).rows('identity_documents')[0]!.id}`, token: SM_TOKEN })).body)).not.toContain('afhomes-customer-ids/customer');
+    expect(
+      serialised(
+        await (
+          await call({
+            path: `${(holder.db as FakeSupabase).rows('identity_documents')[0]!.id}`,
+            token: SM_TOKEN,
+          })
+        ).body,
+      ),
+    ).not.toContain('afhomes-customer-ids/customer');
   });
 });
 
@@ -275,28 +353,64 @@ describe('Phase 27 staff scoping without a document grant', () => {
   it('6/9/33. HR, Finance and Employee are denied every document route', async () => {
     const { id } = await uploaded();
     for (const token of [HR_TOKEN, FIN_TOKEN, EMP_TOKEN]) {
-      expect((await call({ method: 'POST', path: 'customer/upload-url', token, body: jpegUpload })).status).toBe(403);
+      expect(
+        (await call({ method: 'POST', path: 'customer/upload-url', token, body: jpegUpload }))
+          .status,
+      ).toBe(403);
       expect((await call({ path: `${id}`, token })).status).toBe(403);
       expect((await call({ path: `${id}/access-url`, token })).status).toBe(403);
       expect((await call({ method: 'POST', path: `${id}/ocr`, token, body: {} })).status).toBe(403);
-      expect((await call({ method: 'POST', path: `${id}/confirm`, token, body: { decision: 'confirmed', fields: { firstName: 'X' } } })).status).toBe(403);
+      expect(
+        (
+          await call({
+            method: 'POST',
+            path: `${id}/confirm`,
+            token,
+            body: { decision: 'confirmed', fields: { firstName: 'X' } },
+          })
+        ).status,
+      ).toBe(403);
     }
     // And the unfiltered seller list for a grant-less role is empty-by-denial:
     // the list endpoint itself refuses without the module grant.
-    expect((await call({ path: '', token: HR_TOKEN, query: { subjectType: 'customer' } })).status).toBe(403);
+    expect(
+      (await call({ path: '', token: HR_TOKEN, query: { subjectType: 'customer' } })).status,
+    ).toBe(403);
   });
 
   it('8/32. another seller cannot read, preview, OCR or confirm the document', async () => {
     const { id } = await uploaded();
     expect((await call({ path: `${id}`, token: SM2_TOKEN })).status).toBe(403);
     expect((await call({ path: `${id}/access-url`, token: SM2_TOKEN })).status).toBe(403);
-    expect((await call({ method: 'POST', path: `${id}/ocr`, token: SM2_TOKEN, body: {} })).status).toBe(403);
-    expect((await call({ method: 'POST', path: `${id}/confirm`, token: SM2_TOKEN, body: { decision: 'confirmed', fields: { firstName: 'X' } } })).status).toBe(403);
+    expect(
+      (await call({ method: 'POST', path: `${id}/ocr`, token: SM2_TOKEN, body: {} })).status,
+    ).toBe(403);
+    expect(
+      (
+        await call({
+          method: 'POST',
+          path: `${id}/confirm`,
+          token: SM2_TOKEN,
+          body: { decision: 'confirmed', fields: { firstName: 'X' } },
+        })
+      ).status,
+    ).toBe(403);
   });
 
   it('10/34. OST documents are sponsor-scoped; the reviewer sees them', async () => {
-    const ostBody = { subjectType: 'ost_application', subjectId: APP1, mime: 'image/png', sizeBytes: 100, originalFilename: 'ost-id.png' };
-    const own = await call({ method: 'POST', path: 'ost_application/upload-url', token: SM_TOKEN, body: ostBody });
+    const ostBody = {
+      subjectType: 'ost_application',
+      subjectId: APP1,
+      mime: 'image/png',
+      sizeBytes: 100,
+      originalFilename: 'ost-id.png',
+    };
+    const own = await call({
+      method: 'POST',
+      path: 'ost_application/upload-url',
+      token: SM_TOKEN,
+      body: ostBody,
+    });
     expect(own.status).toBe(201);
     const id = (own.body as { documentId: string }).documentId;
     // A different sponsor is outside scope even with the same module grant.
@@ -315,7 +429,12 @@ describe('Phase 27 staff scoping without a document grant', () => {
 describe('Phase 27 document replacement', () => {
   it('24/25/26. a re-upload preserves history, lists newest first, audits each', async () => {
     const first = await uploaded();
-    const secondState = await call({ method: 'POST', path: 'customer/upload-url', token: SM_TOKEN, body: { ...jpegUpload, originalFilename: 'id-front-v2.jpg' } });
+    const secondState = await call({
+      method: 'POST',
+      path: 'customer/upload-url',
+      token: SM_TOKEN,
+      body: { ...jpegUpload, originalFilename: 'id-front-v2.jpg' },
+    });
     expect(secondState.status).toBe(201);
     const secondId = (secondState.body as { documentId: string }).documentId;
     expect(secondId).not.toBe(first.id);
@@ -336,15 +455,23 @@ describe('Phase 27 document replacement', () => {
       '2026-09-27T10:00:00.000Z';
     db.rows('identity_documents').find((r) => r.id === secondId)!.created_at =
       '2026-09-27T10:00:01.000Z';
-    const listState = await call({ path: '', token: SM_TOKEN, query: { subjectType: 'customer', subjectId: CUST1 } });
+    const listState = await call({
+      path: '',
+      token: SM_TOKEN,
+      query: { subjectType: 'customer', subjectId: CUST1 },
+    });
     expect(listState.status).toBe(200);
     const rows = (listState.body as { data: { id: string }[] }).data;
     expect(rows.map((r) => r.id)).toEqual([secondId, first.id]);
 
     // Each upload is its own audited event with its own document id.
-    const uploads = db.rows('audit_events').filter((a) => a.action === 'IDENTITY_DOCUMENT_UPLOADED');
+    const uploads = db
+      .rows('audit_events')
+      .filter((a) => a.action === 'IDENTITY_DOCUMENT_UPLOADED');
     expect(uploads).toHaveLength(2);
-    expect(new Set(uploads.map((a) => String((a.after_data as { documentId: string }).documentId))).size).toBe(2);
+    expect(
+      new Set(uploads.map((a) => String((a.after_data as { documentId: string }).documentId))).size,
+    ).toBe(2);
     expect(serialised(uploads)).not.toContain('afhomes-customer-ids/customer');
   });
 });
@@ -364,7 +491,12 @@ describe('Phase 27 provider robustness', () => {
       null,
     ]) {
       vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => payload }));
-      const state = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: { refresh: true } });
+      const state = await call({
+        method: 'POST',
+        path: `${id}/ocr`,
+        token: SM_TOKEN,
+        body: { refresh: true },
+      });
       expect(state.status).toBe(200);
       expect(['failed', 'completed']).toContain((state.body as { ocrStatus: string }).ocrStatus);
       expect(serialised(state.body)).not.toContain('OCR_PROVIDER_API_KEY');
@@ -375,17 +507,34 @@ describe('Phase 27 provider robustness', () => {
     vi.stubEnv('OCR_PROVIDER_URL', 'https://ocr.example/v1/extract');
     const { id } = await uploaded();
     vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => ({ fields: {} }) }));
-    const empty = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: { refresh: true } });
+    const empty = await call({
+      method: 'POST',
+      path: `${id}/ocr`,
+      token: SM_TOKEN,
+      body: { refresh: true },
+    });
     expect(empty.status).toBe(200);
     expect(empty.body).toMatchObject({ ocrStatus: 'failed' });
     expect((empty.body as { warnings: string[] }).warnings).toContain('OCR_NO_TEXT_DETECTED');
 
-    vi.stubGlobal('fetch', async () => { throw new Error('socket hang up'); });
-    const down = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: { refresh: true } });
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('socket hang up');
+    });
+    const down = await call({
+      method: 'POST',
+      path: `${id}/ocr`,
+      token: SM_TOKEN,
+      body: { refresh: true },
+    });
     expect(down.status).toBe(200);
     expect(down.body).toMatchObject({ ocrStatus: 'failed' });
     // Manual review is still available on the failed document.
-    const confirm = await call({ method: 'POST', path: `${id}/confirm`, token: SM_TOKEN, body: { decision: 'confirmed', fields: { firstName: 'Manual Ana' } } });
+    const confirm = await call({
+      method: 'POST',
+      path: `${id}/confirm`,
+      token: SM_TOKEN,
+      body: { decision: 'confirmed', fields: { firstName: 'Manual Ana' } },
+    });
     expect(confirm.status).toBe(200);
   });
 
@@ -394,8 +543,14 @@ describe('Phase 27 provider robustness', () => {
     vi.stubEnv('OCR_PROVIDER_API_KEY', '');
     const seen: { headers: unknown; body: unknown }[] = [];
     vi.stubGlobal('fetch', async (_url: unknown, init: unknown) => {
-      seen.push({ headers: (init as { headers: unknown }).headers, body: (init as { body: unknown }).body });
-      return { ok: true, json: async () => ({ fields: { firstName: { value: 'Ana', confidence: 0.9 } } }) };
+      seen.push({
+        headers: (init as { headers: unknown }).headers,
+        body: (init as { body: unknown }).body,
+      });
+      return {
+        ok: true,
+        json: async () => ({ fields: { firstName: { value: 'Ana', confidence: 0.9 } } }),
+      };
     });
     const { id } = await uploaded();
     const state = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: {} });
@@ -418,7 +573,10 @@ describe('Phase 27 review editing and manual entry', () => {
       method: 'POST',
       path: `${id}/confirm`,
       token: SM_TOKEN,
-      body: { decision: 'confirmed', fields: { firstName: '  Ana-Marie  ', middleName: null, idNumber: 'P1234567' } },
+      body: {
+        decision: 'confirmed',
+        fields: { firstName: '  Ana-Marie  ', middleName: null, idNumber: 'P1234567' },
+      },
     });
     expect(state.status).toBe(200);
     const row = (holder.db as FakeSupabase).rows('identity_documents').find((r) => r.id === id)!;
@@ -435,7 +593,10 @@ describe('Phase 27 review editing and manual entry', () => {
       method: 'POST',
       path: `${id}/confirm`,
       token: SM_TOKEN,
-      body: { decision: 'confirmed', fields: { firstName: 'Manual', lastName: 'Entry', idNumber: 'M0001' } },
+      body: {
+        decision: 'confirmed',
+        fields: { firstName: 'Manual', lastName: 'Entry', idNumber: 'M0001' },
+      },
     });
     expect(state.status).toBe(200);
     const row = (holder.db as FakeSupabase).rows('identity_documents').find((r) => r.id === id)!;
@@ -447,13 +608,19 @@ describe('Phase 27 review editing and manual entry', () => {
     vi.stubEnv('OCR_PROVIDER_URL', 'https://ocr.example/v1/extract');
     vi.stubGlobal('fetch', async () => ({
       ok: true,
-      json: async () => ({ fields: { firstName: { value: 'Ana', confidence: 0.95 } }, warnings: [] }),
+      json: async () => ({
+        fields: { firstName: { value: 'Ana', confidence: 0.95 } },
+        warnings: [],
+      }),
     }));
     const db = holder.db as FakeSupabase;
     const { id } = await uploaded();
     const state = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: {} });
     expect(state.status).toBe(200);
-    expect(state.body).toMatchObject({ ocrStatus: 'completed', verificationStatus: 'pending_review' });
+    expect(state.body).toMatchObject({
+      ocrStatus: 'completed',
+      verificationStatus: 'pending_review',
+    });
     expect(db.rows('customers').find((r) => r.id === CUST1)!.government_id_number).toBeNull();
     expect(db.rows('customers')).toHaveLength(2);
   });
@@ -470,21 +637,37 @@ describe('Phase 27 secret hygiene', () => {
     vi.stubGlobal('fetch', async () => ({
       ok: true,
       json: async () => ({
-        fields: { firstName: { value: 'Ana', confidence: 0.9 }, idNumber: { value: 'P9999', confidence: 0.9 } },
+        fields: {
+          firstName: { value: 'Ana', confidence: 0.9 },
+          idNumber: { value: 'P9999', confidence: 0.9 },
+        },
         rawText: 'full raw OCR text must never be stored or returned',
         warnings: [],
       }),
     }));
-    const grantState = await call({ method: 'POST', path: 'customer/upload-url', token: SM_TOKEN, body: jpegUpload });
+    const grantState = await call({
+      method: 'POST',
+      path: 'customer/upload-url',
+      token: SM_TOKEN,
+      body: jpegUpload,
+    });
     const id = (grantState.body as { documentId: string }).documentId;
     const db = holder.db as FakeSupabase;
-    store.objects.set(String(db.rows('identity_documents').find((r) => r.id === id)!.storage_path), JPEG);
+    store.objects.set(
+      String(db.rows('identity_documents').find((r) => r.id === id)!.storage_path),
+      JPEG,
+    );
 
     const states = [
       grantState,
       await call({ path: `${id}`, token: SM_TOKEN }),
       await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: {} }),
-      await call({ method: 'POST', path: `${id}/confirm`, token: SM_TOKEN, body: { decision: 'confirmed', fields: { firstName: 'Ana' } } }),
+      await call({
+        method: 'POST',
+        path: `${id}/confirm`,
+        token: SM_TOKEN,
+        body: { decision: 'confirmed', fields: { firstName: 'Ana' } },
+      }),
       await call({ path: `${id}/access-url`, token: SM_TOKEN }),
     ];
     for (const state of states) {
@@ -542,14 +725,20 @@ describe('Phase 27 integration flow', () => {
     // Attempt OCR: suggestions only, low-confidence flagged.
     const ocr = await call({ method: 'POST', path: `${id}/ocr`, token: SM_TOKEN, body: {} });
     expect(ocr.status).toBe(200);
-    expect(ocr.body).toMatchObject({ ocrStatus: 'completed', verificationStatus: 'pending_review' });
+    expect(ocr.body).toMatchObject({
+      ocrStatus: 'completed',
+      verificationStatus: 'pending_review',
+    });
     expect((ocr.body as { warnings: string[] }).warnings).toContain('OCR_LOW_CONFIDENCE');
     // Edit one suggestion (correct the low-confidence ID) and confirm.
     const confirmed = await call({
       method: 'POST',
       path: `${id}/confirm`,
       token: SM_TOKEN,
-      body: { decision: 'confirmed', fields: { firstName: 'Ana', lastName: 'Reyes', idNumber: 'P7654321' } },
+      body: {
+        decision: 'confirmed',
+        fields: { firstName: 'Ana', lastName: 'Reyes', idNumber: 'P7654321' },
+      },
     });
     expect(confirmed.status).toBe(200);
     expect(confirmed.body).toMatchObject({ verificationStatus: 'confirmed' });
@@ -561,7 +750,12 @@ describe('Phase 27 integration flow', () => {
     expect(preview.status).toBe(200);
     expect((preview.body as { url: string }).url).toContain('ttl=60');
     // Replace the document: history grows, audits grow.
-    const replacement = await call({ method: 'POST', path: 'customer/upload-url', token: SM_TOKEN, body: { ...jpegUpload, originalFilename: 'id-back.jpg' } });
+    const replacement = await call({
+      method: 'POST',
+      path: 'customer/upload-url',
+      token: SM_TOKEN,
+      body: { ...jpegUpload, originalFilename: 'id-back.jpg' },
+    });
     expect(replacement.status).toBe(201);
     expect(db.rows('identity_documents')).toHaveLength(2);
     // Cross-user access is denied at every step.
@@ -569,12 +763,22 @@ describe('Phase 27 integration flow', () => {
       call({ path: `${id}`, token: SM2_TOKEN }),
       call({ path: `${id}/access-url`, token: SM2_TOKEN }),
       call({ method: 'POST', path: `${id}/ocr`, token: SM2_TOKEN, body: { refresh: true } }),
-      call({ method: 'POST', path: `${id}/confirm`, token: SM2_TOKEN, body: { decision: 'confirmed', fields: { firstName: 'X' } } }),
+      call({
+        method: 'POST',
+        path: `${id}/confirm`,
+        token: SM2_TOKEN,
+        body: { decision: 'confirmed', fields: { firstName: 'X' } },
+      }),
     ]) {
       expect((await probe).status).toBe(403);
     }
     const actions = db.rows('audit_events').map((a) => a.action);
-    for (const expected of ['IDENTITY_DOCUMENT_UPLOADED', 'IDENTITY_DOCUMENT_OCR_REQUESTED', 'IDENTITY_DOCUMENT_OCR_COMPLETED', 'IDENTITY_DOCUMENT_CONFIRMED']) {
+    for (const expected of [
+      'IDENTITY_DOCUMENT_UPLOADED',
+      'IDENTITY_DOCUMENT_OCR_REQUESTED',
+      'IDENTITY_DOCUMENT_OCR_COMPLETED',
+      'IDENTITY_DOCUMENT_CONFIRMED',
+    ]) {
       expect(actions).toContain(expected);
     }
   });

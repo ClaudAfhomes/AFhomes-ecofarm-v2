@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { resolveCustomerCategory } from '@jad/contracts';
+import { addMoney } from '@jad/shared';
 /**
  * In-memory Supabase client fake for API handler tests.
  *
@@ -70,7 +73,10 @@ export type FakeOptions = {
   /** Id handed back by `createUser`. */
   createUserId?: string;
   /** Override `auth.admin.updateUserById`, e.g. to inject a GoTrue failure. */
-  updateUser?: (id: string, attrs: { password?: string; user_metadata?: unknown }) => Promise<unknown>;
+  updateUser?: (
+    id: string,
+    attrs: { password?: string; user_metadata?: unknown },
+  ) => Promise<unknown>;
   /**
    * Override `auth.signInWithPassword` (the current-password re-verification
    * used by the staff password-change endpoint). Defaults to success; a test
@@ -95,6 +101,7 @@ type Op =
   | { t: 'update'; patch: FakeRow }
   | { t: 'delete' }
   | { t: 'eq'; col: string; val: unknown }
+  | { t: 'neq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
   | { t: 'or'; filter: string }
   | { t: 'ilike'; col: string; pattern: string }
@@ -174,6 +181,8 @@ function matches(row: FakeRow, ops: Op[]): boolean {
     switch (op.t) {
       case 'eq':
         return row[op.col] === op.val;
+      case 'neq':
+        return row[op.col] !== null && row[op.col] !== undefined && row[op.col] !== op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
       case 'ilike': {
@@ -234,11 +243,16 @@ export class FakeSupabase {
 
   constructor(options: FakeOptions = {}) {
     this.tables = options.tables ? structuredClone(options.tables) : {};
+    // Mirror the new database default on synthetic operational-sale fixtures.
+    for (const row of this.tables.card_sales ?? []) row.origin ??= 'normal';
     this.tokens = options.tokens ?? {};
     this.errors = options.errors ?? {};
     this.writeErrors = options.writeErrors ?? {};
     this.unique = options.unique ?? {};
-    this.defaults = options.defaults ?? {};
+    this.defaults = {
+      ...options.defaults,
+      card_sales: { origin: 'normal', ...options.defaults?.card_sales },
+    };
     this.links = (options.links ?? []).map((l) => ({ ...l, pk: l.pk ?? 'id' }));
     this.rpcs = options.rpcs ?? [];
     this.rpcErrors = options.rpcErrors ?? {};
@@ -397,6 +411,9 @@ export class FakeSupabase {
   };
 
   from(table: string) {
+    // Directly appended synthetic rows also inherit the real column default.
+    if (table === 'card_sales')
+      for (const row of this.tables.card_sales ?? []) row.origin ??= 'normal';
     if (!this.tables[table]) this.tables[table] = [];
     const ops: Op[] = [];
     const self = this;
@@ -434,6 +451,10 @@ export class FakeSupabase {
       },
       eq(col: string, val: unknown) {
         ops.push({ t: 'eq', col, val });
+        return this;
+      },
+      neq(col: string, val: unknown) {
+        ops.push({ t: 'neq', col, val });
         return this;
       },
       in(col: string, vals: unknown[]) {
@@ -697,6 +718,92 @@ export class FakeSupabase {
     const entry = (this.rpcs ?? []).find((r) => r.fn === fn);
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
+    // Directory behavior is a handler fixture only; real SQL is separately executed.
+    if (!entry && fn === 'match_import_emails') {
+      const emails = Array.isArray(args.p_emails)
+        ? args.p_emails.map((e) => String(e).toLowerCase())
+        : [];
+      return {
+        data: (this.tables.customers ?? [])
+          .filter((c) => emails.includes(String(c.email).toLowerCase()))
+          .map((c) => ({ id: c.id, email: c.email })),
+        error: null,
+      };
+    }
+    if (!entry && fn === 'customer_directory') {
+      const filters = z.record(z.string(), z.unknown()).parse(args.p_filters ?? {});
+      let records = (this.tables.customers ?? [])
+        .map((c): FakeRow => {
+          const m = (this.tables.memberships ?? []).find((m) => m.customer_id === c.id);
+          const sale = (this.tables.card_sales ?? [])
+            .filter((s) => s.customer_id === c.id && s.status !== 'cancelled')
+            .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+          const paid = (this.tables.payments ?? [])
+            .filter((p) => p.sale_id === sale?.id && p.status === 'verified')
+            .reduce((sum, p) => addMoney(sum, String(p.amount)), '0.00');
+          const memberStatus =
+            m?.status === 'active' && m.expires_at && Date.parse(String(m.expires_at)) <= Date.now()
+              ? 'expired'
+              : m?.status;
+          const category = resolveCustomerCategory({
+            customerStatus: String(c.status),
+            membershipStatus: memberStatus ? String(memberStatus) : null,
+            verifiedTotal: paid,
+            priceTotal: String(sale?.cash_price_snapshot ?? '0.00'),
+            reservationFee: String(sale?.reservation_fee_snapshot ?? '0.00'),
+            requiredInitial: String(sale?.required_initial_snapshot ?? '0.00'),
+          });
+          const plan = (this.tables.card_plans ?? []).find(
+            (p) => p.id === m?.product_id || p.id === sale?.plan_id,
+          );
+          return {
+            ...c,
+            full_name: [c.first_name, c.middle_name, c.last_name, c.suffix]
+              .filter(Boolean)
+              .join(' '),
+            derivedCategory: category,
+            tier: plan?.code,
+            memberships: m ?? null,
+            membership_id: m?.id,
+            member_status: m?.status,
+            membership_number: m?.membership_number,
+            expires_at: m?.expires_at,
+            activated_at: m?.activated_at,
+            available_points:
+              (this.tables.points_accounts ?? []).find((p) => p.membership_id === m?.id)?.balance ??
+              0,
+            seller_name:
+              (this.tables.staff_users ?? []).find((p) => p.id === sale?.seller_staff_id)
+                ?.full_name ?? '',
+            payment_status:
+              paid === '0.00'
+                ? 'no_payment'
+                : Number(paid) >= Number(sale?.cash_price_snapshot ?? 0)
+                  ? 'fully_paid'
+                  : 'partially_paid',
+            verified_paid: paid,
+          };
+        })
+        .filter(
+          (r) =>
+            (!filters.status || r.status === filters.status) &&
+            (!filters.category || r.derivedCategory === filters.category) &&
+            (!filters.tier || r.tier === filters.tier) &&
+            (!filters.membersOnly || r.membership_id) &&
+            (!filters.search ||
+              [r.full_name, r.customer_number, r.membership_number, r.email].some((v) =>
+                String(v ?? '')
+                  .toLowerCase()
+                  .includes(String(filters.search).toLowerCase()),
+              )),
+        );
+      const total = records.length;
+      records = records.slice(
+        Number(filters.offset ?? 0),
+        Number(filters.offset ?? 0) + Number(filters.limit ?? 50),
+      );
+      return { data: records.map((record) => ({ record, total_count: total })), error: null };
+    }
     if (!entry) return { data: null, error: { code: '42883', message: `${fn} does not exist` } };
     return {
       data: typeof entry.result === 'function' ? entry.result(args) : entry.result,

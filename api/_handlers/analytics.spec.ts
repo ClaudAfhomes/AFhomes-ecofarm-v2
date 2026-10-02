@@ -15,6 +15,14 @@ const holder = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
 const { default: handler, calendarWindow } = await import('./analytics.js');
 
+it.each(['2026-10-01T12:00:00Z', '2027-01-01T12:00:00Z'])(
+  'keeps calendar weeks seven days across month and year boundaries (%s)',
+  (value) => {
+    const window = calendarWindow('week', new Date(value));
+    expect(window.to.valueOf() - window.from.valueOf()).toBe(7 * 86400000);
+  },
+);
+
 function install() {
   const tables = phase2World({
     card_sale_hierarchy_snapshots: [],
@@ -209,4 +217,27 @@ describe('Phase 14 migration contract', () => {
     expect(sql).toMatch(/SALE_HIERARCHY_SNAPSHOT_IMMUTABLE/);
     expect(sql).not.toMatch(/correct_referral_upline/i);
   });
+});
+
+it('excludes imported payment history from global operational revenue trends', async () => {
+  const db = holder.db as FakeSupabase;
+  const before = analyticsOverviewSchema.parse((await call(TOKEN.superAdmin)).body);
+  const id = '88888888-0000-4000-8000-000000000048';
+  db.rows('card_sales').push({
+    ...db.rows('card_sales')[0]!,
+    id,
+    origin: 'legacy_import',
+    sale_number: 'LEGACY-048',
+  });
+  db.rows('payments').push({
+    id: '88888888-0000-4000-8000-000000000049',
+    sale_id: id,
+    status: 'verified',
+    amount: '999999.00',
+    verified_at: new Date().toISOString(),
+    recorded_at: new Date().toISOString(),
+  });
+  const after = analyticsOverviewSchema.parse((await call(TOKEN.superAdmin)).body);
+  expect(after.headline).toEqual(before.headline);
+  expect(after.trends).toEqual(before.trends);
 });

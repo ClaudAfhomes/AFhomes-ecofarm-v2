@@ -128,6 +128,12 @@ export const createReservationAgreementSchema = z
   .object({
     saleId: z.string().uuid(),
     customerApplicationId: z.string().uuid().optional(),
+    /**
+     * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
+     * for economics: the sale's plan tier is authoritative, and a conflict is
+     * rejected. Present so previews and saves can validate Gold-only holders.
+     */
+    vipTier: vipTierSchema.optional(),
     reservationDate: dateSchema,
     agreementDate: dateSchema,
     revisionNumber: z.string().trim().max(40).optional(),

@@ -24,7 +24,7 @@ export type XlsxColumn = { label: string; type: XlsxColumnType; width?: number }
 export function escapeCsvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   let text = typeof value === 'string' ? value : String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
 }

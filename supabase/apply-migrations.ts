@@ -51,8 +51,14 @@ const EXPECTED_PROJECT_REF = 'ikaevepedpqygdlipsei';
 
 const CHECK_ONLY = process.argv.includes('--check');
 const PRODUCTION_APPROVED = process.argv.includes('--approve-production');
+const ONLY_ARGUMENT = process.argv.find((arg) => arg.startsWith('--only='));
 
-type Target = { connectionString: string; migrationsDir: string; files: string[]; problems: string[] };
+type Target = {
+  connectionString: string;
+  migrationsDir: string;
+  files: string[];
+  problems: string[];
+};
 
 /* ---------------------------------------------------------------- */
 /* Configuration and fail-closed guards                              */
@@ -69,6 +75,11 @@ type Target = { connectionString: string; migrationsDir: string; files: string[]
  */
 function readTarget(): Target {
   const problems: string[] = [];
+  const onlyFlags = process.argv.filter((arg) => arg === '--only' || arg.startsWith('--only='));
+  if (onlyFlags.length > 1 || onlyFlags.includes('--only'))
+    problems.push(
+      'Use exactly one --only=version,version argument; bare or repeated selectors are refused.',
+    );
 
   if (process.env.AFHOMES_TARGET_PROJECT_REF !== EXPECTED_PROJECT_REF) {
     problems.push(
@@ -122,17 +133,26 @@ function readTarget(): Target {
     return { connectionString: connectionString ?? '', migrationsDir, files: [], problems };
   }
 
-  const files = fs
+  let files = fs
     .readdirSync(migrationsDir)
     .filter((file) => file.endsWith('.sql'))
     .sort();
   if (files.some((file) => !file.includes('afhomes_')))
-    problems.push('Non-AF Homes migration found in active path. The retired JAD set must stay out.');
-
-  if (problems.length > 0 && !CHECK_ONLY) {
-    throw new Error(
-      `Refusing migration:\n${problems.map((p) => `  - ${p}`).join('\n')}`,
+    problems.push(
+      'Non-AF Homes migration found in active path. The retired JAD set must stay out.',
     );
+
+  if (ONLY_ARGUMENT) {
+    const versions = ONLY_ARGUMENT.slice(7).split(',');
+    if (versions.some((v) => !/^\d{14}$/.test(v)) || new Set(versions).size !== versions.length)
+      problems.push('--only requires unique 14-digit migration versions');
+    for (const version of versions)
+      if (files.filter((f) => f.split('_', 1)[0] === version).length !== 1)
+        problems.push('Selected migration version must exist exactly once: ' + version);
+    files = files.filter((file) => versions.includes(file.split('_', 1)[0]!));
+  }
+  if (problems.length > 0 && !CHECK_ONLY) {
+    throw new Error(`Refusing migration:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
   }
 
   return { connectionString: connectionString ?? '', migrationsDir, files, problems };
@@ -166,7 +186,7 @@ async function main(): Promise<void> {
     console.log('[afhomes:migrate] Configuration is valid.');
     console.log(
       `[afhomes:migrate] Applying requires an explicit production acknowledgement:\n` +
-        `            npx pnpm db:migrate -- --approve-production`,
+        `            npx pnpm db:migrate -- --approve-production${ONLY_ARGUMENT ? ' ' + ONLY_ARGUMENT : ''}`,
     );
     return;
   }
@@ -245,8 +265,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(
-    error instanceof Error ? error.message : 'Migration runner failed.',
-  );
+  console.error(error instanceof Error ? error.message : 'Migration runner failed.');
   process.exitCode = 1;
 });

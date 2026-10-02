@@ -1,3 +1,4 @@
+import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 /**
  * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
  *
@@ -402,6 +403,13 @@ const BASELINE_TABLES = [
   'customer_onboarding_tokens',
   'referral_relationships',
   'audit_events',
+  'customer_applications',
+  'customer_application_holders',
+  'customer_application_documents',
+  'reservation_agreements',
+  'reservation_agreement_holders',
+  'reservation_agreement_schedule',
+  'reservation_agreement_documents',
 ] as const;
 const baseline = new Map<string, number>();
 
@@ -4742,8 +4750,11 @@ async function main(): Promise<void> {
     // is "the file says the right thing and the database does not" - for
     // example a runner that skipped the file, or a hand-edited row.
     {
+      // Counts include the bulk-import grant: migration 20261019000002 gives
+      // the Admin role one governance.customer_import row (view/create/update,
+      // never delete), so admin holds 21 of 71 total rows.
       const expectedCounts: Record<string, number> = {
-        admin: 20,
+        admin: 21,
         finance: 8,
         hr: 3,
         vice_director: 10,
@@ -4772,8 +4783,8 @@ async function main(): Promise<void> {
       }
       const total = [...counted.values()].reduce((sum, n) => sum + n, 0);
       check(
-        'the baseline installs 70 rows in total and no other role holds rows',
-        total === 70,
+        'the baseline installs 71 rows in total and no other role holds rows',
+        total === 71,
         `total=${total}`,
       );
 
@@ -4871,14 +4882,15 @@ async function main(): Promise<void> {
         JSON.stringify(res),
       );
 
-      // Idempotency: re-applying the real migration file changes nothing.
+      // Idempotency: re-applying the real migration file changes nothing
+      // (the import grant from 20261019000002 is a different row and survives).
       await db.query(readMigration('20260930000001_afhomes_role_permission_baseline.sql'));
       const recount = (
         await db.query<{ n: number }>('select count(*)::int as n from public.role_permissions')
       ).rows[0]!.n;
       check(
-        're-applying the baseline migration leaves exactly 70 rows',
-        recount === 70,
+        're-applying the baseline migration leaves exactly 71 rows',
+        recount === 71,
         `count=${recount}`,
       );
     }
@@ -5267,7 +5279,12 @@ async function main(): Promise<void> {
       const custB = await mkCustomer('isolation', 'e2e');
       eq(
         'isolation customer starts with no sale',
-        (await one<{ n: number }>('select count(*)::int as n from public.card_sales where customer_id = $1', [custB])).n,
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.card_sales where customer_id = $1',
+            [custB],
+          )
+        ).n,
         0,
       );
       const saleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
@@ -5316,9 +5333,21 @@ async function main(): Promise<void> {
         [saleId],
       );
       eq('snapshot: frozen price', String(frozen.cash_price_snapshot), String(gold.cash_price));
-      eq('snapshot: frozen minimum down', String(frozen.minimum_down_payment_snapshot), String(gold.minimum_down_payment));
-      eq('snapshot: frozen yearly points', String(frozen.yearly_points_snapshot), String(gold.yearly_points));
-      eq('snapshot: frozen commission rate', String(frozen.commission_rate_snapshot), String(gold.commission_rate));
+      eq(
+        'snapshot: frozen minimum down',
+        String(frozen.minimum_down_payment_snapshot),
+        String(gold.minimum_down_payment),
+      );
+      eq(
+        'snapshot: frozen yearly points',
+        String(frozen.yearly_points_snapshot),
+        String(gold.yearly_points),
+      );
+      eq(
+        'snapshot: frozen commission rate',
+        String(frozen.commission_rate_snapshot),
+        String(gold.commission_rate),
+      );
       eq(
         'snapshot: frozen expected commission',
         String(frozen.expected_commission_snapshot),
@@ -5342,19 +5371,34 @@ async function main(): Promise<void> {
              (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
               cash_price_snapshot, status, submitted_at, balance_due_at)
            values ($1,$2,$3,$4,'staff',$5,$6,$6,'submitted', now(), now() + interval '365 days')`,
-          [uuidFor('e2e:sale:dupe'), `${saleNo}-DUPE`, custA, String(gold.id), ost, String(gold.cash_price)],
+          [
+            uuidFor('e2e:sale:dupe'),
+            `${saleNo}-DUPE`,
+            custA,
+            String(gold.id),
+            ost,
+            String(gold.cash_price),
+          ],
         ),
       );
-      check('  unique violation, nothing persisted', /23505|duplicate|unique/i.test(dupeRefused), dupeRefused.split('\n')[0]);
+      check(
+        '  unique violation, nothing persisted',
+        /23505|duplicate|unique/i.test(dupeRefused),
+        dupeRefused.split('\n')[0],
+      );
       // A live repricing cannot move the frozen sale; the seed is restored in
       // the same section with a re-verification, so later sections are safe.
-      await db.query(`update public.card_plans set cash_price = '99999.99' where id = $1`, [String(gold.id)]);
+      await db.query(`update public.card_plans set cash_price = '99999.99' where id = $1`, [
+        String(gold.id),
+      ]);
       const afterReprice = await one<{ p: string }>(
         'select cash_price_snapshot as p from public.card_sales where id = $1',
         [saleId],
       );
       eq('frozen price ignores the live plan', afterReprice.p, '312000.00');
-      await db.query(`update public.card_plans set cash_price = '312000.00' where id = $1`, [String(gold.id)]);
+      await db.query(`update public.card_plans set cash_price = '312000.00' where id = $1`, [
+        String(gold.id),
+      ]);
       const restored = await one<{ p: string }>(
         'select cash_price::text as p from public.card_plans where id = $1',
         [String(gold.id)],
@@ -5381,12 +5425,16 @@ async function main(): Promise<void> {
       );
       check('first verified payment instant recorded', !!window1.started, window1.started);
       const sevenDays = await one<{ ok: boolean }>(
-        'select ($1::timestamptz - $2::timestamptz) = interval \'7 days\' as ok',
+        "select ($1::timestamptz - $2::timestamptz) = interval '7 days' as ok",
         [window1.deadline, window1.started],
       );
       check('deadline is exactly first verified + 7 days', sevenDays.ok === true);
       const midSummary = await summaryOf(saleId);
-      eq('unverified nothing: verified total from rows only', midSummary.verifiedTotal, '100000.00');
+      eq(
+        'unverified nothing: verified total from rows only',
+        midSummary.verifiedTotal,
+        '100000.00',
+      );
       check('sale is not activation-ready yet', midSummary.fullyPaid === false);
       const commMid = await one<{ status: string }>(
         'select status from public.commissions where sale_id = $1',
@@ -5423,9 +5471,18 @@ async function main(): Promise<void> {
       // DB-level retry of a decided payment is refused (the handler turns
       // this into an idempotent success; the database itself never recounts).
       const reverify = await throws('re-verifying a decided payment is refused', () =>
-        db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [pay1, 'verified', null, fin]),
+        db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
+          pay1,
+          'verified',
+          null,
+          fin,
+        ]),
       );
-      check('  PAYMENT_NOT_PENDING, totals untouched', /PAYMENT_NOT_PENDING/.test(reverify), reverify.split('\n')[0]);
+      check(
+        '  PAYMENT_NOT_PENDING, totals untouched',
+        /PAYMENT_NOT_PENDING/.test(reverify),
+        reverify.split('\n')[0],
+      );
       eq('  verified total still 312000.00', (await summaryOf(saleId)).verifiedTotal, '312000.00');
 
       // -- Flow D: activation creates each dependent row exactly once.
@@ -5435,9 +5492,19 @@ async function main(): Promise<void> {
       );
       const membershipId = String(activated.membership_id);
       check('membership created', !!membershipId);
-      check('membership number issued', String(activated.membership_number).length > 0, String(activated.membership_number));
-      check('QR token issued exactly once', typeof activated.qr_token === 'string' && String(activated.qr_token).length > 0);
-      check('fallback code issued exactly once', typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0);
+      check(
+        'membership number issued',
+        String(activated.membership_number).length > 0,
+        String(activated.membership_number),
+      );
+      check(
+        'QR token issued exactly once',
+        typeof activated.qr_token === 'string' && String(activated.qr_token).length > 0,
+      );
+      check(
+        'fallback code issued exactly once',
+        typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0,
+      );
       eq(
         'yearly allocation is the official Gold yearly points',
         String(activated.points_allocated),
@@ -5453,26 +5520,45 @@ async function main(): Promise<void> {
       eq('same customer', String(memberRow.customer_id), custA);
       eq('same sale', String(memberRow.sale_id), saleId);
       eq('QR stored as a 64-hex hash', String(memberRow.qr_token_hash).length, 64);
-      check('QR plaintext not stored', String(memberRow.qr_token_hash) !== String(activated.qr_token));
+      check(
+        'QR plaintext not stored',
+        String(memberRow.qr_token_hash) !== String(activated.qr_token),
+      );
       eq('fallback stored as a 64-hex hash', String(memberRow.fallback_code_hash).length, 64);
       const acct = await one<{ balance: string; lifetime: string }>(
         'select balance::text as balance, lifetime_allocated::text as lifetime from public.points_accounts where membership_id = $1',
         [membershipId],
       );
-      eq('points account balance is the official allocation', acct.balance, String(gold.yearly_points));
-      eq('lifetime allocated is the official allocation', acct.lifetime, String(gold.yearly_points));
+      eq(
+        'points account balance is the official allocation',
+        acct.balance,
+        String(gold.yearly_points),
+      );
+      eq(
+        'lifetime allocated is the official allocation',
+        acct.lifetime,
+        String(gold.yearly_points),
+      );
       const ledgerAfterActivate = await db.query(
         `select entry_type, amount from public.points_ledger
           where account_id = (select id from public.points_accounts where membership_id = $1)`,
         [membershipId],
       );
       eq('exactly one allocation ledger row', ledgerAfterActivate.rows.length, 1);
-      eq('allocation amount', String(ledgerAfterActivate.rows[0]!.amount), String(gold.yearly_points));
+      eq(
+        'allocation amount',
+        String(ledgerAfterActivate.rows[0]!.amount),
+        String(gold.yearly_points),
+      );
       const commActivated = await one<{ status: string; earned: string | null; amount: string }>(
         'select status, earned_at::text as earned, amount::text as amount from public.commissions where sale_id = $1',
         [saleId],
       );
-      eq('commission awaits final qualification', commActivated.status, 'final_qualification_pending');
+      eq(
+        'commission awaits final qualification',
+        commActivated.status,
+        'final_qualification_pending',
+      );
       check('never auto-earned', commActivated.earned === null);
       eq('commission amount matches the frozen snapshot', commActivated.amount, expectedComm.v);
       const again = await one<Record<string, string | number | boolean>>(
@@ -5496,7 +5582,10 @@ async function main(): Promise<void> {
 
       // -- Flow E: onboarding token issue, claim, and portal isolation.
       const authA = uuidFor('e2e:auth:customer-a');
-      await db.query('insert into auth.users (id, email) values ($1, $2)', [authA, `${RUN}-e2e-buyer@example.invalid`]);
+      await db.query('insert into auth.users (id, email) values ($1, $2)', [
+        authA,
+        `${RUN}-e2e-buyer@example.invalid`,
+      ]);
       createdAuthIds.push(authA);
       const rawToken = (
         await one<{ token: string }>(
@@ -5530,32 +5619,62 @@ async function main(): Promise<void> {
       // portal serves history server-side, proven at handler level).
       eq(
         'customer reads exactly their own customer row',
-        await visibleRows(target.url, 'authenticated', authA, `select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`),
+        await visibleRows(
+          target.url,
+          'authenticated',
+          authA,
+          `select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`,
+        ),
         1,
       );
       eq(
         'customer reads exactly their own membership',
-        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.memberships'),
+        await visibleRows(
+          target.url,
+          'authenticated',
+          authA,
+          'select count(*)::int as n from public.memberships',
+        ),
         1,
       );
       eq(
         'customer reads their own ledger entries',
-        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.points_ledger'),
+        await visibleRows(
+          target.url,
+          'authenticated',
+          authA,
+          'select count(*)::int as n from public.points_ledger',
+        ),
         1,
       );
       eq(
         'customer cannot read payment rows directly (server-mediated portal)',
-        await visibleRows(target.url, 'authenticated', authA, 'select count(*)::int as n from public.payments'),
+        await visibleRows(
+          target.url,
+          'authenticated',
+          authA,
+          'select count(*)::int as n from public.payments',
+        ),
         0,
       );
       eq(
         'finance reads the scenario payments through RLS',
-        await visibleRows(target.url, 'authenticated', fin, `select count(*)::int as n from public.payments where reference like '${RUN}-E2E-%'`),
+        await visibleRows(
+          target.url,
+          'authenticated',
+          fin,
+          `select count(*)::int as n from public.payments where reference like '${RUN}-E2E-%'`,
+        ),
         2,
       );
       eq(
         'anonymous reads no payments',
-        await visibleRows(target.url, 'anon', null, 'select count(*)::int as n from public.payments'),
+        await visibleRows(
+          target.url,
+          'anon',
+          null,
+          'select count(*)::int as n from public.payments',
+        ),
         0,
       );
       // An unauthorized browser write is refused and changes nothing.
@@ -5587,7 +5706,11 @@ async function main(): Promise<void> {
         'select qr_token_hash as qr, fallback_code_hash as fb, print_count as printed from public.memberships where id = $1',
         [membershipId],
       );
-      check('no print recorded yet', hashesBefore.printed === 0 || hashesBefore.printed === null, String(hashesBefore.printed));
+      check(
+        'no print recorded yet',
+        hashesBefore.printed === 0 || hashesBefore.printed === null,
+        String(hashesBefore.printed),
+      );
       await db.query(
         `update public.memberships set last_printed_at = now(), print_count = coalesce(print_count, 0) + 1 where id = $1`,
         [membershipId],
@@ -5643,7 +5766,10 @@ async function main(): Promise<void> {
       );
       eq('rotation returns the same membership', rotated.membership_id, membershipId);
       check('fresh QR issued', typeof rotated.qr_token === 'string' && rotated.qr_token.length > 0);
-      check('fresh fallback issued', typeof rotated.fallback_code === 'string' && rotated.fallback_code.length > 0);
+      check(
+        'fresh fallback issued',
+        typeof rotated.fallback_code === 'string' && rotated.fallback_code.length > 0,
+      );
       const hashesAfterRotate = await one<{ qr: string; fb: string }>(
         'select qr_token_hash as qr, fallback_code_hash as fb from public.memberships where id = $1',
         [membershipId],
@@ -5676,7 +5802,11 @@ async function main(): Promise<void> {
         Number(pointsAfterRotate.account),
         Number(gold.yearly_points),
       );
-      eq('denormalized cache untouched by rotation', Number(pointsAfterRotate.cache), Number(pointsBeforeRotate.cache));
+      eq(
+        'denormalized cache untouched by rotation',
+        Number(pointsAfterRotate.cache),
+        Number(pointsBeforeRotate.cache),
+      );
       eq('sale link untouched by rotation', sameNumber.sale, saleId);
       const rotationAudit = await one<{ n: number }>(
         `select count(*)::int as n from public.audit_events
@@ -5716,13 +5846,21 @@ async function main(): Promise<void> {
         ).rows[0],
       );
       eq('receipt charges the catalog cost', String(receipt.totalPoints), '2000');
-      eq('balance before is the official allocation', String(receipt.balanceBefore), String(gold.yearly_points));
+      eq(
+        'balance before is the official allocation',
+        String(receipt.balanceBefore),
+        String(gold.yearly_points),
+      );
       eq(
         'balance after deducts the catalog cost',
         String(receipt.balanceAfter),
         String(Number(gold.yearly_points) - 2000),
       );
-      check('redemption number issued', /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)), String(receipt.redemptionNumber));
+      check(
+        'redemption number issued',
+        /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)),
+        String(receipt.redemptionNumber),
+      );
       const balanceAfter = await one<{ b: number }>(
         'select balance as b from public.points_accounts where membership_id = $1',
         [membershipId],
@@ -5758,10 +5896,21 @@ async function main(): Promise<void> {
           ])
         ).rows[0],
       );
-      eq('replay returns the original receipt', String(replay.redemptionId), String(receipt.redemptionId));
+      eq(
+        'replay returns the original receipt',
+        String(replay.redemptionId),
+        String(receipt.redemptionId),
+      );
       eq(
         'balance still deducted after replay',
-        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(
+          (
+            await one<{ b: number }>(
+              'select balance as b from public.points_accounts where membership_id = $1',
+              [membershipId],
+            )
+          ).b,
+        ),
         Number(gold.yearly_points) - 2000,
       );
       const replays = await one<{ n: number }>(
@@ -5780,10 +5929,21 @@ async function main(): Promise<void> {
           emp,
         ]),
       );
-      check('  INSUFFICIENT_POINTS', /INSUFFICIENT_POINTS/.test(poorAttempt), poorAttempt.split('\n')[0]);
+      check(
+        '  INSUFFICIENT_POINTS',
+        /INSUFFICIENT_POINTS/.test(poorAttempt),
+        poorAttempt.split('\n')[0],
+      );
       eq(
         '  balance unchanged by the refusal',
-        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(
+          (
+            await one<{ b: number }>(
+              'select balance as b from public.points_accounts where membership_id = $1',
+              [membershipId],
+            )
+          ).b,
+        ),
         Number(gold.yearly_points) - 2000,
       );
 
@@ -5849,7 +6009,16 @@ async function main(): Promise<void> {
         [saleId],
       );
       eq('repeat pay is a no-op', payAgain.rowCount, 0);
-      eq('still paid exactly once', (await one<{ n: number }>(`select count(*)::int as n from public.commissions where sale_id = $1 and status = 'paid'`, [saleId])).n, 1);
+      eq(
+        'still paid exactly once',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.commissions where sale_id = $1 and status = 'paid'`,
+            [saleId],
+          )
+        ).n,
+        1,
+      );
 
       // -- Flow I: move SM-A under SSM-B; history must not follow.
       const smEdge = await one<{ id: string }>(
@@ -5866,7 +6035,16 @@ async function main(): Promise<void> {
         [saleId],
       );
       eq('sale still points at its creation-time relationship', saleRef.ref, String(ostEdge.id));
-      eq('commission beneficiary unchanged by the move', (await one<{ b: string }>('select beneficiary_staff_id::text as b from public.commissions where sale_id = $1', [saleId])).b, ost);
+      eq(
+        'commission beneficiary unchanged by the move',
+        (
+          await one<{ b: string }>(
+            'select beneficiary_staff_id::text as b from public.commissions where sale_id = $1',
+            [saleId],
+          )
+        ).b,
+        ost,
+      );
       const vdSnaps = await one<{ n: number }>(
         'select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1 and ancestor_staff_id = $2',
         [saleId, vd],
@@ -5895,7 +6073,11 @@ async function main(): Promise<void> {
       const publishedDocs = await one<{ n: number }>(
         `select count(*)::int as n from public.cms_documents where status = 'published'`,
       );
-      check('published CMS documents are publicly readable (zero or more)', publishedDocs.n >= 0, String(publishedDocs.n));
+      check(
+        'published CMS documents are publicly readable (zero or more)',
+        publishedDocs.n >= 0,
+        String(publishedDocs.n),
+      );
       const priceCols = await one<{ n: number }>(
         `select count(*)::int as n from information_schema.columns
           where table_schema = 'public'
@@ -5909,8 +6091,26 @@ async function main(): Promise<void> {
       eq('report-equivalent: verified 312000.00', e2eSummary.verifiedTotal, '312000.00');
       eq('report-equivalent: fully paid', e2eSummary.fullyPaid, true);
       eq('report-equivalent: remaining 0.00', e2eSummary.remainingBalance, '0.00');
-      eq('snapshot rows still exactly seller + 3 uplines', (await one<{ n: number }>('select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1', [saleId])).n, 4);
-      eq('ledger holds allocation + redemption', (await one<{ n: number }>(`select count(*)::int as n from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $1)`, [membershipId])).n, 2);
+      eq(
+        'snapshot rows still exactly seller + 3 uplines',
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.card_sale_hierarchy_snapshots where sale_id = $1',
+            [saleId],
+          )
+        ).n,
+        4,
+      );
+      eq(
+        'ledger holds allocation + redemption',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $1)`,
+            [membershipId],
+          )
+        ).n,
+        2,
+      );
 
       // -- Flow L: audit presence for every step, with no secrets anywhere.
       const e2eActors = [vd, ssm, sm, ost, fin, emp, admin, vdB, ssmB, authA];
@@ -5952,29 +6152,103 @@ async function main(): Promise<void> {
       eq('no hashes, codes, tokens, or keys in E2E audit payloads', secretScan.n, 0);
 
       // -- Cross-module invariants: exactly one of everything intended.
-      eq('one intended customer chain (A + isolation B)', (await one<{ n: number }>(`select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`, [])).n, 2);
-      eq('one Gold sale', (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [saleId])).n, 1);
-      eq('one membership for the sale', (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [saleId])).n, 1);
-      eq('membership number stable end to end', (await one<{ no: string }>('select membership_number as no from public.memberships where id = $1', [membershipId])).no, membershipNumber);
+      eq(
+        'one intended customer chain (A + isolation B)',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.customers where email like '${RUN}-e2e-%'`,
+            [],
+          )
+        ).n,
+        2,
+      );
+      eq(
+        'one Gold sale',
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.card_sales where id = $1',
+            [saleId],
+          )
+        ).n,
+        1,
+      );
+      eq(
+        'one membership for the sale',
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.memberships where sale_id = $1',
+            [saleId],
+          )
+        ).n,
+        1,
+      );
+      eq(
+        'membership number stable end to end',
+        (
+          await one<{ no: string }>(
+            'select membership_number as no from public.memberships where id = $1',
+            [membershipId],
+          )
+        ).no,
+        membershipNumber,
+      );
       eq(
         'final points balance deducts the catalog cost',
-        Number((await one<{ b: number }>('select balance as b from public.points_accounts where membership_id = $1', [membershipId])).b),
+        Number(
+          (
+            await one<{ b: number }>(
+              'select balance as b from public.points_accounts where membership_id = $1',
+              [membershipId],
+            )
+          ).b,
+        ),
         Number(gold.yearly_points) - 2000,
       );
-      eq('frozen sale price still 312000.00', (await one<{ p: string }>('select cash_price_snapshot as p from public.card_sales where id = $1', [saleId])).p, '312000.00');
-      eq('frozen commission rate still matches Gold', (await one<{ r: string }>('select commission_rate_snapshot as r from public.card_sales where id = $1', [saleId])).r, String(gold.commission_rate));
+      eq(
+        'frozen sale price still 312000.00',
+        (
+          await one<{ p: string }>(
+            'select cash_price_snapshot as p from public.card_sales where id = $1',
+            [saleId],
+          )
+        ).p,
+        '312000.00',
+      );
+      eq(
+        'frozen commission rate still matches Gold',
+        (
+          await one<{ r: string }>(
+            'select commission_rate_snapshot as r from public.card_sales where id = $1',
+            [saleId],
+          )
+        ).r,
+        String(gold.commission_rate),
+      );
 
       // -- Failure rollback: an underpaid second sale activates nothing.
-      const bronze = await one<Record<string, string | number>>(`select * from public.card_plans where code = 'BRONZE'`);
+      const bronze = await one<Record<string, string | number>>(
+        `select * from public.card_plans where code = 'BRONZE'`,
+      );
       const sale2 = uuidFor('e2e:sale:bronze-partial');
-      const sn2 = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      const sn2 = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
+        .sale_number;
       await db.query(
         `insert into public.card_sales
            (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
             cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
             commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at, created_by)
          values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days', $5)`,
-        [sale2, sn2, custA, String(bronze.id), ost, String(bronze.cash_price), String(bronze.minimum_down_payment), Number(bronze.yearly_points), String(bronze.commission_rate)],
+        [
+          sale2,
+          sn2,
+          custA,
+          String(bronze.id),
+          ost,
+          String(bronze.cash_price),
+          String(bronze.minimum_down_payment),
+          Number(bronze.yearly_points),
+          String(bronze.commission_rate),
+        ],
       );
       const payPartial = (
         await one<{ id: string }>(
@@ -5982,17 +6256,31 @@ async function main(): Promise<void> {
           [sale2, '5000.00', `${RUN}-E2E-PAY-PARTIAL`, fin],
         )
       ).id;
-      await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [payPartial, 'verified', null, fin]);
+      await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
+        payPartial,
+        'verified',
+        null,
+        fin,
+      ]);
       // A partially paid sale never reaches `payment_verified`, so activation
       // refuses at the status gate before the funds gate: either refusal code
       // proves money was never enough to activate, and no membership exists.
       const underpaidFail = await throws('underpaid activation fails', () =>
         db.query('select * from public.activate_card_sale($1,$2,$3)', [sale2, fin, 12]),
       );
-      check('  activation refused, no partial membership', /SALE_NOT_(FULLY_PAID|ACTIVATABLE)/.test(underpaidFail), underpaidFail.split('\n')[0]);
+      check(
+        '  activation refused, no partial membership',
+        /SALE_NOT_(FULLY_PAID|ACTIVATABLE)/.test(underpaidFail),
+        underpaidFail.split('\n')[0],
+      );
       eq(
         '  no membership row for the underpaid sale',
-        (await one<{ n: number }>('select count(*)::int as n from public.memberships where sale_id = $1', [sale2])).n,
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.memberships where sale_id = $1',
+            [sale2],
+          )
+        ).n,
         0,
       );
       // Explicit tidy-up for the rollback fixture (shared cleanup would also
@@ -6003,13 +6291,20 @@ async function main(): Promise<void> {
       // cannot be removed by accident - only deliberate, flagged maintenance.
       await db.query('begin');
       await db.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
-      await db.query('delete from public.card_sale_hierarchy_snapshots where sale_id = $1', [sale2]);
+      await db.query('delete from public.card_sale_hierarchy_snapshots where sale_id = $1', [
+        sale2,
+      ]);
       await db.query('delete from public.payments where id = $1', [payPartial]);
       await db.query('delete from public.card_sales where id = $1', [sale2]);
       await db.query('commit');
       eq(
         'rollback fixture fully removed',
-        (await one<{ n: number }>('select count(*)::int as n from public.card_sales where id = $1', [sale2])).n,
+        (
+          await one<{ n: number }>(
+            'select count(*)::int as n from public.card_sales where id = $1',
+            [sale2],
+          )
+        ).n,
         0,
       );
 
@@ -6041,13 +6336,24 @@ async function main(): Promise<void> {
       const vipBronze = vipByCode.get('BRONZE')!;
       const vipSilver = vipByCode.get('SILVER')!;
       const vipGold = vipByCode.get('GOLD')!;
-      check('Bronze never allows B1/B2 (plan flags)', vipBronze.move_b1_enabled === false && vipBronze.move_b2_enabled === false);
-      check('Silver allows B1/B2', vipSilver.move_b1_enabled === true && vipSilver.move_b2_enabled === true);
-      check('Gold allows B1/B2', vipGold.move_b1_enabled === true && vipGold.move_b2_enabled === true);
+      check(
+        'Bronze never allows B1/B2 (plan flags)',
+        vipBronze.move_b1_enabled === false && vipBronze.move_b2_enabled === false,
+      );
+      check(
+        'Silver allows B1/B2',
+        vipSilver.move_b1_enabled === true && vipSilver.move_b2_enabled === true,
+      );
+      check(
+        'Gold allows B1/B2',
+        vipGold.move_b1_enabled === true && vipGold.move_b2_enabled === true,
+      );
 
       // The scheme CHECK rejects free-text schemes at the database boundary.
       const badSaleId = uuidFor('vip:bad-scheme');
-      const badSaleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      const badSaleNo = (
+        await one<{ sale_number: string }>('select * from public.next_sale_number()')
+      ).sale_number;
       const badCust = await mkCustomer('bad-scheme', 'vip');
       const schemeRefused = await throws('unknown scheme code is refused by CHECK', () =>
         db.query(
@@ -6058,14 +6364,20 @@ async function main(): Promise<void> {
           [badSaleId, badSaleNo, badCust, vipGold.id, staff['ost']!, vipGold.cash_price],
         ),
       );
-      check('  CHECK violation, nothing persisted', /check|23514|23505|new row/i.test(schemeRefused), schemeRefused.split('\n')[0]);
+      check(
+        '  CHECK violation, nothing persisted',
+        /check|23514|23505|new row/i.test(schemeRefused),
+        schemeRefused.split('\n')[0],
+      );
 
       // A Silver B1 sale freezes the B1 economics; full payment is judged
       // against the FROZEN installment total, and activation uses the FROZEN
       // validity (144 months), not the caller parameter.
       const vipCust = await mkCustomer('b1', 'vip');
       const vipSale = uuidFor('vip:sale:silver-b1');
-      const vipSaleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+      const vipSaleNo = (
+        await one<{ sale_number: string }>('select * from public.next_sale_number()')
+      ).sale_number;
       await db.query(
         `insert into public.card_sales
           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
@@ -6076,10 +6388,16 @@ async function main(): Promise<void> {
            created_by, referral_relationship_id)
          values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,'move_b1_40_12','10000.00','96000.00',12,'12000.00',144,$8,$9,'9600.00','submitted', now(), now() + interval '365 days', $5, $10)`,
         [
-          vipSale, vipSaleNo, vipCust, vipSilver.id, staff['ost']!,
-          vipSilver.installment_price, vipSilver.minimum_down_payment,
+          vipSale,
+          vipSaleNo,
+          vipCust,
+          vipSilver.id,
+          staff['ost']!,
+          vipSilver.installment_price,
+          vipSilver.minimum_down_payment,
           Number(vipSilver.yearly_points),
-          '0.04', ostEdge.id,
+          '0.04',
+          ostEdge.id,
         ],
       );
       await db.query(
@@ -6089,8 +6407,14 @@ async function main(): Promise<void> {
         [vipSale, staff['ost']],
       );
       const vipFrozen = await one<{
-        scheme: string; total: string; reservation: string; initial: string;
-        months: number; monthly: string; validity: number; commission: string;
+        scheme: string;
+        total: string;
+        reservation: string;
+        initial: string;
+        months: number;
+        monthly: string;
+        validity: number;
+        commission: string;
       }>(
         `select payment_scheme as scheme, cash_price_snapshot as total,
                 reservation_fee_snapshot as reservation, required_initial_snapshot as initial,
@@ -6126,7 +6450,10 @@ async function main(): Promise<void> {
           [vipSale, '96000.00', `${RUN}-VIP-PAY-1`, staff['finance']],
         )
       ).id;
-      await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [vipPay1, staff['finance']]);
+      await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [
+        vipPay1,
+        staff['finance'],
+      ]);
       const vipPay2 = (
         await one<{ id: string }>(
           `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
@@ -6171,460 +6498,1738 @@ async function main(): Promise<void> {
     // can echo the connection string, and a harness must never log credentials.
     check('suite completed without an unexpected error', false, safeErrorMessage(error));
   } finally {
-    section('41. OST referral codes, applications, members and SM->OST genealogy');
-    /* ---------------------------------------------------------------- */
-    // Phase 8/24 primitives on real PostgreSQL: the sequence-backed OST
-    // number (read as a one-row set, the Phase 18 lesson), hash-addressed
-    // referral codes, the case-insensitive reviewable-email guard, member
-    // creation, the adjacency trigger, the one-active-upline backstop, and
-    // RLS scoping for two different Sales Managers.
-    const ostStaffId = uuidFor('ost:phase41-member');
-    const ostEmail = `${RUN}-phase41-ost@example.invalid`;
-    await db.query('insert into auth.users (id, email) values ($1, $2)', [ostStaffId, ostEmail]);
-    await db.query(
-      `insert into public.staff_users (id, email, full_name, status) values ($1, $2, 'Synthetic phase41 ost', 'invited')`,
-      [ostStaffId, ostEmail],
-    );
-    await db.query(
-      'insert into public.staff_role_assignments (staff_id, role_id, assigned_by) values ($1, $2, $3)',
-      [ostStaffId, roles['ost'], staff['super-admin']],
-    );
-    createdStaffIds.push(ostStaffId);
+    try {
+      section('41. OST referral codes, applications, members and SM->OST genealogy');
+      /* ---------------------------------------------------------------- */
+      // Phase 8/24 primitives on real PostgreSQL: the sequence-backed OST
+      // number (read as a one-row set, the Phase 18 lesson), hash-addressed
+      // referral codes, the case-insensitive reviewable-email guard, member
+      // creation, the adjacency trigger, the one-active-upline backstop, and
+      // RLS scoping for two different Sales Managers.
+      const ostStaffId = uuidFor('ost:phase41-member');
+      const ostEmail = `${RUN}-phase41-ost@example.invalid`;
+      await db.query('insert into auth.users (id, email) values ($1, $2)', [ostStaffId, ostEmail]);
+      await db.query(
+        `insert into public.staff_users (id, email, full_name, status) values ($1, $2, 'Synthetic phase41 ost', 'invited')`,
+        [ostStaffId, ostEmail],
+      );
+      await db.query(
+        'insert into public.staff_role_assignments (staff_id, role_id, assigned_by) values ($1, $2, $3)',
+        [ostStaffId, roles['ost'], staff['super-admin']],
+      );
+      createdStaffIds.push(ostStaffId);
 
-    // 41a. next_ost_number() answers a ONE-ROW SET with a non-blank number.
-    // A handler that reads `.ost_number` off the set itself (instead of the
-    // row) would persist a blank - exactly the Phase 18 sale-number defect.
-    const ostNumbers = await db.query<{ ost_number: string }>(
-      'select * from public.next_ost_number()',
-    );
-    eq('next_ost_number returns exactly one row', ostNumbers.rows.length, 1);
-    const ostNumber = ostNumbers.rows[0]!.ost_number;
-    check(
-      'the OST number is non-blank and sequenced',
-      typeof ostNumber === 'string' && /^OST-\d{6}$/.test(ostNumber),
-      JSON.stringify(ostNumber),
-    );
+      // 41a. next_ost_number() answers a ONE-ROW SET with a non-blank number.
+      // A handler that reads `.ost_number` off the set itself (instead of the
+      // row) would persist a blank - exactly the Phase 18 sale-number defect.
+      const ostNumbers = await db.query<{ ost_number: string }>(
+        'select * from public.next_ost_number()',
+      );
+      eq('next_ost_number returns exactly one row', ostNumbers.rows.length, 1);
+      const ostNumber = ostNumbers.rows[0]!.ost_number;
+      check(
+        'the OST number is non-blank and sequenced',
+        typeof ostNumber === 'string' && /^OST-\d{6}$/.test(ostNumber),
+        JSON.stringify(ostNumber),
+      );
 
-    // 41b. Referral codes are addressed by SHA-256 hash, never plaintext.
-    const rawCode = `OST-${RUN.slice(1, 7).toUpperCase().padEnd(6, 'X')}-${RUN.slice(7, 13).toUpperCase().padEnd(6, 'Y')}`;
-    const codeHash = createHash('sha256').update(rawCode).digest('hex');
-    const codeId = uuidFor('ost:phase41-code');
-    await db.query(
-      `insert into public.referral_codes
+      // 41b. Referral codes are addressed by SHA-256 hash, never plaintext.
+      const rawCode = `OST-${RUN.slice(1, 7).toUpperCase().padEnd(6, 'X')}-${RUN.slice(7, 13).toUpperCase().padEnd(6, 'Y')}`;
+      const codeHash = createHash('sha256').update(rawCode).digest('hex');
+      const codeId = uuidFor('ost:phase41-code');
+      await db.query(
+        `insert into public.referral_codes
         (id, code_hash, code_hint, sponsor_staff_id, expires_at, max_uses, use_count, is_active, created_by)
        values ($1, $2, $3, $4, now() + interval '7 days', 10, 0, true, $4)`,
-      [codeId, codeHash, `OST-…-${rawCode.slice(-4)}`, staff['sm']],
-    );
-    const byHash = await one<{ id: string } | undefined>(
-      'select id from public.referral_codes where code_hash = $1',
-      [codeHash],
-    );
-    eq('a code resolves by its hash', byHash?.id, codeId);
-    const byUnknown = await one<{ id: string } | undefined>(
-      'select id from public.referral_codes where code_hash = $1',
-      ['0'.repeat(64)],
-    );
-    eq('an unknown hash resolves to nothing', byUnknown, undefined);
+        [codeId, codeHash, `OST-…-${rawCode.slice(-4)}`, staff['sm']],
+      );
+      const byHash = await one<{ id: string } | undefined>(
+        'select id from public.referral_codes where code_hash = $1',
+        [codeHash],
+      );
+      eq('a code resolves by its hash', byHash?.id, codeId);
+      const byUnknown = await one<{ id: string } | undefined>(
+        'select id from public.referral_codes where code_hash = $1',
+        ['0'.repeat(64)],
+      );
+      eq('an unknown hash resolves to nothing', byUnknown, undefined);
 
-    // 41c. One reviewable application per email, case-insensitively; a
-    // terminal decision frees the address.
-    const appEmail = `${RUN}-phase41-applicant@example.invalid`;
-    const appId = uuidFor('ost:phase41-app');
-    await db.query(
-      `insert into public.ost_applications
+      // 41c. One reviewable application per email, case-insensitively; a
+      // terminal decision frees the address.
+      const appEmail = `${RUN}-phase41-applicant@example.invalid`;
+      const appId = uuidFor('ost:phase41-app');
+      await db.query(
+        `insert into public.ost_applications
         (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
          birth_date, address, status)
        values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
          '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
          'submitted')`,
-      [appId, codeId, staff['sm'], appEmail],
-    );
-    let duplicateRefused = false;
-    try {
-      await db.query(
-        `insert into public.ost_applications
+        [appId, codeId, staff['sm'], appEmail],
+      );
+      let duplicateRefused = false;
+      try {
+        await db.query(
+          `insert into public.ost_applications
           (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
            birth_date, address, status)
          values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
            '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
            'under_review')`,
-        [uuidFor('ost:phase41-app-dupe'), codeId, staff['sm'], appEmail.toUpperCase()],
-      );
-    } catch (error) {
-      duplicateRefused = (error as { code?: string })?.code === '23505';
-    }
-    check('a mixed-case duplicate reviewable email is refused', duplicateRefused);
-    await db.query(`update public.ost_applications set status = 'rejected' where id = $1`, [appId]);
-    const reuseId = uuidFor('ost:phase41-app-reuse');
-    await db.query(
-      `insert into public.ost_applications
+          [uuidFor('ost:phase41-app-dupe'), codeId, staff['sm'], appEmail.toUpperCase()],
+        );
+      } catch (error) {
+        duplicateRefused = (error as { code?: string })?.code === '23505';
+      }
+      check('a mixed-case duplicate reviewable email is refused', duplicateRefused);
+      await db.query(`update public.ost_applications set status = 'rejected' where id = $1`, [
+        appId,
+      ]);
+      const reuseId = uuidFor('ost:phase41-app-reuse');
+      await db.query(
+        `insert into public.ost_applications
         (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
          birth_date, address, status)
        values ($1, $2, $3, $4, '+639171234567', 'Phase', 'Fortyone', '1995-06-15',
          '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
          'submitted')`,
-      [reuseId, codeId, staff['sm'], appEmail],
-    );
-    check('the address is reusable after a terminal decision', true);
+        [reuseId, codeId, staff['sm'], appEmail],
+      );
+      check('the address is reusable after a terminal decision', true);
 
-    // 41d. Member creation plus the SM -> OST edge; the trigger and the
-    // one-active-upline index are the backstops, not the handler.
-    const memberNumber = (
-      await one<{ ost_number: string }>('select * from public.next_ost_number()')
-    ).ost_number;
-    await db.query(
-      `insert into public.ost_members
+      // 41d. Member creation plus the SM -> OST edge; the trigger and the
+      // one-active-upline index are the backstops, not the handler.
+      const memberNumber = (
+        await one<{ ost_number: string }>('select * from public.next_ost_number()')
+      ).ost_number;
+      await db.query(
+        `insert into public.ost_members
         (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone,
          status, approved_by)
        values ($1, $2, $3, $4, 'Synthetic phase41 ost', $5, '+639170000041', 'active', $6)`,
-      [ostStaffId, reuseId, staff['sm'], memberNumber, ostEmail, staff['super-admin']],
-    );
-    const edgeId = (
-      await one<{ id: string }>(
-        `insert into public.referral_relationships
+        [ostStaffId, reuseId, staff['sm'], memberNumber, ostEmail, staff['super-admin']],
+      );
+      const edgeId = (
+        await one<{ id: string }>(
+          `insert into public.referral_relationships
           (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
          values ($1, $2, 'ost', true, true, $3) returning id`,
-        [ostStaffId, staff['sm'], staff['super-admin']],
-      )
-    ).id;
-    check('an SM -> OST edge is created', typeof edgeId === 'string' && edgeId.length > 0);
-    let secondEdgeRefused = false;
-    try {
-      await db.query(
-        `insert into public.referral_relationships
+          [ostStaffId, staff['sm'], staff['super-admin']],
+        )
+      ).id;
+      check('an SM -> OST edge is created', typeof edgeId === 'string' && edgeId.length > 0);
+      let secondEdgeRefused = false;
+      try {
+        await db.query(
+          `insert into public.referral_relationships
           (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
          values ($1, $2, 'ost', true, true, $3)`,
-        [ostStaffId, staff['sm'], staff['super-admin']],
-      );
-    } catch (error) {
-      secondEdgeRefused = (error as { code?: string })?.code === '23505';
-    }
-    check('a second active upline for the same subject is refused', secondEdgeRefused);
-    let wrongUplineRefused = false;
-    try {
-      await db.query(
-        `insert into public.referral_relationships
+          [ostStaffId, staff['sm'], staff['super-admin']],
+        );
+      } catch (error) {
+        secondEdgeRefused = (error as { code?: string })?.code === '23505';
+      }
+      check('a second active upline for the same subject is refused', secondEdgeRefused);
+      let wrongUplineRefused = false;
+      try {
+        await db.query(
+          `insert into public.referral_relationships
           (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
          values ($1, $2, 'ost', false, false, $3)`,
-        [uuidFor('ost:phase41-ost2'), staff['vice-director'], staff['super-admin']],
-      );
-    } catch {
-      wrongUplineRefused = true;
-    }
-    check('an OST edge under a Vice Director is refused by the trigger', wrongUplineRefused);
-    let duplicateNumberRefused = false;
-    try {
-      await db.query(
-        `insert into public.ost_members
+          [uuidFor('ost:phase41-ost2'), staff['vice-director'], staff['super-admin']],
+        );
+      } catch {
+        wrongUplineRefused = true;
+      }
+      check('an OST edge under a Vice Director is refused by the trigger', wrongUplineRefused);
+      let duplicateNumberRefused = false;
+      try {
+        await db.query(
+          `insert into public.ost_members
           (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone, status, approved_by)
          values ($1, $2, $3, $4, 'Duplicate number', $5, '+639170000042', 'active', $6)`,
-        [
-          uuidFor('ost:phase41-dupe'),
-          appId,
-          staff['sm'],
-          memberNumber,
-          `${RUN}-phase41-dupe@example.invalid`,
-          staff['super-admin'],
-        ],
-      );
-    } catch (error) {
-      duplicateNumberRefused = (error as { code?: string })?.code === '23505';
-    }
-    check('a duplicate OST number is refused', duplicateNumberRefused);
+          [
+            uuidFor('ost:phase41-dupe'),
+            appId,
+            staff['sm'],
+            memberNumber,
+            `${RUN}-phase41-dupe@example.invalid`,
+            staff['super-admin'],
+          ],
+        );
+      } catch (error) {
+        duplicateNumberRefused = (error as { code?: string })?.code === '23505';
+      }
+      check('a duplicate OST number is refused', duplicateNumberRefused);
 
-    // 41e. RLS: anonymous sees nothing; an unrelated role sees nothing; each
-    // SM sees applications including the one they sponsor.
-    const hrStaffId = staff['hr'];
-    const smStaffId = staff['sm'];
-    if (!hrStaffId || !smStaffId) throw new Error('Phase 41 staff fixtures are incomplete');
-    eq(
-      'anon reads no OST applications',
-      await visibleRows(
-        target.url,
-        'anon',
-        null,
-        'select count(*)::int as n from public.ost_applications',
-      ),
-      0,
-    );
-    eq(
-      'an unrelated role reads no OST applications',
-      await visibleRows(
+      // 41e. RLS: anonymous sees nothing; an unrelated role sees nothing; each
+      // SM sees applications including the one they sponsor.
+      const hrStaffId = staff['hr'];
+      const smStaffId = staff['sm'];
+      if (!hrStaffId || !smStaffId) throw new Error('Phase 41 staff fixtures are incomplete');
+      eq(
+        'anon reads no OST applications',
+        await visibleRows(
+          target.url,
+          'anon',
+          null,
+          'select count(*)::int as n from public.ost_applications',
+        ),
+        0,
+      );
+      eq(
+        'an unrelated role reads no OST applications',
+        await visibleRows(
+          target.url,
+          'authenticated',
+          hrStaffId,
+          'select count(*)::int as n from public.ost_applications',
+        ),
+        0,
+      );
+      const smSees = await visibleRows(
         target.url,
         'authenticated',
-        hrStaffId,
-        'select count(*)::int as n from public.ost_applications',
-      ),
-      0,
-    );
-    const smSees = await visibleRows(
-      target.url,
-      'authenticated',
-      smStaffId,
-      `select count(*)::int as n from public.ost_applications where sponsor_staff_id = '${smStaffId}'`,
-    );
-    check('the sponsoring SM reads their own applications', smSees >= 2, String(smSees));
+        smStaffId,
+        `select count(*)::int as n from public.ost_applications where sponsor_staff_id = '${smStaffId}'`,
+      );
+      check('the sponsoring SM reads their own applications', smSees >= 2, String(smSees));
 
-    // 41f. Explicit tidy-up for tables the shared cleanup does not count:
-    // edges first (restrict), then members, applications and codes.
-    await db.query('delete from public.referral_relationships where subject_staff_id = $1', [
-      ostStaffId,
-    ]);
-    await db.query('delete from public.ost_members where id = $1', [ostStaffId]);
-    await db.query('delete from public.ost_applications where id = any($1::uuid[])', [
-      [appId, reuseId],
-    ]);
-    await db.query('delete from public.referral_codes where id = $1', [codeId]);
-    check('phase 41 synthetics removed', true);
+      // 41f. Explicit tidy-up for tables the shared cleanup does not count:
+      // edges first (restrict), then members, applications and codes.
+      await db.query('delete from public.referral_relationships where subject_staff_id = $1', [
+        ostStaffId,
+      ]);
+      await db.query('delete from public.ost_members where id = $1', [ostStaffId]);
+      await db.query('delete from public.ost_applications where id = any($1::uuid[])', [
+        [appId, reuseId],
+      ]);
+      await db.query('delete from public.referral_codes where id = $1', [codeId]);
+      check('phase 41 synthetics removed', true);
 
-    /* ---------------------------------------------------------------- */
-    section('44. Phase 20 staff temporary-password lifecycle columns');
-    /* ---------------------------------------------------------------- */
-    // The forced first-login change is recorded on staff_users, never in
-    // Auth: must_change_password gates, password_changed_at audits. The
-    // temporary password itself lives in Supabase Auth only - no secret
-    // column may ever exist here.
-    {
-      const cols = await db.query<{
-        column_name: string;
-        data_type: string;
-        is_nullable: string;
-        column_default: string | null;
-      }>(
-        `select column_name, data_type, is_nullable, column_default
+      /* ---------------------------------------------------------------- */
+      section('44. Phase 20 staff temporary-password lifecycle columns');
+      /* ---------------------------------------------------------------- */
+      // The forced first-login change is recorded on staff_users, never in
+      // Auth: must_change_password gates, password_changed_at audits. The
+      // temporary password itself lives in Supabase Auth only - no secret
+      // column may ever exist here.
+      {
+        const cols = await db.query<{
+          column_name: string;
+          data_type: string;
+          is_nullable: string;
+          column_default: string | null;
+        }>(
+          `select column_name, data_type, is_nullable, column_default
            from information_schema.columns
           where table_schema = 'public' and table_name = 'staff_users'
             and column_name in ('must_change_password', 'password_changed_at')
           order by column_name`,
-      );
-      eq('both lifecycle columns exist', cols.rowCount, 2);
-      const flag = cols.rows.find((r) => r.column_name === 'must_change_password')!;
-      check(
-        'must_change_password is boolean NOT NULL with a false default',
-        flag.data_type === 'boolean' &&
-          flag.is_nullable === 'NO' &&
-          /false/i.test(flag.column_default ?? ''),
-        JSON.stringify(flag),
-      );
-      const stamped = cols.rows.find((r) => r.column_name === 'password_changed_at')!;
-      check(
-        'password_changed_at is a nullable timestamptz with no default',
-        stamped.data_type === 'timestamp with time zone' &&
-          stamped.is_nullable === 'YES' &&
-          stamped.column_default === null,
-        JSON.stringify(stamped),
-      );
-      // No secret column: the temporary password must have nowhere to live.
-      const secrets = await one<{ n: number }>(
-        `select count(*)::int as n from information_schema.columns
+        );
+        eq('both lifecycle columns exist', cols.rowCount, 2);
+        const flag = cols.rows.find((r) => r.column_name === 'must_change_password')!;
+        check(
+          'must_change_password is boolean NOT NULL with a false default',
+          flag.data_type === 'boolean' &&
+            flag.is_nullable === 'NO' &&
+            /false/i.test(flag.column_default ?? ''),
+          JSON.stringify(flag),
+        );
+        const stamped = cols.rows.find((r) => r.column_name === 'password_changed_at')!;
+        check(
+          'password_changed_at is a nullable timestamptz with no default',
+          stamped.data_type === 'timestamp with time zone' &&
+            stamped.is_nullable === 'YES' &&
+            stamped.column_default === null,
+          JSON.stringify(stamped),
+        );
+        // No secret column: the temporary password must have nowhere to live.
+        const secrets = await one<{ n: number }>(
+          `select count(*)::int as n from information_schema.columns
           where table_schema = 'public' and table_name = 'staff_users'
             and (column_name like '%password%' or column_name like '%secret%')
             and column_name not in ('must_change_password', 'password_changed_at')`,
-      );
-      eq('no password/secret storage column exists on staff_users', secrets.n, 0);
-      // Pre-existing and default-constructed rows are ungated, never null.
-      const nullFlags = await one<{ n: number }>(
-        'select count(*)::int as n from public.staff_users where must_change_password is null',
-      );
-      eq('no staff row has a null flag', nullFlags.n, 0);
-      // The handler's write path, end to end at the SQL level: gate, stamp, clear.
-      const lifecycleId = uuidFor('staff:phase44-lifecycle');
-      const lifecycleEmail = `${RUN}-phase44-lifecycle@example.invalid`;
-      await db.query('insert into auth.users (id, email) values ($1, $2)', [
-        lifecycleId,
-        lifecycleEmail,
-      ]);
-      await db.query(
-        `insert into public.staff_users (id, email, full_name, status)
+        );
+        eq('no password/secret storage column exists on staff_users', secrets.n, 0);
+        // Pre-existing and default-constructed rows are ungated, never null.
+        const nullFlags = await one<{ n: number }>(
+          'select count(*)::int as n from public.staff_users where must_change_password is null',
+        );
+        eq('no staff row has a null flag', nullFlags.n, 0);
+        // The handler's write path, end to end at the SQL level: gate, stamp, clear.
+        const lifecycleId = uuidFor('staff:phase44-lifecycle');
+        const lifecycleEmail = `${RUN}-phase44-lifecycle@example.invalid`;
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          lifecycleId,
+          lifecycleEmail,
+        ]);
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status)
          values ($1, $2, 'Synthetic phase44', 'active')`,
-        [lifecycleId, lifecycleEmail],
-      );
-      createdStaffIds.push(lifecycleId);
-      const fresh = await one<{
-        must_change_password: boolean;
-        password_changed_at: string | null;
-      }>('select must_change_password, password_changed_at from public.staff_users where id = $1', [
-        lifecycleId,
-      ]);
-      check('a new row defaults to ungated', fresh.must_change_password === false);
-      check('a new row has no rotation stamp', fresh.password_changed_at === null);
-      await db.query('update public.staff_users set must_change_password = true where id = $1', [
-        lifecycleId,
-      ]);
-      const gated = await one<{ must_change_password: boolean }>(
-        'select must_change_password from public.staff_users where id = $1',
-        [lifecycleId],
-      );
-      check(
-        'the flag can be set (temporary-password onboarding)',
-        gated.must_change_password === true,
-      );
-      await db.query(
-        `update public.staff_users
+          [lifecycleId, lifecycleEmail],
+        );
+        createdStaffIds.push(lifecycleId);
+        const fresh = await one<{
+          must_change_password: boolean;
+          password_changed_at: string | null;
+        }>(
+          'select must_change_password, password_changed_at from public.staff_users where id = $1',
+          [lifecycleId],
+        );
+        check('a new row defaults to ungated', fresh.must_change_password === false);
+        check('a new row has no rotation stamp', fresh.password_changed_at === null);
+        await db.query('update public.staff_users set must_change_password = true where id = $1', [
+          lifecycleId,
+        ]);
+        const gated = await one<{ must_change_password: boolean }>(
+          'select must_change_password from public.staff_users where id = $1',
+          [lifecycleId],
+        );
+        check(
+          'the flag can be set (temporary-password onboarding)',
+          gated.must_change_password === true,
+        );
+        await db.query(
+          `update public.staff_users
             set must_change_password = false, password_changed_at = now(), updated_at = now()
           where id = $1`,
-        [lifecycleId],
-      );
-      const cleared = await one<{
-        must_change_password: boolean;
-        password_changed_at: string | null;
-      }>('select must_change_password, password_changed_at from public.staff_users where id = $1', [
-        lifecycleId,
-      ]);
-      check('the flag clears on password change', cleared.must_change_password === false);
-      check('clearing stamps the rotation', cleared.password_changed_at !== null);
-    }
+          [lifecycleId],
+        );
+        const cleared = await one<{
+          must_change_password: boolean;
+          password_changed_at: string | null;
+        }>(
+          'select must_change_password, password_changed_at from public.staff_users where id = $1',
+          [lifecycleId],
+        );
+        check('the flag clears on password change', cleared.must_change_password === false);
+        check('clearing stamps the rotation', cleared.password_changed_at !== null);
+      }
 
-    section('21. cleanup');
-    try {
-      // Every synthetic row is reachable either by an id this process recorded or
-      // by the run prefix, and the delete order is the reverse of the foreign
-      // keys. The order is NOT cosmetic: customers, card_sales, memberships,
-      // points_accounts, staff_users and the redemption tables are all
-      // `on delete restrict`, so a parent removed before its child raises and the
-      // remaining deletes never run.
-      //
-      // The id sets are resolved FROM THE DATABASE, as the union of the recorded
-      // ids and everything carrying the run marker - not from the recorded ids
-      // alone. That is not tidiness: the synthetic INACTIVE staff member was
-      // created without ever being pushed onto createdStaffIds, so an id-list
-      // cleanup deleted every staff user except that one, on every run, forever,
-      // while the customer check still passed. A missing `.push()` is invisible
-      // to an id-list cleanup. The run prefix is a reliable marker for people and
-      // for catalog items, so the union is what every delete below uses.
-      const resolveSynthetic = async (
-        table: 'public.customers' | 'public.staff_users',
-        ids: string[],
-      ) =>
-        (await db?.query<{ id: string }>(
-          `select id from ${table} where id = any($1::uuid[]) or email like $2`,
-          [ids, `${RUN}-%`],
+      section('45. Official-form application RPC (corrective migration proof)');
+      /* ---------------------------------------------------------------- */
+      // UAT defect D1: save_customer_application referenced v_plan.holder_limit,
+      // but the plan column is cardholder_limit, so EVERY call failed on real
+      // PostgreSQL with 42703. PL/pgSQL validates %rowtype field references only
+      // at execution, which is why creation succeeded while broken and why only
+      // a real RPC call counts as proof here - never a mock.
+      {
+        const body = await one<{ prosrc: string }>(
+          `select prosrc from pg_proc where proname = 'save_customer_application'`,
+        );
+        const code = stripSqlComments(body.prosrc);
+        check(
+          'installed function reads the real plan column',
+          code.includes('v_plan.cardholder_limit'),
+        );
+        check(
+          'installed function has no invalid plan field reference',
+          !code.includes('v_plan.holder_limit'),
+        );
+
+        const planIds = new Map<string, string>(
+          (
+            await db.query<{ code: string; id: string }>(
+              `select code, id from public.card_plans where code in ('BRONZE','SILVER','GOLD')`,
+            )
+          ).rows.map((r) => [r.code, r.id]),
+        );
+        check('all three official plans exist', planIds.size === 3);
+        const actor = staff['sm']!;
+        // Local customer factory: mkCustomer is scoped to the main try block,
+        // so this finally-block section creates (and registers) its own.
+        const mkFormsCustomer = async (label: string) => {
+          const id = uuidFor(`cust:forms45:${label}`);
+          const cn = (
+            await one<{ customer_number: string }>('select * from public.next_customer_number()')
+          ).customer_number;
+          await db.query(
+            `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1,$2,'Form','Test','1990-01-01',$3,'09175550001','prospect')`,
+            [id, cn, `${RUN}-forms45-${label}@example.invalid`],
+          );
+          createdCustomerIds.push(id);
+          return id;
+        };
+        const headerFor = (customerId: string, planId: string) => ({
+          customerId,
+          planId,
+          paymentScheme: 'spot_cash',
+          salesManagerName: '',
+          vipRecommenderName: '',
+          recommenderContact: '',
+          recommenderEmail: '',
+          vipReferrer: '',
+          acquisitionChannels: ['Referral'],
+          consentAcknowledged: true,
+          acknowledgedAt: '2026-10-01',
+          primarySignatureStatus: 'received',
+          validIdReceived: true,
+          reservationPaymentProofReceived: false,
+        });
+        const holderFor = () => ({
+          lastName: 'Form',
+          firstName: 'Test',
+          middleName: '',
+          suffix: '',
+          birthDate: '1990-04-05',
+          sex: '',
+          citizenship: '',
+          civilStatus: '',
+          permanentAddressLine1: '1 RPC Street',
+          permanentAddressLine2: '',
+          cityMunicipality: 'Calamba',
+          province: 'Laguna',
+          postalCode: '',
+          landline: '',
+          mobile: '09170000001',
+          email: `${RUN}-forms45-holder@example.invalid`,
+          tinNumber: '',
+          occupationBusinessName: '',
+          officeBusinessAddress: '',
+          businessIndustry: '',
+          employedPosition: '',
+          printedName: 'Test Form',
+        });
+        const appIds: string[] = [];
+        const saveApp = async (tier: string, withSecondary: boolean) => {
+          const cust = await mkFormsCustomer(`${tier.toLowerCase()}${withSecondary ? '-2' : ''}`);
+          const res = await one<{ id: string }>(
+            'select public.save_customer_application(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, $4::jsonb) as id',
+            [
+              actor,
+              JSON.stringify(headerFor(cust, planIds.get(tier)!)),
+              JSON.stringify(holderFor()),
+              withSecondary ? JSON.stringify(holderFor()) : null,
+            ],
+          );
+          appIds.push(res.id);
+          return res.id;
+        };
+        const snapshots = async (id: string) =>
+          one<Record<string, string | number>>(
+            `select customer_id, tier_snapshot, discount_percent_snapshot, validity_years_snapshot,
+                  yearly_points_snapshot, annual_points_tranches_snapshot,
+                  holder_limit_snapshot, vip_amount_snapshot, payment_scheme_snapshot,
+                  status from public.customer_applications where id = $1`,
+            [id],
+          );
+        const holderCount = async (id: string) =>
+          one<{ n: number }>(
+            `select count(*)::int as n from public.customer_application_holders where application_id = $1`,
+            [id],
+          );
+
+        const bronze = await saveApp('BRONZE', false);
+        const bronzeSnap = await snapshots(bronze);
+        eq('BRONZE application tier is frozen', String(bronzeSnap.tier_snapshot), 'BRONZE');
+        eq('BRONZE discount snapshot is 15', Number(bronzeSnap.discount_percent_snapshot), 15);
+        eq('BRONZE validity snapshot is 7', Number(bronzeSnap.validity_years_snapshot), 7);
+        eq(
+          'BRONZE yearly-points snapshot is 10000',
+          Number(bronzeSnap.yearly_points_snapshot),
+          10000,
+        );
+        eq('BRONZE tranche snapshot is 5', Number(bronzeSnap.annual_points_tranches_snapshot), 5);
+        eq('BRONZE holder-limit snapshot is 1', Number(bronzeSnap.holder_limit_snapshot), 1);
+        eq('BRONZE has exactly the primary holder', (await holderCount(bronze)).n, 1);
+
+        const silver = await saveApp('SILVER', false);
+        const silverSnap = await snapshots(silver);
+        eq('SILVER application tier is frozen', String(silverSnap.tier_snapshot), 'SILVER');
+        eq('SILVER discount snapshot is 20', Number(silverSnap.discount_percent_snapshot), 20);
+        eq('SILVER validity snapshot is 12', Number(silverSnap.validity_years_snapshot), 12);
+        eq(
+          'SILVER yearly-points snapshot is 20000',
+          Number(silverSnap.yearly_points_snapshot),
+          20000,
+        );
+        eq('SILVER holder-limit snapshot is 1', Number(silverSnap.holder_limit_snapshot), 1);
+
+        const goldSolo = await saveApp('GOLD', false);
+        const goldSnap = await snapshots(goldSolo);
+        eq('GOLD discount snapshot is 25', Number(goldSnap.discount_percent_snapshot), 25);
+        eq('GOLD validity snapshot is 22', Number(goldSnap.validity_years_snapshot), 22);
+        eq('GOLD yearly-points snapshot is 25000', Number(goldSnap.yearly_points_snapshot), 25000);
+        eq('GOLD holder-limit snapshot is 2', Number(goldSnap.holder_limit_snapshot), 2);
+        eq('GOLD without secondary still succeeds', (await holderCount(goldSolo)).n, 1);
+
+        const goldDuo = await saveApp('GOLD', true);
+        eq('GOLD with secondary stores both holders', (await holderCount(goldDuo)).n, 2);
+
+        const bronzeBlocked = await throws('BRONZE with secondary is rejected', () =>
+          saveApp('BRONZE', true),
+        );
+        check(
+          'BRONZE rejection names the Gold-only rule',
+          /SECONDARY_HOLDER_GOLD_ONLY/.test(bronzeBlocked),
+          bronzeBlocked,
+        );
+        const silverBlocked = await throws('SILVER with secondary is rejected', () =>
+          saveApp('SILVER', true),
+        );
+        check(
+          'SILVER rejection names the Gold-only rule',
+          /SECONDARY_HOLDER_GOLD_ONLY/.test(silverBlocked),
+          silverBlocked,
+        );
+
+        await db.query('select public.submit_customer_application($1::uuid, $2::uuid)', [
+          bronze,
+          actor,
+        ]);
+        eq(
+          'submitted application leaves draft',
+          String((await snapshots(bronze)).status),
+          'submitted',
+        );
+        const resubmitBlocked = await throws('a submitted application cannot be resubmitted', () =>
+          db.query('select public.submit_customer_application($1::uuid, $2::uuid)', [
+            bronze,
+            actor,
+          ]),
+        );
+        check(
+          'resubmission names the transition rule',
+          /INVALID_APPLICATION_TRANSITION/.test(resubmitBlocked),
+          resubmitBlocked,
+        );
+        const editBlocked = await throws('a submitted application is not editable', async () => {
+          const snap = await snapshots(bronze);
+          return one<{ id: string }>(
+            'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+            [
+              bronze,
+              actor,
+              JSON.stringify(headerFor(snap.customer_id as string, planIds.get('BRONZE')!)),
+              JSON.stringify(holderFor()),
+            ],
+          );
+        });
+        check(
+          'edit names the not-editable rule',
+          /APPLICATION_NOT_EDITABLE/.test(editBlocked),
+          editBlocked,
+        );
+
+        // Explicit tidy-up for this section's rows (the shared cleanup also
+        // covers them via the synthetic customers; both paths are idempotent).
+        await db.query(
+          'delete from public.customer_application_holders where application_id = any($1::uuid[])',
+          [appIds],
+        );
+        await db.query('delete from public.customer_applications where id = any($1::uuid[])', [
+          appIds,
+        ]);
+        const remaining = await one<{ n: number }>(
+          'select count(*)::int as n from public.customer_applications where id = any($1::uuid[])',
+          [appIds],
+        );
+        eq('section rows are removed', remaining.n, 0);
+      }
+
+      section('46. Bulk customer import (legacy member RPC)');
+      /* ---------------------------------------------------------------- */
+      // Row-level legacy migration through the REAL RPC: duplicate matching,
+      // reconciled historical payments, minted credentials, and the
+      // allocation-plus-delta opening balance - with nothing invented.
+      {
+        const actor = staff['sm']!;
+        const goldPlan = await one<{ id: string; cash_price: string; yearly_points: number }>(
+          `select id, cash_price, yearly_points from public.card_plans where code = 'GOLD'`,
+        );
+        const jobId = uuidFor('import:job46');
+        await db.query(
+          `insert into public.customer_import_jobs
+           (id, source_type, source_name, status, total_rows, valid_rows, created_by, validated_at)
+         values ($1, 'csv', 'section-46.csv', 'ready', 5, 5, $2, now())`,
+          [jobId, actor],
+        );
+        const mkPerson = (email: string) => ({
+          firstName: 'Legacy',
+          lastName: 'Member',
+          middleName: null,
+          suffix: null,
+          birthDate: '1985-06-07',
+          gender: null,
+          email,
+          phone: '+639170000001',
+          address: {
+            line1: '1 Legacy Street',
+            city: 'Calamba',
+            province: 'Laguna',
+            countryCode: 'PH',
+          },
+          customerStatus: 'prospect',
+          paymentScheme: 'spot_cash',
+          historicalSaleTotal: goldPlan.cash_price,
+          notes: null,
+          secondaryNote: null,
+        });
+        const importRow = (
+          customer: Record<string, unknown>,
+          payments: unknown[],
+          membership: unknown,
+          requireMember: boolean,
+        ) =>
+          one<Record<string, unknown>>(
+            'select public.import_legacy_member($1::uuid, $2::uuid, $3::jsonb, $4::uuid, $5::jsonb, $6::jsonb, $7::boolean) as out',
+            [
+              jobId,
+              actor,
+              JSON.stringify(customer),
+              goldPlan.id,
+              JSON.stringify(payments),
+              membership === null ? null : JSON.stringify(membership),
+              requireMember,
+            ],
+          );
+
+        // A. Prospect with no money and no member: customer only.
+        const emailA = `${RUN}-sec46-a@example.invalid`;
+        const outA = await importRow(mkPerson(emailA), [], null, false);
+        const rowA = outA.out as { customerId: string; saleId: null; membershipId: null };
+        check(
+          'prospect import creates a customer and nothing else',
+          !!rowA.customerId && rowA.saleId === null && rowA.membershipId === null,
+        );
+        eq(
+          'prospect keeps the prospect status',
+          (
+            await one<{ status: string }>('select status from public.customers where id = $1', [
+              rowA.customerId,
+            ])
+          ).status,
+          'prospect',
+        );
+
+        // B. Active VIP: full historical payment, minted credentials, delta ledger.
+        const opening = goldPlan.yearly_points + 2000;
+        const emailB = `${RUN}-sec46-b@example.invalid`;
+        const outB = await importRow(
+          { ...mkPerson(emailB), customerStatus: 'active' },
+          [
+            {
+              amount: goldPlan.cash_price,
+              date: '2026-09-01T00:00:00.000Z',
+              method: 'bank_transfer',
+              reference: 'SEC46-B',
+            },
+          ],
+          {
+            membershipNumber: null,
+            activationDate: '2026-09-02T00:00:00.000Z',
+            expiresAt: null,
+            openingBalance: opening,
+            memberStatus: 'active',
+          },
+          true,
+        );
+        const rowB = outB.out as {
+          customerId: string;
+          saleId: string;
+          membershipId: string;
+          membershipNumber: string;
+        };
+        check(
+          'active VIP import links customer, sale and membership',
+          !!rowB.customerId && !!rowB.saleId && !!rowB.membershipId,
+        );
+        check(
+          'membership number uses the MBS sequence',
+          /^MBS-\d{6}$/.test(rowB.membershipNumber),
+          rowB.membershipNumber,
+        );
+        const member = await one<Record<string, unknown>>(
+          'select * from public.memberships where id = $1',
+          [rowB.membershipId],
+        );
+        eq('member is active', String(member.status), 'active');
+        eq(
+          'member allocated the plan yearly points',
+          Number(member.yearly_points_allocated),
+          goldPlan.yearly_points,
+        );
+        check(
+          'credential hashes are stored, never plaintext',
+          String(member.fallback_code_hash).length === 64 &&
+            String(member.qr_token_hash).length === 64,
+        );
+        const account = await one<Record<string, unknown>>(
+          'select * from public.points_accounts where membership_id = $1',
+          [rowB.membershipId],
+        );
+        eq('account balance equals the imported opening balance', Number(account.balance), opening);
+        const ledger = await db.query<{ entry_type: string; amount: string }>(
+          'select entry_type, amount::text as amount from public.points_ledger where account_id = $1 order by id',
+          [(account as { id: string }).id],
+        );
+        eq('ledger holds exactly one opening balance', ledger.rows.length, 1);
+        eq('opening row is an import adjustment', ledger.rows[0]!.entry_type, 'adjustment');
+        eq('opening amount is preserved', Number(ledger.rows[0]!.amount), opening);
+        const saleB = await one<{ status: string }>(
+          'select status from public.card_sales where id = $1',
+          [rowB.saleId],
+        );
+        eq('legacy sale is active', saleB.status, 'active');
+        // No commission is fabricated for migrated history.
+        eq(
+          'no commission row exists for the legacy sale',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from public.commissions where sale_id = $1',
+              [rowB.saleId],
+            )
+          ).n,
+          0,
+        );
+
+        // C. The minted number is now taken: reuse is refused.
+        const dupeBlocked = await throws('a reused membership number is refused', () =>
+          importRow(
+            mkPerson(`${RUN}-sec46-c@example.invalid`),
+            [
+              {
+                amount: goldPlan.cash_price,
+                date: '2026-09-01T00:00:00.000Z',
+                method: 'bank_transfer',
+                reference: 'SEC46-C',
+              },
+            ],
+            {
+              membershipNumber: rowB.membershipNumber,
+              activationDate: null,
+              expiresAt: null,
+              openingBalance: 0,
+              memberStatus: 'active',
+            },
+            true,
+          ),
+        );
+        check(
+          'duplicate names the membership rule',
+          /IMPORT_DUPLICATE_MEMBERSHIP/.test(dupeBlocked),
+          dupeBlocked,
+        );
+
+        // D. Active VIP without payment history is refused, never invented.
+        const noPayBlocked = await throws('member demand without payments is refused', () =>
+          importRow(mkPerson(`${RUN}-sec46-d@example.invalid`), [], null, true),
+        );
+        check(
+          'refusal names the fully-paid rule',
+          /IMPORT_NOT_FULLY_PAID/.test(noPayBlocked),
+          noPayBlocked,
+        );
+
+        // E. Zero opening balance writes no ledger delta.
+        const emailE = `${RUN}-sec46-e@example.invalid`;
+        const outE = await importRow(
+          { ...mkPerson(emailE), customerStatus: 'active' },
+          [
+            {
+              amount: goldPlan.cash_price,
+              date: '2026-09-01T00:00:00.000Z',
+              method: 'bank_transfer',
+              reference: 'SEC46-E',
+            },
+          ],
+          {
+            membershipNumber: null,
+            activationDate: null,
+            expiresAt: null,
+            openingBalance: 0,
+            memberStatus: 'active',
+          },
+          true,
+        );
+        const rowE = outE.out as { membershipId: string };
+        const ledgerE = await db.query<{ n: number }>(
+          `select count(*)::int as n from public.points_ledger where account_id =
+           (select id from public.points_accounts where membership_id = $1)`,
+          [rowE.membershipId],
+        );
+        eq('zero opening balance creates no invented points', ledgerE.rows[0]!.n, 0);
+        eq(
+          'zero opening balance remains zero',
+          (
+            await one<{ balance: string }>(
+              'select balance from public.points_accounts where membership_id = $1',
+              [rowE.membershipId],
+            )
+          ).balance,
+          '0',
+        );
+
+        // Normal search, identity and portal activation use the imported graph.
+        const customerB = await one<{ customer_number: string }>(
+          'select customer_number from public.customers where id = $1',
+          [rowB.customerId],
+        );
+        for (const search of [
+          'Legacy Member',
+          'Lega',
+          customerB.customer_number,
+          rowB.membershipNumber,
+          'AFHOMES:' + rowB.membershipNumber,
+        ]) {
+          const found = await db.query<{ customer_id: string }>(
+            'select * from public.search_customer_ids($1)',
+            [search],
+          );
+          check(
+            'normal search finds imported member: ' + search,
+            found.rows.some((r) => r.customer_id === rowB.customerId),
+          );
+        }
+        const token = await one<{ token: string }>(
+          'select token from public.issue_customer_onboarding_token($1, $2, $3, $4)',
+          [rowB.customerId, 'account_activation', 72, actor],
+        );
+        const authId = uuidFor('import:portal46');
+        await db.query('insert into auth.users(id, email) values($1, $2)', [authId, emailB]);
+        createdAuthIds.push(authId);
+        await db.query(
+          'select public.claim_customer_onboarding_token(private.hash_token($1), $2, $3)',
+          [token.token, authId, 'account_activation'],
+        );
+        eq(
+          'portal links the imported customer',
+          (
+            await one<{ auth_user_id: string }>(
+              'select auth_user_id from public.customers where id = $1',
+              [rowB.customerId],
+            )
+          ).auth_user_id,
+          authId,
+        );
+        eq(
+          'portal activation creates no duplicate membership',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from public.memberships where customer_id = $1',
+              [rowB.customerId],
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'failed import leaves no partial customer',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from public.customers where email = $1',
+              [RUN + '-sec46-d@example.invalid'],
+            )
+          ).n,
+          0,
+        );
+
+        // F. Job tables carry the run and clean up with it.
+        eq(
+          'import job exists',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from public.customer_import_jobs where id = $1',
+              [jobId],
+            )
+          ).n,
+          1,
+        );
+      }
+
+      section('47. Atomic import row and normal member integration');
+      {
+        const actor = staff['super-admin']!;
+        const jobId = uuidFor('import:job47');
+        await db.query(
+          "insert into public.customer_import_jobs(id, source_type, source_name, status, created_by, validated_at) values($1,'excel','section47.xlsx','ready',$2,now())",
+          [jobId, actor],
+        );
+        const plan = await one<{ id: string; cash_price: string }>(
+          "select id,cash_price from public.card_plans where code='GOLD'",
+        );
+        const mkRow = async (label: string, category = 'ACTIVE_VIP', balance = 500) => {
+          const id = uuidFor('import:row47:' + label);
+          const person = {
+            firstName: 'Imported',
+            lastName: label,
+            email: RUN + '-sec47-' + label + '@example.invalid',
+            phone: '+639170000001',
+          };
+          const normalized = {
+            category,
+            paymentScheme: 'spot_cash',
+            historicalSaleTotal: plan.cash_price,
+            tier: 'GOLD',
+            customerStatus: category === 'SUSPENDED' ? 'suspended' : 'active',
+            person,
+            payment: {
+              amount: plan.cash_price,
+              date: '2025-01-01',
+              method: 'bank_transfer',
+              reference: label,
+            },
+            membershipNumber: null,
+            activationDate: '2025-01-01',
+            expiresAt: category === 'EXPIRED' ? '2025-12-31' : '2035-01-01',
+            openingBalance: balance,
+            memberStatus:
+              category === 'SUSPENDED'
+                ? 'suspended'
+                : category === 'EXPIRED'
+                  ? 'expired'
+                  : 'active',
+            requireMember: true,
+          };
+          await db.query(
+            "insert into public.customer_import_rows(id, import_job_id, row_number, validation_status, action, normalized_data) values($1,$2,$3,'valid','CREATE',$4)",
+            [
+              id,
+              jobId,
+              1 +
+                (
+                  await one<{ n: number }>(
+                    'select count(*)::int as n from public.customer_import_rows where import_job_id=$1',
+                    [jobId],
+                  )
+                ).n,
+              JSON.stringify(normalized),
+            ],
+          );
+          return id;
+        };
+        const commit = async (id: string) =>
+          (
+            await one<{ out: { customerId: string; membershipId: string; saleId: string } }>(
+              'select public.commit_customer_import_row($1,$2) as out',
+              [id, actor],
+            )
+          ).out;
+        const rowId = await mkRow('Active');
+        const active = await commit(rowId);
+        const retry = await commit(rowId);
+        eq('source-row retry returns the same membership', retry.membershipId, active.membershipId);
+        const member = await one<{
+          points_balance: string;
+          status: string;
+          membership_number: string;
+        }>('select points_balance,status,membership_number from public.memberships where id=$1', [
+          active.membershipId,
+        ]);
+        eq('opening balance below annual allocation remains exact', member.points_balance, '500');
+        eq('active imported member uses normal active status', member.status, 'active');
+        const linkage = await one<{
+          customer_id: string;
+          membership_id: string;
+          committed_at: unknown;
+        }>(
+          'select customer_id,membership_id,committed_at from public.customer_import_rows where id=$1',
+          [rowId],
+        );
+        eq('source row points at the normal customer', linkage.customer_id, active.customerId);
+        eq(
+          'source row points at the normal membership',
+          linkage.membership_id,
+          active.membershipId,
+        );
+        check('source row records commit time', !!linkage.committed_at);
+        eq(
+          'source-linked audit exists',
+          (
+            await one<{ n: number }>(
+              "select count(*)::int as n from public.audit_events where entity_id=$1 and action='CUSTOMER_IMPORT_ROW_COMMITTED'",
+              [rowId],
+            )
+          ).n,
+          1,
+        );
+        for (const category of ['SUSPENDED', 'EXPIRED']) {
+          const imported = await commit(await mkRow(category, category));
+          eq(
+            'imported ' + category + ' uses normal membership lifecycle',
+            (
+              await one<{ status: string }>('select status from public.memberships where id=$1', [
+                imported.membershipId,
+              ])
+            ).status,
+            category.toLowerCase(),
+          );
+        }
+        // A fault at source linkage occurs AFTER normal records were inserted.
+        // PostgreSQL must roll back the entire row graph.
+        const faultId = await mkRow('Fault');
+        await db.query(
+          "create function private.uat_import_fault() returns trigger language plpgsql as $$ begin if new.id='" +
+            faultId +
+            "'::uuid then raise exception 'UAT_IMPORT_FAULT'; end if; return new; end $$",
+        );
+        await db.query(
+          'create trigger uat_import_fault before update on public.customer_import_rows for each row execute function private.uat_import_fault()',
+        );
+        await throws('late import failure rolls back', () => commit(faultId));
+        await db.query(
+          'drop trigger uat_import_fault on public.customer_import_rows; drop function private.uat_import_fault()',
+        );
+        eq(
+          'failed source linkage leaves no customer',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from public.customers where email=$1',
+              [RUN + '-sec47-Fault@example.invalid'],
+            )
+          ).n,
+          0,
+        );
+        const updateId = uuidFor('import:row47:Update');
+        await db.query(
+          'insert into public.customer_import_rows(id,import_job_id,row_number,validation_status,action,normalized_data,customer_id,membership_id) select $1,import_job_id,99,\'valid\',\'UPDATE\',normalized_data || \'{"category":"SUSPENDED","customerStatus":"suspended"}\'::jsonb,customer_id,membership_id from public.customer_import_rows where id=$2',
+          [updateId, rowId],
+        );
+        await db.query(
+          "create function private.uat_import_update_fault() returns trigger language plpgsql as $$ begin if new.id='" +
+            updateId +
+            "'::uuid then raise exception 'UAT_IMPORT_UPDATE_FAULT'; end if; return new; end $$",
+        );
+        await db.query(
+          'create trigger uat_import_update_fault before update on public.customer_import_rows for each row execute function private.uat_import_update_fault()',
+        );
+        await throws('late update failure rolls back', () => commit(updateId));
+        eq(
+          'failed update preserves membership state',
+          (
+            await one<{ status: string }>('select status from public.memberships where id=$1', [
+              active.membershipId,
+            ])
+          ).status,
+          'active',
+        );
+        eq(
+          'failed update preserves customer state',
+          (
+            await one<{ status: string }>('select status from public.customers where id=$1', [
+              active.customerId,
+            ])
+          ).status,
+          'active',
+        );
+        await db.query(
+          'drop trigger uat_import_update_fault on public.customer_import_rows; drop function private.uat_import_update_fault()',
+        );
+        await commit(updateId);
+        eq(
+          'successful update uses normal membership lifecycle',
+          (
+            await one<{ status: string }>('select status from public.memberships where id=$1', [
+              active.membershipId,
+            ])
+          ).status,
+          'suspended',
+        );
+
+        const invariants = await db.query(
+          readFileSync(join(process.cwd(), 'supabase/security/rls_invariants.sql'), 'utf8'),
+        );
+        check(
+          'RLS invariants return no violations',
+          (Array.isArray(invariants) ? invariants : [invariants]).every((r) => r.rows.length === 0),
+          JSON.stringify(
+            (Array.isArray(invariants) ? invariants : [invariants]).flatMap((r) => r.rows),
+          ),
+        );
+      }
+
+      section('48. Customer import release blockers on real PostgreSQL');
+      {
+        const actor = staff['super-admin']!;
+        const job = uuidFor('import:job48');
+        await db.query(
+          "insert into customer_import_jobs(id,source_type,source_name,status,created_by,validated_at) values($1,'csv',$2,'ready',$3,now())",
+          [job, RUN + '-release48.csv', actor],
+        );
+        const plan = await one<{ id: string; cash_price: string }>(
+          "select id,cash_price from card_plans where code='GOLD'",
+        );
+        let serial = 0;
+        const person = (label: string) => ({
+          firstName: 'Release',
+          lastName: label,
+          email: RUN + '-release48-' + label + '@example.invalid',
+          phone: '09170000000',
+          customerStatus: 'active',
+          paymentScheme: 'spot_cash',
+          historicalSaleTotal: '12000.00',
+        });
+        const payment = { amount: '12000.00', date: '2025-01-01', method: 'cash', reference: null };
+        const createRow = async (label: string, overrides: Record<string, unknown> = {}) => {
+          const id = uuidFor('import:row48:' + label);
+          const normalized = {
+            category: 'ACTIVE_VIP',
+            tier: 'GOLD',
+            customerStatus: 'active',
+            person: person(label),
+            paymentScheme: 'spot_cash',
+            historicalSaleTotal: '12000.00',
+            payment,
+            membershipNumber: null,
+            activationDate: '2025-01-01',
+            expiresAt: '2035-01-01',
+            openingBalance: 12500,
+            memberStatus: 'active',
+            requireMember: true,
+            ...overrides,
+          };
+          await db.query(
+            "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,normalized_data) values($1,$2,$3,'valid','CREATE',$4)",
+            [id, job, ++serial, JSON.stringify(normalized)],
+          );
+          return id;
+        };
+        type Imported = { customerId: string; membershipId: string; saleId: string };
+        const commit = async (id: string) =>
+          (
+            await one<{ out: Imported }>('select commit_customer_import_row($1,$2) as out', [
+              id,
+              actor,
+            ])
+          ).out;
+        const badAmount = await createRow('AmountOnly', { payment: { amount: '12000.00' } });
+        const missing = await throws('amount-only history is rejected', () => commit(badAmount));
+        check(
+          'missing history names the payment rule',
+          missing.includes('IMPORT_BAD_PAYMENT'),
+          missing,
+        );
+        eq(
+          'bad history rolls back all customer data',
+          (
+            await one<{ n: number }>('select count(*)::int as n from customers where email=$1', [
+              person('AmountOnly').email,
+            ])
+          ).n,
+          0,
+        );
+        const id = await createRow('Active');
+        const member = await commit(id);
+        const retry = await commit(id);
+        eq('retry returns existing customer', retry.customerId, member.customerId);
+        eq('retry returns existing sale', retry.saleId, member.saleId);
+        eq('retry returns existing membership', retry.membershipId, member.membershipId);
+        const sale = await one<{
+          origin: string;
+          import_job_id: string;
+          import_row_id: string;
+          seller_staff_id: string | null;
+          cash_price_snapshot: string;
+        }>(
+          'select origin,import_job_id,import_row_id,seller_staff_id,cash_price_snapshot from card_sales where id=$1',
+          [member.saleId],
+        );
+        eq('explicit legacy origin', sale.origin, 'legacy_import');
+        eq('sale links job', sale.import_job_id, job);
+        eq('sale links exact row', sale.import_row_id, id);
+        eq('unknown seller stays unknown', sale.seller_staff_id, null);
+        eq(
+          'historical frozen total differs from current plan',
+          sale.cash_price_snapshot,
+          '12000.00',
+        );
+        eq(
+          'historical import creates no hierarchy',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from card_sale_hierarchy_snapshots where sale_id=$1',
+              [member.saleId],
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'historical import creates no commission',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from commissions where sale_id=$1',
+              [member.saleId],
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'operational sales exclude legacy',
+          (
+            await one<{ n: number }>(
+              "select count(*)::int as n from card_sales where id=$1 and origin='normal'",
+              [member.saleId],
+            )
+          ).n,
+          0,
+        );
+        const pay = await one<{ method: string; date: string }>(
+          'select method,recorded_at::date::text as date from payments where sale_id=$1',
+          [member.saleId],
+        );
+        eq('historical method preserved', pay.method, 'cash');
+        eq('historical date preserved', pay.date, '2025-01-01');
+        const directory = await db.query<{ record: Record<string, unknown>; total_count: string }>(
+          'select * from customer_directory($1)',
+          [JSON.stringify({ search: person('Active').email, limit: 1 })],
+        );
+        eq('directory query executes on the actual schema', directory.rows.length, 1);
+        eq(
+          'directory uses normal imported membership',
+          directory.rows[0]!.record.membership_id,
+          member.membershipId,
+        );
+        const safe = memberLookupFromDirectory(directory.rows[0]!.record);
+        eq('employee lookup returns imported member', safe.memberName, 'Release Active');
+        eq('lookup points from normal account', safe.availablePoints, '12500');
+        check(
+          'lookup excludes identity/contact/auth/payment fields',
+          !Object.keys(safe).some((k) =>
+            /email|phone|address|birth|auth|payment|tin|document/i.test(k),
+          ),
+        );
+        const ledgerBefore = (
+          await one<{ n: number }>(
+            'select count(*)::int as n from points_ledger where account_id=(select id from points_accounts where membership_id=$1)',
+            [member.membershipId],
+          )
+        ).n;
+        for (const status of ['cancelled', 'suspended', 'expired']) {
+          await db.query('update memberships set status=$1 where id=$2', [
+            status,
+            member.membershipId,
+          ]);
+          const updateId = uuidFor('import:update48:' + status);
+          await db.query(
+            "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,customer_id,membership_id,normalized_data) select $1,import_job_id,$3,'valid','UPDATE',customer_id,membership_id,normalized_data from customer_import_rows where id=$2",
+            [updateId, id, ++serial],
+          );
+          const conflict = await throws(status + ' to active import conflicts', () =>
+            commit(updateId),
+          );
+          check(
+            'conflict carries existing and requested states',
+            conflict.includes('existing=' + status) && conflict.includes('requested=active'),
+            conflict,
+          );
+        }
+        await db.query("update memberships set status='active' where id=$1", [member.membershipId]);
+        await db.query("update customers set status='suspended' where id=$1", [member.customerId]);
+        eq(
+          'suspended customer overrides active card',
+          (
+            await one<{ record: { derivedCategory: string } }>(
+              'select record from customer_directory($1)',
+              [JSON.stringify({ search: person('Active').email })],
+            )
+          ).record.derivedCategory,
+          'SUSPENDED',
+        );
+        eq(
+          'existing ledger unchanged',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from points_ledger where account_id=(select id from points_accounts where membership_id=$1)',
+              [member.membershipId],
+            )
+          ).n,
+          ledgerBefore,
+        );
+        await db.query("update customers set status='active' where id=$1", [member.customerId]);
+        const pointsUpdate = uuidFor('import:points48');
+        await db.query(
+          "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,customer_id,membership_id,normalized_data) select $1,import_job_id,$3,'valid','UPDATE',customer_id,membership_id,normalized_data || '{\"openingBalance\":999999}'::jsonb from customer_import_rows where id=$2",
+          [pointsUpdate, id, ++serial],
+        );
+        await commit(pointsUpdate);
+        eq(
+          'existing opening balance is never overwritten',
+          (
+            await one<{ balance: string }>(
+              'select balance::text from points_accounts where membership_id=$1',
+              [member.membershipId],
+            )
+          ).balance,
+          '12500',
+        );
+        for (const opening of [0, 25000, 25100, 24900]) {
+          const out = await commit(
+            await createRow('Points' + opening, { openingBalance: opening }),
+          );
+          eq(
+            'opening balance ' + opening + ' remains exact',
+            (
+              await one<{ balance: string }>(
+                'select balance::text from points_accounts where membership_id=$1',
+                [out.membershipId],
+              )
+            ).balance,
+            String(opening),
+          );
+          eq(
+            'opening ledger sum ' + opening + ' equals balance',
+            (
+              await one<{ amount: string }>(
+                'select coalesce(sum(pl.amount),0)::text as amount from points_ledger pl join points_accounts pa on pa.id=pl.account_id where pa.membership_id=$1',
+                [out.membershipId],
+              )
+            ).amount,
+            String(opening),
+          );
+        }
+        const mixed = RUN + '-MixedCase48@EXAMPLE.INVALID';
+        await db.query('update customers set email=$1 where id=$2', [mixed, member.customerId]);
+        eq(
+          'database email lookup is case insensitive',
+          (
+            await one<{ id: string }>('select id from match_import_emails($1)', [
+              [mixed.toLowerCase()],
+            ])
+          ).id,
+          member.customerId,
+        );
+        const otherId = await createRow('Other');
+        const other = await commit(otherId);
+        const otherNumber = (
+          await one<{ customer_number: string }>(
+            'select customer_number from customers where id=$1',
+            [other.customerId],
+          )
+        ).customer_number;
+        const contradictory = uuidFor('import:cross48');
+        await db.query(
+          "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,customer_id,membership_id,normalized_data,raw_data) select $1,import_job_id,$3,'valid','UPDATE',customer_id,membership_id,normalized_data,jsonb_build_object('customer_number',$4::text) from customer_import_rows where id=$2",
+          [contradictory, id, ++serial, otherNumber],
+        );
+        check(
+          'contradictory customer number rejected',
+          (await throws('cross-link rejected', () => commit(contradictory))).includes(
+            'IMPORT_IDENTIFIER_CONFLICT',
+          ),
+        );
+        const next = (
+          await one<{ n: string }>('select (last_value+1)::text as n from membership_number_seq')
+        ).n;
+        const supplied = 'MBS-' + next.padStart(6, '0');
+        const suppliedId = await createRow('Supplied', { membershipNumber: supplied });
+        await commit(suppliedId);
+        const auto = await commit(await createRow('Automatic'));
+        check(
+          'automatic creation skips supplied number',
+          (
+            await one<{ membership_number: string }>(
+              'select membership_number from memberships where id=$1',
+              [auto.membershipId],
+            )
+          ).membership_number !== supplied,
+        );
+        check(
+          'supplied duplicate rejected',
+          (
+            await throws('duplicate supplied number', () =>
+              createRow('Duplicate', { membershipNumber: supplied }).then(commit),
+            )
+          ).includes('IMPORT_DUPLICATE_MEMBERSHIP'),
+        );
+        check(
+          'malformed number rejected at RPC',
+          (
+            await throws('malformed number', () =>
+              createRow('Malformed', { membershipNumber: 'MBS-invalid' }).then(commit),
+            )
+          ).includes('IMPORT_BAD_MEMBERSHIP_NUMBER'),
+        );
+        const concurrentIds = await Promise.all([
+          createRow('ConcurrentA'),
+          createRow('ConcurrentB'),
+        ]);
+        const clients = [
+          new Client({ connectionString: target.url }),
+          new Client({ connectionString: target.url }),
+        ];
+        await Promise.all(clients.map((c) => c.connect()));
+        try {
+          const outputs = await Promise.all(
+            clients.map((c, i) =>
+              c.query<{ out: Imported }>('select commit_customer_import_row($1,$2) as out', [
+                concurrentIds[i],
+                actor,
+              ]),
+            ),
+          );
+          check(
+            'concurrent imports create distinct members',
+            outputs[0]!.rows[0]!.out.membershipId !== outputs[1]!.rows[0]!.out.membershipId,
+          );
+        } finally {
+          await Promise.all(clients.map((c) => c.end()));
+        }
+        const dp = await commit(
+          await createRow('DownPayment', {
+            category: 'DOWN_PAYMENT_COMPLETED',
+            requireMember: false,
+            paymentScheme: 'move_b1_40_12',
+            historicalReservationFee: '1000.00',
+            historicalRequiredInitial: '4000.00',
+            payment: { amount: '4000.00', date: '2025-01-01', method: 'cash' },
+          }),
+        );
+        eq(
+          'actual historical scheme down-payment snapshot drives category',
+          (
+            await one<{ record: { derivedCategory: string } }>(
+              'select record from customer_directory($1)',
+              [JSON.stringify({ search: person('DownPayment').email })],
+            )
+          ).record.derivedCategory,
+          'DOWN_PAYMENT_COMPLETED',
+        );
+        eq(
+          'historical scheme is preserved',
+          (
+            await one<{ payment_scheme: string }>(
+              'select payment_scheme from card_sales where id=$1',
+              [dp.saleId],
+            )
+          ).payment_scheme,
+          'move_b1_40_12',
+        );
+        const reservation = await commit(
+          await createRow('Reservation', {
+            historicalReservationFee: '10000.00',
+            historicalRequiredInitial: '10000.00',
+            category: 'RESERVATION_PAID',
+            customerStatus: 'active',
+            requireMember: false,
+            payment: { amount: '10000.00', date: '2025-01-01', method: 'cash' },
+            paymentScheme: 'spot_cash',
+            historicalSaleTotal: plan.cash_price,
+          }),
+        );
+        eq(
+          'reservation payment stays reservation category',
+          (
+            await one<{ record: { derivedCategory: string } }>(
+              'select record from customer_directory($1)',
+              [JSON.stringify({ search: person('Reservation').email })],
+            )
+          ).record.derivedCategory,
+          'RESERVATION_PAID',
+        );
+        await db.query('update card_sales set seller_staff_id=$1 where id=$2', [
+          actor,
+          reservation.saleId,
+        ]);
+        eq(
+          'seller ID filter precedes page limit',
+          (
+            await one<{ record: { id: string } }>('select record from customer_directory($1)', [
+              JSON.stringify({ search: person('Reservation').email, seller: actor, limit: 1 }),
+            ])
+          ).record.id,
+          reservation.customerId,
+        );
+        await db.query(
+          "update card_sales set seller_type='staff',seller_staff_id=$1,seller_ost_id=null where id=$2",
+          [staff['ost'], reservation.saleId],
+        );
+        eq(
+          'OST staff seller ID filter uses frozen sale identity',
+          (
+            await one<{ record: { id: string } }>('select record from customer_directory($1)', [
+              JSON.stringify({
+                search: person('Reservation').email,
+                seller: staff['ost'],
+                limit: 1,
+              }),
+            ])
+          ).record.id,
+          reservation.customerId,
+        );
+        await db.query("update customer_import_jobs set status='committing' where id=$1", [job]);
+        eq(
+          'committing source row retry remains idempotent',
+          (await commit(id)).saleId,
+          member.saleId,
+        );
+        const denied = await throws('ordinary staff cannot commit import', () =>
+          one('select commit_customer_import_row($1,$2)', [id, staff['employee'] ?? staff['sm']]),
+        );
+        check('ordinary staff denial is explicit', denied.includes('IMPORT_FORBIDDEN'), denied);
+        await db.query("update customer_import_jobs set status='failed' where id=$1", [job]);
+        check(
+          'failure timestamp recorded',
+          (
+            await one<{ failed_at: unknown }>(
+              'select failed_at from customer_import_jobs where id=$1',
+              [job],
+            )
+          ).failed_at !== null,
+        );
+        check(
+          'failed job cannot return to ready',
+          (
+            await throws('illegal lifecycle edge', () =>
+              db.query("update customer_import_jobs set status='ready' where id=$1", [job]),
+            )
+          ).includes('IMPORT_JOB_TRANSITION_INVALID'),
+        );
+
+        const countsJob = uuidFor('import:counts48');
+        await db.query(
+          "insert into customer_import_jobs(id,source_type,source_name,status,created_by,validated_at,total_rows,valid_rows,invalid_rows) values($1,'csv',$2,'ready',$3,now(),500,495,5)",
+          [countsJob, RUN + '-counts48.csv', actor],
+        );
+        await db.query("update customer_import_jobs set status='committing' where id=$1", [
+          countsJob,
+        ]);
+        await throws('completed job cannot hide five invalid rows', () =>
+          db.query(
+            "update customer_import_jobs set status='completed',inserted_rows=495,skipped_rows=5,committed_at=now() where id=$1",
+            [countsJob],
+          ),
+        );
+        await db.query(
+          "update customer_import_jobs set status='completed_with_errors',inserted_rows=495,failed_rows=5,committed_at=now() where id=$1",
+          [countsJob],
+        );
+        eq(
+          'completion counts preserve 495+5',
+          (
+            await one<{ status: string }>('select status from customer_import_jobs where id=$1', [
+              countsJob,
+            ])
+          ).status,
+          'completed_with_errors',
+        );
+      }
+    } catch (error) {
+      check('post-baseline sections completed', false, safeErrorMessage(error));
+    } finally {
+      section('21. cleanup');
+      try {
+        // Every synthetic row is reachable either by an id this process recorded or
+        // by the run prefix, and the delete order is the reverse of the foreign
+        // keys. The order is NOT cosmetic: customers, card_sales, memberships,
+        // points_accounts, staff_users and the redemption tables are all
+        // `on delete restrict`, so a parent removed before its child raises and the
+        // remaining deletes never run.
+        //
+        // The id sets are resolved FROM THE DATABASE, as the union of the recorded
+        // ids and everything carrying the run marker - not from the recorded ids
+        // alone. That is not tidiness: the synthetic INACTIVE staff member was
+        // created without ever being pushed onto createdStaffIds, so an id-list
+        // cleanup deleted every staff user except that one, on every run, forever,
+        // while the customer check still passed. A missing `.push()` is invisible
+        // to an id-list cleanup. The run prefix is a reliable marker for people and
+        // for catalog items, so the union is what every delete below uses.
+        const resolveSynthetic = async (
+          table: 'public.customers' | 'public.staff_users',
+          ids: string[],
+        ) =>
+          (await db?.query<{ id: string }>(
+            `select id from ${table} where id = any($1::uuid[]) or email like $2`,
+            [ids, `${RUN}-%`],
+          ))!.rows.map((r) => r.id);
+
+        const custSet = await resolveSynthetic('public.customers', createdCustomerIds);
+        const staffSet = await resolveSynthetic('public.staff_users', createdStaffIds);
+        // staff_users.id and customers.auth_user_id both reference auth.users, so
+        // the Auth rows go last of all.
+        const authSet = (await db?.query<{ id: string }>(
+          'select id from auth.users where id = any($1::uuid[]) or email like $2',
+          [[...createdAuthIds, ...createdStaffIds], `${RUN}-%`],
         ))!.rows.map((r) => r.id);
 
-      const custSet = await resolveSynthetic('public.customers', createdCustomerIds);
-      const staffSet = await resolveSynthetic('public.staff_users', createdStaffIds);
-      // staff_users.id and customers.auth_user_id both reference auth.users, so
-      // the Auth rows go last of all.
-      const authSet = (await db?.query<{ id: string }>(
-        'select id from auth.users where id = any($1::uuid[]) or email like $2',
-        [[...createdAuthIds, ...createdStaffIds], `${RUN}-%`],
-      ))!.rows.map((r) => r.id);
-
-      await db?.query('begin');
-      await db?.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
-      await db?.query('delete from public.audit_events where actor_id = any($1::uuid[])', [
-        authSet,
-      ]);
-      await db?.query(
-        `delete from public.audit_events
+        await db?.query('begin');
+        await db?.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
+        await db?.query('delete from public.audit_events where actor_id = any($1::uuid[])', [
+          authSet,
+        ]);
+        await db?.query(
+          'update public.card_sales set import_row_id=null,import_job_id=null where customer_id=any($1::uuid[])',
+          [custSet],
+        );
+        // Bulk-import job rows reference jobs, customers, memberships and sales
+        // (all RESTRICT), so they go before everything they point at.
+        await db?.query(
+          `delete from public.customer_import_rows where import_job_id in
+           (select id from public.customer_import_jobs where created_by = any($1::uuid[]))`,
+          [staffSet],
+        );
+        await db?.query(
+          'delete from public.customer_import_jobs where created_by = any($1::uuid[])',
+          [staffSet],
+        );
+        await db?.query(
+          `delete from public.audit_events
           where entity_id = any (select id::text from public.customers where id = any($1::uuid[]))`,
-        [custSet],
-      );
-      await db?.query('delete from public.redemptions where customer_id = any($1::uuid[])', [
-        custSet,
-      ]);
-      await db?.query(
-        `delete from public.points_ledger
+          [custSet],
+        );
+        await db?.query('delete from public.redemptions where customer_id = any($1::uuid[])', [
+          custSet,
+        ]);
+        await db?.query(
+          `delete from public.points_ledger
           where account_id in (select pa.id from public.points_accounts pa
                                 join public.memberships m on m.id = pa.membership_id
                                where m.customer_id = any($1::uuid[]))`,
-        [custSet],
-      );
-      await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [custSet]);
-      await db?.query(
-        `delete from public.commissions
+          [custSet],
+        );
+        await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
+          custSet,
+        ]);
+        // Application document rows can link payments with ON DELETE RESTRICT,
+        // so they go before anything they reference.
+        await db?.query(
+          `delete from public.customer_application_documents where application_id in
+           (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.commissions
           where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))
              or beneficiary_staff_id = any($2::uuid[])`,
-        [custSet, staffSet],
-      );
-      await db?.query(
-        'delete from public.customer_onboarding_tokens where customer_id = any($1::uuid[])',
-        [custSet],
-      );
-      await db?.query('delete from public.identity_documents where customer_id = any($1::uuid[])', [
-        custSet,
-      ]);
-      await db?.query(
-        `delete from public.final_qualifications
-          where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
-        [custSet],
-      );
-      await db?.query(
-        `delete from public.points_accounts
-          where membership_id in (select id from public.memberships where customer_id = any($1::uuid[]))`,
-        [custSet],
-      );
-      await db?.query('delete from public.memberships where customer_id = any($1::uuid[])', [
-        custSet,
-      ]);
-      await db?.query(
-        `delete from public.card_sale_hierarchy_snapshots
-          where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
-        [custSet],
-      );
-      await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
-        custSet,
-      ]);
-      // The customer row itself goes last of the customer-owned tables, and it
-      // matches on the run prefix as well as on the recorded ids. The delete and
-      // the count below MUST use the same predicate: when they disagreed, an
-      // untracked customer survived, `customers.auth_user_id` then held the
-      // Auth row shut against `auth.users`, and the whole cleanup aborted on the
-      // FK instead of on the thing it was supposed to report.
-      await db?.query('delete from public.customers where id = any($1::uuid[])', [custSet]);
-      await db?.query(
-        `delete from public.referral_relationships
-          where subject_staff_id = any($1::uuid[]) or upline_staff_id = any($1::uuid[])`,
-        [staffSet],
-      );
-      await db?.query('delete from public.staff_invitations where invited_by = any($1::uuid[])', [
-        staffSet,
-      ]);
-      await db?.query(
-        'delete from public.ost_applications where sponsor_staff_id = any($1::uuid[])',
-        [staffSet],
-      );
-      // staff_role_assignments and staff_permission_restrictions cascade from
-      // staff_users, so they need no statement of their own.
-      await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
-      await db?.query('delete from auth.users where id = any($1::uuid[])', [authSet]);
-      await db?.query('delete from public.redemption_items where code like $1', [`${RUN}-%`]);
-      await db?.query('commit');
-
-      // Cleanup is not proven by the deletes succeeding; it is proven by the
-      // database being back where it started. The baseline was captured before
-      // the suite wrote anything, so this asserts every table the suite touches
-      // is back to its pre-run row count - which also covers rows this process
-      // forgot to record an id for. A marker-based check cannot: memberships,
-      // points_ledger and redemptions carry no run prefix, so there is nothing
-      // to grep them by once their parents are gone.
-      const leaks: string[] = [];
-      for (const table of BASELINE_TABLES) {
-        const after = await db?.query<{ n: number }>(
-          `select count(*)::int as n from public.${table}`,
+          [custSet, staffSet],
         );
-        const now = after!.rows[0]!.n;
-        if (now !== baseline.get(table)) leaks.push(`${table}: ${baseline.get(table)} -> ${now}`);
-      }
-      const authLeak = await db?.query<{ n: number }>(
-        'select count(*)::int as n from auth.users where email like $1',
-        [`${RUN}-%`],
-      );
-      if (authLeak!.rows[0]!.n !== 0) leaks.push(`auth.users: ${authLeak!.rows[0]!.n} left behind`);
+        await db?.query(
+          'delete from public.customer_onboarding_tokens where customer_id = any($1::uuid[])',
+          [custSet],
+        );
+        await db?.query(
+          'delete from public.identity_documents where customer_id = any($1::uuid[])',
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.final_qualifications
+          where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.points_accounts
+          where membership_id in (select id from public.memberships where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        await db?.query('delete from public.memberships where customer_id = any($1::uuid[])', [
+          custSet,
+        ]);
+        await db?.query(
+          `delete from public.card_sale_hierarchy_snapshots
+          where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        // Official-form transaction rows first: reservation agreements reference
+        // synthetic sales with ON DELETE RESTRICT, so the sale delete below would
+        // fail while they exist. Details go before headers.
+        await db?.query(
+          `delete from public.reservation_agreement_schedule where agreement_id in
+           (select id from public.reservation_agreements where sale_id in
+             (select id from public.card_sales where customer_id = any($1::uuid[]))
+             or customer_application_id in
+             (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.reservation_agreement_holders where agreement_id in
+           (select id from public.reservation_agreements where sale_id in
+             (select id from public.card_sales where customer_id = any($1::uuid[]))
+             or customer_application_id in
+             (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.reservation_agreement_documents where agreement_id in
+           (select id from public.reservation_agreements where sale_id in
+             (select id from public.card_sales where customer_id = any($1::uuid[]))
+             or customer_application_id in
+             (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.reservation_agreements where sale_id in
+           (select id from public.card_sales where customer_id = any($1::uuid[]))
+           or customer_application_id in
+           (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
+          custSet,
+        ]);
+        // Customer-application rows reference synthetic customers (and synthetic
+        // sales, already removed above). Holders go before headers; headers go
+        // before the customer row itself. Documents were removed with payments.
+        await db?.query(
+          `delete from public.customer_application_holders where application_id in
+           (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        await db?.query(
+          'delete from public.customer_applications where customer_id = any($1::uuid[])',
+          [custSet],
+        );
+        // The customer row itself goes last of the customer-owned tables, and it
+        // matches on the run prefix as well as on the recorded ids. The delete and
+        // the count below MUST use the same predicate: when they disagreed, an
+        // untracked customer survived, `customers.auth_user_id` then held the
+        // Auth row shut against `auth.users`, and the whole cleanup aborted on the
+        // FK instead of on the thing it was supposed to report.
+        await db?.query('delete from public.customers where id = any($1::uuid[])', [custSet]);
+        await db?.query(
+          `delete from public.referral_relationships
+          where subject_staff_id = any($1::uuid[]) or upline_staff_id = any($1::uuid[])`,
+          [staffSet],
+        );
+        await db?.query('delete from public.staff_invitations where invited_by = any($1::uuid[])', [
+          staffSet,
+        ]);
+        await db?.query(
+          'delete from public.ost_applications where sponsor_staff_id = any($1::uuid[])',
+          [staffSet],
+        );
+        // staff_role_assignments and staff_permission_restrictions cascade from
+        // staff_users, so they need no statement of their own.
+        await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
+        await db?.query('delete from auth.users where id = any($1::uuid[])', [authSet]);
+        await db?.query('delete from public.redemption_items where code like $1', [`${RUN}-%`]);
+        await db?.query('commit');
 
-      check('synthetic customers removed', !leaks.some((l) => l.startsWith('customers:')));
-      check(
-        'every table the suite writes is back to its pre-run row count',
-        leaks.length === 0,
-        leaks.join('; '),
-      );
-      await db?.end();
-    } catch (error) {
-      // A half-applied cleanup leaves an aborted transaction open. Roll it back
-      // so the connection is not left mid-transaction, then fail the suite: a
-      // cleanup failure is a failure, never a warning.
-      await db?.query('rollback').catch(() => {});
-      check('cleanup completed', false, safeErrorMessage(error));
+        // Cleanup is not proven by the deletes succeeding; it is proven by the
+        // database being back where it started. The baseline was captured before
+        // the suite wrote anything, so this asserts every table the suite touches
+        // is back to its pre-run row count - which also covers rows this process
+        // forgot to record an id for. A marker-based check cannot: memberships,
+        // points_ledger and redemptions carry no run prefix, so there is nothing
+        // to grep them by once their parents are gone.
+        const leaks: string[] = [];
+        for (const table of BASELINE_TABLES) {
+          const after = await db?.query<{ n: number }>(
+            `select count(*)::int as n from public.${table}`,
+          );
+          const now = after!.rows[0]!.n;
+          if (now !== baseline.get(table)) leaks.push(`${table}: ${baseline.get(table)} -> ${now}`);
+        }
+        const authLeak = await db?.query<{ n: number }>(
+          'select count(*)::int as n from auth.users where email like $1',
+          [`${RUN}-%`],
+        );
+        if (authLeak!.rows[0]!.n !== 0)
+          leaks.push(`auth.users: ${authLeak!.rows[0]!.n} left behind`);
+
+        check('synthetic customers removed', !leaks.some((l) => l.startsWith('customers:')));
+        check(
+          'every table the suite writes is back to its pre-run row count',
+          leaks.length === 0,
+          leaks.join('; '),
+        );
+        await db?.end();
+      } catch (error) {
+        // A half-applied cleanup leaves an aborted transaction open. Roll it back
+        // so the connection is not left mid-transaction, then fail the suite: a
+        // cleanup failure is a failure, never a warning.
+        await db?.query('rollback').catch(() => {});
+        check('cleanup completed', false, safeErrorMessage(error));
+      }
     }
   }
 

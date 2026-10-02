@@ -108,6 +108,7 @@ export {
   BASELINE_ROLES,
   BASELINE_ROW_COUNT,
   DEFAULT_ROLE_BASELINE,
+  MIGRATION_SEEDED_GRANTS,
 } from './schemas/role-baseline.js';
 export type { BaselineGrant, BaselineRole } from './schemas/role-baseline.js';
 
@@ -267,6 +268,46 @@ export {
   CUSTOMER_ACTIVATION_ERRORS,
 } from './schemas/customer.js';
 
+/* ---- Bulk customer import/export (main-system feature) ----
+   Header/detail job model, tier + status mapping, and the shared display-
+   category resolver. Display categories are never persisted. */
+export {
+  CUSTOMER_IMPORT_COLUMNS,
+  CUSTOMER_EXPORT_COLUMNS,
+  CUSTOMER_IMPORT_ROW_LIMIT,
+  importSourceSchema,
+  importJobStatusSchema,
+  importRowActionSchema,
+  importValidationSchema,
+  normalizeTier,
+  customerCategorySchema,
+  CUSTOMER_CATEGORY_LABELS,
+  mapSourceStatus,
+  customerStatusForCategory,
+  categoryRequiresMember,
+  compareMoney,
+  resolveCustomerCategory,
+  parseGoogleSheetUrl,
+  googleSheetCsvUrl,
+  customerImportJobSchema,
+  customerImportRowSchema,
+  customerImportParseResponseSchema,
+  customerImportCommitResponseSchema,
+} from './schemas/customer-import.js';
+export type {
+  CustomerImportColumn,
+  CustomerExportRow,
+  ImportSource,
+  ImportJobStatus,
+  ImportRowAction,
+  ImportValidation,
+  VipTier,
+  CustomerCategory,
+  CustomerImportJob,
+  CustomerImportRow,
+  CustomerImportParseResponse,
+  CustomerImportCommitResponse,
+} from './schemas/customer-import.js';
 /* ---- Official paper-form transaction snapshots and review-first imports. ---- */
 export {
   vipTierSchema,
@@ -479,3 +520,7 @@ export type {
   CustomerCredentials,
   CustomerActivationError,
 } from './schemas/customer.js';
+
+export { memberLookupSchema, type MemberLookup } from './schemas/customer-import.js';
+
+export { customerSellerOptionSchema } from './schemas/customer-import.js';

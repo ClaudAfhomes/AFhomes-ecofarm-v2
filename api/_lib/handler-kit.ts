@@ -135,12 +135,31 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
     AGREEMENT_SALE_IMMUTABLE: ['CONFLICT', 409],
     INVALID_APPLICATION_TRANSITION: ['CONFLICT', 409],
     INVALID_AGREEMENT_TRANSITION: ['CONFLICT', 409],
+    SALE_COMPLETE_HIERARCHY_REQUIRED: ['CONFLICT', 409],
+    SALE_HIERARCHY_TOO_DEEP: ['CONFLICT', 409],
+    SALE_SELLER_REQUIRED: ['VALIDATION_ERROR', 400],
+    SALE_SELLER_HIERARCHY_ROLE_REQUIRED: ['CONFLICT', 409],
+    IMPORT_JOB_NOT_FOUND: ['NOT_FOUND', 404],
+    IMPORT_JOB_NOT_COMMITTABLE: ['CONFLICT', 409],
+    IMPORT_DUPLICATE_MEMBERSHIP: ['CONFLICT', 409],
+    IMPORT_DUPLICATE_EMAIL: ['CONFLICT', 409],
+    IMPORT_BAD_PAYMENT: ['VALIDATION_ERROR', 400],
+    IMPORT_BAD_OPENING_BALANCE: ['VALIDATION_ERROR', 400],
+    IMPORT_NOT_FULLY_PAID: ['CONFLICT', 409],
   };
 
   const mapped = byCode[code ?? ''];
   // eslint-disable-next-line no-console
   console.error('[api] rpc error:', message);
-  if (mapped) return fail(res, mapped[0], code!.replace(/_/g, ' ').toLowerCase(), mapped[1]);
+  if (mapped)
+    return fail(
+      res,
+      mapped[0],
+      code === 'SALE_COMPLETE_HIERARCHY_REQUIRED'
+        ? 'Complete the seller hierarchy before creating this sale.'
+        : code!.replace(/_/g, ' ').toLowerCase(),
+      mapped[1],
+    );
 
   // Postgres unique violation (23505) surfaces as a duplicate conflict rather
   // than an opaque 500.

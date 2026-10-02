@@ -60,7 +60,9 @@ export const isOfficialTier = (value: unknown): value is OfficialTier =>
   value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
 
 export const officialTierBenefits = (tier: string) =>
-  isOfficialTier(tier.toUpperCase()) ? OFFICIAL_TIER_BENEFITS[tier.toUpperCase() as OfficialTier] : null;
+  isOfficialTier(tier.toUpperCase())
+    ? OFFICIAL_TIER_BENEFITS[tier.toUpperCase() as OfficialTier]
+    : null;
 
 export const CUSTOMER_IMPORT_HEADERS = [
   'primary_last_name',
@@ -125,6 +127,7 @@ export const CUSTOMER_IMPORT_HEADERS = [
 export const IST_IMPORT_HEADERS = [
   'sale_id',
   'customer_application_id',
+  'vip_tier',
   'reservation_date',
   'agreement_date',
   'revision_number',
@@ -244,6 +247,7 @@ const requiredCustomer = [
 ] as const;
 const requiredIst = [
   'sale_id',
+  'vip_tier',
   'reservation_date',
   'agreement_date',
   'primary_signature_status',
@@ -315,15 +319,32 @@ export function validateFormImport(
   const phoneKey = kind === 'customer_application' ? 'primary_mobile' : 'primary_contact_number';
   if (fields[phoneKey] && fields[phoneKey].replace(/\D/g, '').length < 7)
     errors.push({ field: phoneKey, message: 'Invalid phone' });
-  if (fields.secondary_contact_number && fields.secondary_contact_number.replace(/\D/g, '').length < 7)
+  if (
+    fields.secondary_contact_number &&
+    fields.secondary_contact_number.replace(/\D/g, '').length < 7
+  )
     errors.push({ field: 'secondary_contact_number', message: 'Invalid phone' });
   if (fields.card_tier && !KNOWN_TIERS.includes(fields.card_tier.toUpperCase()))
     errors.push({ field: 'card_tier', message: 'Unknown tier' });
+  if (fields.vip_tier && !KNOWN_TIERS.includes(fields.vip_tier.toUpperCase()))
+    errors.push({ field: 'vip_tier', message: 'Unknown tier' });
   if (fields.payment_scheme && !KNOWN_SCHEMES.includes(fields.payment_scheme))
     errors.push({ field: 'payment_scheme', message: 'Unknown payment scheme' });
+  // Secondary holders are Gold-only in both formats. The customer format
+  // carries card_tier; the IST format carries vip_tier as its tier context.
+  const holderTier = (
+    kind === 'customer_application' ? fields.card_tier : fields.vip_tier
+  )?.toUpperCase();
+  const hasSecondaryData = Object.entries(fields).some(
+    ([key, value]) =>
+      key.startsWith('secondary_') &&
+      key !== 'secondary_enabled' &&
+      key !== 'secondary_signature_status' &&
+      value.trim().length > 0,
+  );
   if (
-    fields.secondary_enabled?.toLowerCase() === 'true' &&
-    fields.card_tier?.toUpperCase() !== 'GOLD'
+    (fields.secondary_enabled?.toLowerCase() === 'true' || hasSecondaryData) &&
+    holderTier !== 'GOLD'
   )
     errors.push({ field: 'secondary_enabled', message: 'Secondary holder is Gold-only' });
   if (
@@ -375,10 +396,7 @@ export function mapOcrToApplicationDraft(
       if (value) {
         draft[to] = value;
         detected.push(to);
-        if (
-          extracted[key]?.confidence !== null &&
-          (extracted[key]?.confidence ?? 1) < 0.6
-        )
+        if (extracted[key]?.confidence !== null && (extracted[key]?.confidence ?? 1) < 0.6)
           warnings.push(`${to}: low confidence - please verify`);
         return;
       }
@@ -401,7 +419,10 @@ function benefitRows(tier: string): string[][] {
     ['discount', `${benefits.discountPercent}% priority reservation discount`],
     ['cardholders', benefits.cardholderLabel],
     ['validity', benefits.validityLabel],
-    ['annual points', `${benefits.yearlyPoints.toLocaleString('en-PH')}/year x ${benefits.annualPointsTranches}`],
+    [
+      'annual points',
+      `${benefits.yearlyPoints.toLocaleString('en-PH')}/year x ${benefits.annualPointsTranches}`,
+    ],
     ['total loyalty value', `PHP ${benefits.totalLoyaltyValue}`],
     ['priority reservation', benefits.priorityReservation ? 'Yes' : 'No'],
     ['monthly/annual dues', benefits.noMonthlyAnnualDues ? 'None' : 'See plan'],
@@ -418,7 +439,7 @@ export function officialFormPdf(
   const rows: string[][] = [];
   const section = (name: string) => rows.push([name, '']);
   if (kind === 'reservation_agreement') {
-    const tier = fields.tier ?? fields.card_tier ?? 'BRONZE';
+    const tier = fields.tier ?? fields.card_tier ?? fields.vip_tier ?? 'BRONZE';
     section('AF HOMES ECOFARM');
     rows.push(['document', title]);
     section('RESERVATION HEADER');
@@ -534,7 +555,10 @@ export function officialFormPdf(
     rows.push(['secondary signature', fields.secondary_signature_status ?? '']);
     section('RESERVATION REQUIREMENTS');
     rows.push(['valid id received', fields.valid_id_received ?? '']);
-    rows.push(['reservation payment proof received', fields.reservation_payment_proof_received ?? '']);
+    rows.push([
+      'reservation payment proof received',
+      fields.reservation_payment_proof_received ?? '',
+    ]);
   }
   return toPdf({
     title: `AF Homes Ecofarm\n${title}`,

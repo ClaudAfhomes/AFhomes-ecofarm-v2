@@ -82,8 +82,8 @@ describe('exact decimal money', () => {
 });
 
 describe('afHomesModuleKeySchema', () => {
-  it('exposes the 24 existing keys plus four narrowly scoped Phase 6 CMS keys', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(28);
+  it('exposes the 24 existing keys plus four narrowly scoped Phase 6 CMS keys plus bulk import', () => {
+    expect(afHomesModuleKeySchema.options).toHaveLength(29);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
@@ -94,6 +94,8 @@ describe('afHomesModuleKeySchema', () => {
       'cms.settings',
       'cms.history',
     ]);
+    // Bulk customer import is an Admin-only migration-seeded workflow.
+    expect(keys).toContain('governance.customer_import');
   });
 
   it('covers every seeded module group', () => {

@@ -13,6 +13,7 @@ import {
   BASELINE_ROLES,
   BASELINE_ROW_COUNT,
   DEFAULT_ROLE_BASELINE,
+  MIGRATION_SEEDED_GRANTS,
 } from './role-baseline.js';
 
 const ALL_KEYS = new Set(afHomesModuleKeySchema.options);
@@ -82,8 +83,27 @@ describe('default role permission baseline', () => {
     for (const key of BASELINE_EXCLUDED_MODULES) {
       expect(granted.has(key), `${key} must stay ungranted`).toBe(false);
     }
-    // And the union of granted + excluded is the whole module vocabulary.
-    expect(new Set([...granted, ...BASELINE_EXCLUDED_MODULES])).toEqual(ALL_KEYS);
+    // And the union of granted + excluded + migration-seeded is the whole
+    // module vocabulary. Migration-seeded grants stay out of the matrix so
+    // the Phase-2-reviewed history is never rewritten.
+    expect(
+      new Set([
+        ...granted,
+        ...BASELINE_EXCLUDED_MODULES,
+        ...MIGRATION_SEEDED_GRANTS.map((g) => g.moduleKey),
+      ]),
+    ).toEqual(ALL_KEYS);
+  });
+
+  it('reserves bulk customer import for admin via its migration-seeded grant', () => {
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({
+      moduleKey: 'governance.customer_import',
+      roles: ['admin'],
+    });
+    const granted = new Set(
+      Object.values(DEFAULT_ROLE_BASELINE).flatMap((grants) => grants.map((g) => g.moduleKey)),
+    );
+    expect(granted.has('governance.customer_import')).toBe(false);
   });
 
   it('gives sellers no sales.uplines row (they must never assign an upline)', () => {

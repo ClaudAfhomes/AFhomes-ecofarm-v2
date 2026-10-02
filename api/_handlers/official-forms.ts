@@ -11,6 +11,7 @@ import {
   type ReservationAgreementStatus,
 } from '@jad/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
   deny,
@@ -328,12 +329,10 @@ async function listRows(
         names.set(String(holder.agreement_id), String(holder.name ?? ''));
     for (const row of rows) row.applicant_name = names.get(String(row.id)) ?? null;
   }
-  return res
-    .status(200)
-    .json({
-      data: rows,
-      meta: { total: count ?? rows.length, limit: q.limit, offset: q.offset },
-    });
+  return res.status(200).json({
+    data: rows,
+    meta: { total: count ?? rows.length, limit: q.limit, offset: q.offset },
+  });
 }
 
 const APPLICABLE_DECISION_AUDIT: Record<string, string> = {
@@ -381,7 +380,9 @@ async function transitionApplicationStatus(
   await audit(
     db,
     authUserId,
-    to === 'draft' ? 'CUSTOMER_APPLICATION_REOPENED' : (APPLICABLE_DECISION_AUDIT[to] ?? 'CUSTOMER_APPLICATION_UPDATED'),
+    to === 'draft'
+      ? 'CUSTOMER_APPLICATION_REOPENED'
+      : (APPLICABLE_DECISION_AUDIT[to] ?? 'CUSTOMER_APPLICATION_UPDATED'),
     'customer_application',
     id,
     { status: row.status },
@@ -422,13 +423,123 @@ async function transitionAgreementStatus(
   await audit(
     db,
     authUserId,
-    to === 'draft' ? 'RESERVATION_AGREEMENT_REOPENED' : (APPLICABLE_DECISION_AUDIT[to] ?? 'RESERVATION_AGREEMENT_UPDATED'),
+    to === 'draft'
+      ? 'RESERVATION_AGREEMENT_REOPENED'
+      : (APPLICABLE_DECISION_AUDIT[to] ?? 'RESERVATION_AGREEMENT_UPDATED'),
     'reservation_agreement',
     id,
     { status: row.status },
     { status: to },
   );
   return true;
+}
+
+/**
+ * D2 seller-scoped mutation gate for reservation agreements.
+ *
+ * Baseline reality: selling roles (VD/SSM/SM/OST) hold `sales.card_sales`
+ * view+create but NOT update, so gating draft edits, submit, execute, cancel
+ * and reopen on `update` made the whole seller IST workflow impossible (only
+ * super_admin could complete one). EXECUTE here means the seller finalizes the
+ * reservation contract (terminal status, signatures collected) - it moves no
+ * money and grants no financial approval, so the owning seller may perform it.
+ *
+ * Rule (narrowest existing vocabulary, no new modules):
+ * - the caller must hold `sales.card_sales` create (employees and anonymous
+ *   callers are refused here, before any row is read);
+ * - then either the caller owns the agreement (`created_by`), or the caller
+ *   holds `sales.card_sales` update for cross-cutting oversight (today only
+ *   super_admin, implicitly; a future role can be granted update without a
+ *   code change). No other permission confers access, so one seller can never
+ *   touch another seller's agreement through a side permission.
+ * Returns the principal on allow, otherwise writes the denial and returns null.
+ */
+async function authorizeAgreementMutation(
+  req: VercelRequest,
+  res: VercelResponse,
+  db: Db,
+  agreement: { createdBy?: unknown } | null,
+) {
+  const creator = await authorizeAfHomes(req, 'sales.card_sales', 'create');
+  if ('error' in creator) {
+    deny(res, creator);
+    return null;
+  }
+  if (agreement) {
+    const cardUpdate = await authorizeAfHomes(req, 'sales.card_sales', 'update');
+    if (!('error' in cardUpdate)) return cardUpdate;
+    if (agreement.createdBy && String(agreement.createdBy) === creator.userId) return creator;
+    deny(res, {
+      error: toErrorEnvelope(
+        'FORBIDDEN',
+        'Only the owning seller or an authorized reviewer may change this agreement',
+        403,
+      ),
+    });
+    return null;
+  }
+  return creator;
+}
+
+/**
+ * D3 tier-mismatch guard. The imported `vipTier` is validation context only:
+ * the sale's plan tier stays authoritative for every snapshot. A declared tier
+ * that contradicts the selected sale is rejected instead of silently kept.
+ */
+async function tierConflictForSale(
+  db: Db,
+  saleId: string,
+  vipTier: string,
+): Promise<string | null> {
+  const { data: sale, error: saleError } = await db
+    .from('card_sales')
+    .select('plan_id')
+    .eq('id', saleId)
+    .maybeSingle();
+  if (saleError) throw saleError;
+  if (!sale) return null;
+  const { data: plan, error: planError } = await db
+    .from('card_plans')
+    .select('code')
+    .eq('id', (sale as { plan_id: string }).plan_id)
+    .maybeSingle();
+  if (planError) throw planError;
+  if (!plan) return null;
+  const actual = String((plan as { code: string }).code).toUpperCase();
+  return actual === vipTier.toUpperCase()
+    ? null
+    : `Imported tier ${vipTier.toUpperCase()} does not match the selected sale (${actual})`;
+}
+
+async function authorizeAgreementSale(
+  req: VercelRequest,
+  res: VercelResponse,
+  db: Db,
+  saleId: string,
+) {
+  const auth = await authorizeAfHomes(req, 'sales.card_sales', 'create');
+  if ('error' in auth) {
+    deny(res, auth);
+    return false;
+  }
+  const oversight = await authorizeAfHomes(req, 'sales.card_sales', 'update');
+  if (!('error' in oversight)) return true;
+  const { data, error } = await db
+    .from('card_sales')
+    .select('seller_staff_id,seller_ost_id')
+    .eq('id', saleId)
+    .maybeSingle();
+  if (error) throw error;
+  const sale = data as { seller_staff_id?: string; seller_ost_id?: string } | null;
+  if (sale && (sale.seller_staff_id === auth.userId || sale.seller_ost_id === auth.userId))
+    return true;
+  fail(
+    res,
+    'FORBIDDEN',
+    'Only the sale seller or an authorized reviewer may create or edit this agreement',
+    403,
+  );
+  return false;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -631,7 +742,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = createReservationAgreementSchema.safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
-      const { primary, secondary, scheduleNotes, ...input } = parsed.data;
+      const { primary, secondary, scheduleNotes, vipTier, ...input } = parsed.data;
+      if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
+      if (vipTier) {
+        const conflict = await tierConflictForSale(db, input.saleId, vipTier);
+        if (conflict) return fail(res, 'CONFLICT', conflict, 409);
+      }
       const { data, error } = await db.rpc('save_reservation_agreement', {
         p_agreement_id: null,
         p_actor_id: auth.userId,
@@ -664,14 +780,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const agreementPatch = route(req, 'PATCH', /^reservations\/([0-9a-f-]+)$/);
     if (agreementPatch) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales', 'update');
-      if ('error' in auth) return deny(res, auth);
+      const before = await getAgreement(db, agreementPatch[1]!);
+      if (!before) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const auth = await authorizeAgreementMutation(req, res, db, before);
+      if (!auth) return;
       const parsed = createReservationAgreementSchema.safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
-      const before = await getAgreement(db, agreementPatch[1]!);
-      if (!before) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
-      const { primary, secondary, scheduleNotes, ...input } = parsed.data;
+      const { primary, secondary, scheduleNotes, vipTier, ...input } = parsed.data;
+      if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
+      if (vipTier) {
+        const conflict = await tierConflictForSale(db, input.saleId, vipTier);
+        if (conflict) return fail(res, 'CONFLICT', conflict, 409);
+      }
       const { error } = await db.rpc('save_reservation_agreement', {
         p_agreement_id: agreementPatch[1],
         p_actor_id: auth.userId,
@@ -695,10 +816,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const agreementSubmit = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/submit$/);
     if (agreementSubmit) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales', 'update');
-      if ('error' in auth) return deny(res, auth);
       const before = await getAgreement(db, agreementSubmit[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const auth = await authorizeAgreementMutation(req, res, db, before);
+      if (!auth) return;
       const { error } = await db.rpc('submit_reservation_agreement', {
         p_agreement_id: agreementSubmit[1],
         p_actor_id: auth.userId,
@@ -717,11 +838,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const agreementDecision = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/decision$/);
     if (agreementDecision) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales', 'update');
-      if ('error' in auth) return deny(res, auth);
       const parsed = reservationAgreementDecisionSchema.safeParse(jsonBody(req));
-      if (!parsed.success)
-        return fail(res, 'VALIDATION_ERROR', 'Invalid agreement decision', 400);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid agreement decision', 400);
+      const current = await getAgreement(db, agreementDecision[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const auth = await authorizeAgreementMutation(req, res, db, current);
+      if (!auth) return;
       const ok = await transitionAgreementStatus(
         db,
         auth.userId,
@@ -733,8 +855,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const agreementReopen = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/reopen$/);
     if (agreementReopen) {
-      const auth = await authorizeAfHomes(req, 'sales.card_sales', 'update');
-      if ('error' in auth) return deny(res, auth);
+      const current = await getAgreement(db, agreementReopen[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const auth = await authorizeAgreementMutation(req, res, db, current);
+      if (!auth) return;
       const ok = await transitionAgreementStatus(db, auth.userId, agreementReopen[1]!, 'draft');
       if (!ok) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       return res.status(200).json(await getAgreement(db, agreementReopen[1]!));
@@ -753,6 +877,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fields: Record<string, string> = {
         sale_id: String(agreement.saleId),
         customer_application_id: String(agreement.customerApplicationId ?? ''),
+        vip_tier: String(agreement.tier),
         reservation_date: String(agreement.reservationDate),
         agreement_date: String(agreement.agreementDate),
         revision_number: String(agreement.revisionNumber ?? ''),

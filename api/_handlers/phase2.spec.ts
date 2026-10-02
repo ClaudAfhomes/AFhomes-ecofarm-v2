@@ -357,6 +357,10 @@ describe('customers', () => {
   });
 
   it('lists and searches by name or number', async () => {
+    (holder.db as FakeSupabase).rpcs.push({
+      fn: 'search_customer_ids',
+      result: [{ customer_id: CUSTOMER.prospectTwo }],
+    });
     const all = await call('customers', { path: '', token: TOKEN.admin });
     expect((all.body as { meta: { total: number } }).meta.total).toBe(4);
     const search = await call('customers', {
@@ -365,6 +369,27 @@ describe('customers', () => {
       query: { search: 'Santos' },
     });
     expect(data(search.body)).toHaveLength(1);
+  });
+
+  it.each([
+    ['active', 'ACTIVE_VIP'],
+    ['suspended', 'SUSPENDED'],
+    ['expired', 'EXPIRED'],
+  ])('normal customer filter includes imported %s memberships', async (status, category) => {
+    const world = phase2World();
+    const imported = world.customers.find((row) => row.id === CUSTOMER.active)!;
+    install({
+      tables: {
+        customers: [{ ...imported, registration_source: 'bulk_import' }],
+        memberships: [
+          { id: MEMBERSHIP.active, customer_id: CUSTOMER.active, status, expires_at: '2099-01-01' },
+        ],
+      },
+    });
+    const response = await call('customers', { path: '', token: TOKEN.admin, query: { category } });
+    expect(response.status).toBe(200);
+    expect(data(response.body)).toHaveLength(1);
+    expect(data(response.body)[0]).toMatchObject({ derivedCategory: category });
   });
 
   it('filters by status', async () => {
@@ -612,9 +637,9 @@ describe('customer active-membership mapping', () => {
     });
     const state = await call('customers', { path: '', token: TOKEN.admin });
     const rows = data(state.body) as Record<string, unknown>[];
-    expect(
-      rows.find((row) => row.customerNumber === 'CUS-000001')!.hasActiveMembership,
-    ).toBe(false);
+    expect(rows.find((row) => row.customerNumber === 'CUS-000001')!.hasActiveMembership).toBe(
+      false,
+    );
   });
 
   it('matches list behavior on the detail endpoint', async () => {
@@ -628,8 +653,7 @@ describe('customer active-membership mapping', () => {
 
   it('reports a linked portal account without changing the membership flag', async () => {
     const db = install();
-    db.rows('customers').find((row) => row.id === CUSTOMER.active)!.auth_user_id =
-      'auth-user-0001';
+    db.rows('customers').find((row) => row.id === CUSTOMER.active)!.auth_user_id = 'auth-user-0001';
     const state = await call('customers', { path: `${CUSTOMER.active}`, token: TOKEN.admin });
     const body = state.body as Record<string, unknown>;
     expect(body.portalAccountActivated).toBe(true);
@@ -641,7 +665,12 @@ describe('customer active-membership mapping', () => {
     ['to-one object (live PostgREST shape)', { memberships: { id: 'm1', status: 'active' } }, true],
     [
       'to-many array with one active',
-      { memberships: [{ id: 'm1', status: 'suspended' }, { id: 'm2', status: 'active' }] },
+      {
+        memberships: [
+          { id: 'm1', status: 'suspended' },
+          { id: 'm2', status: 'active' },
+        ],
+      },
       true,
     ],
     ['to-many array all inactive', { memberships: [{ id: 'm1', status: 'expired' }] }, false],
@@ -1749,4 +1778,44 @@ describe('customer account onboarding', () => {
       ),
     ).toBe(false);
   });
+});
+
+it('authorized employee can look up imported normal records without importing or receiving PII', async () => {
+  const world = phase2World();
+  install({
+    tables: {
+      role_permissions: [
+        ...world.role_permissions,
+        {
+          role_id: UUID.role.employee,
+          module_id: world.modules.find((m) => m.key === 'operations.redemption')!.id,
+          can_view: true,
+          can_create: false,
+          can_update: false,
+          can_delete: false,
+        },
+      ],
+    },
+  });
+  const response = await call('memberships', {
+    path: 'lookup',
+    token: TOKEN.viewer,
+    query: { search: 'MBS-' },
+  });
+  expect(response.status).toBe(200);
+  expect(data(response.body).length).toBeGreaterThan(0);
+  const text = JSON.stringify(response.body);
+  expect(text).not.toMatch(/government|auth_user|dateOfBirth|address|payment|email/i);
+  const imports = (await import('./customer-imports.js')).default;
+  const { res, state } = makeRes();
+  await imports(
+    makeReq({
+      method: 'POST',
+      familyPath: 'parse',
+      headers: { authorization: `Bearer ${TOKEN.viewer}` },
+      body: { source: 'csv', contentBase64: 'aA==' },
+    }),
+    res,
+  );
+  expect(state.status).toBe(403);
 });

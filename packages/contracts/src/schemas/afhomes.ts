@@ -27,6 +27,7 @@ export const afHomesModuleKeySchema = z.enum([
   'operations.redemption',
   'operations.catalog',
   'governance.audit',
+  'governance.customer_import',
   'governance.config',
   'cms.pages',
   'cms.media',

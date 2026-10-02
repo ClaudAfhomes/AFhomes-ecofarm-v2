@@ -24,7 +24,6 @@ const COMMISSION_STATUSES = [
 
 export function calendarWindow(period: AnalyticsPeriod, now = new Date()) {
   const from = new Date(now);
-  const to = new Date(now);
   if (period === 'day') from.setUTCHours(0, 0, 0, 0);
   if (period === 'week') {
     const mondayOffset = (from.getUTCDay() + 6) % 7;
@@ -39,6 +38,7 @@ export function calendarWindow(period: AnalyticsPeriod, now = new Date()) {
     from.setUTCMonth(0, 1);
     from.setUTCHours(0, 0, 0, 0);
   }
+  const to = new Date(from);
   if (period === 'day') to.setUTCDate(from.getUTCDate() + 1);
   if (period === 'week') to.setUTCDate(from.getUTCDate() + 7);
   if (period === 'month') to.setUTCMonth(from.getUTCMonth() + 1, 1);
@@ -79,7 +79,9 @@ function roleScope(principal: AfHomesPrincipal): ScopeKind {
 }
 
 async function rows(db: Db, table: string, columns: string): Promise<Row[]> {
-  const result = await db.from(table).select(columns);
+  let query = db.from(table).select(columns);
+  if (table === 'card_sales') query = query.eq('origin', 'normal');
+  const result = await query;
   if (result.error) throw result.error;
   return (result.data ?? []) as Row[];
 }
@@ -102,6 +104,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       .select(
         'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,submitted_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
+      .eq('origin', 'normal')
       .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`);
     if (result.error) throw result.error;
     return {
@@ -127,6 +130,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       .select(
         'id,customer_id,plan_id,seller_staff_id,seller_ost_id,cash_price_snapshot,payment_scheme,status,created_at,submitted_at,activated_at,fully_paid_at,spot_cash_started_at,spot_cash_deadline,referral_relationship_id',
       )
+      .eq('origin', 'normal')
       .in('id', saleIds);
     if (result.error) throw result.error;
     sales = (result.data ?? []) as Row[];
@@ -329,7 +333,8 @@ async function salesTrend(req: VercelRequest, res: VercelResponse) {
             for (let year = start; year <= currentYear; year += 1) out.push(String(year));
             return out;
           })();
-    const keyOf = (date: Date) => (granularity === 'month' ? trendMonthKey(date) : String(date.getUTCFullYear()));
+    const keyOf = (date: Date) =>
+      granularity === 'month' ? trendMonthKey(date) : String(date.getUTCFullYear());
     const buckets = new Map(keys.map((key) => [key, { count: 0, values: [] as unknown[] }]));
     for (const row of dated) {
       const bucket = buckets.get(keyOf(row.date));
@@ -355,7 +360,8 @@ async function salesTrend(req: VercelRequest, res: VercelResponse) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if ((req.method ?? 'GET') !== 'GET') return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
+  if ((req.method ?? 'GET') !== 'GET')
+    return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
   const familyPath = String(req.query.familyPath ?? '');
   if (familyPath === 'sales-trend') return salesTrend(req, res);
   if (familyPath !== '') return fail(res, 'NOT_FOUND', 'Analytics route not found', 404);
@@ -468,9 +474,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       kind === 'global' || kind === 'organization' ? rows(db, 'departments', 'id,is_active') : [],
       currentNetworkContext(db, principal, kind),
     ]);
-    const payments = paymentsAll as Row[];
+    const operationalSaleIds = new Set(saleIds);
+    const payments = (paymentsAll as Row[]).filter((row) =>
+      operationalSaleIds.has(String(row.sale_id)),
+    );
     const memberships = membershipsAll as Row[];
-    const commissions = commissionsAll as Row[];
+    const commissions = (commissionsAll as Row[]).filter((row) =>
+      operationalSaleIds.has(String(row.sale_id)),
+    );
     const redemptions = (redemptionsAll as Row[]).filter((row) => row.status === 'completed');
     const verified = payments.filter((row) => row.status === 'verified');
     const now = new Date();

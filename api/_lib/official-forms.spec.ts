@@ -111,6 +111,7 @@ describe('official form XLSX/PDF', () => {
     const fields = Object.fromEntries(IST_IMPORT_HEADERS.map((key) => [key, '']));
     Object.assign(fields, {
       sale_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      vip_tier: 'GOLD',
       reservation_date: '2026-10-01',
       agreement_date: '2026-10-01',
       primary_signature_status: 'received',
@@ -118,11 +119,78 @@ describe('official form XLSX/PDF', () => {
       primary_address: '1 Main',
       primary_contact_number: '09171234567',
       primary_email: 'ana@example.com',
+      secondary_enabled: 'true',
+      secondary_name: 'Jose Reyes',
       schedule_particular: 'Monthly amortization',
       schedule_amount: '10000.00',
     });
     expect(parseFormXlsx(reservationAgreementXlsx(fields))).toEqual(fields);
     expect(validateFormImport('reservation_agreement', fields).errors).toEqual([]);
+  });
+  it('requires vip_tier on IST imports so secondary holders can be validated', () => {
+    const fields = Object.fromEntries(IST_IMPORT_HEADERS.map((key) => [key, '']));
+    Object.assign(fields, {
+      sale_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      reservation_date: '2026-10-01',
+      agreement_date: '2026-10-01',
+      primary_signature_status: 'received',
+      primary_name: 'Ana Dela Cruz',
+      primary_address: '1 Main',
+      primary_contact_number: '09171234567',
+      primary_email: 'ana@example.com',
+    });
+    expect(validateFormImport('reservation_agreement', fields).errors).toContainEqual({
+      field: 'vip_tier',
+      message: 'Required',
+    });
+  });
+  it.each(['SILVER', 'BRONZE'] as const)(
+    'rejects a secondary holder on a %s IST import row',
+    (tier) => {
+      const preview = validateFormImport('reservation_agreement', {
+        sale_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+        vip_tier: tier,
+        reservation_date: '2026-10-01',
+        agreement_date: '2026-10-01',
+        primary_signature_status: 'received',
+        primary_name: 'Ana Dela Cruz',
+        primary_address: '1 Main',
+        primary_contact_number: '09171234567',
+        primary_email: 'ana@example.com',
+        secondary_enabled: 'true',
+        secondary_name: 'Jose Reyes',
+      });
+      expect(preview.errors).toContainEqual({
+        field: 'secondary_enabled',
+        message: 'Secondary holder is Gold-only',
+      });
+    },
+  );
+  it('rejects an unknown vip_tier on IST import rows', () => {
+    const preview = validateFormImport('reservation_agreement', {
+      sale_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      vip_tier: 'PLATINUM',
+      reservation_date: '2026-10-01',
+      agreement_date: '2026-10-01',
+      primary_signature_status: 'received',
+      primary_name: 'Ana Dela Cruz',
+      primary_address: '1 Main',
+      primary_contact_number: '09171234567',
+      primary_email: 'ana@example.com',
+    });
+    expect(preview.errors).toContainEqual({ field: 'vip_tier', message: 'Unknown tier' });
+  });
+
+  it.each(['SILVER', 'BRONZE'])('rejects %s secondary data even when disabled', (tier) => {
+    const result = validateFormImport('reservation_agreement', {
+      vip_tier: tier,
+      secondary_enabled: 'false',
+      secondary_email: 'secondary@example.com',
+    });
+    expect(result.errors).toContainEqual({
+      field: 'secondary_enabled',
+      message: 'Secondary holder is Gold-only',
+    });
   });
   it('round-trips the IST template headings', () => {
     expect(parseFormXlsx(istImportTemplate())).toEqual(
@@ -219,12 +287,12 @@ describe('official form lifecycles', () => {
     expect(canTransitionCustomerApplication('draft', 'approved')).toBe(false);
     expect(canTransitionCustomerApplication('approved', 'draft')).toBe(false);
     expect(canTransitionCustomerApplication('cancelled', 'draft')).toBe(false);
-    expect(
-      customerApplicationDecisionSchema.safeParse({ decision: 'approved' }).success,
-    ).toBe(true);
-    expect(
-      customerApplicationDecisionSchema.safeParse({ decision: 'executed' }).success,
-    ).toBe(false);
+    expect(customerApplicationDecisionSchema.safeParse({ decision: 'approved' }).success).toBe(
+      true,
+    );
+    expect(customerApplicationDecisionSchema.safeParse({ decision: 'executed' }).success).toBe(
+      false,
+    );
   });
   it('moves agreements draft -> submitted -> executed with reopen', () => {
     expect(canTransitionReservationAgreement('draft', 'submitted')).toBe(true);
@@ -232,9 +300,9 @@ describe('official form lifecycles', () => {
     expect(canTransitionReservationAgreement('submitted', 'draft')).toBe(true);
     expect(canTransitionReservationAgreement('draft', 'executed')).toBe(false);
     expect(canTransitionReservationAgreement('executed', 'draft')).toBe(false);
-    expect(
-      reservationAgreementDecisionSchema.safeParse({ decision: 'executed' }).success,
-    ).toBe(true);
+    expect(reservationAgreementDecisionSchema.safeParse({ decision: 'executed' }).success).toBe(
+      true,
+    );
   });
   it('rejects secondary holders for reservations outside Gold at the contract', () => {
     const holder = {

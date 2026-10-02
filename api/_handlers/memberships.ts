@@ -1,3 +1,5 @@
+import { customerDirectory } from '../_lib/customer-directory.js';
+import { memberLookupFromDirectory } from '../_lib/member-lookup.js';
 /**
  * AF Homes memberships (cards), identifier resolution, and the points ledger.
  *
@@ -201,6 +203,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (subPath(req) === 'lookup' && method(req) === 'GET') {
+      const auth = await authorizeAfHomes(req, 'operations.redemption');
+      if ('error' in auth) return deny(res, auth);
+      const search = String(req.query.search ?? '').trim();
+      if (search.length < 2 || search.length > 120)
+        return fail(res, 'VALIDATION_ERROR', 'Enter at least two search characters', 400);
+      const directory = await customerDirectory(db, {
+        search,
+        membersOnly: true,
+        limit: 50,
+        sort: 'name',
+      });
+      const data = directory.map(({ record: r }) => memberLookupFromDirectory(r));
+      return res
+        .status(200)
+        .json({ data, meta: { total: directory[0]?.total_count ?? 0, limit: 50, offset: 0 } });
+    }
     /* ---------------- resolve an identifier ---------------- */
     if (subPath(req) === 'resolve' && method(req) === 'GET') {
       // Three staff responsibilities may look a card up: redemption, activation,

@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  createCommissionRuleSchema,
-  createCustomerApplicationSchema,
-} from '@jad/contracts';
+import { createCommissionRuleSchema, createCustomerApplicationSchema } from '@jad/contracts';
 import { calculateCommission } from '../_lib/commerce.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
@@ -19,15 +16,29 @@ vi.mock('../_lib/rest.js', () => ({
 }));
 
 vi.mock('../_lib/afhomes-access.js', () => ({
-  authorizeAfHomes: async (req: { headers?: Record<string, string> }) => {
+  // Models the real role baseline: sellers hold sales.card_sales view+create
+  // (never update) and sales.customers view+create+update; only the super
+  // admin passes an update check on sales.card_sales.
+  authorizeAfHomes: async (
+    req: { headers?: Record<string, string> },
+    moduleKey?: string,
+    action?: string,
+  ) => {
     const token = req.headers?.authorization ?? '';
-    if (token.includes('forbidden'))
-      return {
-        error: {
-          error: { code: 'FORBIDDEN', message: 'Forbidden' },
-          status: 403,
-        },
-      };
+    const denied = (status: number, code: string) => ({
+      error: {
+        error: { code, message: code === 'UNAUTHORIZED' ? 'Missing authentication' : 'Forbidden' },
+        status,
+      },
+    });
+    if (!token.replace(/^Bearer\s*/, '').trim()) return denied(401, 'UNAUTHORIZED');
+    if (token.includes('forbidden')) return denied(403, 'FORBIDDEN');
+    if (action === 'update' && moduleKey === 'sales.card_sales')
+      return token.includes('super-admin')
+        ? { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin' }
+        : denied(403, 'FORBIDDEN');
+    if (token.includes('other-seller'))
+      return { userId: '33333333-3333-4333-8333-333333333333', roleSlug: 'sales_manager' };
     if (token.includes('seller'))
       return {
         userId: '11111111-1111-4111-8111-111111111111',
@@ -42,8 +53,17 @@ const commissions = (await import('./commissions.js')).default;
 
 const APP_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 const AGREEMENT_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
+const AGREEMENT_DRAFT_ID = 'bbbbbbbb-0000-4000-8000-000000000003';
+const SALE_ID = 'eeeeeeee-0000-4000-8000-000000000005';
+const PLAN_ID = 'dddddddd-0000-4000-8000-000000000004';
 
-function install(tables: Record<string, unknown[]> = {}) {
+function install(
+  tables: Record<string, unknown[]> = {},
+  options: {
+    rpcs?: { fn: string; result: unknown }[];
+    rpcErrors?: Record<string, { code?: string; message: string }>;
+  } = {},
+) {
   holder.db = new FakeSupabase({
     tables: {
       customer_applications: [],
@@ -53,16 +73,26 @@ function install(tables: Record<string, unknown[]> = {}) {
       reservation_agreement_schedule: [],
       commission_rules: [],
       audit_events: [],
+      card_sales: [],
+      card_plans: [],
       roles: [{ id: '33333333-3333-4333-8333-333333333333', slug: 'sales_manager' }],
       ...tables,
     } as never,
+    rpcs: options.rpcs ?? [],
+    rpcErrors: options.rpcErrors,
   });
   return holder.db as FakeSupabase;
 }
 
 async function call(
   handler: (req: never, res: never) => Promise<void> | void,
-  opts: { path: string; method?: string; token?: string; body?: unknown; query?: Record<string, string> },
+  opts: {
+    path: string;
+    method?: string;
+    token?: string;
+    body?: unknown;
+    query?: Record<string, string>;
+  },
 ) {
   const { res, state } = makeRes();
   await (handler as (req: unknown, res: unknown) => Promise<void>)(
@@ -172,6 +202,11 @@ describe('official form review lifecycle', () => {
         },
       ],
       reservation_agreement_schedule: [],
+      card_sales: [
+        { id: SALE_ID, plan_id: PLAN_ID },
+        { id: 'eeeeeeee-0000-4000-8000-000000000006', plan_id: PLAN_ID },
+      ],
+      card_plans: [{ id: PLAN_ID, code: 'GOLD' }],
     });
   });
 
@@ -223,12 +258,14 @@ describe('official form review lifecycle', () => {
     // Single-level only: one rate, one basis, one amount. No upline share.
     expect(calculateCommission('50000.00', '0.15')).toBe('7500.00');
     expect(calculateCommission('50000.00', '0')).toBe('0.00');
-    expect(createCommissionRuleSchema.safeParse({
-      targetType: 'staff',
-      targetId: '11111111-1111-4111-8111-111111111111',
-      rate: '0.15',
-      effectiveFrom: '2026-10-01',
-    }).success).toBe(true);
+    expect(
+      createCommissionRuleSchema.safeParse({
+        targetType: 'staff',
+        targetId: '11111111-1111-4111-8111-111111111111',
+        rate: '0.15',
+        effectiveFrom: '2026-10-01',
+      }).success,
+    ).toBe(true);
   });
 
   it('creates commission rules and surfaces overlap as a conflict', async () => {
@@ -285,5 +322,217 @@ describe('official form review lifecycle', () => {
         reservationPaymentProofReceived: false,
       }).success,
     ).toBe(false);
+  });
+});
+
+const draftAgreementRow = (overrides: Record<string, unknown> = {}) => ({
+  id: AGREEMENT_DRAFT_ID,
+  reservation_number: 'RES-20261001-00000002',
+  revision_number: null,
+  reservation_date: '2026-10-01',
+  agreement_date: '2026-10-01',
+  sale_id: SALE_ID,
+  customer_application_id: null,
+  plan_id: PLAN_ID,
+  tier_snapshot: 'GOLD',
+  inclusions_snapshot: {},
+  total_price_snapshot: '50000.00',
+  reservation_fee_snapshot: '10000.00',
+  down_payment_snapshot: '10000.00',
+  total_payment_received_snapshot: '0.00',
+  balance_snapshot: '50000.00',
+  monthly_amortization_snapshot: null,
+  installment_months_snapshot: null,
+  payment_scheme_snapshot: 'spot_cash',
+  discount_percent_snapshot: 25,
+  validity_years_snapshot: 22,
+  yearly_points_snapshot: 25000,
+  annual_points_tranches_snapshot: 20,
+  holder_limit_snapshot: 2,
+  monthly_amortization_start: null,
+  monthly_amortization_end: null,
+  payment_due_day: null,
+  primary_signature_status: 'received',
+  secondary_signature_status: null,
+  status: 'draft',
+  created_by: '11111111-1111-4111-8111-111111111111',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  submitted_at: null,
+  executed_at: null,
+  ...overrides,
+});
+
+const draftHolderRow = {
+  agreement_id: AGREEMENT_DRAFT_ID,
+  holder_type: 'PRIMARY',
+  name: 'Ana Dela Cruz',
+  address: '1 Main',
+  contact_number: '09171234567',
+  email: 'ana@example.com',
+};
+
+const validAgreementBody = (overrides: Record<string, unknown> = {}) => ({
+  saleId: SALE_ID,
+  reservationDate: '2026-10-01',
+  agreementDate: '2026-10-01',
+  primarySignatureStatus: 'received',
+  primary: {
+    holderType: 'PRIMARY',
+    name: 'Ana Dela Cruz',
+    address: '1 Main',
+    contactNumber: '09171234567',
+    email: 'ana@example.com',
+  },
+  scheduleNotes: [],
+  ...overrides,
+});
+
+describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
+  beforeEach(() => {
+    install(
+      {
+        reservation_agreements: [draftAgreementRow()],
+        reservation_agreement_holders: [{ ...draftHolderRow }],
+        reservation_agreement_schedule: [],
+        card_sales: [
+          {
+            id: SALE_ID,
+            plan_id: PLAN_ID,
+            seller_staff_id: '11111111-1111-4111-8111-111111111111',
+          },
+        ],
+        card_plans: [{ id: PLAN_ID, code: 'GOLD' }],
+      },
+      {
+        rpcs: [
+          { fn: 'submit_reservation_agreement', result: AGREEMENT_DRAFT_ID },
+          { fn: 'save_reservation_agreement', result: AGREEMENT_DRAFT_ID },
+        ],
+      },
+    );
+  });
+
+  it.each([
+    ['GOLD', true],
+    ['GOLD', false],
+    ['SILVER', false],
+    ['BRONZE', false],
+  ] as const)(
+    'round-trips a saved %s agreement (secondary=%s) through export and import handlers',
+    async (tier, secondary) => {
+      const db = holder.db as FakeSupabase;
+      db.tables.reservation_agreements = [draftAgreementRow({ tier_snapshot: tier })];
+      if (secondary)
+        db.tables.reservation_agreement_holders!.push({
+          ...draftHolderRow,
+          holder_type: 'SECONDARY',
+          name: 'Jose Reyes',
+          email: 'jose@example.com',
+        });
+      const exported = await call(forms, {
+        path: `reservations/${AGREEMENT_DRAFT_ID}/export/xlsx`,
+      });
+      expect(exported.status).toBe(200);
+      const imported = await call(forms, {
+        path: 'import',
+        method: 'POST',
+        body: {
+          kind: 'reservation_agreement',
+          contentBase64: (exported.body as { content: string }).content,
+        },
+      });
+      expect(imported.status).toBe(200);
+      expect(imported.body).toMatchObject({ errors: [], fields: { vip_tier: tier } });
+      if (secondary)
+        expect(imported.body).toMatchObject({
+          fields: { secondary_name: 'Jose Reyes', secondary_email: 'jose@example.com' },
+        });
+    },
+  );
+
+  it('lets the owning seller submit their own draft', async () => {
+    const res = await call(forms, {
+      path: `reservations/${AGREEMENT_DRAFT_ID}/submit`,
+      method: 'POST',
+      body: {},
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('lets the owning seller edit their own draft', async () => {
+    const res = await call(forms, {
+      path: `reservations/${AGREEMENT_DRAFT_ID}`,
+      method: 'PATCH',
+      body: validAgreementBody(),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses another seller mutating an unrelated agreement', async () => {
+    for (const req of [
+      { path: `reservations/${AGREEMENT_DRAFT_ID}/submit`, method: 'POST' },
+      { path: `reservations/${AGREEMENT_DRAFT_ID}`, method: 'PATCH' },
+      { path: `reservations/${AGREEMENT_DRAFT_ID}/reopen`, method: 'POST' },
+      { path: `reservations/${AGREEMENT_DRAFT_ID}/decision`, method: 'POST' },
+    ]) {
+      const res = await call(forms, {
+        ...req,
+        body:
+          req.method === 'PATCH'
+            ? validAgreementBody()
+            : req.path.endsWith('decision')
+              ? { decision: 'cancelled', notes: 'UAT note here' }
+              : {},
+        token: 'other-seller-token',
+      });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it('keeps super-admin oversight over any agreement', async () => {
+    const res = await call(forms, {
+      path: `reservations/${AGREEMENT_DRAFT_ID}/submit`,
+      method: 'POST',
+      body: {},
+      token: 'super-admin-token',
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses unauthenticated and employee callers before any row is read', async () => {
+    const anon = await call(forms, {
+      path: `reservations/${AGREEMENT_DRAFT_ID}/submit`,
+      method: 'POST',
+      body: {},
+      token: '',
+    });
+    expect(anon.status).toBe(401);
+    const employee = await call(forms, {
+      path: 'reservations',
+      method: 'POST',
+      body: validAgreementBody(),
+      token: 'forbidden-token',
+    });
+    expect(employee.status).toBe(403);
+  });
+
+  it('rejects an imported tier that contradicts the selected sale', async () => {
+    const res = await call(forms, {
+      path: 'reservations',
+      method: 'POST',
+      body: validAgreementBody({ vipTier: 'SILVER' }),
+    });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toContain('does not match the selected sale');
+  });
+
+  it('accepts a matching imported tier and saves the draft', async () => {
+    const res = await call(forms, {
+      path: 'reservations',
+      method: 'POST',
+      body: validAgreementBody({ vipTier: 'GOLD' }),
+    });
+    expect(res.status).toBe(201);
   });
 });

@@ -839,6 +839,10 @@ export function ReservationAgreementEditorPage() {
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
   const [saleId, setSaleId] = useState('');
   const [customerApplicationId, setCustomerApplicationId] = useState('');
+  // Imported tier context (IST XLSX `vip_tier`). Display/validation only:
+  // the server always derives the authoritative tier from the selected sale
+  // and rejects a mismatch.
+  const [vipTier, setVipTier] = useState('');
   const [dates, setDates] = useState({
     reservationDate: today(),
     agreementDate: today(),
@@ -877,6 +881,7 @@ export function ReservationAgreementEditorPage() {
     const timer = window.setTimeout(() => {
       setSaleId(agreement.saleId);
       setCustomerApplicationId(agreement.customerApplicationId ?? '');
+      setVipTier(agreement.tier);
       setDates({
         reservationDate: agreement.reservationDate,
         agreementDate: agreement.agreementDate,
@@ -909,6 +914,9 @@ export function ReservationAgreementEditorPage() {
   const payload = (): CreateReservationAgreementRequest => ({
     saleId,
     ...(customerApplicationId ? { customerApplicationId } : {}),
+    ...(vipTier === 'BRONZE' || vipTier === 'SILVER' || vipTier === 'GOLD'
+      ? { vipTier: vipTier as 'BRONZE' | 'SILVER' | 'GOLD' }
+      : {}),
     ...dates,
     revisionNumber: dates.revisionNumber || undefined,
     monthlyAmortizationStart: dates.monthlyAmortizationStart || undefined,
@@ -993,6 +1001,7 @@ export function ReservationAgreementEditorPage() {
     const f = preview.fields;
     if (f.sale_id) setSaleId(f.sale_id);
     if (f.customer_application_id) setCustomerApplicationId(f.customer_application_id);
+    if (f.vip_tier) setVipTier(f.vip_tier.toUpperCase());
     if (f.reservation_date) setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
     if (f.agreement_date) setDates((d) => ({ ...d, agreementDate: f.agreement_date ?? d.agreementDate }));
     if (f.revision_number !== undefined)
@@ -1074,6 +1083,14 @@ export function ReservationAgreementEditorPage() {
             value={customerApplicationId}
             placeholder="Application UUID"
             onChange={(e) => setCustomerApplicationId(e.target.value)}
+          />
+        </label>
+        <label>
+          Imported tier context (validates secondary; sale tier stays authoritative)
+          <input
+            value={vipTier}
+            placeholder="BRONZE, SILVER, or GOLD"
+            onChange={(e) => setVipTier(e.target.value.toUpperCase())}
           />
         </label>
         <div className="form-grid">

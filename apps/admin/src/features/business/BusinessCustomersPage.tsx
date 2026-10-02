@@ -12,7 +12,13 @@ import {
   StatusChip,
 } from '@jad/ui';
 import type { CreateCustomerRequest, Customer, CustomerOnboardingRecovery } from '@jad/contracts';
+import {
+  CUSTOMER_CATEGORY_LABELS,
+  resolveCustomerCategory,
+  customerSellerOptionSchema,
+} from '@jad/contracts';
 
+import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
 import {
   anonymizeCustomer,
@@ -49,9 +55,26 @@ export function BusinessCustomersPage() {
   const { user } = useSession();
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  const [category, setCategory] = useState('');
+  const [filters, setFilters] = useState({
+    tier: '',
+    seller: '',
+    from: '',
+    to: '',
+    sort: 'created',
+  });
   const customers = useQuery({
-    queryKey: ['business', 'customers', applied],
-    queryFn: () => getCustomers(applied ? { search: applied } : {}),
+    queryKey: ['business', 'customers', applied, category, filters],
+    queryFn: () =>
+      getCustomers({
+        search: applied || undefined,
+        category: category || undefined,
+        ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
+      }),
+  });
+  const sellers = useQuery({
+    queryKey: ['customer-seller-options'],
+    queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
   const products = useQuery({
     queryKey: ['business', 'card-products'],
@@ -123,7 +146,9 @@ export function BusinessCustomersPage() {
       },
     });
     setImportErrors(preview.errors);
-    setImportMessage('Imported fields are candidates only — review and correct every value before registering.');
+    setImportMessage(
+      'Imported fields are candidates only — review and correct every value before registering.',
+    );
     setOpen(true);
   };
 
@@ -197,7 +222,13 @@ export function BusinessCustomersPage() {
                 }}
               />
             </label>
-            <Button onClick={() => { setImportMessage(''); setImportErrors([]); setOpen(true); }}>
+            <Button
+              onClick={() => {
+                setImportMessage('');
+                setImportErrors([]);
+                setOpen(true);
+              }}
+            >
               Register customer
             </Button>
           </>
@@ -214,15 +245,100 @@ export function BusinessCustomersPage() {
           search={
             <SearchField
               label="Search customers"
-              placeholder="Name, email or customer number"
+              placeholder="Name, email, customer or membership number"
               value={search}
               onChange={setSearch}
             />
           }
           actions={
-            <Button type="submit" variant="secondary">
-              Search
-            </Button>
+            <>
+              <label>
+                Customer category{' '}
+                <select
+                  aria-label="Customer category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {Object.entries(CUSTOMER_CATEGORY_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                VIP Tier
+                <select
+                  aria-label="VIP Tier"
+                  value={filters.tier}
+                  onChange={(e) => setFilters({ ...filters, tier: e.target.value })}
+                >
+                  <option value="">All tiers</option>
+                  {['GOLD', 'SILVER', 'BRONZE'].map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Seller
+                <select
+                  aria-label="Seller"
+                  value={filters.seller}
+                  onChange={(e) => setFilters({ ...filters, seller: e.target.value })}
+                >
+                  <option value="">All sellers</option>
+                  {sellers.data?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                From
+                <input
+                  aria-label="From date"
+                  type="date"
+                  value={filters.from}
+                  onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  aria-label="To date"
+                  type="date"
+                  value={filters.to}
+                  onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+                />
+              </label>
+              <label>
+                Sort
+                <select
+                  aria-label="Sort customers"
+                  value={filters.sort}
+                  onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
+                >
+                  {Object.entries({
+                    name: 'Customer Name',
+                    tier: 'VIP Tier',
+                    category: 'Category',
+                    payment_status: 'Payment Status',
+                    membership_status: 'Membership Status',
+                    verified_paid: 'Verified Paid',
+                    created: 'Created Date',
+                  }).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button type="submit" variant="secondary">
+                Search
+              </Button>
+            </>
           }
         />
       </form>
@@ -247,6 +363,7 @@ export function BusinessCustomersPage() {
                 <th>Phone</th>
                 <th>Government ID</th>
                 <th>Status</th>
+                <th>Category</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -264,6 +381,19 @@ export function BusinessCustomersPage() {
                       label={customer.status}
                       tone={customer.status === 'active' ? 'success' : 'neutral'}
                     />
+                  </td>
+                  <td>
+                    {
+                      CUSTOMER_CATEGORY_LABELS[
+                        customer.derivedCategory ??
+                          resolveCustomerCategory({
+                            customerStatus: customer.status,
+                            membershipStatus: customer.hasActiveMembership ? 'active' : null,
+                            verifiedTotal: '0.00',
+                            priceTotal: '0.00',
+                          })
+                      ]
+                    }
                   </td>
                   <td>
                     <Button
@@ -348,7 +478,13 @@ export function BusinessCustomersPage() {
           {importErrors.length ? (
             <div role="alert">
               <strong>Import needs correction:</strong>
-              <ul>{importErrors.map((error) => <li key={`${error.field}:${error.message}`}>{error.field}: {error.message}</li>)}</ul>
+              <ul>
+                {importErrors.map((error) => (
+                  <li key={`${error.field}:${error.message}`}>
+                    {error.field}: {error.message}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <label>

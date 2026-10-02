@@ -26,11 +26,11 @@ vi.mock('../_lib/storage.js', () => ({
   storageClient: () => ({}),
   createUploadGrant: async (_storage: unknown, bucket: string, path: string) => ({
     uploadUrl: `https://storage.test/upload/${bucket}/${path}`,
-    expiresAt: '2026-10-01T00:10:00.000Z',
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
   }),
   createDownloadGrant: async (_storage: unknown, bucket: string, path: string, ttl: number) => ({
     url: `https://storage.test/download/${bucket}/${path}?ttl=${ttl}`,
-    expiresAt: '2026-10-01T00:01:00.000Z',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }),
   downloadObject: async (_storage: unknown, bucket: string, path: string) => {
     const bytes = store.objects.get(`${bucket}/${path}`);

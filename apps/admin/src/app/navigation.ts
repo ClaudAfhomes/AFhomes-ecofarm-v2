@@ -12,6 +12,12 @@ export type AdminNavItem = {
 };
 
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
+  {
+    to: '/admin/member-lookup',
+    label: 'VIP Member Lookup',
+    icon: 'grid',
+    module: 'operations.redemption',
+  },
   { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
   {
     to: '/admin/sales',
@@ -21,6 +27,11 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     dropdown: [
       { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
+      {
+        to: '/admin/customers/import-export',
+        label: 'Import / Export',
+        module: 'governance.customer_import',
+      },
       {
         to: '/admin/customers/applications',
         label: 'Customer Applications',

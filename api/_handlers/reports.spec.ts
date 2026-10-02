@@ -313,6 +313,15 @@ async function get(path: string, token?: string, query: Record<string, string> =
 beforeEach(() => install());
 
 describe('sales report', () => {
+  it('excludes imported history from operational sales and payment totals', async () => {
+    const db = holder.db as FakeSupabase;
+    const sale = db.rows('card_sales').find((row) => row.id === SALE.downPaid)!;
+    sale.origin = 'legacy_import';
+    const sales = reportResponseSchema.parse((await get('sales', TOKEN.superAdmin)).body);
+    expect(sales.data.some((row) => row.saleNumber === sale.sale_number)).toBe(false);
+    const payments = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
+    expect(payments.data.some((row) => row.saleNumber === sale.sale_number)).toBe(false);
+  });
   it('gives Super Admin the global frozen-snapshot report with exact totals', async () => {
     const state = await get('', TOKEN.superAdmin, {});
     // Root catalog is separate; the sales report lives at its own sub-path.

@@ -161,7 +161,7 @@ type Ctx = {
 async function buildSales(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
-  let query = db.from('card_sales').select('*', { count: 'exact' });
+  let query = db.from('card_sales').select('*', { count: 'exact' }).eq('origin', 'normal');
   if (saleIds) query = query.in('id', saleIds.length ? saleIds : ['__none__']);
   if (q.status) query = query.eq('status', q.status);
   if (q.planId) query = query.eq('plan_id', q.planId);
@@ -217,8 +217,7 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
       paymentScheme: paymentSchemeLabel(String(row.payment_scheme ?? 'spot_cash')),
       frozenPrice: row.cash_price_snapshot ?? '0.00',
       reservationFee: row.reservation_fee_snapshot ?? '0.00',
-      requiredDown:
-        row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
+      requiredDown: row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
       installmentMonths: months,
       monthlyAmount: row.monthly_amount_snapshot ?? null,
       validityMonths:
@@ -278,6 +277,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
     const sq = db
       .from('card_sales')
       .select('id,customer_id')
+      .eq('origin', 'normal')
       .in('id', saleIds.length ? saleIds : ['__none__']);
     const { data: sdata, error: serror } = await sq;
     if (serror) throw serror;
@@ -325,6 +325,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
           const { data: sdata, error: serror } = await db
             .from('card_sales')
             .select('customer_id,seller_staff_id,seller_ost_id')
+            .eq('origin', 'normal')
             .in('id', saleIds.length ? saleIds : ['__none__']);
           if (serror) throw serror;
           return (sdata ?? []) as Row[];
@@ -393,7 +394,13 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
 async function buildPayments(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
-  let query = db.from('payments').select('*', { count: 'exact' });
+  const normalSales = await db.from('card_sales').select('id').eq('origin', 'normal');
+  if (normalSales.error) throw normalSales.error;
+  const normalIds = ((normalSales.data ?? []) as Row[]).map((sale) => String(sale.id));
+  let query = db
+    .from('payments')
+    .select('*', { count: 'exact' })
+    .in('sale_id', normalIds.length ? normalIds : ['__none__']);
   if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : ['__none__']);
   if (q.status) query = query.eq('status', q.status);
   if (window.from) query = query.gte('recorded_at', window.from);
@@ -672,7 +679,7 @@ async function buildGenealogy(ctx: Ctx): Promise<ReportData> {
       .select('subject_staff_id,upline_staff_id')
       .eq('is_active', true),
     db.from('ost_members').select('id,status'),
-    db.from('card_sales').select('id,cash_price_snapshot,created_at'),
+    db.from('card_sales').select('id,cash_price_snapshot,created_at').eq('origin', 'normal'),
     db.from('card_sale_hierarchy_snapshots').select('sale_id,ancestor_staff_id'),
   ]);
   for (const res of [staffRes, assignRes, rolesRes, relsRes, ostRes, salesRes, snapsRes]) {
@@ -1055,7 +1062,10 @@ async function buildPlans(ctx: Ctx): Promise<ReportData> {
   if (q.status === 'active') plans = plans.filter((row) => row.is_active === true);
   if (q.status === 'inactive') plans = plans.filter((row) => row.is_active !== true);
   const saleIds = await scopedSaleIds(db, principal, kind);
-  let saleQuery = db.from('card_sales').select('plan_id,cash_price_snapshot');
+  let saleQuery = db
+    .from('card_sales')
+    .select('plan_id,cash_price_snapshot')
+    .eq('origin', 'normal');
   if (saleIds) saleQuery = saleQuery.in('id', saleIds.length ? saleIds : ['__none__']);
   const { data: salesData, error: salesError } = await saleQuery;
   if (salesError) throw salesError;

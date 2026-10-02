@@ -1,3 +1,4 @@
+import { MemberLookupPage } from '../features/memberships/MemberLookupPage';
 import { Navigate, Route, Routes } from 'react-router';
 import type { ReactNode } from 'react';
 import { NotFound } from '@jad/ui';
@@ -11,6 +12,7 @@ import { BusinessActivationQueuePage } from '../features/business/BusinessActiva
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
 import { CommissionSettingsPage } from '../features/business/CommissionSettingsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
+import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
@@ -74,6 +76,7 @@ export default function App() {
         <Route path="/staff/forgot-password" element={<StaffForgotPasswordPage />} />
         <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
         <Route element={<AdminLayout />}>
+          <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
           <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
           <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
           {/* Internal IST payment-scheme reference. Gated on the
@@ -84,6 +87,10 @@ export default function App() {
             element={protectedPage(<PaymentSchemeGuidePage />)}
           />
           <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+          <Route
+            path="/admin/customers/import-export"
+            element={protectedPage(<CustomerImportExportPage />)}
+          />
           <Route
             path="/admin/customers/applications"
             element={protectedPage(<CustomerApplicationsPage />)}

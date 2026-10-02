@@ -1,3 +1,4 @@
+import { customerDirectory } from '../_lib/customer-directory.js';
 /**
  * AF Homes customer master records.
  *
@@ -6,7 +7,12 @@
  * Document images live in a private bucket and are addressed by path only.
  */
 import { z } from 'zod';
-import { createCustomerSchema, maskGovernmentId, updateCustomerSchema } from '@jad/contracts';
+import {
+  createCustomerSchema,
+  maskGovernmentId,
+  updateCustomerSchema,
+  customerCategorySchema,
+} from '@jad/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { isSellingRole } from '../_lib/commerce.js';
@@ -62,9 +68,11 @@ const toCustomer = (row: Record<string, unknown>) => ({
   gender: isoOrNull(row.gender),
   address: row.address ?? null,
   governmentIdType: isoOrNull(row.government_id_type),
-  governmentIdMasked: maskGovernmentId(isoOrNull(row.government_id_number)),
+  governmentIdMasked:
+    isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
+  derivedCategory: row.derivedCategory,
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,
   createdBy: isoOrNull(row.created_by),
@@ -75,6 +83,28 @@ const toCustomer = (row: Record<string, unknown>) => ({
 const listQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   status: z.string().trim().max(30).optional(),
+  category: customerCategorySchema.optional(),
+  tier: z.enum(['GOLD', 'SILVER', 'BRONZE']).optional(),
+  seller: z.string().uuid().optional(),
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  sort: z
+    .enum([
+      'name',
+      'tier',
+      'category',
+      'payment_status',
+      'membership_status',
+      'verified_paid',
+      'created',
+    ])
+    .default('created'),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -131,31 +161,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (subPath(req) === 'filter-options' && method(req) === 'GET') {
+      const auth = await authorizeAfHomes(req, 'sales.customers');
+      if ('error' in auth) return deny(res, auth);
+      const { data, error } = await db
+        .from('staff_users')
+        .select('id,full_name')
+        .eq('status', 'active')
+        .order('full_name');
+      if (error) throw error;
+      return res
+        .status(200)
+        .json({
+          data: ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+            id: r.id,
+            name: r.full_name,
+          })),
+          meta: { total: (data ?? []).length },
+        });
+    }
     if (subPath(req) === '' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
 
       const parsed = parseListQuery(req);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
-      const { search, status, limit, offset } = parsed.data;
-
-      let query = db.from('customers').select('*, memberships(id,status)', { count: 'exact' });
-      if (status) query = query.eq('status', status);
-      if (search) {
-        // Postgres full-text style OR across the name parts, email and number.
-        const term = `%${search.replace(/[%_]/g, '')}%`;
-        query = query.or(
-          `first_name.ilike.${term},middle_name.ilike.${term},last_name.ilike.${term},email.ilike.${term},customer_number.ilike.${term}`,
-        );
-      }
-      const { data, error, count } = await query
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-      if (error) throw error;
-      return res.status(200).json({
-        data: (data ?? []).map(toCustomer),
-        meta: { total: count ?? (data ?? []).length, limit, offset },
-      });
+      const { limit, offset } = parsed.data;
+      const directory = await customerDirectory(db, parsed.data);
+      return res
+        .status(200)
+        .json({
+          data: directory.map((row) => toCustomer(row.record)),
+          meta: { total: directory[0]?.total_count ?? 0, limit, offset },
+        });
     }
 
     if (subPath(req) === '' && method(req) === 'POST') {
