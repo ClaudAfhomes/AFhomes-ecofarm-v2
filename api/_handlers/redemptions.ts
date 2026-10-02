@@ -418,6 +418,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     /* ================================================================
      * GET /redemptions  - history
+     *
+     * Employee ownership: anyone without a global view sees ONLY the rows
+     * they handled (`redeemed_by` from the session). Only admin/super_admin
+     * hold the global redemption view, so only they may list everyone.
      * ================================================================ */
     if ((path === '' || path === 'history') && verb === 'GET') {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
@@ -426,7 +430,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid history query', 400);
       const { limit, offset, status, itemId, membershipNumber, from, to } = parsed.data;
 
+      const globalView = auth.roleSlug === 'super_admin' || auth.roleSlug === 'admin';
       let query = db.from('redemptions').select(SELECT_REDEMPTION, { count: 'exact' });
+      if (!globalView) query = query.eq('redeemed_by', auth.userId);
       if (status) query = query.eq('status', status);
       if (itemId) query = query.eq('redemption_item_id', itemId);
       if (membershipNumber) {
@@ -454,7 +460,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    /* ================================================================ */
+    /* ================================================================
+     * GET /redemptions/:id - one redemption (ownership applies: a scoped
+     * caller who did not handle this row reads it as NOT_FOUND, so a caller
+     * can never probe for another employee's receipt ids).
+     * ================================================================ */
     const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
     if (detail) {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
@@ -466,7 +476,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (error) throw error;
       if (!data) return fail(res, 'NOT_FOUND', 'Redemption not found', 404);
-      return res.status(200).json(toRedemption(data as Record<string, unknown>));
+      const row = data as Record<string, unknown>;
+      const globalView = auth.roleSlug === 'super_admin' || auth.roleSlug === 'admin';
+      if (!globalView && String(row.redeemed_by ?? '') !== auth.userId) {
+        return fail(res, 'NOT_FOUND', 'Redemption not found', 404);
+      }
+      return res.status(200).json(toRedemption(row));
     }
 
     return fail(res, 'NOT_FOUND', 'Redemption endpoint not found', 404);

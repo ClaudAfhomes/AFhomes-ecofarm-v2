@@ -610,60 +610,188 @@ async function buildCommissions(ctx: Ctx): Promise<ReportData> {
 
 async function buildRedemptions(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
+  // Employee ownership: a scoped caller sees ONLY rows they handled. The
+  // server derives the employee from the session - a `seller` query value from
+  // a scoped caller is ignored so one employee can never pull another's rows.
+  const scopedToSelf = kind === 'redemption' || kind === 'self' || kind === 'team';
+  // The only authoritative employee-handled transaction in this schema is a
+  // points redemption. Any other transaction-type value matches nothing - it
+  // must never widen into someone else's rows, and an empty scope is a 200
+  // with zeros, never a 500.
+  const typeFilter = (q.transactionType ?? '').trim().toLowerCase();
+  if (typeFilter && typeFilter !== 'redemption') {
+    return emptyRedemptionData();
+  }
   let query = db.from('redemptions').select('*', { count: 'exact' });
-  if (kind === 'redemption' || kind === 'self' || kind === 'team') {
+  if (scopedToSelf) {
     // Sellers hold no redemption grant, so reaching here with a seller kind
     // means an explicit grant: still narrow to their own handled rows.
     query = query.eq('redeemed_by', principal.userId);
   }
   if (q.status) query = query.eq('status', q.status);
   if (q.itemId) query = query.eq('redemption_item_id', q.itemId);
-  if (q.seller) query = query.eq('redeemed_by', q.seller);
+  if (q.seller && !scopedToSelf) query = query.eq('redeemed_by', q.seller);
   if (window.from) query = query.gte('created_at', window.from);
   if (window.to) query = query.lte('created_at', window.to);
   const { data, error, count } = await query.order('created_at', { ascending: false });
   if (error) throw error;
-  const redemptions = ((data ?? []) as Row[]).filter((row) =>
+  let redemptions = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(row.created_at, window.from, window.to),
   );
   const customerIds = [...new Set(redemptions.map((row) => String(row.customer_id)))];
   const membershipIds = [...new Set(redemptions.map((row) => String(row.membership_id)))];
   const [customers, memberships] = await Promise.all([
-    mapById(db, 'customers', customerIds, 'id,first_name,middle_name,last_name,suffix'),
-    mapById(db, 'memberships', membershipIds, 'id,membership_number'),
+    mapById(
+      db,
+      'customers',
+      customerIds,
+      'id,customer_number,first_name,middle_name,last_name,suffix',
+    ),
+    mapById(db, 'memberships', membershipIds, 'id,membership_number,product_id'),
   ]);
-  const rows = redemptions.map((row) => ({
-    redemptionNumber: row.redemption_number,
-    timestamp: row.created_at,
-    customer: displayName(customers.get(String(row.customer_id)) ?? {}),
-    membershipNumber: memberships.get(String(row.membership_id))?.membership_number ?? null,
-    item: row.item_name_snapshot ?? null,
-    quantity: Number(row.quantity ?? 1),
-    pointsSpent: Number(row.total_points ?? 0),
-    actor: row.redeemed_by_name ?? null,
-    balanceAfter: Number(row.balance_after_snapshot ?? row.balance_after ?? 0),
-    status: row.status,
-  }));
+  // VIP tier is the plan name at report time (display only - the commercial
+  // facts stay frozen in the redemption snapshots).
+  const planIds = [
+    ...new Set([...memberships.values()].map((m) => String(m.product_id ?? '')).filter(Boolean)),
+  ];
+  const plans = await mapById(db, 'card_plans', planIds, 'id,name');
+  // Server-side search over the already-scoped set: customer name / customer
+  // number, membership number, redemption reference, or service/item text.
+  // Filtering here (on the server, before pagination) keeps a lookup from ever
+  // becoming a transaction: a search that matches nothing returns [].
+  const needle = (q.search ?? '').trim().toLowerCase();
+  if (needle) {
+    redemptions = redemptions.filter((row) => {
+      const customer = customers.get(String(row.customer_id));
+      const membership = memberships.get(String(row.membership_id));
+      const haystacks = [
+        row.redemption_number,
+        row.item_name_snapshot,
+        row.item_code_snapshot,
+        membership?.membership_number,
+        customer ? displayName(customer) : null,
+        customer?.customer_number,
+      ];
+      return haystacks.some((field) =>
+        String(field ?? '')
+          .toLowerCase()
+          .includes(needle),
+      );
+    });
+  }
+  const rows = redemptions.map((row) => {
+    const customer = customers.get(String(row.customer_id));
+    const membership = memberships.get(String(row.membership_id));
+    const tier = plans.get(String(membership?.product_id ?? ''))?.name ?? null;
+    return {
+      // Canonical service-history fields (Step 4 column order).
+      date: row.created_at,
+      customer: displayName(customer ?? {}),
+      customerNumber: customer?.customer_number ?? null,
+      membershipNumber: membership?.membership_number ?? null,
+      tier,
+      serviceItem: row.item_name_snapshot ?? null,
+      transactionType: 'redemption',
+      pointsUsed: Number(row.total_points ?? 0),
+      quantity: Number(row.quantity ?? 1),
+      status: row.status,
+      referenceNumber: row.redemption_number,
+      balanceBefore: Number(row.balance_before_snapshot ?? 0),
+      balanceAfter: Number(row.balance_after_snapshot ?? row.balance_after ?? 0),
+      servedBy: row.redeemed_by_name ?? null,
+      // Legacy keys kept so existing screens and exports keep working.
+      redemptionNumber: row.redemption_number,
+      timestamp: row.created_at,
+      item: row.item_name_snapshot ?? null,
+      pointsSpent: Number(row.total_points ?? 0),
+      actor: row.redeemed_by_name ?? null,
+    };
+  });
+  const completed = rows.filter((row) => row.status === 'completed');
   const points = rows.reduce((sum, row) => sum + Number(row.pointsSpent), 0);
+  const pointsRedeemed = completed.reduce((sum, row) => sum + Number(row.pointsUsed), 0);
+  const customerSet = new Set(redemptions.map((row) => String(row.customer_id)));
+  const now = new Date();
+  const dayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  ).valueOf();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).valueOf();
+  const inDay = (value: unknown) => {
+    const time = new Date(String(value ?? '')).valueOf();
+    return Number.isFinite(time) && time >= dayStart;
+  };
+  const inMonth = (value: unknown) => {
+    const time = new Date(String(value ?? '')).valueOf();
+    return Number.isFinite(time) && time >= monthStart;
+  };
+  const summary = {
+    redemptions: rows.length,
+    pointsSpent: points,
+    customersServed: customerSet.size,
+    completedTransactions: completed.length,
+    pointsRedeemed,
+    todayTransactions: rows.filter((row) => inDay(row.date)).length,
+    monthTransactions: rows.filter((row) => inMonth(row.date)).length,
+  };
+  // A server-side search narrows after the count query, so the total must
+  // follow the narrowed set - otherwise the pager would promise rows that the
+  // filters already removed.
+  const total = needle ? rows.length : (count ?? rows.length);
   return {
     rows,
-    total: count ?? rows.length,
-    summary: { redemptions: rows.length, pointsSpent: points },
+    total,
+    summary,
     columns: [
-      { key: 'redemptionNumber', label: 'Redemption number', type: 'text' },
-      { key: 'timestamp', label: 'Timestamp', type: 'date' },
-      { key: 'customer', label: 'Customer', type: 'text' },
-      { key: 'membershipNumber', label: 'Membership', type: 'text' },
-      { key: 'item', label: 'Item', type: 'text' },
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'customer', label: 'Customer / VIP member', type: 'text' },
+      { key: 'membershipNumber', label: 'Membership number', type: 'text' },
+      { key: 'tier', label: 'VIP tier', type: 'text' },
+      { key: 'serviceItem', label: 'Service / item', type: 'text' },
+      { key: 'transactionType', label: 'Transaction type', type: 'text' },
+      { key: 'pointsUsed', label: 'Points used', type: 'number' },
       { key: 'quantity', label: 'Qty', type: 'number' },
-      { key: 'pointsSpent', label: 'Points spent', type: 'number' },
-      { key: 'actor', label: 'Staff', type: 'text' },
-      { key: 'balanceAfter', label: 'Balance after', type: 'number' },
       { key: 'status', label: 'Status', type: 'text' },
+      { key: 'referenceNumber', label: 'Reference number', type: 'text' },
+      { key: 'balanceBefore', label: 'Balance before', type: 'number' },
+      { key: 'balanceAfter', label: 'Balance after', type: 'number' },
+      { key: 'servedBy', label: 'Served by', type: 'text' },
     ],
     summaryLines: [
       `Redemptions: ${rows.length}  |  Points spent: ${points} (points are loyalty units, not currency)`,
+      `Customers served: ${summary.customersServed}  |  Completed: ${summary.completedTransactions}  |  This month: ${summary.monthTransactions}`,
     ],
+  };
+}
+
+function emptyRedemptionData(): ReportData {
+  return {
+    rows: [],
+    total: 0,
+    summary: {
+      redemptions: 0,
+      pointsSpent: 0,
+      customersServed: 0,
+      completedTransactions: 0,
+      pointsRedeemed: 0,
+      todayTransactions: 0,
+      monthTransactions: 0,
+    },
+    columns: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'customer', label: 'Customer / VIP member', type: 'text' },
+      { key: 'membershipNumber', label: 'Membership number', type: 'text' },
+      { key: 'tier', label: 'VIP tier', type: 'text' },
+      { key: 'serviceItem', label: 'Service / item', type: 'text' },
+      { key: 'transactionType', label: 'Transaction type', type: 'text' },
+      { key: 'pointsUsed', label: 'Points used', type: 'number' },
+      { key: 'quantity', label: 'Qty', type: 'number' },
+      { key: 'status', label: 'Status', type: 'text' },
+      { key: 'referenceNumber', label: 'Reference number', type: 'text' },
+      { key: 'balanceBefore', label: 'Balance before', type: 'number' },
+      { key: 'balanceAfter', label: 'Balance after', type: 'number' },
+      { key: 'servedBy', label: 'Served by', type: 'text' },
+    ],
+    summaryLines: ['Redemptions: 0  |  Points spent: 0'],
   };
 }
 
@@ -1407,6 +1535,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       itemId: input.itemId,
       kind: input.kind,
       search: input.search,
+      transactionType: input.transactionType,
     };
     const ctx: Ctx = {
       db,
@@ -1454,6 +1583,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         itemId: input.itemId ?? null,
         kind: input.kind ?? null,
         search: input.search ?? null,
+        transactionType: input.transactionType ?? null,
       },
       summary: built.summary,
       data: page,

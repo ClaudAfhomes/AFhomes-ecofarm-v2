@@ -27,6 +27,7 @@ export type ReportFilters = {
   itemId?: string;
   kind?: string;
   search?: string;
+  transactionType?: string;
   limit?: number;
   offset?: number;
 };

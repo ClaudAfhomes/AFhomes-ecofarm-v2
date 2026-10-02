@@ -21,6 +21,10 @@ const PAGE_SIZE = 50;
  * Role-scoped reports. The selector only offers reports the session's
  * permissions allow (UX only); every table, total, and export below is the
  * server's scoped answer, paginated server-side.
+ *
+ * The redemptions report doubles as the employee's personal service history:
+ * for a scoped caller the server returns only the transactions that caller
+ * handled, with per-employee summary cards, presets, and a detail view.
  */
 export function ReportsPage() {
   const { user } = useSession();
@@ -32,7 +36,9 @@ export function ReportsPage() {
   const [status, setStatus] = useState('');
   const [kind, setKind] = useState('');
   const [search, setSearch] = useState('');
+  const [transactionType, setTransactionType] = useState('');
   const [offset, setOffset] = useState(0);
+  const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -42,11 +48,12 @@ export function ReportsPage() {
     ...(status ? { status } : {}),
     ...(type === 'ost' && kind ? { kind } : {}),
     ...(search ? { search } : {}),
+    ...(type === 'redemptions' && transactionType ? { transactionType } : {}),
     limit: PAGE_SIZE,
     offset,
   };
   const query = useQuery({
-    queryKey: ['reports', type, from, to, status, kind, search, offset],
+    queryKey: ['reports', type, from, to, status, kind, search, transactionType, offset],
     queryFn: () => getReport(type, filters),
   });
 
@@ -63,7 +70,46 @@ export function ReportsPage() {
     }
   };
 
-  const resetPage = () => setOffset(0);
+  const resetPage = () => {
+    setOffset(0);
+    setSelected(null);
+  };
+
+  const dayString = (date: Date) => date.toISOString().slice(0, 10);
+  const applyPreset = (preset: 'today' | 'week' | 'month' | 'custom') => {
+    const now = new Date();
+    if (preset === 'custom') {
+      setFrom('');
+      setTo('');
+    } else if (preset === 'today') {
+      const day = dayString(now);
+      setFrom(day);
+      setTo(day);
+    } else if (preset === 'week') {
+      const start = new Date(now);
+      const dow = (now.getUTCDay() + 6) % 7;
+      start.setUTCDate(now.getUTCDate() - dow);
+      setFrom(dayString(start));
+      setTo(dayString(now));
+    } else {
+      setFrom(dayString(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))));
+      setTo(dayString(now));
+    }
+    resetPage();
+  };
+
+  const switchType = (next: string) => {
+    setType(next);
+    setTransactionType('');
+    setSelected(null);
+    resetPage();
+  };
+
+  const summary = query.data?.summary as Record<string, unknown> | undefined;
+  const summaryNumber = (key: string): string => {
+    const value = summary?.[key];
+    return typeof value === 'number' ? value.toLocaleString('en-PH') : String(value ?? '—');
+  };
 
   return (
     <section>
@@ -76,7 +122,9 @@ export function ReportsPage() {
         search={
           <SearchField
             label="Search report"
-            placeholder="name / number"
+            placeholder={
+              type === 'redemptions' ? 'customer / membership / reference / item' : 'name / number'
+            }
             value={search}
             onChange={(value) => {
               setSearch(value);
@@ -90,8 +138,7 @@ export function ReportsPage() {
               aria-label="Report"
               value={type}
               onChange={(e) => {
-                setType(e.target.value);
-                resetPage();
+                switchType(e.target.value);
               }}
               options={defs.map((d) => ({ value: d.type, label: d.label }))}
             />
@@ -122,6 +169,20 @@ export function ReportsPage() {
                 resetPage();
               }}
             />
+            {type === 'redemptions' ? (
+              <Select
+                aria-label="Transaction type"
+                value={transactionType}
+                onChange={(e) => {
+                  setTransactionType(e.target.value);
+                  resetPage();
+                }}
+                options={[
+                  { value: '', label: 'All types' },
+                  { value: 'redemption', label: 'Redemption' },
+                ]}
+              />
+            ) : null}
             {type === 'ost' ? (
               <Select
                 aria-label="Kind"
@@ -140,6 +201,17 @@ export function ReportsPage() {
         }
         actions={
           <>
+            {(['today', 'week', 'month', 'custom'] as const).map((preset) => (
+              <Button key={preset} variant="ghost" onClick={() => applyPreset(preset)}>
+                {preset === 'today'
+                  ? 'Today'
+                  : preset === 'week'
+                    ? 'This week'
+                    : preset === 'month'
+                      ? 'This month'
+                      : 'Custom'}
+              </Button>
+            ))}
             {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
               <Button
                 key={format}
@@ -168,30 +240,63 @@ export function ReportsPage() {
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data.data.length === 0 ? (
         <EmptyState
-          title="No rows in scope"
-          description="Nothing matches these filters within your authorized scope."
+          title={type === 'redemptions' ? 'No service transactions yet.' : 'No rows in scope'}
+          description={
+            type === 'redemptions'
+              ? 'Nothing you have served matches these filters yet.'
+              : 'Nothing matches these filters within your authorized scope.'
+          }
         />
       ) : (
         <>
-          <dl
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 12,
-              marginBottom: 16,
-            }}
-          >
-            {Object.entries(query.data.summary).map(([key, value]) => (
-              <div key={key}>
-                <dt style={{ opacity: 0.7 }}>{key}</dt>
-                <dd>
-                  <strong>
-                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </strong>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          {type === 'redemptions' && summary ? (
+            <dl
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 12,
+                marginBottom: 16,
+              }}
+              aria-label="Personal service summary"
+            >
+              {(
+                [
+                  ['customersServed', 'Customers served'],
+                  ['completedTransactions', 'Completed transactions'],
+                  ['pointsRedeemed', 'Points redeemed'],
+                  ['todayTransactions', "Today's transactions"],
+                  ['monthTransactions', "This month's transactions"],
+                ] as const
+              ).map(([key, label]) => (
+                <div key={key}>
+                  <dt style={{ opacity: 0.7 }}>{label}</dt>
+                  <dd>
+                    <strong>{summaryNumber(key)}</strong>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <dl
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 12,
+                marginBottom: 16,
+              }}
+            >
+              {Object.entries(query.data.summary).map(([key, value]) => (
+                <div key={key}>
+                  <dt style={{ opacity: 0.7 }}>{key}</dt>
+                  <dd>
+                    <strong>
+                      {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                    </strong>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
           <p style={{ opacity: 0.8 }}>
             Scope: {query.data.scope.label} · {query.data.meta.total} rows
           </p>
@@ -205,18 +310,68 @@ export function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {query.data.data.map((row, i) => (
-                  <tr key={i}>
-                    {def.columns.map((col) => (
-                      <td key={col.key}>
-                        {formatCell(col.key, (row as Record<string, unknown>)[col.key])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {query.data.data.map((row, i) => {
+                  const record = row as Record<string, unknown>;
+                  const reference = String(
+                    record.referenceNumber ?? record.redemptionNumber ?? `row-${i}`,
+                  );
+                  return (
+                    <tr
+                      key={reference}
+                      onClick={() =>
+                        setSelected(selected?.referenceNumber === reference ? null : record)
+                      }
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {def.columns.map((col) => (
+                        <td key={col.key}>{formatCell(col.key, record[col.key])}</td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+          {selected ? (
+            <section aria-label="Transaction detail" style={{ marginTop: 16 }}>
+              <h3>Transaction {String(selected.referenceNumber ?? '')}</h3>
+              <dl
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 12,
+                }}
+              >
+                {(
+                  [
+                    ['customer', 'Customer'],
+                    ['membershipNumber', 'Membership'],
+                    ['tier', 'VIP tier'],
+                    ['servedBy', 'Served by'],
+                    ['serviceItem', 'Item'],
+                    ['quantity', 'Quantity'],
+                    ['pointsUsed', 'Points'],
+                    ['balanceBefore', 'Previous balance'],
+                    ['balanceAfter', 'Balance after'],
+                    ['date', 'Date / time'],
+                    ['status', 'Status'],
+                    ['referenceNumber', 'Reference'],
+                    ['transactionType', 'Transaction type'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key}>
+                    <dt style={{ opacity: 0.7 }}>{label}</dt>
+                    <dd>
+                      <strong>{formatCell(key, selected[key])}</strong>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <Button variant="ghost" onClick={() => setSelected(null)}>
+                Close detail
+              </Button>
+            </section>
+          ) : null}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
             <Button
               variant="secondary"

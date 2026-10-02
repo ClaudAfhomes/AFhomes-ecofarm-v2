@@ -42,6 +42,7 @@ export const reportQuerySchema = z.object({
   itemId: z.string().uuid().optional(),
   kind: z.string().trim().max(20).optional(),
   search: z.string().trim().max(120).optional(),
+  transactionType: z.string().trim().max(40).optional(),
   format: reportFormatSchema.default('json'),
   limit: z.coerce.number().int().min(1).max(REPORT_EXPORT_CAP).default(50),
   offset: z.coerce.number().int().min(0).default(0),
