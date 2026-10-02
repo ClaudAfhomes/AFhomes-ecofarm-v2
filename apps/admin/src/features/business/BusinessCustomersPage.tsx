@@ -1,3 +1,4 @@
+import { NormalizedInput } from '@jad/ui';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -20,6 +21,8 @@ import {
 
 import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { normalizeLiveHumanField } from '../../lib/normalize';
 import {
   anonymizeCustomer,
   createCustomer,
@@ -55,6 +58,9 @@ export function BusinessCustomersPage() {
   const { user } = useSession();
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  // Live search: the list follows the settled term automatically; the Search
+  // button remains as an instant-apply accessibility fallback.
+  void useDebouncedValue(search, 300, (term) => setApplied(term.trim()));
   const [category, setCategory] = useState('');
   const [filters, setFilters] = useState({
     tier: '',
@@ -489,18 +495,27 @@ export function BusinessCustomersPage() {
           ) : null}
           <label>
             First name
-            <input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} />
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('firstName', value)}
+              value={form.firstName}
+              onChange={(e) => set('firstName', e.target.value)}
+            />
           </label>
           <label>
             Middle name
-            <input
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('middleName', value)}
               value={form.middleName ?? ''}
               onChange={(e) => set('middleName', e.target.value)}
             />
           </label>
           <label>
             Last name
-            <input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} />
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('lastName', value)}
+              value={form.lastName}
+              onChange={(e) => set('lastName', e.target.value)}
+            />
           </label>
           <label>
             Date of birth (YYYY-MM-DD)
@@ -520,33 +535,48 @@ export function BusinessCustomersPage() {
           </label>
           <label>
             Address line
-            <input
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('line1', value)}
               value={form.address.line1}
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  address: { ...prev.address, line1: e.target.value },
+                  address: {
+                    ...prev.address,
+                    line1: e.target.value,
+                  },
                 }))
               }
             />
           </label>
           <label>
             City
-            <input
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('city', value)}
               value={form.address.city}
               onChange={(e) =>
-                setForm((prev) => ({ ...prev, address: { ...prev.address, city: e.target.value } }))
+                setForm((prev) => ({
+                  ...prev,
+                  address: {
+                    ...prev.address,
+                    city: e.target.value,
+                  },
+                }))
               }
             />
           </label>
           <label>
             Province
-            <input
+            <NormalizedInput
+              normalize={(value) => normalizeLiveHumanField('province', value)}
               value={form.address.province}
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  address: { ...prev.address, province: e.target.value },
+                  address: {
+                    ...prev.address,
+                    province: e.target.value,
+                  },
                 }))
               }
             />

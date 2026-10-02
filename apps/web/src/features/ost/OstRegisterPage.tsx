@@ -1,8 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { AuthLayout, Button } from '@jad/ui';
-import type { SubmitOstApplicationRequest } from '@jad/contracts';
+import {
+  normalizeAddressField,
+  normalizeEmail,
+  normalizePersonName,
+  normalizePhilippinePhone,
+  type SubmitOstApplicationRequest,
+} from '@jad/contracts';
+import { NormalizedInput, AuthLayout, Button } from '@jad/ui';
 
 import { resolveOstReferral, submitOstApplication } from './services';
 import authStyles from '../customer/auth.module.css';
@@ -50,16 +56,16 @@ export function OstRegisterPage() {
     void submission
       .mutateAsync({
         referralCode: code,
-        firstName: form.firstName.trim(),
-        middleName: form.middleName.trim() || undefined,
-        lastName: form.lastName.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
+        firstName: normalizePersonName(form.firstName),
+        middleName: form.middleName.trim() ? normalizePersonName(form.middleName) : undefined,
+        lastName: normalizePersonName(form.lastName),
+        email: normalizeEmail(form.email) ?? form.email.trim(),
+        phone: normalizePhilippinePhone(form.phone) ?? form.phone.trim(),
         birthDate: form.birthDate,
         address: {
-          line1: form.line1.trim(),
-          city: form.city.trim(),
-          province: form.province.trim(),
+          line1: normalizeAddressField(form.line1),
+          city: normalizeAddressField(form.city),
+          province: normalizeAddressField(form.province),
           postalCode: form.postalCode.trim() || undefined,
           countryCode: 'PH',
         },
@@ -70,7 +76,10 @@ export function OstRegisterPage() {
   };
 
   const set = (key: keyof typeof form) => (event: { target: { value: string } }) =>
-    setForm((current) => ({ ...current, [key]: event.target.value }));
+    setForm((current) => ({
+      ...current,
+      [key]: event.target.value,
+    }));
 
   if (submission.isSuccess) {
     return (
@@ -109,7 +118,6 @@ export function OstRegisterPage() {
       wide
     >
       <div>
-
         {!code ? (
           <p className={authStyles.error} role="alert">
             This page needs a referral code. Ask your Sales Manager for their registration link.
@@ -139,7 +147,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-first">
             First name
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-first"
             className={authStyles.input}
             value={form.firstName}
@@ -151,7 +160,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-middle">
             Middle name (optional)
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-middle"
             className={authStyles.input}
             value={form.middleName}
@@ -162,7 +172,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-last">
             Last name
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-last"
             className={authStyles.input}
             value={form.lastName}
@@ -211,7 +222,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-line1">
             Street address
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-line1"
             className={authStyles.input}
             value={form.line1}
@@ -223,7 +235,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-city">
             City
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-city"
             className={authStyles.input}
             value={form.city}
@@ -235,7 +248,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-province">
             Province
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-province"
             className={authStyles.input}
             value={form.province}
@@ -247,7 +261,8 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-postal">
             Postal code (optional)
           </label>
-          <input
+          <NormalizedInput
+            normalize={(value) => value.toUpperCase()}
             id="ost-postal"
             className={authStyles.input}
             value={form.postalCode}

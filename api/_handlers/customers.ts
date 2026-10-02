@@ -10,6 +10,10 @@ import { z } from 'zod';
 import {
   createCustomerSchema,
   maskGovernmentId,
+  normalizeAddressField,
+  normalizePersonName,
+  normalizePhilippinePhone,
+  normalizePostalCode,
   updateCustomerSchema,
   customerCategorySchema,
 } from '@jad/contracts';
@@ -225,14 +229,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const row = {
         customer_number: customerNumber,
         first_name: input.firstName,
-        middle_name: input.middleName ?? null,
+        middle_name:
+          input.middleName === undefined ? null : normalizePersonName(input.middleName),
         last_name: input.lastName,
-        suffix: input.suffix ?? null,
+        suffix: input.suffix === undefined ? null : normalizeAddressField(input.suffix),
         birth_date: input.dateOfBirth,
         gender: input.gender ?? null,
         email: input.email,
         phone: input.phone,
-        address: input.address,
+        address: {
+          ...input.address,
+          postalCode: input.address.postalCode
+            ? normalizePostalCode(input.address.postalCode)
+            : input.address.postalCode,
+        },
         government_id_type: input.governmentIdType ?? null,
         government_id_number: input.governmentIdNumber ?? null,
         registration_source: 'seller_created',
@@ -304,13 +314,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const p = parsed.data;
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (p.firstName !== undefined) patch.first_name = p.firstName;
-      if (p.middleName !== undefined) patch.middle_name = p.middleName;
+      if (p.middleName !== undefined)
+        patch.middle_name = p.middleName === null ? null : normalizePersonName(p.middleName);
       if (p.lastName !== undefined) patch.last_name = p.lastName;
-      if (p.suffix !== undefined) patch.suffix = p.suffix;
+      if (p.suffix !== undefined)
+        patch.suffix = p.suffix === null ? null : normalizeAddressField(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
       if (p.email !== undefined) patch.email = p.email;
-      if (p.phone !== undefined) patch.phone = p.phone;
-      if (p.address !== undefined) patch.address = p.address;
+      if (p.phone !== undefined)
+        patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
+      if (p.address !== undefined)
+        patch.address = {
+          ...p.address,
+          postalCode: p.address.postalCode
+            ? normalizePostalCode(p.address.postalCode)
+            : p.address.postalCode,
+        };
       if (p.governmentIdType !== undefined) patch.government_id_type = p.governmentIdType;
       if (p.governmentIdNumber !== undefined) patch.government_id_number = p.governmentIdNumber;
       if (p.status !== undefined) patch.status = p.status;

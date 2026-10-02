@@ -68,6 +68,11 @@ import {
   protectedRequest as request,
   protectedRequestList as requestList,
 } from '../../lib/api/client';
+import {
+  normalizeCustomerApplicationRequest,
+  normalizeCustomerRequest,
+  normalizeReservationAgreementRequest,
+} from '../../lib/normalize';
 
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });
@@ -150,7 +155,7 @@ export const getCustomers = (
 };
 
 export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> =>
-  post('/customers', customerSchema, input);
+  post('/customers', customerSchema, normalizeCustomerRequest(input));
 
 export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnboardingRecovery> =>
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
@@ -211,9 +216,17 @@ export const getCustomerApplications = (
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
   request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
 export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
-  post('/official-forms/customer-applications', customerApplicationSchema, input);
+  post(
+    '/official-forms/customer-applications',
+    customerApplicationSchema,
+    normalizeCustomerApplicationRequest(input),
+  );
 export const updateCustomerApplication = (id: string, input: CreateCustomerApplicationRequest) =>
-  patch(`/official-forms/customer-applications/${id}`, customerApplicationSchema, input);
+  patch(
+    `/official-forms/customer-applications/${id}`,
+    customerApplicationSchema,
+    normalizeCustomerApplicationRequest(input),
+  );
 export const submitCustomerApplication = (id: string) =>
   post(`/official-forms/customer-applications/${id}/submit`, customerApplicationSchema, {});
 export const decideCustomerApplication = (
@@ -256,9 +269,17 @@ export const getReservationAgreements = (
 export const getReservationAgreement = (id: string): Promise<ReservationAgreement> =>
   request(`/official-forms/reservations/${id}`, reservationAgreementSchema);
 export const createReservationAgreement = (input: CreateReservationAgreementRequest) =>
-  post('/official-forms/reservations', reservationAgreementSchema, input);
+  post(
+    '/official-forms/reservations',
+    reservationAgreementSchema,
+    normalizeReservationAgreementRequest(input),
+  );
 export const updateReservationAgreement = (id: string, input: CreateReservationAgreementRequest) =>
-  patch(`/official-forms/reservations/${id}`, reservationAgreementSchema, input);
+  patch(
+    `/official-forms/reservations/${id}`,
+    reservationAgreementSchema,
+    normalizeReservationAgreementRequest(input),
+  );
 export const submitReservationAgreement = (id: string) =>
   post(`/official-forms/reservations/${id}/submit`, reservationAgreementSchema, {});
 export const decideReservationAgreement = (

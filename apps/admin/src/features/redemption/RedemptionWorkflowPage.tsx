@@ -83,6 +83,11 @@ export function RedemptionWorkflowPage() {
     onSuccess: (result) => {
       setReceipt(result);
       void client.invalidateQueries({ queryKey: ['redemption', 'history'] });
+      // Employee Reports (`['reports', 'redemptions', …]`) must show the new
+      // service transaction - and its updated summary cards - without reload.
+      void client.invalidateQueries({ queryKey: ['reports'] });
+      // The member preview balance shown at the till is now stale.
+      setPreview(null);
     },
   });
 

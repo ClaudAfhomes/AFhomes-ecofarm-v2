@@ -26,6 +26,8 @@ export function OstApplicationsPage() {
   const query = useQuery({
     queryKey: ['ost', 'applications', status],
     queryFn: () => getOstApplications(status),
+    // Reviews happen on the detail screen and in other sessions.
+    refetchInterval: 30_000,
   });
 
   return (

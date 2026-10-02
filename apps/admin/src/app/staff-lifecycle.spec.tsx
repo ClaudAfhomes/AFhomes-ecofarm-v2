@@ -227,7 +227,7 @@ describe('temporary-password staff creation', () => {
     fireEvent.click(create);
     await waitFor(() =>
       expect(createAfHomesStaff).toHaveBeenCalledWith({
-        fullName: 'New Hire',
+        fullName: 'NEW HIRE',
         email: 'new.hire@afhomes.test',
         roleId: 'r-admin',
         departmentId: null,

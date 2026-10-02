@@ -394,6 +394,27 @@ works, and a test that cannot fail is not a test.** `pnpm test:db:local` and
   ad-hoc `fetch` in features.
 - Client route guards are **UX only**; the server is the security boundary.
 - Prettier: `semi`, `singleQuote`, `printWidth: 100`, `trailingComma: all`.
+- Input rules live in `packages/contracts/src/schemas/input.ts` (single
+  source): person names are Unicode-letters-only and stored UPPERCASE, phones
+  reject alpha and canonicalize PH mobile to `+63`, emails stay lowercase,
+  money stays exact-decimal strings, birth dates must be past and plausible.
+  Emails, passwords, tokens, URLs, UUIDs, hashes, keys, paths and notes are
+  never case-folded. Frontend normalizes on submit (`apps/admin/src/lib/normalize.ts`);
+  handlers normalize the optional fields on write; imports normalize rows.
+  Historical records are never rewritten.
+- Live search uses `useDebouncedValue` (`apps/admin/src/lib/`, ~300ms) with the
+  debounced term in the queryKey; staged `applied` filters sync from the
+  settle callback, never from a sync setState-in-effect. Latest query wins by
+  key change; superseded results are isolated from the active query state.
+  Already-started network requests are not guaranteed to be cancelled.
+- Freshness is mutation invalidation first (redeem also invalidates
+  `['reports']`; activation also invalidates `member-lookup`/`memberships`/
+  `reports`), plus conservative polling on operational lists (5s import jobs,
+  15s finance/activation/history/member-lookup, 30s reports/audit/OST/
+  applications/commissions/memberships/customer points). No Supabase Realtime
+  subscriptions: browser roles hold no table privileges to subscribe to, so
+  polling the authorized service-role endpoints is the cross-session channel.
+  Logout clears the whole QueryClient in both apps.
 
 ## Authorization architecture
 

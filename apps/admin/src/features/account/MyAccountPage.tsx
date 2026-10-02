@@ -14,6 +14,7 @@ import {
   TextField,
 } from '@jad/ui';
 import { useSession } from '../../lib/session';
+import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
 
 /**
@@ -34,8 +35,7 @@ export function MyAccountPage() {
 
   const displayName = name ?? user?.name ?? '';
   const passwordsMatch = newPassword === confirmPassword;
-  const passwordValid =
-    currentPassword.length > 0 && newPassword.length >= 8 && passwordsMatch;
+  const passwordValid = currentPassword.length > 0 && newPassword.length >= 8 && passwordsMatch;
 
   const profile = useMutation({
     mutationFn: () => updateAfHomesStaffProfile({ name: displayName.trim() }),
@@ -83,6 +83,7 @@ export function MyAccountPage() {
               name="account-display-name"
               label="Display name"
               value={displayName}
+              normalize={(value) => normalizeLiveHumanField('fullName', value)}
               onChange={setName}
               autoComplete="name"
               error={

@@ -73,6 +73,9 @@ export function CustomerImportExportPage() {
   const jobs = useQuery({
     queryKey: ['business', 'customer-import-jobs'],
     queryFn: () => getCustomerImportJobs(),
+    // Import jobs progress server-side: poll so parse/commit/cancel status
+    // advances without reload (mutations still invalidate instantly).
+    refetchInterval: 5_000,
   });
 
   const sellers = useQuery({
@@ -117,7 +120,8 @@ export function CustomerImportExportPage() {
       setPreview(null);
       void client.invalidateQueries({ queryKey: ['business', 'customer-import-jobs'] });
       void client.invalidateQueries({ queryKey: ['business', 'customers'] });
-      void client.invalidateQueries({ queryKey: ['business', 'memberships'] });
+      void client.invalidateQueries({ queryKey: ['memberships'] });
+      void client.invalidateQueries({ queryKey: ['member-lookup'] });
       void client.invalidateQueries({ queryKey: ['analytics'] });
       void client.invalidateQueries({ queryKey: ['reports'] });
     },

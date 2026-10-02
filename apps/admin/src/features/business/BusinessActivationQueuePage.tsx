@@ -23,12 +23,20 @@ export function BusinessActivationQueuePage() {
   const queue = useQuery({
     queryKey: ['business', 'queue', 'activation'],
     queryFn: getActivationQueue,
+    // Activations and payments land from other sessions: poll the queue
+    // (same-session writes invalidate instantly).
+    refetchInterval: 15_000,
   });
   const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
 
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['business', 'queue', 'activation'] });
+    // Activation changes what member lookup, memberships and the activation
+    // report show: refresh them in this session without reload.
+    await client.invalidateQueries({ queryKey: ['member-lookup'] });
+    await client.invalidateQueries({ queryKey: ['memberships'] });
+    await client.invalidateQueries({ queryKey: ['reports'] });
   };
 
   return (

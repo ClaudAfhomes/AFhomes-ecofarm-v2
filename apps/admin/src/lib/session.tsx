@@ -11,6 +11,7 @@ import type { AfHomesPermission } from '@jad/contracts';
 import { afHomesSessionSchema } from '@jad/contracts';
 import { protectedRequest } from './api/client';
 import { ApiError } from './api/errors';
+import { queryClient } from './query';
 import { getSupabaseClient } from './supabase';
 
 export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
@@ -138,6 +139,10 @@ export function SessionProvider({
 
   const logout = useCallback(() => {
     void client?.auth.signOut();
+    // Drop every cached row with the session: the next login must never see
+    // the previous user's customers, redemptions or reports, and polling
+    // queries must not keep firing against a signed-out client.
+    queryClient.clear();
     setUser(null);
     setStatus('unauthenticated');
   }, [client]);

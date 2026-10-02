@@ -3,14 +3,27 @@ import { useQuery } from '@tanstack/react-query';
 import { memberLookupSchema, CUSTOMER_CATEGORY_LABELS } from '@jad/contracts';
 import { Button, PageHeader, SearchField, ErrorState, EmptyState } from '@jad/ui';
 import { requestList } from '../../lib/api/client';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 export function MemberLookupPage() {
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  // Live lookup: the query follows the settled term (min 2 chars); the Search
+  // button stays as an instant-apply fallback.
+  void useDebouncedValue(search.trim(), 300, (term) => {
+    if (term.length >= 2) setApplied(term);
+    else setApplied('');
+  });
+  const activeTerm = search.trim().length >= 2 ? applied : '';
   const members = useQuery({
-    queryKey: ['member-lookup', applied],
-    enabled: applied.length >= 2,
+    queryKey: ['member-lookup', activeTerm],
+    enabled: activeTerm.length >= 2,
     queryFn: () =>
-      requestList('/memberships/lookup?search=' + encodeURIComponent(applied), memberLookupSchema),
+      requestList(
+        '/memberships/lookup?search=' + encodeURIComponent(activeTerm),
+        memberLookupSchema,
+      ),
+    // An activation from another session updates the member state shown here.
+    refetchInterval: 15_000,
   });
   return (
     <section>
@@ -24,12 +37,21 @@ export function MemberLookupPage() {
           setApplied(search.trim());
         }}
       >
-        <SearchField label="Find member" value={search} onChange={setSearch} />
+        <SearchField
+          label="Find member"
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            if (value.trim().length < 2) setApplied('');
+          }}
+        />
         <Button type="submit" disabled={search.trim().length < 2}>
           Search
         </Button>
       </form>
-      {members.isFetching ? (
+      {activeTerm.length < 2 ? (
+        <EmptyState title="Enter at least two characters to find a member" />
+      ) : members.isFetching ? (
         <p role="status">Looking up members - </p>
       ) : members.isError ? (
         <ErrorState error={members.error} onRetry={members.refetch} />

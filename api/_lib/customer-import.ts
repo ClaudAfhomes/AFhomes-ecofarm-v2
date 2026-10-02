@@ -2,11 +2,19 @@ import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
+  PERSON_NAME_RE,
+  dateOfBirthSchema,
+  emailSchema,
+  personNameSchema,
   categoryRequiresMember,
   compareMoney,
   customerStatusForCategory,
   googleSheetCsvUrl,
   mapSourceStatus,
+  normalizeAddressField,
+  normalizeEmail,
+  normalizePersonName,
+  normalizePhilippinePhone,
   normalizeTier,
   parseGoogleSheetUrl,
   resolveCustomerCategory,
@@ -254,7 +262,6 @@ export type ValidatedImportRow = {
   membershipId: string | null;
 };
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FORMULA_RE = /^[=+\-@\t\r]/;
 const MEMBERSHIP_NUMBER_RE = /^MBS-\d{6}$/;
@@ -292,13 +299,22 @@ export function validateImportRow(
     if (FORMULA_RE.test(value)) warn(field, 'Formula-like content is stored as plain text');
 
   if (!nonEmpty(get('first_name'))) err('first_name', 'Required');
+  else if (!personNameSchema.safeParse(get('first_name')).success)
+    err('first_name', 'Use letters, spaces, apostrophes and hyphens only');
   if (!nonEmpty(get('last_name'))) err('last_name', 'Required');
+  else if (!personNameSchema.safeParse(get('last_name')).success)
+    err('last_name', 'Use letters, spaces, apostrophes and hyphens only');
+  if (nonEmpty(get('middle_name')) && !personNameSchema.safeParse(get('middle_name')).success)
+    err('middle_name', 'Use letters, spaces, apostrophes and hyphens only');
+  if (nonEmpty(get('suffix')) && !PERSON_NAME_RE.test(get('suffix').replace(/\./g, '')))
+    err('suffix', 'Use letters, spaces, apostrophes and hyphens only');
   if (!nonEmpty(get('email'))) err('email', 'Required');
-  else if (!EMAIL_RE.test(get('email'))) err('email', 'Invalid email');
+  else if (!emailSchema.safeParse(get('email')).success) err('email', 'Invalid email');
+  const mobile = normalizePhilippinePhone(get('mobile'));
   if (!nonEmpty(get('mobile'))) err('mobile', 'Required');
-  else if (get('mobile').replace(/\D/g, '').length < 7) err('mobile', 'Invalid phone');
-  if (nonEmpty(get('birth_date')) && !isRealDate(get('birth_date')))
-    err('birth_date', 'Use YYYY-MM-DD');
+  else if (mobile === null) err('mobile', 'Invalid phone');
+  if (nonEmpty(get('birth_date')) && !dateOfBirthSchema.safeParse(get('birth_date')).success)
+    err('birth_date', 'Use a real past birth date within 120 years');
   for (const key of [
     'activation_date',
     'membership_expiry_date',
@@ -327,10 +343,23 @@ export function validateImportRow(
     nonEmpty(get('secondary_mobile')) ||
     nonEmpty(get('secondary_birth_date'));
   if (hasSecondary && tier !== 'GOLD') err('secondary_first_name', 'Secondary holder is Gold-only');
-  if (nonEmpty(get('secondary_email')) && !EMAIL_RE.test(get('secondary_email')))
+  for (const field of [
+    'secondary_first_name',
+    'secondary_middle_name',
+    'secondary_last_name',
+  ] as const)
+    if (nonEmpty(get(field)) && !personNameSchema.safeParse(get(field)).success)
+      err(field, 'Use letters, spaces, apostrophes and hyphens only');
+  if (nonEmpty(get('secondary_email')) && !emailSchema.safeParse(get('secondary_email')).success)
     err('secondary_email', 'Invalid email');
-  if (nonEmpty(get('secondary_birth_date')) && !isRealDate(get('secondary_birth_date')))
-    err('secondary_birth_date', 'Use YYYY-MM-DD');
+  const secondaryMobileRaw = get('secondary_mobile');
+  const secondaryMobile = secondaryMobileRaw ? normalizePhilippinePhone(secondaryMobileRaw) : null;
+  if (secondaryMobileRaw && secondaryMobile === null) err('secondary_mobile', 'Invalid phone');
+  if (
+    nonEmpty(get('secondary_birth_date')) &&
+    !dateOfBirthSchema.safeParse(get('secondary_birth_date')).success
+  )
+    err('secondary_birth_date', 'Use a real past birth date within 120 years');
 
   const balance = parseOpeningBalance(get('current_points_balance'));
   if (balance === null) err('current_points_balance', 'Must be a whole non-negative number');
@@ -522,17 +551,17 @@ export function validateImportRow(
     tier,
     customerStatus: customerStatusForCategory(category!),
     person: {
-      firstName: get('first_name'),
-      middleName: get('middle_name') || null,
-      lastName: get('last_name'),
-      suffix: get('suffix') || null,
+      firstName: normalizePersonName(get('first_name')),
+      middleName: nonEmpty(get('middle_name')) ? normalizePersonName(get('middle_name')) : null,
+      lastName: normalizePersonName(get('last_name')),
+      suffix: nonEmpty(get('suffix')) ? normalizeAddressField(get('suffix')) : null,
       birthDate: get('birth_date') || null,
       gender: (() => {
         const g = get('sex').toLowerCase();
         return g === 'male' || g === 'female' || g === 'other' || g === 'undisclosed' ? g : null;
       })(),
-      email: get('email'),
-      phone: get('mobile'),
+      email: normalizeEmail(get('email')) ?? get('email'),
+      phone: mobile ?? get('mobile'),
     },
     payment,
     historicalSaleTotal: nonEmpty(get('historical_sale_total'))
@@ -554,9 +583,10 @@ export function validateImportRow(
         ? [
             [get('secondary_first_name'), get('secondary_middle_name'), get('secondary_last_name')]
               .filter(Boolean)
+              .map((part) => normalizePersonName(part))
               .join(' '),
-            get('secondary_email'),
-            get('secondary_mobile'),
+            normalizeEmail(get('secondary_email')) ?? get('secondary_email'),
+            secondaryMobile ?? secondaryMobileRaw,
           ]
             .filter(Boolean)
             .join(' · ') || null
@@ -580,7 +610,16 @@ export function validateImportRow(
     };
   return {
     rowNumber,
-    fields,
+    fields: {
+      ...fields,
+      first_name: normalized.person.firstName ?? '',
+      middle_name: normalized.person.middleName ?? '',
+      last_name: normalized.person.lastName ?? '',
+      suffix: normalized.person.suffix ?? '',
+      email: normalized.person.email ?? '',
+      mobile: normalized.person.phone ?? '',
+      ...(secondaryMobile ? { secondary_mobile: secondaryMobile } : {}),
+    },
     normalized,
     validation: warnings.length > 0 ? 'warning' : 'valid',
     errors,

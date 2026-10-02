@@ -393,7 +393,7 @@ describe('OST application submission', () => {
   it('7. blocks a duplicate pending application for the same email', async () => {
     const db = install();
     expect((await submit(db, applicant)).status).toBe(201);
-    const retry = await submit(db, { ...applicant, firstName: 'Oscar2' });
+    const retry = await submit(db, { ...applicant, firstName: 'Oscar Segundo' });
     expect(retry.status).toBe(409);
   });
 

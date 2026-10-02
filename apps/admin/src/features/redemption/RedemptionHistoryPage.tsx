@@ -18,6 +18,7 @@ import {
 } from '@jad/ui';
 
 import { getRedemptionItems, getRedemptions } from './services';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './RedemptionHistory.module.css';
 
 /**
@@ -37,6 +38,9 @@ export function RedemptionHistoryPage() {
   const [itemId, setItemId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Live search: the history follows the settled membership number; Apply
+  // stays as an instant-apply fallback.
+  void useDebouncedValue(membershipNumber.trim(), 300, (term) => setAppliedNumber(term));
 
   const items = useQuery({ queryKey: ['redemption', 'items', 'all'], queryFn: () => getRedemptionItems(true) });
 
@@ -50,6 +54,9 @@ export function RedemptionHistoryPage() {
         ...(to ? { to: new Date(`${to}T23:59:59`).toISOString() } : {}),
         limit: 100,
       }),
+    // Operational freshness: a redemption completed on another terminal
+    // appears here without reload (same-session writes invalidate instantly).
+    refetchInterval: 15_000,
   });
 
   const clear = () => {

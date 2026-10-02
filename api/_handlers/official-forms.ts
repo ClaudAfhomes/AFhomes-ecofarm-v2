@@ -5,6 +5,9 @@ import {
   createCustomerApplicationSchema,
   createReservationAgreementSchema,
   customerApplicationDecisionSchema,
+  normalizeAddressField,
+  normalizePersonName,
+  normalizePostalCode,
   officialFormListQuerySchema,
   reservationAgreementDecisionSchema,
   type CustomerApplicationStatus,
@@ -48,6 +51,47 @@ const pdfSchema = z.object({
 const sendFile = (res: VercelResponse, filename: string, mime: string, bytes: Uint8Array) =>
   res.status(200).json({ filename, mime, content: Buffer.from(bytes).toString('base64') });
 const rpcId = (data: unknown) => String(Array.isArray(data) ? data[0] : data);
+
+/**
+ * Uppercase the optional holder/header text the schemas validate but leave
+ * untransformed (required fields are already normalized by the schemas).
+ * Spreads preserve key presence exactly: null/undefined/blank pass through.
+ */
+type OptionalTextHolder = {
+  middleName?: string;
+  suffix?: string;
+  postalCode?: string;
+  occupationBusinessName?: string;
+  employedPosition?: string;
+};
+
+const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T => ({
+  ...holder,
+  ...(holder.middleName ? { middleName: normalizePersonName(holder.middleName) } : {}),
+  ...(holder.suffix ? { suffix: normalizeAddressField(holder.suffix) } : {}),
+  ...(holder.postalCode ? { postalCode: normalizePostalCode(holder.postalCode) } : {}),
+  ...(holder.occupationBusinessName
+    ? { occupationBusinessName: normalizeAddressField(holder.occupationBusinessName) }
+    : {}),
+  ...(holder.employedPosition
+    ? { employedPosition: normalizeAddressField(holder.employedPosition) }
+    : {}),
+});
+
+const normalizeApplicationHeader = <T extends {
+  salesManagerName?: string;
+  vipRecommenderName?: string;
+  vipReferrer?: string;
+}>(header: T): T => ({
+  ...header,
+  ...(header.salesManagerName
+    ? { salesManagerName: normalizeAddressField(header.salesManagerName) }
+    : {}),
+  ...(header.vipRecommenderName
+    ? { vipRecommenderName: normalizeAddressField(header.vipRecommenderName) }
+    : {}),
+  ...(header.vipReferrer ? { vipReferrer: normalizeAddressField(header.vipReferrer) } : {}),
+});
 
 const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   holderType: row.holder_type,
@@ -604,9 +648,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await db.rpc('save_customer_application', {
         p_application_id: null,
         p_actor_id: auth.userId,
-        p_header: header,
-        p_primary: primary,
-        p_secondary: secondary ?? null,
+        p_header: normalizeApplicationHeader(header),
+        p_primary: normalizeHolderOptionals(primary),
+        p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
       });
       if (error) throw error;
       const id = rpcId(data);
@@ -643,9 +687,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error } = await db.rpc('save_customer_application', {
         p_application_id: appPatch[1],
         p_actor_id: auth.userId,
-        p_header: header,
-        p_primary: primary,
-        p_secondary: secondary ?? null,
+        p_header: normalizeApplicationHeader(header),
+        p_primary: normalizeHolderOptionals(primary),
+        p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
       });
       if (error) throw error;
       const after = await getApplication(db, appPatch[1]!);

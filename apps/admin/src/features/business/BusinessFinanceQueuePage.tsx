@@ -21,12 +21,20 @@ import { getFinanceQueue, getSalePayments, getSaleSummary, recordPayment, verify
  */
 export function BusinessFinanceQueuePage() {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ['business', 'queue', 'finance'], queryFn: getFinanceQueue });
+  const query = useQuery({
+    queryKey: ['business', 'queue', 'finance'],
+    queryFn: getFinanceQueue,
+    // Money moves from other sessions too: poll the queue (same-session
+    // writes invalidate instantly).
+    refetchInterval: 15_000,
+  });
   const [paying, setPaying] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
 
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['business', 'queue'] });
+    // Payment reports (verified/pending/rejected totals) stay fresh too.
+    await client.invalidateQueries({ queryKey: ['reports'] });
   };
 
   return (

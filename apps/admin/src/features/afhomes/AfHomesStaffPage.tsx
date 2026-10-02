@@ -18,8 +18,10 @@ import {
   StatusChip,
   TextField,
 } from '@jad/ui';
-import type { AfHomesStaff } from '@jad/contracts';
+import { PERSON_NAME_RE, type AfHomesStaff } from '@jad/contracts';
+import { normalizeLiveHumanField } from '../../lib/normalize';
 import { useSession } from '../../lib/session';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   createAfHomesStaff,
   deactivateAfHomesStaff,
@@ -43,7 +45,8 @@ function statusTone(status: AfHomesStaff['status']): 'success' | 'danger' | 'neu
 export function AfHomesStaffPage() {
   const client = useQueryClient();
   const navigate = useNavigate();
-  const { user } = useSession();  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
+  const { user } = useSession();
+  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
   const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
   const departments = useQuery({
     queryKey: ['afhomes', 'departments'],
@@ -52,6 +55,7 @@ export function AfHomesStaffPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
+  const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -69,8 +73,7 @@ export function AfHomesStaffPage() {
   const [confirmation, setConfirmation] = useState('');
   const [purgeTarget, setPurgeTarget] = useState<AfHomesStaff | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState('');
-  const canPurgeTest =
-    user?.roleSlug === 'super_admin' && user.testPurgeEnabled === true;
+  const canPurgeTest = user?.roleSlug === 'super_admin' && user.testPurgeEnabled === true;
 
   const resetCreate = () => {
     setFullName('');
@@ -82,7 +85,14 @@ export function AfHomesStaffPage() {
   };
 
   const createErrors = useMemo(() => {
-    const errors: { email?: string; temporaryPassword?: string; confirmPassword?: string } = {};
+    const errors: {
+      fullName?: string;
+      email?: string;
+      temporaryPassword?: string;
+      confirmPassword?: string;
+    } = {};
+    if (fullName && !PERSON_NAME_RE.test(fullName.trim()))
+      errors.fullName = 'Use letters, spaces, apostrophes and hyphens only - no numbers.';
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
       errors.email = 'Enter a valid email address.';
     if (temporaryPassword && temporaryPassword.length < 8)
@@ -90,9 +100,10 @@ export function AfHomesStaffPage() {
     if (confirmPassword && temporaryPassword !== confirmPassword)
       errors.confirmPassword = 'Passwords do not match.';
     return errors;
-  }, [email, temporaryPassword, confirmPassword]);
+  }, [fullName, email, temporaryPassword, confirmPassword]);
   const createValid =
     fullName.trim().length > 0 &&
+    PERSON_NAME_RE.test(fullName.trim()) &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
     roleId.length > 0 &&
     temporaryPassword.length >= 8 &&
@@ -149,9 +160,9 @@ export function AfHomesStaffPage() {
         (item) =>
           (status === 'all' || item.status === status) &&
           (roleFilter === 'all' || item.roleId === roleFilter) &&
-          `${item.fullName} ${item.email}`.toLowerCase().includes(search.toLowerCase()),
+          `${item.fullName} ${item.email}`.toLowerCase().includes(debouncedSearch.toLowerCase()),
       ) ?? [],
-    [staff.data, status, roleFilter, search],
+    [staff.data, status, roleFilter, debouncedSearch],
   );
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -298,7 +309,9 @@ export function AfHomesStaffPage() {
                       <StatusChip label={item.status} tone={statusTone(item.status)} />
                     </td>
                     <td>
-                      <small>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</small>
+                      <small>
+                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
+                      </small>
                     </td>
                     <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                       <Button variant="secondary" onClick={() => openRestrictions(item)}>
@@ -369,7 +382,9 @@ export function AfHomesStaffPage() {
             name="staff-name"
             label="Full name"
             value={fullName}
+            normalize={(value) => normalizeLiveHumanField('fullName', value)}
             onChange={setFullName}
+            error={createErrors.fullName}
             autoComplete="name"
           />
           <TextField
@@ -421,8 +436,8 @@ export function AfHomesStaffPage() {
             error={createErrors.confirmPassword}
           />
           <Alert variant="info" title="First login">
-            The new member signs in with this password and must set their own before the admin
-            panel unlocks.
+            The new member signs in with this password and must set their own before the admin panel
+            unlocks.
           </Alert>
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
@@ -526,9 +541,9 @@ export function AfHomesStaffPage() {
           <div>
             <p>
               TEST DATA PURGE. This permanently deletes the test account
-              {purgeTarget ? ` ${purgeTarget.email}` : ''} and related test records. This
-              action cannot be undone. Real business data is never purged: anything
-              shared or non-test blocks the purge instead.
+              {purgeTarget ? ` ${purgeTarget.email}` : ''} and related test records. This action
+              cannot be undone. Real business data is never purged: anything shared or non-test
+              blocks the purge instead.
             </p>
             <label>
               Type PURGE to confirm

@@ -67,6 +67,28 @@ export {
   EXACT_DECIMAL_RATE_RE,
 } from './schemas/money.js';
 
+export {
+  PERSON_NAME_RE,
+  personNameSchema,
+  optionalPersonNameSchema,
+  nullablePersonNameSchema,
+  optionalPhoneSchema,
+  phoneSchema,
+  optionalContactNumberSchema,
+  emailSchema,
+  dateOfBirthSchema,
+  birthDateSchema,
+  uppercaseAddressSchema,
+  uppercasedText,
+  normalizePersonName,
+  normalizeAddressField,
+  normalizePostalCode,
+  normalizePhilippinePhone,
+  normalizeEmail,
+  normalizeMoneyString,
+  isPlausibleBirthDate,
+} from './schemas/input.js';
+
 export { listResponseSchema } from './schemas/collection.js';
 export type { ListResponse } from './schemas/collection.js';
 

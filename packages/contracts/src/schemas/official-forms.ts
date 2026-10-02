@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import {
+  birthDateSchema,
+  emailSchema,
+  normalizeAddressField,
+  optionalPersonNameSchema,
+  optionalContactNumberSchema,
+  personNameSchema,
+  phoneSchema,
+  PERSON_NAME_RE,
+} from './input.js';
 import { exactDecimalStringSchema } from './money.js';
 import {
   customerApplicationStatusSchema,
@@ -23,28 +33,48 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  lastName: z.string().trim().min(1).max(80),
-  firstName: z.string().trim().min(1).max(80),
-  middleName: z.string().trim().max(80).optional(),
+  lastName: personNameSchema,
+  firstName: personNameSchema,
+  middleName: optionalPersonNameSchema,
   suffix: z.string().trim().max(20).optional(),
-  birthDate: dateSchema,
+  birthDate: birthDateSchema,
   sex: z.string().trim().max(30).optional(),
   citizenship: z.string().trim().max(80).optional(),
   civilStatus: z.string().trim().max(40).optional(),
-  permanentAddressLine1: z.string().trim().min(1).max(200),
-  permanentAddressLine2: z.string().trim().max(200).optional(),
-  cityMunicipality: z.string().trim().min(1).max(100),
-  province: z.string().trim().min(1).max(100),
+  permanentAddressLine1: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .transform((v) => normalizeAddressField(v)),
+  permanentAddressLine2: z.string().trim().max(200).transform(normalizeAddressField).optional(),
+  cityMunicipality: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .transform((v) => normalizeAddressField(v)),
+  province: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .transform((v) => normalizeAddressField(v)),
   postalCode: z.string().trim().max(20).optional(),
-  landline: z.string().trim().max(30).optional(),
-  mobile: z.string().trim().min(7).max(30),
-  email: z.string().trim().toLowerCase().email().max(254),
+  landline: optionalContactNumberSchema,
+  mobile: phoneSchema,
+  email: emailSchema,
   tinNumber: z.string().trim().max(40).optional(),
-  occupationBusinessName: z.string().trim().max(160).optional(),
-  officeBusinessAddress: z.string().trim().max(300).optional(),
+  occupationBusinessName: z.string().trim().max(160).transform(normalizeAddressField).optional(),
+  officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
-  employedPosition: z.string().trim().max(120).optional(),
-  printedName: z.string().trim().min(1).max(180),
+  employedPosition: z.string().trim().max(120).transform(normalizeAddressField).optional(),
+  printedName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(180)
+    .transform((v) => normalizeAddressField(v)),
 });
 
 export const createCustomerApplicationSchema = z
@@ -58,7 +88,7 @@ export const createCustomerApplicationSchema = z
     secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
     salesManagerName: z.string().trim().max(160).optional(),
     vipRecommenderName: z.string().trim().max(160).optional(),
-    recommenderContact: z.string().trim().max(30).optional(),
+    recommenderContact: optionalContactNumberSchema,
     recommenderEmail: z.string().trim().toLowerCase().email().max(254).optional(),
     vipReferrer: z.string().trim().max(160).optional(),
     acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
@@ -117,10 +147,21 @@ export const agreementPaymentInputSchema = z.object({
 
 export const reservationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  name: z.string().trim().min(1).max(180),
-  address: z.string().trim().min(1).max(400),
-  contactNumber: z.string().trim().min(7).max(30),
-  email: z.string().trim().toLowerCase().email().max(254),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(180)
+    .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
+    .transform(normalizeAddressField),
+  address: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .transform((v) => normalizeAddressField(v)),
+  contactNumber: phoneSchema,
+  email: emailSchema,
   tinNumber: z.string().trim().max(40).optional(),
 });
 

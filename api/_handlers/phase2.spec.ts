@@ -305,7 +305,7 @@ describe('customers', () => {
     });
     expect(state.status).toBe(201);
     const body = state.body as Record<string, unknown>;
-    expect(body.fullName).toBe('Ana R Reyes');
+    expect(body.fullName).toBe('ANA R REYES');
     expect(body.status).toBe('prospect');
     expect(body.customerNumber).toMatch(/^CUS-/);
     // Stored, but never returned.
@@ -429,7 +429,7 @@ describe('customers', () => {
       body: { lastName: 'Dela Cruz Jr' },
     });
     expect(state.status).toBe(200);
-    expect((state.body as { fullName: string }).fullName).toBe('Juan A Dela Cruz Jr');
+    expect((state.body as { fullName: string }).fullName).toBe('Juan A DELA CRUZ JR');
     expect(JSON.stringify(db.rows('audit_events'))).not.toContain('0011-2233-4455');
   });
 

@@ -17,6 +17,13 @@
  */
 import { z } from 'zod';
 
+import {
+  birthDateSchema,
+  emailSchema,
+  optionalPersonNameSchema,
+  personNameSchema,
+  phoneSchema,
+} from './input.js';
 import { customerAddressSchema } from './sales.js';
 
 /* ------------------------------------------------------------------ */
@@ -113,22 +120,12 @@ export type OstReferralResolution = z.infer<typeof ostReferralResolutionSchema>;
 
 export const submitOstApplicationSchema = z.object({
   referralCode: z.string().trim().min(8).max(64),
-  firstName: z.string().trim().min(1).max(80),
-  middleName: z.string().trim().max(80).optional(),
-  lastName: z.string().trim().min(1).max(80),
-  email: z.string().trim().toLowerCase().email().max(254),
-  phone: z
-    .string()
-    .trim()
-    .regex(/^\+?[0-9]{7,15}$/, 'phone must be 7-15 digits, optionally + prefixed'),
-  birthDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'birthDate must be YYYY-MM-DD')
-    .refine((v) => {
-      const d = new Date(v);
-      return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === v;
-    }, 'birthDate is not a real calendar date')
-    .refine((v) => v < new Date().toISOString().slice(0, 10), 'birthDate must be in the past'),
+  firstName: personNameSchema,
+  middleName: optionalPersonNameSchema,
+  lastName: personNameSchema,
+  email: emailSchema,
+  phone: phoneSchema,
+  birthDate: birthDateSchema,
   address: customerAddressSchema,
 });
 export type SubmitOstApplicationRequest = z.infer<typeof submitOstApplicationSchema>;

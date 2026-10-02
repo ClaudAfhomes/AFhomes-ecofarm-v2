@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+import { emailSchema, normalizePersonName, PERSON_NAME_RE } from './input.js';
+
+/** Staff display name: letters/spaces/apostrophes/hyphens, stored UPPERCASE. */
+const staffNameSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(120)
+  .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
+  .transform((value) => normalizePersonName(value));
+
 export const afHomesActionSchema = z.enum(['view', 'create', 'update', 'delete']);
 export type AfHomesAction = z.infer<typeof afHomesActionSchema>;
 
@@ -190,8 +201,8 @@ export const createAfHomesRoleSchema = z.object({
   permissions: z.array(afHomesPermissionSchema),
 });
 export const inviteAfHomesStaffSchema = z.object({
-  email: z.string().trim().email(),
-  fullName: z.string().trim().min(2).max(120),
+  email: emailSchema,
+  fullName: staffNameSchema,
   departmentId: z.string().uuid().nullable(),
   roleId: z.string().uuid(),
 });
@@ -210,7 +221,7 @@ export type CreateAfHomesStaff = z.infer<typeof createAfHomesStaffSchema>;
 
 /** My Account display-name update (PATCH own session). */
 export const updateAfHomesStaffProfileSchema = z.object({
-  name: z.string().trim().min(2).max(120),
+  name: staffNameSchema,
 });
 export type UpdateAfHomesStaffProfile = z.infer<typeof updateAfHomesStaffProfileSchema>;
 

@@ -126,7 +126,8 @@ describe('public OST registration', () => {
     const post = requests.find((r) => r.method === 'POST' && r.path === '/ost/applications');
     expect(post?.body).toMatchObject({
       referralCode: 'OST-ABCDEF-123456',
-      firstName: 'Oscar',
+      firstName: 'OSCAR',
+      lastName: 'TRAINEE',
       email: 'oscar@example.invalid',
     });
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsorStaffId');

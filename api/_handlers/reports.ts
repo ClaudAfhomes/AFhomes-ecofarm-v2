@@ -134,9 +134,16 @@ async function mapById(
 ): Promise<Map<string, Row>> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
-  const { data, error } = await db.from(table).select(select).in('id', unique);
-  if (error) throw error;
-  return new Map(((data ?? []) as Row[]).map((row) => [String(row.id), row]));
+  const rows: Row[] = [];
+  for (let start = 0; start < unique.length; start += 500) {
+    const { data, error } = await db
+      .from(table)
+      .select(select)
+      .in('id', unique.slice(start, start + 500));
+    if (error) throw error;
+    rows.push(...((data ?? []) as Row[]));
+  }
+  return new Map(rows.map((row) => [String(row.id), row]));
 }
 
 const staffName = (staff: Map<string, Row>, id: unknown): string | null => {
@@ -168,33 +175,74 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
   if (q.seller) query = query.or(`seller_staff_id.eq.${q.seller},seller_ost_id.eq.${q.seller}`);
   if (window.from) query = query.gte('created_at', window.from);
   if (window.to) query = query.lte('created_at', window.to);
-  const { data, error, count } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
-  const sales = ((data ?? []) as Row[]).filter((row) =>
-    inReportWindow(row.created_at, window.from, window.to),
-  );
+  // Exhaust database pages before resolving names/search. A managed API row
+  // cap must not hide matches or truncate summaries before UI pagination.
+  const allSales: Row[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + 499);
+    if (error) throw error;
+    const batch = (data ?? []) as Row[];
+    allSales.push(...batch);
+    if (batch.length < 500) break;
+  }
+  let sales = allSales.filter((row) => inReportWindow(row.created_at, window.from, window.to));
   const customerIds = sales.map((row) => String(row.customer_id));
   const planIds = sales.map((row) => String(row.plan_id));
   const sellerIds = sales.flatMap((row) =>
     [row.seller_staff_id, row.seller_ost_id].filter(Boolean).map(String),
   );
   const [customers, plans, staff, payments] = await Promise.all([
-    mapById(db, 'customers', customerIds, 'id,first_name,middle_name,last_name,suffix'),
+    mapById(
+      db,
+      'customers',
+      customerIds,
+      'id,first_name,middle_name,last_name,suffix,customer_number',
+    ),
     mapById(db, 'card_plans', planIds, 'id,name,code'),
     mapById(db, 'staff_users', sellerIds, 'id,full_name'),
     saleIds !== null && saleIds.length === 0
       ? []
       : (async () => {
-          let pq = db.from('payments').select('sale_id,amount,status');
-          if (saleIds) pq = pq.in('sale_id', saleIds.length ? saleIds : ['__none__']);
-          const { data: pdata, error: perror } = await pq;
-          if (perror) throw perror;
-          return (pdata ?? []) as Row[];
+          const rows: Row[] = [];
+          const ids = allSales.map((row) => String(row.id));
+          for (let start = 0; start < ids.length; start += 500) {
+            for (let offset = 0; ; offset += 500) {
+              const { data: pdata, error: perror } = await db
+                .from('payments')
+                .select('id,sale_id,amount,status')
+                .in('sale_id', ids.slice(start, start + 500))
+                .order('id', { ascending: true })
+                .range(offset, offset + 499);
+              if (perror) throw perror;
+              const batch = (pdata ?? []) as Row[];
+              rows.push(...batch);
+              if (batch.length < 500) break;
+            }
+          }
+          return rows;
         })(),
   ]);
+  const needle = (q.search ?? '').trim().toLocaleLowerCase();
+  if (needle) {
+    sales = sales.filter((row) => {
+      const customer = customers.get(String(row.customer_id)) ?? {};
+      return [
+        row.sale_number,
+        row.id,
+        displayName(customer),
+        customer.customer_number,
+        staffName(staff, row.seller_staff_id),
+        staffName(staff, row.seller_ost_id),
+      ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(needle));
+    });
+  }
+  const matchedIds = new Set(sales.map((row) => String(row.id)));
   const verifiedBySale = new Map<string, bigint>();
   for (const payment of payments as Row[]) {
-    if (payment.status !== 'verified') continue;
+    if (payment.status !== 'verified' || !matchedIds.has(String(payment.sale_id))) continue;
     const id = String(payment.sale_id);
     verifiedBySale.set(id, (verifiedBySale.get(id) ?? 0n) + centsOf(payment.amount));
   }
@@ -235,7 +283,7 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
   const verifiedTotal = moneyOf([...verifiedBySale.values()].reduce((sum, v) => sum + v, 0n));
   return {
     rows,
-    total: count ?? rows.length,
+    total: rows.length,
     summary: {
       sales: rows.length,
       grossFrozenValue: gross,

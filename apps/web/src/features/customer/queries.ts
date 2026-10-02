@@ -32,13 +32,20 @@ export const useCustomerMembershipQuery = (enabled = true) =>
   });
 
 export const useCustomerPointsQuery = (enabled = true) =>
-  useQuery({ queryKey: ['customer', 'points'], queryFn: getCustomerPoints, enabled });
+  useQuery({
+    queryKey: ['customer', 'points'],
+    queryFn: getCustomerPoints,
+    enabled,
+    // Staff redemptions debit this balance from another session.
+    refetchInterval: 30_000,
+  });
 
 export const useCustomerLedgerQuery = (enabled = true) =>
   useQuery({
     queryKey: ['customer', 'points', 'ledger'],
     queryFn: getCustomerPointsLedger,
     enabled,
+    refetchInterval: 30_000,
   });
 
 export const useCustomerPaymentsQuery = (enabled = true) =>

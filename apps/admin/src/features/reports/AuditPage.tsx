@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
@@ -11,6 +11,7 @@ import {
 } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { downloadExport, exportAudit, getAudit } from './services';
 
 const PAGE_SIZE = 50;
@@ -31,17 +32,22 @@ export function AuditPage() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  const resetPage = useCallback(() => setOffset(0), []);
+  const debouncedAction = useDebouncedValue(action, 300, resetPage);
+  const debouncedEntityType = useDebouncedValue(entityType, 300, resetPage);
+
   const filters = {
-    ...(action ? { action } : {}),
-    ...(entityType ? { entityType } : {}),
+    ...(debouncedAction ? { action: debouncedAction } : {}),
+    ...(debouncedEntityType ? { entityType: debouncedEntityType } : {}),
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     limit: PAGE_SIZE,
     offset,
   };
   const query = useQuery({
-    queryKey: ['audit', action, entityType, from, to, offset],
+    queryKey: ['audit', debouncedAction, debouncedEntityType, from, to, offset],
     queryFn: () => getAudit(filters),
+    refetchInterval: 30_000,
   });
 
   const runExport = async () => {
@@ -55,8 +61,6 @@ export function AuditPage() {
       setExporting(false);
     }
   };
-
-  const resetPage = () => setOffset(0);
 
   return (
     <section>
@@ -73,7 +77,6 @@ export function AuditPage() {
             value={action}
             onChange={(value) => {
               setAction(value);
-              resetPage();
             }}
           />
         }
@@ -85,7 +88,6 @@ export function AuditPage() {
               value={entityType}
               onChange={(value) => {
                 setEntityType(value);
-                resetPage();
               }}
             />
             <input

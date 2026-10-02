@@ -25,6 +25,7 @@ import {
   protectedRequest as request,
   protectedRequestList as requestList,
 } from '../../lib/api/client';
+import { normalizeProfileName, normalizeStaffIdentity } from '../../lib/normalize';
 
 export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);
@@ -85,7 +86,7 @@ export const createAfHomesStaff = (input: {
 }) =>
   request('/admin/afhomes/staff', afHomesStaffSchema, {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, ...normalizeStaffIdentity(input) }),
   });
 export const updateAfHomesStaff = (
   id: string,
@@ -141,7 +142,7 @@ export const getAfHomesDashboard = (range: string): Promise<AfHomesDashboard> =>
 export const updateAfHomesStaffProfile = (input: { name: string }) =>
   request('/admin/afhomes/session', afHomesSessionSchema, {
     method: 'PATCH',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ name: normalizeProfileName(input.name) }),
   });
 
 const passwordChangedSchema = z.object({ changed: z.literal(true) });

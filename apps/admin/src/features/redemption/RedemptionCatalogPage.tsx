@@ -19,6 +19,7 @@ import {
 } from '@jad/contracts';
 
 import { useSession } from '../../lib/session';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   createRedemptionItem,
   getRedemptionItems,
@@ -58,6 +59,8 @@ export function RedemptionCatalogPage() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [visibility, setVisibility] = useState<'active' | 'inactive' | 'all'>('all');
+  // Live search: the catalog follows the settled term; submit applies instantly.
+  void useDebouncedValue(search.trim(), 300, (term) => setAppliedSearch(term));
 
   const canManage =
     user?.afHomesPermissions.some(

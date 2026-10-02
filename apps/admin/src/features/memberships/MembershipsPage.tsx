@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { EmptyState, ErrorState, FilterBar, PageHeader, SearchField, Select, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { getMemberships } from './services';
 
 const STATUSES = ['', 'active', 'expired', 'suspended', 'cancelled'];
@@ -18,15 +19,18 @@ const STATUSES = ['', 'active', 'expired', 'suspended', 'cancelled'];
 export function MembershipsPage() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
     queryKey: ['memberships', status],
     queryFn: () => getMemberships(status),
+    // Card status changes on the activation queue and detail screens.
+    refetchInterval: 30_000,
   });
   const rows = (query.data ?? []).filter(
     (m) =>
-      search.trim().length === 0 ||
-      m.customerName.toLowerCase().includes(search.toLowerCase()) ||
-      m.membershipNumber.toLowerCase().includes(search.toLowerCase()),
+      debouncedSearch.trim().length === 0 ||
+      m.customerName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      m.membershipNumber.toLowerCase().includes(debouncedSearch.toLowerCase()),
   );
 
   return (

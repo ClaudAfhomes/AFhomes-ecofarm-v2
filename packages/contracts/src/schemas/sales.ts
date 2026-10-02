@@ -7,6 +7,16 @@
 import { z } from 'zod';
 import { customerCategorySchema } from './customer-import.js';
 
+import {
+  dateOfBirthSchema,
+  emailSchema,
+  normalizeAddressField,
+  nullablePersonNameSchema,
+  optionalPersonNameSchema,
+  optionalPhoneSchema,
+  personNameSchema,
+  phoneSchema,
+} from './input.js';
 import { exactDecimalRateSchema, exactDecimalStringSchema } from './money.js';
 import {
   customerStatusSchema,
@@ -277,12 +287,27 @@ export const genderSchema = z.enum(['male', 'female', 'other', 'undisclosed']);
 
 export const customerAddressSchema = z
   .object({
-    line1: z.string().trim().min(1).max(200),
-    line2: z.string().trim().max(200).optional(),
-    city: z.string().trim().min(1).max(100),
-    province: z.string().trim().min(1).max(100),
+    line1: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .transform((v) => normalizeAddressField(v)),
+    line2: z.string().trim().max(200).transform(normalizeAddressField).optional(),
+    city: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .transform((v) => normalizeAddressField(v)),
+    province: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .transform((v) => normalizeAddressField(v)),
     postalCode: z.string().trim().max(20).optional(),
-    countryCode: z.string().trim().length(2).default('PH'),
+    countryCode: z.string().trim().toUpperCase().length(2).default('PH'),
   })
   .refine((v) => !v.line2 || v.line2.trim().length > 0, {
     message: 'line2 must be omitted rather than blank',
@@ -291,24 +316,14 @@ export type CustomerAddress = z.infer<typeof customerAddressSchema>;
 
 /** `governmentIdNumber` is accepted on write and never returned on read. */
 export const createCustomerSchema = z.object({
-  firstName: z.string().trim().min(1).max(80),
-  middleName: z.string().trim().max(80).optional(),
-  lastName: z.string().trim().min(1).max(80),
+  firstName: personNameSchema,
+  middleName: optionalPersonNameSchema,
+  lastName: personNameSchema,
   suffix: z.string().trim().max(20).optional(),
-  dateOfBirth: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'dateOfBirth must be YYYY-MM-DD')
-    .refine((v) => {
-      const d = new Date(v);
-      return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === v;
-    }, 'dateOfBirth is not a real calendar date')
-    .refine((v) => v < new Date().toISOString().slice(0, 10), 'dateOfBirth must be in the past'),
+  dateOfBirth: dateOfBirthSchema,
   gender: genderSchema.optional(),
-  email: z.string().trim().toLowerCase().email().max(254),
-  phone: z
-    .string()
-    .trim()
-    .regex(/^\+?[0-9]{7,15}$/, 'phone must be 7-15 digits, optionally + prefixed'),
+  email: emailSchema,
+  phone: phoneSchema,
   address: customerAddressSchema,
   governmentIdType: governmentIdTypeSchema.optional(),
   governmentIdNumber: z.string().trim().min(4).max(40).optional(),
@@ -319,17 +334,13 @@ export type CreateCustomerRequest = z.infer<typeof createCustomerSchema>;
 
 export const updateCustomerSchema = z
   .object({
-    firstName: z.string().trim().min(1).max(80).optional(),
-    middleName: z.string().trim().max(80).nullable().optional(),
-    lastName: z.string().trim().min(1).max(80).optional(),
+    firstName: personNameSchema.optional(),
+    middleName: nullablePersonNameSchema,
+    lastName: personNameSchema.optional(),
     suffix: z.string().trim().max(20).nullable().optional(),
     gender: genderSchema.nullable().optional(),
-    email: z.string().trim().toLowerCase().email().max(254).optional(),
-    phone: z
-      .string()
-      .trim()
-      .regex(/^\+?[0-9]{7,15}$/)
-      .optional(),
+    email: emailSchema.optional(),
+    phone: optionalPhoneSchema,
     address: customerAddressSchema.optional(),
     governmentIdType: governmentIdTypeSchema.nullable().optional(),
     governmentIdNumber: z.string().trim().min(4).max(40).nullable().optional(),

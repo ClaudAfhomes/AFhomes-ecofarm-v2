@@ -173,7 +173,11 @@ describe('Memberships list', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search member or number' }), {
       target: { value: 'no-such-member' },
     });
-    expect(screen.queryByText('MBS-000001')).not.toBeInTheDocument();
+    // The keystrokes apply after the live-search pause, still without refetching.
+    await waitFor(() => {
+      expect(screen.queryByText('MBS-000001')).not.toBeInTheDocument();
+    });
+    expect(mockedGetMemberships).toHaveBeenCalledTimes(1);
   });
 
   it('replaces loading with a retryable API error state', async () => {

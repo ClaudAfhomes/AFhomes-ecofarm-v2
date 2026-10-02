@@ -1,9 +1,11 @@
 import type { RefObject } from 'react';
 
+import { NormalizedInput } from './NormalizedInput.js';
 import { FormField } from './FormField.js';
 import styles from './FormField.module.css';
 
 export interface TextFieldProps {
+  normalize?: (value: string) => string;
   id: string;
   name: string;
   label: string;
@@ -27,6 +29,7 @@ export interface TextFieldProps {
  * with shared input styling and `aria-invalid`/`aria-describedby` wiring.
  */
 export function TextField({
+  normalize,
   id,
   name,
   label,
@@ -51,7 +54,8 @@ export function TextField({
 
   return (
     <FormField id={id} label={label} hint={hint} error={error} optional={optional}>
-      <input
+      <NormalizedInput
+        normalize={normalize}
         ref={inputRef}
         id={id}
         className={`${styles.input} ${error ? styles.inputError : ''} ${readOnly ? styles.readOnlyInput : ''}`}

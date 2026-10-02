@@ -15,6 +15,7 @@ import type { Commission } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { canViewModule } from '../../app/navigation';
 import { formatMoney, formatRate } from './format';
 import { getCommissions, markCommissionPaid, qualifyCommission } from './services';
@@ -61,6 +62,23 @@ export function BusinessCommissionsPage() {
   const [search, setSearch] = useState('');
   const [seller, setSeller] = useState('');
   const [applied, setApplied] = useState<{ status?: string; search?: string; seller?: string }>({});
+  // Live search: text follows the settled term automatically; selects and the
+  // Apply button apply instantly; Clear resets everything.
+  const applyFilters = (explicit: { status: string; search: string; seller: string }) =>
+    setApplied((current) => {
+      const next = {
+        ...(explicit.status ? { status: explicit.status } : {}),
+        ...(explicit.search ? { search: explicit.search } : {}),
+        ...(explicit.seller ? { seller: explicit.seller } : {}),
+      };
+      return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+    });
+  void useDebouncedValue(search.trim(), 300, (term) =>
+    applyFilters({ status, search: term, seller: seller.trim() }),
+  );
+  void useDebouncedValue(seller.trim(), 300, (term) =>
+    applyFilters({ status, search: search.trim(), seller: term }),
+  );
   const mayMutate = canDecideCommissions(user?.afHomesPermissions);
   // Sellers are scoped server-side to their own commissions; the seller filter
   // is only useful for Finance/Admin who see every row.
@@ -71,6 +89,9 @@ export function BusinessCommissionsPage() {
   const query = useQuery({
     queryKey: ['business', 'commissions', applied],
     queryFn: () => getCommissions(applied),
+    // Qualification and payout decisions land from review screens and other
+    // sessions; the Apply-time snapshot refreshes without reload.
+    refetchInterval: 30_000,
   });
 
   const [qualifying, setQualifying] = useState<Commission | null>(null);
@@ -101,7 +122,11 @@ export function BusinessCommissionsPage() {
             <Select
               aria-label="Filter by status"
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setStatus(next);
+                applyFilters({ status: next, search: search.trim(), seller: seller.trim() });
+              }}
               options={[
                 { value: '', label: 'All statuses' },
                 ...STATUSES.filter(Boolean).map((value) => ({
@@ -125,11 +150,7 @@ export function BusinessCommissionsPage() {
             <Button
               variant="secondary"
               onClick={() =>
-                setApplied({
-                  ...(status ? { status } : {}),
-                  ...(search.trim() ? { search: search.trim() } : {}),
-                  ...(seller.trim() ? { seller: seller.trim() } : {}),
-                })
+                applyFilters({ status, search: search.trim(), seller: seller.trim() })
               }
             >
               Apply

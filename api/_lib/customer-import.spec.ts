@@ -54,6 +54,67 @@ const baseFields = (overrides: Record<string, string> = {}): Record<string, stri
   ...overrides,
 });
 
+describe('canonical import birth dates and secondary contacts', () => {
+  it.each(['2099-01-01', `${new Date().getUTCFullYear() - 121}-01-01`, '1990-02-30'])(
+    'rejects invalid primary and secondary DOB %s',
+    (birthDate) => {
+      for (const field of ['birth_date', 'secondary_birth_date']) {
+        const row = validateImportRow(
+          2,
+          baseFields({ vip_tier: 'GOLD', [field]: birthDate }),
+          ctx(),
+          TODAY,
+        );
+        expect(row.errors.some((error) => error.field === field)).toBe(true);
+        expect(row.normalized).toBeNull();
+      }
+    },
+  );
+  it.each(['09ABC123456', 'PHONE123', '0917TEST'])(
+    'rejects secondary phone %s as an error',
+    (phone) => {
+      const row = validateImportRow(
+        2,
+        baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+        ctx(),
+        TODAY,
+      );
+      expect(row.errors).toContainEqual({ field: 'secondary_mobile', message: 'Invalid phone' });
+      expect(row.normalized).toBeNull();
+    },
+  );
+  it.each(['09171234567', '0917-123-4567', '+639171234567'])(
+    'canonicalizes valid secondary phone %s',
+    (phone) => {
+      const row = validateImportRow(
+        2,
+        baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+        ctx(),
+        TODAY,
+      );
+      expect(row.errors).toEqual([]);
+      expect(row.fields.secondary_mobile).toBe('+639171234567');
+      expect(row.normalized?.secondaryNote).toContain('+639171234567');
+    },
+  );
+  it('uses canonical name length/email rules and normalized preview fields', () => {
+    expect(
+      validateImportRow(2, baseFields({ first_name: 'A'.repeat(81) }), ctx(), TODAY).validation,
+    ).toBe('error');
+    expect(
+      validateImportRow(2, baseFields({ email: 'qa@invalid..com' }), ctx(), TODAY).validation,
+    ).toBe('error');
+    const row = validateImportRow(
+      2,
+      baseFields({ first_name: 'claud', email: 'CLAUD@Example.COM' }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.fields.first_name).toBe('CLAUD');
+    expect(row.fields.email).toBe('claud@example.com');
+  });
+});
+
 describe('XLSX matrix reader', () => {
   const xlsxOf = (rows: string[][]) =>
     toXlsx(
@@ -327,7 +388,7 @@ describe('row validation', () => {
       TODAY,
     );
     expect(gold.errors).toEqual([]);
-    expect(gold.normalized?.secondaryNote).toContain('Rosa');
+    expect(gold.normalized?.secondaryNote).toContain('ROSA CRUZ');
     const silver = validateImportRow(
       2,
       baseFields({

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
@@ -12,6 +12,7 @@ import {
 } from '@jad/ui';
 
 import { useSession } from '../../lib/session';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { REPORT_DEFS, availableReports } from './reports';
 import { downloadExport, exportReport, formatCell, getReport } from './services';
 
@@ -39,22 +40,45 @@ export function ReportsPage() {
   const [transactionType, setTransactionType] = useState('');
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
+  const resetPage = useCallback(() => {
+    setOffset(0);
+    setSelected(null);
+  }, []);
+  // Live search: keystrokes stay instant, the query follows the pause, and a
+  // settled term always restarts at the first page.
+  const debouncedSearch = useDebouncedValue(search, 300, resetPage);
+  const debouncedStatus = useDebouncedValue(status, 300, resetPage);
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const filters = {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
-    ...(status ? { status } : {}),
+    ...(debouncedStatus ? { status: debouncedStatus } : {}),
     ...(type === 'ost' && kind ? { kind } : {}),
-    ...(search ? { search } : {}),
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(type === 'redemptions' && transactionType ? { transactionType } : {}),
     limit: PAGE_SIZE,
     offset,
   };
   const query = useQuery({
-    queryKey: ['reports', type, from, to, status, kind, search, transactionType, offset],
+    queryKey: [
+      'reports',
+      type,
+      from,
+      to,
+      debouncedStatus,
+      kind,
+      debouncedSearch,
+      transactionType,
+      offset,
+    ],
     queryFn: () => getReport(type, filters),
+    // Operational freshness without reload: same-scoped refetch every 30s.
+    // Mutation invalidation stays the primary mechanism; this covers changes
+    // made from another session (e.g. a redemption completed at the POS while
+    // this report is open).
+    refetchInterval: 30_000,
   });
 
   const runExport = async (format: 'csv' | 'xlsx' | 'pdf') => {
@@ -70,10 +94,9 @@ export function ReportsPage() {
     }
   };
 
-  const resetPage = () => {
-    setOffset(0);
-    setSelected(null);
-  };
+  // A settled search term always restarts at the first page: staying on page
+  // 3 of a previous term would show a slice that no longer exists. Runs
+  // inside the debounce timeout via the hook, never synchronously in render.
 
   const dayString = (date: Date) => date.toISOString().slice(0, 10);
   const applyPreset = (preset: 'today' | 'week' | 'month' | 'custom') => {
@@ -128,7 +151,6 @@ export function ReportsPage() {
             value={search}
             onChange={(value) => {
               setSearch(value);
-              resetPage();
             }}
           />
         }
@@ -166,7 +188,6 @@ export function ReportsPage() {
               value={status}
               onChange={(value) => {
                 setStatus(value);
-                resetPage();
               }}
             />
             {type === 'redemptions' ? (

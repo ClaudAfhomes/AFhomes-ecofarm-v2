@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { getSupabaseClient } from './supabase';
+import { queryClient } from './query';
 
 export type CustomerSessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -105,6 +106,8 @@ export function CustomerSessionProvider({
 
   const signOut = useCallback(async () => {
     await client?.auth.signOut();
+    // Drop cached member data with the session so the next sign-in starts clean.
+    queryClient.clear();
     setUser(null);
     setStatus('unauthenticated');
   }, [client]);

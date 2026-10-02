@@ -17,6 +17,7 @@ import {
   OST_REVIEWABLE_STATUSES,
   createOstReferralCodeSchema,
   normalizeOstReferralCode,
+  normalizePersonName,
   ostMeSchema,
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
@@ -382,7 +383,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           email: input.email,
           phone: input.phone,
           first_name: input.firstName,
-          middle_name: input.middleName ?? null,
+          middle_name:
+            input.middleName === undefined ? null : normalizePersonName(input.middleName),
           last_name: input.lastName,
           birth_date: input.birthDate,
           address: input.address,

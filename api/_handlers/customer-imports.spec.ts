@@ -100,6 +100,68 @@ const pendingRow = (overrides: Record<string, string> = {}) => ({
   ...overrides,
 });
 
+describe('every import transport uses the canonical row validator', () => {
+  it.each(['csv', 'excel', 'google_sheets'] as const)(
+    '%s rejects DOB/secondary phone and normalizes preview',
+    async (source) => {
+      install();
+      const rows = [
+        pendingRow({
+          first_name: 'claud',
+          email: 'CLAUD@Example.COM',
+          vip_tier: 'GOLD',
+          secondary_mobile: '0917-123-4567',
+        }),
+        pendingRow({ birth_date: '2099-01-01', email: 'future@example.com' }),
+        pendingRow({
+          birth_date: `${new Date().getUTCFullYear() - 121}-01-01`,
+          email: 'old@example.com',
+        }),
+        pendingRow({ birth_date: '1990-02-30', email: 'calendar@example.com' }),
+        pendingRow({ vip_tier: 'GOLD', secondary_mobile: 'PHONE123', email: 'phone@example.com' }),
+      ];
+      const csv = [
+        CUSTOMER_IMPORT_COLUMNS.join(','),
+        ...rows.map((row) =>
+          CUSTOMER_IMPORT_COLUMNS.map((key) => row[key as keyof typeof row] ?? '').join(','),
+        ),
+      ].join('\n');
+      if (source === 'google_sheets')
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async () => new Response(csv, { headers: { 'Content-Type': 'text/csv' } })),
+        );
+      const result = await call({
+        path: 'parse',
+        method: 'POST',
+        body:
+          source === 'google_sheets'
+            ? {
+                source,
+                sheetUrl: 'https://docs.google.com/spreadsheets/d/abcdefghij1234567890/edit#gid=0',
+              }
+            : { source, contentBase64: source === 'excel' ? xlsxOf(rows) : b64(Buffer.from(csv)) },
+      });
+      expect(result.status).toBe(201);
+      expect(result.body).toMatchObject({
+        job: { validRows: 1, invalidRows: 4 },
+        rows: [
+          expect.objectContaining({
+            fields: expect.objectContaining({
+              first_name: 'CLAUD',
+              email: 'claud@example.com',
+              secondary_mobile: '+639171234567',
+            }),
+            validation: 'warning',
+          }),
+          ...Array.from({ length: 4 }, () => expect.objectContaining({ validation: 'error' })),
+        ],
+      });
+      vi.unstubAllGlobals();
+    },
+  );
+});
+
 describe('customer import/export handler', () => {
   beforeEach(() => {
     install({

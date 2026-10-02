@@ -1,8 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { ApplicationHolder, CreateReservationAgreementRequest } from '@jad/contracts';
-import { Alert, Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { optionalContactNumberSchema } from '@jad/contracts';
+import {
+  NormalizedInput,
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  StatusChip,
+} from '@jad/ui';
+
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { normalizeLiveHumanField } from '../../lib/normalize';
 import { putUploadBytes, requestUploadGrant, runDocumentOcr } from '../documents/services';
 import {
   createCustomerApplication,
@@ -59,27 +71,42 @@ const asBase64 = async (file: File) => {
 };
 
 function Field({
+  normalize,
+  optionalPhone = false,
   label,
   value,
   onChange,
   type = 'text',
   required = false,
 }: {
+  normalize?: (value: string) => string;
+  optionalPhone?: boolean;
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
 }) {
+  const id = useId();
+  const error = optionalPhone && !optionalContactNumberSchema.safeParse(value).success;
   return (
     <label style={{ display: 'grid', gap: 4 }}>
-      <span>{label}</span>
-      <input
+      <span id={`${id}-label`}>{label}</span>
+      <NormalizedInput
+        normalize={normalize}
         type={type}
         value={value}
         required={required}
+        aria-labelledby={`${id}-label`}
+        aria-invalid={error || undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
+      {error ? (
+        <small id={`${id}-error`} role="alert">
+          Enter a valid contact number.
+        </small>
+      ) : null}
     </label>
   );
 }
@@ -101,100 +128,144 @@ function HolderFields({
         <Field
           label="Last name"
           value={value.lastName}
+          normalize={(v) => normalizeLiveHumanField('lastName', v)}
           onChange={(v) => set('lastName', v)}
           required
         />
         <Field
           label="First name"
           value={value.firstName}
+          normalize={(v) => normalizeLiveHumanField('firstName', v)}
           onChange={(v) => set('firstName', v)}
           required
         />
         <Field
           label="Middle name"
           value={value.middleName ?? ''}
+          normalize={(v) => normalizeLiveHumanField('middleName', v)}
           onChange={(v) => set('middleName', v)}
         />
-        <Field label="Suffix" value={value.suffix ?? ''} onChange={(v) => set('suffix', v)} />
+        <Field
+          label="Suffix"
+          value={value.suffix ?? ''}
+          normalize={(v) => normalizeLiveHumanField('suffix', v)}
+          onChange={(v) => set('suffix', v)}
+        />
         <Field
           label="Birth date"
           value={value.birthDate}
+          normalize={(v) => normalizeLiveHumanField('birthDate', v)}
           onChange={(v) => set('birthDate', v)}
           type="date"
           required
         />
-        <Field label="Sex" value={value.sex ?? ''} onChange={(v) => set('sex', v)} />
+        <Field
+          label="Sex"
+          value={value.sex ?? ''}
+          normalize={(v) => normalizeLiveHumanField('sex', v)}
+          onChange={(v) => set('sex', v)}
+        />
         <Field
           label="Citizenship"
           value={value.citizenship ?? ''}
+          normalize={(v) => normalizeLiveHumanField('citizenship', v)}
           onChange={(v) => set('citizenship', v)}
         />
         <Field
           label="Civil status"
           value={value.civilStatus ?? ''}
+          normalize={(v) => normalizeLiveHumanField('civilStatus', v)}
           onChange={(v) => set('civilStatus', v)}
         />
         <Field
           label="Permanent address line 1"
           value={value.permanentAddressLine1}
+          normalize={(v) => normalizeLiveHumanField('permanentAddressLine1', v)}
           onChange={(v) => set('permanentAddressLine1', v)}
           required
         />
         <Field
           label="Permanent address line 2"
           value={value.permanentAddressLine2 ?? ''}
+          normalize={(v) => normalizeLiveHumanField('permanentAddressLine2', v)}
           onChange={(v) => set('permanentAddressLine2', v)}
         />
         <Field
           label="City / municipality"
           value={value.cityMunicipality}
+          normalize={(v) => normalizeLiveHumanField('cityMunicipality', v)}
           onChange={(v) => set('cityMunicipality', v)}
           required
         />
         <Field
           label="Province"
           value={value.province}
+          normalize={(v) => normalizeLiveHumanField('province', v)}
           onChange={(v) => set('province', v)}
           required
         />
         <Field
           label="Postal code"
           value={value.postalCode ?? ''}
+          normalize={(v) => normalizeLiveHumanField('postalCode', v)}
           onChange={(v) => set('postalCode', v)}
         />
-        <Field label="Landline" value={value.landline ?? ''} onChange={(v) => set('landline', v)} />
-        <Field label="Mobile" value={value.mobile} onChange={(v) => set('mobile', v)} required />
+        <Field
+          label="Landline"
+          optionalPhone
+          value={value.landline ?? ''}
+          normalize={(v) => normalizeLiveHumanField('landline', v)}
+          onChange={(v) => set('landline', v)}
+        />
+        <Field
+          label="Mobile"
+          value={value.mobile}
+          normalize={(v) => normalizeLiveHumanField('mobile', v)}
+          onChange={(v) => set('mobile', v)}
+          required
+        />
         <Field
           label="Email"
           value={value.email}
+          normalize={(v) => normalizeLiveHumanField('email', v)}
           onChange={(v) => set('email', v)}
           type="email"
           required
         />
-        <Field label="TIN" value={value.tinNumber ?? ''} onChange={(v) => set('tinNumber', v)} />
+        <Field
+          label="TIN"
+          value={value.tinNumber ?? ''}
+          normalize={(v) => normalizeLiveHumanField('tinNumber', v)}
+          onChange={(v) => set('tinNumber', v)}
+        />
         <Field
           label="Occupation / business"
           value={value.occupationBusinessName ?? ''}
+          normalize={(v) => normalizeLiveHumanField('occupationBusinessName', v)}
           onChange={(v) => set('occupationBusinessName', v)}
         />
         <Field
           label="Office / business address"
           value={value.officeBusinessAddress ?? ''}
+          normalize={(v) => normalizeLiveHumanField('officeBusinessAddress', v)}
           onChange={(v) => set('officeBusinessAddress', v)}
         />
         <Field
           label="Business / industry"
           value={value.businessIndustry ?? ''}
+          normalize={(v) => normalizeLiveHumanField('businessIndustry', v)}
           onChange={(v) => set('businessIndustry', v)}
         />
         <Field
           label="Employed position"
           value={value.employedPosition ?? ''}
+          normalize={(v) => normalizeLiveHumanField('employedPosition', v)}
           onChange={(v) => set('employedPosition', v)}
         />
         <Field
           label="Printed name"
           value={value.printedName}
+          normalize={(v) => normalizeLiveHumanField('printedName', v)}
           onChange={(v) => set('printedName', v)}
           required
         />
@@ -209,16 +280,19 @@ export function CustomerApplicationsPage() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['customer-applications', status, tier, search, from, to],
+    queryKey: ['customer-applications', status, tier, debouncedSearch, from, to],
     queryFn: () =>
       getCustomerApplications({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
-        ...(search ? { search } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
       }),
+    // Application decisions happen in review screens and other sessions.
+    refetchInterval: 30_000,
   });
   return (
     <section>
@@ -349,6 +423,11 @@ export function CustomerApplicationEditorPage() {
   const [paymentProof, setPaymentProof] = useState(false);
   const [message, setMessage] = useState('');
   const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const optionalPhonesValid = [
+    primary.landline,
+    secondary?.landline,
+    meta.recommenderContact,
+  ].every((value) => optionalContactNumberSchema.safeParse(value).success);
   useEffect(() => {
     const app = existing.data;
     if (!app) return;
@@ -509,9 +588,9 @@ export function CustomerApplicationEditorPage() {
       {message ? <Alert variant="info">{message}</Alert> : null}
       {existing.data ? (
         <p>
-          Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
-          Approved: {existing.data.approvedAt ?? '—'} · Rejected: {existing.data.rejectedAt ?? '—'} ·
-          Related customer: {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
+          Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} · Approved:{' '}
+          {existing.data.approvedAt ?? '—'} · Rejected: {existing.data.rejectedAt ?? '—'} · Related
+          customer: {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
           {existing.data.saleId ?? '—'}
         </p>
       ) : null}
@@ -626,6 +705,8 @@ export function CustomerApplicationEditorPage() {
                 label={key.replace(/[A-Z]/g, (c) => ` ${c}`).replace(/^./, (c) => c.toUpperCase())}
                 value={value}
                 type={key === 'acknowledgedAt' ? 'date' : 'text'}
+                normalize={(v) => normalizeLiveHumanField(key, v)}
+                optionalPhone={key === 'recommenderContact'}
                 onChange={(v) => setMeta({ ...meta, [key]: v })}
               />
             ))}
@@ -686,11 +767,14 @@ export function CustomerApplicationEditorPage() {
           </label>
         </fieldset>
         <p>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || !optionalPhonesValid}>
             Save draft
           </Button>{' '}
           {id && editable ? (
-            <Button onClick={() => submit.mutate()} disabled={!consent || submit.isPending}>
+            <Button
+              onClick={() => submit.mutate()}
+              disabled={!consent || submit.isPending || !optionalPhonesValid}
+            >
               Submit
             </Button>
           ) : null}{' '}
@@ -737,14 +821,17 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['reservation-agreements', status, tier, search],
+    queryKey: ['reservation-agreements', status, tier, debouncedSearch],
     queryFn: () =>
       getReservationAgreements({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
-        ...(search ? { search } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
       }),
+    // Agreement decisions happen in review screens and other sessions.
+    refetchInterval: 30_000,
   });
   return (
     <section>
@@ -990,10 +1077,7 @@ export function ReservationAgreementEditorPage() {
     setMessage('Known sale/customer data pre-filled — please verify before saving.');
   };
   const importIstFile = async (file: File) => {
-    const preview = await previewOfficialFormImport(
-      'reservation_agreement',
-      await asBase64(file),
-    );
+    const preview = await previewOfficialFormImport('reservation_agreement', await asBase64(file));
     if (preview.errors.length) {
       setMessage(preview.errors.map((e) => `${e.field}: ${e.message}`).join('; '));
       return;
@@ -1002,8 +1086,10 @@ export function ReservationAgreementEditorPage() {
     if (f.sale_id) setSaleId(f.sale_id);
     if (f.customer_application_id) setCustomerApplicationId(f.customer_application_id);
     if (f.vip_tier) setVipTier(f.vip_tier.toUpperCase());
-    if (f.reservation_date) setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
-    if (f.agreement_date) setDates((d) => ({ ...d, agreementDate: f.agreement_date ?? d.agreementDate }));
+    if (f.reservation_date)
+      setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
+    if (f.agreement_date)
+      setDates((d) => ({ ...d, agreementDate: f.agreement_date ?? d.agreementDate }));
     if (f.revision_number !== undefined)
       setDates((d) => ({ ...d, revisionNumber: f.revision_number ?? d.revisionNumber }));
     setPrimary((prev) => ({
@@ -1087,10 +1173,11 @@ export function ReservationAgreementEditorPage() {
         </label>
         <label>
           Imported tier context (validates secondary; sale tier stays authoritative)
-          <input
+          <NormalizedInput
             value={vipTier}
             placeholder="BRONZE, SILVER, or GOLD"
-            onChange={(e) => setVipTier(e.target.value.toUpperCase())}
+            normalize={(value) => value.toUpperCase()}
+            onChange={(e) => setVipTier(e.target.value)}
           />
         </label>
         <div className="form-grid">
@@ -1117,6 +1204,7 @@ export function ReservationAgreementEditorPage() {
                 key={key}
                 label={key}
                 value={value}
+                normalize={(v) => normalizeLiveHumanField(key, v)}
                 onChange={(v) => setPrimary({ ...primary, [key]: v })}
               />
             ))}
@@ -1128,7 +1216,14 @@ export function ReservationAgreementEditorPage() {
             onChange={(e) =>
               setSecondary(
                 e.target.checked
-                  ? { holderType: 'SECONDARY' as const, name: '', address: '', contactNumber: '', email: '', tinNumber: '' }
+                  ? {
+                      holderType: 'SECONDARY' as const,
+                      name: '',
+                      address: '',
+                      contactNumber: '',
+                      email: '',
+                      tinNumber: '',
+                    }
                   : null,
               )
             }
@@ -1145,6 +1240,7 @@ export function ReservationAgreementEditorPage() {
                   key={key}
                   label={key}
                   value={value}
+                  normalize={(v) => normalizeLiveHumanField(key, v)}
                   onChange={(v) => setSecondary({ ...secondary, [key]: v })}
                 />
               ))}

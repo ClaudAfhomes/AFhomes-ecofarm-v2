@@ -214,9 +214,9 @@ describe('PATCH /admin/afhomes/session', () => {
       body: { name: 'Renamed Admin' },
     });
     expect(state.status).toBe(200);
-    expect((state.body as Json).fullName).toBe('Renamed Admin');
+    expect((state.body as Json).fullName).toBe('RENAMED ADMIN');
     expect(db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.full_name).toBe(
-      'Renamed Admin',
+      'RENAMED ADMIN',
     );
     expect(
       db.calls.some((c) => c.op === 'updateUserById' && (c.arg as Json).id === UUID.adminStaff),

@@ -297,6 +297,13 @@ describe('employee personal service history', () => {
       (await getReport('redemptions', TOKEN2.hr, { search: 'pedro' })).body,
     );
     expect(byCustomer.meta.total).toBe(1);
+    // Casing never matters: lower, upper and mixed case all find the member.
+    for (const term of ['PEDRO', 'Pedro', 'pEdRo', 'TEPPANYAKI', 'Teppanyaki']) {
+      const found = reportResponseSchema.parse(
+        (await getReport('redemptions', TOKEN2.hr, { search: term })).body,
+      );
+      expect(found.meta.total, term).toBe(1);
+    }
     const byMembership = reportResponseSchema.parse(
       (await getReport('redemptions', TOKEN2.hr, { search: 'MBS-000001' })).body,
     );
