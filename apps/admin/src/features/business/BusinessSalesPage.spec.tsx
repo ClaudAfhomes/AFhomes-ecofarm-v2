@@ -94,7 +94,8 @@ describe('Card Sales states', () => {
     mockedGetSales.mockRejectedValue(new Error('Sales service unavailable'));
     renderWithProviders(<BusinessSalesPage />);
     await waitFor(() => expect(screen.queryByText('Loading sales…')).not.toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('Sales service unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Sales service unavailable');
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });

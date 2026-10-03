@@ -75,7 +75,7 @@ export function GenealogyPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="No matching records." description="Adjust the current filters." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

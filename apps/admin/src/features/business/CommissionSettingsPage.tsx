@@ -162,7 +162,7 @@ export function CommissionSettingsPage() {
           description="All direct sellers currently resolve to the 0% default."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -193,7 +193,8 @@ export function CommissionSettingsPage() {
                   </td>
                   <td>
                     <Button
-                      variant="secondary"
+                      size="sm"
+                      variant="ghost"
                       onClick={() => {
                         setEditingId(rule.id);
                         setForm({
@@ -209,13 +210,14 @@ export function CommissionSettingsPage() {
                       Edit
                     </Button>{' '}
                     <Button
+                      size="sm"
                       variant="secondary"
                       disabled={toggle.isPending}
                       onClick={() => toggle.mutate(rule)}
                     >
                       {rule.isActive ? 'Disable' : 'Activate'}
                     </Button>{' '}
-                    <Button variant="secondary" onClick={() => setHistoryId(rule.id)}>
+                    <Button size="sm" variant="secondary" onClick={() => setHistoryId(rule.id)}>
                       History
                     </Button>
                   </td>

@@ -9,6 +9,7 @@ import type {
 } from '@jad/contracts';
 import { paymentSchemeLabel } from '@jad/contracts';
 import {
+  buttonClassName,
   EmptyState,
   ErrorState,
   Icon,
@@ -195,7 +196,7 @@ export function AfHomesDashboardPage() {
       {actions.length ? (
         <nav className={styles.actions} aria-label="Dashboard actions">
           {actions.map((action) => (
-            <Link key={action.to} to={action.to}>
+            <Link className={buttonClassName('secondary')} key={action.to} to={action.to}>
               {action.label}
             </Link>
           ))}

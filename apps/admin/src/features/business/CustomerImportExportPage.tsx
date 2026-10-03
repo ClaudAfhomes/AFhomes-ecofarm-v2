@@ -248,7 +248,7 @@ export function CustomerImportExportPage() {
             Total {preview.job.totalRows} · valid {preview.job.validRows} · invalid{' '}
             {preview.job.invalidRows} · status {preview.job.status}
           </p>
-          <div className="table-scroll">
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -328,7 +328,7 @@ export function CustomerImportExportPage() {
       ) : !jobs.data?.length ? (
         <EmptyState title="No import jobs" description="Parse a file to start the first job." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -360,12 +360,17 @@ export function CustomerImportExportPage() {
                   <td>{job.createdAt}</td>
                   <td>
                     {job.status === 'committing' ? (
-                      <Button disabled={confirm.isPending} onClick={() => confirm.mutate(job.id)}>
+                      <Button
+                        size="sm"
+                        disabled={confirm.isPending}
+                        onClick={() => confirm.mutate(job.id)}
+                      >
                         Resume Import
                       </Button>
                     ) : null}
                     {job.status === 'ready' || job.status === 'validated' ? (
                       <Button
+                        size="sm"
                         variant="secondary"
                         disabled={cancel.isPending}
                         onClick={() => cancel.mutate(job.id)}

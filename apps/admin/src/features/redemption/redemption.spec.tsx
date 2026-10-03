@@ -326,9 +326,7 @@ describe('POS till: items, pending confirmation, print safety', () => {
     render('/admin/redemption');
     await identify(user);
     expect(await screen.findByText('Japanese Teppanyaki')).toBeInTheDocument();
-    const fetches = requests.filter(
-      (r) => r.method === 'GET' && r.path === '/redemptions/items',
-    );
+    const fetches = requests.filter((r) => r.method === 'GET' && r.path === '/redemptions/items');
     expect(fetches.length).toBeGreaterThan(0);
     for (const fetch of fetches) {
       expect(fetch.query).not.toMatch(/all|includeInactive/);
@@ -382,9 +380,9 @@ describe('POS till: items, pending confirmation, print safety', () => {
     await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
     const pending = await screen.findByRole('button', { name: 'Redeeming…' });
     expect(pending).toBeDisabled();
-    expect(
-      requests.filter((r) => r.method === 'POST' && r.path === '/redemptions'),
-    ).toHaveLength(1);
+    expect(requests.filter((r) => r.method === 'POST' && r.path === '/redemptions')).toHaveLength(
+      1,
+    );
   });
 
   it('printing the receipt sends no further requests and keeps it open', async () => {
@@ -398,9 +396,9 @@ describe('POS till: items, pending confirmation, print safety', () => {
       (r) => r.method === 'POST' && r.path === '/redemptions',
     ).length;
     await user.click(screen.getByRole('button', { name: 'Print receipt' }));
-    expect(
-      requests.filter((r) => r.method === 'POST' && r.path === '/redemptions'),
-    ).toHaveLength(postsBefore);
+    expect(requests.filter((r) => r.method === 'POST' && r.path === '/redemptions')).toHaveLength(
+      postsBefore,
+    );
     // The receipt is still open for the next member flow.
     expect(screen.getByText('RDM-000001')).toBeInTheDocument();
   });
@@ -561,7 +559,7 @@ describe('redemption confirm', () => {
     await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
     await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
     await screen.findByText('RDM-000001');
-    await user.click(screen.getByRole('button', { name: 'Next member' }));
+    await user.click(screen.getByRole('button', { name: 'New Transaction' }));
 
     await waitFor(() => expect(screen.queryByText('Ana R Buyer')).toBeNull());
     expect(screen.getByLabelText('Member code')).toHaveValue('');
@@ -845,7 +843,8 @@ describe('redemption catalog search and filter', () => {
     await user.click(screen.getByRole('button', { name: 'Search' }));
     await waitFor(() => {
       const get = requests.find(
-        (r) => r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('search=tepp'),
+        (r) =>
+          r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('search=tepp'),
       );
       expect(get).toBeDefined();
     });
@@ -858,7 +857,8 @@ describe('redemption catalog search and filter', () => {
     await user.selectOptions(screen.getByLabelText('Filter by status'), 'inactive');
     await waitFor(() => {
       const get = requests.find(
-        (r) => r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('active=false'),
+        (r) =>
+          r.method === 'GET' && r.path === '/redemptions/items' && r.query.includes('active=false'),
       );
       expect(get).toBeDefined();
     });
@@ -886,7 +886,10 @@ describe('redemption catalog search and filter', () => {
   it('recovers from a load error through retry', async () => {
     const user = userEvent.setup();
     install({
-      'GET /redemptions/items': { status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } },
+      'GET /redemptions/items': {
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'boom' } },
+      },
     });
     render('/admin/redemption/items');
     await screen.findByText('The catalog could not be loaded');

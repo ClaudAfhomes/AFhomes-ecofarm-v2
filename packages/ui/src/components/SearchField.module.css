@@ -7,12 +7,13 @@
 
 .input {
   width: 100%;
-  min-height: 44px;
-  padding: 10px var(--space-4) 10px 36px;
+  min-height: var(--control-md);
+  padding: var(--space-2) 44px var(--space-2) 36px;
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-control);
   font-size: var(--text-body-s);
   font-weight: 500;
+  line-height: 1.4;
   background-color: var(--color-bg-surface-raised);
   color: var(--color-text-primary);
   box-shadow: var(--shadow-sm);
@@ -38,6 +39,11 @@
     var(--shadow-sm);
 }
 
+.input:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
 .input:disabled {
   cursor: not-allowed;
   background-color: var(--color-state-disabled-bg);
@@ -52,4 +58,19 @@
   display: inline-flex;
   color: var(--color-text-muted);
   pointer-events: none;
+}
+
+.large {
+  min-height: var(--control-lg);
+  font-size: var(--text-body);
+}
+
+.clear {
+  position: absolute;
+  right: 1px;
+  display: flex;
+}
+
+.input::-webkit-search-cancel-button {
+  display: none;
 }

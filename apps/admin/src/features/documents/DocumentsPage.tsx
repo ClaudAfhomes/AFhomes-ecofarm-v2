@@ -161,7 +161,7 @@ export function DocumentsPage() {
           description="Upload a scan above, or pick a different record."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -193,6 +193,7 @@ export function DocumentsPage() {
                     <Link to={`/admin/documents/${doc.id}`}>Review</Link>
                     {doc.ocrStatus !== 'completed' ? (
                       <Button
+                        size="sm"
                         variant="secondary"
                         disabled={ocr.isPending}
                         onClick={() => ocr.mutate(doc.id)}

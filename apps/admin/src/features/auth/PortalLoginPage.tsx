@@ -197,7 +197,12 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
           </div>
 
           <div className={styles.submitRow}>
-            <Button type="submit" loading={pending} disabled={pending || status === 'loading'}>
+            <Button
+              loadingLabel="Signing in…"
+              type="submit"
+              loading={pending}
+              disabled={pending || status === 'loading'}
+            >
               Sign in
             </Button>
           </div>
@@ -205,7 +210,11 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
           {!isAdmin ? (
             <p className={styles.prompt}>
               Member?{' '}
-              <a className={styles.promptLink} href={`${webBase()}/customer/login`} rel="noreferrer">
+              <a
+                className={styles.promptLink}
+                href={`${webBase()}/customer/login`}
+                rel="noreferrer"
+              >
                 Customer Login
               </a>{' '}
               · OST?{' '}

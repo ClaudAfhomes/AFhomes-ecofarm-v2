@@ -494,7 +494,9 @@ export function RedemptionWorkflowPage() {
             <Button variant="secondary" onClick={printReceipt}>
               Print receipt
             </Button>
-            <Button onClick={reset}>Next member</Button>
+            <Button size="lg" onClick={reset}>
+              New Transaction
+            </Button>
           </>
         }
       >

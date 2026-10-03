@@ -262,3 +262,11 @@
   justify-content: center;
   padding: var(--space-3);
 }
+
+.sidebar a.active,
+.sidebar a.activeSubLink {
+  box-shadow: inset 3px 0 var(--color-accent-light);
+}
+.category {
+  margin-top: var(--space-2);
+}

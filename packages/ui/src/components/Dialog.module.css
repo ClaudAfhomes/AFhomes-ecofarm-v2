@@ -23,7 +23,7 @@
   background-color: var(--color-bg-surface-raised);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  animation: rise var(--transition-fast) ease;
+  animation: rise 160ms ease;
 }
 
 .header {
@@ -76,6 +76,7 @@
   .panel {
     width: 100%;
     max-height: 92vh;
+    max-height: 92dvh;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
   }
 

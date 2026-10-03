@@ -36,7 +36,7 @@ export function OstMembersPage() {
           description="Approved applications create a member row here."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

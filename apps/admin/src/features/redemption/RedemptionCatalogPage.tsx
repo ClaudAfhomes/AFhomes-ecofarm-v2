@@ -20,11 +20,7 @@ import {
 
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
-  createRedemptionItem,
-  getRedemptionItems,
-  updateRedemptionItem,
-} from './services';
+import { createRedemptionItem, getRedemptionItems, updateRedemptionItem } from './services';
 import styles from './RedemptionCatalog.module.css';
 
 const EMPTY: CreateRedemptionItemRequest = {
@@ -80,7 +76,11 @@ export function RedemptionCatalogPage() {
 
   if (items.isLoading)
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading the catalog">
+      <div
+        style={{ display: 'grid', gap: 'var(--space-3)' }}
+        role="status"
+        aria-label="Loading the catalog"
+      >
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
@@ -150,60 +150,65 @@ export function RedemptionCatalogPage() {
           }
         />
       ) : (
-        <div className="table-scroll">
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th scope="col">Code</th>
-              <th scope="col">Name</th>
-              <th scope="col">Category</th>
-              <th scope="col" className={styles.numeric}>
-                Points cost
-              </th>
-              <th scope="col">Status</th>
-              <th scope="col" className={styles.numeric}>
-                Display order
-              </th>
-              {canManage && <th scope="col">Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {(items.data ?? []).map((item) => (
-              <tr key={item.id} className={item.isActive ? undefined : styles.inactive}>
-                <td className={styles.mono}>{item.code}</td>
-                <td>
-                  {item.name}
-                  {item.description && <span className={styles.description}>{item.description}</span>}
-                </td>
-                <td>{item.category}</td>
-                <td className={styles.numeric}>{item.pointsCost.toLocaleString('en-PH')}</td>
-                <td>
-                  <StatusChip
-                    label={item.isActive ? 'Active' : 'Inactive'}
-                    tone={item.isActive ? 'success' : 'neutral'}
-                  />
-                </td>
-                <td className={styles.numeric}>{item.sortOrder}</td>
-                {canManage && (
-                  <td>
-                    <div className={styles.actions}>
-                      <Button variant="secondary" onClick={() => setEditing(item)}>
-                        Edit
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        disabled={setActive.isPending}
-                        onClick={() => setActive.mutate({ id: item.id, isActive: !item.isActive })}
-                      >
-                        {item.isActive ? 'Deactivate' : 'Activate'}
-                      </Button>
-                    </div>
-                  </td>
-                )}
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th scope="col">Code</th>
+                <th scope="col">Name</th>
+                <th scope="col">Category</th>
+                <th scope="col" className={styles.numeric}>
+                  Points cost
+                </th>
+                <th scope="col">Status</th>
+                <th scope="col" className={styles.numeric}>
+                  Display order
+                </th>
+                {canManage && <th scope="col">Actions</th>}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(items.data ?? []).map((item) => (
+                <tr key={item.id} className={item.isActive ? undefined : styles.inactive}>
+                  <td className={styles.mono}>{item.code}</td>
+                  <td>
+                    {item.name}
+                    {item.description && (
+                      <span className={styles.description}>{item.description}</span>
+                    )}
+                  </td>
+                  <td>{item.category}</td>
+                  <td className={styles.numeric}>{item.pointsCost.toLocaleString('en-PH')}</td>
+                  <td>
+                    <StatusChip
+                      label={item.isActive ? 'Active' : 'Inactive'}
+                      tone={item.isActive ? 'success' : 'neutral'}
+                    />
+                  </td>
+                  <td className={styles.numeric}>{item.sortOrder}</td>
+                  {canManage && (
+                    <td>
+                      <div className={styles.actions}>
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={setActive.isPending}
+                          onClick={() =>
+                            setActive.mutate({ id: item.id, isActive: !item.isActive })
+                          }
+                        >
+                          {item.isActive ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

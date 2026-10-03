@@ -1,21 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import { NavLink, useLocation } from "react-router";
-import { AnimatePresence, motion } from "motion/react";
-import type { Variants } from "motion/react";
-import { cn } from "../../lib/cn";
-import { Logo } from "../../components/ui/Logo";
-import { Button } from "../../components/ui/Button";
-import { SmartImage } from "../../components/ui/SmartImage";
-import { cmsRepository } from "../../lib/cms";
-import type { ExperienceStatus } from "../../types/experience";
-import { ArrowRight } from "../../components/ui/icons";
-import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { EASE } from "../../lib/motion";
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation } from 'react-router';
+import { AnimatePresence, motion } from 'motion/react';
+import type { Variants } from 'motion/react';
+import { cn } from '../../lib/cn';
+import { Logo } from '../../components/ui/Logo';
+import { Button } from '../../components/ui/Button';
+import { SmartImage } from '../../components/ui/SmartImage';
+import { cmsRepository } from '../../lib/cms';
+import type { ExperienceStatus } from '../../types/experience';
+import { ArrowRight } from '../../components/ui/icons';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { EASE } from '../../lib/motion';
 
 const statusDot: Record<ExperienceStatus, string> = {
-  open: "bg-leaf-500",
-  "opening-soon": "bg-gold-500",
-  "in-development": "bg-cyan-500",
+  open: 'bg-leaf-500',
+  'opening-soon': 'bg-gold-500',
+  'in-development': 'bg-cyan-500',
 };
 
 /* Mobile menu — a calm, sequential reveal. Children catch up to the panel
@@ -27,14 +27,14 @@ const menuPanel: Variants = {
     transition: {
       duration: 0.32,
       ease: EASE,
-      when: "beforeChildren",
+      when: 'beforeChildren',
       staggerChildren: 0.05,
     },
   },
   closed: {
     opacity: 0,
     y: -12,
-    transition: { duration: 0.18, ease: "easeOut" },
+    transition: { duration: 0.18, ease: 'easeOut' },
   },
 };
 
@@ -46,19 +46,21 @@ const menuItem: Variants = {
 export function Navbar() {
   const siteConfig = cmsRepository.getSiteConfig();
   const experiences = cmsRepository.getExperiences();
-  const desktopLinks = siteConfig.nav.main.filter((item) => item.path !== "/" && item.path !== "/experiences");
+  const desktopLinks = siteConfig.nav.main.filter(
+    (item) => item.path !== '/' && item.path !== '/experiences',
+  );
   const location = useLocation();
-  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [megaOpen, setMegaOpen] = useState(false);
   const megaWrapperRef = useRef<HTMLDivElement>(null);
   const mobilePanelRef = useRef<HTMLDivElement>(null);
 
-  const experiencesActive = location.pathname.startsWith("/experiences");
+  const experiencesActive = location.pathname.startsWith('/experiences');
   const hasDarkTop =
-    location.pathname === "/" ||
-    ["/about", "/vip", "/faq", "/compliance", "/contact", "/experiences", "/stories"].some(
+    location.pathname === '/' ||
+    ['/about', '/vip', '/faq', '/compliance', '/contact', '/experiences', '/stories'].some(
       (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
     );
   const lightText = hasDarkTop && !scrolled && !menuOpen;
@@ -66,8 +68,8 @@ export function Navbar() {
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
     onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   useEffect(() => {
@@ -80,15 +82,15 @@ export function Navbar() {
 
   useEffect(() => {
     if (!menuOpen) return;
-    document.body.style.overflow = "hidden";
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = '';
     };
   }, [menuOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === 'Escape') {
         setMenuOpen(false);
         setMegaOpen(false);
       }
@@ -102,11 +104,11 @@ export function Navbar() {
         setMegaOpen(false);
       }
     };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
     };
   }, [megaOpen]);
 
@@ -114,8 +116,8 @@ export function Navbar() {
     if (!menuOpen) return;
     // Make page content unreachable for assistive tech and keyboard users
     // while the dialog is open.
-    const content = document.getElementById("site-content");
-    content?.setAttribute("inert", "");
+    const content = document.getElementById('site-content');
+    content?.setAttribute('inert', '');
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
     const panel = mobilePanelRef.current;
@@ -126,7 +128,7 @@ export function Navbar() {
     first?.focus();
 
     const onTab = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !focusables?.length) return;
+      if (event.key !== 'Tab' || !focusables?.length) return;
       const list = Array.from(focusables);
       const firstEl = list[0];
       const lastEl = list[list.length - 1];
@@ -139,10 +141,10 @@ export function Navbar() {
         firstEl?.focus();
       }
     };
-    document.addEventListener("keydown", onTab);
+    document.addEventListener('keydown', onTab);
     return () => {
-      document.removeEventListener("keydown", onTab);
-      content?.removeAttribute("inert");
+      document.removeEventListener('keydown', onTab);
+      content?.removeAttribute('inert');
       previouslyFocused?.focus();
     };
   }, [menuOpen]);
@@ -160,25 +162,22 @@ export function Navbar() {
     <>
       <header
         className={cn(
-          "fixed inset-x-0 top-0 z-50 transition-all duration-300",
+          'fixed inset-x-0 top-0 z-50 transition-all duration-300',
           solid
-            ? "border-b border-line bg-cream-50/95 text-navy-900 shadow-soft backdrop-blur-md"
-            : "border-b border-transparent bg-transparent text-cream-50",
+            ? 'border-b border-line bg-cream-50/95 text-navy-900 shadow-soft backdrop-blur-md'
+            : 'border-b border-transparent bg-transparent text-cream-50',
         )}
       >
         <div
           className={cn(
-            "mx-auto flex w-full max-w-[var(--container-site)] items-center justify-between px-5 sm:px-8",
-            solid ? "h-14 sm:h-16" : "h-16 sm:h-20",
+            'mx-auto flex w-full max-w-[var(--container-site)] items-center justify-between px-5 sm:px-8',
+            solid ? 'h-14 sm:h-16' : 'h-16 sm:h-20',
           )}
         >
           <Logo />
 
           {/* Desktop nav */}
-          <nav
-            className="hidden items-center gap-8 lg:flex"
-            aria-label="Primary"
-          >
+          <nav className="hidden items-center gap-8 lg:flex" aria-label="Primary">
             <div
               ref={megaWrapperRef}
               className="relative"
@@ -192,12 +191,12 @@ export function Navbar() {
                 onClick={() => setMegaOpen((open) => !open)}
                 onFocus={() => setMegaOpen(true)}
                 className={cn(
-                  "group flex items-center gap-1.5 text-sm font-semibold transition-colors",
+                  'group flex min-h-10 items-center gap-1.5 text-sm font-semibold transition-colors',
                   lightText
-                    ? "text-cream-100 hover:text-leaf-300"
+                    ? 'text-cream-100 hover:text-leaf-300'
                     : experiencesActive
-                      ? "text-leaf-700"
-                      : "text-navy-900 hover:text-leaf-700",
+                      ? 'text-leaf-700'
+                      : 'text-navy-900 hover:text-leaf-700',
                 )}
               >
                 Experiences
@@ -207,7 +206,10 @@ export function Navbar() {
                   stroke="currentColor"
                   strokeWidth="2"
                   strokeLinecap="round"
-                  className={cn("h-3 w-3 transition-transform duration-200", megaOpen && "rotate-180")}
+                  className={cn(
+                    'h-3 w-3 transition-transform duration-200',
+                    megaOpen && 'rotate-180',
+                  )}
                   aria-hidden="true"
                 >
                   <path d="m6 9 6 6 6-6" />
@@ -245,7 +247,10 @@ export function Navbar() {
                                 <span className="absolute right-2 bottom-2 left-2 flex flex-col">
                                   <span className="flex items-center gap-1.5 text-[0.58rem] font-semibold tracking-[0.18em] text-cream-100 uppercase">
                                     <span
-                                      className={cn("h-1.5 w-1.5 rounded-full", statusDot[experience.status])}
+                                      className={cn(
+                                        'h-1.5 w-1.5 rounded-full',
+                                        statusDot[experience.status],
+                                      )}
                                       aria-hidden="true"
                                     />
                                     {experience.statusLabel}
@@ -255,10 +260,10 @@ export function Navbar() {
                                   </span>
                                 </span>
                               </span>
-<span className="mt-2 flex items-center gap-1.5 px-1 text-xs font-semibold text-navy-900">
-                View
-                <ArrowRight className="h-3 w-3 text-leaf-600 transition-transform duration-300 group-hover:translate-x-1" />
-              </span>
+                              <span className="mt-2 flex items-center gap-1.5 px-1 text-xs font-semibold text-navy-900">
+                                View
+                                <ArrowRight className="h-3 w-3 text-leaf-600 transition-transform duration-300 group-hover:translate-x-1" />
+                              </span>
                             </NavLink>
                           </li>
                         ))}
@@ -283,14 +288,14 @@ export function Navbar() {
                 to={item.path}
                 className={({ isActive }) =>
                   cn(
-                    "link-underline text-sm font-semibold",
+                    'link-underline text-sm font-semibold',
                     lightText
                       ? isActive
-                        ? "link-underline-active text-leaf-300"
-                        : "text-cream-100 hover:text-leaf-300"
+                        ? 'link-underline-active text-leaf-300'
+                        : 'text-cream-100 hover:text-leaf-300'
                       : isActive
-                        ? "link-underline-active text-leaf-700"
-                        : "text-navy-900 hover:text-leaf-700",
+                        ? 'link-underline-active text-leaf-700'
+                        : 'text-navy-900 hover:text-leaf-700',
                   )
                 }
               >
@@ -303,7 +308,7 @@ export function Navbar() {
             {isDesktop && (
               <Button
                 to="/experiences"
-                variant={lightText ? "accent" : "primary"}
+                variant={lightText ? 'accent' : 'primary'}
                 size="sm"
                 withArrow
               >
@@ -317,30 +322,30 @@ export function Navbar() {
                 type="button"
                 aria-expanded={menuOpen}
                 aria-controls="mobile-menu"
-                aria-label={menuOpen ? "Close menu" : "Open menu"}
+                aria-label={menuOpen ? 'Close menu' : 'Open menu'}
                 onClick={() => setMenuOpen((open) => !open)}
                 className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-full transition-colors motion-safe:active:scale-95",
-                  lightText ? "text-cream-50" : "border border-line bg-white/70 text-navy-900",
+                  'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+                  lightText ? 'text-cream-50' : 'border border-line bg-white/70 text-navy-900',
                 )}
               >
                 <span className="relative block h-3 w-5" aria-hidden="true">
                   <span
                     className={cn(
-                      "absolute left-0 h-[1.5px] w-full bg-current transition-all duration-300",
-                      menuOpen ? "top-1.5 rotate-45" : "top-0",
+                      'absolute left-0 h-[1.5px] w-full bg-current transition-all duration-300',
+                      menuOpen ? 'top-1.5 rotate-45' : 'top-0',
                     )}
                   />
                   <span
                     className={cn(
-                      "absolute left-0 top-1.5 h-[1.5px] w-full bg-current transition-all duration-300",
-                      menuOpen && "opacity-0",
+                      'absolute left-0 top-1.5 h-[1.5px] w-full bg-current transition-all duration-300',
+                      menuOpen && 'opacity-0',
                     )}
                   />
                   <span
                     className={cn(
-                      "absolute left-0 h-[1.5px] w-full bg-current transition-all duration-300",
-                      menuOpen ? "top-1.5 -rotate-45" : "top-3",
+                      'absolute left-0 h-[1.5px] w-full bg-current transition-all duration-300',
+                      menuOpen ? 'top-1.5 -rotate-45' : 'top-3',
                     )}
                   />
                 </span>
@@ -365,15 +370,18 @@ export function Navbar() {
             exit="closed"
             variants={menuPanel}
           >
-            <nav className="mx-auto w-full max-w-[var(--container-site)] flex-1 overflow-y-auto px-5 pb-10" aria-label="Mobile">
+            <nav
+              className="mx-auto w-full max-w-[var(--container-site)] flex-1 overflow-y-auto px-5 pb-10"
+              aria-label="Mobile"
+            >
               <ul className="flex flex-col divide-y divide-line">
                 <motion.li variants={menuItem}>
                   <NavLink
                     to="/"
                     className={({ isActive }) =>
                       cn(
-                        "flex items-center justify-between py-5",
-                        isActive ? "text-leaf-700" : "text-navy-900",
+                        'flex items-center justify-between py-5',
+                        isActive ? 'text-leaf-700' : 'text-navy-900',
                       )
                     }
                   >
@@ -396,7 +404,10 @@ export function Navbar() {
                             </span>
                             <span className="flex items-center gap-1.5 text-[0.62rem] font-semibold tracking-[0.18em] text-ink-400 uppercase">
                               <span
-                                className={cn("h-1.5 w-1.5 rounded-full", statusDot[experience.status])}
+                                className={cn(
+                                  'h-1.5 w-1.5 rounded-full',
+                                  statusDot[experience.status],
+                                )}
                                 aria-hidden="true"
                               />
                               {experience.statusLabel}
@@ -409,15 +420,15 @@ export function Navbar() {
                 </motion.li>
 
                 {siteConfig.nav.main
-                  .filter((item) => item.path !== "/" && item.path !== "/experiences")
+                  .filter((item) => item.path !== '/' && item.path !== '/experiences')
                   .map((item) => (
                     <motion.li key={item.path} variants={menuItem}>
                       <NavLink
                         to={item.path}
                         className={({ isActive }) =>
                           cn(
-                            "flex items-center justify-between py-5",
-                            isActive ? "text-leaf-700" : "text-navy-900",
+                            'flex items-center justify-between py-5',
+                            isActive ? 'text-leaf-700' : 'text-navy-900',
                           )
                         }
                       >

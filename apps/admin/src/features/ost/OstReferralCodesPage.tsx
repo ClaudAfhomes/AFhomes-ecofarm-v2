@@ -149,7 +149,7 @@ export function OstReferralCodesPage() {
           description="Issue your first code above."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -194,7 +194,7 @@ export function OstReferralCodesPage() {
           description="Registrations submitted with your code appear here."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

@@ -22,7 +22,7 @@ export function AdminLayout() {
           <div className={styles.brandBlock}>
             <div className={styles.brandTextBlock}>
               <span className={styles.brandName}>AF Homes</span>
-              <span className={styles.brandText}>Ecofarm Administration</span>
+              <span className={styles.brandText}>Ecofarm Operations</span>
             </div>
           </div>
         }
@@ -43,7 +43,7 @@ export function AdminLayout() {
         }
         topbarLeading={
           <div className={styles.topbarBrand} aria-hidden="true">
-            <span className={styles.topbarWordmark}>AF Homes</span>
+            <span className={styles.topbarWordmark}>{crumbs?.at(-1)?.label ?? 'AF Homes'}</span>
           </div>
         }
       >

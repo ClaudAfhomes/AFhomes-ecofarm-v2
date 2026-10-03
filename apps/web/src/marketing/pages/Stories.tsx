@@ -1,39 +1,39 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router";
-import { Container } from "../components/ui/Container";
-import { PageHeader } from "../components/ui/PageHeader";
-import { Reveal } from "../components/ui/Reveal";
-import { StoryCard } from "../components/blog/StoryCard";
-import { Badge } from "../components/ui/Badge";
-import { LoadingState, ErrorState, EmptyState } from "../components/ui/Feedback";
-import { Button } from "../components/ui/Button";
-import { SmartImage } from "../components/ui/SmartImage";
-import { Seo } from "../lib/seo";
-import { useAsync } from "../hooks/useAsync";
-import { storyService } from "../services/storyService";
-import { cn } from "../lib/cn";
-import { getPlaceholder } from "../lib/images";
-import { cmsRepository } from "../lib/cms";
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router';
+import { Container } from '../components/ui/Container';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Reveal } from '../components/ui/Reveal';
+import { StoryCard } from '../components/blog/StoryCard';
+import { Badge } from '../components/ui/Badge';
+import { LoadingState, ErrorState, EmptyState } from '../components/ui/Feedback';
+import { Button } from '../components/ui/Button';
+import { SmartImage } from '../components/ui/SmartImage';
+import { Seo } from '../lib/seo';
+import { useAsync } from '../hooks/useAsync';
+import { storyService } from '../services/storyService';
+import { cn } from '../lib/cn';
+import { getPlaceholder } from '../lib/images';
+import { cmsRepository } from '../lib/cms';
 
 const PAGE_SIZE = 6;
 
 export default function Stories() {
   const { data: stories, loading, error, retry } = useAsync(() => storyService.getStories());
   const content = cmsRepository.getPageContent().stories;
-  const [category, setCategory] = useState("All");
-  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState('All');
+  const [query, setQuery] = useState('');
   const [visible, setVisible] = useState(PAGE_SIZE);
 
   const categories = useMemo(() => {
-    if (!stories) return ["All"];
-    return ["All", ...Array.from(new Set(stories.map((story) => story.category)))];
+    if (!stories) return ['All'];
+    return ['All', ...Array.from(new Set(stories.map((story) => story.category)))];
   }, [stories]);
 
   const filtered = useMemo(() => {
     if (!stories) return [];
     const needle = query.trim().toLowerCase();
     return stories.filter((story) => {
-      const matchesCategory = category === "All" || story.category === category;
+      const matchesCategory = category === 'All' || story.category === category;
       const matchesQuery =
         needle.length === 0 ||
         story.title.toLowerCase().includes(needle) ||
@@ -65,18 +65,14 @@ export default function Stories() {
         eyebrow={content.eyebrow}
         title={content.title}
         lede={content.lede}
-        imageSpec={content.image.src ? content.image : getPlaceholder("resort-valley")}
+        imageSpec={content.image.src ? content.image : getPlaceholder('resort-valley')}
       />
 
       <section className="bg-cream-100 py-20 sm:py-28">
         <Container>
           {loading && <LoadingState label="Loading stories…" />}
           {error && (
-            <ErrorState
-              title="Couldn't load stories"
-              message={error.message}
-              onRetry={retry}
-            />
+            <ErrorState title="Couldn't load stories" message={error.message} onRetry={retry} />
           )}
 
           {stories && (
@@ -133,17 +129,22 @@ export default function Stories() {
 
               {/* Filters */}
               <div className="mt-16 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap gap-2" role="group" aria-label="Filter stories by category">
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                  aria-label="Filter stories by category"
+                >
                   {categories.map((item) => (
                     <button
                       key={item}
                       type="button"
+                      aria-pressed={category === item}
                       onClick={() => resetVisible(item, query)}
                       className={cn(
-                        "label-caps rounded-full border px-4 py-3 transition-colors",
+                        'label-caps min-h-10 rounded-lg border px-4 py-2 transition-colors',
                         category === item
-                          ? "border-navy-800 bg-navy-800 text-cream-50"
-                          : "border-line bg-cream-50 text-ink-600 hover:border-navy-300 hover:text-navy-900",
+                          ? 'border-navy-800 bg-navy-800 text-cream-50'
+                          : 'border-line bg-cream-50 text-ink-600 hover:border-navy-300 hover:text-navy-900',
                       )}
                     >
                       {item}

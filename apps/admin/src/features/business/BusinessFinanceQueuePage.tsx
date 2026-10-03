@@ -68,7 +68,7 @@ export function BusinessFinanceQueuePage() {
           description="No sale is awaiting payment."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -118,10 +118,10 @@ export function BusinessFinanceQueuePage() {
                   </td>
                   <td>{item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}</td>
                   <td>
-                    <Button variant="secondary" onClick={() => setPaying(item.saleId)}>
+                    <Button size="sm" variant="secondary" onClick={() => setPaying(item.saleId)}>
                       Record payment
                     </Button>{' '}
-                    <Button variant="secondary" onClick={() => setReviewing(item.saleId)}>
+                    <Button size="sm" variant="secondary" onClick={() => setReviewing(item.saleId)}>
                       Verify
                     </Button>
                   </td>
@@ -316,7 +316,7 @@ function VerifyDialog({
                   Verify
                 </Button>
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   onClick={() =>
                     decide.mutate({
                       paymentId: payment.id,

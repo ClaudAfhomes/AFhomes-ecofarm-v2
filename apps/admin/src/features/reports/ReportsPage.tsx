@@ -1,3 +1,4 @@
+import styles from './ReportsPage.module.css';
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -252,7 +253,11 @@ export function ReportsPage() {
       <p style={{ opacity: 0.8 }}>{def.description}</p>
 
       {query.isPending ? (
-        <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading report">
+        <div
+          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          role="status"
+          aria-label="Loading report"
+        >
           <Skeleton style={{ height: 48 }} />
           <Skeleton style={{ height: 48 }} />
           <Skeleton style={{ height: 48 }} />
@@ -271,15 +276,7 @@ export function ReportsPage() {
       ) : (
         <>
           {type === 'redemptions' && summary ? (
-            <dl
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: 12,
-                marginBottom: 16,
-              }}
-              aria-label="Personal service summary"
-            >
+            <dl className={styles.summary} aria-label="Personal service summary">
               {(
                 [
                   ['customersServed', 'Customers served'],
@@ -290,7 +287,7 @@ export function ReportsPage() {
                 ] as const
               ).map(([key, label]) => (
                 <div key={key}>
-                  <dt style={{ opacity: 0.7 }}>{label}</dt>
+                  <dt className={styles.summaryLabel}>{label}</dt>
                   <dd>
                     <strong>{summaryNumber(key)}</strong>
                   </dd>
@@ -298,17 +295,10 @@ export function ReportsPage() {
               ))}
             </dl>
           ) : (
-            <dl
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: 12,
-                marginBottom: 16,
-              }}
-            >
+            <dl className={styles.summary}>
               {Object.entries(query.data.summary).map(([key, value]) => (
                 <div key={key}>
-                  <dt style={{ opacity: 0.7 }}>{key}</dt>
+                  <dt className={styles.summaryLabel}>{key}</dt>
                   <dd>
                     <strong>
                       {typeof value === 'object' ? JSON.stringify(value) : String(value)}
@@ -321,7 +311,7 @@ export function ReportsPage() {
           <p style={{ opacity: 0.8 }}>
             Scope: {query.data.scope.label} · {query.data.meta.total} rows
           </p>
-          <div className="table-scroll">
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -381,7 +371,7 @@ export function ReportsPage() {
                   ] as const
                 ).map(([key, label]) => (
                   <div key={key}>
-                    <dt style={{ opacity: 0.7 }}>{label}</dt>
+                    <dt className={styles.summaryLabel}>{label}</dt>
                     <dd>
                       <strong>{formatCell(key, selected[key])}</strong>
                     </dd>

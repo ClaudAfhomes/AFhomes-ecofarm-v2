@@ -8,9 +8,15 @@
   font-size: var(--text-caption);
   font-weight: 600;
   line-height: 1.6;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--color-text-secondary);
   background-color: var(--color-bg-surface);
+}
+
+.chip svg {
+  flex-shrink: 0;
 }
 
 .neutral {
@@ -20,7 +26,7 @@
 }
 
 .success {
-  color: var(--color-success);
+  color: var(--color-success-strong);
   background-color: #eef5ef;
   background-color: color-mix(in srgb, var(--color-success) 10%, white);
   border-color: #b9d3be;
@@ -28,7 +34,7 @@
 }
 
 .warning {
-  color: var(--color-warning);
+  color: var(--color-warning-strong);
   background-color: #fdf6e3;
   background-color: color-mix(in srgb, var(--color-warning) 10%, white);
   border-color: #ecd9a8;

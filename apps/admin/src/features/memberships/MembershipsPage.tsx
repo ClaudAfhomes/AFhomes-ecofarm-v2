@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, FilterBar, PageHeader, SearchField, Select, StatusChip } from '@jad/ui';
+import {
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -69,7 +77,7 @@ export function MembershipsPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="No memberships" description="Activated cards appear here." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

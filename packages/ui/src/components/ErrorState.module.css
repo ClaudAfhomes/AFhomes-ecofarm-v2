@@ -42,3 +42,16 @@
   color: var(--color-text-muted);
   font-size: var(--text-caption);
 }
+
+@media (max-width: 430px) {
+  .error {
+    flex-wrap: wrap;
+    padding: var(--space-4);
+  }
+  .body {
+    flex-basis: calc(100% - 48px);
+  }
+  .error > button {
+    margin-left: 44px;
+  }
+}

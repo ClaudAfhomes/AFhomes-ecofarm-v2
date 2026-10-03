@@ -108,7 +108,7 @@
 }
 
 .balance {
-  font-size: var(--text-h1);
+  font-size: var(--text-metric);
   font-weight: 600;
   color: var(--color-brand-primary);
   font-variant-numeric: tabular-nums;
@@ -197,7 +197,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: var(--space-5);
   align-items: start;
 }
@@ -247,5 +247,22 @@
 
   .credentialCode {
     font-size: var(--text-body-m);
+  }
+}
+
+.digitalCard,
+.credentialBox {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 430px) {
+  .digitalActions {
+    flex-direction: column;
+  }
+  .digitalActions > button {
+    width: 100%;
+  }
+  .kpiGrid {
+    grid-template-columns: 1fr;
   }
 }

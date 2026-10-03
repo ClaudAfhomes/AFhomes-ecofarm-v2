@@ -48,6 +48,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={confirmDisabled}
             loading={confirmLoading}
+            loadingLabel="Processing…"
           >
             {confirmLabel}
           </Button>

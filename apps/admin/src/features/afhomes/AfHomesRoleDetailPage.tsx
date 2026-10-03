@@ -59,7 +59,7 @@ export function AfHomesRoleDetailPage() {
         actions={
           <>
             {!record.isSystem ? (
-              <Button variant="secondary" onClick={() => setEditing(true)}>
+              <Button variant="ghost" onClick={() => setEditing(true)}>
                 Edit role
               </Button>
             ) : null}{' '}
@@ -101,7 +101,12 @@ export function AfHomesRoleDetailPage() {
           {record.isSystem && record.slug === 'super_admin' ? (
             <p>All modules — granted by slug, not by row.</p>
           ) : (
-            <div className="table-scroll">
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className="table-scroll"
+            >
               <table>
                 <thead>
                   <tr>

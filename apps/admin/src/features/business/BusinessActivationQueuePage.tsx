@@ -53,7 +53,7 @@ export function BusinessActivationQueuePage() {
       ) : queue.data?.length === 0 ? (
         <EmptyState title="Nothing to activate" description="No application is fully paid yet." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -105,6 +105,7 @@ export function BusinessActivationQueuePage() {
                   </td>
                   <td>
                     <Button
+                      size="sm"
                       disabled={!item.activatable}
                       onClick={() => {
                         setActivating(item);
@@ -377,7 +378,7 @@ function CommissionReview() {
       ) : awaiting.length === 0 ? (
         <p>No commission is awaiting a qualification decision.</p>
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -403,6 +404,7 @@ function CommissionReview() {
                   </td>
                   <td>
                     <Button
+                      size="sm"
                       variant="secondary"
                       onClick={() => {
                         setDeciding(commission.id);

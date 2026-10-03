@@ -1,9 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import {
-  resolvePortalDestination,
-  type AuthPortals,
-} from '@jad/contracts';
+import { resolvePortalDestination, type AuthPortals } from '@jad/contracts';
 import { Alert, Button, PasswordField, TextField } from '@jad/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
@@ -39,10 +36,9 @@ export function CustomerLoginForm() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  const from =
-    (location.state as { from?: string } | null)?.from?.startsWith('/customer')
-      ? (location.state as { from: string }).from
-      : '/customer';
+  const from = (location.state as { from?: string } | null)?.from?.startsWith('/customer')
+    ? (location.state as { from: string }).from
+    : '/customer';
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -155,7 +151,7 @@ export function CustomerLoginForm() {
       </div>
 
       <div className={styles.submitRow}>
-        <Button type="submit" loading={pending} disabled={pending}>
+        <Button loadingLabel="Signing in…" type="submit" loading={pending} disabled={pending}>
           Sign in
         </Button>
       </div>

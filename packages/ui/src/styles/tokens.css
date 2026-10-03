@@ -51,12 +51,13 @@
   --color-success: #3f7d4e;
   --color-success-strong: #2e6b3a;
   --color-warning: #9a6b1f;
+  --color-warning-strong: #805719;
   --color-danger: #a63a32;
   --color-info: #1f6b8f;
 
   --color-state-focus: var(--color-accent-strong);
   --color-state-disabled-bg: #ece9e0;
-  --color-state-disabled-text: #9a978d;
+  --color-state-disabled-text: #5d625d;
   --color-state-hover: rgba(28, 43, 58, 0.06);
 
   /* Typography - editorial serif for display headings, system sans for body. */
@@ -65,6 +66,15 @@
   --font-family-display: Georgia, 'Iowan Old Style', 'Times New Roman', 'Noto Serif', serif;
 
   --text-caption: 12px;
+  --text-control-sm: 13px;
+  --text-page-title: clamp(1.375rem, 1.2rem + 0.6vw, 1.75rem);
+  --text-metric: clamp(1.75rem, 1.5rem + 0.75vw, 2.25rem);
+  --control-sm: 32px;
+  --control-md: 40px;
+  --control-lg: 48px;
+  --radius-control: 8px;
+  --icon-action: 18px;
+  --auth-form-max: 440px;
   --text-body-s: 14px;
   --text-body: 16px;
   --text-body-m: 14px;

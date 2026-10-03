@@ -129,7 +129,7 @@ export function OstLoginPage() {
         </div>
 
         <div className={styles.submitRow}>
-          <Button type="submit" loading={pending} disabled={pending}>
+          <Button loadingLabel="Signing in…" type="submit" loading={pending} disabled={pending}>
             Sign in
           </Button>
         </div>

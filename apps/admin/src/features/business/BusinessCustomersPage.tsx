@@ -359,7 +359,7 @@ export function BusinessCustomersPage() {
           description="Register the first customer to get started."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -403,6 +403,7 @@ export function BusinessCustomersPage() {
                   </td>
                   <td>
                     <Button
+                      size="sm"
                       variant="secondary"
                       disabled={customer.status === 'cancelled'}
                       onClick={() => {
@@ -412,7 +413,8 @@ export function BusinessCustomersPage() {
                       New application
                     </Button>{' '}
                     <Button
-                      variant="secondary"
+                      size="sm"
+                      variant="danger"
                       disabled={customer.status === 'suspended' || customer.status === 'cancelled'}
                       onClick={() => setAccountAction({ kind: 'deactivate', customer })}
                     >
@@ -424,6 +426,7 @@ export function BusinessCustomersPage() {
                       <>
                         {' '}
                         <Button
+                          size="sm"
                           variant="secondary"
                           disabled={
                             issueActivation.isPending && activationCustomerId === customer.id
@@ -440,12 +443,14 @@ export function BusinessCustomersPage() {
                       <>
                         {' '}
                         <Button
+                          size="sm"
                           variant="secondary"
                           onClick={() => setAccountAction({ kind: 'anonymize', customer })}
                         >
                           Anonymize
                         </Button>{' '}
                         <Button
+                          size="sm"
                           variant="danger"
                           onClick={() => setAccountAction({ kind: 'delete', customer })}
                         >
@@ -493,122 +498,138 @@ export function BusinessCustomersPage() {
               </ul>
             </div>
           ) : null}
-          <label>
-            First name
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('firstName', value)}
-              value={form.firstName}
-              onChange={(e) => set('firstName', e.target.value)}
-            />
-          </label>
-          <label>
-            Middle name
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('middleName', value)}
-              value={form.middleName ?? ''}
-              onChange={(e) => set('middleName', e.target.value)}
-            />
-          </label>
-          <label>
-            Last name
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('lastName', value)}
-              value={form.lastName}
-              onChange={(e) => set('lastName', e.target.value)}
-            />
-          </label>
-          <label>
-            Date of birth (YYYY-MM-DD)
-            <input
-              value={form.dateOfBirth}
-              onChange={(e) => set('dateOfBirth', e.target.value)}
-              placeholder="1990-05-04"
-            />
-          </label>
-          <label>
-            Email
-            <input value={form.email} onChange={(e) => set('email', e.target.value)} type="email" />
-          </label>
-          <label>
-            Phone
-            <input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
-          </label>
-          <label>
-            Address line
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('line1', value)}
-              value={form.address.line1}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  address: {
-                    ...prev.address,
-                    line1: e.target.value,
-                  },
-                }))
-              }
-            />
-          </label>
-          <label>
-            City
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('city', value)}
-              value={form.address.city}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  address: {
-                    ...prev.address,
-                    city: e.target.value,
-                  },
-                }))
-              }
-            />
-          </label>
-          <label>
-            Province
-            <NormalizedInput
-              normalize={(value) => normalizeLiveHumanField('province', value)}
-              value={form.address.province}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  address: {
-                    ...prev.address,
-                    province: e.target.value,
-                  },
-                }))
-              }
-            />
-          </label>
-          <label>
-            Government ID type
-            <select
-              value={form.governmentIdType ?? ''}
-              onChange={(e) =>
-                set(
-                  'governmentIdType',
-                  e.target.value
-                    ? (e.target.value as NonNullable<CreateCustomerRequest['governmentIdType']>)
-                    : undefined,
-                )
-              }
-            >
-              <option value="">Not provided</option>
-              <option value="philippine_id">PhilSys ID</option>
-              <option value="drivers_license">Driver&apos;s licence</option>
-              <option value="passport">Passport</option>
-              <option value="tax_id">Tax ID</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>
-            Government ID number (stored privately, never displayed in full)
-            <input
-              value={form.governmentIdNumber ?? ''}
-              onChange={(e) => set('governmentIdNumber', e.target.value)}
-            />
-          </label>
+          <fieldset>
+            <legend>Personal Information</legend>
+            <label>
+              First name
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('firstName', value)}
+                value={form.firstName}
+                onChange={(e) => set('firstName', e.target.value)}
+              />
+            </label>
+            <label>
+              Middle name
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('middleName', value)}
+                value={form.middleName ?? ''}
+                onChange={(e) => set('middleName', e.target.value)}
+              />
+            </label>
+            <label>
+              Last name
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('lastName', value)}
+                value={form.lastName}
+                onChange={(e) => set('lastName', e.target.value)}
+              />
+            </label>
+            <label>
+              Date of birth (YYYY-MM-DD)
+              <input
+                value={form.dateOfBirth}
+                onChange={(e) => set('dateOfBirth', e.target.value)}
+                placeholder="1990-05-04"
+              />
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Contact Information</legend>
+            <label>
+              Email
+              <input
+                value={form.email}
+                onChange={(e) => set('email', e.target.value)}
+                type="email"
+              />
+            </label>
+            <label>
+              Phone
+              <input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Address</legend>
+            <label>
+              Address line
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('line1', value)}
+                value={form.address.line1}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    address: {
+                      ...prev.address,
+                      line1: e.target.value,
+                    },
+                  }))
+                }
+              />
+            </label>
+            <label>
+              City
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('city', value)}
+                value={form.address.city}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    address: {
+                      ...prev.address,
+                      city: e.target.value,
+                    },
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Province
+              <NormalizedInput
+                normalize={(value) => normalizeLiveHumanField('province', value)}
+                value={form.address.province}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    address: {
+                      ...prev.address,
+                      province: e.target.value,
+                    },
+                  }))
+                }
+              />
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Identity Documents</legend>
+            <label>
+              Government ID type
+              <select
+                value={form.governmentIdType ?? ''}
+                onChange={(e) =>
+                  set(
+                    'governmentIdType',
+                    e.target.value
+                      ? (e.target.value as NonNullable<CreateCustomerRequest['governmentIdType']>)
+                      : undefined,
+                  )
+                }
+              >
+                <option value="">Not provided</option>
+                <option value="philippine_id">PhilSys ID</option>
+                <option value="drivers_license">Driver&apos;s licence</option>
+                <option value="passport">Passport</option>
+                <option value="tax_id">Tax ID</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Government ID number (stored privately, never displayed in full)
+              <input
+                value={form.governmentIdNumber ?? ''}
+                onChange={(e) => set('governmentIdNumber', e.target.value)}
+              />
+            </label>
+          </fieldset>
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
       </Dialog>

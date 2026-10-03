@@ -56,7 +56,8 @@ describe('ErrorState', () => {
   it('renders a readable message and retry', () => {
     const onRetry = vi.fn();
     render(<ErrorState error={new Error('boom')} onRetry={onRetry} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('boom');
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('boom');
     screen.getByRole('button', { name: 'Retry' }).click();
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

@@ -1,6 +1,6 @@
 /*
  * Auth form field primitives (JAD FormField parity).
- * Inputs are 48px tall with AA contrast, visible focus ring, and inline
+ * Inputs use the 40px control scale (48px in auth), visible focus, and inline
  * error styling. Shared across auth and admin forms.
  */
 
@@ -51,14 +51,15 @@
 
 .input {
   width: 100%;
-  min-height: 48px;
+  min-height: var(--control-md);
   padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: var(--text-body);
+  line-height: 1.25;
   color: var(--color-text-primary);
   background-color: var(--color-bg-surface-raised);
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast);

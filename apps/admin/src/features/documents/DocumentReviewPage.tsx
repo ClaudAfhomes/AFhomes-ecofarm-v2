@@ -168,7 +168,7 @@ export function DocumentReviewPage() {
       {Object.keys(suggestions).length === 0 ? (
         <p>No fields were extracted. Enter the values manually below.</p>
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -236,7 +236,7 @@ export function DocumentReviewPage() {
               {decide.isPending ? 'Saving…' : 'Confirm reviewed values'}
             </Button>
             <Button
-              variant="secondary"
+              variant="danger"
               onClick={() => {
                 setOutcome(null);
                 decide.mutate('rejected');
@@ -252,7 +252,7 @@ export function DocumentReviewPage() {
       {data.reviewedFields ? (
         <div style={{ marginTop: 24 }}>
           <h2>Confirmed record</h2>
-          <div className="table-scroll">
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
             <table>
               <thead>
                 <tr>

@@ -125,7 +125,7 @@ describe('Phase 33 table responsive contracts', () => {
 
   it('long status values render through the shared chip without breaking semantics', () => {
     render(<StatusChip label="final_qualification_pending" tone="neutral" />);
-    expect(screen.getByText('final_qualification_pending')).not.toBeNull();
+    expect(screen.getByText('Final qualification pending')).not.toBeNull();
   });
 });
 

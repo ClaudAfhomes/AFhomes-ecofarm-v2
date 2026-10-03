@@ -111,7 +111,8 @@ function StaffDetailForm({
     mutationFn: () =>
       updateAfHomesStaff(member.id, {
         roleId: roleId !== member.roleId ? roleId : undefined,
-        departmentId: departmentId !== (member.departmentId ?? '') ? departmentId || null : undefined,
+        departmentId:
+          departmentId !== (member.departmentId ?? '') ? departmentId || null : undefined,
       }),
     onSuccess: async () => {
       await invalidate();
@@ -285,7 +286,7 @@ function StaffDetailForm({
                   {standing.isPending ? 'Saving…' : 'Save status'}
                 </Button>{' '}
                 {member.status === 'active' ? (
-                  <Button variant="secondary" onClick={() => setConfirmDeactivate(true)}>
+                  <Button variant="danger" onClick={() => setConfirmDeactivate(true)}>
                     Deactivate access
                   </Button>
                 ) : null}
@@ -311,7 +312,10 @@ function StaffDetailForm({
               ))}
             </ul>
           ) : (
-            <EmptyState title="No history" description="No recorded changes for this account yet." />
+            <EmptyState
+              title="No history"
+              description="No recorded changes for this account yet."
+            />
           )}
         </DetailCard>
 
@@ -319,8 +323,8 @@ function StaffDetailForm({
           <DetailCard>
             <DetailCardTitle>Delete</DetailCardTitle>
             <p>
-              Permanent removal is only possible when the account has no protected business
-              records. Deactivation is the safe default.
+              Permanent removal is only possible when the account has no protected business records.
+              Deactivation is the safe default.
             </p>
             <Button variant="danger" onClick={() => setConfirmDelete(true)}>
               Delete permanently

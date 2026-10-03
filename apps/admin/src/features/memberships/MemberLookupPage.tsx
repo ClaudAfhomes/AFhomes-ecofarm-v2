@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { memberLookupSchema, CUSTOMER_CATEGORY_LABELS } from '@jad/contracts';
-import { Button, PageHeader, SearchField, ErrorState, EmptyState } from '@jad/ui';
+import { Button, PageHeader, SearchField, ErrorState, EmptyState, StatusChip } from '@jad/ui';
+import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 export function MemberLookupPage() {
@@ -32,12 +33,15 @@ export function MemberLookupPage() {
         description="Find a member by name, membership number or card identifier."
       />
       <form
+        className={styles.search}
         onSubmit={(e) => {
           e.preventDefault();
           setApplied(search.trim());
         }}
       >
         <SearchField
+          size="lg"
+          busy={members.isFetching && activeTerm.length >= 2}
           label="Find member"
           value={search}
           onChange={(value) => {
@@ -45,13 +49,13 @@ export function MemberLookupPage() {
             if (value.trim().length < 2) setApplied('');
           }}
         />
-        <Button type="submit" disabled={search.trim().length < 2}>
+        <Button size="lg" variant="secondary" type="submit" disabled={search.trim().length < 2}>
           Search
         </Button>
       </form>
       {activeTerm.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a member" />
-      ) : members.isFetching ? (
+      ) : members.isPending ? (
         <p role="status">Looking up members - </p>
       ) : members.isError ? (
         <ErrorState error={members.error} onRetry={members.refetch} />
@@ -59,7 +63,7 @@ export function MemberLookupPage() {
         <EmptyState title="No matching members" />
       ) : (
         members.data?.map((m) => (
-          <article key={m.membershipNumber}>
+          <article className={styles.member} key={m.membershipNumber}>
             <h2>{m.memberName}</h2>
             <p>
               {m.membershipNumber} - {m.tier} - {m.customerNumber}
@@ -68,11 +72,28 @@ export function MemberLookupPage() {
               <strong>{CUSTOMER_CATEGORY_LABELS[m.category]}</strong> -{' '}
               {m.mayUsePrivileges ? 'VIP privileges available' : 'VIP privileges unavailable'}
             </p>
-            <p>
-              Membership: {m.membershipStatus}; activated {m.activatedAt?.slice(0, 10) ?? ' - '};
-              expires {m.expiresAt?.slice(0, 10) ?? ' - '}
-            </p>
-            <p>Available points: {m.availablePoints}</p>
+            <dl className={styles.details}>
+              <div>
+                <dt>Membership status</dt>
+                <dd>
+                  <StatusChip label={m.membershipStatus} />
+                </dd>
+              </div>
+              <div>
+                <dt>Activated</dt>
+                <dd>{m.activatedAt?.slice(0, 10) ?? 'Not activated'}</dd>
+              </div>
+              <div>
+                <dt>Valid until</dt>
+                <dd>{m.expiresAt?.slice(0, 10) ?? 'Not available'}</dd>
+              </div>
+              <div>
+                <dt>Available points</dt>
+                <dd className={styles.points}>
+                  {BigInt(m.availablePoints).toLocaleString('en-PH')}
+                </dd>
+              </div>
+            </dl>
           </article>
         ))
       )}

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { it, expect, vi } from 'vitest';
 import { MemberLookupPage } from './MemberLookupPage';
 import { renderWithProviders } from '../../test/utils';
@@ -30,7 +30,7 @@ it('searches a card identifier and clearly denies privileges for a suspended mem
   expect(await screen.findByRole('heading', { name: 'Imported Member' })).toBeInTheDocument();
   expect(screen.getByText('Suspended')).toBeInTheDocument();
   expect(screen.getByText(/VIP privileges unavailable/)).toBeInTheDocument();
-  expect(screen.getByText(/Available points: 12500/)).toBeInTheDocument();
+  expect(screen.getByText('12,500')).toBeInTheDocument();
 });
 
 it('clears immediately below minimum length and never restores a late previous result', async () => {
@@ -99,4 +99,45 @@ it('removes an already displayed result immediately on one-character input', asy
   expect(screen.queryByText('CLAUD RESULT')).not.toBeInTheDocument();
   await new Promise((resolve) => setTimeout(resolve, 350));
   expect(requestList).toHaveBeenCalledTimes(1);
+});
+
+it('retains the member card during a background refresh and clears through the shared control', async () => {
+  const member = {
+    memberName: 'QA MEMBER',
+    membershipNumber: 'MBS-QA',
+    customerNumber: 'CUS-QA',
+    tier: 'GOLD' as const,
+    membershipStatus: 'active' as const,
+    category: 'ACTIVE_VIP' as const,
+    activatedAt: null,
+    expiresAt: null,
+    availablePoints: '9007199254740993',
+    mayUsePrivileges: true,
+  };
+  vi.mocked(requestList).mockReset().mockResolvedValueOnce([member]);
+  let complete: (rows: (typeof member)[]) => void = () => {};
+  vi.mocked(requestList).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const { client } = renderWithProviders(<MemberLookupPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'QA' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  expect(await screen.findByText('QA MEMBER')).toBeInTheDocument();
+  expect(screen.getByText('9,007,199,254,740,993')).toBeInTheDocument();
+  await act(async () => {
+    void client.invalidateQueries({ queryKey: ['member-lookup'] });
+  });
+  await waitFor(() => expect(requestList).toHaveBeenCalledTimes(2));
+  expect(screen.getByText('QA MEMBER')).toBeInTheDocument();
+  expect(screen.getByRole('searchbox')).toHaveAttribute('aria-busy', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Clear find member' }));
+  expect(screen.getByRole('searchbox')).toHaveFocus();
+  expect(screen.queryByText('QA MEMBER')).not.toBeInTheDocument();
+  await act(async () => {
+    complete([member]);
+  });
+  expect(screen.queryByText('QA MEMBER')).not.toBeInTheDocument();
 });

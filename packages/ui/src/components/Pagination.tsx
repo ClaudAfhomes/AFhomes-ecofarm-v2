@@ -1,4 +1,5 @@
 import { IconButton } from './IconButton';
+import { Button } from './Button';
 import styles from './Pagination.module.css';
 
 export interface PaginationProps {
@@ -58,7 +59,8 @@ export function Pagination({
             </li>
           ) : (
             <li key={p}>
-              <button
+              <Button
+                variant="ghost"
                 type="button"
                 className={`${styles.page} ${p === page ? styles.active : ''}`}
                 aria-current={p === page ? 'page' : undefined}
@@ -67,7 +69,7 @@ export function Pagination({
                 onClick={() => onChange(p)}
               >
                 {p}
-              </button>
+              </Button>
             </li>
           ),
         )}

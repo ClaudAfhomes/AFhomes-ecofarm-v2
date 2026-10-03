@@ -783,7 +783,11 @@ export function CustomerApplicationEditorPage() {
               <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
                 Approve
               </Button>{' '}
-              <Button onClick={() => decide.mutate('rejected')} disabled={decide.isPending}>
+              <Button
+                variant="danger"
+                onClick={() => decide.mutate('rejected')}
+                disabled={decide.isPending}
+              >
                 Reject
               </Button>{' '}
               <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>

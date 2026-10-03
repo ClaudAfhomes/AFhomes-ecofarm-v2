@@ -48,7 +48,11 @@ export function CmsMediaPage() {
   });
   if (media.isLoading)
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading media">
+      <div
+        style={{ display: 'grid', gap: 'var(--space-3)' }}
+        role="status"
+        aria-label="Loading media"
+      >
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
@@ -108,7 +112,7 @@ export function CmsMediaPage() {
               </small>
               {canDelete && (
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   disabled={remove.isPending}
                   onClick={() => remove.mutate(item.id)}
                 >

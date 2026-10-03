@@ -6,7 +6,11 @@ export function CmsHistoryPage() {
   const history = useQuery({ queryKey: ['cms', 'history'], queryFn: getCmsHistory });
   if (history.isLoading)
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS history">
+      <div
+        style={{ display: 'grid', gap: 'var(--space-3)' }}
+        role="status"
+        aria-label="Loading CMS history"
+      >
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
@@ -32,7 +36,7 @@ export function CmsHistoryPage() {
           description="Saving the first draft creates the first revision."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table className={styles.table}>
             <thead>
               <tr>

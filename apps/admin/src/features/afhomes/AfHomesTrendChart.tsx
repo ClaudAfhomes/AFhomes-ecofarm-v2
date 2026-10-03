@@ -115,6 +115,7 @@ export function AfHomesTrendChart() {
           <div className={styles.segmented} role="group" aria-label="Chart metric">
             <button
               type="button"
+              aria-pressed={metric === 'value'}
               className={metric === 'value' ? styles.on : ''}
               onClick={() => setMetric('value')}
             >
@@ -122,6 +123,7 @@ export function AfHomesTrendChart() {
             </button>
             <button
               type="button"
+              aria-pressed={metric === 'count'}
               className={metric === 'count' ? styles.on : ''}
               onClick={() => setMetric('count')}
             >
@@ -131,6 +133,7 @@ export function AfHomesTrendChart() {
           <div className={styles.segmented} aria-label="Chart granularity">
             <button
               type="button"
+              aria-pressed={granularity === 'month'}
               className={granularity === 'month' ? styles.on : ''}
               onClick={() => setGranularity('month')}
             >
@@ -138,6 +141,7 @@ export function AfHomesTrendChart() {
             </button>
             <button
               type="button"
+              aria-pressed={granularity === 'year'}
               className={granularity === 'year' ? styles.on : ''}
               onClick={() => setGranularity('year')}
             >
@@ -180,7 +184,11 @@ export function AfHomesTrendChart() {
                     <stop offset="100%" stopColor="var(--color-brand-primary)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border-subtle)" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="var(--color-border-subtle)"
+                />
                 <XAxis
                   dataKey="label"
                   tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
@@ -190,7 +198,9 @@ export function AfHomesTrendChart() {
                   minTickGap={24}
                 />
                 <YAxis
-                  tickFormatter={(v: number) => (metric === 'value' ? abbreviateMoney(v) : String(v))}
+                  tickFormatter={(v: number) =>
+                    metric === 'value' ? abbreviateMoney(v) : String(v)
+                  }
                   tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
                   tickLine={false}
                   axisLine={false}
@@ -207,8 +217,7 @@ export function AfHomesTrendChart() {
                   labelFormatter={(label) => String(label)}
                   formatter={(value, _name, item) => {
                     const point = item as
-                      | { payload?: { total?: string; count?: number } }
-                      | undefined;
+                      { payload?: { total?: string; count?: number } } | undefined;
                     if (point?.payload?.total !== undefined) {
                       return [formatMoney(point.payload.total), 'Sales value'];
                     }

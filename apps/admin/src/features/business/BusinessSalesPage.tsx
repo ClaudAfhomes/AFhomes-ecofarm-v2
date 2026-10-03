@@ -4,11 +4,7 @@ import { paymentSchemeLabel } from '@jad/contracts';
 import { Button, EmptyState, ErrorState, FilterBar, PageHeader, Select, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
-import {
-  SALE_STATUS_LABEL,
-  SALE_STATUS_TONE,
-  formatMoney,
-} from './format';
+import { SALE_STATUS_LABEL, SALE_STATUS_TONE, formatMoney } from './format';
 import { getSalePayments, getSaleSummary, getSales } from './services';
 
 const STATUSES = ['', ...Object.keys(SALE_STATUS_LABEL)];
@@ -62,7 +58,7 @@ export function BusinessSalesPage() {
           description="Open an application from the Customers screen."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -100,7 +96,7 @@ export function BusinessSalesPage() {
                   <td>{sale.activatedAt ? 'Active' : 'Not activated'}</td>
                   <td>{formatDateTime(sale.createdAt)}</td>
                   <td>
-                    <Button variant="secondary" onClick={() => setOpenId(sale.id)}>
+                    <Button size="sm" variant="secondary" onClick={() => setOpenId(sale.id)}>
                       Payments
                     </Button>
                   </td>
@@ -132,7 +128,13 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={summary.refetch} />
       ) : summary.data ? (
-        <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <dl
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 12,
+          }}
+        >
           <div>
             <dt>Payment scheme</dt>
             <dd>{paymentSchemeLabel(summary.data.paymentScheme)}</dd>
@@ -191,7 +193,13 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
       )}
 
       {payments.data && payments.data.length > 0 ? (
-        <div className="table-scroll" style={{ marginTop: 16 }}>
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className="table-scroll"
+          style={{ marginTop: 16 }}
+        >
           <table>
             <thead>
               <tr>

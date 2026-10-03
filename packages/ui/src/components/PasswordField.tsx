@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { RefObject } from 'react';
 
 import { FormField } from './FormField.js';
+import { Button } from './Button.js';
 import fieldStyles from './FormField.module.css';
 import styles from './PasswordField.module.css';
 
@@ -66,7 +67,7 @@ const EYE_OFF_ICON = (
 
 /**
  * Password input with an accessible show/hide toggle (JAD PasswordField
- * parity). The toggle is a real 44px button (`aria-pressed` + labelled)
+ * parity). The toggle is a 40px canonical button (`aria-pressed` + labelled)
  * that switches the input type; the input keeps `autoComplete` semantics
  * for password managers and `type="password"` by default.
  */
@@ -105,15 +106,17 @@ export function PasswordField({
           aria-describedby={describedBy}
           required={!optional}
         />
-        <button
+        <Button
+          variant="ghost"
           type="button"
           className={styles.toggle}
           aria-pressed={visible}
           aria-label={visible ? 'Hide password' : 'Show password'}
+          title={visible ? 'Hide password' : 'Show password'}
           onClick={() => setVisible((current) => !current)}
         >
           {visible ? EYE_OFF_ICON : EYE_ICON}
-        </button>
+        </Button>
       </div>
     </FormField>
   );

@@ -103,6 +103,15 @@
   font-family: var(--font-family-display);
   font-size: var(--text-body-s);
   font-weight: 700;
-  color: var(--color-on-dark);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .topbarWordmark {
+    color: var(--color-on-dark);
+    max-width: 38vw;
+  }
 }

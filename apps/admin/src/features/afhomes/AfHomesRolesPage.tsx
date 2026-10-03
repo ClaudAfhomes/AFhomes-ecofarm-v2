@@ -36,7 +36,7 @@ export function AfHomesRolesPage() {
       ) : roles.data?.length === 0 ? (
         <EmptyState title="No roles" description="Create the first custom role." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -71,6 +71,7 @@ export function AfHomesRolesPage() {
                   </td>
                   <td>
                     <Button
+                      size="sm"
                       variant="secondary"
                       disabled={role.isSystem}
                       onClick={() => setEditing(role)}

@@ -76,7 +76,7 @@ export function OstApplicationsPage() {
           description="New registrations submitted with your referral code appear here."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

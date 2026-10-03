@@ -415,7 +415,12 @@ export function BusinessProductsPage() {
               }
             />
           ) : (
-            <div className="table-scroll">
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className="table-scroll"
+            >
               <table>
                 <thead>
                   <tr>
@@ -475,10 +480,11 @@ export function BusinessProductsPage() {
                       </td>
                       <td>{product.sortOrder}</td>
                       <td>
-                        <Button variant="secondary" onClick={() => openEditPlan(product)}>
+                        <Button size="sm" variant="ghost" onClick={() => openEditPlan(product)}>
                           View/Edit
                         </Button>{' '}
                         <Button
+                          size="sm"
                           variant="secondary"
                           disabled={togglePlan.isPending}
                           onClick={() =>
@@ -508,7 +514,12 @@ export function BusinessProductsPage() {
               description="Create the first category to organise plans."
             />
           ) : (
-            <div className="table-scroll">
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className="table-scroll"
+            >
               <table>
                 <thead>
                   <tr>
@@ -536,10 +547,15 @@ export function BusinessProductsPage() {
                       <td>{category.sortOrder}</td>
                       <td>{category.planCount ?? '—'}</td>
                       <td>
-                        <Button variant="secondary" onClick={() => openEditCategory(category)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openEditCategory(category)}
+                        >
                           Edit
                         </Button>{' '}
                         <Button
+                          size="sm"
                           variant="secondary"
                           disabled={toggleCategory.isPending}
                           onClick={() =>

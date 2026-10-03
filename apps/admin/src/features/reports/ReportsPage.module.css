@@ -1,0 +1,23 @@
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.summary > div {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.summary dd {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-metric);
+  font-variant-numeric: tabular-nums;
+}
+.summaryLabel {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}

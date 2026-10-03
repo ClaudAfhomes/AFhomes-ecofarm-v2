@@ -30,7 +30,7 @@ export function AfHomesDepartmentsPage() {
       ) : query.data?.length === 0 ? (
         <EmptyState title="No departments" description="Create an organization department." />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

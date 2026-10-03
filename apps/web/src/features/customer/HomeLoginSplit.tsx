@@ -1,3 +1,4 @@
+import { Button } from '@jad/ui';
 import { Suspense, lazy, useEffect } from 'react';
 import { Link } from 'react-router';
 
@@ -71,7 +72,10 @@ export function HomeLoginSplit({ noIndex = false }: { noIndex?: boolean }) {
               {content.heroLede}
             </p>
           </div>
-          <div className="rounded-2xl bg-cream-50 p-6 shadow-2xl sm:p-8" aria-label="Member sign in">
+          <div
+            className="rounded-2xl bg-cream-50 p-6 shadow-2xl sm:p-8"
+            aria-label="Member sign in"
+          >
             {status === 'authenticated' ? (
               <SignedInPanel onSignOut={() => void signOut()} />
             ) : (
@@ -111,13 +115,9 @@ function SignedInPanel({ onSignOut }: { onSignOut: () => void }) {
         </Link>
       </p>
       <p className="mt-2">
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="cursor-pointer font-semibold text-pine-950 underline"
-        >
+        <Button variant="ghost" type="button" onClick={onSignOut} className="">
           Sign out
-        </button>
+        </Button>
       </p>
     </div>
   );

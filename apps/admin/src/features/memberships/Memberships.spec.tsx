@@ -8,10 +8,7 @@ import type { SessionUser } from '../../lib/session';
 import { MembershipCardPrintPage } from './MembershipCardPrintPage';
 import { MembershipDetailPage } from './MembershipDetailPage';
 import { MembershipsPage } from './MembershipsPage';
-import {
-  getMembershipCard,
-  getMemberships,
-} from './services';
+import { getMembershipCard, getMemberships } from './services';
 import { getAudit } from '../reports/services';
 
 vi.mock('./services', () => ({
@@ -184,7 +181,8 @@ describe('Memberships list', () => {
     mockedGetMemberships.mockRejectedValue(new Error('Memberships unavailable'));
     renderWithProviders(<MembershipsPage />);
     await waitFor(() => expect(screen.queryByText('Loading memberships…')).not.toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('Memberships unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Memberships unavailable');
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
@@ -226,7 +224,8 @@ describe('Membership detail', () => {
     mockedGetMembershipCard.mockRejectedValue(new Error('Card unavailable'));
     renderDetail(STAFF);
     await waitFor(() => expect(screen.queryByText('Loading card…')).not.toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('Card unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Card unavailable');
   });
 });
 
@@ -248,7 +247,9 @@ describe('Printable card', () => {
     expect(proof).toHaveTextContent('AF Homes Ecofarm');
     expect(proof).toHaveTextContent('MBS-000001');
     expect(proof).toHaveTextContent('Membership Cards');
-    expect(screen.getByText(/stored credentials cannot be recovered, only rotated/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/stored credentials cannot be recovered, only rotated/),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Print' })).toBeInTheDocument();
   });
 });

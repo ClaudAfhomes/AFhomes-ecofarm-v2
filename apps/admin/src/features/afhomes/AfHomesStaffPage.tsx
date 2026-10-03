@@ -273,7 +273,7 @@ export function AfHomesStaffPage() {
         />
       ) : (
         <>
-          <div className="table-scroll">
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -314,14 +314,15 @@ export function AfHomesStaffPage() {
                       </small>
                     </td>
                     <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <Button variant="secondary" onClick={() => openRestrictions(item)}>
+                      <Button size="sm" variant="secondary" onClick={() => openRestrictions(item)}>
                         Restrictions
                       </Button>
                       {item.id !== user?.id && item.status !== 'inactive' ? (
                         <>
                           {' '}
                           <Button
-                            variant="secondary"
+                            size="sm"
+                            variant="danger"
                             onClick={() => setAccountAction({ kind: 'deactivate', staff: item })}
                           >
                             Deactivate
@@ -332,6 +333,7 @@ export function AfHomesStaffPage() {
                         <>
                           {' '}
                           <Button
+                            size="sm"
                             variant="danger"
                             onClick={() => setAccountAction({ kind: 'delete', staff: item })}
                           >
@@ -342,7 +344,7 @@ export function AfHomesStaffPage() {
                       {canPurgeTest && item.id !== user?.id && isTestStaffEmail(item.email) ? (
                         <>
                           {' '}
-                          <Button variant="danger" onClick={() => setPurgeTarget(item)}>
+                          <Button size="sm" variant="danger" onClick={() => setPurgeTarget(item)}>
                             Purge Test Account
                           </Button>
                         </>
@@ -458,7 +460,7 @@ export function AfHomesStaffPage() {
         }
       >
         <p>Overrides can only remove access granted by the role.</p>
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

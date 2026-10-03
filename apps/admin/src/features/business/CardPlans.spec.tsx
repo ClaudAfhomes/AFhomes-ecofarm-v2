@@ -370,7 +370,8 @@ describe('Card Plans states', () => {
     mockedGetCardProducts.mockRejectedValue(new Error('Plans service unavailable'));
     renderWithProviders(<BusinessProductsPage />);
     await waitFor(() => expect(screen.queryByText('Loading card plans…')).not.toBeInTheDocument());
-    expect(screen.getByRole('alert')).toHaveTextContent('Plans service unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Plans service unavailable');
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 

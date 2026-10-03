@@ -95,7 +95,7 @@ export function AfHomesRoleFormDialog({
           Active
         </label>
         {error ? <p role="alert">{error.message}</p> : null}
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>

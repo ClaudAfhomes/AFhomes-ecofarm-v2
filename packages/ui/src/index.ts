@@ -7,8 +7,8 @@ export type { ScrollToLatest } from './hooks/useScrollToLatest.js';
 
 export { Icon } from './components/Icon.js';
 export type { IconName, IconProps } from './components/Icon.js';
-export { Button } from './components/Button.js';
-export type { ButtonProps, ButtonVariant } from './components/Button.js';
+export { Button, buttonClassName } from './components/Button.js';
+export type { ButtonProps, ButtonVariant, ButtonSize } from './components/Button.js';
 export { IconButton } from './components/IconButton.js';
 export type { IconButtonProps } from './components/IconButton.js';
 export { AppShell } from './components/AppShell.js';

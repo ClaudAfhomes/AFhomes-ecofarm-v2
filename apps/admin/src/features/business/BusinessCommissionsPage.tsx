@@ -178,7 +178,7 @@ export function BusinessCommissionsPage() {
           description="No commission matches the current filters."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -226,11 +226,15 @@ export function BusinessCommissionsPage() {
                   </td>
                   <td>
                     {commission.status === 'final_qualification_pending' && mayMutate ? (
-                      <Button variant="secondary" onClick={() => setQualifying(commission)}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setQualifying(commission)}
+                      >
                         Decide
                       </Button>
                     ) : commission.status === 'earned' && mayMutate ? (
-                      <Button variant="secondary" onClick={() => setPaying(commission)}>
+                      <Button size="sm" variant="secondary" onClick={() => setPaying(commission)}>
                         Mark Paid
                       </Button>
                     ) : (

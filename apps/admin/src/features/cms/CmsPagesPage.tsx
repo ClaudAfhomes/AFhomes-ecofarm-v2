@@ -22,7 +22,11 @@ export function CmsPagesPage() {
   });
   if (pages.isLoading)
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS pages">
+      <div
+        style={{ display: 'grid', gap: 'var(--space-3)' }}
+        role="status"
+        aria-label="Loading CMS pages"
+      >
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
         <Skeleton style={{ height: 48 }} />
@@ -51,7 +55,7 @@ export function CmsPagesPage() {
           description="The Phase 3 routes continue using repository defaults."
         />
       ) : (
-        <div className="table-scroll">
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table className={styles.table}>
             <thead>
               <tr>
@@ -62,40 +66,44 @@ export function CmsPagesPage() {
                 <th>Actions</th>
               </tr>
             </thead>
-          <tbody>
-            {pages.data.map((page) => (
-              <tr key={page.id}>
-                <td>{page.title}</td>
-                <td>/{page.slug}</td>
-                <td>
-                  <StatusChip
-                    label={page.status}
-                    tone={page.status === 'published' ? 'success' : 'neutral'}
-                  />
-                </td>
-                <td>{page.version}</td>
-                <td>
-                  <div className={styles.actions}>
-                    {canUpdate && (
-                      <Button variant="secondary" onClick={() => setEditing(page)}>
-                        Edit
-                      </Button>
-                    )}
-                    {canUpdate && (
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          publication.mutate({ id: page.id, publish: page.status !== 'published' })
-                        }
-                      >
-                        {page.status === 'published' ? 'Unpublish' : 'Publish'}
-                      </Button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+            <tbody>
+              {pages.data.map((page) => (
+                <tr key={page.id}>
+                  <td>{page.title}</td>
+                  <td>/{page.slug}</td>
+                  <td>
+                    <StatusChip
+                      label={page.status}
+                      tone={page.status === 'published' ? 'success' : 'neutral'}
+                    />
+                  </td>
+                  <td>{page.version}</td>
+                  <td>
+                    <div className={styles.actions}>
+                      {canUpdate && (
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(page)}>
+                          Edit
+                        </Button>
+                      )}
+                      {canUpdate && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            publication.mutate({
+                              id: page.id,
+                              publish: page.status !== 'published',
+                            })
+                          }
+                        >
+                          {page.status === 'published' ? 'Unpublish' : 'Publish'}
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
           </table>
         </div>
       )}

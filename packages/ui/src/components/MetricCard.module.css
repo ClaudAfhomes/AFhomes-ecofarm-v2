@@ -20,7 +20,6 @@
 a.card:hover {
   border-color: var(--color-brand-primary);
   box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
 }
 
 a.card:focus-visible {
@@ -47,8 +46,8 @@ a.card:focus-visible {
 }
 
 .count {
-  font-size: var(--text-h2);
-  font-weight: 800;
+  font-size: var(--text-metric);
+  font-weight: 700;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
   line-height: 1;

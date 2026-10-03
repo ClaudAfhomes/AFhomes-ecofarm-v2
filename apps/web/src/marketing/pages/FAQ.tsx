@@ -1,18 +1,18 @@
-import { useState } from "react";
-import { Container } from "../components/ui/Container";
-import { PageHeader } from "../components/ui/PageHeader";
-import { SectionHeading } from "../components/ui/SectionHeading";
-import { Accordion } from "../components/ui/Accordion";
-import { Reveal } from "../components/ui/Reveal";
-import { Button } from "../components/ui/Button";
-import { Seo } from "../lib/seo";
-import { cmsRepository } from "../lib/cms";
-import { cn } from "../lib/cn";
+import { useState } from 'react';
+import { Container } from '../components/ui/Container';
+import { PageHeader } from '../components/ui/PageHeader';
+import { SectionHeading } from '../components/ui/SectionHeading';
+import { Accordion } from '../components/ui/Accordion';
+import { Reveal } from '../components/ui/Reveal';
+import { Button } from '../components/ui/Button';
+import { Seo } from '../lib/seo';
+import { cmsRepository } from '../lib/cms';
+import { cn } from '../lib/cn';
 
 export default function FAQ() {
   const faqCategories = cmsRepository.getFaqCategories();
   const content = cmsRepository.getPageContent().faq;
-  const [active, setActive] = useState(faqCategories[0]?.id ?? "");
+  const [active, setActive] = useState(faqCategories[0]?.id ?? '');
 
   return (
     <>
@@ -22,21 +22,14 @@ export default function FAQ() {
         path="/faq"
       />
 
-      <PageHeader
-        eyebrow={content.eyebrow}
-        title={content.title}
-        lede={content.lede}
-      />
+      <PageHeader eyebrow={content.eyebrow} title={content.title} lede={content.lede} />
 
       <section className="bg-cream-100 py-20 sm:py-28">
         <Container>
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-16">
             {/* Category nav */}
             <div className="lg:col-span-4">
-              <SectionHeading
-                eyebrow="Browse by topic"
-                title={content.browseTitle}
-              />
+              <SectionHeading eyebrow="Browse by topic" title={content.browseTitle} />
               <Reveal delay={0.1}>
                 <div
                   className="mt-8 flex flex-wrap gap-2 lg:flex-col lg:gap-1"
@@ -55,19 +48,19 @@ export default function FAQ() {
                         aria-controls={`faq-panel-${category.id}`}
                         onClick={() => setActive(category.id)}
                         className={cn(
-                          "label-caps flex items-center gap-2 rounded-full border px-5 py-3 text-left transition-colors lg:rounded-xl",
+                          'label-caps flex min-h-10 items-center gap-2 rounded-lg border px-4 py-2 text-left transition-colors',
                           isActive
-                            ? "border-navy-800 bg-navy-800 text-cream-50"
-                            : "border-line bg-cream-50 text-ink-600 hover:border-navy-300 hover:text-navy-900",
+                            ? 'border-navy-800 bg-navy-800 text-cream-50'
+                            : 'border-line bg-cream-50 text-ink-600 hover:border-navy-300 hover:text-navy-900',
                         )}
                       >
                         {category.label}
                         <span
                           className={cn(
-                            "rounded-full px-2 py-0.5 text-xs",
+                            'rounded-full px-2 py-0.5 text-xs',
                             isActive
-                              ? "bg-cream-50/15 text-cream-200"
-                              : "bg-cream-200/70 text-ink-400",
+                              ? 'bg-cream-50/15 text-cream-200'
+                              : 'bg-cream-200/70 text-ink-400',
                           )}
                           aria-hidden="true"
                         >
@@ -131,9 +124,7 @@ export default function FAQ() {
               <h2 className="font-display text-4xl leading-tight font-medium text-balance sm:text-5xl">
                 {content.stillCuriousTitle}
               </h2>
-              <p className="mt-4 max-w-xl text-lg text-cream-200/75">
-                {content.stillCuriousLede}
-              </p>
+              <p className="mt-4 max-w-xl text-lg text-cream-200/75">{content.stillCuriousLede}</p>
             </div>
             <Button to="/contact" variant="accent" size="lg" withArrow>
               {content.stillCuriousButton}

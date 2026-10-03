@@ -118,7 +118,11 @@ export function AuditPage() {
       />
 
       {query.isPending ? (
-        <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading audit events">
+        <div
+          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          role="status"
+          aria-label="Loading audit events"
+        >
           <Skeleton style={{ height: 48 }} />
           <Skeleton style={{ height: 48 }} />
           <Skeleton style={{ height: 48 }} />
@@ -129,7 +133,7 @@ export function AuditPage() {
         <EmptyState title="No audit events" description="Nothing matches these filters." />
       ) : (
         <>
-          <div className="table-scroll">
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -152,7 +156,7 @@ export function AuditPage() {
                     <td>{event.entityType}</td>
                     <td>{event.summary}</td>
                     <td>
-                      <Button variant="secondary" onClick={() => setOpenId(event.id)}>
+                      <Button size="sm" variant="secondary" onClick={() => setOpenId(event.id)}>
                         Metadata
                       </Button>
                     </td>

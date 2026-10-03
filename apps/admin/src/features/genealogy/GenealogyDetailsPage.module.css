@@ -1,0 +1,17 @@
+.chain {
+  padding-left: var(--space-6);
+}
+.chain li {
+  padding: var(--space-3);
+  border-left: 2px solid var(--color-border-default);
+  overflow-wrap: anywhere;
+}
+.chain li > a {
+  margin-right: var(--space-3);
+  font-weight: 600;
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+}
