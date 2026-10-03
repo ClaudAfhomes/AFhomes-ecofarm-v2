@@ -1,3 +1,4 @@
+import { readSearchRows } from './list-search.js';
 /**
  * Phase 15 report scoping - the same effective-authorization model Phase 14
  * analytics uses, factored so every report reuses it instead of re-deriving it.
@@ -56,19 +57,23 @@ export async function scopedSaleIds(
 ): Promise<string[] | null> {
   if (kind === 'global' || kind === 'finance') return null;
   if (kind === 'self') {
-    const { data, error } = await db
-      .from('card_sales')
-      .select('id')
-      .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`);
-    if (error) throw error;
+    const data = await readSearchRows(
+      db
+        .from('card_sales')
+        .select('id')
+        .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`)
+        .order('id'),
+    );
     return ((data ?? []) as Row[]).map((row) => String(row.id));
   }
   if (kind === 'team') {
-    const { data, error } = await db
-      .from('card_sale_hierarchy_snapshots')
-      .select('sale_id')
-      .eq('ancestor_staff_id', principal.userId);
-    if (error) throw error;
+    const data = await readSearchRows(
+      db
+        .from('card_sale_hierarchy_snapshots')
+        .select('sale_id')
+        .eq('ancestor_staff_id', principal.userId)
+        .order('sale_id'),
+    );
     return [...new Set(((data ?? []) as Row[]).map((row) => String(row.sale_id)))];
   }
   return [];
@@ -76,11 +81,14 @@ export async function scopedSaleIds(
 
 /** Staff ids in the caller's current downline (self + active descendants). */
 export async function teamStaffIds(db: Db, principal: AfHomesPrincipal): Promise<string[]> {
-  const { data, error } = await db
-    .from('referral_relationships')
-    .select('subject_staff_id,upline_staff_id')
-    .eq('is_active', true);
-  if (error) throw error;
+  const data = await readSearchRows(
+    db
+      .from('referral_relationships')
+      .select('subject_staff_id,upline_staff_id')
+      .eq('is_active', true)
+      .order('subject_staff_id')
+      .order('upline_staff_id'),
+  );
   const children = new Map<string, string[]>();
   for (const edge of ((data ?? []) as Row[]).filter((row) => row.upline_staff_id)) {
     const parent = String(edge.upline_staff_id);

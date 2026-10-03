@@ -1,6 +1,15 @@
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, QrCode, StatusChip } from '@jad/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  QrCode,
+  SearchField,
+  StatusChip,
+} from '@jad/ui';
 import { buildOstRegistrationUrl } from '@jad/contracts';
 
 import { env } from '../../lib/env';
@@ -18,11 +27,20 @@ import { createReferralCode, getMyReferralCodes, getOstApplications } from './se
  */
 export function OstReferralCodesPage() {
   const client = useQueryClient();
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
   const codes = useQuery({ queryKey: ['ost', 'my-codes'], queryFn: getMyReferralCodes });
   const applications = useQuery({
-    queryKey: ['ost', 'my-applications'],
-    queryFn: () => getOstApplications(),
+    queryKey: ['ost', 'my-applications', settled],
+    queryFn: () => (settled ? getOstApplications('', settled) : getOstApplications()),
   });
+  const visibleCodes = codes.data?.filter(
+    (code) =>
+      !settled ||
+      [code.codeHint, code.isActive ? 'active' : 'inactive'].some((value) =>
+        value.toLowerCase().includes(settled.toLowerCase()),
+      ),
+  );
   const [maxUses, setMaxUses] = useState(10);
   const [expiresInHours, setExpiresInHours] = useState(168);
   const [issued, setIssued] = useState<{ code: string; hint: string } | null>(null);
@@ -120,12 +138,16 @@ export function OstReferralCodesPage() {
       </div>
       {issue.isError ? <ErrorState error={issue.error} onRetry={() => issue.mutate()} /> : null}
 
+      <SearchField label="Search my OST records" value={search} onChange={setSearch} />
       {codes.isPending ? (
         <p role="status">Loading codes…</p>
       ) : codes.isError ? (
         <ErrorState error={codes.error} onRetry={codes.refetch} />
-      ) : codes.data?.length === 0 ? (
-        <EmptyState title="No referral codes" description="Issue your first code above." />
+      ) : visibleCodes?.length === 0 ? (
+        <EmptyState
+          title={settled ? 'No matching records.' : 'No referral codes'}
+          description="Issue your first code above."
+        />
       ) : (
         <div className="table-scroll">
           <table>
@@ -138,7 +160,7 @@ export function OstReferralCodesPage() {
               </tr>
             </thead>
             <tbody>
-              {codes.data?.map((code) => (
+              {visibleCodes?.map((code) => (
                 <tr key={code.id}>
                   <td>{code.codeHint}</td>
                   <td>
@@ -168,7 +190,7 @@ export function OstReferralCodesPage() {
         <ErrorState error={applications.error} onRetry={applications.refetch} />
       ) : applications.data?.length === 0 ? (
         <EmptyState
-          title="No applications yet"
+          title={settled ? 'No matching records.' : 'No applications yet'}
           description="Registrations submitted with your code appear here."
         />
       ) : (

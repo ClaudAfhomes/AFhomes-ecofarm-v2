@@ -1,3 +1,4 @@
+import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
  * AF Homes Phase 8 - OST registration and approval (SM -> OST).
  *
@@ -75,6 +76,22 @@ const toApplication = (row: Record<string, unknown>, sponsorName: string, codeHi
   submittedAt: isoOrNull(row.submitted_at) ?? '',
   reviewedAt: isoOrNull(row.reviewed_at),
 });
+
+async function searchRelated(db: Db, table: string, ids: string[], columns: string) {
+  const data: Record<string, unknown>[] = [];
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    data.push(
+      ...(await readSearchRows(
+        db
+          .from(table)
+          .select(columns)
+          .in('id', ids.slice(offset, offset + 500))
+          .order('id'),
+      )),
+    );
+  }
+  return { data };
+}
 
 const toMember = (row: Record<string, unknown>, sponsorName: string) => ({
   id: row.id,
@@ -171,10 +188,7 @@ async function validateOstSponsor(db: Db, sponsorStaffId: string): Promise<Spons
  * longer qualify, approval is refused with an approval-specific error so an
  * operator knows the application needs sponsor attention, not a resubmit.
  */
-async function validateApprovalSponsor(
-  db: Db,
-  sponsorStaffId: string,
-): Promise<SponsorCheck> {
+async function validateApprovalSponsor(db: Db, sponsorStaffId: string): Promise<SponsorCheck> {
   const checked = await validateOstSponsor(db, sponsorStaffId);
   if (checked.ok) return checked;
   return {
@@ -289,11 +303,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (error) throw error;
       if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
-      const { data: sponsor } = await db
+      const { data: sponsor, error: sponsorError } = await db
         .from('staff_users')
         .select('full_name')
         .eq('id', member.sponsor_staff_id)
         .maybeSingle();
+      if (sponsorError) throw sponsorError;
       const parsed = ostMeSchema.safeParse({
         ostNumber: member.ost_number,
         fullName: member.full_name,
@@ -438,6 +453,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'applications' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.ost_registrations');
       if ('error' in auth) return deny(res, auth);
+      const search = String(req.query.search ?? '').trim();
+      if (search.length > 120) return fail(res, 'VALIDATION_ERROR', 'Search is too long', 400);
       const statusFilter =
         typeof req.query.status === 'string' && req.query.status.length > 0
           ? String(req.query.status)
@@ -450,17 +467,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // nothing of each other's pipeline. Non-sellers with the grant see all.
       if (sellerScoped(auth)) query = query.eq('sponsor_staff_id', auth.userId);
       if (statusFilter) query = query.eq('status', statusFilter);
-      const { data, error } = await query;
-      if (error) throw error;
-      const rows = (data ?? []) as Record<string, unknown>[];
+      const rows = await readSearchRows(query.order('id', { ascending: false }));
       const sponsorIds = [...new Set(rows.map((r) => String(r.sponsor_staff_id)))];
       const codeIds = [...new Set(rows.map((r) => String(r.referral_code_id)))];
       const [{ data: sponsors }, { data: codes }] = await Promise.all([
         sponsorIds.length
-          ? db.from('staff_users').select('id, full_name').in('id', sponsorIds)
+          ? searchRelated(db, 'staff_users', sponsorIds, 'id, full_name')
           : Promise.resolve({ data: [] }),
         codeIds.length
-          ? db.from('referral_codes').select('id, code_hint').in('id', codeIds)
+          ? searchRelated(db, 'referral_codes', codeIds, 'id, code_hint')
           : Promise.resolve({ data: [] }),
       ]);
       const sponsorById = new Map(
@@ -477,13 +492,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       return list(
         res,
-        rows.map((r) =>
-          toApplication(
-            r,
-            sponsorById.get(String(r.sponsor_staff_id)) ?? '',
-            hintById.get(String(r.referral_code_id)) ?? '',
+        rows
+          .map((r) =>
+            toApplication(
+              r,
+              sponsorById.get(String(r.sponsor_staff_id)) ?? '',
+              hintById.get(String(r.referral_code_id)) ?? '',
+            ),
+          )
+          .filter((row) =>
+            matchesSearch(search, [
+              row.applicantName,
+              row.email,
+              row.phone,
+              row.referralCodeHint,
+              row.sponsorName,
+              row.status,
+              row.id,
+            ]),
           ),
-        ),
       );
     }
 
@@ -535,11 +562,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('application_id', id)
           .maybeSingle();
         if (member) {
-          const { data: sponsor } = await db
+          const { data: sponsor, error: sponsorError } = await db
             .from('staff_users')
             .select('full_name')
             .eq('id', member.sponsor_staff_id)
             .maybeSingle();
+          if (sponsorError) throw sponsorError;
           return res.status(200).json(toMember(member, String(sponsor?.full_name ?? '')));
         }
         return fail(res, 'CONFLICT', 'Application is already approved', 409);
@@ -844,11 +872,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           !isSelf
         )
           return fail(res, 'NOT_FOUND', 'OST member not found', 404);
-        const { data: sponsor } = await db
+        const { data: sponsor, error: sponsorError } = await db
           .from('staff_users')
           .select('full_name')
           .eq('id', data.sponsor_staff_id)
           .maybeSingle();
+        if (sponsorError) throw sponsorError;
         return res.status(200).json(toMember(data, String(sponsor?.full_name ?? '')));
       }
 
@@ -868,22 +897,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .maybeSingle();
         if (error) throw error;
         if (!data) return list(res, []);
-        const { data: sponsor } = await db
+        const { data: sponsor, error: sponsorError } = await db
           .from('staff_users')
           .select('full_name')
           .eq('id', data.sponsor_staff_id)
           .maybeSingle();
-        return list(res, [toMember(data, String(sponsor?.full_name ?? ''))]);
+        if (sponsorError) throw sponsorError;
+        const search = String(req.query.search ?? '').trim();
+        if (search.length > 120) return fail(res, 'VALIDATION_ERROR', 'Search is too long', 400);
+        const row = toMember(data, String(sponsor?.full_name ?? ''));
+        return list(
+          res,
+          matchesSearch(search, [
+            row.fullName,
+            row.email,
+            row.phone,
+            row.ostNumber,
+            row.sponsorName,
+            row.status,
+          ])
+            ? [row]
+            : [],
+        );
       }
+      const search = String(req.query.search ?? '').trim();
+      if (search.length > 120) return fail(res, 'VALIDATION_ERROR', 'Search is too long', 400);
       let query = db.from('ost_members').select('*').order('created_at', { ascending: false });
       if (principal.roleSlug === 'sales_manager')
         query = query.eq('sponsor_staff_id', principal.userId);
-      const { data, error } = await query;
-      if (error) throw error;
-      const rows = (data ?? []) as Record<string, unknown>[];
+      const rows = await readSearchRows(query.order('id', { ascending: false }));
       const sponsorIds = [...new Set(rows.map((r) => String(r.sponsor_staff_id)))];
       const { data: sponsors } = sponsorIds.length
-        ? await db.from('staff_users').select('id, full_name').in('id', sponsorIds)
+        ? await searchRelated(db, 'staff_users', sponsorIds, 'id, full_name')
         : { data: [] as unknown[] };
       const byId = new Map(
         ((sponsors ?? []) as Record<string, unknown>[]).map((s) => [
@@ -893,7 +938,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       return list(
         res,
-        rows.map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? '')),
+        rows
+          .map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? ''))
+          .filter((row) =>
+            matchesSearch(search, [
+              row.fullName,
+              row.email,
+              row.phone,
+              row.ostNumber,
+              row.sponsorName,
+              row.status,
+            ]),
+          ),
       );
     }
 
@@ -901,12 +957,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'referral-codes/me' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
-      const { data, error } = await db
-        .from('referral_codes')
-        .select('id, code_hint, expires_at, max_uses, use_count, is_active, created_at')
-        .eq('sponsor_staff_id', auth.userId)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
+      const data = await readSearchRows(
+        db
+          .from('referral_codes')
+          .select('id, code_hint, expires_at, max_uses, use_count, is_active, created_at')
+          .eq('sponsor_staff_id', auth.userId)
+          .order('created_at', { ascending: false })
+          .order('id'),
+      );
       const webBase = process.env.AFHOMES_WEB_URL ?? '';
       return list(
         res,

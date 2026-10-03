@@ -689,13 +689,19 @@ export class FakeSupabase {
       // the kind of gap that lets a test pass without testing anything.
       const [embedTable, constraint] = target.split('!');
       const byName = (l: FakeLink) =>
-        constraint && constraint !== 'inner' ? `${embedTable}_${l.fk}_fkey` === constraint : false;
+        constraint && constraint !== 'inner'
+          ? l.child === parent &&
+            l.parent === embedTable &&
+            `${l.child}_${l.fk}_fkey` === constraint
+          : false;
       const asParent = (l: FakeLink) =>
         constraint && constraint !== 'inner'
           ? false
-          : l.parent === embedTable && row[l.fk] !== undefined;
+          : l.child === parent && l.parent === embedTable && row[l.fk] !== undefined;
       const asChild = (l: FakeLink) =>
-        constraint && constraint !== 'inner' ? false : l.child === embedTable;
+        constraint && constraint !== 'inner'
+          ? false
+          : l.parent === parent && l.child === embedTable;
       const link = this.links.find((l) => byName(l) || asParent(l) || asChild(l));
       if (!link) continue;
       const parentSide = link.parent === embedTable;

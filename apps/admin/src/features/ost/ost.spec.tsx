@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OstApplication, OstMember, OstReferralCodeRecord } from '@jad/contracts';
 import { Route, Routes } from 'react-router';
@@ -282,5 +282,58 @@ describe('OST members', () => {
     mockedGetOstMembers.mockResolvedValue([]);
     renderWithProviders(<OstMembersPage />, { user: STAFF });
     expect(await screen.findByText('No OST members')).toBeInTheDocument();
+  });
+});
+
+describe('live OST search', () => {
+  it('debounces applications, preserves status, and clears to defaults', async () => {
+    mockedGetOstApplications.mockResolvedValue([APP]);
+    renderWithProviders(<OstApplicationsPage />, { user: STAFF });
+    await screen.findByText(APP.applicantName);
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'submitted' } });
+    await waitFor(() => expect(mockedGetOstApplications).toHaveBeenLastCalledWith('submitted'));
+    const input = screen.getByLabelText('Search OST applications');
+    const count = mockedGetOstApplications.mock.calls.length;
+    fireEvent.change(input, { target: { value: 'o' } });
+    fireEvent.change(input, { target: { value: 'os' } });
+    fireEvent.change(input, { target: { value: 'oscar' } });
+    expect(mockedGetOstApplications.mock.calls.length).toBe(count);
+    await waitFor(() =>
+      expect(mockedGetOstApplications).toHaveBeenLastCalledWith('submitted', 'oscar'),
+    );
+    expect(mockedGetOstApplications.mock.calls.length).toBe(count + 1);
+    fireEvent.change(input, { target: { value: '' } });
+    await waitFor(() => expect(mockedGetOstApplications).toHaveBeenLastCalledWith('submitted'));
+  });
+  it('isolates a late previous application response from the current query', async () => {
+    let finish: (rows: OstApplication[]) => void = () => {};
+    mockedGetOstApplications.mockImplementation((_status, search) =>
+      search === 'old'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(search === 'new' ? [] : [APP]),
+    );
+    renderWithProviders(<OstApplicationsPage />, { user: STAFF });
+    await screen.findByText(APP.applicantName);
+    const input = screen.getByLabelText('Search OST applications');
+    fireEvent.change(input, { target: { value: 'old' } });
+    await waitFor(() => expect(mockedGetOstApplications).toHaveBeenLastCalledWith('', 'old'));
+    fireEvent.change(input, { target: { value: 'new' } });
+    await screen.findByText('No matching records.');
+    finish([APP]);
+    await waitFor(() => expect(screen.queryByText(APP.applicantName)).not.toBeInTheDocument());
+    expect(screen.getByText('No matching records.')).toBeInTheDocument();
+  });
+  it('searches members live and restores defaults when cleared', async () => {
+    mockedGetOstMembers.mockImplementation((search) => Promise.resolve(search ? [] : [MEMBER]));
+    renderWithProviders(<OstMembersPage />, { user: STAFF });
+    await screen.findByText(MEMBER.fullName);
+    const input = screen.getByLabelText('Search OST members');
+    fireEvent.change(input, { target: { value: 'missing' } });
+    await screen.findByText('No matching records.');
+    expect(mockedGetOstMembers).toHaveBeenLastCalledWith('missing');
+    fireEvent.change(input, { target: { value: '' } });
+    await screen.findByText(MEMBER.fullName);
   });
 });

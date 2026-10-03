@@ -1,3 +1,4 @@
+import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
  * Phase 15 Reports and Audit Center.
  *
@@ -169,7 +170,7 @@ async function buildSales(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
   let query = db.from('card_sales').select('*', { count: 'exact' }).eq('origin', 'normal');
-  if (saleIds) query = query.in('id', saleIds.length ? saleIds : ['__none__']);
+  if (saleIds) query = query.in('id', saleIds.length ? saleIds : []);
   if (q.status) query = query.eq('status', q.status);
   if (q.planId) query = query.eq('plan_id', q.planId);
   if (q.seller) query = query.or(`seller_staff_id.eq.${q.seller},seller_ost_id.eq.${q.seller}`);
@@ -326,7 +327,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
       .from('card_sales')
       .select('id,customer_id')
       .eq('origin', 'normal')
-      .in('id', saleIds.length ? saleIds : ['__none__']);
+      .in('id', saleIds.length ? saleIds : []);
     const { data: sdata, error: serror } = await sq;
     if (serror) throw serror;
     scopedCustomerIds = new Set(((sdata ?? []) as Row[]).map((row) => String(row.customer_id)));
@@ -335,7 +336,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
       const { data: referred, error: rerror } = await db
         .from('customers')
         .select('id')
-        .in('referred_by_staff_id', team.length ? team : ['__none__']);
+        .in('referred_by_staff_id', team.length ? team : []);
       if (rerror) throw rerror;
       for (const row of (referred ?? []) as Row[]) scopedCustomerIds.add(String(row.id));
     }
@@ -343,7 +344,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
   let query = db.from('customers').select('*', { count: 'exact' });
   if (scopedCustomerIds) {
     const ids = [...scopedCustomerIds];
-    query = query.in('id', ids.length ? ids : ['__none__']);
+    query = query.in('id', ids.length ? ids : []);
   }
   if (q.status) query = query.eq('status', q.status);
   if (q.search) {
@@ -374,7 +375,7 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
             .from('card_sales')
             .select('customer_id,seller_staff_id,seller_ost_id')
             .eq('origin', 'normal')
-            .in('id', saleIds.length ? saleIds : ['__none__']);
+            .in('id', saleIds.length ? saleIds : []);
           if (serror) throw serror;
           return (sdata ?? []) as Row[];
         })()
@@ -442,20 +443,27 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
 async function buildPayments(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
-  const normalSales = await db.from('card_sales').select('id').eq('origin', 'normal');
-  if (normalSales.error) throw normalSales.error;
-  const normalIds = ((normalSales.data ?? []) as Row[]).map((sale) => String(sale.id));
+  let normalQuery = db.from('card_sales').select('id').eq('origin', 'normal');
+  if (q.planId) normalQuery = normalQuery.eq('plan_id', q.planId);
+  if (q.seller)
+    normalQuery = normalQuery.or(`seller_staff_id.eq.${q.seller},seller_ost_id.eq.${q.seller}`);
+  const normalSales = await readSearchRows(normalQuery.order('id'));
+  const normalIds = normalSales.map((sale) => String(sale.id));
   let query = db
     .from('payments')
     .select('*', { count: 'exact' })
-    .in('sale_id', normalIds.length ? normalIds : ['__none__']);
-  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : ['__none__']);
+    .in('sale_id', normalIds.length ? normalIds : []);
+  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : []);
   if (q.status) query = query.eq('status', q.status);
   if (window.from) query = query.gte('recorded_at', window.from);
   if (window.to) query = query.lte('recorded_at', window.to);
-  const { data, error, count } = await query.order('recorded_at', { ascending: false });
-  if (error) throw error;
-  const payments = ((data ?? []) as Row[]).filter((row) =>
+  const data =
+    normalIds.length === 0 || saleIds?.length === 0
+      ? []
+      : await readSearchRows(
+          query.order('recorded_at', { ascending: false }).order('id', { ascending: false }),
+        );
+  let payments = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(row.recorded_at, window.from, window.to),
   );
   const saleIdsSeen = [...new Set(payments.map((row) => String(row.sale_id)))];
@@ -465,11 +473,28 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
   const verifierIds = [...new Set(payments.map((row) => String(row.verified_by ?? '')))].filter(
     Boolean,
   );
-  const [sales, customers, staff] = await Promise.all([
-    mapById(db, 'card_sales', saleIdsSeen, 'id,sale_number,customer_id'),
-    mapById(db, 'customers', customerIds, 'id,first_name,middle_name,last_name,suffix'),
+  const sales = await mapById(db, 'card_sales', saleIdsSeen, 'id,sale_number,customer_id');
+  customerIds.push(...[...sales.values()].map((s) => String(s.customer_id)));
+  const [customers, staff] = await Promise.all([
+    mapById(
+      db,
+      'customers',
+      customerIds,
+      'id,first_name,middle_name,last_name,suffix,customer_number',
+    ),
     mapById(db, 'staff_users', verifierIds, 'id,full_name'),
   ]);
+  payments = payments.filter((row) => {
+    const sale = sales.get(String(row.sale_id));
+    const customer = customers.get(String(row.customer_id ?? sale?.customer_id ?? ''));
+    return matchesSearch(q.search, [
+      customer && displayName(customer),
+      customer?.customer_number,
+      sale?.sale_number,
+      row.reference,
+      row.status,
+    ]);
+  });
   const rows = payments.map((row) => {
     const sale = sales.get(String(row.sale_id));
     const customer = customers.get(String(row.customer_id ?? sale?.customer_id ?? ''));
@@ -492,7 +517,7 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
   const rejected = sumMoney(payments.filter((r) => r.status === 'rejected').map((r) => r.amount));
   return {
     rows,
-    total: count ?? rows.length,
+    total: rows.length,
     summary: {
       payments: rows.length,
       verifiedTotal: verified,
@@ -523,7 +548,7 @@ async function buildMemberships(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
   let query = db.from('memberships').select('*', { count: 'exact' });
-  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : ['__none__']);
+  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : []);
   if (q.status) query = query.eq('status', q.status);
   if (q.planId) query = query.eq('product_id', q.planId);
   if (q.search) query = query.ilike('membership_number', `%${q.search.replace(/[%_]/g, '')}%`);
@@ -580,15 +605,16 @@ async function buildCommissions(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
   let query = db.from('commissions').select('*', { count: 'exact' });
-  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : ['__none__']);
+  if (saleIds) query = query.in('sale_id', saleIds.length ? saleIds : []);
   if (q.status) query = query.eq('status', q.status);
   if (q.seller) {
     query = query.or(`beneficiary_staff_id.eq.${q.seller},beneficiary_ost_id.eq.${q.seller}`);
   }
   if (window.from) query = query.gte('created_at', window.from);
   if (window.to) query = query.lte('created_at', window.to);
-  const { data, error, count } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
+  const data = await readSearchRows(
+    query.order('created_at', { ascending: false }).order('id', { ascending: false }),
+  );
   const commissions = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(row.created_at, window.from, window.to),
   );
@@ -604,24 +630,28 @@ async function buildCommissions(ctx: Ctx): Promise<ReportData> {
     mapById(db, 'staff_users', staffIds, 'id,full_name'),
     mapById(db, 'ost_members', ostIds, 'id,full_name'),
   ]);
-  const rows = commissions.map((row) => ({
-    id: row.id,
-    saleNumber: sales.get(String(row.sale_id))?.sale_number ?? null,
-    beneficiary:
-      staffName(staff, row.beneficiary_staff_id) ??
-      (typeof row.beneficiary_ost_id === 'string'
-        ? (ost.get(row.beneficiary_ost_id)?.full_name ?? 'OST member')
-        : 'Unknown'),
-    beneficiaryType: row.beneficiary_type ?? null,
-    basePrice: row.basis_amount_snapshot ?? '0.00',
-    rate: row.rate_snapshot ?? null,
-    amount: row.amount ?? '0.00',
-    status: row.status,
-    createdAt: row.created_at,
-    qualifiedAt: isoOrNull(row.qualified_at),
-    earnedAt: isoOrNull(row.earned_at),
-    paidAt: isoOrNull(row.paid_at),
-  }));
+  const rows = commissions
+    .map((row) => ({
+      id: row.id,
+      saleNumber: sales.get(String(row.sale_id))?.sale_number ?? null,
+      beneficiary:
+        staffName(staff, row.beneficiary_staff_id) ??
+        (typeof row.beneficiary_ost_id === 'string'
+          ? (ost.get(row.beneficiary_ost_id)?.full_name ?? 'OST member')
+          : 'Unknown'),
+      beneficiaryType: row.beneficiary_type ?? null,
+      basePrice: row.basis_amount_snapshot ?? '0.00',
+      rate: row.rate_snapshot ?? null,
+      amount: row.amount ?? '0.00',
+      status: row.status,
+      createdAt: row.created_at,
+      qualifiedAt: isoOrNull(row.qualified_at),
+      earnedAt: isoOrNull(row.earned_at),
+      paidAt: isoOrNull(row.paid_at),
+    }))
+    .filter((row) =>
+      matchesSearch(q.search, [row.beneficiary, row.saleNumber, row.id, row.status]),
+    );
   const byStatus: Record<string, number> = {};
   const amountByStatus: Record<string, bigint> = {};
   for (const row of rows) {
@@ -633,7 +663,7 @@ async function buildCommissions(ctx: Ctx): Promise<ReportData> {
   for (const [status, cents] of Object.entries(amountByStatus)) amounts[status] = moneyOf(cents);
   return {
     rows,
-    total: count ?? rows.length,
+    total: rows.length,
     summary: { commissions: rows.length, byStatus, amountByStatus: amounts },
     columns: [
       { key: 'id', label: 'Commission ID', type: 'text' },
@@ -847,17 +877,39 @@ async function buildGenealogy(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const sellerRoles = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'];
   const [staffRes, assignRes, rolesRes, relsRes, ostRes, salesRes, snapsRes] = await Promise.all([
-    db.from('staff_users').select('id,full_name,status'),
-    db.from('staff_role_assignments').select('staff_id,role_id'),
-    db.from('roles').select('id,slug').eq('is_active', true),
-    db
-      .from('referral_relationships')
-      .select('subject_staff_id,upline_staff_id')
-      .eq('is_active', true),
-    db.from('ost_members').select('id,status'),
-    db.from('card_sales').select('id,cash_price_snapshot,created_at').eq('origin', 'normal'),
-    db.from('card_sale_hierarchy_snapshots').select('sale_id,ancestor_staff_id'),
-  ]);
+    readSearchRows(db.from('staff_users').select('id,full_name,status').order('id')),
+    readSearchRows(
+      db
+        .from('staff_role_assignments')
+        .select('staff_id,role_id')
+        .order('staff_id')
+        .order('role_id'),
+    ),
+    readSearchRows(db.from('roles').select('id,slug').eq('is_active', true).order('id')),
+    readSearchRows(
+      db
+        .from('referral_relationships')
+        .select('subject_staff_id,upline_staff_id')
+        .eq('is_active', true)
+        .order('subject_staff_id')
+        .order('upline_staff_id'),
+    ),
+    readSearchRows(db.from('ost_members').select('id,status').order('id')),
+    readSearchRows(
+      db
+        .from('card_sales')
+        .select('id,cash_price_snapshot,created_at')
+        .eq('origin', 'normal')
+        .order('id'),
+    ),
+    readSearchRows(
+      db
+        .from('card_sale_hierarchy_snapshots')
+        .select('sale_id,ancestor_staff_id')
+        .order('sale_id')
+        .order('ancestor_staff_id'),
+    ),
+  ]).then((results) => results.map((data) => ({ data, error: null })));
   for (const res of [staffRes, assignRes, rolesRes, relsRes, ostRes, salesRes, snapsRes]) {
     if (res.error) throw res.error;
   }
@@ -952,6 +1004,9 @@ async function buildGenealogy(ctx: Ctx): Promise<ReportData> {
         ostStatus: ostById.get(id) ?? null,
       };
     });
+  nodes = nodes.filter((node) =>
+    matchesSearch(q.search, [node.seller, node.sellerId, node.role, node.upline]),
+  );
   if (q.role) nodes = nodes.filter((node) => node.role === q.role);
   if (q.seller) nodes = nodes.filter((node) => node.sellerId === q.seller);
   if (q.status) nodes = nodes.filter((node) => node.status === q.status);
@@ -1012,8 +1067,9 @@ async function buildOst(ctx: Ctx): Promise<ReportData> {
     if (q.seller) query = query.eq('sponsor_staff_id', q.seller);
     if (window.from) query = query.gte('submitted_at', window.from);
     if (window.to) query = query.lte('submitted_at', window.to);
-    const { data, error, count } = await query.order('submitted_at', { ascending: false });
-    if (error) throw error;
+    const data = await readSearchRows(
+      query.order('submitted_at', { ascending: false }).order('id', { ascending: false }),
+    );
     const apps = ((data ?? []) as Row[]).filter((row) =>
       inReportWindow(pickDate(row, 'submitted_at', 'created_at'), window.from, window.to),
     );
@@ -1027,25 +1083,29 @@ async function buildOst(ctx: Ctx): Promise<ReportData> {
       mapById(db, 'staff_users', sponsorIds, 'id,full_name'),
       mapById(db, 'staff_users', reviewerIds, 'id,full_name'),
     ]);
-    const rows = apps.map((row) => ({
-      applicant:
-        [row.first_name, row.middle_name, row.last_name]
-          .filter((p) => typeof p === 'string' && p)
-          .join(' ') || 'Unknown',
-      email: ctx.masked ? maskEmail(row.email) : (row.email ?? null),
-      phone: ctx.masked ? maskPhone(row.phone) : (row.phone ?? null),
-      sponsor: staffName(sponsors, row.sponsor_staff_id),
-      status: row.status,
-      submittedAt: isoOrNull(row.submitted_at),
-      reviewedAt: isoOrNull(row.reviewed_at),
-      reviewer: staffName(reviewers, row.reviewed_by),
-      reviewNotes: row.review_notes ?? null,
-    }));
+    const rows = apps
+      .map((row) => ({
+        applicant:
+          [row.first_name, row.middle_name, row.last_name]
+            .filter((p) => typeof p === 'string' && p)
+            .join(' ') || 'Unknown',
+        email: ctx.masked ? maskEmail(row.email) : (row.email ?? null),
+        phone: ctx.masked ? maskPhone(row.phone) : (row.phone ?? null),
+        sponsor: staffName(sponsors, row.sponsor_staff_id),
+        status: row.status,
+        submittedAt: isoOrNull(row.submitted_at),
+        reviewedAt: isoOrNull(row.reviewed_at),
+        reviewer: staffName(reviewers, row.reviewed_by),
+        reviewNotes: row.review_notes ?? null,
+      }))
+      .filter((row) =>
+        matchesSearch(q.search, [row.applicant, row.sponsor, row.email, row.phone, row.status]),
+      );
     const byStatus: Record<string, number> = {};
     for (const row of rows) byStatus[String(row.status)] = (byStatus[String(row.status)] ?? 0) + 1;
     return {
       rows,
-      total: count ?? rows.length,
+      total: rows.length,
       summary: { applications: rows.length, byStatus },
       columns: [
         { key: 'applicant', label: 'Applicant', type: 'text' },
@@ -1074,8 +1134,9 @@ async function buildOst(ctx: Ctx): Promise<ReportData> {
     if (ownError) throw ownError;
     const selfRow = ((own ?? []) as Row[]).length ? [principal.userId] : [];
     if (q.status) query = query.eq('status', q.status);
-    const { data, error, count } = await query.order('approved_at', { ascending: false });
-    if (error) throw error;
+    const data = await readSearchRows(
+      query.order('approved_at', { ascending: false }).order('id', { ascending: false }),
+    );
     const scoped = ((data ?? []) as Row[]).filter(
       (row) =>
         String(row.sponsor_staff_id) === principal.userId || selfRow.includes(String(row.id)),
@@ -1083,21 +1144,22 @@ async function buildOst(ctx: Ctx): Promise<ReportData> {
     const members = scoped.filter((row) =>
       inReportWindow(pickDate(row, 'approved_at', 'created_at'), window.from, window.to),
     );
-    return ostMemberData(db, ctx, members, members.length);
+    return ostMemberData(db, ctx, members);
   }
   if (q.status) query = query.eq('status', q.status);
   if (q.seller) query = query.eq('sponsor_staff_id', q.seller);
   if (window.from) query = query.gte('approved_at', window.from);
   if (window.to) query = query.lte('approved_at', window.to);
-  const { data, error, count } = await query.order('approved_at', { ascending: false });
-  if (error) throw error;
+  const data = await readSearchRows(
+    query.order('approved_at', { ascending: false }).order('id', { ascending: false }),
+  );
   const members = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(pickDate(row, 'approved_at', 'created_at'), window.from, window.to),
   );
-  return ostMemberData(db, ctx, members, count ?? members.length);
+  return ostMemberData(db, ctx, members);
 }
 
-async function ostMemberData(db: Db, ctx: Ctx, members: Row[], total: number): Promise<ReportData> {
+async function ostMemberData(db: Db, ctx: Ctx, members: Row[]): Promise<ReportData> {
   const sponsorIds = [...new Set(members.map((row) => String(row.sponsor_staff_id ?? '')))].filter(
     Boolean,
   );
@@ -1108,19 +1170,31 @@ async function ostMemberData(db: Db, ctx: Ctx, members: Row[], total: number): P
     members.map((row) => String(row.id)),
     'id,status',
   );
-  const rows = members.map((row) => ({
-    ostNumber: row.ost_number ?? null,
-    name: String(row.full_name ?? 'Unknown'),
-    email: ctx.masked ? maskEmail(row.email) : (row.email ?? null),
-    phone: ctx.masked ? maskPhone(row.phone) : (row.phone ?? null),
-    sponsor: staffName(sponsors, row.sponsor_staff_id),
-    staffStatus: staffStatus.get(String(row.id))?.status ?? null,
-    ostStatus: row.status ?? null,
-    approvedAt: isoOrNull(row.approved_at),
-  }));
+  const rows = members
+    .map((row) => ({
+      ostNumber: row.ost_number ?? null,
+      name: String(row.full_name ?? 'Unknown'),
+      email: ctx.masked ? maskEmail(row.email) : (row.email ?? null),
+      phone: ctx.masked ? maskPhone(row.phone) : (row.phone ?? null),
+      sponsor: staffName(sponsors, row.sponsor_staff_id),
+      staffStatus: staffStatus.get(String(row.id))?.status ?? null,
+      ostStatus: row.status ?? null,
+      approvedAt: isoOrNull(row.approved_at),
+    }))
+    .filter((row) =>
+      matchesSearch(ctx.q.search, [
+        row.ostNumber,
+        row.name,
+        row.email,
+        row.phone,
+        row.sponsor,
+        row.ostStatus,
+        row.staffStatus,
+      ]),
+    );
   return {
     rows,
-    total,
+    total: rows.length,
     summary: { members: rows.length },
     columns: [
       { key: 'ostNumber', label: 'OST number', type: 'text' },
@@ -1141,33 +1215,32 @@ async function buildPoints(ctx: Ctx): Promise<ReportData> {
   const saleIds = await scopedSaleIds(db, principal, kind);
   let membershipIds: string[] | null = null;
   if (saleIds) {
-    const { data, error } = await db
-      .from('memberships')
-      .select('id')
-      .in('sale_id', saleIds.length ? saleIds : ['__none__']);
-    if (error) throw error;
+    const data = await readSearchRows(
+      db
+        .from('memberships')
+        .select('id')
+        .in('sale_id', saleIds.length ? saleIds : [])
+        .order('id'),
+    );
     membershipIds = ((data ?? []) as Row[]).map((row) => String(row.id));
   }
   let accountQuery = db.from('points_accounts').select('id,membership_id');
   if (membershipIds) {
-    accountQuery = accountQuery.in(
-      'membership_id',
-      membershipIds.length ? membershipIds : ['__none__'],
-    );
+    accountQuery = accountQuery.in('membership_id', membershipIds.length ? membershipIds : []);
   }
-  const { data: accountData, error: accountError } = await accountQuery;
-  if (accountError) throw accountError;
+  const accountData = await readSearchRows(accountQuery.order('id'));
   const accountIds = ((accountData ?? []) as Row[]).map((row) => String(row.id));
   const accountToMembership = new Map<string, string>(
     ((accountData ?? []) as Row[]).map((row) => [String(row.id), String(row.membership_id)]),
   );
   let query = db.from('points_ledger').select('*', { count: 'exact' });
-  if (membershipIds) query = query.in('account_id', accountIds.length ? accountIds : ['__none__']);
+  if (membershipIds) query = query.in('account_id', accountIds.length ? accountIds : []);
   if (q.status) query = query.eq('entry_type', q.status);
   if (window.from) query = query.gte('created_at', window.from);
   if (window.to) query = query.lte('created_at', window.to);
-  const { data, error, count } = await query.order('created_at', { ascending: false });
-  if (error) throw error;
+  const data = await readSearchRows(
+    query.order('created_at', { ascending: false }).order('id', { ascending: false }),
+  );
   const entries = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(row.created_at, window.from, window.to),
   );
@@ -1189,28 +1262,32 @@ async function buildPoints(ctx: Ctx): Promise<ReportData> {
     customerIds,
     'id,first_name,middle_name,last_name,suffix',
   );
-  const rows = entries.map((row) => {
-    const membershipId = accountToMembership.get(String(row.account_id)) ?? null;
-    const membership = membershipId ? (memberRows.get(membershipId) ?? null) : null;
-    const customer = membership ? customers.get(String(membership.customer_id)) : undefined;
-    return {
-      date: row.created_at,
-      membershipNumber: membership?.membership_number ?? null,
-      customer: customer ? displayName(customer) : null,
-      entryType: row.entry_type,
-      amount: Number(row.amount ?? 0),
-      balanceAfter: Number(row.balance_after ?? 0),
-      reference: [row.reference_type, row.reference_id].filter(Boolean).join(':') || null,
-      reason: row.reason ?? null,
-    };
-  });
+  const rows = entries
+    .map((row) => {
+      const membershipId = accountToMembership.get(String(row.account_id)) ?? null;
+      const membership = membershipId ? (memberRows.get(membershipId) ?? null) : null;
+      const customer = membership ? customers.get(String(membership.customer_id)) : undefined;
+      return {
+        date: row.created_at,
+        membershipNumber: membership?.membership_number ?? null,
+        customer: customer ? displayName(customer) : null,
+        entryType: row.entry_type,
+        amount: Number(row.amount ?? 0),
+        balanceAfter: Number(row.balance_after ?? 0),
+        reference: [row.reference_type, row.reference_id].filter(Boolean).join(':') || null,
+        reason: row.reason ?? null,
+      };
+    })
+    .filter((row) =>
+      matchesSearch(q.search, [row.customer, row.membershipNumber, row.reference, row.entryType]),
+    );
   const net = rows.reduce((sum, row) => sum + Number(row.amount), 0);
   const byType: Record<string, number> = {};
   for (const row of rows)
     byType[String(row.entryType)] = (byType[String(row.entryType)] ?? 0) + Number(row.amount);
   return {
     rows,
-    total: count ?? rows.length,
+    total: rows.length,
     summary: { entries: rows.length, netPoints: net, byType },
     columns: [
       { key: 'date', label: 'Date', type: 'date' },
@@ -1235,6 +1312,7 @@ async function buildPlans(ctx: Ctx): Promise<ReportData> {
   const { data, error } = await db.from('card_plans').select('*');
   if (error) throw error;
   let plans = (data ?? []) as Row[];
+  plans = plans.filter((row) => matchesSearch(q.search, [row.name, row.code]));
   if (q.status === 'active') plans = plans.filter((row) => row.is_active === true);
   if (q.status === 'inactive') plans = plans.filter((row) => row.is_active !== true);
   const saleIds = await scopedSaleIds(db, principal, kind);
@@ -1242,9 +1320,15 @@ async function buildPlans(ctx: Ctx): Promise<ReportData> {
     .from('card_sales')
     .select('plan_id,cash_price_snapshot')
     .eq('origin', 'normal');
-  if (saleIds) saleQuery = saleQuery.in('id', saleIds.length ? saleIds : ['__none__']);
-  const { data: salesData, error: salesError } = await saleQuery;
-  if (salesError) throw salesError;
+  if (saleIds) saleQuery = saleQuery.in('id', saleIds.length ? saleIds : []);
+  const salesData = await readSearchRows(
+    saleQuery
+      .in(
+        'plan_id',
+        plans.map((row) => String(row.id)),
+      )
+      .order('id'),
+  );
   const countByPlan = new Map<string, number>();
   const valueByPlan = new Map<string, bigint>();
   for (const sale of (salesData ?? []) as Row[]) {

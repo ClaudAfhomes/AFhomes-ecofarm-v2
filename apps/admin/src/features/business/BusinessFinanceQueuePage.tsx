@@ -1,16 +1,27 @@
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { paymentSchemeLabel } from '@jad/contracts';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  SearchField,
+  StatusChip,
+} from '@jad/ui';
 import type { PaymentType } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
+import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney } from './format';
 import {
-  SPOT_CASH_LABEL,
-  SPOT_CASH_TONE,
-  formatMoney,
-} from './format';
-import { getFinanceQueue, getSalePayments, getSaleSummary, recordPayment, verifyPayment } from './services';
+  getFinanceQueue,
+  getSalePayments,
+  getSaleSummary,
+  recordPayment,
+  verifyPayment,
+} from './services';
 
 /**
  * Finance payment queue.
@@ -21,9 +32,11 @@ import { getFinanceQueue, getSalePayments, getSaleSummary, recordPayment, verify
  */
 export function BusinessFinanceQueuePage() {
   const client = useQueryClient();
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
   const query = useQuery({
-    queryKey: ['business', 'queue', 'finance'],
-    queryFn: getFinanceQueue,
+    queryKey: ['business', 'queue', 'finance', settled],
+    queryFn: () => (settled ? getFinanceQueue(settled) : getFinanceQueue()),
     // Money moves from other sessions too: poll the queue (same-session
     // writes invalidate instantly).
     refetchInterval: 15_000,
@@ -44,12 +57,16 @@ export function BusinessFinanceQueuePage() {
         description="Sales awaiting payment handling. Balances are computed from payment records, never entered by hand."
       />
 
+      <SearchField label="Search payments" value={search} onChange={setSearch} />
       {query.isPending ? (
         <p role="status">Loading queue…</p>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data?.length === 0 ? (
-        <EmptyState title="Nothing to handle" description="No sale is awaiting payment." />
+        <EmptyState
+          title={settled ? 'No matching records.' : 'Nothing to handle'}
+          description="No sale is awaiting payment."
+        />
       ) : (
         <div className="table-scroll">
           <table>
@@ -90,7 +107,9 @@ export function BusinessFinanceQueuePage() {
                       : '—'}
                   </td>
                   <td>{item.downPaymentSatisfied ? 'Yes' : 'No'}</td>
-                  <td>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</td>
+                  <td>
+                    {item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}
+                  </td>
                   <td>
                     <StatusChip
                       label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
@@ -113,7 +132,9 @@ export function BusinessFinanceQueuePage() {
         </div>
       )}
 
-      {paying ? <RecordPaymentDialog saleId={paying} onDone={refresh} onClose={() => setPaying(null)} /> : null}
+      {paying ? (
+        <RecordPaymentDialog saleId={paying} onDone={refresh} onClose={() => setPaying(null)} />
+      ) : null}
       {reviewing ? (
         <VerifyDialog saleId={reviewing} onDone={refresh} onClose={() => setReviewing(null)} />
       ) : null}
@@ -169,8 +190,8 @@ function RecordPaymentDialog({
     >
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
-          The payment is saved as <strong>recorded</strong> and does not count toward the price until it
-          is verified. The resulting balance is recalculated on the server.
+          The payment is saved as <strong>recorded</strong> and does not count toward the price
+          until it is verified. The resulting balance is recalculated on the server.
         </p>
         {summary.data ? (
           <dl
@@ -257,7 +278,11 @@ function VerifyDialog({
   const pending = payments.data?.filter((p) => p.status === 'recorded') ?? [];
 
   const decide = useMutation({
-    mutationFn: (input: { paymentId: string; decision: 'verified' | 'rejected'; reason?: string }) =>
+    mutationFn: (input: {
+      paymentId: string;
+      decision: 'verified' | 'rejected';
+      reason?: string;
+    }) =>
       verifyPayment(input.paymentId, {
         decision: input.decision,
         ...(input.reason ? { reason: input.reason } : {}),
@@ -266,13 +291,21 @@ function VerifyDialog({
   });
 
   return (
-    <Dialog open onClose={onClose} title="Verify a payment" footer={<Button onClick={onClose}>Done</Button>}>
+    <Dialog
+      open
+      onClose={onClose}
+      title="Verify a payment"
+      footer={<Button onClick={onClose}>Done</Button>}
+    >
       <div style={{ display: 'grid', gap: 12 }}>
         {pending.length === 0 ? (
           <p>No payment is awaiting verification.</p>
         ) : (
           pending.map((payment) => (
-            <div key={payment.id} style={{ borderTop: '1px solid var(--color-border, #ddd)', paddingTop: 8 }}>
+            <div
+              key={payment.id}
+              style={{ borderTop: '1px solid var(--color-border, #ddd)', paddingTop: 8 }}
+            >
               <strong>{formatMoney(payment.amount)}</strong> — {payment.method}{' '}
               {payment.reference ? `(${payment.reference})` : ''}
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>

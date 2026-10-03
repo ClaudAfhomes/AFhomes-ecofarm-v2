@@ -1,3 +1,4 @@
+import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
  * AF Homes operational queues: Finance payment handling and activation readiness.
  *
@@ -24,6 +25,7 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 const parseListQuery = (req: VercelRequest) =>
   z
     .object({
+      search: z.string().trim().max(120).optional(),
       limit: z.coerce.number().int().min(1).max(200).default(50),
       offset: z.coerce.number().int().min(0).default(0),
     })
@@ -94,16 +96,38 @@ function shape(row: QueueRow) {
   };
 }
 
-async function buildQueue(db: Db, statuses: string[], limit: number, offset: number) {
-  const { data, error, count } = await db
+async function buildQueue(
+  db: Db,
+  statuses: string[],
+  limit: number,
+  offset: number,
+  search?: string,
+) {
+  const query = db
     .from('card_sales')
     .select(SELECT_QUEUE, { count: 'exact' })
     .in('status', statuses)
     .order('created_at', { ascending: true })
-    .range(offset, offset + limit - 1);
-  if (error) throw error;
+    .order('id');
+  const all = await readSearchRows(query);
+  const filtered = all.filter((row) => {
+    const customer = row.customers;
+    const product = row.card_plans;
+    return matchesSearch(search, [
+      row.sale_number,
+      row.status,
+      customer && typeof customer === 'object'
+        ? Object.values(customer)
+            .filter((value) => typeof value === 'string' && value)
+            .join(' ')
+        : null,
+      ...(product && typeof product === 'object' ? Object.values(product) : []),
+    ]);
+  });
+  const count = filtered.length;
+  const data = filtered.slice(offset, offset + limit);
 
-  const saleIds = (data ?? []).map((row: { id: string }) => row.id);
+  const saleIds = (data ?? []).map((row) => String(row.id));
   const paymentsBySale = new Map<string, QueueRow['payments']>();
   if (saleIds.length > 0) {
     const { data: payments, error: payError } = await db
@@ -169,13 +193,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (method(req) !== 'GET') return fail(res, 'NOT_FOUND', 'Queue endpoint not found', 404);
     const parsed = parseListQuery(req);
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
-    const { limit, offset } = parsed.data;
+    const { limit, offset, search } = parsed.data;
 
     if (subPath(req) === 'finance') {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification');
       if ('error' in auth) return deny(res, auth);
       // Awaiting money, or money that has been recorded but not yet verified.
-      const queue = await buildQueue(db, PAYMENT_VERIFICATION_STATUSES, limit, offset);
+      const queue = await buildQueue(db, PAYMENT_VERIFICATION_STATUSES, limit, offset, search);
       return res.status(200).json(queue);
     }
 
@@ -198,7 +222,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         auth.permissions.some(
           (permission) => permission.moduleKey === moduleKey && permission.canView,
         );
-      const counts: Record<'ostMembers' | 'ostApplications' | 'paymentVerification', number | null> = {
+      const counts: Record<
+        'ostMembers' | 'ostApplications' | 'paymentVerification',
+        number | null
+      > = {
         ostMembers: null,
         ostApplications: null,
         paymentVerification: null,

@@ -39,10 +39,10 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
-function canDecideCommissions(permissions: { moduleKey: string; canUpdate: boolean }[] | undefined) {
-  return (
-    permissions?.some((p) => p.moduleKey === 'network.commissions' && p.canUpdate) === true
-  );
+function canDecideCommissions(
+  permissions: { moduleKey: string; canUpdate: boolean }[] | undefined,
+) {
+  return permissions?.some((p) => p.moduleKey === 'network.commissions' && p.canUpdate) === true;
 }
 
 /**
@@ -149,9 +149,7 @@ export function BusinessCommissionsPage() {
           <>
             <Button
               variant="secondary"
-              onClick={() =>
-                applyFilters({ status, search: search.trim(), seller: seller.trim() })
-              }
+              onClick={() => applyFilters({ status, search: search.trim(), seller: seller.trim() })}
             >
               Apply
             </Button>
@@ -176,7 +174,7 @@ export function BusinessCommissionsPage() {
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data?.length === 0 ? (
         <EmptyState
-          title="No commissions"
+          title={applied.search ? 'No matching records.' : 'No commissions'}
           description="No commission matches the current filters."
         />
       ) : (
@@ -296,7 +294,10 @@ function QualifyDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={notes.trim().length < 5 || decide.isPending} onClick={() => decide.mutate()}>
+          <Button
+            disabled={notes.trim().length < 5 || decide.isPending}
+            onClick={() => decide.mutate()}
+          >
             Record decision
           </Button>
         </>
@@ -310,7 +311,10 @@ function QualifyDialog({
         </p>
         <label>
           Decision
-          <select value={decision} onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}>
+          <select
+            value={decision}
+            onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
+          >
             <option value="earned">Qualify — commission earned</option>
             <option value="cancelled">Cancel — commission cancelled</option>
           </select>
@@ -360,8 +364,8 @@ function MarkPaidDialog({
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
           Sale <strong>{commission.saleNumber}</strong> · {formatMoney(commission.amount)} to{' '}
-          {commission.beneficiaryName}. Only an earned commission can be marked paid. The amount
-          and attribution do not change; this records when and by whom it was paid.
+          {commission.beneficiaryName}. Only an earned commission can be marked paid. The amount and
+          attribution do not change; this records when and by whom it was paid.
         </p>
         <label>
           Payment reference (optional)

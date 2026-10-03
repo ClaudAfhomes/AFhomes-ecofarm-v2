@@ -352,8 +352,11 @@ export const activateSale = (saleId: string, validityMonths = 12): Promise<Activ
 /* Queues                                                              */
 /* ------------------------------------------------------------------ */
 
-export const getFinanceQueue = (): Promise<FinanceQueueItem[]> =>
-  requestList('/queues/finance', financeQueueItemSchema);
+export const getFinanceQueue = (search = ''): Promise<FinanceQueueItem[]> =>
+  requestList(
+    '/queues/finance' + (search ? '?search=' + encodeURIComponent(search) : ''),
+    financeQueueItemSchema,
+  );
 
 export const getActivationQueue = (): Promise<FinanceQueueItem[]> =>
   requestList('/queues/activation', financeQueueItemSchema);

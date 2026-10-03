@@ -1,6 +1,8 @@
+import { useState } from 'react';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { EmptyState, ErrorState, PageHeader, SearchField, StatusChip } from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getOstMembers } from './services';
@@ -10,7 +12,12 @@ import { getOstMembers } from './services';
  * edge is visible under the same authorization as the rest of the network.
  */
 export function OstMembersPage() {
-  const query = useQuery({ queryKey: ['ost', 'members'], queryFn: getOstMembers });
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
+  const query = useQuery({
+    queryKey: ['ost', 'members', settled],
+    queryFn: () => getOstMembers(settled),
+  });
 
   return (
     <section>
@@ -18,13 +25,14 @@ export function OstMembersPage() {
         title="OST Members"
         description="Approved OST sellers and the Sales Manager each one serves under."
       />
+      <SearchField label="Search OST members" value={search} onChange={setSearch} />
       {query.isPending ? (
         <p role="status">Loading members…</p>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data?.length === 0 ? (
         <EmptyState
-          title="No OST members"
+          title={settled ? 'No matching records.' : 'No OST members'}
           description="Approved applications create a member row here."
         />
       ) : (

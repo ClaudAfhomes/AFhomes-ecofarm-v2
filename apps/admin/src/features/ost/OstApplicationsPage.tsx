@@ -1,7 +1,16 @@
 import { useState } from 'react';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, FilterBar, PageHeader, Select, StatusChip } from '@jad/ui';
+import {
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  SearchField,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getOstApplications } from './services';
@@ -23,9 +32,11 @@ const STATUSES = [
  */
 export function OstApplicationsPage() {
   const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
   const query = useQuery({
-    queryKey: ['ost', 'applications', status],
-    queryFn: () => getOstApplications(status),
+    queryKey: ['ost', 'applications', status, settled],
+    queryFn: () => (settled ? getOstApplications(status, settled) : getOstApplications(status)),
     // Reviews happen on the detail screen and in other sessions.
     refetchInterval: 30_000,
   });
@@ -38,6 +49,7 @@ export function OstApplicationsPage() {
       />
 
       <FilterBar
+        search={<SearchField label="Search OST applications" value={search} onChange={setSearch} />}
         filters={
           <label style={{ display: 'grid', gap: 4, fontSize: 14, fontWeight: 600 }}>
             Status
@@ -60,7 +72,7 @@ export function OstApplicationsPage() {
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data?.length === 0 ? (
         <EmptyState
-          title="No OST applications"
+          title={settled ? 'No matching records.' : 'No OST applications'}
           description="New registrations submitted with your referral code appear here."
         />
       ) : (

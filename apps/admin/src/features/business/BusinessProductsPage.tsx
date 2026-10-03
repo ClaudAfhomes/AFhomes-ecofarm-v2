@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CardCategory, CardProduct } from '@jad/contracts';
 import {
@@ -115,7 +116,8 @@ function validatePlanForm(form: PlanForm): string | null {
   if (!form.name.trim()) return 'Name is required';
   if (!form.code.trim()) return 'Code is required';
   if (!form.categoryId) return 'Category is required';
-  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0) return 'Spot cash price must be greater than zero';
+  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0)
+    return 'Spot cash price must be greater than zero';
   if (!/^\d+$/.test(form.points)) return 'Yearly points must be a whole number';
   if (!RATE_RE.test(form.rate) || Number(form.rate) < 0 || Number(form.rate) > 1)
     return 'Commission rate must be between 0 and 1 (0.04 = 4%)';
@@ -159,6 +161,7 @@ export function BusinessProductsPage() {
   const [tab, setTab] = useState<'plans' | 'categories'>('plans');
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
+  void useDebouncedValue(search.trim(), 300, setAppliedSearch);
   const [visibility, setVisibility] = useState<CardPlanVisibility>('active');
 
   const [creatingPlan, setCreatingPlan] = useState(false);
@@ -345,7 +348,11 @@ export function BusinessProductsPage() {
         }
       />
 
-      <div role="tablist" aria-label="Card catalogue" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div
+        role="tablist"
+        aria-label="Card catalogue"
+        style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
+      >
         <Button variant={tab === 'plans' ? 'primary' : 'secondary'} onClick={() => setTab('plans')}>
           Plans
         </Button>
@@ -400,7 +407,7 @@ export function BusinessProductsPage() {
             <ErrorState error={plans.error} onRetry={plans.refetch} />
           ) : plans.data?.length === 0 ? (
             <EmptyState
-              title="No card plans"
+              title={appliedSearch ? 'No matching records.' : 'No card plans'}
               description={
                 appliedSearch || visibility !== 'active'
                   ? 'No card plans match the current filters.'
@@ -615,7 +622,10 @@ export function BusinessProductsPage() {
             </select>
           </label>
           {planCategoryInactive ? (
-            <p role="note">This plan sits under an inactive category. Reactivate the category first to move other plans into it.</p>
+            <p role="note">
+              This plan sits under an inactive category. Reactivate the category first to move other
+              plans into it.
+            </p>
           ) : null}
           <label>
             Description
@@ -652,7 +662,9 @@ export function BusinessProductsPage() {
             Spot cash days
             <input
               value={planForm.spotDays}
-              onChange={(e) => setPlanForm({ ...planForm, spotDays: e.target.value.replace(/\D/g, '') })}
+              onChange={(e) =>
+                setPlanForm({ ...planForm, spotDays: e.target.value.replace(/\D/g, '') })
+              }
               inputMode="numeric"
             />
           </label>
@@ -707,7 +719,9 @@ export function BusinessProductsPage() {
             Yearly points
             <input
               value={planForm.points}
-              onChange={(e) => setPlanForm({ ...planForm, points: e.target.value.replace(/\D/g, '') })}
+              onChange={(e) =>
+                setPlanForm({ ...planForm, points: e.target.value.replace(/\D/g, '') })
+              }
               inputMode="numeric"
             />
           </label>
@@ -793,7 +807,10 @@ export function BusinessProductsPage() {
             <input
               value={categoryForm.sortOrder}
               onChange={(e) =>
-                setCategoryForm({ ...categoryForm, sortOrder: e.target.value.replace(/[^0-9-]/g, '') })
+                setCategoryForm({
+                  ...categoryForm,
+                  sortOrder: e.target.value.replace(/[^0-9-]/g, ''),
+                })
               }
               inputMode="numeric"
             />

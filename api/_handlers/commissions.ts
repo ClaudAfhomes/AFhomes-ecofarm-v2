@@ -1,3 +1,4 @@
+import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
  * AF Homes commissions - the 4% single-level sale commission.
  *
@@ -140,12 +141,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('*')
         .order('effective_from', { ascending: false });
       if (error) throw error;
-      return res
-        .status(200)
-        .json({
-          data: (data ?? []).map((row: Record<string, unknown>) => toRule(row)),
-          meta: { total: (data ?? []).length },
-        });
+      return res.status(200).json({
+        data: (data ?? []).map((row: Record<string, unknown>) => toRule(row)),
+        meta: { total: (data ?? []).length },
+      });
     }
 
     if (subPath(req) === 'rules' && method(req) === 'POST') {
@@ -307,20 +306,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Search spans the joined sale number and beneficiary name. Those live
       // on other tables, so the search runs as an in-memory substring filter
       // over the scoped set (fetched without pagination), then paginates.
-      // With the 200-row cap this stays proportional; it never invents a row.
+      // Exhaust database batches first: the response cap cannot hide matches.
       if (search) {
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
-        const needle = search.toLowerCase();
+        const data = await readSearchRows(
+          query.order('created_at', { ascending: false }).order('id', { ascending: false }),
+        );
         const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) => toCommission(row));
-        const filtered = shaped.filter(
-          (c) =>
-            String(c.saleNumber ?? '')
-              .toLowerCase()
-              .includes(needle) ||
-            String(c.beneficiaryName ?? '')
-              .toLowerCase()
-              .includes(needle),
+        const filtered = shaped.filter((c) =>
+          matchesSearch(search, [c.saleNumber, c.beneficiaryName, c.status, c.id]),
         );
         return res.status(200).json({
           data: filtered.slice(offset, offset + limit),

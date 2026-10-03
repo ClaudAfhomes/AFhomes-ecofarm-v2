@@ -722,3 +722,222 @@ describe('safety and wiring', () => {
     expect(files.filter((file) => /phase15/i.test(file))).toEqual([]);
   });
 });
+
+describe('outstanding report search', () => {
+  it.each(['payments', 'commissions', 'genealogy', 'ost', 'points', 'plans'])(
+    '%s returns a controlled empty filtered set',
+    async (path) => {
+      const state = await get(path, TOKEN.superAdmin, { search: '__NO_SUCH_RECORD__' });
+      expect(state.status).toBe(200);
+      const result = reportResponseSchema.parse(state.body);
+      expect(result.data).toEqual([]);
+      expect(result.meta.total).toBe(0);
+    },
+  );
+});
+
+describe('safe projected fields and pagination', () => {
+  const fields = [
+    ['payments', 'customer'],
+    ['payments', 'saleNumber'],
+    ['payments', 'reference'],
+    ['payments', 'status'],
+    ['commissions', 'beneficiary'],
+    ['commissions', 'saleNumber'],
+    ['commissions', 'status'],
+    ['genealogy', 'seller'],
+    ['genealogy', 'role'],
+    ['ost', 'applicant'],
+    ['ost', 'sponsor'],
+    ['points', 'customer'],
+    ['points', 'membershipNumber'],
+    ['points', 'entryType'],
+    ['points', 'reference'],
+    ['plans', 'name'],
+    ['plans', 'code'],
+  ];
+  it.each(fields)('%s searches %s literally and ignores case', async (path, field) => {
+    const baseline = reportResponseSchema.parse((await get(path, TOKEN.superAdmin)).body);
+    const value = baseline.data
+      .map((row) => row[field])
+      .find((value) => typeof value === 'string' && value.length > 0);
+    expect(typeof value).toBe('string');
+    if (typeof value !== 'string') throw new Error('Missing searchable fixture');
+    const upper = reportResponseSchema.parse(
+      (await get(path, TOKEN.superAdmin, { search: value.toUpperCase() })).body,
+    );
+    const lower = reportResponseSchema.parse(
+      (await get(path, TOKEN.superAdmin, { search: value.toLowerCase() })).body,
+    );
+    expect(upper.data.length).toBeGreaterThan(0);
+    expect(lower.data).toEqual(upper.data);
+  });
+  it.each(['payments', 'commissions', 'genealogy', 'ost', 'points', 'plans'])(
+    '%s preserves filtered totals across pages',
+    async (path) => {
+      const baseline = reportResponseSchema.parse((await get(path, TOKEN.superAdmin)).body);
+      const field =
+        path === 'payments'
+          ? 'customer'
+          : path === 'commissions'
+            ? 'beneficiary'
+            : path === 'genealogy'
+              ? 'seller'
+              : path === 'ost'
+                ? 'applicant'
+                : path === 'points'
+                  ? 'customer'
+                  : 'name';
+      const search = String(baseline.data[0]?.[field] ?? '');
+      const full = reportResponseSchema.parse((await get(path, TOKEN.superAdmin, { search })).body);
+      const page = reportResponseSchema.parse(
+        (await get(path, TOKEN.superAdmin, { search, limit: '1', offset: '1' })).body,
+      );
+      expect(page.meta.total).toBe(full.meta.total);
+      expect(page.data).toEqual(full.data.slice(1, 2));
+    },
+  );
+  it.each(['payments', 'commissions', 'genealogy', 'ost', 'points', 'plans'])(
+    '%s cannot turn an unauthenticated search into access',
+    async (path) => {
+      expect((await get(path, undefined, { search: 'a' })).status).toBe(401);
+    },
+  );
+});
+
+describe('combined outstanding search filters', () => {
+  it.each(['payments', 'commissions'])('%s retains status and date constraints', async (path) => {
+    const all = reportResponseSchema.parse((await get(path, TOKEN.superAdmin)).body);
+    const row = all.data[0];
+    const field = path === 'payments' ? 'customer' : 'beneficiary';
+    const search = String(row[field]);
+    const status = String(row.status);
+    const filtered = reportResponseSchema.parse(
+      (await get(path, TOKEN.superAdmin, { search, status })).body,
+    );
+    expect(filtered.data.length).toBeGreaterThan(0);
+    expect(filtered.data.every((item) => item.status === status)).toBe(true);
+    const empty = reportResponseSchema.parse(
+      (await get(path, TOKEN.superAdmin, { search, from: '2099-01-01', to: '2099-01-02' })).body,
+    );
+    expect(empty.meta.total).toBe(0);
+    expect(empty.data).toEqual([]);
+  });
+  it('does not discover a foreign customer through payment search', async () => {
+    const result = reportResponseSchema.parse(
+      (await get('payments', TOKEN2.salesManager, { search: 'Juan' })).body,
+    );
+    expect(result.meta.total).toBe(0);
+  });
+  it('retains points entry type while matching member identity', async () => {
+    const all = reportResponseSchema.parse((await get('points', TOKEN.superAdmin)).body);
+    const row = all.data[0];
+    const result = reportResponseSchema.parse(
+      (
+        await get('points', TOKEN.superAdmin, {
+          search: String(row.customer),
+          status: String(row.entryType),
+        })
+      ).body,
+    );
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.data.every((item) => item.entryType === row.entryType)).toBe(true);
+  });
+  it.each(['BRONZE', 'SILVER', 'GOLD'])('finds %s plans with active filtering', async (search) => {
+    const result = reportResponseSchema.parse(
+      (await get('plans', TOKEN.superAdmin, { search, status: 'active' })).body,
+    );
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.data.every((row) => row.isActive === true)).toBe(true);
+  });
+});
+
+describe('empty UUID-backed Payments filters', () => {
+  const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  it.each<Record<string, string>>([
+    { planId: absent },
+    { seller: absent },
+    { planId: absent, seller: absent },
+    { planId: absent, search: 'Juan' },
+  ])('returns the ordinary zero report for %j without reading payments', async (query) => {
+    (holder.db as FakeSupabase).errors.payments = {
+      code: '22P02',
+      message: 'must not query payments',
+    };
+    const result = await get('payments', TOKEN.superAdmin, query);
+    expect(result.status).toBe(200);
+    const report = reportResponseSchema.parse(result.body);
+    expect(report.data).toEqual([]);
+    expect(report.meta.total).toBe(0);
+    expect(report.summary).toEqual({
+      payments: 0,
+      verifiedTotal: '0.00',
+      pendingTotal: '0.00',
+      rejectedTotal: '0.00',
+    });
+  });
+  it.each(['planId', 'seller'])('still finds an existing %s', async (field) => {
+    const sale = (holder.db as FakeSupabase)
+      .rows('card_sales')
+      .find((row) => row.id === SALE.downPaid)!;
+    const result = await get('payments', TOKEN.superAdmin, {
+      [field]: String(sale[field === 'planId' ? 'plan_id' : 'seller_staff_id']),
+    });
+    expect(result.status).toBe(200);
+    expect(reportResponseSchema.parse(result.body).data.length).toBeGreaterThan(0);
+  });
+});
+
+describe('genealogy snapshot batch ordering', () => {
+  it('reads every unique snapshot pair repeatedly across 500-row boundaries', async () => {
+    const db = holder.db as FakeSupabase;
+    const snapshots = Array.from({ length: 1203 }, (_, n) => ({
+      sale_id: 'aaaaaaaa-0000-4000-8000-' + String(Math.floor(n / 3)).padStart(12, '0'),
+      ancestor_staff_id: [STAFF2.salesManager, STAFF2.seniorSalesManager, STAFF2.viceDirector][
+        n % 3
+      ],
+    }));
+    db.rows('card_sale_hierarchy_snapshots').splice(0, Infinity, ...snapshots.reverse());
+    const original = db.from.bind(db);
+    const orders: string[] = [];
+    const offsets: number[] = [];
+    const pairs: string[][] = [[], []];
+    let pass = 0;
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = original(table);
+      if (table === 'card_sale_hierarchy_snapshots') {
+        const order = query.order.bind(query);
+        vi.spyOn(query, 'order').mockImplementation((...args) => {
+          orders.push(args[0]);
+          return order(...args);
+        });
+        const range = query.range.bind(query);
+        vi.spyOn(query, 'range').mockImplementation((...args) => {
+          offsets.push(args[0]);
+          return range(...args);
+        });
+        const then = query.then.bind(query);
+        vi.spyOn(query, 'then').mockImplementation((onFulfilled, onRejected) =>
+          then((result) => {
+            for (const row of result.data ?? [])
+              pairs[pass].push(String(row.sale_id) + '/' + String(row.ancestor_staff_id));
+            return onFulfilled ? onFulfilled(result) : result;
+          }, onRejected),
+        );
+      }
+      return query;
+    });
+    expect((await get('genealogy', TOKEN.superAdmin)).status).toBe(200);
+    pass = 1;
+    expect((await get('genealogy', TOKEN.superAdmin)).status).toBe(200);
+    expect(orders).toEqual(['sale_id', 'ancestor_staff_id', 'sale_id', 'ancestor_staff_id']);
+    expect(offsets).toEqual([0, 500, 1000, 0, 500, 1000]);
+    expect(pairs[0]).toHaveLength(1203);
+    expect(new Set(pairs[0]).size).toBe(1203);
+    expect(new Set(pairs[0].slice(0, 1000)).size).toBe(1000);
+    expect(new Set(pairs[0])).toEqual(
+      new Set(snapshots.map((row) => row.sale_id + '/' + row.ancestor_staff_id)),
+    );
+    expect(pairs[1]).toEqual(pairs[0]);
+  });
+});

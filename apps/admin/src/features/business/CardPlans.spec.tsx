@@ -268,7 +268,13 @@ describe('Customer onboarding recovery', () => {
       id: '00000000-0000-4000-8000-0000000000cc',
       roleSlug: 'employee',
       afHomesPermissions: [
-        { moduleKey: 'sales.customers', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+        {
+          moduleKey: 'sales.customers',
+          canView: true,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
       ],
     };
     renderWithProviders(<BusinessCustomersPage />, { user: viewer });
@@ -435,9 +441,11 @@ describe('Card Plans states', () => {
     await screen.findByText('GOLD');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
-    await waitFor(() => expect(mockedUpdateCardProduct).toHaveBeenCalledWith(GOLD.id, {
-      isActive: false,
-    }));
+    await waitFor(() =>
+      expect(mockedUpdateCardProduct).toHaveBeenCalledWith(GOLD.id, {
+        isActive: false,
+      }),
+    );
   });
 });
 
@@ -549,6 +557,33 @@ describe('Categories tab', () => {
       expect(mockedUpdateCardCategory).toHaveBeenCalledWith(MEMBERSHIP_CATEGORY_ID, {
         isActive: false,
       }),
+    );
+  });
+});
+
+describe('live plan management search', () => {
+  it('debounces plan search and clears without requiring submit', async () => {
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByText('GOLD');
+    const input = screen.getByLabelText('Search card plans');
+    const count = mockedGetCardProducts.mock.calls.length;
+    fireEvent.change(input, { target: { value: 'g' } });
+    fireEvent.change(input, { target: { value: 'go' } });
+    fireEvent.change(input, { target: { value: 'gold' } });
+    expect(mockedGetCardProducts.mock.calls.length).toBe(count);
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'gold' }),
+      ),
+    );
+    expect(mockedGetCardProducts.mock.calls.length).toBe(count + 1);
+    fireEvent.change(input, { target: { value: '' } });
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: undefined }),
+      ),
     );
   });
 });

@@ -1,3 +1,4 @@
+import { commissionSchema, financeQueueItemSchema } from '@jad/contracts';
 /**
  * AF Homes Phase 2 - business API coverage.
  *
@@ -1818,4 +1819,113 @@ it('authorized employee can look up imported normal records without importing or
     res,
   );
   expect(state.status).toBe(403);
+});
+
+describe('operational search before pagination', () => {
+  beforeEach(() => install());
+  it.each(['customerName', 'saleNumber', 'productName'])(
+    'payment queue searches %s before its page window',
+    async (field) => {
+      const all = data((await call('queues', { path: 'finance', token: TOKEN.admin })).body).map(
+        (row) => financeQueueItemSchema.parse(row),
+      );
+      const row = all[all.length - 1];
+      const search =
+        field === 'customerName'
+          ? row.customerName
+          : field === 'saleNumber'
+            ? row.saleNumber
+            : row.productName;
+      const result = await call('queues', {
+        path: 'finance',
+        token: TOKEN.admin,
+        query: { search: search.toLowerCase(), limit: '1' },
+      });
+      expect(result.status).toBe(200);
+      expect(data(result.body)).toHaveLength(1);
+      const matched = financeQueueItemSchema.parse(data(result.body)[0]);
+      expect(
+        [matched.customerName, matched.saleNumber, matched.productName].some((value) =>
+          value.toLowerCase().includes(search.toLowerCase()),
+        ),
+      ).toBe(true);
+    },
+  );
+  it('returns no payment queue rows for nonexistent text', async () => {
+    expect(
+      data(
+        (
+          await call('queues', {
+            path: 'finance',
+            token: TOKEN.admin,
+            query: { search: '__NO_SUCH_PAYMENT__' },
+          })
+        ).body,
+      ),
+    ).toEqual([]);
+  });
+  it('cannot bypass payment permissions with search', async () => {
+    expect(
+      (await call('queues', { path: 'finance', token: TOKEN.viewer, query: { search: 'Juan' } }))
+        .status,
+    ).toBe(403);
+  });
+  it.each(['beneficiaryName', 'saleNumber', 'status'])(
+    'commission transactions search %s case insensitively',
+    async (field) => {
+      const rows = data((await call('commissions', { path: '', token: TOKEN.admin })).body).map(
+        (row) => commissionSchema.parse(row),
+      );
+      const row = rows.find((row) =>
+        Boolean(
+          field === 'beneficiaryName'
+            ? row.beneficiaryName
+            : field === 'saleNumber'
+              ? row.saleNumber
+              : row.status,
+        ),
+      );
+      if (!row) throw new Error('Missing commission fixture');
+      const search = String(
+        field === 'beneficiaryName'
+          ? row.beneficiaryName
+          : field === 'saleNumber'
+            ? row.saleNumber
+            : row.status,
+      );
+      const lower = data(
+        (
+          await call('commissions', {
+            path: '',
+            token: TOKEN.admin,
+            query: { search: search.toLowerCase() },
+          })
+        ).body,
+      );
+      const upper = data(
+        (
+          await call('commissions', {
+            path: '',
+            token: TOKEN.admin,
+            query: { search: search.toUpperCase() },
+          })
+        ).body,
+      );
+      expect(lower.length).toBeGreaterThan(0);
+      expect(upper).toEqual(lower);
+    },
+  );
+  it('returns no transaction commissions for nonexistent text', async () => {
+    expect(
+      data(
+        (
+          await call('commissions', {
+            path: '',
+            token: TOKEN.admin,
+            query: { search: '__NO_SUCH_COMMISSION__' },
+          })
+        ).body,
+      ),
+    ).toEqual([]);
+  });
 });

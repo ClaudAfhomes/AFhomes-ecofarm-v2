@@ -885,3 +885,99 @@ describe('OST referral QR transport', () => {
     expect(routerSource).toContain('../_handlers/ost.js');
   });
 });
+
+describe('authorized OST literal search', () => {
+  async function search(path: string, term: string, token = ADMIN_TOKEN, status?: string) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'GET',
+        familyPath: path,
+        token,
+        query: { search: term, ...(status ? { status } : {}) },
+      }) as never,
+      res as never,
+    );
+    return state;
+  }
+  it.each(['oscar', 'OSCAR', 'Trai', '3456', 'Sam Manager', 'submitted'])(
+    'matches safe application identity %s',
+    async (term) => {
+      const db = install();
+      await submit(db, applicant);
+      const result = await search('applications', term);
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ meta: { total: 1 } });
+    },
+  );
+  it('combines application search with workflow status', async () => {
+    const db = install();
+    await submit(db, applicant);
+    expect((await search('applications', 'oscar', ADMIN_TOKEN, 'submitted')).body).toMatchObject({
+      meta: { total: 1 },
+    });
+    expect((await search('applications', 'oscar', ADMIN_TOKEN, 'approved')).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+  it('does not reveal another sponsor application', async () => {
+    const db = install();
+    await submit(db, applicant);
+    expect((await search('applications', 'oscar', SM2_TOKEN)).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+  it('applies unmatched search to the OST self member branch', async () => {
+    install();
+    expect((await search('members', '__NO_SUCH_OST__', OST_TOKEN)).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+});
+
+describe('OST sponsor lookup failure envelopes', () => {
+  async function lookup(token: string, search: string) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'members', token, query: { search } }) as never,
+      res as never,
+    );
+    return state;
+  }
+  it.each(['Sam Manager', '__missing__'])(
+    'distinguishes successful sponsor search %s',
+    async (search) => {
+      install();
+      const state = await lookup(ADMIN_TOKEN, search);
+      expect(state.status).toBe(200);
+      expect(state.body).toMatchObject({ meta: { total: search === 'Sam Manager' ? 1 : 0 } });
+    },
+  );
+  it.each([ADMIN_TOKEN, OST_TOKEN])(
+    'fails safely on sponsor infrastructure failure for %s',
+    async (token) => {
+      const db = install();
+      const original = db.from.bind(db);
+      vi.spyOn(db, 'from').mockImplementation((table) => {
+        const query = original(table);
+        if (table === 'staff_users') {
+          const select = query.select.bind(query);
+          vi.spyOn(query, 'select').mockImplementation((...args) => {
+            if (args[0] === 'id, full_name' || args[0] === 'full_name')
+              db.errors.staff_users = { message: 'PRIVATE SQL sponsor failure' };
+            return select(...args);
+          });
+        }
+        return query;
+      });
+      const state = await lookup(token, 'Sam Manager');
+      expect(state.status).toBe(500);
+      expect(state.body).toMatchObject({ error: { code: 'INTERNAL' } });
+      expect(JSON.stringify(state.body)).not.toContain('PRIVATE SQL');
+      expect(state.body).not.toHaveProperty('data');
+    },
+  );
+});

@@ -25,8 +25,11 @@ import {
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });
 
-export const getOstApplications = (status = ''): Promise<OstApplication[]> => {
-  const suffix = status ? `?status=${encodeURIComponent(status)}` : '';
+export const getOstApplications = (status = '', search = ''): Promise<OstApplication[]> => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  const suffix = params.size ? '?' + params.toString() : '';
   return requestList(`/ost/applications${suffix}`, ostApplicationSchema);
 };
 
@@ -42,8 +45,11 @@ export const rejectOstApplication = (id: string, reason: string): Promise<OstApp
 export const requestOstApplicationChanges = (id: string, notes: string): Promise<OstApplication> =>
   post(`/ost/applications/${id}/request-changes`, ostApplicationSchema, { notes });
 
-export const getOstMembers = (): Promise<OstMember[]> =>
-  requestList('/ost/members', ostMemberSchema);
+export const getOstMembers = (search = ''): Promise<OstMember[]> =>
+  requestList(
+    '/ost/members' + (search ? '?search=' + encodeURIComponent(search) : ''),
+    ostMemberSchema,
+  );
 
 export const getMyReferralCodes = (): Promise<OstReferralCodeRecord[]> =>
   requestList('/ost/referral-codes/me', ostReferralCodeRecordSchema);
