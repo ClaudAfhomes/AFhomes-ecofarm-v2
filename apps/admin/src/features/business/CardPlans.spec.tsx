@@ -207,7 +207,10 @@ describe('Customer onboarding recovery', () => {
     });
 
     renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
-    fireEvent.click(await screen.findByRole('button', { name: 'Issue / Reissue activation link' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000003' }));
+    fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'Issue / Reissue activation link' }),
+    );
 
     const dialog = await screen.findByRole('dialog', { name: 'Customer activation ready' });
     expect(dialog).toHaveTextContent('Email could not be sent');
@@ -229,8 +232,9 @@ describe('Customer onboarding recovery', () => {
     mockedGetCardProducts.mockResolvedValue([]);
     renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
     await screen.findByText('Pedro Reyes');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000003' }));
     expect(
-      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+      screen.queryByRole('menuitem', { name: 'Issue / Reissue activation link' }),
     ).not.toBeInTheDocument();
   });
 
@@ -240,8 +244,9 @@ describe('Customer onboarding recovery', () => {
     mockedGetCardProducts.mockResolvedValue([]);
     renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
     await screen.findByText('Ada Customer');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000001' }));
     expect(
-      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+      screen.queryByRole('menuitem', { name: 'Issue / Reissue activation link' }),
     ).not.toBeInTheDocument();
   });
 
@@ -254,8 +259,9 @@ describe('Customer onboarding recovery', () => {
     mockedGetCardProducts.mockResolvedValue([]);
     renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
     await screen.findByText('Pedro Reyes');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000003' }));
     expect(
-      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+      screen.queryByRole('menuitem', { name: 'Issue / Reissue activation link' }),
     ).not.toBeInTheDocument();
   });
 
@@ -279,8 +285,9 @@ describe('Customer onboarding recovery', () => {
     };
     renderWithProviders(<BusinessCustomersPage />, { user: viewer });
     await screen.findByText('Pedro Reyes');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000003' }));
     expect(
-      screen.queryByRole('button', { name: 'Issue / Reissue activation link' }),
+      screen.queryByRole('menuitem', { name: 'Issue / Reissue activation link' }),
     ).not.toBeInTheDocument();
   });
 
@@ -297,7 +304,10 @@ describe('Customer onboarding recovery', () => {
       expiresAt: '2026-10-03T00:00:00.000Z',
     });
     renderWithProviders(<BusinessCustomersPage />, { user: CUSTOMER_ADMIN });
-    fireEvent.click(await screen.findByRole('button', { name: 'Issue / Reissue activation link' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for CUS-000003' }));
+    fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'Issue / Reissue activation link' }),
+    );
     await waitFor(() =>
       expect(mockedIssueCustomerAccountActivation).toHaveBeenCalledWith(ACTIVE_CUSTOMER.id),
     );

@@ -226,7 +226,7 @@ export function CustomerImportExportPage() {
             value={sheetUrl}
             placeholder="https://docs.google.com/spreadsheets/d/…"
             onChange={(e) => setSheetUrl(e.target.value)}
-            style={{ minWidth: 320 }}
+            style={{ width: '100%', maxWidth: 480, minWidth: 0 }}
           />
         </label>{' '}
         <Button
@@ -400,7 +400,7 @@ export function CustomerImportExportPage() {
           >
             <option value="">All</option>
             {Object.entries(CUSTOMER_CATEGORY_LABELS).map(([value, label]) => (
-              <option key={value} value={label}>
+              <option key={value} value={value}>
                 {label}
               </option>
             ))}

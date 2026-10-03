@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import QRCode from 'qrcode';
 
 import { downloadQrImage, QrCode } from '../index';
 
@@ -35,5 +36,16 @@ describe('QrCode', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     await downloadQrImage('AFH-CARD-2026-101', 'voucher.png');
     expect(click).toHaveBeenCalled();
+  });
+
+  it('encodes a 4-module quiet zone without changing payload or dimensions', async () => {
+    const toDataURL = vi.spyOn(QRCode, 'toDataURL');
+    render(<QrCode value="AFH-CARD-2026-101" size={160} alt="QR code for AFH-CARD-2026-101" />);
+    await screen.findByRole('img', { name: 'QR code for AFH-CARD-2026-101' });
+    await waitFor(() => expect(toDataURL).toHaveBeenCalled());
+    expect(toDataURL).toHaveBeenCalledWith(
+      'AFH-CARD-2026-101',
+      expect.objectContaining({ width: 160, margin: 4, errorCorrectionLevel: 'M' }),
+    );
   });
 });

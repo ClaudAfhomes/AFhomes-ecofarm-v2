@@ -103,7 +103,10 @@ export function OstApplicationsPage() {
                           ? 'success'
                           : app.status === 'rejected'
                             ? 'danger'
-                            : 'neutral'
+                            : app.status === 'under_review' ||
+                                app.status === 'changes_requested'
+                              ? 'warning'
+                              : 'neutral'
                       }
                     />
                   </td>

@@ -213,7 +213,9 @@ export function BusinessCommissionsPage() {
                               ? 'neutral'
                               : commission.status === 'final_qualification_pending'
                                 ? 'warning'
-                                : 'neutral'
+                                : commission.status === 'payment_verified'
+                                  ? 'info'
+                                  : 'warning'
                       }
                     />
                   </td>

@@ -9,7 +9,9 @@ import {
   Button,
   EmptyState,
   ErrorState,
+  FilterBar,
   PageHeader,
+  SearchField,
   StatusChip,
 } from '@jad/ui';
 
@@ -301,50 +303,58 @@ export function CustomerApplicationsPage() {
         description="Official application transactions. Submitted snapshots remain independent of later customer master-data edits."
         actions={<Link to="/admin/customers/applications/new">New application</Link>}
       />
-      <div className="form-grid" style={{ marginBottom: 12 }}>
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All</option>
-            {['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tier
-          <select value={tier} onChange={(e) => setTier(e.target.value)}>
-            <option value="">All</option>
-            {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Search
-          <input
-            value={search}
+      <FilterBar
+        search={
+          <SearchField
+            label="Search applications"
             placeholder="Application number"
-            onChange={(e) => setSearch(e.target.value)}
+            value={search}
+            onChange={setSearch}
+            busy={query.isPending}
           />
-        </label>
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-      </div>
-      {query.isError ? (
+        }
+        filters={
+          <>
+            <label>
+              Status
+              <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All</option>
+                {['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Tier
+              <select value={tier} onChange={(e) => setTier(e.target.value)}>
+                <option value="">All</option>
+                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              From
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label>
+              To
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </label>
+          </>
+        }
+      />
+      {query.isPending ? (
+        <p role="status">Loading applications…</p>
+      ) : query.isError ? (
         <ErrorState title="Applications could not be loaded" onRetry={() => void query.refetch()} />
       ) : query.data?.length ? (
-        <table>
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <table>
           <thead>
             <tr>
               <th>Application</th>
@@ -379,7 +389,8 @@ export function CustomerApplicationsPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <EmptyState
           title="No customer applications"
@@ -844,42 +855,50 @@ export function ReservationAgreementsPage() {
         description="Contract snapshots remain separate from actual verified payment transactions."
         actions={<Link to="/admin/sales/reservations/new">New agreement</Link>}
       />
-      <div className="form-grid" style={{ marginBottom: 12 }}>
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All</option>
-            {['draft', 'submitted', 'executed', 'cancelled'].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tier
-          <select value={tier} onChange={(e) => setTier(e.target.value)}>
-            <option value="">All</option>
-            {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Search
-          <input
-            value={search}
+      <FilterBar
+        search={
+          <SearchField
+            label="Search reservation agreements"
             placeholder="Reservation number"
-            onChange={(e) => setSearch(e.target.value)}
+            value={search}
+            onChange={setSearch}
+            busy={query.isPending}
           />
-        </label>
-      </div>
-      {query.isError ? (
+        }
+        filters={
+          <>
+            <label>
+              Status
+              <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All</option>
+                {['draft', 'submitted', 'executed', 'cancelled'].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Tier
+              <select value={tier} onChange={(e) => setTier(e.target.value)}>
+                <option value="">All</option>
+                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        }
+      />
+      {query.isPending ? (
+        <p role="status">Loading reservation agreements…</p>
+      ) : query.isError ? (
         <ErrorState title="Agreements could not be loaded" onRetry={() => void query.refetch()} />
       ) : query.data?.length ? (
-        <table>
+        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <table>
           <thead>
             <tr>
               <th>Reservation</th>
@@ -906,7 +925,8 @@ export function ReservationAgreementsPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <EmptyState
           title="No reservation agreements"

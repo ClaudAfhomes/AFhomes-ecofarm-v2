@@ -34,6 +34,7 @@ const STATUS_TONES: Record<string, StatusTone> = {
   paid: 'success',
   pending: 'warning',
   partial_payment: 'warning',
+  partial: 'warning',
   reservation_paid: 'info',
   payment_verified: 'info',
   final_qualification_pending: 'warning',

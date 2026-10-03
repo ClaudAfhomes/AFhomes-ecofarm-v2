@@ -33,7 +33,11 @@ export function QrCode({
     let alive = true;
     QRCode.toDataURL(value, {
       width: size,
-      margin: 1,
+      // Spec-grade quiet zone: 4 modules of white margin baked into the
+      // image itself, so scanning never depends on surrounding page padding
+      // (or none at all, for downloaded/printed codes). Payload, size and
+      // error correction are unchanged.
+      margin: 4,
       errorCorrectionLevel,
     })
       .then((url) => {
@@ -71,7 +75,7 @@ export function QrCode({
 
 /** Download the QR for the value as a PNG (client-side only). */
 export async function downloadQrImage(value: string, filename: string): Promise<void> {
-  const dataUrl = await QRCode.toDataURL(value, { width: 360, margin: 1 });
+  const dataUrl = await QRCode.toDataURL(value, { width: 360, margin: 4 });
   const link = document.createElement('a');
   link.href = dataUrl;
   link.download = filename;

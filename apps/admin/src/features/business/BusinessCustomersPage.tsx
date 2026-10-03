@@ -8,6 +8,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  OverflowMenu,
   PageHeader,
   SearchField,
   StatusChip,
@@ -355,7 +356,7 @@ export function BusinessCustomersPage() {
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : customers.data?.length === 0 ? (
         <EmptyState
-          title="No customers"
+          title="No customers found."
           description="Register the first customer to get started."
         />
       ) : (
@@ -383,10 +384,7 @@ export function BusinessCustomersPage() {
                   {/* Only ever the masked form; the API never returns the number. */}
                   <td>{customer.governmentIdMasked ?? '—'}</td>
                   <td>
-                    <StatusChip
-                      label={customer.status}
-                      tone={customer.status === 'active' ? 'success' : 'neutral'}
-                    />
+                    <StatusChip label={customer.status} />
                   </td>
                   <td>
                     {
@@ -412,52 +410,53 @@ export function BusinessCustomersPage() {
                     >
                       New application
                     </Button>{' '}
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={customer.status === 'suspended' || customer.status === 'cancelled'}
-                      onClick={() => setAccountAction({ kind: 'deactivate', customer })}
-                    >
-                      Deactivate Account
-                    </Button>
-                    {canIssueActivation &&
-                    customer.hasActiveMembership &&
-                    !customer.portalAccountActivated ? (
-                      <>
-                        {' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={
-                            issueActivation.isPending && activationCustomerId === customer.id
-                          }
-                          onClick={() => issueActivation.mutate(customer.id)}
-                        >
-                          {issueActivation.isPending && activationCustomerId === customer.id
-                            ? 'Issuing activation link…'
-                            : 'Issue / Reissue activation link'}
-                        </Button>
-                      </>
-                    ) : null}
-                    {user?.roleSlug === 'super_admin' ? (
-                      <>
-                        {' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setAccountAction({ kind: 'anonymize', customer })}
-                        >
-                          Anonymize
-                        </Button>{' '}
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => setAccountAction({ kind: 'delete', customer })}
-                        >
-                          Delete Permanently
-                        </Button>
-                      </>
-                    ) : null}
+                    <OverflowMenu
+                      label={`More actions for ${customer.customerNumber}`}
+                      items={[
+                        ...(canIssueActivation &&
+                        customer.hasActiveMembership &&
+                        !customer.portalAccountActivated
+                          ? [
+                              {
+                                label:
+                                  issueActivation.isPending &&
+                                  activationCustomerId === customer.id
+                                    ? 'Issuing activation link…'
+                                    : 'Issue / Reissue activation link',
+                                icon: 'user-check' as const,
+                                disabled:
+                                  issueActivation.isPending &&
+                                  activationCustomerId === customer.id,
+                                onClick: () => issueActivation.mutate(customer.id),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: 'Deactivate account',
+                          icon: 'user-x' as const,
+                          danger: true,
+                          disabled:
+                            customer.status === 'suspended' || customer.status === 'cancelled',
+                          onClick: () => setAccountAction({ kind: 'deactivate', customer }),
+                        },
+                        ...(user?.roleSlug === 'super_admin'
+                          ? [
+                              { label: '-', onClick: undefined },
+                              {
+                                label: 'Anonymize',
+                                icon: 'pencil' as const,
+                                onClick: () => setAccountAction({ kind: 'anonymize', customer }),
+                              },
+                              {
+                                label: 'Delete permanently',
+                                icon: 'trash' as const,
+                                danger: true,
+                                onClick: () => setAccountAction({ kind: 'delete', customer }),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -734,7 +733,7 @@ export function BusinessCustomersPage() {
         danger
         confirmLabel={
           accountAction?.kind === 'delete'
-            ? 'Delete Permanently'
+            ? 'Delete permanently'
             : accountAction?.kind === 'anonymize'
               ? 'Anonymize'
               : 'Confirm'
