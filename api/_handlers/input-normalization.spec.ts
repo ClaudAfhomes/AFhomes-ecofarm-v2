@@ -68,9 +68,9 @@ describe('customer writes normalize server-side', () => {
     expect(state.status).toBe(201);
     const db = holder.db as FakeSupabase;
     const row = db.rows('customers').find((r) => r.email === 'claud@example.com')!;
-    expect(row.first_name).toBe('CLAUD MARS');
-    expect(row.middle_name).toBe('JIMENEZ');
-    expect(row.last_name).toBe('DELA CRUZ');
+    expect(row.first_name).toBe('claud mars');
+    expect(row.middle_name).toBe('jimenez');
+    expect(row.last_name).toBe('dela cruz');
     expect(row.email).toBe('claud@example.com');
     expect(row.phone).toBe('+639185550101');
     const address = row.address as Record<string, string>;
@@ -100,8 +100,8 @@ describe('other writers normalize through the same contracts', () => {
       birthDate: '1992-08-19',
       address: ADDRESS,
     });
-    expect(parsed.firstName).toBe('OSCAR');
-    expect(parsed.lastName).toBe('SANTOS');
+    expect(parsed.firstName).toBe('oscar');
+    expect(parsed.lastName).toBe('santos');
     expect(parsed.email).toBe('oscar@example.com');
     expect(parsed.phone).toBe('+639171234567');
     expect(parsed.address.city).toBe('QUEZON CITY');
@@ -160,16 +160,16 @@ describe('other writers normalize through the same contracts', () => {
     const call = db.calls.find((c) => c.op === 'rpc' && c.table === 'save_customer_application');
     const primary = (call?.arg as Record<string, Record<string, unknown>>).p_primary;
     expect(primary).toMatchObject({
-      lastName: 'JIMENEZ',
-      firstName: 'CLAUD',
-      middleName: 'MARS',
-      suffix: 'JR',
+      lastName: 'jimenez',
+      firstName: 'claud',
+      middleName: 'mars',
+      suffix: 'jr',
       cityMunicipality: 'QUEZON CITY',
       permanentAddressLine2: 'UNIT 2, 123 RIZAL ST.',
       officeBusinessAddress: 'OFFICE AT RIZAL ST.',
       occupationBusinessName: 'SARI-SARI STORE OWNER',
       employedPosition: 'STORE KEEPER',
-      printedName: 'CLAUD JIMENEZ',
+      printedName: 'claud jimenez',
       mobile: '+639171234567',
       email: 'claud@example.com',
     });
@@ -195,8 +195,8 @@ describe('other writers normalize through the same contracts', () => {
       '2026-10-02',
     );
     expect(v.errors).toEqual([]);
-    expect(v.normalized?.person.firstName).toBe('JUAN');
-    expect(v.normalized?.person.lastName).toBe('DELA CRUZ');
+    expect(v.normalized?.person.firstName).toBe('juan');
+    expect(v.normalized?.person.lastName).toBe('dela cruz');
     expect(v.normalized?.person.email).toBe('juan@example.com');
     expect(v.normalized?.person.phone).toBe('+639185550101');
     const bad = validateImportRow(

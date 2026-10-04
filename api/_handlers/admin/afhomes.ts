@@ -270,9 +270,7 @@ export function isTestAccountEmail(email: unknown): boolean {
   ) {
     return true;
   }
-  return (
-    host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost')
-  );
+  return host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost');
 }
 
 /**
@@ -296,12 +294,7 @@ type PurgeCounts = {
   history: number;
 };
 
-async function countWhere(
-  db: Db,
-  table: string,
-  column: string,
-  id: string,
-): Promise<number> {
+async function countWhere(db: Db, table: string, column: string, id: string): Promise<number> {
   // Same rule as hasReference: select the checked column, never a presumed
   // `id` (staff_permission_restrictions and staff_role_assignments key on
   // staff_id and have no id column at all).
@@ -337,7 +330,10 @@ async function customerHasActivity(db: Db, customerId: string): Promise<boolean>
 async function planTestPurge(
   db: Db,
   targetId: string,
-): Promise<{ blockers: PurgeBlocker[]; plan: Omit<PurgeCounts, 'staff'> & { disposableCustomers: string[] } }> {
+): Promise<{
+  blockers: PurgeBlocker[];
+  plan: Omit<PurgeCounts, 'staff'> & { disposableCustomers: string[] };
+}> {
   const blockers: PurgeBlocker[] = [];
   const block = (reason: string) => blockers.push({ blocked: reason });
   const plan = {
@@ -414,7 +410,7 @@ async function planTestPurge(
     .select('id')
     .or(`sponsor_staff_id.eq.${targetId},created_by.eq.${targetId}`);
   if (codesError) throw codesError;
-  for (const code of ((codes ?? []) as { id: string }[])) {
+  for (const code of (codes ?? []) as { id: string }[]) {
     if (await hasReference(db, 'ost_applications', 'referral_code_id', String(code.id))) {
       block('a referral code of this account is in use by an application');
     } else {
@@ -430,12 +426,12 @@ async function planTestPurge(
     .select('id,customer_number,email,auth_user_id')
     .or(`created_by.eq.${targetId},referred_by_staff_id.eq.${targetId}`);
   if (attributedError) throw attributedError;
-  for (const customer of ((attributed ?? []) as {
+  for (const customer of (attributed ?? []) as {
     id: string;
     customer_number: string;
     email: string;
     auth_user_id: string | null;
-  }[])) {
+  }[]) {
     // A linked portal login is a real identity even on a test address: the
     // dual-auth rule below preserves it, so it is never disposable here.
     if (customer.auth_user_id) continue;
@@ -474,7 +470,7 @@ async function planTestPurge(
     .select('id,email')
     .eq('invited_by', targetId);
   if (sentError) throw sentError;
-  for (const invite of ((sent ?? []) as { id: string; email: string }[])) {
+  for (const invite of (sent ?? []) as { id: string; email: string }[]) {
     if (!isTestAccountEmail(invite.email)) {
       block(`an invitation sent to non-test address ${invite.email} must stay`);
     } else {
@@ -711,9 +707,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await db.auth.admin.updateUserById(principal.userId, {
         user_metadata: { full_name: parsed.data.name },
       });
-      await audit(db, principal.userId, 'STAFF_PROFILE_UPDATED', 'staff_user', principal.userId, null, {
-        fullName: parsed.data.name,
-      });
+      await audit(
+        db,
+        principal.userId,
+        'STAFF_PROFILE_UPDATED',
+        'staff_user',
+        principal.userId,
+        null,
+        {
+          fullName: parsed.data.name,
+        },
+      );
       return res.status(200).json({
         id: principal.userId,
         email: principal.email,
@@ -761,9 +765,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update({ must_change_password: false, password_changed_at: now, updated_at: now })
         .eq('id', principal.userId);
       if (flagError) throw flagError;
-      await audit(db, principal.userId, 'STAFF_PASSWORD_CHANGED', 'staff_user', principal.userId, null, {
-        email: staff.email,
-      });
+      await audit(
+        db,
+        principal.userId,
+        'STAFF_PASSWORD_CHANGED',
+        'staff_user',
+        principal.userId,
+        null,
+        {
+          email: staff.email,
+        },
+      );
       return res.status(200).json({ changed: true });
     }
     if (path === 'roles' && method === 'GET') {
@@ -915,6 +927,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (r: { id: string }) => r.id === parsed.data.roleId,
       );
       if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
+      if (target.slug === 'customer')
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Customer accounts cannot be assigned staff roles',
+          400,
+        );
       if (target.slug === 'super_admin' && auth.roleSlug !== 'super_admin')
         return fail(res, 'FORBIDDEN', 'Only Super Admin can assign Super Admin', 403);
       if (!permissionsAreSubset(target.permissions, auth.permissions))
@@ -971,20 +990,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           throw new Error(`staff_role_assignments insert failed: ${assignmentError.message}`);
         // The temporary password is NEVER persisted or logged: the audit
         // payload carries identity only, and Supabase Auth holds the secret.
-        await audit(
-          db,
-          auth.userId,
-          'STAFF_CREATED',
-          'staff_user',
-          created.user.id,
-          null,
-          {
-            email,
-            fullName: parsed.data.fullName,
-            departmentId: parsed.data.departmentId,
-            roleId: parsed.data.roleId,
-          },
-        );
+        await audit(db, auth.userId, 'STAFF_CREATED', 'staff_user', created.user.id, null, {
+          email,
+          fullName: parsed.data.fullName,
+          departmentId: parsed.data.departmentId,
+          roleId: parsed.data.roleId,
+        });
       } catch (error) {
         await db.auth.admin.deleteUser(created.user.id);
         throw error;
@@ -1056,6 +1067,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           (role: { id: string }) => role.id === parsed.data.roleId,
         );
         if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
+        if (target.slug === 'customer')
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Customer accounts cannot be assigned staff roles',
+            400,
+          );
         if (target.slug === 'super_admin' && auth.roleSlug !== 'super_admin')
           return fail(res, 'FORBIDDEN', 'Only Super Admin can assign Super Admin', 403);
         if (!permissionsAreSubset(target.permissions, auth.permissions))
@@ -1215,7 +1233,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ['redemptions', 'voided_by'],
         ['ost_applications', 'reviewed_by'],
       ] as const) {
-        const { error } = await db.from(table).update({ [column]: null }).eq(column, id);
+        const { error } = await db
+          .from(table)
+          .update({ [column]: null })
+          .eq(column, id);
         if (error) throw error;
       }
       const remove = async (table: string, column: string, value: string) => {
@@ -1231,7 +1252,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('id')
         .or(`sponsor_staff_id.eq.${id},created_by.eq.${id}`);
       if (ownedCodesError) throw ownedCodesError;
-      for (const code of ((ownedCodes ?? []) as { id: string }[])) {
+      for (const code of (ownedCodes ?? []) as { id: string }[]) {
         if (await hasReference(db, 'ost_applications', 'referral_code_id', String(code.id))) {
           throw new Error(
             `Test account cannot be purged: a referral code gained an application mid-purge.`,
@@ -1247,7 +1268,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('id,email')
         .eq('invited_by', id);
       if (sentInvitesError) throw sentInvitesError;
-      for (const invite of ((sentInvites ?? []) as { id: string; email: string }[])) {
+      for (const invite of (sentInvites ?? []) as { id: string; email: string }[]) {
         if (!isTestAccountEmail(invite.email)) {
           throw new Error(
             `Test account cannot be purged: invitation to non-test address ${invite.email} appeared mid-purge.`,

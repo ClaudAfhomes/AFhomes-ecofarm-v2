@@ -148,7 +148,7 @@ export function OstRegisterPage() {
             First name
           </label>
           <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
+            suggestName
             id="ost-first"
             className={authStyles.input}
             value={form.firstName}
@@ -161,7 +161,7 @@ export function OstRegisterPage() {
             Middle name (optional)
           </label>
           <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
+            suggestName
             id="ost-middle"
             className={authStyles.input}
             value={form.middleName}
@@ -173,7 +173,7 @@ export function OstRegisterPage() {
             Last name
           </label>
           <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
+            suggestName
             id="ost-last"
             className={authStyles.input}
             value={form.lastName}

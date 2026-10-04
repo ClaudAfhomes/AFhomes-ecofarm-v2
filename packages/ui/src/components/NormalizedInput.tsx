@@ -1,19 +1,25 @@
 import { useLayoutEffect, useRef, useState, type ComponentProps } from 'react';
 
-type Props = ComponentProps<'input'> & { normalize?: (value: string) => string };
+type Props = ComponentProps<'input'> & {
+  normalize?: (value: string) => string;
+  suggestName?: boolean;
+};
 
 /** Controlled normalization with selection mapping and an unmodified IME draft. */
 export function NormalizedInput({
   normalize,
+  suggestName = false,
   value,
   onChange,
   onCompositionStart,
   onCompositionEnd,
+  onBlur,
   ...props
 }: Props) {
   const [draft, setDraft] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const composing = useRef(false);
+  const nameSuggested = useRef(false);
   const pending = useRef<{
     input: HTMLInputElement;
     start: number;
@@ -33,6 +39,21 @@ export function NormalizedInput({
     <input
       {...props}
       value={draft ?? value}
+      onBlur={(event) => {
+        const input = event.currentTarget;
+        // Suggest once; deliberately corrected capitalization is never overwritten.
+        if (suggestName && !nameSuggested.current && input.value.trim()) {
+          nameSuggested.current = true;
+          if (!/\p{Lu}/u.test(input.value)) {
+            input.value = input.value.replace(
+              /(^|[\s'’\-])(\p{L})/gu,
+              (_, boundary: string, letter: string) => boundary + letter.toLocaleUpperCase(),
+            );
+            onChange?.({ ...event, target: input, currentTarget: input, type: 'change' });
+          }
+        }
+        onBlur?.(event);
+      }}
       onCompositionStart={(event) => {
         composing.current = true;
         setDraft(event.currentTarget.value);

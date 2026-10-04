@@ -19,14 +19,19 @@ const RESOLUTION = {
 type RouteHandler = () => { status: number; body: unknown };
 const routes = new Map<string, RouteHandler>();
 
-const ok = (body: unknown): RouteHandler => () => ({ status: 200, body });
+const ok =
+  (body: unknown): RouteHandler =>
+  () => ({ status: 200, body });
 
 const requests: { path: string; method: string; body: unknown }[] = [];
 
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0]!;
+    const path = url
+      .replace(/^https?:\/\/[^/]+/, '')
+      .replace(/^\/api\/v1/, '')
+      .split('?')[0]!;
     const method = init?.method ?? 'GET';
     let body: unknown = null;
     if (typeof init?.body === 'string') {
@@ -92,7 +97,9 @@ describe('public OST registration', () => {
   it('needs a referral code before anything else', async () => {
     render('/ost/register');
     expect(
-      await screen.findByText('This page needs a referral code. Ask your Sales Manager for their registration link.'),
+      await screen.findByText(
+        'This page needs a referral code. Ask your Sales Manager for their registration link.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -126,8 +133,8 @@ describe('public OST registration', () => {
     const post = requests.find((r) => r.method === 'POST' && r.path === '/ost/applications');
     expect(post?.body).toMatchObject({
       referralCode: 'OST-ABCDEF-123456',
-      firstName: 'OSCAR',
-      lastName: 'TRAINEE',
+      firstName: 'Oscar',
+      lastName: 'Trainee',
       email: 'oscar@example.invalid',
     });
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsorStaffId');

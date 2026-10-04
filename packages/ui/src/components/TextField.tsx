@@ -6,6 +6,7 @@ import styles from './FormField.module.css';
 
 export interface TextFieldProps {
   normalize?: (value: string) => string;
+  suggestName?: boolean;
   id: string;
   name: string;
   label: string;
@@ -30,6 +31,7 @@ export interface TextFieldProps {
  */
 export function TextField({
   normalize,
+  suggestName,
   id,
   name,
   label,
@@ -56,6 +58,7 @@ export function TextField({
     <FormField id={id} label={label} hint={hint} error={error} optional={optional}>
       <NormalizedInput
         normalize={normalize}
+        suggestName={suggestName}
         ref={inputRef}
         id={id}
         className={`${styles.input} ${error ? styles.inputError : ''} ${readOnly ? styles.readOnlyInput : ''}`}

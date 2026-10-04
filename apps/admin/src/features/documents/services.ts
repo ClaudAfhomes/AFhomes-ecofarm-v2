@@ -10,6 +10,7 @@ import {
   documentAccessUrlSchema,
   documentUploadGrantSchema,
   identityDocumentSchema,
+  currentDocumentResponseSchema,
   type DocumentAccessUrl,
   type DocumentConfirmRequest,
   type DocumentUploadGrant,
@@ -28,10 +29,25 @@ const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
 export const getDocuments = (params: {
   subjectType: 'customer' | 'ost_application';
   subjectId?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<IdentityDocument[]> => {
   const query = new URLSearchParams({ subjectType: params.subjectType });
   if (params.subjectId) query.set('subjectId', params.subjectId);
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
   return requestList(`/documents?${query.toString()}`, identityDocumentSchema);
+};
+
+/** Subject-wide server current, independent of the history page being displayed. */
+export const getCurrentDocument = (params: {
+  subjectType: 'customer' | 'ost_application';
+  subjectId: string;
+}): Promise<IdentityDocument | null> => {
+  const query = new URLSearchParams(params);
+  return request(`/documents/current?${query.toString()}`, currentDocumentResponseSchema).then(
+    (response) => response.currentDocument,
+  );
 };
 
 export const getDocument = (id: string): Promise<IdentityDocument> =>
@@ -52,6 +68,10 @@ export const putUploadBytes = async (uploadUrl: string, file: File): Promise<voi
 
 export const runDocumentOcr = (id: string, refresh = false): Promise<IdentityDocument> =>
   post(`/documents/${id}/ocr`, identityDocumentSchema, { refresh });
+
+/** Verifies private persisted bytes on the server; does not approve identity or run OCR. */
+export const completeDocumentUpload = (id: string): Promise<IdentityDocument> =>
+  post(`/documents/${id}/complete-upload`, identityDocumentSchema, {});
 
 export const confirmDocument = (
   id: string,

@@ -11,6 +11,14 @@
   box-sizing: border-box;
 }
 
+:where(input, textarea, select)[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
+}
+small[role='alert'] {
+  color: var(--color-danger);
+}
+
 /* Raw operational forms share the same geometry as the field primitives.
    Zero specificity lets specialized controls retain their own behavior. */
 :where(
@@ -57,19 +65,19 @@
   background: var(--color-state-disabled-bg);
   color: var(--color-state-disabled-text);
 }
-.table-scroll > table {
+.table-scroll > table:not([class]) {
   width: 100%;
   border-collapse: collapse;
   background: var(--color-bg-surface-raised);
   font-size: var(--text-body-s);
 }
-.table-scroll > table :where(th, td) {
+.table-scroll > table:not([class]) :where(th, td) {
   padding: var(--space-3) var(--space-4);
   text-align: left;
   vertical-align: middle;
   border-bottom: 1px solid var(--color-border-default);
 }
-.table-scroll > table th {
+.table-scroll > table:not([class]) th {
   background: var(--color-bg-surface);
   font-size: var(--text-caption);
   font-weight: 600;
@@ -83,7 +91,7 @@
   outline-offset: 2px;
 }
 @media (max-width: 639px) {
-  .table-scroll > table {
+  .table-scroll > table:not([class]) {
     min-width: 640px;
   }
   .table-scroll > table td > button {

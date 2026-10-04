@@ -45,8 +45,20 @@ const SESSION_BODY = {
   roleName: 'Finance',
   mustChangePassword: false,
   permissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'operations.redemption',
+      canView: true,
+      canCreate: true,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
   testPurgeEnabled: false,
 };
@@ -194,7 +206,7 @@ describe('staff entry decisions', () => {
       { route: '/staff/login' },
     );
     await signInAs('emp@afhomes.test');
-    await expectLocation('/admin/redemption');
+    await expectLocation('/admin');
   });
 
   it('refuses an admin with the Administration message and link', async () => {

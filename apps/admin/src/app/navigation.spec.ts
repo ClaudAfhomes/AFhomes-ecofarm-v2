@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AfHomesPermission } from '@jad/contracts';
-import { breadcrumbItems, navItemsForPermissions } from './navigation';
+import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions } from './navigation';
 
 const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({
   moduleKey,
@@ -11,6 +11,19 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
 });
 
 describe('AF Homes navigation', () => {
+  it('places lookup after Dashboard and hides compatibility document links without weakening route guards', () => {
+    const grants = [
+      permission('dashboard.view'),
+      permission('operations.redemption'),
+      permission('sales.id_documents'),
+    ];
+    const items = navItemsForPermissions(grants);
+    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'VIP Member Lookup']);
+    expect(JSON.stringify(items)).not.toContain('/admin/documents');
+    expect(canAccessNavTarget([], '/admin/documents')).toBe(false);
+    expect(canAccessNavTarget([], '/admin/documents/test')).toBe(false);
+    expect(canAccessNavTarget(grants, '/admin/documents/test')).toBe(true);
+  });
   it('shows only server-granted groups and links', () => {
     const items = navItemsForPermissions([
       permission('dashboard.view'),

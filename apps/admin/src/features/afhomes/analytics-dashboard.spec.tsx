@@ -88,7 +88,12 @@ const financeOverview = (over: Record<string, unknown> = {}) => ({
   },
   redemptions: null,
   salesByPlan: [
-    { planId: '33333333-3333-4333-8333-333333333333', planName: 'Gold', count: 1, value: '60000.00' },
+    {
+      planId: '33333333-3333-4333-8333-333333333333',
+      planName: 'Gold',
+      count: 1,
+      value: '60000.00',
+    },
   ],
   salesByScheme: [{ scheme: 'spot_cash', count: 1, value: '60000.00' }],
   trends: [
@@ -113,10 +118,34 @@ const FINANCE_USER: SessionUser = {
   roleName: 'Finance',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.payment_verification',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.card_activation',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -181,11 +210,41 @@ const ADMIN_USER: SessionUser = {
   email: 'admin@afhomes.test',
   roleName: 'Admin',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'network.ost_members', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'network.ost_registrations', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.ost_members',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.ost_registrations',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.payment_verification',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.card_activation',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -213,7 +272,9 @@ describe('Phase 29 role dashboard', () => {
     expect(screen.getByText('Rejected payments')).toBeInTheDocument();
     // Commission states stay distinct by name.
     expect(await screen.findByText('Commission status')).toBeInTheDocument();
-    expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=month'))).toBe(true);
+    expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=month'))).toBe(
+      true,
+    );
   });
 
   it('39/40. renders empty and single-point chart states without crashing', async () => {
@@ -302,8 +363,8 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByText('Pending payments')).toBeInTheDocument();
     expect(await screen.findByText('Sales Overview')).toBeInTheDocument();
     const html = document.body.innerHTML;
-    expect(html.indexOf('OST Members')).toBeLessThan(html.indexOf('Pending payments'));
-    expect(html.indexOf('OST Members')).toBeLessThan(html.indexOf('Sales Overview'));
+    expect(html.indexOf('Pending payments')).toBeLessThan(html.indexOf('OST Members'));
+    expect(html.indexOf('Sales Overview')).toBeLessThan(html.indexOf('OST Members'));
   });
 
   it('2B. shows only the permitted queue card to a finance user', async () => {

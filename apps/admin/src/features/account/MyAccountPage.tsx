@@ -83,6 +83,7 @@ export function MyAccountPage() {
               name="account-display-name"
               label="Display name"
               value={displayName}
+              suggestName
               normalize={(value) => normalizeLiveHumanField('fullName', value)}
               onChange={setName}
               autoComplete="name"

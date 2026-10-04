@@ -227,7 +227,7 @@ describe('temporary-password staff creation', () => {
     fireEvent.click(create);
     await waitFor(() =>
       expect(createAfHomesStaff).toHaveBeenCalledWith({
-        fullName: 'NEW HIRE',
+        fullName: 'New Hire',
         email: 'new.hire@afhomes.test',
         roleId: 'r-admin',
         departmentId: null,
@@ -317,12 +317,8 @@ describe('test-account purge', () => {
     renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
     await screen.findByText('Ana Reyes');
     // ana@afhomes.test is RFC-reserved: eligible. The normal delete stays too.
-    expect(screen.getAllByRole('button', { name: 'Purge Test Account' }).length).toBeGreaterThan(
-      0,
-    );
-    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(
-      0,
-    );
+    expect(screen.getAllByRole('button', { name: 'Purge Test Account' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(0);
   });
 
   it('hides Purge Test Account for a real-domain row', async () => {
@@ -332,13 +328,14 @@ describe('test-account purge', () => {
     renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
     await screen.findByText('Ana Reyes');
     expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(
-      0,
-    );
+    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(0);
   });
 
   it('hides Purge Test Account when the server flag is off', async () => {
-    renderWithProviders(<App />, { route: '/admin/staff', user: { ...SUPER, testPurgeEnabled: false } });
+    renderWithProviders(<App />, {
+      route: '/admin/staff',
+      user: { ...SUPER, testPurgeEnabled: false },
+    });
     await screen.findByText('Ana Reyes');
     expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
   });
@@ -389,7 +386,9 @@ describe('staff and role detail pages', () => {
     const self: SessionUser = { ...SUPER, id: 's-1', name: 'Ana Reyes' };
     renderWithProviders(<App />, { route: '/admin/staff/s-1', user: self });
     await screen.findByText('Staff information');
-    expect(await screen.findByText('You cannot edit your own assignment. Ask another administrator.')).toBeTruthy();
+    expect(
+      await screen.findByText('You cannot edit your own assignment. Ask another administrator.'),
+    ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Save assignment' })).toBeNull();
   });
 

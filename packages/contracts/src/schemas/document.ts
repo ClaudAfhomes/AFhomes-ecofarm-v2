@@ -49,6 +49,13 @@ export const identityDocumentSchema = z.object({
   ocrStatus: ocrStatusSchema,
   ocrProvider: z.string().nullable(),
   verificationStatus: documentVerificationStatusSchema,
+  /**
+   * Server-derived authority: the single Current ID for the subject under the
+   * canonical rule (newest file-backed, non-rejected document by
+   * created_at, id tiebreak). Required on every document read so the UI
+   * never infers currentness locally. See `selectCurrentDocumentId`.
+   */
+  isCurrent: z.boolean(),
   extractedFields: z.record(z.string(), ocrFieldSchema),
   warnings: z.array(z.string()),
   reviewedFields: z.record(z.string(), z.string().nullable()).nullable(),
@@ -57,6 +64,23 @@ export const identityDocumentSchema = z.object({
   reviewedAt: z.string().nullable(),
 });
 export type IdentityDocument = z.infer<typeof identityDocumentSchema>;
+
+/** Page flags describe subject-wide currentness; a page may contain no current row. */
+export const documentListQuerySchema = z.object({
+  subjectType: documentSubjectSchema,
+  subjectId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export const currentDocumentQuerySchema = documentListQuerySchema
+  .pick({
+    subjectType: true,
+    subjectId: true,
+  })
+  .required({ subjectId: true });
+export const currentDocumentResponseSchema = z.object({
+  currentDocument: identityDocumentSchema.nullable(),
+});
 
 /** Server-issued upload grant. The browser PUTs bytes to `uploadUrl`. */
 export const documentUploadRequestSchema = z.object({

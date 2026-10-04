@@ -66,66 +66,77 @@ export function AfHomesRoleFormDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={role ? `Edit ${role.name}` : 'Create custom role'}
+      title={
+        role
+          ? role.isSystem
+            ? `View ${role.name} access`
+            : `Edit ${role.name}`
+          : 'Create custom role'
+      }
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
-            Cancel
+            {role?.isSystem ? 'Close' : 'Cancel'}
           </Button>
-          <Button
-            disabled={!name.trim() || saving}
-            onClick={() => onSave({ name, description, isActive: active, permissions })}
-          >
-            {saving ? 'Saving…' : 'Save role'}
-          </Button>
+          {!role?.isSystem ? (
+            <Button
+              disabled={!name.trim() || saving}
+              onClick={() => onSave({ name, description, isActive: active, permissions })}
+            >
+              {saving ? 'Saving…' : 'Save role'}
+            </Button>
+          ) : null}
         </>
       }
     >
-      <div style={{ display: 'grid', gap: 12 }}>
-        <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
-          Description
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-        <label>
-          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />{' '}
-          Active
-        </label>
-        {error ? <p role="alert">{error.message}</p> : null}
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Module</th>
-                <th>View</th>
-                <th>Create</th>
-                <th>Update</th>
-                <th>Delete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {permissions.map((p) => (
-                <tr key={p.moduleKey}>
-                  <td>{p.moduleKey}</td>
-                  {(['canView', 'canCreate', 'canUpdate', 'canDelete'] as const).map((action) => (
-                    <td key={action}>
-                      <input
-                        aria-label={`${p.moduleKey} ${action}`}
-                        type="checkbox"
-                        checked={p[action]}
-                        onChange={() => toggle(p.moduleKey, action)}
-                      />
-                    </td>
-                  ))}
+      <fieldset disabled={role?.isSystem}>
+        <legend>{role?.isSystem ? 'Protected system access — read only' : 'Role access'}</legend>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <label>
+            Name
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            Description
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
+          <label>
+            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />{' '}
+            Active
+          </label>
+          {error ? <p role="alert">{error.message}</p> : null}
+          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>View</th>
+                  <th>Create</th>
+                  <th>Update</th>
+                  <th>Delete</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {permissions.map((p) => (
+                  <tr key={p.moduleKey}>
+                    <td>{p.moduleKey}</td>
+                    {(['canView', 'canCreate', 'canUpdate', 'canDelete'] as const).map((action) => (
+                      <td key={action}>
+                        <input
+                          aria-label={`${p.moduleKey} ${action}`}
+                          type="checkbox"
+                          checked={p[action]}
+                          onChange={() => toggle(p.moduleKey, action)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </fieldset>
     </Dialog>
   );
 }

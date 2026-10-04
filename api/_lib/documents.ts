@@ -106,3 +106,66 @@ export function idNumberFromFields(fields: Record<string, string | null>): strin
   }
   return null;
 }
+
+/** Storage-path digest proving bytes arrived. Only a server-verified digest counts. */
+export const PENDING_SHA256 = '0'.repeat(64);
+
+/** Minimal row shape the current-ID rule reads. No hashes or paths leave this module. */
+export interface CurrentCandidateRow {
+  id?: unknown;
+  created_at?: unknown;
+  verification_status?: unknown;
+  storage_path?: unknown;
+  sha256?: unknown;
+}
+
+/**
+ * A reserved path carries no bytes until the server verifies the digest.
+ * Shared with the documents handler so both use one definition.
+ */
+export function hasPersistedFile(row: CurrentCandidateRow): boolean {
+  return (
+    typeof row.storage_path === 'string' &&
+    row.storage_path.length > 0 &&
+    typeof row.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(row.sha256) &&
+    row.sha256 !== PENDING_SHA256
+  );
+}
+
+/**
+ * THE canonical Current ID rule (server authority, UI must never re-derive).
+ *
+ * Current is the newest file-backed, non-rejected document by
+ * `created_at DESC, id DESC`. Rationale, each clause load-bearing:
+ *
+ * - File-backed only: a reserved path with no verified bytes cannot identify anyone.
+ * - Non-rejected: a rejected document is affirmatively not a valid ID.
+ * - `created_at` primary (NOT `reviewed_at`): verifying or human-confirming an
+ *   older document must never steal currentness from a newer one. VERIFY and
+ *   MAKE-CURRENT are different operations; only creating a newer document row
+ *   (an explicit replacement upload) moves currentness.
+ * - `id` tiebreak: UUID text order is arbitrary but total, so simultaneous
+ *   rows still resolve to exactly one winner deterministically.
+ *
+ * Pure function of persisted rows: no locks, no writes, idempotent under
+ * retry, and immune to completion order. Returns null when nothing qualifies.
+ */
+export function selectCurrentDocumentId(rows: CurrentCandidateRow[]): string | null {
+  const eligible = rows.filter(
+    (row) =>
+      typeof row.id === 'string' &&
+      hasPersistedFile(row) &&
+      row.verification_status !== 'rejected',
+  );
+  eligible.sort((a, b) => {
+    const aTime = Date.parse(String(a.created_at));
+    const bTime = Date.parse(String(b.created_at));
+    const aSafe = Number.isNaN(aTime) ? 0 : aTime;
+    const bSafe = Number.isNaN(bTime) ? 0 : bTime;
+    if (aSafe !== bSafe) return bSafe - aSafe;
+    return String(b.id) < String(a.id) ? -1 : String(b.id) > String(a.id) ? 1 : 0;
+  });
+  const winner = eligible[0];
+  return winner && typeof winner.id === 'string' ? winner.id : null;
+}

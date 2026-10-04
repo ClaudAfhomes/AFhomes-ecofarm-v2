@@ -19,7 +19,10 @@ type Route = { status?: number; body: unknown };
 const routes = new Map<string, Route>();
 const requests: { path: string; method: string; body: unknown; query: string }[] = [];
 
-const list = (data: unknown[]): Route => ({ status: 200, body: { data, meta: { total: data.length } } });
+const list = (data: unknown[]): Route => ({
+  status: 200,
+  body: { data, meta: { total: data.length } },
+});
 
 const DOC_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 const SUBJECT_ID = 'bbbbbbbb-0000-4000-8000-000000000001';
@@ -35,6 +38,7 @@ const doc = (over: Record<string, unknown> = {}) => ({
   ocrStatus: 'failed',
   ocrProvider: 'http',
   verificationStatus: 'pending_review',
+  isCurrent: false,
   extractedFields: {},
   warnings: ['OCR_NO_TEXT_DETECTED'],
   reviewedFields: null,
@@ -52,8 +56,20 @@ const DOCS_USER: SessionUser = {
   roleName: 'Admin',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.id_documents', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.id_documents',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -163,11 +179,11 @@ describe('Phase 27 upload flow', () => {
     // fireEvent bypasses the input's accept hint, proving the component's own
     // allowlist rejects the file even when the browser hint is circumvented.
     fireEvent.change(screen.getByLabelText(/Scan to upload/), { target: { files: [file] } });
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Upload scan' })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload scan' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Upload scan' }));
-    expect(await screen.findByText('Only JPEG, PNG or PDF files are accepted.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Only JPEG, PNG or PDF files are accepted.'),
+    ).toBeInTheDocument();
     expect(requests.filter((r) => r.path.includes('upload-url'))).toHaveLength(0);
   });
 
@@ -178,9 +194,7 @@ describe('Phase 27 upload flow', () => {
     const bytes = new Uint8Array(10 * 1024 * 1024 + 1);
     const file = new File([bytes], 'huge.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(/Scan to upload/), file);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Upload scan' })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload scan' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Upload scan' }));
     expect(
       await screen.findByText('The file must be non-empty and at most 10 MiB.'),
@@ -192,6 +206,7 @@ describe('Phase 27 upload flow', () => {
     const user = userEvent.setup();
     install({
       'GET /documents': list([]),
+      ['POST /documents/' + DOC_ID + '/complete-upload']: { status: 200, body: doc() },
       'POST /documents/customer/upload-url': {
         status: 201,
         body: {
@@ -209,7 +224,9 @@ describe('Phase 27 upload flow', () => {
     const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'id.jpg', { type: 'image/jpeg' });
     await user.upload(screen.getByLabelText(/Scan to upload/), file);
     await user.click(screen.getByRole('button', { name: 'Upload scan' }));
-    expect(await screen.findByText(/nothing is final until a human confirms it/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/nothing is final until a human confirms it/i),
+    ).toBeInTheDocument();
     // The bytes went to the signed URL only; no profile or review call fired.
     expect(requests.some((r) => r.method === 'PUT')).toBe(true);
     expect(requests.filter((r) => r.path.endsWith('/confirm'))).toHaveLength(0);
@@ -231,7 +248,10 @@ describe('Phase 27 document review', () => {
           requests.push({ path: '/ocr', method: 'POST', body: null, query: '' });
           return new Promise(() => {}) as unknown as Response;
         }
-        return (mockFetch() as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>)(input, init);
+        return (mockFetch() as (i: RequestInfo | URL, n?: RequestInit) => Promise<Response>)(
+          input,
+          init,
+        );
       }),
     );
     install({
@@ -241,7 +261,10 @@ describe('Phase 27 document review', () => {
       },
       'GET /documents/aaaaaaaa-0000-4000-8000-000000000001/access-url': {
         status: 200,
-        body: { url: 'https://storage.test/download/x?ttl=60', expiresAt: '2026-10-01T00:01:00.000Z' },
+        body: {
+          url: 'https://storage.test/download/x?ttl=60',
+          expiresAt: '2026-10-01T00:01:00.000Z',
+        },
       },
     });
     const user = userEvent.setup();
@@ -257,7 +280,10 @@ describe('Phase 27 document review', () => {
       [`GET /documents/${DOC_ID}`]: { status: 200, body: doc() },
       [`GET /documents/${DOC_ID}/access-url`]: {
         status: 200,
-        body: { url: 'https://storage.test/download/x?ttl=60', expiresAt: '2026-10-01T00:01:00.000Z' },
+        body: {
+          url: 'https://storage.test/download/x?ttl=60',
+          expiresAt: '2026-10-01T00:01:00.000Z',
+        },
       },
       [`POST /documents/${DOC_ID}/confirm`]: {
         status: 200,
@@ -269,15 +295,22 @@ describe('Phase 27 document review', () => {
       },
     });
     render(`/admin/documents/${DOC_ID}`);
-    expect(await screen.findByText('No fields were extracted. Enter the values manually below.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No fields were extracted. Enter the values manually below.'),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Review and edit' }));
     await user.type(screen.getByLabelText('Add a field'), 'firstName');
     await user.click(screen.getByRole('button', { name: 'Add' }));
     await user.type(screen.getByLabelText(/firstName \(editable copy/), 'Manual Ana');
     await user.click(screen.getByRole('button', { name: 'Confirm reviewed values' }));
     await waitFor(() => {
-      const post = requests.find((r) => r.method === 'POST' && r.path === `/documents/${DOC_ID}/confirm`);
-      expect(post?.body).toMatchObject({ decision: 'confirmed', fields: { firstName: 'Manual Ana' } });
+      const post = requests.find(
+        (r) => r.method === 'POST' && r.path === `/documents/${DOC_ID}/confirm`,
+      );
+      expect(post?.body).toMatchObject({
+        decision: 'confirmed',
+        fields: { firstName: 'Manual Ana' },
+      });
     });
     expect(await screen.findByText('Confirmed.')).toBeInTheDocument();
   });
@@ -297,7 +330,10 @@ describe('Phase 27 document review', () => {
       [`GET /documents/${DOC_ID}`]: { status: 200, body: suggested },
       [`GET /documents/${DOC_ID}/access-url`]: {
         status: 200,
-        body: { url: 'https://storage.test/download/x?ttl=60', expiresAt: '2026-10-01T00:01:00.000Z' },
+        body: {
+          url: 'https://storage.test/download/x?ttl=60',
+          expiresAt: '2026-10-01T00:01:00.000Z',
+        },
       },
       [`POST /documents/${DOC_ID}/confirm`]: {
         status: 200,
@@ -314,7 +350,9 @@ describe('Phase 27 document review', () => {
     await user.clear(screen.getByLabelText(/idNumber \(editable copy/));
     await user.click(screen.getByRole('button', { name: 'Confirm reviewed values' }));
     await waitFor(() => {
-      const post = requests.find((r) => r.method === 'POST' && r.path === `/documents/${DOC_ID}/confirm`);
+      const post = requests.find(
+        (r) => r.method === 'POST' && r.path === `/documents/${DOC_ID}/confirm`,
+      );
       expect(post?.body).toMatchObject({ fields: { firstName: 'Ana-Marie', idNumber: null } });
     });
   });
@@ -324,7 +362,10 @@ describe('Phase 27 document review', () => {
       [`GET /documents/${DOC_ID}`]: { status: 200, body: doc() },
       [`GET /documents/${DOC_ID}/access-url`]: {
         status: 200,
-        body: { url: 'https://storage.test/download/afhomes-customer-ids/x?ttl=60', expiresAt: '2026-10-01T00:01:00.000Z' },
+        body: {
+          url: 'https://storage.test/download/afhomes-customer-ids/x?ttl=60',
+          expiresAt: '2026-10-01T00:01:00.000Z',
+        },
       },
     });
     render(`/admin/documents/${DOC_ID}`);
@@ -342,7 +383,40 @@ describe('Phase 27 document review', () => {
       },
     });
     render(`/admin/documents/${DOC_ID}`);
-    expect(await screen.findByText('The preview is unavailable right now. The metadata below is unaffected.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'The preview is unavailable right now. The metadata below is unaffected.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText('OCR suggestions (not authoritative)')).toBeInTheDocument();
+  });
+
+  it('updates Current ID to No immediately after server rejection', async () => {
+    const rejected = doc({ verificationStatus: 'rejected', isCurrent: false });
+    install({
+      [`GET /documents/${DOC_ID}`]: {
+        status: 200,
+        body: doc({
+          isCurrent: true,
+          extractedFields: { firstName: { value: 'Synthetic', confidence: 0.9 } },
+        }),
+      },
+      [`GET /documents/${DOC_ID}/access-url`]: {
+        status: 200,
+        body: {
+          url: 'https://storage.test/download/x?ttl=60',
+          expiresAt: '2026-10-01T00:01:00.000Z',
+        },
+      },
+      [`POST /documents/${DOC_ID}/confirm`]: { status: 200, body: rejected },
+    });
+    render(`/admin/documents/${DOC_ID}`);
+    await screen.findByText('Yes \u2014 current ID for this subject');
+    fireEvent.click(screen.getByRole('button', { name: 'Review and edit' }));
+    // Keep the following authoritative read consistent with the decision.
+    routes.set(`GET /documents/${DOC_ID}`, { status: 200, body: rejected });
+    fireEvent.click(screen.getByRole('button', { name: 'Reject document' }));
+    await screen.findByText('No \u2014 retained record');
+    expect(screen.queryByText('Yes \u2014 current ID for this subject')).not.toBeInTheDocument();
   });
 });

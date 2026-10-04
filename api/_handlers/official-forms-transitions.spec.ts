@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createCommissionRuleSchema, createCustomerApplicationSchema } from '@jad/contracts';
+import {
+  createCommissionRuleSchema,
+  createCustomerApplicationSchema,
+  reservationAgreementListItemSchema,
+} from '@jad/contracts';
 import { calculateCommission } from '../_lib/commerce.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
@@ -535,4 +539,48 @@ describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
     });
     expect(res.status).toBe(201);
   });
+});
+
+describe('IST list holder-aware summary', () => {
+  it.each([false, true])(
+    'returns strict commercial fields with secondary holder=%s',
+    async (hasSecondary) => {
+      install({
+        reservation_agreements: [
+          {
+            id: AGREEMENT_ID,
+            reservation_number: 'RES-QA',
+            sale_id: SALE_ID,
+            tier_snapshot: 'GOLD',
+            payment_scheme_snapshot: 'spot_cash',
+            total_price_snapshot: '312000.00',
+            primary_signature_status: 'received',
+            secondary_signature_status: hasSecondary ? 'pending' : null,
+            status: 'executed',
+            created_by: '11111111-1111-4111-8111-111111111111',
+            created_at: '2026-10-01',
+            submitted_at: '2026-10-01',
+          },
+        ],
+        reservation_agreement_holders: [
+          { agreement_id: AGREEMENT_ID, holder_type: 'PRIMARY', name: 'QA Applicant' },
+          ...(hasSecondary
+            ? [{ agreement_id: AGREEMENT_ID, holder_type: 'SECONDARY', name: 'QA Secondary' }]
+            : []),
+        ],
+      });
+      const result = await call(forms, { path: 'reservations' });
+      expect(result.status).toBe(200);
+      const rows = (result.body as { data: unknown[] }).data;
+      expect(rows).toHaveLength(1);
+      expect(reservationAgreementListItemSchema.parse(rows[0])).toMatchObject({
+        applicantName: 'QA Applicant',
+        paymentScheme: 'spot_cash',
+        totalPrice: '312000.00',
+        primarySignatureStatus: 'received',
+        secondarySignatureStatus: hasSecondary ? 'pending' : null,
+        hasSecondaryHolder: hasSecondary,
+      });
+    },
+  );
 });

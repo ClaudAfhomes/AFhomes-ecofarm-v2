@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { resolvePortalDestination, type AuthPortals } from '@jad/contracts';
 import { Alert, Button, PasswordField, TextField } from '@jad/ui';
 
@@ -25,7 +25,6 @@ type PostLogin =
  */
 export function CustomerLoginForm() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { signIn, signOut } = useCustomerSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,10 +34,6 @@ export function CustomerLoginForm() {
   const [postLogin, setPostLogin] = useState<PostLogin | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-
-  const from = (location.state as { from?: string } | null)?.from?.startsWith('/customer')
-    ? (location.state as { from: string }).from
-    : '/customer';
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -61,7 +56,7 @@ export function CustomerLoginForm() {
     try {
       await signIn(email, password);
       const portals = await getAuthPortals();
-      const next = decideCustomerLogin(portals, from);
+      const next = decideCustomerLogin(portals);
       if (next.kind === 'navigate') {
         navigate(next.to, { replace: true });
       } else if (next.kind === 'chooser') {
@@ -229,7 +224,7 @@ type CustomerDecision =
  * Pure post-login decision for the customer entry. Unit-testable; the
  * component only renders it.
  */
-export function decideCustomerLogin(portals: AuthPortals, from: string): CustomerDecision {
+export function decideCustomerLogin(portals: AuthPortals): CustomerDecision {
   const destination = resolvePortalDestination({
     staffRole: portals.staff?.roleSlug ?? null,
     mustChangePassword: portals.staff?.mustChangePassword === true,
@@ -239,7 +234,7 @@ export function decideCustomerLogin(portals: AuthPortals, from: string): Custome
   });
   switch (destination) {
     case 'customer':
-      return { kind: 'navigate', to: from };
+      return { kind: 'navigate', to: '/customer' };
     case 'ost':
       return {
         kind: 'notice',
@@ -268,7 +263,7 @@ export function decideCustomerLogin(portals: AuthPortals, from: string): Custome
       return {
         kind: 'chooser',
         options: [
-          { label: 'Customer / Member', to: from },
+          { label: 'Customer / Member', to: '/customer' },
           { label: 'Staff', to: '/staff/login', external: true },
         ],
       };
@@ -276,7 +271,7 @@ export function decideCustomerLogin(portals: AuthPortals, from: string): Custome
       return {
         kind: 'chooser',
         options: [
-          { label: 'Customer / Member', to: from },
+          { label: 'Customer / Member', to: '/customer' },
           { label: 'Administration', to: '/admin/login', external: true },
         ],
       };

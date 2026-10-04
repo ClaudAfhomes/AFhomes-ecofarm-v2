@@ -32,7 +32,7 @@ import { createRedemptionRequestSchema, pointsAmountSchema } from './redemption.
 describe('person names', () => {
   it('accepts alphabetic, Unicode, hyphen and apostrophe names', () => {
     for (const name of ['Juan', 'Maria Santos', 'Anne-Marie', "O'Brien", 'Peña', 'ÑOÑO']) {
-      expect(personNameSchema.parse(name)).toBe(name.toUpperCase());
+      expect(personNameSchema.parse(name)).toBe(name);
     }
   });
 
@@ -70,10 +70,13 @@ describe('person names', () => {
 });
 
 describe('safe uppercase normalization', () => {
-  it('uppercases lowercase and mixed-case names', () => {
-    expect(normalizePersonName('claud mars jimenez')).toBe('CLAUD MARS JIMENEZ');
-    expect(normalizePersonName('  Claud   Mars  Jimenez  ')).toBe('CLAUD MARS JIMENEZ');
-    expect(normalizePersonName("o'brien")).toBe("O'BRIEN");
+  it('preserves lowercase and deliberate mixed-case names while collapsing whitespace', () => {
+    expect(normalizePersonName('claud mars jimenez')).toBe('claud mars jimenez');
+    expect(normalizePersonName('  Claud   Mars  Jimenez  ')).toBe('Claud Mars Jimenez');
+    expect(normalizePersonName("O'Connor")).toBe("O'Connor");
+    expect(personNameSchema.parse('Claud Mars C. Jimenez')).toBe('Claud Mars C. Jimenez');
+    for (const name of ['McDonald', 'de la Cruz', 'van der Meer', 'Anne-Marie'])
+      expect(personNameSchema.parse(name)).toBe(name);
   });
 
   it('uppercases address and business text, trims postal codes', () => {

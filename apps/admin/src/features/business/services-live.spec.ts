@@ -98,8 +98,8 @@ describe('customer service integration', () => {
     });
     const body = calls[0]!.body as Record<string, unknown>;
     expect(body).toMatchObject({
-      firstName: 'CLAUD',
-      lastName: 'DELA CRUZ',
+      firstName: 'claud',
+      lastName: 'dela cruz',
       email: 'claud@example.com',
       phone: '+639185550101',
       notes: 'Keep this Note as Typed!',

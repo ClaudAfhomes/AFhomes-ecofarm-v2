@@ -1,4 +1,5 @@
-import { NormalizedInput } from '@jad/ui';
+import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
+
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -163,7 +164,16 @@ export function BusinessCustomersPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   const create = useMutation({
-    mutationFn: () => createCustomer(form),
+    mutationFn: () => {
+      const invalid = document.querySelector<HTMLInputElement>(
+        '[role="dialog"] [aria-invalid="true"]',
+      );
+      if (invalid) {
+        invalid.focus();
+        throw new Error('Correct the highlighted fields before registering.');
+      }
+      return createCustomer(form);
+    },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['business', 'customers'] });
       setForm(EMPTY);
@@ -419,14 +429,12 @@ export function BusinessCustomersPage() {
                           ? [
                               {
                                 label:
-                                  issueActivation.isPending &&
-                                  activationCustomerId === customer.id
+                                  issueActivation.isPending && activationCustomerId === customer.id
                                     ? 'Issuing activation link…'
                                     : 'Issue / Reissue activation link',
                                 icon: 'user-check' as const,
                                 disabled:
-                                  issueActivation.isPending &&
-                                  activationCustomerId === customer.id,
+                                  issueActivation.isPending && activationCustomerId === customer.id,
                                 onClick: () => issueActivation.mutate(customer.id),
                               },
                             ]
@@ -502,6 +510,7 @@ export function BusinessCustomersPage() {
             <label>
               First name
               <NormalizedInput
+                suggestName
                 normalize={(value) => normalizeLiveHumanField('firstName', value)}
                 value={form.firstName}
                 onChange={(e) => set('firstName', e.target.value)}
@@ -510,6 +519,7 @@ export function BusinessCustomersPage() {
             <label>
               Middle name
               <NormalizedInput
+                suggestName
                 normalize={(value) => normalizeLiveHumanField('middleName', value)}
                 value={form.middleName ?? ''}
                 onChange={(e) => set('middleName', e.target.value)}
@@ -518,6 +528,7 @@ export function BusinessCustomersPage() {
             <label>
               Last name
               <NormalizedInput
+                suggestName
                 normalize={(value) => normalizeLiveHumanField('lastName', value)}
                 value={form.lastName}
                 onChange={(e) => set('lastName', e.target.value)}
@@ -536,7 +547,7 @@ export function BusinessCustomersPage() {
             <legend>Contact Information</legend>
             <label>
               Email
-              <input
+              <NormalizedInput
                 value={form.email}
                 onChange={(e) => set('email', e.target.value)}
                 type="email"
@@ -544,7 +555,12 @@ export function BusinessCustomersPage() {
             </label>
             <label>
               Phone
-              <input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+              <NormalizedInput
+                type="tel"
+                inputMode="tel"
+                value={form.phone}
+                onChange={(e) => set('phone', e.target.value)}
+              />
             </label>
           </fieldset>
           <fieldset>

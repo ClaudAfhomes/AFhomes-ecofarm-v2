@@ -174,15 +174,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('status', 'active')
         .order('full_name');
       if (error) throw error;
-      return res
-        .status(200)
-        .json({
-          data: ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-            id: r.id,
-            name: r.full_name,
-          })),
-          meta: { total: (data ?? []).length },
-        });
+      return res.status(200).json({
+        data: ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+          id: r.id,
+          name: r.full_name,
+        })),
+        meta: { total: (data ?? []).length },
+      });
     }
     if (subPath(req) === '' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'sales.customers');
@@ -192,12 +190,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
       const { limit, offset } = parsed.data;
       const directory = await customerDirectory(db, parsed.data);
-      return res
-        .status(200)
-        .json({
-          data: directory.map((row) => toCustomer(row.record)),
-          meta: { total: directory[0]?.total_count ?? 0, limit, offset },
-        });
+      return res.status(200).json({
+        data: directory.map((row) => toCustomer(row.record)),
+        meta: { total: directory[0]?.total_count ?? 0, limit, offset },
+      });
     }
 
     if (subPath(req) === '' && method(req) === 'POST') {
@@ -229,10 +225,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const row = {
         customer_number: customerNumber,
         first_name: input.firstName,
-        middle_name:
-          input.middleName === undefined ? null : normalizePersonName(input.middleName),
+        middle_name: input.middleName === undefined ? null : normalizePersonName(input.middleName),
         last_name: input.lastName,
-        suffix: input.suffix === undefined ? null : normalizeAddressField(input.suffix),
+        suffix: input.suffix === undefined ? null : normalizePersonName(input.suffix),
         birth_date: input.dateOfBirth,
         gender: input.gender ?? null,
         email: input.email,
@@ -318,11 +313,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch.middle_name = p.middleName === null ? null : normalizePersonName(p.middleName);
       if (p.lastName !== undefined) patch.last_name = p.lastName;
       if (p.suffix !== undefined)
-        patch.suffix = p.suffix === null ? null : normalizeAddressField(p.suffix);
+        patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
       if (p.email !== undefined) patch.email = p.email;
-      if (p.phone !== undefined)
-        patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
+      if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
       if (p.address !== undefined)
         patch.address = {
           ...p.address,

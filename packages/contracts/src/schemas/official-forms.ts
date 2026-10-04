@@ -3,6 +3,7 @@ import {
   birthDateSchema,
   emailSchema,
   normalizeAddressField,
+  normalizePersonName,
   optionalPersonNameSchema,
   optionalContactNumberSchema,
   personNameSchema,
@@ -69,12 +70,7 @@ export const applicationHolderSchema = z.object({
   officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
   employedPosition: z.string().trim().max(120).transform(normalizeAddressField).optional(),
-  printedName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(180)
-    .transform((v) => normalizeAddressField(v)),
+  printedName: z.string().trim().min(1).max(180).transform(normalizePersonName),
 });
 
 export const createCustomerApplicationSchema = z
@@ -153,7 +149,7 @@ export const reservationHolderSchema = z.object({
     .min(1)
     .max(180)
     .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
-    .transform(normalizeAddressField),
+    .transform(normalizePersonName),
   address: z
     .string()
     .trim()
@@ -254,6 +250,62 @@ export const officialFormListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+/** Lists return commercial snapshot summaries, not editable holder details. */
+const officialFormSummaryFields = {
+  id: z.string().uuid(),
+  tier_snapshot: vipTierSchema,
+  applicant_name: z.string().nullable(),
+  created_by: z.string().uuid().nullable(),
+  created_at: z.string(),
+  submitted_at: z.string().nullable(),
+};
+export const customerApplicationListItemSchema = z
+  .object({
+    ...officialFormSummaryFields,
+    application_number: z.string(),
+    status: customerApplicationStatusSchema,
+  })
+  .transform((row) => ({
+    id: row.id,
+    applicationNumber: row.application_number,
+    tier: row.tier_snapshot,
+    applicantName: row.applicant_name,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    submittedAt: row.submitted_at,
+    status: row.status,
+  }));
+export const reservationAgreementListItemSchema = z
+  .object({
+    ...officialFormSummaryFields,
+    reservation_number: z.string(),
+    sale_id: z.string().uuid(),
+    payment_scheme_snapshot: paymentSchemeSchema,
+    total_price_snapshot: exactDecimalStringSchema,
+    primary_signature_status: signatureStatusSchema,
+    secondary_signature_status: signatureStatusSchema.nullable(),
+    has_secondary_holder: z.boolean(),
+    status: reservationAgreementStatusSchema,
+  })
+  .transform((row) => ({
+    id: row.id,
+    reservationNumber: row.reservation_number,
+    saleId: row.sale_id,
+    paymentScheme: row.payment_scheme_snapshot,
+    totalPrice: row.total_price_snapshot,
+    primarySignatureStatus: row.primary_signature_status,
+    secondarySignatureStatus: row.secondary_signature_status,
+    hasSecondaryHolder: row.has_secondary_holder,
+    tier: row.tier_snapshot,
+    applicantName: row.applicant_name,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    submittedAt: row.submitted_at,
+    status: row.status,
+  }));
+export type CustomerApplicationListItem = z.infer<typeof customerApplicationListItemSchema>;
+export type ReservationAgreementListItem = z.infer<typeof reservationAgreementListItemSchema>;
 
 export const formImportPreviewSchema = z.object({
   kind: z.enum(['customer_application', 'reservation_agreement']),

@@ -554,7 +554,7 @@ export function validateImportRow(
       firstName: normalizePersonName(get('first_name')),
       middleName: nonEmpty(get('middle_name')) ? normalizePersonName(get('middle_name')) : null,
       lastName: normalizePersonName(get('last_name')),
-      suffix: nonEmpty(get('suffix')) ? normalizeAddressField(get('suffix')) : null,
+      suffix: nonEmpty(get('suffix')) ? normalizePersonName(get('suffix')) : null,
       birthDate: get('birth_date') || null,
       gender: (() => {
         const g = get('sex').toLowerCase();

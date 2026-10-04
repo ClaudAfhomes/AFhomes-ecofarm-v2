@@ -108,8 +108,8 @@ type Op =
   | { t: 'gte'; col: string; val: unknown }
   | { t: 'lte'; col: string; val: unknown }
   | { t: 'range'; from: number; to: number }
-  | { t: 'order'; col: string; asc: boolean }
-  | { t: 'limit'; n: number };
+  | { t: 'order'; col: string; asc: boolean; reference?: string }
+  | { t: 'limit'; n: number; reference?: string };
 
 /** A declared relation between two fixture tables. */
 type FakeLink = { child: string; parent: string; fk: string; pk?: string };
@@ -178,6 +178,7 @@ const hasWrite = (ops: Op[]) =>
 
 function matches(row: FakeRow, ops: Op[]): boolean {
   return ops.every((op) => {
+    if ('col' in op && op.col.includes('.')) return true;
     switch (op.t) {
       case 'eq':
         return row[op.col] === op.val;
@@ -481,12 +482,17 @@ export class FakeSupabase {
         ops.push({ t: 'range', from, to });
         return this;
       },
-      order(col: string, opts?: { ascending?: boolean }) {
-        ops.push({ t: 'order', col, asc: opts?.ascending !== false });
+      order(col: string, opts?: { ascending?: boolean; referencedTable?: string }) {
+        ops.push({
+          t: 'order',
+          col,
+          asc: opts?.ascending !== false,
+          reference: opts?.referencedTable,
+        });
         return this;
       },
-      limit(n: number) {
-        ops.push({ t: 'limit', n });
+      limit(n: number, opts?: { referencedTable?: string }) {
+        ops.push({ t: 'limit', n, reference: opts?.referencedTable });
         return this;
       },
       async maybeSingle() {
@@ -607,7 +613,7 @@ export class FakeSupabase {
 
       // PostgREST order() clauses form ONE comparator, most significant first
       // (`ORDER BY a, b`), not a chain of independent sorts.
-      const orders = ops.filter((o) => o.t === 'order') as {
+      const orders = ops.filter((o) => o.t === 'order' && !o.reference) as {
         t: 'order';
         col: string;
         asc: boolean;
@@ -626,7 +632,7 @@ export class FakeSupabase {
       }
       const range = [...ops].reverse().find((o) => o.t === 'range') as
         { t: 'range'; from: number; to: number } | undefined;
-      const limit = [...ops].reverse().find((o) => o.t === 'limit') as
+      const limit = [...ops].reverse().find((o) => o.t === 'limit' && !o.reference) as
         { t: 'limit'; n: number } | undefined;
 
       // PostgREST's `count: 'exact'` is the TOTAL number of matching rows, taken
@@ -646,7 +652,7 @@ export class FakeSupabase {
       const selectOp = ops.find((o) => o.t === 'select') as
         { t: 'select'; cols: string; count: boolean } | undefined;
       if (selectOp) {
-        out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols) }));
+        out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols, ops) }));
       }
       // Record the read shape (columns only, never row data) so tests can
       // assert a probe selected the column it filters on. A blocker probe
@@ -667,7 +673,7 @@ export class FakeSupabase {
    * Attach embedded relations to a parent row. Supports one level of
    * `alias:child!constraint(cols)` / `child!constraint(cols)` / `child(cols)`.
    */
-  private embed(parent: string, row: FakeRow, cols: string): FakeRow {
+  private embed(parent: string, row: FakeRow, cols: string, ops: Op[] = []): FakeRow {
     const attached: FakeRow = {};
     for (const spec of splitTopLevel(cols)) {
       if (!spec.includes('!') && !/\w+\(/.test(spec)) continue;
@@ -705,6 +711,29 @@ export class FakeSupabase {
       const link = this.links.find((l) => byName(l) || asParent(l) || asChild(l));
       if (!link) continue;
       const parentSide = link.parent === embedTable;
+      const childLimit = ops.find((op) => op.t === 'limit' && op.reference === alias);
+      if (!parentSide && childLimit?.t === 'limit') {
+        const embeddedError = this.errors[embedTable!];
+        if (embeddedError) throw new Error(embeddedError.message);
+        const filters: Op[] = ops.flatMap((op) =>
+          'col' in op && op.col.startsWith(alias + '.')
+            ? [{ ...op, col: op.col.slice(alias.length + 1) }]
+            : [],
+        );
+        const orders = ops.filter((op) => op.t === 'order' && op.reference === alias);
+        const children = (this.tables[link.child] ?? [])
+          .filter((child) => child[link.fk] === row[link.pk ?? 'id'] && matches(child, filters))
+          .sort((a, b) => {
+            for (const order of orders) {
+              if (order.t !== 'order' || a[order.col] === b[order.col]) continue;
+              const cmp = a[order.col]! > b[order.col]! ? 1 : -1;
+              return order.asc ? cmp : -cmp;
+            }
+            return 0;
+          });
+        attached[alias] = children.slice(0, childLimit.n);
+        continue;
+      }
       const match = parentSide
         ? // Embedded table is the PARENT: this row holds the FK.
           (this.tables[link.parent] ?? []).find((r) => r[link.pk ?? 'id'] === row[link.fk])

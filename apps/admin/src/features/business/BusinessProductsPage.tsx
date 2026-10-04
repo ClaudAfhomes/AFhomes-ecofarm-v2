@@ -1,3 +1,5 @@
+import styles from './WorkflowCards.module.css';
+import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
 import { useState } from 'react';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -164,6 +166,7 @@ export function BusinessProductsPage() {
   void useDebouncedValue(search.trim(), 300, setAppliedSearch);
   const [visibility, setVisibility] = useState<CardPlanVisibility>('active');
 
+  const [detailPlan, setDetailPlan] = useState<CardProduct | null>(null);
   const [creatingPlan, setCreatingPlan] = useState(false);
   const [editingPlan, setEditingPlan] = useState<CardProduct | null>(null);
   const [planForm, setPlanForm] = useState<PlanForm>(EMPTY_PLAN_FORM);
@@ -364,6 +367,116 @@ export function BusinessProductsPage() {
         </Button>
       </div>
 
+      {detailPlan ? (
+        <Dialog
+          open
+          title={detailPlan.name}
+          onClose={() => setDetailPlan(null)}
+          footer={
+            <Button variant="secondary" onClick={() => setDetailPlan(null)}>
+              Close
+            </Button>
+          }
+        >
+          <section>
+            <h2>Pricing</h2>
+            <dl className={styles.facts}>
+              <div>
+                <dt>Spot Cash</dt>
+                <dd>{formatMoney(detailPlan.cashPrice)}</dd>
+              </div>
+              <div>
+                <dt>Installment</dt>
+                <dd>{formatMoney(detailPlan.installmentPrice)}</dd>
+              </div>
+              <div>
+                <dt>Reservation</dt>
+                <dd>{formatMoney(detailPlan.reservationFee)}</dd>
+              </div>
+            </dl>
+          </section>
+          <section>
+            <h2>Membership</h2>
+            <dl className={styles.facts}>
+              <div>
+                <dt>Validity</dt>
+                <dd>
+                  {detailPlan.validityYears} years ({detailPlan.baseValidityYears} +{' '}
+                  {detailPlan.validityExtensionYears})
+                </dd>
+              </div>
+              <div>
+                <dt>Cardholder limit</dt>
+                <dd>{detailPlan.cardholderLimit}</dd>
+              </div>
+              <div>
+                <dt>Yearly points</dt>
+                <dd>
+                  {formatPoints(detailPlan.yearlyPoints)} × {detailPlan.annualPointsTranches}
+                </dd>
+              </div>
+              <div>
+                <dt>Total loyalty value</dt>
+                <dd>{formatMoney(detailPlan.totalLoyaltyValue)}</dd>
+              </div>
+            </dl>
+          </section>
+          <section>
+            <h2>Benefits</h2>
+            <p>
+              {detailPlan.discountPercent}% discount ·{' '}
+              {detailPlan.priorityReservation ? 'Priority reservation' : 'Standard reservation'} ·{' '}
+              {detailPlan.noMonthlyAnnualDues ? 'No monthly/annual dues' : 'Dues apply'}
+            </p>
+            <p>{detailPlan.description}</p>
+          </section>
+          <section>
+            <h2>Payment options</h2>
+            <p>
+              Spot Cash ({detailPlan.spotCashDays} days) · Standard (
+              {detailPlan.standardInstallmentMonths} months)
+              {detailPlan.moveAEnabled ? ' · Move A' : ''}
+              {detailPlan.moveB1Enabled ? ' · B1' : ''}
+              {detailPlan.moveB2Enabled ? ' · B2' : ''}
+            </p>
+          </section>
+          <section>
+            <h2>Commission</h2>
+            <p>
+              Plan default: {formatRate(detailPlan.commissionRate)}. Effective rules are resolved by
+              the server when a sale is created.
+            </p>
+          </section>
+          <section>
+            <h2>Status / Display order</h2>
+            <StatusChip label={detailPlan.isActive ? 'Active' : 'Inactive'} />
+            <p>Display order: {detailPlan.sortOrder}</p>
+          </section>
+          <div className={styles.actions}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                openEditPlan(detailPlan);
+                setDetailPlan(null);
+              }}
+            >
+              Edit plan
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={togglePlan.isPending}
+              onClick={() =>
+                togglePlan.mutate(
+                  { id: detailPlan.id, isActive: !detailPlan.isActive },
+                  { onSuccess: () => setDetailPlan(null) },
+                )
+              }
+            >
+              {detailPlan.isActive ? 'Deactivate' : 'Activate'}
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
       {tab === 'plans' ? (
         <>
           <form
@@ -415,89 +528,47 @@ export function BusinessProductsPage() {
               }
             />
           ) : (
-            <div
-              role="region"
-              aria-label="Scrollable records"
-              tabIndex={0}
-              className="table-scroll"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Code</th>
-                    <th>Category</th>
-                    <th>Spot Cash</th>
-                    <th>Installment</th>
-                    <th>Reservation</th>
-                    <th>Validity</th>
-                    <th>Moves</th>
-                    <th>Yearly Points</th>
-                    <th>Official Benefits</th>
-                    <th>Commission</th>
-                    <th>Status</th>
-                    <th>Display Order</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plans.data?.map((product) => (
-                    <tr key={product.id}>
-                      <td>{product.name}</td>
-                      <td>{product.code}</td>
-                      <td>{product.categoryName ?? '—'}</td>
-                      <td>{formatMoney(product.cashPrice)}</td>
-                      <td>{formatMoney(product.installmentPrice)}</td>
-                      <td>{formatMoney(product.reservationFee)}</td>
-                      <td>
-                        {product.validityYears} year{product.validityYears === 1 ? '' : 's'}
-                      </td>
-                      <td>
-                        {[
-                          product.moveAEnabled ? 'A' : null,
-                          product.moveB1Enabled ? 'B1' : null,
-                          product.moveB2Enabled ? 'B2' : null,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ') || '—'}
-                      </td>
-                      <td>{formatPoints(product.yearlyPoints)}</td>
-                      <td>
-                        MASTER: {product.discountPercent}% discount; {product.cardholderLimit}{' '}
-                        {product.cardholderLimit === 1 ? 'cardholder' : 'cardholders'} max;{' '}
-                        {formatPoints(product.yearlyPoints)}/year × {product.annualPointsTranches};{' '}
-                        {product.baseValidityYears}+{product.validityExtensionYears} years; ₱
-                        {product.totalLoyaltyValue};{' '}
-                        {product.priorityReservation ? 'priority reservation' : 'no priority'};{' '}
-                        {product.noMonthlyAnnualDues ? 'no monthly/annual dues' : 'dues apply'}
-                      </td>
-                      <td>{formatRate(product.commissionRate)}</td>
-                      <td>
-                        <StatusChip
-                          label={product.isActive ? 'Active' : 'Inactive'}
-                          tone={product.isActive ? 'success' : 'neutral'}
-                        />
-                      </td>
-                      <td>{product.sortOrder}</td>
-                      <td>
-                        <Button size="sm" variant="ghost" onClick={() => openEditPlan(product)}>
-                          View/Edit
-                        </Button>{' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={togglePlan.isPending}
-                          onClick={() =>
-                            togglePlan.mutate({ id: product.id, isActive: !product.isActive })
-                          }
-                        >
-                          {product.isActive ? 'Deactivate' : 'Activate'}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className={styles.grid} aria-label="VIP card plans">
+              {plans.data?.map((product) => (
+                <article key={product.id} className={styles.card}>
+                  {['GOLD', 'SILVER', 'BRONZE'].includes(product.code.trim().toUpperCase()) ? (
+                    <img className={styles.artwork} {...tierArtwork(product.code)} />
+                  ) : null}
+                  <h2>{product.name}</h2>
+                  <StatusChip label={product.isActive ? 'Active' : 'Inactive'} />
+                  <dl className={styles.facts}>
+                    <div>
+                      <dt>Spot Cash</dt>
+                      <dd>{formatMoney(product.cashPrice)}</dd>
+                    </div>
+                    <div>
+                      <dt>Installment</dt>
+                      <dd>{formatMoney(product.installmentPrice)}</dd>
+                    </div>
+                    <div>
+                      <dt>Discount</dt>
+                      <dd>{product.discountPercent}%</dd>
+                    </div>
+                    <div>
+                      <dt>Points / Year</dt>
+                      <dd>{formatPoints(product.yearlyPoints)}</dd>
+                    </div>
+                    <div>
+                      <dt>Validity</dt>
+                      <dd>{product.validityYears} years</dd>
+                    </div>
+                    <div>
+                      <dt>Cardholders</dt>
+                      <dd>{product.cardholderLimit}</dd>
+                    </div>
+                  </dl>
+                  <div className={styles.actions}>
+                    <Button variant="secondary" onClick={() => setDetailPlan(product)}>
+                      View details
+                    </Button>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
           {togglePlan.isError ? <p role="alert">{togglePlan.error.message}</p> : null}

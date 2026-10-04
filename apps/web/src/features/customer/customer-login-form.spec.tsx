@@ -24,9 +24,9 @@ const none: AuthPortals = { staff: null, customer: null, ost: null };
 
 describe('decideCustomerLogin', () => {
   it('navigates a customer home', () => {
-    expect(decideCustomerLogin(customer(), '/customer/membership')).toEqual({
+    expect(decideCustomerLogin(customer())).toEqual({
       kind: 'navigate',
-      to: '/customer/membership',
+      to: '/customer',
     });
   });
 
@@ -39,7 +39,7 @@ describe('decideCustomerLogin', () => {
       'senior_sales_manager',
       'sales_manager',
     ]) {
-      const decision = decideCustomerLogin(staff(roleSlug), '/customer');
+      const decision = decideCustomerLogin(staff(roleSlug));
       expect(decision).toMatchObject({
         kind: 'notice',
         message: 'This account belongs to an AF Homes staff user.',
@@ -49,7 +49,7 @@ describe('decideCustomerLogin', () => {
   });
 
   it('points admins at the administration entry', () => {
-    expect(decideCustomerLogin(staff('super_admin'), '/customer')).toMatchObject({
+    expect(decideCustomerLogin(staff('super_admin'))).toMatchObject({
       kind: 'notice',
       linkTo: '/admin/login',
     });
@@ -57,22 +57,25 @@ describe('decideCustomerLogin', () => {
 
   it('points approved OST sign-ins at OST login', () => {
     expect(
-      decideCustomerLogin(
-        { staff: null, customer: null, ost: { status: 'active', ostNumber: 'OST-1' } },
-        '/customer',
-      ),
+      decideCustomerLogin({
+        staff: null,
+        customer: null,
+        ost: { status: 'active', ostNumber: 'OST-1' },
+      }),
     ).toMatchObject({ kind: 'notice', linkTo: '/ost/login' });
   });
 
   it('offers a chooser for dual staff+customer identities', () => {
-    const decision = decideCustomerLogin(
-      {
-        staff: { roleSlug: 'employee', roleName: 'Employee', status: 'active', mustChangePassword: false },
-        customer: { status: 'active' },
-        ost: null,
+    const decision = decideCustomerLogin({
+      staff: {
+        roleSlug: 'employee',
+        roleName: 'Employee',
+        status: 'active',
+        mustChangePassword: false,
       },
-      '/customer',
-    );
+      customer: { status: 'active' },
+      ost: null,
+    });
     expect(decision.kind).toBe('chooser');
     if (decision.kind === 'chooser') {
       expect(decision.options.map((o) => o.label)).toEqual(['Customer / Member', 'Staff']);
@@ -80,14 +83,16 @@ describe('decideCustomerLogin', () => {
   });
 
   it('offers a chooser for dual admin+customer identities', () => {
-    const decision = decideCustomerLogin(
-      {
-        staff: { roleSlug: 'admin', roleName: 'Admin', status: 'active', mustChangePassword: false },
-        customer: { status: 'active' },
-        ost: null,
+    const decision = decideCustomerLogin({
+      staff: {
+        roleSlug: 'admin',
+        roleName: 'Admin',
+        status: 'active',
+        mustChangePassword: false,
       },
-      '/customer',
-    );
+      customer: { status: 'active' },
+      ost: null,
+    });
     expect(decision.kind).toBe('chooser');
     if (decision.kind === 'chooser') {
       expect(decision.options.map((o) => o.label)).toEqual(['Customer / Member', 'Administration']);
@@ -95,7 +100,7 @@ describe('decideCustomerLogin', () => {
   });
 
   it('fails closed with a sign-out for valid Auth with no identity', () => {
-    expect(decideCustomerLogin(none, '/customer')).toMatchObject({
+    expect(decideCustomerLogin(none)).toMatchObject({
       kind: 'notice',
       signOut: true,
     });

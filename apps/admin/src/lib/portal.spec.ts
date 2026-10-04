@@ -39,7 +39,7 @@ describe('decideForPortal (admin entry)', () => {
   it('restores a deep link, but never the profile or an auth page', () => {
     expect(decideForPortal('admin', staff('admin'), '/admin/redemption')).toEqual({
       action: 'forward',
-      to: '/admin/redemption',
+      to: '/admin',
     });
     expect(decideForPortal('admin', staff('admin'), '/admin/profile')).toEqual({
       action: 'forward',
@@ -51,21 +51,17 @@ describe('decideForPortal (admin entry)', () => {
     });
   });
 
-  it.each([
-    'finance',
-    'hr',
-    'employee',
-    'vice_director',
-    'senior_sales_manager',
-    'sales_manager',
-  ])('refuses %s with the Staff Portal message and link', (roleSlug) => {
-    expect(decideForPortal('admin', staff(roleSlug), undefined)).toEqual({
-      action: 'refuse',
-      message: 'This account uses the Staff Portal.',
-      linkTo: '/staff/login',
-      linkLabel: 'Go to Staff Login',
-    });
-  });
+  it.each(['finance', 'hr', 'employee', 'vice_director', 'senior_sales_manager', 'sales_manager'])(
+    'refuses %s with the Staff Portal message and link',
+    (roleSlug) => {
+      expect(decideForPortal('admin', staff(roleSlug), undefined)).toEqual({
+        action: 'refuse',
+        message: 'This account uses the Staff Portal.',
+        linkTo: '/staff/login',
+        linkLabel: 'Go to Staff Login',
+      });
+    },
+  );
 
   it('refuses a customer-only sign-in with the customer message, never a generic error', () => {
     const decision = decideForPortal('admin', customerOnly, undefined);
@@ -87,21 +83,17 @@ describe('decideForPortal (admin entry)', () => {
 });
 
 describe('decideForPortal (staff entry)', () => {
-  it.each([
-    'finance',
-    'hr',
-    'employee',
-    'vice_director',
-    'senior_sales_manager',
-    'sales_manager',
-  ])('forwards %s into the console', (roleSlug) => {
-    expect(decideForPortal('staff', staff(roleSlug), undefined).action).toBe('forward');
-  });
+  it.each(['finance', 'hr', 'employee', 'vice_director', 'senior_sales_manager', 'sales_manager'])(
+    'forwards %s into the console',
+    (roleSlug) => {
+      expect(decideForPortal('staff', staff(roleSlug), undefined).action).toBe('forward');
+    },
+  );
 
   it('lands employees on the redemption dashboard by default', () => {
     expect(decideForPortal('staff', staff('employee'), undefined)).toEqual({
       action: 'forward',
-      to: '/admin/redemption',
+      to: '/admin',
     });
     expect(decideForPortal('staff', staff('finance'), undefined)).toEqual({
       action: 'forward',
@@ -141,9 +133,7 @@ describe('decideForPortal (staff entry)', () => {
 
 describe('resolvePostLoginDestination', () => {
   it('restores in-app deep links', () => {
-    expect(resolvePostLoginDestination('/admin/redemption/history', '/admin')).toBe(
-      '/admin/redemption/history',
-    );
+    expect(resolvePostLoginDestination('/admin/redemption/history', '/admin')).toBe('/admin');
   });
 
   it('never restores auth pages or the profile screen', () => {

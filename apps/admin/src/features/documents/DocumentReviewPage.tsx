@@ -34,7 +34,8 @@ export function DocumentReviewPage() {
 
   const ocr = useMutation({
     mutationFn: () => runDocumentOcr(id, true),
-    onSuccess: () => {
+    onSuccess: (next) => {
+      client.setQueryData(['documents', id], next);
       setOutcome(null);
       refresh();
     },
@@ -61,6 +62,7 @@ export function DocumentReviewPage() {
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       }),
     onSuccess: (next) => {
+      client.setQueryData(['documents', id], next);
       setOutcome(
         next.verificationStatus === 'confirmed'
           ? `Confirmed${next.possibleDuplicate ? ' — flagged as a possible duplicate, not rejected.' : '.'}`
@@ -121,6 +123,14 @@ export function DocumentReviewPage() {
               label={data.verificationStatus.replace(/_/g, ' ')}
               tone={data.verificationStatus === 'confirmed' ? 'success' : 'neutral'}
             />
+          </dd>
+        </div>
+        <div>
+          <dt>Current ID</dt>
+          <dd>
+            {data.isCurrent === true && data.verificationStatus !== 'rejected'
+              ? 'Yes — current ID for this subject'
+              : 'No — retained record'}
           </dd>
         </div>
         <div>

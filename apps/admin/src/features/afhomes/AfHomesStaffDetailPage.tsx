@@ -59,7 +59,7 @@ export function AfHomesStaffDetailPage() {
     <StaffDetailForm
       key={staff.data.id}
       member={staff.data}
-      roles={roles.data}
+      roles={roles.data?.filter((role) => role.slug !== 'customer')}
       departments={departments.data}
       history={history.data}
       historyPending={history.isPending}

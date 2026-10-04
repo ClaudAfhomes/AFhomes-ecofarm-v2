@@ -202,7 +202,6 @@ export function AfHomesDashboardPage() {
           ))}
         </nav>
       ) : null}
-      <AfHomesQueueCards />
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard">
           <p className={styles.loadingRow} aria-live="polite" aria-busy="true">
@@ -220,42 +219,8 @@ export function AfHomesDashboardPage() {
             –{new Date(query.data.window.to).toLocaleDateString()}
           </p>
           <MetricCards values={dashboardMetrics(query.data)} />
-          {query.data.networkContext?.upperline ? (
-            <aside className={styles.notice}>
-              <strong>Current upperline:</strong> {query.data.networkContext.upperline.name} ·{' '}
-              {query.data.networkContext.upperline.role}
-            </aside>
-          ) : null}
-          {query.data.scope.unattributedLegacySaleCount > 0 ? (
-            <aside className={styles.notice}>
-              <strong>Historical sales awaiting attribution:</strong>{' '}
-              {query.data.scope.unattributedLegacySaleCount} sale(s), ₱
-              {query.data.scope.unattributedLegacySaleValue}. They are excluded from team totals.
-            </aside>
-          ) : null}
-          {query.data.sellers ? (
-            <section aria-label="Current team">
-              <h2 className={styles.sectionTitle}>Current team</h2>
-              <MetricCards
-                values={[
-                  ['Direct reports', query.data.sellers.directCount],
-                  ['Descendants', query.data.sellers.descendantCount],
-                  ['Active sellers', query.data.sellers.active],
-                  ['Inactive sellers', query.data.sellers.inactive],
-                ]}
-              />
-            </section>
-          ) : null}
-          {query.data.commissions ? (
-            <section aria-label="Commission status">
-              <h2 className={styles.sectionTitle}>Commission status</h2>
-              <MetricCards
-                values={Object.entries(query.data.commissions).map(([status, count]) => [
-                  status.replaceAll('_', ' '),
-                  count,
-                ])}
-              />
-            </section>
+          {query.data.scope.kind === 'organization' ? (
+            <h2 className={styles.sectionTitle}>Sales Overview</h2>
           ) : null}
           {query.data.scope.kind !== 'organization' ? <Trend /> : null}
           {query.data.salesByScheme.length ? (
@@ -301,6 +266,45 @@ export function AfHomesDashboardPage() {
                   </TableBody>
                 </Table>
               </div>
+            </section>
+          ) : null}
+          <AfHomesQueueCards />
+
+          {query.data.networkContext?.upperline ? (
+            <aside className={styles.notice}>
+              <strong>Current upperline:</strong> {query.data.networkContext.upperline.name} ·{' '}
+              {query.data.networkContext.upperline.role}
+            </aside>
+          ) : null}
+          {query.data.scope.unattributedLegacySaleCount > 0 ? (
+            <aside className={styles.notice}>
+              <strong>Historical sales awaiting attribution:</strong>{' '}
+              {query.data.scope.unattributedLegacySaleCount} sale(s), ₱
+              {query.data.scope.unattributedLegacySaleValue}. They are excluded from team totals.
+            </aside>
+          ) : null}
+          {query.data.sellers ? (
+            <section aria-label="Current team">
+              <h2 className={styles.sectionTitle}>Current team</h2>
+              <MetricCards
+                values={[
+                  ['Direct reports', query.data.sellers.directCount],
+                  ['Descendants', query.data.sellers.descendantCount],
+                  ['Active sellers', query.data.sellers.active],
+                  ['Inactive sellers', query.data.sellers.inactive],
+                ]}
+              />
+            </section>
+          ) : null}
+          {query.data.commissions ? (
+            <section aria-label="Commission status">
+              <h2 className={styles.sectionTitle}>Commission status</h2>
+              <MetricCards
+                values={Object.entries(query.data.commissions).map(([status, count]) => [
+                  status.replaceAll('_', ' '),
+                  count,
+                ])}
+              />
             </section>
           ) : null}
           <p className={styles.timeframe}>As of today</p>

@@ -110,7 +110,7 @@ describe('canonical import birth dates and secondary contacts', () => {
       ctx(),
       TODAY,
     );
-    expect(row.fields.first_name).toBe('CLAUD');
+    expect(row.fields.first_name).toBe('claud');
     expect(row.fields.email).toBe('claud@example.com');
   });
 });
@@ -388,7 +388,7 @@ describe('row validation', () => {
       TODAY,
     );
     expect(gold.errors).toEqual([]);
-    expect(gold.normalized?.secondaryNote).toContain('ROSA CRUZ');
+    expect(gold.normalized?.secondaryNote).toContain('Rosa Cruz');
     const silver = validateImportRow(
       2,
       baseFields({

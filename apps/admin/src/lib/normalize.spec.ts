@@ -14,18 +14,18 @@ import {
 
 describe('live field normalization', () => {
   it.each([
-    'firstName',
-    'name',
     'line2',
     'permanentAddressLine2',
     'officeBusinessAddress',
     'occupationBusinessName',
     'employedPosition',
-    'vipRecommenderName',
   ])('uppercases only classified safe field %s without trimming during typing', (field) => {
     expect(normalizeLiveHumanField(field, 'unit 2, 123 rizal st. ')).toBe('UNIT 2, 123 RIZAL ST. ');
   });
   it.each([
+    'firstName',
+    'name',
+    'vipRecommenderName',
     'email',
     'password',
     'temporaryPassword',
@@ -52,9 +52,9 @@ describe('submit normalization', () => {
   it('normalizes staff identity and profile names', () => {
     expect(normalizeStaffIdentity({ email: '  New@Example.COM ', fullName: 'new hire' })).toEqual({
       email: 'new@example.com',
-      fullName: 'NEW HIRE',
+      fullName: 'new hire',
     });
-    expect(normalizeProfileName('renamed admin')).toBe('RENAMED ADMIN');
+    expect(normalizeProfileName('renamed admin')).toBe('renamed admin');
   });
 
   it('normalizes a customer request and never touches notes or IDs', () => {
@@ -74,8 +74,8 @@ describe('submit normalization', () => {
       notes: 'Keep this Note as Typed!',
     });
     expect(normalized).toMatchObject({
-      firstName: 'CLAUD',
-      lastName: 'DELA CRUZ',
+      firstName: 'claud',
+      lastName: 'dela cruz',
       email: 'claud@example.com',
       phone: '+639185550101',
       notes: 'Keep this Note as Typed!',
@@ -109,7 +109,7 @@ describe('submit normalization', () => {
       validIdReceived: true,
       reservationPaymentProofReceived: true,
     });
-    expect(application.primary.lastName).toBe('JIMENEZ');
+    expect(application.primary.lastName).toBe('jimenez');
     expect(application.primary.mobile).toBe('+639171234567');
     expect(application.primary.email).toBe('claud@example.com');
 
@@ -127,7 +127,7 @@ describe('submit normalization', () => {
         email: 'Claud@Example.COM',
       },
     });
-    expect(reservation.primary.name).toBe('CLAUD JIMENEZ');
+    expect(reservation.primary.name).toBe('claud jimenez');
     expect(reservation.primary.contactNumber).toBe('+639171234567');
   });
 });

@@ -167,7 +167,7 @@ export function AfHomesStaffPage() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const activeRoles = roles.data?.filter((role) => role.isActive) ?? [];
+  const activeRoles = roles.data?.filter((role) => role.isActive && role.slug !== 'customer') ?? [];
   const filtersActive = search !== '' || status !== 'all' || roleFilter !== 'all';
   const openRestrictions = (member: AfHomesStaff) => {
     const role = roles.data?.find((item) => item.id === member.roleId);
@@ -384,6 +384,7 @@ export function AfHomesStaffPage() {
             name="staff-name"
             label="Full name"
             value={fullName}
+            suggestName
             normalize={(value) => normalizeLiveHumanField('fullName', value)}
             onChange={setFullName}
             error={createErrors.fullName}

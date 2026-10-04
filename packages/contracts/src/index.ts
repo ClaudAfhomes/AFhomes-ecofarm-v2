@@ -340,6 +340,8 @@ export {
   reservationHolderSchema,
   createCustomerApplicationSchema,
   customerApplicationSchema,
+  customerApplicationListItemSchema,
+  reservationAgreementListItemSchema,
   customerApplicationDecisionSchema,
   createReservationAgreementSchema,
   reservationAgreementSchema,
@@ -351,6 +353,8 @@ export type {
   ApplicationHolder,
   CreateCustomerApplicationRequest,
   CustomerApplication,
+  CustomerApplicationListItem,
+  ReservationAgreementListItem,
   CustomerApplicationDecision,
   CreateReservationAgreementRequest,
   ReservationAgreement,
@@ -490,6 +494,9 @@ export {
   documentUploadGrantSchema,
   documentConfirmSchema,
   documentAccessUrlSchema,
+  documentListQuerySchema,
+  currentDocumentQuerySchema,
+  currentDocumentResponseSchema,
 } from './schemas/document.js';
 export type {
   OcrStatus,

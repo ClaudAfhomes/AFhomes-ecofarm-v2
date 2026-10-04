@@ -336,44 +336,33 @@ describe('Card Plans states', () => {
     expect(await screen.findByText('No card plans')).toBeInTheDocument();
   });
 
-  it('renders every required column for a populated plan', async () => {
+  it('renders the tier artwork and compact facts, with complete grouped details', async () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     renderWithProviders(<BusinessProductsPage />);
-    expect(await screen.findByText('GOLD')).toBeInTheDocument();
-    for (const heading of [
-      'Name',
-      'Code',
-      'Category',
-      'Spot Cash',
-      'Installment',
-      'Reservation',
-      'Validity',
-      'Moves',
-      'Yearly Points',
-      'Commission',
-      'Status',
-      'Display Order',
-      'Actions',
-    ]) {
-      expect(screen.getByRole('columnheader', { name: heading })).toBeInTheDocument();
-    }
-    expect(screen.getByText('Gold')).toBeInTheDocument();
-    expect(screen.getByText('Membership Cards')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Gold' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Gold VIP membership card' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('gold-card'),
+    );
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.getByText('₱312,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₱390,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₱10,000.00')).toBeInTheDocument();
-    expect(screen.getByText('22 years')).toBeInTheDocument();
-    expect(screen.getByText('A · B1 · B2')).toBeInTheDocument();
-    expect(screen.queryByText('₱20,000.00')).not.toBeInTheDocument();
     expect(screen.getByText('25,000')).toBeInTheDocument();
-    expect(screen.getByText('0.00%')).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Official Benefits' })).toBeInTheDocument();
-    expect(screen.getByText(/MASTER:/)).toBeInTheDocument();
-    expect(screen.getByText(/no monthly\/annual dues/)).toBeInTheDocument();
-    expect(screen.getAllByText('Active')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Add Card Plan' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View/Edit' })).toBeInTheDocument();
+    expect(screen.queryByText('₱10,000.00')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View details' }));
+    expect(screen.getByRole('dialog', { name: 'Gold' })).toBeInTheDocument();
+    for (const name of [
+      'Pricing',
+      'Membership',
+      'Benefits',
+      'Payment options',
+      'Commission',
+      'Status / Display order',
+    ])
+      expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    expect(screen.getByText('₱10,000.00')).toBeInTheDocument();
+    expect(screen.getByText(/No monthly\/annual dues/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit plan' })).toBeInTheDocument();
   });
 
   it('replaces loading with a retryable API error state', async () => {
@@ -388,7 +377,7 @@ describe('Card Plans states', () => {
   it('offers search and active/inactive filters', async () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
     expect(screen.getByRole('searchbox', { name: 'Search card plans' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
   });
@@ -398,7 +387,7 @@ describe('Card Plans states', () => {
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     mockedCreateCardProduct.mockResolvedValue(JADE);
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Jade' } });
@@ -426,7 +415,7 @@ describe('Card Plans states', () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad' } });
@@ -449,8 +438,9 @@ describe('Card Plans states', () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedUpdateCardProduct.mockResolvedValue({ ...GOLD, isActive: false });
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
 
+    fireEvent.click(screen.getByRole('button', { name: 'View details' }));
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
     await waitFor(() =>
       expect(mockedUpdateCardProduct).toHaveBeenCalledWith(GOLD.id, {
@@ -500,7 +490,7 @@ describe('Categories tab', () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP, VIP]);
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
     fireEvent.click(screen.getByRole('button', { name: 'Categories' }));
   }
 
@@ -577,7 +567,7 @@ describe('live plan management search', () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     renderWithProviders(<BusinessProductsPage />);
-    await screen.findByText('GOLD');
+    await screen.findByRole('heading', { name: 'Gold' });
     const input = screen.getByLabelText('Search card plans');
     const count = mockedGetCardProducts.mock.calls.length;
     fireEvent.change(input, { target: { value: 'g' } });

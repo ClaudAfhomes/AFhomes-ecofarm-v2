@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+import { CustomerLoginForm } from '../customer/CustomerLoginForm';
+import { Navigate, Route, Routes } from 'react-router';
 
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
@@ -140,6 +142,24 @@ describe('OST login', () => {
     expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
   });
 
+  it('lands on dashboard after login prompted by a protected feature route', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/"
+          element={<Navigate to="/ost/login" state={{ from: '/ost/previous-feature' }} />}
+        />
+        <Route path="*" element={<App />} />
+      </Routes>,
+    );
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(screen.getByLabelText('Password'), 'Password123!');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+    expect(await screen.findByText('OST-000007')).toBeInTheDocument();
+    expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
+  });
+
   it('explains a non-approved record instead of entering', async () => {
     portalsBody.current = {
       staff: null,
@@ -187,4 +207,25 @@ describe('OST recovery targets', () => {
       '/ost/login',
     );
   });
+});
+
+it('fresh customer login ignores the saved feature route and lands home', async () => {
+  portalsBody.current = { staff: null, customer: { status: 'active' }, ost: null };
+  const user = userEvent.setup();
+  renderWithProviders(
+    <Routes>
+      <Route
+        path="/"
+        element={<Navigate to="/customer/login" state={{ from: '/customer/membership' }} />}
+      />
+      <Route path="/customer/login" element={<CustomerLoginForm />} />
+      <Route path="/customer" element={<h1>QA Customer Dashboard</h1>} />
+      <Route path="/customer/membership" element={<h1>QA Member Feature</h1>} />
+    </Routes>,
+  );
+  await user.type(await screen.findByLabelText('Email'), 'member@afhomes.test');
+  await user.type(screen.getByLabelText('Password'), 'Password123!');
+  await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+  expect(await screen.findByRole('heading', { name: 'QA Customer Dashboard' })).toBeInTheDocument();
+  expect(screen.queryByText('QA Member Feature')).not.toBeInTheDocument();
 });

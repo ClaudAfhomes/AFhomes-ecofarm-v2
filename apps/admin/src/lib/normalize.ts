@@ -56,6 +56,21 @@ const LIVE_UPPERCASE_FIELDS = new Set([
 ]);
 
 export function normalizeLiveHumanField(field: string, value: string): string {
+  if (
+    [
+      'fullName',
+      'firstName',
+      'middleName',
+      'lastName',
+      'name',
+      'printedName',
+      'salesManagerName',
+      'vipRecommenderName',
+      'vipReferrer',
+      'suffix',
+    ].includes(field)
+  )
+    return value;
   return LIVE_UPPERCASE_FIELDS.has(field) ? value.toUpperCase() : value;
 }
 
@@ -81,7 +96,7 @@ export function normalizeCustomerRequest(input: CreateCustomerRequest): CreateCu
     firstName: upper(input.firstName),
     middleName: upperOpt(input.middleName),
     lastName: upper(input.lastName),
-    suffix: upperAddressOpt(input.suffix),
+    suffix: upperOpt(input.suffix),
     email: normalizeEmail(input.email) ?? input.email,
     phone: normalizePhilippinePhone(input.phone) ?? input.phone,
     address: {
@@ -108,7 +123,7 @@ function normalizeApplicationHolder<T extends ApplicationHolder>(holder: T): T {
     lastName: upper(holder.lastName),
     firstName: upper(holder.firstName),
     middleName: upperOpt(holder.middleName),
-    suffix: upperAddressOpt(holder.suffix),
+    suffix: upperOpt(holder.suffix),
     permanentAddressLine1: upperAddress(holder.permanentAddressLine1),
     permanentAddressLine2: upperAddressOpt(holder.permanentAddressLine2),
     officeBusinessAddress: upperAddressOpt(holder.officeBusinessAddress),
@@ -119,7 +134,7 @@ function normalizeApplicationHolder<T extends ApplicationHolder>(holder: T): T {
     email: normalizeEmail(holder.email) ?? holder.email,
     occupationBusinessName: upperAddressOpt(holder.occupationBusinessName),
     employedPosition: upperAddressOpt(holder.employedPosition),
-    printedName: upperAddress(holder.printedName),
+    printedName: upper(holder.printedName),
   };
 }
 
@@ -130,9 +145,9 @@ export function normalizeCustomerApplicationRequest<T extends CreateCustomerAppl
     ...input,
     primary: normalizeApplicationHolder(input.primary),
     secondary: input.secondary ? normalizeApplicationHolder(input.secondary) : input.secondary,
-    salesManagerName: upperAddressOpt(input.salesManagerName),
-    vipRecommenderName: upperAddressOpt(input.vipRecommenderName),
-    vipReferrer: upperAddressOpt(input.vipReferrer),
+    salesManagerName: upperOpt(input.salesManagerName),
+    vipRecommenderName: upperOpt(input.vipRecommenderName),
+    vipReferrer: upperOpt(input.vipReferrer),
   };
 }
 
@@ -143,7 +158,7 @@ type ReservationHolder =
 function normalizeReservationHolder<T extends ReservationHolder>(holder: T): T {
   return {
     ...holder,
-    name: upperAddress(holder.name),
+    name: upper(holder.name),
     address: upperAddress(holder.address),
     contactNumber: normalizePhilippinePhone(holder.contactNumber) ?? holder.contactNumber,
     email: normalizeEmail(holder.email) ?? holder.email,

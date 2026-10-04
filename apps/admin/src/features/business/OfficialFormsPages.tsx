@@ -1,10 +1,17 @@
-import { useEffect, useId, useState } from 'react';
+import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
+import { HumanInputValidity } from '../../lib/human-input-validity';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import type { ApplicationHolder, CreateReservationAgreementRequest } from '@jad/contracts';
-import { optionalContactNumberSchema } from '@jad/contracts';
 import {
-  NormalizedInput,
+  createCustomerApplicationSchema,
+  optionalContactNumberSchema,
+  birthDateSchema,
+  paymentSchemeLabel,
+} from '@jad/contracts';
+import { formatMoney } from './format';
+import {
   Alert,
   Button,
   EmptyState,
@@ -17,7 +24,17 @@ import {
 
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
-import { putUploadBytes, requestUploadGrant, runDocumentOcr } from '../documents/services';
+import {
+  ACCEPTED_MIME,
+  MAX_BYTES,
+  getDocumentAccessUrl,
+  getDocuments,
+  getCurrentDocument,
+  completeDocumentUpload,
+  putUploadBytes,
+  requestUploadGrant,
+  runDocumentOcr,
+} from '../documents/services';
 import {
   createCustomerApplication,
   createReservationAgreement,
@@ -74,6 +91,7 @@ const asBase64 = async (file: File) => {
 
 function Field({
   normalize,
+  suggestName = false,
   optionalPhone = false,
   label,
   value,
@@ -82,6 +100,7 @@ function Field({
   required = false,
 }: {
   normalize?: (value: string) => string;
+  suggestName?: boolean;
   optionalPhone?: boolean;
   label: string;
   value: string | number;
@@ -90,23 +109,38 @@ function Field({
   required?: boolean;
 }) {
   const id = useId();
-  const error = optionalPhone && !optionalContactNumberSchema.safeParse(value).success;
+  const [touched, setTouched] = useState(false);
+  const isPhone = optionalPhone || /mobile|contact|landline/i.test(label);
+  const isName =
+    suggestName || /^(?:first|last|middle|printed|primary|secondary) name$/i.test(label);
+  // HumanInput owns contact/name errors; only date validation belongs here.
+  const validator = /birth date/i.test(label) ? birthDateSchema : null;
+  const error =
+    touched &&
+    Boolean(validator && !validator.safeParse(value).success && (required || value !== ''));
+  const errorMessage = 'Enter a valid past birth date.';
   return (
     <label style={{ display: 'grid', gap: 4 }}>
       <span id={`${id}-label`}>{label}</span>
       <NormalizedInput
         normalize={normalize}
-        type={type}
+        suggestName={isName}
+        type={isPhone ? 'tel' : /email/i.test(label) ? 'email' : type}
+        inputMode={isPhone ? 'tel' : undefined}
         value={value}
         required={required}
         aria-labelledby={`${id}-label`}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
-        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => setTouched(true)}
+        onChange={(event) => {
+          setTouched(true);
+          onChange(event.target.value);
+        }}
       />
       {error ? (
         <small id={`${id}-error`} role="alert">
-          Enter a valid contact number.
+          {errorMessage}
         </small>
       ) : null}
     </label>
@@ -130,6 +164,7 @@ function HolderFields({
         <Field
           label="Last name"
           value={value.lastName}
+          suggestName
           normalize={(v) => normalizeLiveHumanField('lastName', v)}
           onChange={(v) => set('lastName', v)}
           required
@@ -137,6 +172,7 @@ function HolderFields({
         <Field
           label="First name"
           value={value.firstName}
+          suggestName
           normalize={(v) => normalizeLiveHumanField('firstName', v)}
           onChange={(v) => set('firstName', v)}
           required
@@ -144,6 +180,7 @@ function HolderFields({
         <Field
           label="Middle name"
           value={value.middleName ?? ''}
+          suggestName
           normalize={(v) => normalizeLiveHumanField('middleName', v)}
           onChange={(v) => set('middleName', v)}
         />
@@ -267,6 +304,7 @@ function HolderFields({
         <Field
           label="Printed name"
           value={value.printedName}
+          suggestName
           normalize={(v) => normalizeLiveHumanField('printedName', v)}
           onChange={(v) => set('printedName', v)}
           required
@@ -355,40 +393,36 @@ export function CustomerApplicationsPage() {
       ) : query.data?.length ? (
         <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
-          <thead>
-            <tr>
-              <th>Application</th>
-              <th>Applicant</th>
-              <th>Tier</th>
-              <th>Seller</th>
-              <th>Status</th>
-              <th>Submitted</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {query.data.map((app) => (
-              <tr key={app.id}>
-                <td>
-                  <Link to={`/admin/customers/applications/${app.id}`}>
-                    {app.applicationNumber}
-                  </Link>
-                </td>
-                <td>
-                  {app.primary
-                    ? `${app.primary.firstName} ${app.primary.lastName}`
-                    : ((app as unknown as Record<string, string>).applicant_name ?? '—')}
-                </td>
-                <td>{app.tier}</td>
-                <td>{app.createdBy ?? '—'}</td>
-                <td>
-                  <StatusChip label={app.status} />
-                </td>
-                <td>{app.submittedAt ?? '—'}</td>
-                <td>{app.createdAt}</td>
+            <thead>
+              <tr>
+                <th>Application</th>
+                <th>Applicant</th>
+                <th>Tier</th>
+                <th>Seller</th>
+                <th>Status</th>
+                <th>Submitted</th>
+                <th>Created</th>
               </tr>
-            ))}
-          </tbody>
+            </thead>
+            <tbody>
+              {query.data.map((app) => (
+                <tr key={app.id}>
+                  <td>
+                    <Link to={`/admin/customers/applications/${app.id}`}>
+                      {app.applicationNumber}
+                    </Link>
+                  </td>
+                  <td>{app.applicantName ?? '—'}</td>
+                  <td>{app.tier}</td>
+                  <td>{app.createdBy ?? '—'}</td>
+                  <td>
+                    <StatusChip label={app.status} />
+                  </td>
+                  <td>{app.submittedAt ?? '—'}</td>
+                  <td>{app.createdAt}</td>
+                </tr>
+              ))}
+            </tbody>
           </table>
         </div>
       ) : (
@@ -402,6 +436,12 @@ export function CustomerApplicationsPage() {
 }
 
 export function CustomerApplicationEditorPage() {
+  const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
+  const reportValidity = useCallback((field: string, invalid: boolean) => {
+    setInvalidFields((current) =>
+      current[field] === invalid ? current : { ...current, [field]: invalid },
+    );
+  }, []);
   const { id } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -434,6 +474,66 @@ export function CustomerApplicationEditorPage() {
   const [paymentProof, setPaymentProof] = useState(false);
   const [message, setMessage] = useState('');
   const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [pickerVersion, setPickerVersion] = useState(0);
+  const [idPreview, setIdPreview] = useState<string | null>(null);
+  const documents = useQuery({
+    queryKey: ['documents', 'customer', customerId],
+    queryFn: () => getDocuments({ subjectType: 'customer', subjectId: customerId }),
+    enabled: Boolean(customerId),
+    retry: false,
+  });
+  const currentDocument = useQuery({
+    queryKey: ['documents', 'current', 'customer', customerId],
+    queryFn: () => getCurrentDocument({ subjectType: 'customer', subjectId: customerId }),
+    enabled: Boolean(customerId),
+    retry: false,
+  });
+  // There is no current document when the server says none, including all-rejected histories.
+  const serverCurrentDocument =
+    currentDocument.data?.isCurrent === true &&
+    currentDocument.data.hasFile &&
+    currentDocument.data.verificationStatus !== 'rejected'
+      ? currentDocument.data
+      : null;
+  const uploadId = useMutation({
+    mutationFn: async (pendingDocumentId?: string) => {
+      if (pendingDocumentId) {
+        const document = await completeDocumentUpload(pendingDocumentId);
+        if (!document.hasFile) throw new Error('Upload is still incomplete.');
+        return { documentId: document.id, filename: document.originalFilename };
+      }
+      if (!ocrFile || !customerId) throw new Error('Select a customer and ID file first.');
+      const mime = ACCEPTED_MIME.find((value) => value === ocrFile.type);
+      if (!mime || !ocrFile.size || ocrFile.size > MAX_BYTES)
+        throw new Error('Choose a non-empty JPEG, PNG or PDF up to 10 MiB.');
+      const grant = await requestUploadGrant({
+        subjectType: 'customer',
+        subjectId: customerId,
+        mime,
+        sizeBytes: ocrFile.size,
+        originalFilename: ocrFile.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, ocrFile);
+      const document = await completeDocumentUpload(grant.documentId);
+      if (!document.hasFile) throw new Error('Upload verification is still pending.');
+      return { documentId: grant.documentId, filename: ocrFile.name };
+    },
+    onSuccess: async () => {
+      setOcrFile(null);
+      setPickerVersion((version) => version + 1);
+      setIdPreview(null);
+      setValidId(true);
+      setMessage('Valid ID uploaded privately. Review before submitting.');
+      // Wait for subject-wide authority; never promote a completion locally.
+      await Promise.all([documents.refetch(), currentDocument.refetch()]);
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : 'Upload failed.'),
+  });
+  const previewId = useMutation({
+    mutationFn: (documentId: string) => getDocumentAccessUrl(documentId),
+    onSuccess: (grant) => setIdPreview(grant.url),
+    onError: () => setMessage('ID preview unavailable. Try again.'),
+  });
   const optionalPhonesValid = [
     primary.landline,
     secondary?.landline,
@@ -482,8 +582,24 @@ export function CustomerApplicationEditorPage() {
     reservationPaymentProofReceived: paymentProof,
   });
   const save = useMutation({
-    mutationFn: () =>
-      id ? updateCustomerApplication(id, payload()) : createCustomerApplication(payload()),
+    mutationFn: () => {
+      const checked = createCustomerApplicationSchema.safeParse(payload());
+      if (!checked.success) {
+        document
+          .querySelector<HTMLInputElement>(
+            '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
+          )
+          ?.focus();
+        throw new Error(
+          checked.error.issues
+            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+            .join('; '),
+        );
+      }
+      return id
+        ? updateCustomerApplication(id, checked.data)
+        : createCustomerApplication(checked.data);
+    },
     onSuccess: (app) => {
       setMessage('Draft saved.');
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
@@ -539,28 +655,33 @@ export function CustomerApplicationEditorPage() {
   };
   const ocr = useMutation({
     mutationFn: async () => {
-      if (!ocrFile || !customerId) throw new Error('Select a customer and ID file first.');
-      const grant = await requestUploadGrant({
-        subjectType: 'customer',
-        subjectId: customerId,
-        mime: ocrFile.type as 'image/jpeg' | 'image/png' | 'application/pdf',
-        sizeBytes: ocrFile.size,
-        originalFilename: ocrFile.name.slice(0, 255),
-      });
-      await putUploadBytes(grant.uploadUrl, ocrFile);
-      return runDocumentOcr(grant.documentId);
+      const documentId = ocrFile
+        ? (await uploadId.mutateAsync()).documentId
+        : serverCurrentDocument?.id;
+      if (!documentId) throw new Error('Select an ID file first.');
+      const doc = await runDocumentOcr(documentId);
+      await Promise.all([documents.refetch(), currentDocument.refetch()]);
+      return doc;
     },
     onSuccess: (doc) => {
       const fields = doc.extractedFields;
+      const confident = (key: string) => {
+        const field = fields[key];
+        return field && field.confidence !== null && field.confidence >= 0.8 ? field.value : null;
+      };
       setPrimary({
         ...primary,
-        firstName: fields.firstName?.value ?? primary.firstName,
-        middleName: fields.middleName?.value ?? primary.middleName,
-        lastName: fields.lastName?.value ?? primary.lastName,
-        birthDate: fields.dateOfBirth?.value ?? primary.birthDate,
-        permanentAddressLine1: fields.address?.value ?? primary.permanentAddressLine1,
+        firstName: confident('firstName') ?? primary.firstName,
+        middleName: confident('middleName') ?? primary.middleName,
+        lastName: confident('lastName') ?? primary.lastName,
+        birthDate: confident('dateOfBirth') ?? primary.birthDate,
+        permanentAddressLine1: confident('address') ?? primary.permanentAddressLine1,
       });
-      setMessage('Detected — please verify. OCR did not save or submit this application.');
+      setMessage(
+        doc.ocrStatus === 'completed'
+          ? 'OCR completed — review and correct suggestions before saving.'
+          : 'OCR failed — Enter details manually. Your private upload is retained.',
+      );
     },
     onError: (e) =>
       setMessage(e instanceof Error ? e.message : 'OCR failed; continue with manual entry.'),
@@ -588,247 +709,387 @@ export function CustomerApplicationEditorPage() {
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = customers.data?.find((c) => c.id === customerId);
   return (
-    <section>
-      <PageHeader
-        title={existing.data?.applicationNumber ?? 'New Customer Application'}
-        description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
-      />
-      <p>
-        <Link to="/admin/customers/applications">Back to applications</Link>
-      </p>
-      {message ? <Alert variant="info">{message}</Alert> : null}
-      {existing.data ? (
+    <HumanInputValidity.Provider value={reportValidity}>
+      <section>
+        <PageHeader
+          title={existing.data?.applicationNumber ?? 'New Customer Application'}
+          description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
+        />
         <p>
-          Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} · Approved:{' '}
-          {existing.data.approvedAt ?? '—'} · Rejected: {existing.data.rejectedAt ?? '—'} · Related
-          customer: {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
-          {existing.data.saleId ?? '—'}
+          <Link to="/admin/customers/applications">Back to applications</Link>
         </p>
-      ) : null}
-      {selectedPlan ? (
-        <p>
-          Official {selectedPlan.code} benefits: {selectedPlan.discountPercent}% discount;{' '}
-          {selectedPlan.cardholderLimit} holder(s) max; {selectedPlan.yearlyPoints}/year ×{' '}
-          {selectedPlan.annualPointsTranches}; {selectedPlan.baseValidityYears}+
-          {selectedPlan.validityExtensionYears} years; ₱{selectedPlan.totalLoyaltyValue} total
-          value. Snapshots freeze at submit; later plan edits never rewrite this application.
-        </p>
-      ) : null}
-      <fieldset disabled={!editable}>
-        <div className="form-grid">
-          <label>
-            Customer
-            <select value={customerId} required onChange={(e) => setCustomerId(e.target.value)}>
-              <option value="">Select customer</option>
-              {customers.data?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.fullName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            VIP plan
-            <select
-              value={planId}
-              onChange={(e) => {
-                const plan = plans.data?.find((p) => p.id === e.target.value);
-                setPlanId(e.target.value);
-                if (plan) setTier(plan.code as typeof tier);
-              }}
-            >
-              <option value="">Select plan</option>
-              {plans.data
-                ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
+        {message ? <Alert variant="info">{message}</Alert> : null}
+        {existing.data ? (
+          <p>
+            Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
+            Approved: {existing.data.approvedAt ?? '—'} · Rejected:{' '}
+            {existing.data.rejectedAt ?? '—'} · Related customer:{' '}
+            {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
+            {existing.data.saleId ?? '—'}
+          </p>
+        ) : null}
+        {selectedPlan ? (
+          <p>
+            Official {selectedPlan.code} benefits: {selectedPlan.discountPercent}% discount;{' '}
+            {selectedPlan.cardholderLimit} holder(s) max; {selectedPlan.yearlyPoints}/year ×{' '}
+            {selectedPlan.annualPointsTranches}; {selectedPlan.baseValidityYears}+
+            {selectedPlan.validityExtensionYears} years; ₱{selectedPlan.totalLoyaltyValue} total
+            value. Snapshots freeze at submit; later plan edits never rewrite this application.
+          </p>
+        ) : null}
+        <fieldset disabled={!editable}>
+          <div className="form-grid">
+            <label>
+              Customer
+              <select
+                value={customerId}
+                required
+                disabled={uploadId.isPending || ocr.isPending}
+                onChange={(e) => {
+                  setCustomerId(e.target.value);
+                  setOcrFile(null);
+                  setPickerVersion((version) => version + 1);
+                  setIdPreview(null);
+                  setValidId(false);
+                }}
+              >
+                <option value="">Select customer</option>
+                {customers.data?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.fullName}
                   </option>
                 ))}
-            </select>
-          </label>
-          <label>
-            Payment scheme
-            <select
-              value={paymentScheme}
-              onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
-            >
-              {['spot_cash', 'move_a', 'installment_4_month', 'move_b1_40_12', 'move_b2_25_12'].map(
-                (v) => (
+              </select>
+            </label>
+            <label>
+              VIP plan
+              <select
+                value={planId}
+                onChange={(e) => {
+                  const plan = plans.data?.find((p) => p.id === e.target.value);
+                  setPlanId(e.target.value);
+                  if (plan) setTier(plan.code as typeof tier);
+                }}
+              >
+                <option value="">Select plan</option>
+                {plans.data
+                  ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Payment scheme
+              <select
+                value={paymentScheme}
+                onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
+              >
+                {[
+                  'spot_cash',
+                  'move_a',
+                  'installment_4_month',
+                  'move_b1_40_12',
+                  'move_b2_25_12',
+                ].map((v) => (
                   <option key={v}>{v}</option>
-                ),
-              )}
-            </select>
-          </label>
-        </div>
-        <p>
-          <Button onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}>
-            Download template
-          </Button>{' '}
-          <label>
-            Import XLSX{' '}
-            <input
-              type="file"
-              accept=".xlsx"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void importFile(file);
-              }}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            Upload ID for OCR{' '}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,application/pdf"
-              onChange={(e) => setOcrFile(e.target.files?.[0] ?? null)}
-            />
-          </label>{' '}
-          <Button onClick={() => ocr.mutate()} disabled={!ocrFile || !customerId || ocr.isPending}>
-            Detect fields
-          </Button>
-        </p>
-        <HolderFields title="PRIMARY CARDHOLDER" value={primary} onChange={setPrimary} />
-        <label>
-          <input
-            type="checkbox"
-            checked={Boolean(secondary)}
-            disabled={tier !== 'GOLD'}
-            onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
-          />{' '}
-          Add optional Gold secondary cardholder
-        </label>
-        {secondary ? (
-          <HolderFields
-            title="SECONDARY CARDHOLDER — GOLD OPTIONAL"
-            value={secondary}
-            onChange={setSecondary}
-          />
-        ) : null}
-        <fieldset>
-          <legend>VIP RECOMMENDER'S DETAILS</legend>
-          <div className="form-grid">
-            {Object.entries(meta).map(([key, value]) => (
-              <Field
-                key={key}
-                label={key.replace(/[A-Z]/g, (c) => ` ${c}`).replace(/^./, (c) => c.toUpperCase())}
-                value={value}
-                type={key === 'acknowledgedAt' ? 'date' : 'text'}
-                normalize={(v) => normalizeLiveHumanField(key, v)}
-                optionalPhone={key === 'recommenderContact'}
-                onChange={(v) => setMeta({ ...meta, [key]: v })}
-              />
-            ))}
+                ))}
+              </select>
+            </label>
           </div>
-        </fieldset>
-        <fieldset>
-          <legend>CLIENT ACQUISITION CHANNEL</legend>
-          {[
-            'CMP',
-            'DRP',
-            'GDP Corporate',
-            'Walk-In',
-            'GDP Public Servant',
-            'Referral',
-            'FB Ads',
-          ].map((channel) => (
-            <label key={channel}>
+          <p>
+            <Button onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}>
+              Download template
+            </Button>{' '}
+            <label>
+              Import XLSX{' '}
+              <input
+                type="file"
+                accept=".xlsx"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void importFile(file);
+                }}
+              />
+            </label>
+          </p>
+          <fieldset>
+            <legend>VALID ID</legend>
+            <p>Valid ID: {validId ? 'Uploaded ✓' : 'Required / Missing'}</p>
+            {serverCurrentDocument ? (
+              <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+            ) : null}
+            {ocrFile ? (
+              <div role="status">
+                <p>Replacement selected: {ocrFile.name} — Pending replacement. Not saved yet.</p>
+                <Button
+                  variant="secondary"
+                  disabled={uploadId.isPending || ocr.isPending}
+                  onClick={() => {
+                    setOcrFile(null);
+                    setPickerVersion((version) => version + 1);
+                  }}
+                >
+                  Cancel replacement
+                </Button>
+              </div>
+            ) : null}
+            <label>
+              Upload ID{' '}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,application/pdf"
+                key={`upload-${pickerVersion}`}
+                disabled={uploadId.isPending || ocr.isPending}
+                onChange={(e) => {
+                  setOcrFile(e.target.files?.[0] ?? null);
+                }}
+              />
+            </label>{' '}
+            <label>
+              Scan / Take Photo
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                capture="environment"
+                key={`camera-${pickerVersion}`}
+                disabled={uploadId.isPending || ocr.isPending}
+                onChange={(e) => {
+                  setOcrFile(e.target.files?.[0] ?? null);
+                }}
+              />
+            </label>
+            <Button
+              onClick={() => uploadId.mutate()}
+              disabled={!ocrFile || !customerId || uploadId.isPending || ocr.isPending}
+            >
+              Upload ID
+            </Button>
+            <Button
+              onClick={() => ocr.mutate()}
+              disabled={
+                (!ocrFile && !serverCurrentDocument) ||
+                !customerId ||
+                ocr.isPending ||
+                uploadId.isPending
+              }
+            >
+              {ocr.isPending || uploadId.isPending ? 'Processing…' : 'Detect fields'}
+            </Button>
+            {serverCurrentDocument ? (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => previewId.mutate(serverCurrentDocument.id)}
+                >
+                  Preview uploaded ID
+                </Button>
+                <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
+                  Review identity document
+                </Link>
+              </>
+            ) : null}
+            {idPreview ? (
+              <a href={idPreview} target="_blank" rel="noreferrer">
+                Open short-lived private ID preview
+              </a>
+            ) : null}
+            {documents.data
+              ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
+              .map((doc) => (
+                <p key={doc.id}>
+                  Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
+                  <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
+                    Preview
+                  </Button>
+                </p>
+              ))}
+            {documents.data
+              ?.filter((doc) => !doc.hasFile)
+              .map((doc) => (
+                <p key={doc.id}>
+                  Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
+                    onClick={() => uploadId.mutate(doc.id)}
+                  >
+                    Verify saved upload
+                  </Button>
+                </p>
+              ))}
+            {currentDocument.isError ? (
+              <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
+            ) : null}
+            {documents.isError ? (
+              <p role="status">
+                Existing ID documents could not be loaded. Document permissions still apply.
+              </p>
+            ) : null}
+          </fieldset>
+          <HolderFields title="PRIMARY CARDHOLDER" value={primary} onChange={setPrimary} />
+          <label>
+            <input
+              type="checkbox"
+              checked={Boolean(secondary)}
+              disabled={tier !== 'GOLD'}
+              onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
+            />{' '}
+            Add optional Gold secondary cardholder
+          </label>
+          {secondary ? (
+            <HolderFields
+              title="SECONDARY CARDHOLDER — GOLD OPTIONAL"
+              value={secondary}
+              onChange={setSecondary}
+            />
+          ) : null}
+          <fieldset>
+            <legend>VIP RECOMMENDER'S DETAILS</legend>
+            <div className="form-grid">
+              {Object.entries(meta).map(([key, value]) => (
+                <Field
+                  key={key}
+                  label={key
+                    .replace(/[A-Z]/g, (c) => ` ${c}`)
+                    .replace(/^./, (c) => c.toUpperCase())}
+                  value={value}
+                  type={key === 'acknowledgedAt' ? 'date' : 'text'}
+                  normalize={(v) => normalizeLiveHumanField(key, v)}
+                  optionalPhone={key === 'recommenderContact'}
+                  onChange={(v) => setMeta({ ...meta, [key]: v })}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>CLIENT ACQUISITION CHANNEL</legend>
+            {[
+              'CMP',
+              'DRP',
+              'GDP Corporate',
+              'Walk-In',
+              'GDP Public Servant',
+              'Referral',
+              'FB Ads',
+            ].map((channel) => (
+              <label key={channel}>
+                <input
+                  type="checkbox"
+                  checked={channels.includes(channel)}
+                  onChange={(e) =>
+                    setChannels(
+                      e.target.checked
+                        ? [...channels, channel]
+                        : channels.filter((v) => v !== channel),
+                    )
+                  }
+                />
+                {channel}
+              </label>
+            ))}
+          </fieldset>
+          <fieldset>
+            <legend>CERTIFICATION AND RESERVATION REQUIREMENTS</legend>
+            <label>
               <input
                 type="checkbox"
-                checked={channels.includes(channel)}
-                onChange={(e) =>
-                  setChannels(
-                    e.target.checked
-                      ? [...channels, channel]
-                      : channels.filter((v) => v !== channel),
-                  )
-                }
-              />
-              {channel}
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+              />{' '}
+              I certify the information and consent to verification and processing under RA 10173.
             </label>
-          ))}
-        </fieldset>
-        <fieldset>
-          <legend>CERTIFICATION AND RESERVATION REQUIREMENTS</legend>
-          <label>
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-            />{' '}
-            I certify the information and consent to verification and processing under RA 10173.
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={validId}
-              onChange={(e) => setValidId(e.target.checked)}
-            />{' '}
-            Valid government ID with specimen signatures received
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={paymentProof}
-              onChange={(e) => setPaymentProof(e.target.checked)}
-            />{' '}
-            Reservation payment proof received
-          </label>
-        </fieldset>
-        <p>
-          <Button onClick={() => save.mutate()} disabled={save.isPending || !optionalPhonesValid}>
-            Save draft
-          </Button>{' '}
-          {id && editable ? (
+            <label>
+              <input
+                type="checkbox"
+                checked={validId}
+                onChange={(e) => setValidId(e.target.checked)}
+              />{' '}
+              Valid government ID with specimen signatures received
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={paymentProof}
+                onChange={(e) => setPaymentProof(e.target.checked)}
+              />{' '}
+              Reservation payment proof received
+            </label>
+          </fieldset>
+          <p>
             <Button
-              onClick={() => submit.mutate()}
-              disabled={!consent || submit.isPending || !optionalPhonesValid}
+              onClick={() => save.mutate()}
+              disabled={
+                save.isPending ||
+                uploadId.isPending ||
+                ocr.isPending ||
+                Boolean(ocrFile) ||
+                !optionalPhonesValid ||
+                Object.values(invalidFields).some(Boolean)
+              }
             >
-              Submit
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'submitted' ? (
-            <>
-              <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
-                Approve
-              </Button>{' '}
+              Save draft
+            </Button>{' '}
+            {id && editable ? (
               <Button
-                variant="danger"
-                onClick={() => decide.mutate('rejected')}
-                disabled={decide.isPending}
+                onClick={() => submit.mutate()}
+                disabled={
+                  !consent ||
+                  uploadId.isPending ||
+                  ocr.isPending ||
+                  Boolean(ocrFile) ||
+                  submit.isPending ||
+                  !optionalPhonesValid ||
+                  Object.values(invalidFields).some(Boolean)
+                }
               >
-                Reject
-              </Button>{' '}
+                Submit
+              </Button>
+            ) : null}{' '}
+            {id && existing.data?.status === 'submitted' ? (
+              <>
+                <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
+                  Approve
+                </Button>{' '}
+                <Button
+                  variant="danger"
+                  onClick={() => decide.mutate('rejected')}
+                  disabled={decide.isPending}
+                >
+                  Reject
+                </Button>{' '}
+                <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+                  Reopen to draft
+                </Button>{' '}
+              </>
+            ) : null}{' '}
+            {id && existing.data?.status === 'rejected' ? (
               <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
                 Reopen to draft
-              </Button>{' '}
-            </>
-          ) : null}{' '}
-          {id && existing.data?.status === 'rejected' ? (
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-              Reopen to draft
-            </Button>
-          ) : null}{' '}
-          {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-            <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
-              Cancel
-            </Button>
-          ) : null}{' '}
-          {id ? (
-            <>
-              <Button onClick={() => void exportCustomerApplication(id, 'xlsx').then(saveFile)}>
-                Export XLSX
               </Button>
-              <Button onClick={() => void exportCustomerApplication(id, 'pdf').then(saveFile)}>
-                Export PDF
+            ) : null}{' '}
+            {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
+              <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+                Cancel
               </Button>
-            </>
-          ) : null}
-        </p>
-      </fieldset>
-    </section>
+            ) : null}{' '}
+            {id ? (
+              <>
+                <Button onClick={() => void exportCustomerApplication(id, 'xlsx').then(saveFile)}>
+                  Export XLSX
+                </Button>
+                <Button onClick={() => void exportCustomerApplication(id, 'pdf').then(saveFile)}>
+                  Export PDF
+                </Button>
+              </>
+            ) : null}
+          </p>
+        </fieldset>
+      </section>
+    </HumanInputValidity.Provider>
   );
 }
 
@@ -899,32 +1160,47 @@ export function ReservationAgreementsPage() {
       ) : query.data?.length ? (
         <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
           <table>
-          <thead>
-            <tr>
-              <th>Reservation</th>
-              <th>Tier</th>
-              <th>Sale</th>
-              <th>Status</th>
-              <th>Submitted</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {query.data.map((item) => (
-              <tr key={item.id}>
-                <td>
-                  <Link to={`/admin/sales/reservations/${item.id}`}>{item.reservationNumber}</Link>
-                </td>
-                <td>{item.tier}</td>
-                <td>{item.saleId}</td>
-                <td>
-                  <StatusChip label={item.status} />
-                </td>
-                <td>{item.submittedAt ?? '—'}</td>
-                <td>{item.createdAt}</td>
+            <thead>
+              <tr>
+                <th>Reservation</th>
+                <th>Applicant</th>
+                <th>Tier</th>
+                <th>Sale</th>
+                <th>Payment scheme</th>
+                <th>Amount</th>
+                <th>Signatures</th>
+                <th>Status</th>
+                <th>Submitted</th>
+                <th>Created</th>
               </tr>
-            ))}
-          </tbody>
+            </thead>
+            <tbody>
+              {query.data.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <Link to={`/admin/sales/reservations/${item.id}`}>
+                      {item.reservationNumber}
+                    </Link>
+                  </td>
+                  <td>{item.applicantName ?? '—'}</td>
+                  <td>{item.tier}</td>
+                  <td>{item.saleId}</td>
+                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
+                  <td>{formatMoney(item.totalPrice)}</td>
+                  <td>
+                    {item.primarySignatureStatus === 'received' &&
+                    (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received')
+                      ? 'Complete'
+                      : 'Pending signature'}
+                  </td>
+                  <td>
+                    <StatusChip label={item.status} />
+                  </td>
+                  <td>{item.submittedAt ?? '—'}</td>
+                  <td>{item.createdAt}</td>
+                </tr>
+              ))}
+            </tbody>
           </table>
         </div>
       ) : (

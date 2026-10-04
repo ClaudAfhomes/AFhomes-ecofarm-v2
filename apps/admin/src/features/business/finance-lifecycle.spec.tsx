@@ -222,6 +222,23 @@ beforeEach(() => {
 /* ================================================================== */
 
 describe('Phase 26 finance queue states', () => {
+  it('keeps payment mutations disabled for a view-only finance principal', async () => {
+    render('/admin/finance/payments', {
+      ...FINANCE_USER,
+      afHomesPermissions: FINANCE_USER.afHomesPermissions.map((permission) => ({
+        ...permission,
+        canUpdate: false,
+      })),
+    });
+    await screen.findByText(QUEUE_ITEM.saleNumber);
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
+    const detail = within(screen.getByRole('dialog'));
+    expect(detail.getByRole('button', { name: 'Verify payment' })).toBeDisabled();
+    expect(detail.getByRole('button', { name: 'Record payment' })).toBeDisabled();
+    expect(requests.some((request) => request.method !== 'GET')).toBe(false);
+  });
   it('41. shows a loading state while the queue is pending', async () => {
     vi.stubGlobal(
       'fetch',
@@ -257,7 +274,7 @@ describe('Phase 26 finance queue states', () => {
     // The server-sent exact-decimal strings, formatted without float math.
     expect(await screen.findByText('SALE-260001')).toBeInTheDocument();
     expect(screen.getByText('₱60,000.00')).toBeInTheDocument();
-    expect(screen.getAllByText('₱20,000.00')).toHaveLength(2);
+    expect(screen.getAllByText('₱20,000.00')).toHaveLength(1);
     expect(screen.getByText('₱40,000.00')).toBeInTheDocument();
     const get = requests.find((r) => r.method === 'GET' && r.path === '/queues/finance');
     expect(get).toBeDefined();
@@ -266,6 +283,7 @@ describe('Phase 26 finance queue states', () => {
   it('shows first verified payment and deadline status from the server', async () => {
     render('/admin/finance/payments');
     await screen.findByText('SALE-260001');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'View details' }));
     // First verified instant and the derived 7-day state are displayed.
     expect(screen.getByText('Within 7 days')).toBeInTheDocument();
   });
@@ -376,4 +394,40 @@ describe('Phase 26 commission management UI', () => {
     expect(screen.getAllByText('₱2,400.00').length).toBeGreaterThan(0);
     expect(screen.getByText('₱1,600.00')).toBeInTheDocument();
   });
+});
+
+describe('payment exact-decimal input UX', () => {
+  it.each(['1e3', '1E3', '1e+3', '1e-3', 'NaN', 'Infinity', 'ABC', '100ABC', '', '0', '0.00'])(
+    'blocks invalid payment amount %s before any write',
+    async (amount) => {
+      const user = userEvent.setup();
+      render('/admin/finance/payments');
+      await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+      const input = screen.getByLabelText('Amount');
+      await user.type(input, amount || '1');
+      if (!amount) await user.clear(input);
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+      const errorId = input.getAttribute('aria-describedby');
+      expect(errorId).toBeTruthy();
+      expect(document.getElementById(errorId!)).toHaveTextContent(/valid amount/);
+      expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
+      expect(requests.some((request) => request.method !== 'GET')).toBe(false);
+      await user.clear(input);
+      await user.type(input, '1000.00');
+      expect(input).not.toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
+    },
+  );
+  it.each(['1000', '1000.00', '0.01'])(
+    'accepts the existing payment contract amount %s',
+    async (amount) => {
+      const user = userEvent.setup();
+      render('/admin/finance/payments');
+      await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+      await user.type(screen.getByLabelText('Amount'), amount);
+      expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
+      await user.clear(screen.getByLabelText('Method'));
+      expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
+    },
+  );
 });

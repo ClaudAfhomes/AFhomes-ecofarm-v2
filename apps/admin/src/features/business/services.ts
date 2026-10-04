@@ -19,9 +19,12 @@ import {
   customerImportRowSchema,
   customerOnboardingRecoverySchema,
   customerSchema,
+  createCustomerSchema,
   financeQueueItemSchema,
   formImportPreviewSchema,
   customerApplicationSchema,
+  customerApplicationListItemSchema,
+  reservationAgreementListItemSchema,
   reservationAgreementSchema,
   membershipSchema,
   paymentSchema,
@@ -48,6 +51,8 @@ import {
   type FinanceQueueItem,
   type FormImportPreview,
   type CustomerApplication,
+  type CustomerApplicationListItem,
+  type ReservationAgreementListItem,
   type CreateCustomerApplicationRequest,
   type ReservationAgreement,
   type CreateReservationAgreementRequest,
@@ -155,7 +160,7 @@ export const getCustomers = (
 };
 
 export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> =>
-  post('/customers', customerSchema, normalizeCustomerRequest(input));
+  post('/customers', customerSchema, createCustomerSchema.parse(normalizeCustomerRequest(input)));
 
 export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnboardingRecovery> =>
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
@@ -199,7 +204,7 @@ export const getCustomerApplications = (
     to?: string;
     search?: string;
   } = {},
-): Promise<CustomerApplication[]> => {
+): Promise<CustomerApplicationListItem[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.tier) query.set('tier', params.tier);
@@ -210,7 +215,7 @@ export const getCustomerApplications = (
   const suffix = query.toString();
   return requestList(
     `/official-forms/customer-applications${suffix ? `?${suffix}` : ''}`,
-    customerApplicationSchema,
+    customerApplicationListItemSchema,
   );
 };
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
@@ -252,7 +257,7 @@ export const getReservationAgreements = (
     to?: string;
     search?: string;
   } = {},
-): Promise<ReservationAgreement[]> => {
+): Promise<ReservationAgreementListItem[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.tier) query.set('tier', params.tier);
@@ -263,7 +268,7 @@ export const getReservationAgreements = (
   const suffix = query.toString();
   return requestList(
     `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,
-    reservationAgreementSchema,
+    reservationAgreementListItemSchema,
   );
 };
 export const getReservationAgreement = (id: string): Promise<ReservationAgreement> =>

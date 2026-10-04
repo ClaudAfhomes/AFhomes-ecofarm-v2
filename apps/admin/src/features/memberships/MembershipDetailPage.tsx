@@ -1,3 +1,4 @@
+import styles from '../business/WorkflowCards.module.css';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -8,6 +9,7 @@ import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/format';
 import { getAudit } from '../reports/services';
 import { getMembershipCard, markMembershipPrinted, reissueMembershipCard } from './services';
+import { MembershipActivity } from './MembershipActivity';
 
 /**
  * One membership's card operations.
@@ -42,8 +44,7 @@ export function MembershipDetailPage() {
       (p) => p.moduleKey === 'finance.card_activation' && p.canUpdate,
     ) === true;
   const canSeeAudit =
-    user?.afHomesPermissions.some((p) => p.moduleKey === 'governance.audit' && p.canView) ===
-    true;
+    user?.afHomesPermissions.some((p) => p.moduleKey === 'governance.audit' && p.canView) === true;
   const history = useQuery({
     queryKey: ['memberships', id, 'history'],
     queryFn: () => getAudit({ entityType: 'membership', entityId: id, limit: 20 }),
@@ -90,139 +91,164 @@ export function MembershipDetailPage() {
         <Link to="/admin/memberships">← Back to memberships</Link>
       </p>
 
-      <dl
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <div>
-          <dt>Tier</dt>
-          <dd>
-            {data.tierName} ({data.tierCode || '—'})
-          </dd>
-        </div>
-        <div>
-          <dt>Category</dt>
-          <dd>{data.categoryName ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Customer account</dt>
-          <dd>{data.customerStatus ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>
-            <StatusChip
-              label={data.status}
-              tone={data.status === 'active' ? 'success' : 'neutral'}
-            />
-          </dd>
-        </div>
-        <div>
-          <dt>Points balance</dt>
-          <dd>{data.pointsBalance.toLocaleString('en-PH')}</dd>
-        </div>
-        <div>
-          <dt>Yearly entitlement</dt>
-          <dd>{data.yearlyPointsAllocated.toLocaleString('en-PH')}</dd>
-        </div>
-        <div>
-          <dt>Activated</dt>
-          <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
-        </div>
-        <div>
-          <dt>Valid until</dt>
-          <dd>{data.expiresAt ? formatDateTime(data.expiresAt) : '—'}</dd>
-        </div>
-        <div>
-          <dt>Validity</dt>
-          <dd>
-            {data.validityYears ? `Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}` : '—'}
-          </dd>
-        </div>
-        <div>
-          <dt>Card issued</dt>
-          <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
-        </div>
-        <div>
-          <dt>Issued by</dt>
-          <dd>{data.issuedBy ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Prints</dt>
-          <dd>
-            {data.printCount}{' '}
-            {data.lastPrintedAt
-              ? `(last ${formatDateTime(data.lastPrintedAt)})`
-              : '(never printed)'}
-          </dd>
-        </div>
-      </dl>
+      <section className={styles.card} aria-label="Membership summary">
+        <dl className={styles.facts}>
+          {' '}
+          <div>
+            <dt>Status</dt>
+            <dd>
+              <StatusChip
+                label={data.status}
+                tone={data.status === 'active' ? 'success' : 'neutral'}
+              />
+            </dd>
+          </div>
+          <div>
+            <dt>Points balance</dt>
+            <dd>{data.pointsBalance.toLocaleString('en-PH')}</dd>
+          </div>
+          <div>
+            <dt>Valid until</dt>
+            <dd>{data.expiresAt ? formatDateTime(data.expiresAt) : '—'}</dd>
+          </div>
+        </dl>
+      </section>
+      <section className={styles.card}>
+        <h2>Overview</h2>
+        <dl className={styles.facts}>
+          <div>
+            <dt>Tier</dt>
+            <dd>
+              {data.tierName} ({data.tierCode || '—'})
+            </dd>
+          </div>
+          <div>
+            <dt>Category</dt>
+            <dd>{data.categoryName ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Customer account</dt>
+            <dd>{data.customerStatus ?? '—'}</dd>
+          </div>
 
-      <div style={{ marginTop: 24, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <Button variant="secondary" onClick={() => navigate(`/admin/memberships/${id}/card`)}>
-          Open printable card
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setOutcome(null);
-            markPrinted.mutate();
-          }}
-          disabled={markPrinted.isPending}
-        >
-          {markPrinted.isPending ? 'Recording…' : 'Record a print (no code change)'}
-        </Button>
-      </div>
+          <div>
+            <dt>Activated</dt>
+            <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
+          </div>
 
-      {canReissue ? (
-        <div style={{ marginTop: 24, display: 'grid', gap: 12, maxWidth: 560 }}>
-          <h2>Rotate credentials</h2>
-          <p>
-            Issues a new QR and fallback code and invalidates the previous pair immediately.
-            Balances and identity are unchanged. Do this for a lost, damaged or compromised card —
-            not for a reprint.
-          </p>
-          <label>
-            Reason (required, min 5 characters)
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              style={{ width: '100%' }}
-            />
-          </label>
+          <div>
+            <dt>Validity</dt>
+            <dd>
+              {data.validityYears
+                ? `Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}`
+                : '—'}
+            </dd>
+          </div>
+        </dl>
+      </section>
+      <section className={styles.card}>
+        <h2>Points entitlement</h2>
+        <dl className={styles.facts}>
+          {' '}
+          <div>
+            <dt>Yearly entitlement</dt>
+            <dd>{data.yearlyPointsAllocated.toLocaleString('en-PH')}</dd>
+          </div>
+        </dl>
+      </section>
+      <MembershipActivity
+        id={id}
+        number={data.membershipNumber}
+        permissions={user?.afHomesPermissions ?? []}
+      />
+      <section className={styles.card}>
+        <h2>Card / Credentials</h2>
+        <dl className={styles.facts}>
+          {' '}
+          <div>
+            <dt>Card issued</dt>
+            <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
+          </div>
+          <div>
+            <dt>Issued by</dt>
+            <dd>{data.issuedBy ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Prints</dt>
+            <dd>
+              {data.printCount}{' '}
+              {data.lastPrintedAt
+                ? `(last ${formatDateTime(data.lastPrintedAt)})`
+                : '(never printed)'}
+            </dd>
+          </div>
+        </dl>
+        <div style={{ marginTop: 24, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <Button variant="secondary" onClick={() => navigate(`/admin/memberships/${id}/card`)}>
+            Open printable card
+          </Button>
           <Button
+            variant="secondary"
             onClick={() => {
               setOutcome(null);
-              setConfirmReissue(true);
+              markPrinted.mutate();
             }}
-            disabled={reissue.isPending || reason.trim().length < 5}
+            disabled={markPrinted.isPending}
           >
-            {reissue.isPending ? 'Rotating…' : 'Reissue credentials'}
+            {markPrinted.isPending ? 'Recording…' : 'Record a print (no code change)'}
           </Button>
-          <ConfirmDialog
-            open={confirmReissue}
-            onCancel={() => setConfirmReissue(false)}
-            onConfirm={() => {
-              setConfirmReissue(false);
-              reissue.mutate();
-            }}
-            title="Reissue credentials?"
-            message="Rotate the credentials for this card? The previous codes stop working immediately."
-            confirmLabel="Reissue"
-            cancelLabel="Cancel"
-            confirmLoading={reissue.isPending}
-          />
         </div>
-      ) : (
-        <p style={{ marginTop: 24 }}>
-          Credential rotation requires the card-activation update permission, which this account
-          does not hold.
-        </p>
-      )}
+
+        <details>
+          <summary>Security: credential recovery</summary>
+          {canReissue ? (
+            <div style={{ marginTop: 24, display: 'grid', gap: 12, maxWidth: 560 }}>
+              <h3>Rotate credentials</h3>
+              <p>
+                Issues a new QR and fallback code and invalidates the previous pair immediately.
+                Balances and identity are unchanged. Do this for a lost, damaged or compromised card
+                — not for a reprint.
+              </p>
+              <label>
+                Reason (required, min 5 characters)
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  style={{ width: '100%' }}
+                />
+              </label>
+              <Button
+                onClick={() => {
+                  setOutcome(null);
+                  setConfirmReissue(true);
+                }}
+                disabled={reissue.isPending || reason.trim().length < 5}
+              >
+                {reissue.isPending ? 'Rotating…' : 'Reissue credentials'}
+              </Button>
+              <ConfirmDialog
+                open={confirmReissue}
+                onCancel={() => setConfirmReissue(false)}
+                onConfirm={() => {
+                  setConfirmReissue(false);
+                  reissue.mutate();
+                }}
+                title="Reissue credentials?"
+                message="Rotate the credentials for this card? The previous codes stop working immediately."
+                confirmLabel="Reissue"
+                cancelLabel="Cancel"
+                confirmLoading={reissue.isPending}
+              />
+            </div>
+          ) : (
+            <p style={{ marginTop: 24 }}>
+              Credential rotation requires the card-activation update permission, which this account
+              does not hold.
+            </p>
+          )}
+        </details>
+      </section>
       {outcome ? (
         <p role="status" style={{ marginTop: 16 }}>
           {outcome}

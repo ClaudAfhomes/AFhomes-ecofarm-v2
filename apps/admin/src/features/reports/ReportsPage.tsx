@@ -1,3 +1,4 @@
+import { formatMoney } from '../business/format';
 import styles from './ReportsPage.module.css';
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -298,10 +299,26 @@ export function ReportsPage() {
             <dl className={styles.summary}>
               {Object.entries(query.data.summary).map(([key, value]) => (
                 <div key={key}>
-                  <dt className={styles.summaryLabel}>{key}</dt>
+                  <dt className={styles.summaryLabel}>
+                    {key === 'grossFrozenValue'
+                      ? 'Gross Sales Value'
+                      : key === 'verifiedPaid'
+                        ? 'Verified Paid'
+                        : key === 'remaining'
+                          ? 'Remaining Balance'
+                          : key
+                              .replace(/([a-z])([A-Z])/g, '$1 $2')
+                              .replace(/^./, (c) => c.toUpperCase())}
+                  </dt>
                   <dd>
                     <strong>
-                      {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                      {typeof value === 'object'
+                        ? JSON.stringify(value)
+                        : typeof value === 'string' && /^-?\d+\.\d{2}$/.test(value)
+                          ? formatMoney(value)
+                          : typeof value === 'number'
+                            ? value.toLocaleString('en-PH')
+                            : String(value)}
                     </strong>
                   </dd>
                 </div>

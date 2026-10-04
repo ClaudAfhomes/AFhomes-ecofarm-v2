@@ -148,7 +148,7 @@ describe('every import transport uses the canonical row validator', () => {
         rows: [
           expect.objectContaining({
             fields: expect.objectContaining({
-              first_name: 'CLAUD',
+              first_name: 'claud',
               email: 'claud@example.com',
               secondary_mobile: '+639171234567',
             }),

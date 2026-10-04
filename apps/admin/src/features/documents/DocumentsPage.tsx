@@ -18,6 +18,7 @@ import {
   ACCEPTED_MIME,
   MAX_BYTES,
   getDocuments,
+  completeDocumentUpload,
   putUploadBytes,
   requestUploadGrant,
   runDocumentOcr,
@@ -66,6 +67,7 @@ export function DocumentsPage() {
         originalFilename: file.name.slice(0, 255),
       });
       await putUploadBytes(grant.uploadUrl, file);
+      await completeDocumentUpload(grant.documentId);
       return grant.documentId;
     },
     onSuccess: (documentId) => {

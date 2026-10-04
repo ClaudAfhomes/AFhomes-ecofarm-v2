@@ -105,7 +105,15 @@ vi.mock('./features/ost/services', () => ({
   getMyReferralCodes: vi.fn(),
 }));
 
-import { getAfHomesDepartments, getAfHomesRoles, getAfHomesStaff, getAnalyticsOverview, getAfHomesDashboardQueues, getAfHomesSalesTrend } from './features/afhomes/services';import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
+import {
+  getAfHomesDepartments,
+  getAfHomesRoles,
+  getAfHomesStaff,
+  getAnalyticsOverview,
+  getAfHomesDashboardQueues,
+  getAfHomesSalesTrend,
+} from './features/afhomes/services';
+import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
 import { getMemberships } from './features/memberships/services';
 import { getRedemptionItems, getRedemptions } from './features/redemption/services';
 import { getAudit, getReport } from './features/reports/services';
@@ -189,6 +197,7 @@ const SALE_ROW = {
 };
 
 const QUEUE_ROW = {
+  status: 'payment_in_progress',
   saleId: 'sale-1',
   saleNumber: 'SALE-000001',
   customerName: 'Juan Dela Cruz',
@@ -295,7 +304,13 @@ const AUDIT_ROW = {
   meta: { total: 1 },
 };
 
-const CMS_ROW = { id: 'p-1', title: 'Ecofarm Story', slug: 'ecofarm-story', status: 'published', version: 3 };
+const CMS_ROW = {
+  id: 'p-1',
+  title: 'Ecofarm Story',
+  slug: 'ecofarm-story',
+  status: 'published',
+  version: 3,
+};
 
 const GENEALOGY_ROW = {
   staffId: 'sm-1',
@@ -489,8 +504,20 @@ describe('Phase 33 mobile shows no permission-hidden links', () => {
     const user: SessionUser = {
       ...SUPER,
       afHomesPermissions: [
-        { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-        { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: false, canDelete: false },
+        {
+          moduleKey: 'dashboard.view',
+          canView: true,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
+        {
+          moduleKey: 'operations.redemption',
+          canView: true,
+          canCreate: true,
+          canUpdate: false,
+          canDelete: false,
+        },
       ] as never,
     };
     renderApp('/admin', user);
@@ -504,7 +531,13 @@ describe('Phase 33 mobile shows no permission-hidden links', () => {
     const user: SessionUser = {
       ...SUPER,
       afHomesPermissions: [
-        { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+        {
+          moduleKey: 'dashboard.view',
+          canView: true,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
       ] as never,
     };
     renderApp('/admin/finance/commissions', user);

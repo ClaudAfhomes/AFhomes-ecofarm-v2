@@ -12,13 +12,13 @@ export type AdminNavItem = {
 };
 
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
+  { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
   {
     to: '/admin/member-lookup',
     label: 'VIP Member Lookup',
     icon: 'grid',
     module: 'operations.redemption',
   },
-  { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
   {
     to: '/admin/sales',
     label: 'Sales & Customers',
@@ -39,7 +39,6 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       },
       { to: '/admin/sales/reservations', label: 'IST Reservations', module: 'sales.card_sales' },
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
-      { to: '/admin/documents', label: 'ID Documents', module: 'sales.id_documents' },
       {
         to: '/admin/sales/payment-scheme-guide',
         label: 'Payment Scheme Guide',
@@ -198,6 +197,9 @@ export function canAccessNavTarget(
   pathname: string,
 ): boolean {
   if (pathname === '/admin/reports') return canViewReports(permissions);
+  // Compatibility-only document routes remain protected after removing navigation.
+  if (pathname === '/admin/documents' || pathname.startsWith('/admin/documents/'))
+    return canViewModule(permissions, 'sales.id_documents');
   const sub = findNavSubItem(pathname);
   const item = findNavItem(pathname);
   const key = sub?.sub.module ?? item?.module;

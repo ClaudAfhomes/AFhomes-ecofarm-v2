@@ -44,7 +44,12 @@ const salesBody = (rows: unknown[], total?: number) => ({
   scope: { kind: 'global', viewerRole: 'super_admin', label: 'Global (super_admin)' },
   window: { from: null, to: null },
   filters: {},
-  summary: { sales: rows.length, grossFrozenValue: '60000.00', verifiedPaid: '20000.00', remaining: '40000.00' },
+  summary: {
+    sales: rows.length,
+    grossFrozenValue: '60000.00',
+    verifiedPaid: '20000.00',
+    remaining: '40000.00',
+  },
   data: rows,
   meta: { total: total ?? rows.length, limit: 50, offset: 0 },
 });
@@ -81,9 +86,27 @@ const ADMIN_USER: SessionUser = {
   roleName: 'Super Admin',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_sales', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'governance.audit', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_sales',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'governance.audit',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -163,6 +186,9 @@ describe('Phase 30 reports page', () => {
     install();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('SALE-000001')).toBeInTheDocument();
+    expect(screen.getByText('Gross Sales Value')).toBeInTheDocument();
+    expect(screen.queryByText('grossFrozenValue')).not.toBeInTheDocument();
+    expect(screen.getAllByText('₱60,000.00').length).toBeGreaterThan(0);
   });
 
   it('renders server summaries, scope labels, and paginated rows', async () => {
@@ -184,12 +210,16 @@ describe('Phase 30 reports page', () => {
     await screen.findByText('SALE-000001');
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => {
-      const call = requests.find((r) => r.path === '/reports/sales' && r.query.includes('format=csv'));
+      const call = requests.find(
+        (r) => r.path === '/reports/sales' && r.query.includes('format=csv'),
+      );
       expect(call).toBeDefined();
     });
     await user.click(screen.getByRole('button', { name: 'Export PDF' }));
     await waitFor(() => {
-      const call = requests.find((r) => r.path === '/reports/sales' && r.query.includes('format=pdf'));
+      const call = requests.find(
+        (r) => r.path === '/reports/sales' && r.query.includes('format=pdf'),
+      );
       expect(call).toBeDefined();
     });
   });
@@ -242,7 +272,9 @@ describe('Phase 30 audit page', () => {
     await screen.findByText('APPLICATION_SUBMITTED');
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => {
-      const call = requests.find((r) => r.path === '/reports/audit' && r.query.includes('format=csv'));
+      const call = requests.find(
+        (r) => r.path === '/reports/audit' && r.query.includes('format=csv'),
+      );
       expect(call).toBeDefined();
     });
   });

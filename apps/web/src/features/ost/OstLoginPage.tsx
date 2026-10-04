@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
@@ -14,7 +14,6 @@ import styles from '../customer/auth.module.css';
  */
 export function OstLoginPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { signIn } = useCustomerSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,12 +22,6 @@ export function OstLoginPage() {
   const [pending, setPending] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-
-  const from =
-    (location.state as { from?: string } | null)?.from?.startsWith('/ost') &&
-    (location.state as { from: string }).from !== '/ost/login'
-      ? (location.state as { from: string }).from
-      : '/ost/dashboard';
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -51,7 +44,7 @@ export function OstLoginPage() {
       await signIn(email, password);
       const portals = await getAuthPortals();
       if (portals.ost?.status === 'active') {
-        navigate(from, { replace: true });
+        navigate('/ost/dashboard', { replace: true });
         return;
       }
       if (portals.ost) {

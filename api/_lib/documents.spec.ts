@@ -9,6 +9,7 @@ import {
   maskExtractedFields,
   maskReviewedFields,
   mimeMatchesSignature,
+  selectCurrentDocumentId,
 } from './documents.js';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
@@ -85,5 +86,54 @@ describe('ID masking', () => {
     expect(idNumberFromFields({ firstName: 'Ana' })).toBeNull();
     expect(isIdNumberKey('governmentId')).toBe(true);
     expect(isIdNumberKey('firstName')).toBe(false);
+  });
+});
+
+describe('canonical Current ID selection', () => {
+  const file = (over: Record<string, unknown> = {}) => ({
+    id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    created_at: '2026-09-20T00:00:00.000Z',
+    verification_status: 'pending_review',
+    storage_path: 'afhomes-customer-ids/customer/x.jpg',
+    sha256: 'a'.repeat(64),
+    ...over,
+  });
+
+  it('returns null when nothing qualifies', () => {
+    expect(selectCurrentDocumentId([])).toBeNull();
+  });
+
+  it('ignores rows without verified bytes and rejected documents', () => {
+    const pending = file({ id: 'a', storage_path: '', sha256: '0'.repeat(64) });
+    const rejected = file({
+      id: 'b',
+      created_at: '2026-09-21T00:00:00.000Z',
+      verification_status: 'rejected',
+    });
+    expect(selectCurrentDocumentId([pending, rejected])).toBeNull();
+  });
+
+  it('prefers the newest file-backed document regardless of verification status', () => {
+    const old = file({ id: 'a', verification_status: 'confirmed' });
+    const current = file({
+      id: 'b',
+      created_at: '2026-09-21T00:00:00.000Z',
+      verification_status: 'pending_review',
+    });
+    expect(selectCurrentDocumentId([old, current])).toBe('b');
+    expect(selectCurrentDocumentId([current, old])).toBe('b');
+  });
+
+  it('breaks created_at ties deterministically by id', () => {
+    const a = file({ id: 'aaaaaaaa-0000-4000-8000-000000000001' });
+    const b = file({ id: 'bbbbbbbb-0000-4000-8000-000000000002' });
+    expect(selectCurrentDocumentId([a, b])).toBe('bbbbbbbb-0000-4000-8000-000000000002');
+    expect(selectCurrentDocumentId([b, a])).toBe('bbbbbbbb-0000-4000-8000-000000000002');
+  });
+
+  it('falls back past unparseable timestamps without throwing', () => {
+    const bad = file({ id: 'a', created_at: 'not-a-date' });
+    const good = file({ id: 'b', created_at: '2026-09-21T00:00:00.000Z' });
+    expect(selectCurrentDocumentId([bad, good])).toBe('b');
   });
 });

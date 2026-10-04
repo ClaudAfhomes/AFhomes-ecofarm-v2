@@ -53,7 +53,7 @@ const sendFile = (res: VercelResponse, filename: string, mime: string, bytes: Ui
 const rpcId = (data: unknown) => String(Array.isArray(data) ? data[0] : data);
 
 /**
- * Uppercase the optional holder/header text the schemas validate but leave
+ * Normalize the optional holder/header text the schemas validate but leave
  * untransformed (required fields are already normalized by the schemas).
  * Spreads preserve key presence exactly: null/undefined/blank pass through.
  */
@@ -68,7 +68,7 @@ type OptionalTextHolder = {
 const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T => ({
   ...holder,
   ...(holder.middleName ? { middleName: normalizePersonName(holder.middleName) } : {}),
-  ...(holder.suffix ? { suffix: normalizeAddressField(holder.suffix) } : {}),
+  ...(holder.suffix ? { suffix: normalizePersonName(holder.suffix) } : {}),
   ...(holder.postalCode ? { postalCode: normalizePostalCode(holder.postalCode) } : {}),
   ...(holder.occupationBusinessName
     ? { occupationBusinessName: normalizeAddressField(holder.occupationBusinessName) }
@@ -78,19 +78,23 @@ const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T =>
     : {}),
 });
 
-const normalizeApplicationHeader = <T extends {
-  salesManagerName?: string;
-  vipRecommenderName?: string;
-  vipReferrer?: string;
-}>(header: T): T => ({
+const normalizeApplicationHeader = <
+  T extends {
+    salesManagerName?: string;
+    vipRecommenderName?: string;
+    vipReferrer?: string;
+  },
+>(
+  header: T,
+): T => ({
   ...header,
   ...(header.salesManagerName
-    ? { salesManagerName: normalizeAddressField(header.salesManagerName) }
+    ? { salesManagerName: normalizePersonName(header.salesManagerName) }
     : {}),
   ...(header.vipRecommenderName
-    ? { vipRecommenderName: normalizeAddressField(header.vipRecommenderName) }
+    ? { vipRecommenderName: normalizePersonName(header.vipRecommenderName) }
     : {}),
-  ...(header.vipReferrer ? { vipReferrer: normalizeAddressField(header.vipReferrer) } : {}),
+  ...(header.vipReferrer ? { vipReferrer: normalizePersonName(header.vipReferrer) } : {}),
 });
 
 const shapeApplicationHolder = (row: Record<string, unknown>) => ({
@@ -349,10 +353,12 @@ async function listRows(
   // applicant without a second round-trip. Detail rows remain authoritative.
   if (table === 'customer_applications' && rows.length) {
     const ids = rows.map((row) => String(row.id));
-    const { data: holders } = await db
+    const { data: holders, error: holderError } = await db
       .from('customer_application_holders')
       .select('application_id,first_name,last_name')
-      .in('application_id', ids);
+      .in('application_id', ids)
+      .eq('holder_type', 'PRIMARY');
+    if (holderError) throw holderError;
     const names = new Map(
       ((holders ?? []) as Record<string, unknown>[]).map((holder) => [
         String(holder.application_id),
@@ -363,15 +369,22 @@ async function listRows(
   }
   if (table === 'reservation_agreements' && rows.length) {
     const ids = rows.map((row) => String(row.id));
-    const { data: holders } = await db
+    const { data: holders, error: holderError } = await db
       .from('reservation_agreement_holders')
       .select('agreement_id,name,holder_type')
       .in('agreement_id', ids);
+    if (holderError) throw holderError;
     const names = new Map<string, string>();
+    const secondaryAgreements = new Set<string>();
     for (const holder of (holders ?? []) as Record<string, unknown>[])
       if (String(holder.holder_type) === 'PRIMARY')
         names.set(String(holder.agreement_id), String(holder.name ?? ''));
-    for (const row of rows) row.applicant_name = names.get(String(row.id)) ?? null;
+      else if (String(holder.holder_type) === 'SECONDARY')
+        secondaryAgreements.add(String(holder.agreement_id));
+    for (const row of rows) {
+      row.applicant_name = names.get(String(row.id)) ?? null;
+      row.has_secondary_holder = secondaryAgreements.has(String(row.id));
+    }
   }
   return res.status(200).json({
     data: rows,

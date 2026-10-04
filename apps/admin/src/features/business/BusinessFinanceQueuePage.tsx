@@ -1,8 +1,16 @@
+import styles from './WorkflowCards.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useState } from 'react';
+import { useSession } from '../../lib/session';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { paymentSchemeLabel } from '@jad/contracts';
+import { paymentSchemeLabel, recordPaymentSchema } from '@jad/contracts';
 import {
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableHeaderCell,
+  TableCell,
   Button,
   Dialog,
   EmptyState,
@@ -10,11 +18,12 @@ import {
   PageHeader,
   SearchField,
   StatusChip,
+  TextField,
 } from '@jad/ui';
-import type { PaymentType } from '@jad/contracts';
+import type { FinanceQueueItem, PaymentType } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
-import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney } from './format';
+import { SPOT_CASH_LABEL, formatMoney } from './format';
 import {
   getFinanceQueue,
   getSalePayments,
@@ -31,6 +40,12 @@ import {
  * `sale_financial_summary`, so nobody can type a paid total or a balance.
  */
 export function BusinessFinanceQueuePage() {
+  const { user } = useSession();
+  const canHandlePayments =
+    user?.afHomesPermissions.some(
+      (permission) =>
+        permission.moduleKey === 'finance.payment_verification' && permission.canUpdate,
+    ) ?? false;
   const client = useQueryClient();
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
@@ -41,8 +56,12 @@ export function BusinessFinanceQueuePage() {
     // writes invalidate instantly).
     refetchInterval: 15_000,
   });
+  const [detail, setDetail] = useState<FinanceQueueItem | null>(null);
   const [paying, setPaying] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
+  const currentDetail = detail
+    ? (query.data?.find((item) => item.saleId === detail.saleId) ?? detail)
+    : null;
 
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['business', 'queue'] });
@@ -69,69 +88,84 @@ export function BusinessFinanceQueuePage() {
         />
       ) : (
         <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Sale</th>
-                <th>Customer</th>
-                <th>Card</th>
-                <th>Scheme</th>
-                <th>Total</th>
-                <th>Verified</th>
-                <th>Balance</th>
-                <th>Reservation</th>
-                <th>Required initial</th>
-                <th>Monthly target</th>
-                <th>Required initial met</th>
-                <th>First verified</th>
-                <th>Spot cash</th>
-                <th>Deadline</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Sale</TableHeaderCell>
+                <TableHeaderCell>Customer</TableHeaderCell>
+                <TableHeaderCell>Card</TableHeaderCell>
+                <TableHeaderCell>Scheme</TableHeaderCell>
+                <TableHeaderCell>Total</TableHeaderCell>
+                <TableHeaderCell>Verified</TableHeaderCell>
+                <TableHeaderCell>Balance</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Next Action</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {query.data?.map((item) => (
-                <tr key={item.saleId}>
-                  <td>{item.saleNumber}</td>
-                  <td>{item.customerName}</td>
-                  <td>{item.productName}</td>
-                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                  <td>{formatMoney(item.cashPrice)}</td>
-                  <td>{formatMoney(item.verifiedTotal)}</td>
-                  <td>{formatMoney(item.remainingBalance)}</td>
-                  <td>{formatMoney(item.reservationFee)}</td>
-                  <td>{formatMoney(item.requiredInitial)}</td>
-                  <td>
-                    {item.installmentMonths && item.monthlyAmount
-                      ? `${formatMoney(item.monthlyAmount)} × ${item.installmentMonths}`
-                      : '—'}
-                  </td>
-                  <td>{item.downPaymentSatisfied ? 'Yes' : 'No'}</td>
-                  <td>
-                    {item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}
-                  </td>
-                  <td>
-                    <StatusChip
-                      label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
-                      tone={SPOT_CASH_TONE[item.spotCashState] ?? 'neutral'}
-                    />
-                  </td>
-                  <td>{item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}</td>
-                  <td>
-                    <Button size="sm" variant="secondary" onClick={() => setPaying(item.saleId)}>
+                <TableRow key={item.saleId}>
+                  <TableCell label="Sale">{item.saleNumber}</TableCell>
+                  <TableCell label="Customer">{item.customerName}</TableCell>
+                  <TableCell label="VIP">{item.productName}</TableCell>
+                  <TableCell label="Scheme">{paymentSchemeLabel(item.paymentScheme)}</TableCell>
+                  <TableCell label="Total">{formatMoney(item.cashPrice)}</TableCell>
+                  <TableCell label="Verified">{formatMoney(item.verifiedTotal)}</TableCell>
+                  <TableCell label="Balance">{formatMoney(item.remainingBalance)}</TableCell>
+                  <TableCell label="Status">
+                    <StatusChip label={item.status} />
+                  </TableCell>
+                  <TableCell label="Next Action">
+                    {item.activatable
+                      ? 'Activate membership'
+                      : item.fullyPaid
+                        ? 'Review activation'
+                        : 'Handle payment'}
+                  </TableCell>
+                  <TableCell label="Actions">
+                    <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
+                      View details
+                    </Button>{' '}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={!canHandlePayments}
+                      onClick={() => setPaying(item.saleId)}
+                    >
                       Record payment
                     </Button>{' '}
-                    <Button size="sm" variant="secondary" onClick={() => setReviewing(item.saleId)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={!canHandlePayments}
+                      onClick={() => setReviewing(item.saleId)}
+                    >
                       Verify
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
+      {currentDetail ? (
+        <PaymentDetails
+          canHandlePayments={canHandlePayments}
+          item={currentDetail}
+          onClose={() => setDetail(null)}
+          onRecord={() => {
+            setPaying(currentDetail.saleId);
+            setDetail(null);
+          }}
+          onVerify={() => {
+            setReviewing(currentDetail.saleId);
+            setDetail(null);
+          }}
+        />
+      ) : null}
       {paying ? (
         <RecordPaymentDialog saleId={paying} onDone={refresh} onClose={() => setPaying(null)} />
       ) : null}
@@ -152,9 +186,13 @@ function RecordPaymentDialog({
   onClose: () => void;
 }) {
   const [amount, setAmount] = useState('');
+  const [amountDirty, setAmountDirty] = useState(false);
   const [type, setType] = useState<PaymentType>('installment');
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
+  const paymentInput = { amount, paymentType: type, method, ...(reference ? { reference } : {}) };
+  const amountValid = recordPaymentSchema.shape.amount.safeParse(amount).success;
+  const paymentValid = recordPaymentSchema.safeParse(paymentInput).success;
 
   const summary = useQuery({
     queryKey: ['business', 'sale-summary', saleId],
@@ -162,13 +200,7 @@ function RecordPaymentDialog({
   });
 
   const save = useMutation({
-    mutationFn: () =>
-      recordPayment(saleId, {
-        amount,
-        paymentType: type,
-        method,
-        ...(reference ? { reference } : {}),
-      }),
+    mutationFn: () => recordPayment(saleId, recordPaymentSchema.parse(paymentInput)),
     onSuccess: onDone,
   });
 
@@ -182,7 +214,7 @@ function RecordPaymentDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!amount || save.isPending} onClick={() => save.mutate()}>
+          <Button disabled={!paymentValid || save.isPending} onClick={() => save.mutate()}>
             Record
           </Button>
         </>
@@ -235,10 +267,23 @@ function RecordPaymentDialog({
             </div>
           </dl>
         ) : null}
-        <label>
-          Amount
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
-        </label>
+        <TextField
+          id="record-payment-amount"
+          name="amount"
+          label="Amount"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(value) => {
+            setAmount(value);
+            setAmountDirty(true);
+          }}
+          error={
+            amountDirty && !amountValid
+              ? 'Enter a valid amount greater than zero without letters or scientific notation.'
+              : undefined
+          }
+        />
         <label>
           Type
           <select value={type} onChange={(e) => setType(e.target.value as PaymentType)}>
@@ -337,6 +382,119 @@ function VerifyDialog({
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
         {decide.error ? <p role="alert">{decide.error.message}</p> : null}
+      </div>
+    </Dialog>
+  );
+}
+
+function PaymentDetails({
+  canHandlePayments,
+  item,
+  onClose,
+  onRecord,
+  onVerify,
+}: {
+  canHandlePayments: boolean;
+  item: FinanceQueueItem;
+  onClose: () => void;
+  onRecord: () => void;
+  onVerify: () => void;
+}) {
+  const payments = useQuery({
+    queryKey: ['business', 'sale-payments', item.saleId],
+    queryFn: () => getSalePayments(item.saleId),
+    refetchInterval: 15_000,
+  });
+  return (
+    <Dialog
+      open
+      title={item.saleNumber}
+      onClose={onClose}
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <section>
+        <h2>Sale summary</h2>
+        <p>
+          {item.customerName} · {item.productName} · {paymentSchemeLabel(item.paymentScheme)}
+        </p>
+        <p>Total: {formatMoney(item.cashPrice)}</p>
+      </section>
+      <section>
+        <h2>Payment progress</h2>
+        <dl className={styles.facts}>
+          <div>
+            <dt>Reservation</dt>
+            <dd>{formatMoney(item.reservationFee)}</dd>
+          </div>
+          <div>
+            <dt>Required initial</dt>
+            <dd>{formatMoney(item.requiredInitial)}</dd>
+          </div>
+          <div>
+            <dt>Verified paid</dt>
+            <dd>{formatMoney(item.verifiedTotal)}</dd>
+          </div>
+          <div>
+            <dt>Balance</dt>
+            <dd>{formatMoney(item.remainingBalance)}</dd>
+          </div>
+          <div>
+            <dt>Monthly target</dt>
+            <dd>
+              {formatMoney(item.monthlyAmount)}{' '}
+              {item.installmentMonths ? '× ' + item.installmentMonths : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>First verified date</dt>
+            <dd>{item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}</dd>
+          </div>
+          <div>
+            <dt>Spot cash</dt>
+            <dd>{SPOT_CASH_LABEL[item.spotCashState]}</dd>
+          </div>
+          <div>
+            <dt>Deadline</dt>
+            <dd>{item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}</dd>
+          </div>
+        </dl>
+      </section>
+      <section>
+        <h2>Payment timeline</h2>
+        {payments.isPending ? (
+          <p role="status">Loading payments…</p>
+        ) : payments.isError ? (
+          <ErrorState error={payments.error} onRetry={payments.refetch} />
+        ) : payments.data.length ? (
+          <ol>
+            {payments.data.map((payment) => (
+              <li key={payment.id}>
+                {payment.paymentType.replaceAll('_', ' ')} · {formatMoney(payment.amount)} ·{' '}
+                <StatusChip label={payment.status} /> · {payment.reference ?? 'No reference'}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p>No payments recorded.</p>
+        )}
+      </section>
+      <section>
+        <h2>Status</h2>
+        <p>Initial requirement met: {item.downPaymentSatisfied ? 'Yes' : 'No'}</p>
+        <p>Fully paid: {item.fullyPaid ? 'Yes' : 'No'}</p>
+        <p>Activation eligible: {item.activatable ? 'Yes' : 'No'}</p>
+      </section>
+      <div className={styles.actions}>
+        <Button disabled={!canHandlePayments} onClick={onRecord}>
+          Record payment
+        </Button>
+        <Button disabled={!canHandlePayments} variant="secondary" onClick={onVerify}>
+          Verify payment
+        </Button>
       </div>
     </Dialog>
   );

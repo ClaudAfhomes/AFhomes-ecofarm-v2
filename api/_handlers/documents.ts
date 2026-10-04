@@ -15,17 +15,25 @@
  */
 import { createHash } from 'node:crypto';
 
-import { documentConfirmSchema, documentUploadRequestSchema } from '@jad/contracts';
+import {
+  currentDocumentQuerySchema,
+  documentListQuerySchema,
+  documentConfirmSchema,
+  documentUploadRequestSchema,
+} from '@jad/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
 import {
   bucketForSubject,
   DOCUMENT_MAX_BYTES,
   documentObjectPath,
+  hasPersistedFile,
   idNumberFromFields,
   maskExtractedFields,
   maskReviewedFields,
   mimeMatchesSignature,
+  PENDING_SHA256,
+  selectCurrentDocumentId,
   type DocumentMime,
 } from '../_lib/documents.js';
 import {
@@ -35,7 +43,6 @@ import {
   isoOrNull,
   jsonBody,
   type Db,
-  list,
   mapRpcError,
   method,
   route,
@@ -61,8 +68,6 @@ const MODULE_FOR_SUBJECT: Record<Subject, 'sales.id_documents' | 'network.ost_re
 
 const SELLER_ROLES = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const;
 
-const PENDING_SHA256 = '0'.repeat(64);
-
 type DocRow = Record<string, unknown>;
 
 const extractedOf = (
@@ -83,7 +88,7 @@ const reviewedOf = (row: DocRow): Record<string, string | null> | null => {
 };
 
 /** Masked read model. Storage path and hashes never leave the server. */
-const toDocument = (row: DocRow, subjectId: string) => {
+const toDocument = (row: DocRow, subjectId: string, isCurrent: boolean) => {
   const reviewed = reviewedOf(row);
   return {
     id: row.id,
@@ -92,10 +97,12 @@ const toDocument = (row: DocRow, subjectId: string) => {
     originalFilename: row.original_filename,
     mime: row.mime_type,
     sizeBytes: Number(row.size_bytes ?? 0),
-    hasFile: typeof row.storage_path === 'string' && row.storage_path.length > 0,
+    hasFile: hasPersistedFile(row),
     ocrStatus: row.ocr_status,
     ocrProvider: isoOrNull(row.ocr_provider),
     verificationStatus: row.verification_status,
+    // Server-derived authority from the canonical rule - never inferred client-side.
+    isCurrent,
     extractedFields: maskExtractedFields(extractedOf(row)),
     warnings: ((): string[] => {
       const data = (row.extracted_data ?? {}) as Record<string, unknown>;
@@ -138,6 +145,79 @@ async function inScope(db: Db, auth: AfHomesPrincipal, row: DocRow): Promise<boo
     .eq('id', row.ost_application_id)
     .maybeSingle();
   return (application as { sponsor_staff_id?: string } | null)?.sponsor_staff_id === auth.userId;
+}
+
+/** Batch the existing seller ownership rule once per subject, never per document. */
+async function ownedSubjects(db: Db, auth: AfHomesPrincipal, subjectType: Subject, ids: string[]) {
+  if (!(SELLER_ROLES as readonly string[]).includes(auth.roleSlug)) return new Set(ids);
+  if (!ids.length) return new Set<string>();
+  const table = subjectType === 'customer' ? 'customers' : 'ost_applications';
+  const owner = subjectType === 'customer' ? 'created_by' : 'sponsor_staff_id';
+  const { data, error } = await db.from(table).select('id').in('id', ids).eq(owner, auth.userId);
+  if (error) throw error;
+  return new Set(((data ?? []) as DocRow[]).map((row) => String(row.id)));
+}
+
+/**
+ * PostgREST applies embedded ordering/limit PER parent. The database considers
+ * every eligible document before returning at most one winner per subject.
+ * Batch parent IDs (at most the presentation page) to avoid per-document or
+ * per-subject queries and unbounded history reads. Non-owned seller subjects
+ * restrict the embedded candidates to that seller's uploads, as inScope does.
+ */
+async function currentDocumentsForSubjects(
+  db: Db,
+  auth: AfHomesPrincipal,
+  subjectType: Subject,
+  ids: string[],
+  owned?: Set<string>,
+): Promise<Map<string, DocRow>> {
+  const result = new Map<string, DocRow>();
+  if (!ids.length) return result;
+  const authorizedOwners = owned ?? (await ownedSubjects(db, auth, subjectType, ids));
+  const groups = [
+    ids.filter((id) => authorizedOwners.has(id)),
+    ids.filter((id) => !authorizedOwners.has(id)),
+  ];
+  const table = subjectType === 'customer' ? 'customers' : 'ost_applications';
+  for (const [index, group] of groups.entries()) {
+    if (!group.length) continue;
+    let query = db
+      .from(table)
+      .select('id,current_documents:identity_documents(*)')
+      .in('id', group)
+      .eq('current_documents.subject_type', subjectType)
+      .neq('current_documents.storage_path', '')
+      .neq('current_documents.sha256', PENDING_SHA256)
+      .neq('current_documents.verification_status', 'rejected')
+      .order('created_at', { referencedTable: 'current_documents', ascending: false })
+      .order('id', { referencedTable: 'current_documents', ascending: false })
+      .limit(1, { referencedTable: 'current_documents' });
+    if (index === 1) query = query.eq('current_documents.uploaded_by', auth.userId);
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const parent of (data ?? []) as DocRow[]) {
+      const candidates = Array.isArray(parent.current_documents)
+        ? (parent.current_documents as DocRow[])
+        : [];
+      // The existing SHA CHECK ensures every non-placeholder digest is valid.
+      // Keep the pure canonical selector as the shared defensive eligibility rule.
+      const id = selectCurrentDocumentId(candidates);
+      const document = candidates.find((row) => row.id === id);
+      if (document) result.set(String(parent.id), document);
+    }
+  }
+  return result;
+}
+
+async function currentIdForSubject(
+  db: Db,
+  auth: AfHomesPrincipal,
+  subjectType: Subject,
+  subjectId: string,
+): Promise<string | null> {
+  const current = await currentDocumentsForSubjects(db, auth, subjectType, [subjectId]);
+  return current.has(subjectId) ? String(current.get(subjectId)!.id) : null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -238,39 +318,124 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    /* ---------------- list (scoped) ---------------- */
-    if (subPath(req) === '' && method(req) === 'GET') {
-      const subjectType = typeof req.query.subjectType === 'string' ? req.query.subjectType : '';
-      const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId : '';
-      if (subjectType !== 'customer' && subjectType !== 'ost_application')
-        return fail(res, 'VALIDATION_ERROR', 'A subject type is required', 400);
-      const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType as Subject]);
-      if ('error' in auth) return deny(res, auth);
-
-      let query = db
+    /* ---------------- verify persisted upload (not human identity approval) ---------------- */
+    const completeUpload = route(req, 'POST', /^([0-9a-f-]+)\/complete-upload$/);
+    if (completeUpload) {
+      const { data: row, error } = await db
         .from('identity_documents')
         .select('*')
-        .eq('subject_type', subjectType === 'customer' ? 'customer' : 'ost_application')
-        .order('created_at', { ascending: false })
-        .limit(100);
-      if (subjectId)
-        query = query.eq(
-          subjectType === 'customer' ? 'customer_id' : 'ost_application_id',
-          subjectId,
+        .eq('id', completeUpload[1]!)
+        .maybeSingle();
+      if (error) throw error;
+      if (!row) return fail(res, 'NOT_FOUND', 'Document not found', 404);
+      const doc = row as DocRow;
+      const subjectType: Subject =
+        doc.subject_type === 'ost_application' ? 'ost_application' : 'customer';
+      const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
+      if ('error' in auth) return deny(res, auth);
+      if (!(await inScope(db, auth, doc)))
+        return fail(res, 'FORBIDDEN', 'That document is outside your authorized scope', 403);
+      const subjectId = String(doc.customer_id ?? doc.ost_application_id ?? '');
+      if (hasPersistedFile(doc)) {
+        const retryCurrentId = await currentIdForSubject(db, auth, subjectType, subjectId);
+        return res.status(200).json(toDocument(doc, subjectId, doc.id === retryCurrentId));
+      }
+      const verdict = consumeIdentifierAttempt(req, auth.userId);
+      if (!verdict.allowed)
+        return fail(res, 'RATE_LIMITED', 'Too many attempts. Try again shortly.', 429);
+      const split = splitStoragePath(String(doc.storage_path ?? ''));
+      const storage = storageClient();
+      if (!split || !storage)
+        return fail(res, 'INTERNAL', 'Document storage is not configured', 500);
+      const downloaded = await downloadObject(storage, split.bucket, split.path);
+      if ('error' in downloaded)
+        return fail(
+          res,
+          'CONFLICT',
+          'Upload is incomplete. Retry verification after the file is saved.',
+          409,
         );
-      else if ((SELLER_ROLES as readonly string[]).includes(auth.roleSlug)) {
+      const bytes = downloaded.bytes;
+      if (
+        !bytes.length ||
+        bytes.length > DOCUMENT_MAX_BYTES ||
+        !mimeMatchesSignature(String(doc.mime_type), bytes)
+      )
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'The saved file is empty, too large or does not match its declared type.',
+          400,
+        );
+      const { data: updated, error: updateError } = await db
+        .from('identity_documents')
+        .update({
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          size_bytes: bytes.length,
+        })
+        .eq('id', doc.id)
+        .select('*')
+        .single();
+      if (updateError) throw updateError;
+      if (!updated)
+        return fail(res, 'CONFLICT', 'Upload verification could not be saved. Try again.', 409);
+      const completedCurrentId = await currentIdForSubject(db, auth, subjectType, subjectId);
+      return res
+        .status(200)
+        .json(
+          toDocument(updated as DocRow, subjectId, (updated as DocRow).id === completedCurrentId),
+        );
+    }
+
+    /* ---------------- subject-wide current, independent of presentation pages ---------------- */
+    if (subPath(req) === 'current' && method(req) === 'GET') {
+      const parsed = currentDocumentQuerySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'A valid subject is required', 400);
+      const { subjectType, subjectId } = parsed.data;
+      const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
+      if ('error' in auth) return deny(res, auth);
+      const current = (await currentDocumentsForSubjects(db, auth, subjectType, [subjectId])).get(
+        subjectId,
+      );
+      return res
+        .status(200)
+        .json({ currentDocument: current ? toDocument(current, subjectId, true) : null });
+    }
+
+    /* ---------------- list (scoped, presentation pagination only) ---------------- */
+    if (subPath(req) === '' && method(req) === 'GET') {
+      const parsed = documentListQuerySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid document list query', 400);
+      const { subjectType, subjectId, limit, offset } = parsed.data;
+      const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
+      if ('error' in auth) return deny(res, auth);
+      const column = subjectType === 'customer' ? 'customer_id' : 'ost_application_id';
+      const owned = subjectId ? await ownedSubjects(db, auth, subjectType, [subjectId]) : undefined;
+      let query = db
+        .from('identity_documents')
+        .select('*', { count: 'exact' })
+        .eq('subject_type', subjectType)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (subjectId) {
+        query = query.eq(column, subjectId);
+        if (!owned?.has(subjectId)) query = query.eq('uploaded_by', auth.userId);
+      } else if ((SELLER_ROLES as readonly string[]).includes(auth.roleSlug)) {
+        // Preserve the existing unfiltered seller list's own-uploads restriction.
         query = query.eq('uploaded_by', auth.userId);
       }
-      const { data, error } = await query;
+      const { data, error, count } = await query;
       if (error) throw error;
-      const visible: ReturnType<typeof toDocument>[] = [];
-      for (const row of (data ?? []) as DocRow[]) {
-        // A subject-scoped read re-checks ownership per row; the unfiltered
-        // seller list is already narrowed to own uploads by the query above.
-        if (subjectId && !(await inScope(db, auth, row))) continue;
-        visible.push(toDocument(row, String(row.customer_id ?? row.ost_application_id ?? '')));
-      }
-      return list(res, visible);
+      const rows = (data ?? []) as DocRow[];
+      const ids = [...new Set(rows.map((row) => String(row[column])))];
+      const current = await currentDocumentsForSubjects(db, auth, subjectType, ids, owned);
+      const visible = rows.map((row) =>
+        toDocument(row, String(row[column]), row.id === current.get(String(row[column]))?.id),
+      );
+      return res
+        .status(200)
+        .json({ data: visible, meta: { total: count ?? rows.length, limit, offset } });
     }
 
     /* ---------------- read one (masked, scoped) ---------------- */
@@ -290,14 +455,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return deny(res, auth);
       if (!(await inScope(db, auth, row as DocRow)))
         return fail(res, 'FORBIDDEN', 'That document is outside your authorized scope', 403);
+      const detailSubjectId = String(
+        (row as DocRow).customer_id ?? (row as DocRow).ost_application_id ?? '',
+      );
+      const detailCurrentId = await currentIdForSubject(db, auth, subjectType, detailSubjectId);
       return res
         .status(200)
-        .json(
-          toDocument(
-            row as DocRow,
-            String((row as DocRow).customer_id ?? (row as DocRow).ost_application_id ?? ''),
-          ),
-        );
+        .json(toDocument(row as DocRow, detailSubjectId, row.id === detailCurrentId));
     }
 
     /* ---------------- short-lived reviewer download ---------------- */
@@ -352,10 +516,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'RATE_LIMITED', 'Too many attempts. Try again shortly.', 429);
 
       const refresh = ((jsonBody(req) ?? {}) as Record<string, unknown>).refresh === true;
+      const ocrSubjectId = String(doc.customer_id ?? doc.ost_application_id ?? '');
+      const ocrCurrentId = await currentIdForSubject(db, auth, subjectType, ocrSubjectId);
       if (doc.ocr_status === 'completed' && !refresh) {
-        return res
-          .status(200)
-          .json(toDocument(doc, String(doc.customer_id ?? doc.ost_application_id ?? '')));
+        return res.status(200).json(toDocument(doc, ocrSubjectId, doc.id === ocrCurrentId));
       }
 
       const split = splitStoragePath(String(doc.storage_path ?? ''));
@@ -402,6 +566,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             toDocument(
               (reread ?? doc) as DocRow,
               String(doc.customer_id ?? doc.ost_application_id ?? ''),
+              ((reread ?? doc) as DocRow).id === ocrCurrentId,
             ),
           );
       };
@@ -415,10 +580,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // First verified sight of the bytes: replace the placeholder hash and
       // record the actual size. Never trusted from the browser.
       const sha256 = createHash('sha256').update(bytes).digest('hex');
-      await db
+      const { error: persistenceError } = await db
         .from('identity_documents')
         .update({ sha256, size_bytes: bytes.length })
         .eq('id', doc.id);
+      if (persistenceError) throw persistenceError;
 
       await audit(
         db,
@@ -469,12 +635,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('*')
         .eq('id', doc.id)
         .maybeSingle();
+      const ocrCurrentIdFinal = await currentIdForSubject(db, auth, subjectType, ocrSubjectId);
       return res
         .status(200)
         .json(
           toDocument(
             (reread ?? doc) as DocRow,
-            String(doc.customer_id ?? doc.ost_application_id ?? ''),
+            ocrSubjectId,
+            ((reread ?? doc) as DocRow).id === ocrCurrentIdFinal,
           ),
         );
     }
@@ -563,9 +731,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           possibleDuplicate,
         },
       );
+      // Recomputed AFTER the decision: rejecting the current document moves
+      // currentness to the next eligible one; confirming an older one never
+      // steals it. The response and any later read use the same rule.
+      const confirmSubjectId = String(doc.customer_id ?? doc.ost_application_id ?? '');
+      const confirmCurrentId = await currentIdForSubject(db, auth, subjectType, confirmSubjectId);
       const body = toDocument(
         updated as DocRow,
-        String(doc.customer_id ?? doc.ost_application_id ?? ''),
+        confirmSubjectId,
+        (updated as DocRow).id === confirmCurrentId,
       );
       return res.status(200).json({ ...body, possibleDuplicate });
     }

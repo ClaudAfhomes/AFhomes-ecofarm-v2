@@ -42,6 +42,7 @@ const holder = vi.hoisted(() => ({ db: null as unknown }));
 
 const documents = (await import('./documents.js')).default;
 const { selectHandler } = await import('../_lib/router.js');
+const { resetIdentifierRateLimit } = await import('../_lib/rate-limit.js');
 
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const SM_ID = '22222222-2222-4222-8222-222222222222';
@@ -149,6 +150,10 @@ function install() {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   const db = new FakeSupabase({
+    links: [
+      { child: 'identity_documents', parent: 'customers', fk: 'customer_id' },
+      { child: 'identity_documents', parent: 'ost_applications', fk: 'ost_application_id' },
+    ],
     tables: tables() as never,
     tokens: {
       [ADMIN_TOKEN]: {
@@ -178,6 +183,7 @@ function install() {
 }
 
 beforeEach(() => {
+  resetIdentifierRateLimit();
   install();
 });
 
@@ -589,5 +595,476 @@ describe('route packaging', () => {
       'documents/customer/upload-url',
     );
     expect(selectHandler('/api/v1/documents/abc/ocr', q)?.routeKey).toBe('documents/abc/ocr');
+  });
+});
+
+describe('durable upload completion', () => {
+  const complete = (id: string, token: string | null = SM_TOKEN) =>
+    call({ method: 'POST', path: id + '/complete-upload', token, body: {} });
+  it('keeps metadata-only replacement incomplete on both list and detail reads', async () => {
+    const old = await uploaded();
+    expect((await complete(old.id)).status).toBe(200);
+    const grant = await call({
+      method: 'POST',
+      path: 'customer/upload-url',
+      token: SM_TOKEN,
+      body: { ...uploadBody, originalFilename: 'replacement.jpg' },
+    });
+    const id = (grant.body as { documentId: string }).documentId;
+    expect((await complete(id)).status).toBe(409);
+    const list = await call({
+      path: '',
+      token: SM_TOKEN,
+      query: { subjectType: 'customer', subjectId: CUST1 },
+    });
+    expect(list.status).toBe(200);
+    expect((list.body as { data: unknown[] }).data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: old.id, hasFile: true }),
+        expect.objectContaining({ id, hasFile: false }),
+      ]),
+    );
+    expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: false });
+    expect(store.objects.get(old.path)).toEqual(JPEG);
+  });
+  it('marks validated bytes complete durably without OCR or identity approval, and is retryable', async () => {
+    const { id } = await uploaded();
+    expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: false });
+    const result = await complete(id);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      hasFile: true,
+      ocrStatus: 'not_requested',
+      verificationStatus: 'pending_review',
+    });
+    expect((await complete(id)).body).toEqual(result.body);
+    expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: true });
+    expect(JSON.stringify(result.body)).not.toMatch(/sha256|storage_path|object\/public/);
+  });
+  it.each([new Uint8Array(), new Uint8Array([1, 2, 3]), new Uint8Array(10 * 1024 * 1024 + 1)])(
+    'keeps empty, invalid or oversized bytes incomplete',
+    async (bytes) => {
+      const { id, path } = await uploaded();
+      store.objects.set(path, bytes);
+      expect((await complete(id)).status).toBe(400);
+      expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: false });
+    },
+  );
+  it('keeps bytes private and pending if durable finalization fails, and supports retry', async () => {
+    const db = holder.db as FakeSupabase;
+    const { id, path } = await uploaded();
+    db.writeErrors.identity_documents = { message: 'Finalization unavailable' };
+    expect((await complete(id)).status).toBe(500);
+    expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: false });
+    expect(db.rows('identity_documents').find((row) => row.id === id)?.sha256).toBe('0'.repeat(64));
+    expect(store.objects.get(path)).toEqual(JPEG);
+    delete db.writeErrors.identity_documents;
+    expect((await complete(id)).body).toMatchObject({ hasFile: true });
+  });
+  it('retains upload completion when OCR cannot extract, without approving identity', async () => {
+    const { id } = await uploaded();
+    await complete(id);
+    const result = await call({ method: 'POST', path: id + '/ocr', token: SM_TOKEN, body: {} });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      hasFile: true,
+      ocrStatus: 'unavailable',
+      verificationStatus: 'pending_review',
+    });
+  });
+  it.each([null, EMP_TOKEN, SM2_TOKEN])('refuses unauthorized completion for %s', async (token) => {
+    const { id } = await uploaded();
+    expect([401, 403]).toContain((await complete(id, token)).status);
+    expect((await call({ path: id, token: SM_TOKEN })).body).toMatchObject({ hasFile: false });
+  });
+});
+
+/* ================================================================== */
+/* Authoritative Current ID                                             */
+/* ================================================================== */
+
+describe('authoritative Current ID', () => {
+  const complete = (id: string, token: string = SM_TOKEN) =>
+    call({ method: 'POST', path: id + '/complete-upload', token, body: {} });
+  const list = (token: string = SM_TOKEN) =>
+    call({ path: '', token, query: { subjectType: 'customer', subjectId: CUST1 } });
+  const backdate = (id: string, createdAt: string) => {
+    (holder.db as FakeSupabase).rows('identity_documents').find((r) => r.id === id)!.created_at =
+      createdAt;
+  };
+  const flags = async (token: string = SM_TOKEN) => {
+    const state = await list(token);
+    expect(state.status).toBe(200);
+    const docs = (state.body as { data: Array<{ id: string; isCurrent: boolean }> }).data;
+    return new Map(docs.map((d) => [d.id, d.isCurrent] as const));
+  };
+  // A older and still pending, B newer and file-complete: B is canonical current.
+  const seedAB = async () => {
+    const a = await uploaded();
+    backdate(a.id, '2026-09-18T00:00:00.000Z');
+    const b = await uploaded();
+    backdate(b.id, '2026-09-19T00:00:00.000Z');
+    expect((await complete(b.id)).status).toBe(200);
+    return { a: a.id, b: b.id };
+  };
+
+  it('A. verifying the older pending document does not steal currentness', async () => {
+    const { a, b } = await seedAB();
+    const done = await complete(a);
+    expect({ status: done.status, body: done.body }).toEqual({
+      status: 200,
+      body: expect.objectContaining({ id: a, hasFile: true, isCurrent: false }),
+    });
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, true],
+      ]),
+    );
+    expect((await call({ path: a, token: SM_TOKEN })).body).toMatchObject({ isCurrent: false });
+    expect((await call({ path: b, token: SM_TOKEN })).body).toMatchObject({ isCurrent: true });
+  });
+
+  it('B. a reopened read agrees with the write response', async () => {
+    const { a, b } = await seedAB();
+    await complete(a);
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, true],
+      ]),
+    );
+  });
+
+  it('C. an explicit replacement upload becomes current immediately', async () => {
+    const { a, b } = await seedAB();
+    const c = await uploaded();
+    backdate(c.id, '2026-09-20T00:00:00.000Z');
+    const done = await complete(c.id);
+    expect(done.status).toBe(200);
+    expect(done.body).toMatchObject({ id: c.id, isCurrent: true });
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, false],
+        [c.id, true],
+      ]),
+    );
+  });
+
+  it('D. the replacement stays current on reopen', async () => {
+    const { a, b } = await seedAB();
+    const c = await uploaded();
+    backdate(c.id, '2026-09-20T00:00:00.000Z');
+    await complete(c.id);
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, false],
+        [c.id, true],
+      ]),
+    );
+  });
+
+  it('E. verifying an older pending document after replacement keeps the replacement', async () => {
+    const { a, b } = await seedAB();
+    const c = await uploaded();
+    backdate(c.id, '2026-09-20T00:00:00.000Z');
+    await complete(c.id);
+    const d = await uploaded();
+    backdate(d.id, '2026-09-17T00:00:00.000Z');
+    expect((await complete(d.id)).status).toBe(200);
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, false],
+        [c.id, true],
+        [d.id, false],
+      ]),
+    );
+  });
+
+  it('F. a failed replacement leaves the prior current untouched', async () => {
+    const { b } = await seedAB();
+    const e = await uploaded();
+    (holder.db as FakeSupabase).rows('identity_documents').find((r) => r.id === e.id)!.created_at =
+      '2026-09-20T00:00:00.000Z';
+    store.objects.delete(e.path);
+    expect((await complete(e.id)).status).toBe(409);
+    const f = await flags();
+    expect(f.get(b)).toBe(true);
+    expect(f.get(e.id)).toBe(false);
+  });
+
+  it('G. retrying an old pending verification never steals currentness', async () => {
+    const { a, b } = await seedAB();
+    await complete(a);
+    const retry = await complete(a);
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ id: a, isCurrent: false });
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, true],
+      ]),
+    );
+  });
+
+  it('confirming the older document does not move currentness', async () => {
+    const { a, b } = await seedAB();
+    await complete(a);
+    const decided = await call({
+      method: 'POST',
+      path: `${a}/confirm`,
+      token: SM_TOKEN,
+      body: { decision: 'confirmed', fields: { firstName: 'Ana' } },
+    });
+    expect(decided.status).toBe(200);
+    expect(decided.body).toMatchObject({
+      id: a,
+      verificationStatus: 'confirmed',
+      isCurrent: false,
+    });
+    expect(await flags()).toEqual(
+      new Map([
+        [a, false],
+        [b, true],
+      ]),
+    );
+  });
+
+  it('rejecting the current document passes currentness to the next eligible one', async () => {
+    const { a, b } = await seedAB();
+    await complete(a);
+    const rejected = await call({
+      method: 'POST',
+      path: `${b}/confirm`,
+      token: SM_TOKEN,
+      body: { decision: 'rejected', fields: { firstName: 'Ana' } },
+    });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body).toMatchObject({ id: b, isCurrent: false });
+    expect(await flags()).toEqual(
+      new Map([
+        [a, true],
+        [b, false],
+      ]),
+    );
+  });
+
+  it('never marks another subject document current', async () => {
+    const { b } = await seedAB();
+    const other = await uploaded(ADMIN_TOKEN, { ...uploadBody, subjectId: CUST2 });
+    (holder.db as FakeSupabase)
+      .rows('identity_documents')
+      .find((r) => r.id === other.id)!.created_at = '2026-09-25T00:00:00.000Z';
+    await call({
+      method: 'POST',
+      path: other.id + '/complete-upload',
+      token: ADMIN_TOKEN,
+      body: {},
+    });
+    const own = await flags();
+    expect(own.get(b)).toBe(true);
+    expect(own.has(other.id)).toBe(false);
+    const foreign = await call({
+      path: '',
+      token: ADMIN_TOKEN,
+      query: { subjectType: 'customer', subjectId: CUST2 },
+    });
+    const docs = (foreign.body as { data: Array<{ id: string; isCurrent: boolean }> }).data;
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ id: other.id, isCurrent: true });
+  });
+
+  const seedHistory = async (subject = CUST1) => {
+    const { b } = await seedAB();
+    const db = holder.db as FakeSupabase;
+    const base = { ...db.rows('identity_documents').find((row) => row.id === b)! };
+    for (let i = 0; i < 125; i++)
+      db.rows('identity_documents').push({
+        ...base,
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(i).padStart(12, '0'),
+        customer_id: subject,
+        uploaded_by: subject === CUST1 ? SM_ID : SM2_ID,
+        created_at: '2026-09-20T00:00:00.000Z',
+      });
+    const winner = {
+      ...base,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      customer_id: subject,
+      uploaded_by: subject === CUST1 ? SM_ID : SM2_ID,
+      created_at: '2026-10-01T00:00:00.000Z',
+    };
+    db.rows('identity_documents').push(winner);
+    return String(winner.id);
+  };
+  const page = (subjectId: string, limit: number, offset: number, token = ADMIN_TOKEN) =>
+    call({
+      path: '',
+      token,
+      query: { subjectType: 'customer', subjectId, limit: String(limit), offset: String(offset) },
+    });
+  const current = (subjectId: string, token = ADMIN_TOKEN) =>
+    call({ path: 'current', token, query: { subjectType: 'customer', subjectId } });
+
+  it('selects beyond the old unordered 100-row subset for list/detail/completion', async () => {
+    const winner = await seedHistory();
+    expect((await page(CUST1, 10, 0)).body).toMatchObject({
+      data: [
+        expect.objectContaining({ id: winner, isCurrent: true }),
+        ...Array(9).fill(expect.objectContaining({ isCurrent: false })),
+      ],
+    });
+    expect((await call({ path: winner, token: ADMIN_TOKEN })).body).toMatchObject({
+      isCurrent: true,
+    });
+    expect((await complete(winner, ADMIN_TOKEN)).body).toMatchObject({ isCurrent: true });
+    expect((await current(CUST1)).body).toMatchObject({
+      currentDocument: { id: winner, isCurrent: true },
+    });
+  });
+  it.each([
+    [1, 0],
+    [7, 0],
+    [13, 40],
+    [100, 1],
+    [10, 120],
+  ])('keeps current invariant for limit=%i offset=%i', async (limit, offset) => {
+    const winner = await seedHistory();
+    const response = await page(CUST1, limit, offset);
+    expect(response.status).toBe(200);
+    const docs = (response.body as { data: { id: string; isCurrent: boolean }[] }).data;
+    expect(docs.every((doc) => doc.isCurrent === (doc.id === winner))).toBe(true);
+    expect((await current(CUST1)).body).toMatchObject({ currentDocument: { id: winner } });
+  });
+  it('does not invent current on a page of rejected rows ahead of the eligible winner', async () => {
+    const winner = await seedHistory();
+    const db = holder.db as FakeSupabase;
+    for (const row of db.rows('identity_documents'))
+      if (row.id !== winner) {
+        row.created_at = '2026-10-02T00:00:00Z';
+        row.verification_status = 'rejected';
+      }
+    const first = await page(CUST1, 100, 0);
+    expect(
+      (first.body as { data: { isCurrent: boolean }[] }).data.every((doc) => !doc.isCurrent),
+    ).toBe(true);
+    expect((await page(CUST1, 100, 100)).body).toMatchObject({
+      data: expect.arrayContaining([expect.objectContaining({ id: winner, isCurrent: true })]),
+    });
+    expect((await current(CUST1)).body).toMatchObject({ currentDocument: { id: winner } });
+  });
+  it('rejects the newest current and hands off across pages consistently', async () => {
+    const winner = await seedHistory();
+    const response = await call({
+      method: 'POST',
+      path: winner + '/confirm',
+      token: ADMIN_TOKEN,
+      body: {
+        decision: 'rejected',
+        fields: { firstName: 'Synthetic' },
+        notes: 'QA synthetic rejection',
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ isCurrent: false, verificationStatus: 'rejected' });
+    const next = 'aaaaaaaa-aaaa-4aaa-8aaa-000000000124';
+    expect((await current(CUST1)).body).toMatchObject({
+      currentDocument: { id: next, isCurrent: true },
+    });
+    expect((await call({ path: next, token: ADMIN_TOKEN })).body).toMatchObject({
+      isCurrent: true,
+    });
+    expect((await page(CUST1, 1, 0)).body).toMatchObject({
+      data: [expect.objectContaining({ id: winner, isCurrent: false })],
+    });
+  });
+  it('uses deterministic ID ties before presentation truncation', async () => {
+    const winner = await seedHistory();
+    for (const row of (holder.db as FakeSupabase).rows('identity_documents'))
+      row.created_at = '2026-10-01T00:00:00Z';
+    expect((await page(CUST1, 1, 0)).body).toMatchObject({
+      data: [expect.objectContaining({ id: winner, isCurrent: true })],
+    });
+    expect((await call({ path: winner, token: ADMIN_TOKEN })).body).toMatchObject({
+      isCurrent: true,
+    });
+  });
+  it('batches independent current winners for multiple subjects each over 100 rows', async () => {
+    const winner = await seedHistory();
+    const db = holder.db as FakeSupabase;
+    const originals = [...db.rows('identity_documents')].filter((row) => row.customer_id === CUST1);
+    for (const [index, row] of originals.entries())
+      db.rows('identity_documents').push({
+        ...row,
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-' + String(index).padStart(12, '0'),
+        customer_id: CUST2,
+        uploaded_by: SM2_ID,
+      });
+    const winner2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    db.rows('identity_documents').push({
+      ...originals.find((row) => row.id === winner)!,
+      id: winner2,
+      customer_id: CUST2,
+      uploaded_by: SM2_ID,
+      created_at: '2026-10-03T00:00:00Z',
+    });
+    db.calls.length = 0;
+    const result = await call({ path: '', token: ADMIN_TOKEN, query: { subjectType: 'customer' } });
+    const docs = (result.body as { data: { id: string; isCurrent: boolean }[] }).data;
+    expect(
+      docs
+        .filter((doc) => doc.isCurrent)
+        .map((doc) => doc.id)
+        .sort(),
+    ).toEqual([winner, winner2].sort());
+    expect(
+      db.calls.filter((call) => call.op === 'select' && call.table === 'customers'),
+    ).toHaveLength(1);
+    expect((await current(CUST2)).body).toMatchObject({ currentDocument: { id: winner2 } });
+    expect((await current(CUST2, SM_TOKEN)).body).toMatchObject({ currentDocument: null });
+    expect((await call({ path: winner2, token: SM_TOKEN })).status).toBe(403);
+  });
+  it('returns no current document for rejected-only subject history', async () => {
+    await seedHistory();
+    for (const row of (holder.db as FakeSupabase).rows('identity_documents'))
+      row.verification_status = 'rejected';
+    expect((await current(CUST1)).body).toEqual({ currentDocument: null });
+  });
+
+  it('keeps OST application currentness independent of customer history and page size', async () => {
+    const customerWinner = await seedHistory();
+    const db = holder.db as FakeSupabase;
+    const base = db.rows('identity_documents').find((row) => row.id === customerWinner)!;
+    for (let index = 0; index < 125; index++) {
+      db.rows('identity_documents').push({
+        ...base,
+        id: 'cccccccc-cccc-4ccc-8ccc-' + String(index).padStart(12, '0'),
+        subject_type: 'ost_application',
+        customer_id: null,
+        ost_application_id: APP1,
+        created_at: '2026-10-02T00:00:00.000Z',
+      });
+    }
+    const winner = 'cccccccc-cccc-4ccc-8ccc-000000000124';
+    const result = await call({
+      path: '',
+      token: SM_TOKEN,
+      query: { subjectType: 'ost_application', subjectId: APP1, limit: '1', offset: '1' },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ data: [expect.objectContaining({ isCurrent: false })] });
+    expect((await call({ path: winner, token: SM_TOKEN })).body).toMatchObject({ isCurrent: true });
+    expect(
+      (
+        await call({
+          path: 'current',
+          token: SM_TOKEN,
+          query: { subjectType: 'ost_application', subjectId: APP1 },
+        })
+      ).body,
+    ).toMatchObject({ currentDocument: { id: winner, subjectType: 'ost_application' } });
+    expect((await current(CUST1)).body).toMatchObject({ currentDocument: { id: customerWinner } });
   });
 });

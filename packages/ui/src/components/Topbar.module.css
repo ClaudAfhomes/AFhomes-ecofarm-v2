@@ -62,6 +62,7 @@
     --color-text-primary: var(--color-on-dark);
     --color-text-secondary: var(--color-on-dark-muted);
     --color-text-muted: var(--color-on-dark-faint);
+    --color-brand-primary: var(--color-on-dark);
     --color-border-default: rgba(255, 255, 255, 0.12);
   }
 }

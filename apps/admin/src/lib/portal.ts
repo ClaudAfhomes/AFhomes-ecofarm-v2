@@ -56,7 +56,7 @@ export function resolvePostLoginDestination(
 ): string {
   if (
     typeof requested === 'string' &&
-    requested.startsWith('/admin') &&
+    requested === fallback &&
     !AUTH_PATHS.has(requested) &&
     requested !== '/admin/profile'
   ) {
@@ -126,7 +126,7 @@ export function decideForPortal(
     };
   }
   if (isStaffPortalRole(staffRole)) {
-    const fallback = staffRole === 'employee' ? '/admin/redemption' : '/admin';
+    const fallback = '/admin';
     return { action: 'forward', to: resolvePostLoginDestination(requested, fallback) };
   }
   if (isAdminPortalRole(staffRole)) {

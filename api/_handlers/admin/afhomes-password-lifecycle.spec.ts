@@ -71,7 +71,10 @@ function install(
     }) => Promise<unknown>;
     createUserId?: string;
     existingAuthEmails?: string[];
-    updateUser?: (id: string, attrs: { password?: string; user_metadata?: unknown }) => Promise<unknown>;
+    updateUser?: (
+      id: string,
+      attrs: { password?: string; user_metadata?: unknown },
+    ) => Promise<unknown>;
     signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   } = {},
 ) {
@@ -119,7 +122,36 @@ const NEW_STAFF_ID = '11111111-2222-4333-8444-555555555555';
 const TEMP_PASSWORD = 'TempPass123';
 const NEW_PASSWORD = 'NewPass456';
 
-function installWithNewHire(signIn?: (creds: { email: string; password: string }) => Promise<unknown>) {
+it('refuses customer-role staff provisioning before creating an Auth account', async () => {
+  const createUser = vi.fn();
+  const db = install({ createUser });
+  const customerRoleId = 'aaaaaaaa-0000-4000-8000-000000000099';
+  db.rows('roles').push({
+    id: customerRoleId,
+    slug: 'customer',
+    name: 'Customer',
+    is_active: true,
+    is_system: true,
+  });
+  const state = await call({
+    method: 'POST',
+    afPath: 'staff',
+    token: TOKEN.admin,
+    body: {
+      email: 'qa.customer@example.com',
+      fullName: 'QA Customer',
+      roleId: customerRoleId,
+      temporaryPassword: TEMP_PASSWORD,
+    },
+  });
+  expect(state.status).toBe(400);
+  expect(createUser).not.toHaveBeenCalled();
+  expect(db.rows('staff_users').some((row) => row.email === 'qa.customer@example.com')).toBe(false);
+});
+
+function installWithNewHire(
+  signIn?: (creds: { email: string; password: string }) => Promise<unknown>,
+) {
   return install({
     createUserId: NEW_STAFF_ID,
     tokens: {
@@ -214,16 +246,14 @@ describe('PATCH /admin/afhomes/session', () => {
       body: { name: 'Renamed Admin' },
     });
     expect(state.status).toBe(200);
-    expect((state.body as Json).fullName).toBe('RENAMED ADMIN');
+    expect((state.body as Json).fullName).toBe('Renamed Admin');
     expect(db.rows('staff_users').find((s) => s.id === UUID.adminStaff)!.full_name).toBe(
-      'RENAMED ADMIN',
+      'Renamed Admin',
     );
     expect(
       db.calls.some((c) => c.op === 'updateUserById' && (c.arg as Json).id === UUID.adminStaff),
     ).toBe(true);
-    expect(
-      db.rows('audit_events').some((e) => e.action === 'STAFF_PROFILE_UPDATED'),
-    ).toBe(true);
+    expect(db.rows('audit_events').some((e) => e.action === 'STAFF_PROFILE_UPDATED')).toBe(true);
   });
 
   it('stays reachable while mustChangePassword gates everything else', async () => {
@@ -260,7 +290,10 @@ describe('PATCH /admin/afhomes/session', () => {
 describe('POST /admin/afhomes/session/password', () => {
   it('rejects a wrong current password without touching Auth or the flag', async () => {
     const db = install({
-      signIn: async () => ({ data: { user: null }, error: { message: 'Invalid login credentials' } }),
+      signIn: async () => ({
+        data: { user: null },
+        error: { message: 'Invalid login credentials' },
+      }),
     });
     const state = await call({
       method: 'POST',
@@ -291,9 +324,7 @@ describe('POST /admin/afhomes/session/password', () => {
     // The new secret is never written to a table or an audit payload.
     expect(JSON.stringify(db.rows('staff_users'))).not.toContain(NEW_PASSWORD);
     expect(JSON.stringify(db.rows('audit_events'))).not.toContain(NEW_PASSWORD);
-    expect(
-      db.rows('audit_events').some((e) => e.action === 'STAFF_PASSWORD_CHANGED'),
-    ).toBe(true);
+    expect(db.rows('audit_events').some((e) => e.action === 'STAFF_PASSWORD_CHANGED')).toBe(true);
   });
 
   it('fails closed when the Auth rotation fails, keeping the flag set', async () => {

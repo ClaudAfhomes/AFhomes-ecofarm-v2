@@ -48,39 +48,36 @@ export function AfHomesRolesPage() {
               </tr>
             </thead>
             <tbody>
-              {roles.data?.map((role) => (
-                <tr key={role.id}>
-                  <td>
-                    <Link to={`/admin/roles/${role.id}`}>
-                      <strong>{role.name}</strong>
-                    </Link>
-                    <br />
-                    <small>{role.description || role.slug}</small>
-                  </td>
-                  <td>
-                    <StatusChip
-                      label={role.isActive ? 'Active' : 'Inactive'}
-                      tone={role.isActive ? 'success' : 'neutral'}
-                    />
-                  </td>
-                  <td>{role.assignedCount}</td>
-                  <td>
-                    {role.isSystem && role.slug === 'super_admin'
-                      ? 'All modules'
-                      : `${role.permissions.filter((p) => p.canView).length} modules`}
-                  </td>
-                  <td>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={role.isSystem}
-                      onClick={() => setEditing(role)}
-                    >
-                      {role.isSystem ? 'Protected' : 'Edit'}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+              {roles.data
+                ?.filter((role) => role.slug !== 'customer')
+                .map((role) => (
+                  <tr key={role.id}>
+                    <td>
+                      <Link to={`/admin/roles/${role.id}`}>
+                        <strong>{role.name}</strong>
+                      </Link>
+                      <br />
+                      <small>{role.description || role.slug}</small>
+                    </td>
+                    <td>
+                      <StatusChip
+                        label={role.isActive ? 'Active' : 'Inactive'}
+                        tone={role.isActive ? 'success' : 'neutral'}
+                      />
+                    </td>
+                    <td>{role.assignedCount}</td>
+                    <td>
+                      {role.isSystem && role.slug === 'super_admin'
+                        ? 'All modules'
+                        : `${role.permissions.filter((p) => p.canView).length} modules`}
+                    </td>
+                    <td>
+                      <Button size="sm" variant="secondary" onClick={() => setEditing(role)}>
+                        {role.isSystem ? 'View access' : 'Edit'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>

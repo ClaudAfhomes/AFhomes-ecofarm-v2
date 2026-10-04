@@ -80,7 +80,7 @@ describe('IST direct API validation', () => {
       const call = holder.db?.calls.find((c) => c.table === 'save_reservation_agreement');
       expect(call?.arg).toMatchObject({
         p_primary: {
-          name,
+          name: name.toLowerCase(),
           address: 'UNIT 2, 123 RIZAL ST.',
           email: 'qa@example.com',
           contactNumber: '+639171234567',
