@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { currentIdForSubject } from './documents.js';
+import { governmentIdTypeSchema } from '@jad/contracts';
 import {
   canTransitionCustomerApplication,
   canTransitionReservationAgreement,
@@ -654,12 +656,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'customer-applications' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
-      const parsed = createCustomerApplicationSchema.safeParse(jsonBody(req));
+      const parsed = createCustomerApplicationSchema
+        .safeExtend({ requestId: z.string().uuid() })
+        .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
-      const { primary, secondary, ...header } = parsed.data;
-      const { data, error } = await db.rpc('save_customer_application', {
-        p_application_id: null,
+      const { primary, secondary, requestId, ...header } = parsed.data;
+      const { data, error } = await db.rpc('create_customer_application_once', {
+        p_request_id: requestId,
         p_actor_id: auth.userId,
         p_header: normalizeApplicationHeader(header),
         p_primary: normalizeHolderOptionals(primary),
@@ -667,15 +671,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (error) throw error;
       const id = rpcId(data);
-      await audit(
-        db,
-        auth.userId,
-        'CUSTOMER_APPLICATION_CREATED',
-        'customer_application',
-        id,
-        null,
-        { status: 'draft' },
-      );
+      // Creation and audit are atomic in the idempotent RPC.
       return res.status(201).json(await getApplication(db, id));
     }
     const appGet = route(req, 'GET', /^customer-applications\/([0-9a-f-]+)$/);
@@ -696,7 +692,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
       const before = await getApplication(db, appPatch[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
-      const { primary, secondary, ...header } = parsed.data;
+      const { primary, secondary, requestId: _requestId, ...header } = parsed.data;
       const { error } = await db.rpc('save_customer_application', {
         p_application_id: appPatch[1],
         p_actor_id: auth.userId,
@@ -723,6 +719,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return deny(res, auth);
       const before = await getApplication(db, appSubmit[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
+      if (typeof before.customerId !== 'string')
+        return fail(res, 'VALIDATION_ERROR', 'Application customer is missing', 400);
+      const currentId = await currentIdForSubject(db, auth, 'customer', before.customerId);
+      const { data: current } = currentId
+        ? await db
+            .from('identity_documents')
+            .select('reviewed_data')
+            .eq('id', currentId)
+            .maybeSingle()
+        : { data: null };
+      const reviewed = current?.reviewed_data as { fields?: { idType?: unknown } } | undefined;
+      if (!currentId || !governmentIdTypeSchema.safeParse(reviewed?.fields?.idType).success)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'A persisted current ID with its type is required before submission',
+          400,
+        );
       const { error } = await db.rpc('submit_customer_application', {
         p_application_id: appSubmit[1],
         p_actor_id: auth.userId,
@@ -796,34 +810,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'reservations' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.card_sales', 'create');
       if ('error' in auth) return deny(res, auth);
-      const parsed = createReservationAgreementSchema.safeParse(jsonBody(req));
+      const parsed = createReservationAgreementSchema
+        .safeExtend({ requestId: z.string().uuid() })
+        .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
-      const { primary, secondary, scheduleNotes, vipTier, ...input } = parsed.data;
+      const { primary, secondary, scheduleNotes, vipTier, requestId, ...input } = parsed.data;
       if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
       if (vipTier) {
         const conflict = await tierConflictForSale(db, input.saleId, vipTier);
         if (conflict) return fail(res, 'CONFLICT', conflict, 409);
       }
-      const { data, error } = await db.rpc('save_reservation_agreement', {
-        p_agreement_id: null,
+      const { data, error } = await db.rpc('create_reservation_agreement_once', {
+        p_request_id: requestId,
         p_actor_id: auth.userId,
-        p_input: input,
+        p_input: { ...input, ...(vipTier ? { vipTier } : {}) },
         p_primary: primary,
         p_secondary: secondary ?? null,
         p_schedule: scheduleNotes,
       });
       if (error) throw error;
       const id = rpcId(data);
-      await audit(
-        db,
-        auth.userId,
-        'RESERVATION_AGREEMENT_CREATED',
-        'reservation_agreement',
-        id,
-        null,
-        { status: 'draft' },
-      );
+      // Creation and audit are atomic in the idempotent RPC.
       return res.status(201).json(await getAgreement(db, id));
     }
     const agreementGet = route(req, 'GET', /^reservations\/([0-9a-f-]+)$/);
@@ -844,7 +852,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = createReservationAgreementSchema.safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
-      const { primary, secondary, scheduleNotes, vipTier, ...input } = parsed.data;
+      const {
+        primary,
+        secondary,
+        scheduleNotes,
+        vipTier,
+        requestId: _requestId,
+        ...input
+      } = parsed.data;
       if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
       if (vipTier) {
         const conflict = await tierConflictForSale(db, input.saleId, vipTier);

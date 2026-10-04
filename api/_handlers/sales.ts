@@ -684,17 +684,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = recordPaymentSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid payment', 400);
       const input = parsed.data;
-
-      const { data, error } = await db.rpc('record_card_payment', {
-        p_sale_id: addPayment[1]!,
-        p_amount: input.amount,
-        p_payment_type: input.paymentType,
-        p_method: input.method,
-        p_reference: input.reference ?? null,
-        p_notes: input.notes ?? null,
-        p_receipt_storage_path: input.receiptStoragePath ?? null,
-        p_actor_id: auth.userId,
-      });
+      if (!input.reference?.trim() && !input.requestId)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'A request UUID is required for reference-less payments',
+          400,
+        );
+      const { data, error } = await db.rpc(
+        input.requestId ? 'record_card_payment_once' : 'record_card_payment',
+        {
+          ...(input.requestId ? { p_request_id: input.requestId } : {}),
+          p_sale_id: addPayment[1]!,
+          p_amount: input.amount,
+          p_payment_type: input.paymentType,
+          p_method: input.method,
+          p_reference: input.reference ?? null,
+          p_notes: input.notes ?? null,
+          p_receipt_storage_path: input.receiptStoragePath ?? null,
+          p_actor_id: auth.userId,
+        },
+      );
       if (error) return mapRpcError(res, error);
       return res.status(201).json({ id: data });
     }

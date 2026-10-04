@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Dialog } from '@jad/ui';
 import { afHomesModuleKeySchema, type AfHomesPermission, type AfHomesRole } from '@jad/contracts';
+import { useSession } from '../../lib/session';
 
 const MODULES = afHomesModuleKeySchema.options;
 const blankPermissions = (): AfHomesPermission[] =>
@@ -34,6 +35,11 @@ export function AfHomesRoleFormDialog({
   onClose: () => void;
   onSave: (input: RoleFormInput) => void;
 }) {
+  const { user } = useSession();
+  const titleEditable =
+    role?.isSystem &&
+    user?.roleSlug === 'super_admin' &&
+    !['admin', 'super_admin', 'customer'].includes(role.slug);
   // Form state mounts fresh per open session: callers pass a `key` that
   // changes with each open (new vs. which role), so initializers below run
   // exactly on open and no effect-sync is needed.
@@ -78,7 +84,7 @@ export function AfHomesRoleFormDialog({
           <Button variant="secondary" onClick={onClose}>
             {role?.isSystem ? 'Close' : 'Cancel'}
           </Button>
-          {!role?.isSystem ? (
+          {!role?.isSystem || titleEditable ? (
             <Button
               disabled={!name.trim() || saving}
               onClick={() => onSave({ name, description, isActive: active, permissions })}
@@ -89,6 +95,12 @@ export function AfHomesRoleFormDialog({
         </>
       }
     >
+      {titleEditable ? (
+        <label>
+          Display title
+          <input value={name} onChange={(event) => setName(event.target.value)} disabled={saving} />
+        </label>
+      ) : null}
       <fieldset disabled={role?.isSystem}>
         <legend>{role?.isSystem ? 'Protected system access — read only' : 'Role access'}</legend>
         <div style={{ display: 'grid', gap: 12 }}>

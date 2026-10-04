@@ -142,6 +142,7 @@ const SIGNED_IN = { authUserId: 'ffffffff-0000-4000-8000-000000000001', email: C
 
 function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.clear();
+  routes.set('/auth/portals', ok({ staff: null, customer: { status: 'active' }, ost: null }));
   routes.set('/customer', ok(CUSTOMER));
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
@@ -226,7 +227,7 @@ describe('customer guard', () => {
       }),
     });
     render('/customer');
-    expect(await screen.findByText('This is not a customer account')).toBeInTheDocument();
+    expect(await screen.findByText('Customer access unavailable')).toBeInTheDocument();
     // A staff member must not be offered a customer sign-in form here.
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
@@ -258,7 +259,11 @@ describe('customer guard', () => {
     // Supabase client configured lands on "unauthenticated" without flashing.
     renderWithProviders(<App />, { route: '/customer' });
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }, { timeout: 3000 }),
+      await screen.findByRole(
+        'heading',
+        { name: 'Sign in to your card', level: 2 },
+        { timeout: 3000 },
+      ),
     ).toBeInTheDocument();
   });
 });
@@ -367,7 +372,9 @@ describe('customer profile', () => {
 describe('membership screen', () => {
   it('shows the persistent digital VIP card without any rotation', async () => {
     render('/customer/membership');
-    expect(await screen.findByRole('heading', { name: /my digital vip card/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: /my digital vip card/i }),
+    ).toBeInTheDocument();
     // The member code is the membership number: always visible, never rotated.
     expect(screen.getAllByText('MBS-000777').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: /copy member code/i })).toBeInTheDocument();
@@ -402,9 +409,7 @@ describe('membership screen', () => {
     // The issued secret renders inside the dialog; the persistent card QR
     // renders on the page, so scope the image query to the dialog.
     const dialog = screen.getByRole('dialog');
-    expect(
-      within(dialog).getByRole('img', { name: /member QR code/i }),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
     expect(screen.getAllByText(/cannot be displayed again/i).length).toBeGreaterThan(0);
   });
 
@@ -528,11 +533,10 @@ describe('sign-in screen', () => {
 
   it('points staff at the staff portal instead of a second login form', async () => {
     render('/customer/login', false);
-    expect(await screen.findByRole('link', { name: /staff login/i })).toHaveAttribute(
-      'href',
-      '/staff/login',
-    );
-    expect(screen.getByRole('link', { name: /ost login/i })).toHaveAttribute('href', '/ost/login');
+    await screen.findByLabelText('Email');
+    expect(
+      screen.queryByRole('link', { name: /staff login|ost login|admin login/i }),
+    ).not.toBeInTheDocument();
     // The administration entry is intentionally undiscoverable here.
     expect(document.body.textContent).not.toMatch(/administration console|administration login/i);
   });
@@ -555,7 +559,11 @@ describe('customer session provider', () => {
     render('/customer');
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }, { timeout: 3000 }),
+      await screen.findByRole(
+        'heading',
+        { name: 'Sign in to your card', level: 2 },
+        { timeout: 3000 },
+      ),
     ).toBeInTheDocument();
   });
 });
@@ -808,9 +816,7 @@ describe('activation existing-account recovery', () => {
     // The typed password was never set on the pre-existing account, so the
     // page must not attempt a sign-in with it (which would fail) - it
     // explains the link and offers the password-owning flows instead.
-    expect(
-      await screen.findByText(/An account already exists for this email/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/An account already exists for this email/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/customer/login',

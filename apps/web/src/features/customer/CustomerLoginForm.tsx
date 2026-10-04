@@ -1,16 +1,14 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { resolvePortalDestination, type AuthPortals } from '@jad/contracts';
+import type { AuthPortals } from '@jad/contracts';
 import { Alert, Button, PasswordField, TextField } from '@jad/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
+import { portalDashboard } from '../../lib/portal-destination';
 import styles from './auth.module.css';
 
-type PostLogin =
-  | { kind: 'navigate'; to: string }
-  | { kind: 'notice'; message: string; linkTo: string; linkLabel: string; external?: boolean }
-  | { kind: 'chooser'; options: { label: string; to: string; external?: boolean }[] };
+type PostLogin = CustomerDecision;
 
 /**
  * Shared customer-login form: validation, generic failure, and post-login
@@ -18,9 +16,8 @@ type PostLogin =
  *
  * After Supabase authentication the server identity is probed
  * (`GET /auth/portals`) and the shared resolver picks the destination:
- * a customer goes home; a staff-only sign-in is told plainly it belongs to
- * a staff user (never a generic customer error); a dual identity gets a
- * chooser; anything else fails closed with a sign-out. Email/password
+ * a customer goes home; staff and OST identities replace-route to their
+ * authorized dashboard; anything else fails closed with a sign-out. Email/password
  * validation failures stay indistinguishable to block enumeration.
  */
 export function CustomerLoginForm() {
@@ -58,9 +55,8 @@ export function CustomerLoginForm() {
       const portals = await getAuthPortals();
       const next = decideCustomerLogin(portals);
       if (next.kind === 'navigate') {
-        navigate(next.to, { replace: true });
-      } else if (next.kind === 'chooser') {
-        setPostLogin(next);
+        if (next.to.startsWith('/admin')) window.location.replace(next.to);
+        else navigate(next.to, { replace: true });
       } else {
         if (next.signOut) await signOut();
         setPostLogin(next);
@@ -76,10 +72,6 @@ export function CustomerLoginForm() {
     }
   };
 
-  if (postLogin?.kind === 'chooser') {
-    return <PortalChooser options={postLogin.options} onBack={() => setPostLogin(null)} />;
-  }
-
   return (
     <form onSubmit={onSubmit} noValidate className={styles.form}>
       {serverError && (
@@ -90,15 +82,6 @@ export function CustomerLoginForm() {
       {postLogin?.kind === 'notice' && (
         <Alert variant="warning" title="Use the right portal">
           {postLogin.message}{' '}
-          {postLogin.external ? (
-            <a className={styles.promptLink} href={postLogin.linkTo} rel="noreferrer">
-              {postLogin.linkLabel}
-            </a>
-          ) : (
-            <Link className={styles.promptLink} to={postLogin.linkTo}>
-              {postLogin.linkLabel}
-            </Link>
-          )}
         </Alert>
       )}
 
@@ -157,142 +140,20 @@ export function CustomerLoginForm() {
           Activate your membership
         </Link>
       </p>
-
-      <p className={styles.footnote}>
-        Are you an AF Homes employee?{' '}
-        <a className={styles.promptLink} href="/staff/login">
-          Staff Login
-        </a>{' '}
-        · OST?{' '}
-        <Link className={styles.promptLink} to="/ost/login">
-          OST Login
-        </Link>
-      </p>
     </form>
   );
 }
 
-function PortalChooser({
-  options,
-  onBack,
-}: {
-  options: { label: string; to: string; external?: boolean }[];
-  onBack: () => void;
-}) {
-  return (
-    <div className={styles.form}>
-      <Alert variant="warning" title="Choose portal">
-        This sign-in belongs to more than one AF Homes account. Continue as:
-      </Alert>
-      {options.map((option) =>
-        option.external ? (
-          <p key={option.label} className={styles.prompt}>
-            <a className={styles.promptLink} href={option.to}>
-              {option.label}
-            </a>
-          </p>
-        ) : (
-          <p key={option.label} className={styles.prompt}>
-            <Link className={styles.promptLink} to={option.to}>
-              {option.label}
-            </Link>
-          </p>
-        ),
-      )}
-      <p className={styles.prompt}>
-        <Button variant="secondary" onClick={onBack}>
-          Back to sign in
-        </Button>
-      </p>
-    </div>
-  );
-}
-
 type CustomerDecision =
-  | { kind: 'navigate'; to: string }
-  | {
-      kind: 'notice';
-      message: string;
-      linkTo: string;
-      linkLabel: string;
-      external?: boolean;
-      signOut?: boolean;
-    }
-  | { kind: 'chooser'; options: { label: string; to: string; external?: boolean }[] };
+  { kind: 'navigate'; to: string } | { kind: 'notice'; message: string; signOut?: boolean };
 
-/**
- * Pure post-login decision for the customer entry. Unit-testable; the
- * component only renders it.
- */
 export function decideCustomerLogin(portals: AuthPortals): CustomerDecision {
-  const destination = resolvePortalDestination({
-    staffRole: portals.staff?.roleSlug ?? null,
-    mustChangePassword: portals.staff?.mustChangePassword === true,
-    hasCustomer: portals.customer !== null,
-    hasActiveCustomer: portals.customer?.status === 'active',
-    ostStatus: portals.ost?.status ?? null,
-  });
-  switch (destination) {
-    case 'customer':
-      return { kind: 'navigate', to: '/customer' };
-    case 'ost':
-      return {
+  const dashboard = portalDashboard(portals, 'customer');
+  return dashboard
+    ? { kind: 'navigate', to: dashboard }
+    : {
         kind: 'notice',
-        message: 'This sign-in belongs to an OST seller.',
-        linkTo: '/ost/login',
-        linkLabel: 'Go to OST Login',
-      };
-    case 'password-change':
-    case 'staff':
-      return {
-        kind: 'notice',
-        message: 'This account belongs to an AF Homes staff user.',
-        linkTo: '/staff/login',
-        linkLabel: 'Go to Staff Login',
-        external: true,
-      };
-    case 'admin':
-      return {
-        kind: 'notice',
-        message: 'This account belongs to an AF Homes staff user.',
-        linkTo: '/admin/login',
-        linkLabel: 'Go to Administration Login',
-        external: true,
-      };
-    case 'chooser-customer-staff':
-      return {
-        kind: 'chooser',
-        options: [
-          { label: 'Customer / Member', to: '/customer' },
-          { label: 'Staff', to: '/staff/login', external: true },
-        ],
-      };
-    case 'chooser-customer-admin':
-      return {
-        kind: 'chooser',
-        options: [
-          { label: 'Customer / Member', to: '/customer' },
-          { label: 'Administration', to: '/admin/login', external: true },
-        ],
-      };
-    case 'pending-ost':
-      return {
-        kind: 'notice',
-        message: 'Your OST application is still awaiting approval.',
-        linkTo: '/ost/register',
-        linkLabel: 'Check registration',
+        message: 'No customer access is assigned to this account. Contact AF Homes for assistance.',
         signOut: true,
       };
-    case 'no-portal':
-    default:
-      // Valid Auth, no AF Homes identity: fail closed and drop the session so
-      // it cannot linger on a portal it does not belong to.
-      return {
-        kind: 'notice',
-        message: 'We could not sign you in with that email and password.',
-        linkTo: '/customer/login',
-        linkLabel: 'Try again',
-        signOut: true,
-      };
-  }
 }

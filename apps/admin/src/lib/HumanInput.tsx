@@ -6,23 +6,31 @@ import {
   phoneSchema,
   emailSchema,
   exactDecimalStringSchema,
+  optionalLandlineSchema,
 } from '@jad/contracts';
 
 /** Shared contract validation for interacted-with human fields. Server validation remains mandatory. */
-export function HumanInput({ onChange, onBlur, ...props }: ComponentProps<typeof NormalizedInput>) {
+export function HumanInput({
+  onChange,
+  onBlur,
+  landline = false,
+  ...props
+}: ComponentProps<typeof NormalizedInput> & { landline?: boolean }) {
   const id = useId();
   const [dirty, setDirty] = useState(false);
   const [blockedPhone, setBlockedPhone] = useState(false);
   const phone = props.type === 'tel' || props.inputMode === 'tel';
   const schema = props.suggestName
     ? personNameSchema
-    : phone
-      ? phoneSchema
-      : props.type === 'email'
-        ? emailSchema
-        : props.inputMode === 'decimal'
-          ? exactDecimalStringSchema
-          : null;
+    : landline
+      ? optionalLandlineSchema
+      : phone
+        ? phoneSchema
+        : props.type === 'email'
+          ? emailSchema
+          : props.inputMode === 'decimal'
+            ? exactDecimalStringSchema
+            : null;
   const value = String(props.value ?? '');
   const invalid =
     blockedPhone ||
@@ -55,7 +63,7 @@ export function HumanInput({ onChange, onBlur, ...props }: ComponentProps<typeof
         }}
         onChange={(event) => {
           setDirty(true);
-          if (phone && /\p{L}/u.test(event.target.value)) {
+          if (phone && !landline && /\p{L}/u.test(event.target.value)) {
             setBlockedPhone(true);
             return;
           }

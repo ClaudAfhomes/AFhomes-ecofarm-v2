@@ -148,6 +148,30 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
     IMPORT_NOT_FULLY_PAID: ['CONFLICT', 409],
   };
 
+  if (code === 'MUTATION_PAYLOAD_CONFLICT')
+    return fail(
+      res,
+      'CONFLICT',
+      'This request identifier was already used with different data.',
+      409,
+    );
+  if (message.includes('payments_sale_reference_unique'))
+    return fail(
+      res,
+      'CONFLICT',
+      'This payment reference has already been recorded for this sale.',
+      409,
+    );
+  if (code === 'MUTATION_FORBIDDEN')
+    return fail(res, 'FORBIDDEN', 'This operation is not authorized', 403);
+  if (code === 'MUTATION_REQUEST_REQUIRED' || code === 'INVALID_DOCUMENT_REVIEW')
+    return fail(
+      res,
+      'VALIDATION_ERROR',
+      'A valid request identity and mutation data are required',
+      400,
+    );
+  if (code === 'DOCUMENT_NOT_FOUND') return fail(res, 'NOT_FOUND', 'Document not found', 404);
   const mapped = byCode[code ?? ''];
   // eslint-disable-next-line no-console
   console.error('[api] rpc error:', message);

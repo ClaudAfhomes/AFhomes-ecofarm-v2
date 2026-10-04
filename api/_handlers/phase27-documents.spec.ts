@@ -1,3 +1,4 @@
+import { installDocumentReviewRpc } from '../_lib/testing/document-review-rpc.js';
 /**
  * AF Homes Phase 27 - OCR + document processing completion.
  *
@@ -204,6 +205,7 @@ function install() {
       },
     },
   });
+  installDocumentReviewRpc(db);
   holder.db = db as unknown;
   return db;
 }

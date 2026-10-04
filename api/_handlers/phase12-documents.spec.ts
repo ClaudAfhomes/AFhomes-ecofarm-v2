@@ -1,3 +1,4 @@
+import { installDocumentReviewRpc } from '../_lib/testing/document-review-rpc.js';
 /**
  * AF Homes Phase 12 - identity documents and OCR-assisted extraction.
  *
@@ -178,6 +179,7 @@ function install() {
       },
     },
   });
+  installDocumentReviewRpc(db);
   holder.db = db as unknown;
   return db;
 }

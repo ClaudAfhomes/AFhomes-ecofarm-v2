@@ -146,6 +146,27 @@ export const optionalContactNumberSchema = z.preprocess(
 
 /** Email input: trimmed + lowercased, never uppercased. */
 export const emailSchema = z.string().trim().toLowerCase().email().max(254);
+/** Optional landlines use number syntax, without Philippine mobile-prefix rules. */
+export const optionalLandlineSchema = z.preprocess(
+  (value) =>
+    value == null || (typeof value === 'string' && /^(?:\s*|\s*N\/A\s*)$/i.test(value))
+      ? undefined
+      : value,
+  z
+    .string()
+    .trim()
+    .max(30)
+    .regex(/^\+?[0-9() .-]+$/, 'Enter a valid landline number')
+    .refine((value) => {
+      const count = value.replace(/\D/g, '').length;
+      return count >= 7 && count <= 15;
+    }, 'Enter 7 to 15 landline digits')
+    .transform((value) => {
+      const mobile = phoneSchema.safeParse(value);
+      return mobile.success ? mobile.data : value;
+    })
+    .optional(),
+);
 
 /** Birth date input: real calendar date, past, plausible age. */
 export const dateOfBirthSchema = z

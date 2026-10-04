@@ -67,6 +67,7 @@ function install() {
       { fn: 'next_customer_number', result: [{ customer_number: 'CUS-900001' }] },
       { fn: 'next_sale_number', result: [{ sale_number: 'SALE-900001' }] },
       { fn: 'record_card_payment', result: 'pay-1' },
+      { fn: 'record_card_payment_once', result: 'pay-1' },
       {
         fn: 'verify_card_payment',
         result: [
@@ -178,7 +179,12 @@ describe('router -> handler contract matrix', () => {
     r = await dispatch(`/api/v1/sales/${SALE.unpaid}/payments`, {
       method: 'POST',
       token: TOKEN2.finance,
-      body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
+      body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
+        amount: '100.00',
+        paymentType: 'installment',
+        method: 'cash',
+      },
     });
     expect(r.handled).toBe(true);
     expect(r.status).toBe(201);

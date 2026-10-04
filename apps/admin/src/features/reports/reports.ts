@@ -196,8 +196,13 @@ export const REPORT_DEFS: ReportDef[] = [
 
 export function availableReports(
   permissions: readonly { moduleKey: AfHomesModuleKey; canView: boolean }[] | undefined,
+  roleSlug?: string,
 ): ReportDef[] {
-  return REPORT_DEFS.filter((def) =>
-    def.modules.some((key) => permissions?.some((p) => p.moduleKey === key && p.canView) === true),
+  return REPORT_DEFS.filter(
+    (def) =>
+      (roleSlug !== 'employee' || def.type === 'redemptions') &&
+      def.modules.some(
+        (key) => permissions?.some((p) => p.moduleKey === key && p.canView) === true,
+      ),
   );
 }

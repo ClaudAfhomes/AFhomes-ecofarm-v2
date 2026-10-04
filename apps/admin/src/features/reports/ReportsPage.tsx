@@ -31,7 +31,7 @@ const PAGE_SIZE = 50;
  */
 export function ReportsPage() {
   const { user } = useSession();
-  const defs = availableReports(user?.afHomesPermissions);
+  const defs = availableReports(user?.afHomesPermissions, user?.roleSlug);
   const [type, setType] = useState(defs[0]?.type ?? 'sales');
   const def = REPORT_DEFS.find((d) => d.type === type) ?? REPORT_DEFS[0]!;
   const [from, setFrom] = useState('');

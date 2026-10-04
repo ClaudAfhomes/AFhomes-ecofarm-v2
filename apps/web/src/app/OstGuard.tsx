@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Spinner } from '@jad/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { getAuthPortals } from '../lib/portals';
+import { portalDashboard } from '../lib/portal-destination';
+import { PortalRedirect } from '../lib/PortalRedirect';
 
 /**
  * OST route guard - UX ONLY.
@@ -30,5 +32,7 @@ export function OstGuard({ children }: { children: ReactNode }) {
   }
   if (portals.isLoading) return <Spinner label="Checking your OST record" />;
   if (portals.data?.ost?.status === 'active') return <>{children}</>;
+  const destination = portals.data ? portalDashboard(portals.data) : null;
+  if (destination && destination !== '/ost/login') return <PortalRedirect to={destination} />;
   return <Navigate to="/ost/login" replace state={{ from: location.pathname }} />;
 }

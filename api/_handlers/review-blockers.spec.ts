@@ -22,7 +22,7 @@ beforeEach(() => {
       reservation_agreement_schedule: [],
     },
     tokens: phase2WorldTokens(),
-    rpcs: [{ fn: 'save_reservation_agreement', result: UUID.viewerStaff }],
+    rpcs: [{ fn: 'create_reservation_agreement_once', result: UUID.viewerStaff }],
   });
 });
 
@@ -41,6 +41,7 @@ async function save(name: string, secondaryName?: string) {
       familyPath: 'reservations',
       token: TOKEN.admin,
       body: {
+        requestId: UUID.viewerStaff,
         saleId: SALE.submitted,
         reservationDate: '2026-01-01',
         agreementDate: '2026-01-01',
@@ -66,18 +67,22 @@ describe('IST direct API validation', () => {
     'rejects numeric primary name %s before RPC',
     async (name) => {
       expect((await save(name)).status).toBe(400);
-      expect(holder.db?.calls.some((c) => c.table === 'save_reservation_agreement')).toBe(false);
+      expect(holder.db?.calls.some((c) => c.table === 'create_reservation_agreement_once')).toBe(
+        false,
+      );
     },
   );
   it('rejects numeric secondary holder before RPC', async () => {
     expect((await save('CLAUD', 'CLAUD123')).status).toBe(400);
-    expect(holder.db?.calls.some((c) => c.table === 'save_reservation_agreement')).toBe(false);
+    expect(holder.db?.calls.some((c) => c.table === 'create_reservation_agreement_once')).toBe(
+      false,
+    );
   });
   it.each(['CLAUD', 'CLAUD MARS', 'DELA CRUZ', "O'CONNOR", 'ANNE-MARIE', 'MARÍA'])(
     'accepts %s and sends normalized arguments',
     async (name) => {
       expect((await save(name.toLowerCase())).status).toBe(201);
-      const call = holder.db?.calls.find((c) => c.table === 'save_reservation_agreement');
+      const call = holder.db?.calls.find((c) => c.table === 'create_reservation_agreement_once');
       expect(call?.arg).toMatchObject({
         p_primary: {
           name: name.toLowerCase(),

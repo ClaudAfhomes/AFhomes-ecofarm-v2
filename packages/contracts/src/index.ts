@@ -76,6 +76,7 @@ export {
   phoneSchema,
   optionalContactNumberSchema,
   emailSchema,
+  optionalLandlineSchema,
   dateOfBirthSchema,
   birthDateSchema,
   uppercaseAddressSchema,

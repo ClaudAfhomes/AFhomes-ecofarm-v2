@@ -1,12 +1,16 @@
-import { Button } from '@jad/ui';
+﻿import { Button } from '@jad/ui';
 import { Suspense, lazy, useEffect } from 'react';
-import { Link } from 'react-router';
+import { useLocation } from 'react-router';
 
 import { CmsHeroMedia } from '../../marketing/components/ui/CmsHeroMedia';
 import { Container } from '../../marketing/components/ui/Container';
 import { getPlaceholder } from '../../marketing/lib/images';
 import { cmsRepository } from '../../marketing/lib/cms';
 import { useCustomerSession } from '../../lib/customer-session';
+import { useQuery } from '@tanstack/react-query';
+import { getAuthPortals } from '../../lib/portals';
+import { portalDashboard } from '../../lib/portal-destination';
+import { PortalRedirect } from '../../lib/PortalRedirect';
 
 const CustomerLoginForm = lazy(() =>
   import('./CustomerLoginForm').then((module) => ({ default: module.CustomerLoginForm })),
@@ -105,14 +109,32 @@ export function HomeLoginSplit({ noIndex = false }: { noIndex?: boolean }) {
 }
 
 function SignedInPanel({ onSignOut }: { onSignOut: () => void }) {
+  const location = useLocation();
+  const { user } = useCustomerSession();
+  const identity = useQuery({
+    queryKey: ['auth-portals', user?.authUserId],
+    queryFn: getAuthPortals,
+    retry: false,
+    staleTime: 0,
+  });
+  const to = identity.data ? portalDashboard(identity.data) : null;
+  if (location.pathname === '/customer/login' && to) return <PortalRedirect to={to} />;
   return (
     <div>
       <p className="label-caps text-pine-950/70">Member Login</p>
       <h2 className="font-display mt-2 text-3xl font-medium text-pine-950">You are signed in</h2>
       <p className="mt-4 text-pine-950/80">
-        <Link to="/customer" className="font-semibold underline">
-          Go to your dashboard
-        </Link>
+        {to ? (
+          <a href={to} className="font-semibold underline">
+            Go to your dashboard
+          </a>
+        ) : (
+          <span role="status">
+            {identity.isError
+              ? 'Could not verify your account. Reload to retry.'
+              : 'Checking your account…'}
+          </span>
+        )}
       </p>
       <p className="mt-2">
         <Button variant="ghost" type="button" onClick={onSignOut} className="">

@@ -8,7 +8,7 @@ beforeEach(() => {
   holder.db = new FakeSupabase({
     tables: phase2World({}),
     tokens: phase2WorldTokens(),
-    rpcs: [{ fn: 'save_customer_application', result: UUID.viewerStaff }],
+    rpcs: [{ fn: 'create_customer_application_once', result: UUID.viewerStaff }],
   });
 });
 const person = () => ({
@@ -29,6 +29,7 @@ function body(field: string, value: unknown) {
     ...(field === 'primary.landline' && value !== undefined ? { landline: value } : {}),
   };
   return {
+    requestId: UUID.viewerStaff,
     customerId: UUID.viewerStaff,
     planId: UUID.viewerStaff,
     tier: 'GOLD',
@@ -66,7 +67,7 @@ async function save(field: string, value: unknown, method = 'POST') {
   return state;
 }
 function args() {
-  const call = holder.db!.calls.find((c) => c.table === 'save_customer_application');
+  const call = holder.db!.calls.find((c) => c.table === 'create_customer_application_once');
   return call?.arg;
 }
 for (const field of ['primary.landline', 'secondary.landline', 'recommenderContact']) {

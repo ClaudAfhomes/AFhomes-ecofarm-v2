@@ -15,6 +15,7 @@
  *   text, paths, URLs or secrets.
  */
 import { z } from 'zod';
+import { governmentIdTypeSchema } from './sales.js';
 
 /** OCR pipeline state. Only the subset the server actually produces. */
 export const ocrStatusSchema = z.enum(['not_requested', 'completed', 'failed', 'unavailable']);
@@ -84,6 +85,7 @@ export const currentDocumentResponseSchema = z.object({
 
 /** Server-issued upload grant. The browser PUTs bytes to `uploadUrl`. */
 export const documentUploadRequestSchema = z.object({
+  idType: governmentIdTypeSchema.optional(),
   subjectType: documentSubjectSchema,
   subjectId: z.string().uuid(),
   mime: documentMimeSchema,

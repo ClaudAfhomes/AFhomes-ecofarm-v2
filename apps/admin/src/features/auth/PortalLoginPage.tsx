@@ -52,14 +52,26 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
   // State updates happen only in the promise callbacks below, never
   // synchronously in the effect body.
   useEffect(() => {
-    if (status !== 'authenticated' || decision) return;
+    if (status === 'loading' || decision) return;
     let live = true;
     getAuthPortals()
       .then((portals) => {
-        if (live) setDecision(decideForPortal(portal, portals, requested));
+        if (!live) return;
+        if (portals.customer && !portals.staff && !portals.ost) {
+          window.location.replace(`${webBase()}/customer`);
+          return;
+        }
+        if (portals.ost?.status === 'active') {
+          window.location.replace(`${webBase()}/ost/dashboard`);
+          return;
+        }
+        const next = decideForPortal(portal, portals, requested);
+        if (next.action === 'forward') navigate(next.to, { replace: true });
+        else if (status === 'authenticated') setDecision(next);
       })
       .catch(() => {
-        if (live) setServerError('We could not verify this sign-in. Please try again.');
+        if (live && status === 'authenticated')
+          setServerError('We could not verify this sign-in. Please try again.');
       });
     return () => {
       live = false;

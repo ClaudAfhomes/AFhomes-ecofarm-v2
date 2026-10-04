@@ -397,6 +397,36 @@ describe('Phase 26 commission management UI', () => {
 });
 
 describe('payment exact-decimal input UX', () => {
+  it('explains the receipt reference, coalesces a double click, confirms success, and refreshes balances', async () => {
+    const user = userEvent.setup();
+    install({
+      [`GET /sales/${QUEUE_ITEM.saleId}/summary`]: {
+        body: {
+          ...QUEUE_ITEM,
+          minimumDownPayment: '20000.00',
+          recordedTotal: '20000.00',
+          rejectedTotal: '0.00',
+          overpaidAmount: '0.00',
+        },
+      },
+      [`POST /sales/${QUEUE_ITEM.saleId}/payments`]: { body: { id: 'qa-payment' } },
+    });
+    render('/admin/finance/payments');
+    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Amount'), '1000.00');
+    await user.type(screen.getByLabelText('Payment reference'), 'QA-REF');
+    await user.dblClick(screen.getByRole('button', { name: /^Record$/ }));
+    await screen.findByText('Payment recorded successfully.');
+    const writes = requests.filter((request) => request.method === 'POST');
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.body).toMatchObject({ reference: 'QA-REF' });
+    expect(requests.filter((request) => request.path === '/queues/finance').length).toBeGreaterThan(
+      1,
+    );
+    expect(screen.getByText('Remaining balance')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('₱40,000.00')).toBeInTheDocument();
+  });
   it.each(['1e3', '1E3', '1e+3', '1e-3', 'NaN', 'Infinity', 'ABC', '100ABC', '', '0', '0.00'])(
     'blocks invalid payment amount %s before any write',
     async (amount) => {

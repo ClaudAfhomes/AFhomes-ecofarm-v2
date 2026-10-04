@@ -69,8 +69,17 @@ async function call(options: {
 }
 
 const perms = (body: unknown) =>
-  (body as { permissions: { moduleKey: string; canView: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }[] })
-    .permissions;
+  (
+    body as {
+      permissions: {
+        moduleKey: string;
+        canView: boolean;
+        canCreate: boolean;
+        canUpdate: boolean;
+        canDelete: boolean;
+      }[];
+    }
+  ).permissions;
 
 describe('Invariant A - a user restriction can remove access but never add it', () => {
   beforeEach(() => install());
@@ -132,7 +141,13 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       body: {
         name: 'Escalate',
         permissions: [
-          { moduleKey: 'finance.commission_payouts', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+          {
+            moduleKey: 'finance.commission_payouts',
+            canView: true,
+            canCreate: true,
+            canUpdate: true,
+            canDelete: true,
+          },
         ],
       },
     });
@@ -150,7 +165,13 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       body: {
         name: 'Delete Staff Grant',
         permissions: [
-          { moduleKey: 'organization.staff', canView: true, canCreate: false, canUpdate: false, canDelete: true },
+          {
+            moduleKey: 'organization.staff',
+            canView: true,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: true,
+          },
         ],
       },
     });
@@ -166,7 +187,13 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       token: TOKEN.admin,
       body: {
         permissions: [
-          { moduleKey: 'organization.roles', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+          {
+            moduleKey: 'organization.roles',
+            canView: true,
+            canCreate: true,
+            canUpdate: true,
+            canDelete: true,
+          },
         ],
       },
     });
@@ -182,9 +209,9 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       body: { roleId: UUID.role.finance },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id).toBe(
-      UUID.role.employee,
-    );
+    expect(
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id,
+    ).toBe(UUID.role.employee);
   });
 
   it('rejects inviting a user into a role the actor cannot grant', async () => {
@@ -193,7 +220,13 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'x@afhomes.test', fullName: 'X Y', departmentId: null, roleId: UUID.role.finance, temporaryPassword: 'TempPass123' },
+      body: {
+        email: 'x@afhomes.test',
+        fullName: 'X Y',
+        departmentId: null,
+        roleId: UUID.role.finance,
+        temporaryPassword: 'TempPass123',
+      },
     });
     expect(state.status).toBe(403);
     expect(db.rows('staff_users').some((s) => s.email === 'x@afhomes.test')).toBe(false);
@@ -212,7 +245,9 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
       body: { status: 'suspended' },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe('active');
+    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe(
+      'active',
+    );
   });
 
   it('rejects deactivating the Super Admin', async () => {
@@ -224,7 +259,9 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
       body: { status: 'inactive' },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe('active');
+    expect(db.rows('staff_users').find((s) => s.id === UUID.superAdminStaff)!.status).toBe(
+      'active',
+    );
   });
 
   it('rejects moving the Super Admin to another department', async () => {
@@ -248,12 +285,20 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
       token: TOKEN.admin,
       body: {
         restrictions: [
-          { moduleKey: 'dashboard.view', denyView: true, denyCreate: false, denyUpdate: false, denyDelete: false },
+          {
+            moduleKey: 'dashboard.view',
+            denyView: true,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
         ],
       },
     });
     expect(state.status).toBe(403);
-    expect(db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.superAdminStaff)).toBe(false);
+    expect(
+      db.rows('staff_permission_restrictions').some((r) => r.staff_id === UUID.superAdminStaff),
+    ).toBe(false);
   });
 
   it('rejects editing the Super Admin role permissions', async () => {
@@ -273,7 +318,13 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
       method: 'POST',
       afPath: 'staff',
       token: TOKEN.admin,
-      body: { email: 'rival@afhomes.test', fullName: 'Rival', departmentId: null, roleId: UUID.role.superAdmin, temporaryPassword: 'TempPass123' },
+      body: {
+        email: 'rival@afhomes.test',
+        fullName: 'Rival',
+        departmentId: null,
+        roleId: UUID.role.superAdmin,
+        temporaryPassword: 'TempPass123',
+      },
     });
     expect(state.status).toBe(403);
     expect(db.rows('staff_users').some((s) => s.email === 'rival@afhomes.test')).toBe(false);
@@ -293,6 +344,36 @@ describe('Invariant C - an Admin cannot alter or deactivate the Super Admin', ()
 });
 
 describe('Invariant D - protected system roles cannot be deleted or defanged', () => {
+  it('lets only Super Admin change an employee display title without changing identity or access', async () => {
+    const db = install();
+    const grants = structuredClone(db.rows('role_permissions'));
+    const state = await call({
+      method: 'PATCH',
+      afPath: `roles/${UUID.role.employee}`,
+      token: TOKEN.superAdmin,
+      body: { name: 'Receptionist' },
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('roles').find((role) => role.id === UUID.role.employee)).toMatchObject({
+      name: 'Receptionist',
+      slug: 'employee',
+      is_system: true,
+    });
+    expect(db.rows('role_permissions')).toEqual(grants);
+  });
+  it.each([UUID.role.admin, UUID.role.superAdmin])(
+    'never renames protected title %s',
+    async (id) => {
+      install();
+      const state = await call({
+        method: 'PATCH',
+        afPath: `roles/${id}`,
+        token: TOKEN.superAdmin,
+        body: { name: 'Renamed' },
+      });
+      expect(state.status).toBe(403);
+    },
+  );
   beforeEach(() => install());
 
   it('exposes no delete route for a system role', async () => {
@@ -316,17 +397,21 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
   });
 
   it('exposes no delete route for a custom role either (deletion is not a Phase 1 surface)', async () => {
-    const state = await call({ method: 'DELETE', afPath: `roles/${UUID.role.custom}`, token: TOKEN.superAdmin });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.superAdmin,
+    });
     expect(state.status).toBe(404);
   });
 
-  it('refuses to edit any system role, even by a Super Admin', async () => {
+  it('refuses to change system access through a display-title edit', async () => {
     const db = install();
     const state = await call({
       method: 'PATCH',
       afPath: `roles/${UUID.role.employee}`,
       token: TOKEN.superAdmin,
-      body: { name: 'Renamed System Role' },
+      body: { name: 'Renamed System Role', isActive: false },
     });
     expect(state.status).toBe(403);
     expect(db.rows('roles').find((r) => r.id === UUID.role.employee)!.name).toBe('Employee');
@@ -357,9 +442,9 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
       body: { roleId: UUID.role.retired },
     });
     expect(state.status).toBe(400);
-    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id).toBe(
-      UUID.role.employee,
-    );
+    expect(
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id,
+    ).toBe(UUID.role.employee);
   });
 });
 
@@ -395,7 +480,13 @@ describe('Invariant F - client permission state cannot authorize a server action
       body: {
         name: 'Client Says Super Admin',
         permissions: [
-          { moduleKey: 'governance.config', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+          {
+            moduleKey: 'governance.config',
+            canView: true,
+            canCreate: true,
+            canUpdate: true,
+            canDelete: true,
+          },
         ],
       },
     });

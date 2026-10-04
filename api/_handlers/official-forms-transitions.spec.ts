@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommissionRuleSchema,
   createCustomerApplicationSchema,
@@ -83,6 +83,7 @@ function install(
       ...tables,
     } as never,
     rpcs: options.rpcs ?? [],
+    links: [{ child: 'identity_documents', parent: 'customers', fk: 'customer_id' }],
     rpcErrors: options.rpcErrors,
   });
   return holder.db as FakeSupabase;
@@ -143,6 +144,62 @@ const draftApplication = {
 };
 
 describe('official form review lifecycle', () => {
+  it.each([undefined, {}, { fields: { idType: 'invented' } }])(
+    'rejects final submission without a persisted supported ID type: %j',
+    async (reviewedData) => {
+      install({
+        customer_applications: [{ ...draftApplication, status: 'draft' }],
+        customers: [{ id: draftApplication.customer_id, created_by: draftApplication.created_by }],
+        identity_documents:
+          reviewedData === undefined
+            ? []
+            : [
+                {
+                  id: '11111111-0000-4000-8000-000000000010',
+                  subject_type: 'customer',
+                  customer_id: draftApplication.customer_id,
+                  storage_path: 'synthetic/id.png',
+                  sha256: 'a'.repeat(64),
+                  verification_status: 'pending_review',
+                  created_at: '2026-10-01',
+                  reviewed_data: reviewedData,
+                },
+              ],
+      });
+      const response = await call(forms, {
+        path: `customer-applications/${APP_ID}/submit`,
+        method: 'POST',
+      });
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    },
+  );
+  it('accepts final submission with a persisted supported ID type', async () => {
+    install(
+      {
+        customer_applications: [{ ...draftApplication, status: 'draft' }],
+        customers: [{ id: draftApplication.customer_id, created_by: draftApplication.created_by }],
+        identity_documents: [
+          {
+            id: '11111111-0000-4000-8000-000000000010',
+            subject_type: 'customer',
+            customer_id: draftApplication.customer_id,
+            storage_path: 'synthetic/id.png',
+            sha256: 'a'.repeat(64),
+            verification_status: 'pending_review',
+            created_at: '2026-10-01',
+            reviewed_data: { fields: { idType: 'passport' } },
+          },
+        ],
+      },
+      { rpcs: [{ fn: 'submit_customer_application', result: APP_ID }] },
+    );
+    const response = await call(forms, {
+      path: `customer-applications/${APP_ID}/submit`,
+      method: 'POST',
+    });
+    expect(response.status).toBe(200);
+  });
   beforeEach(() => {
     install({
       customer_applications: [{ ...draftApplication }],
@@ -377,6 +434,7 @@ const draftHolderRow = {
 };
 
 const validAgreementBody = (overrides: Record<string, unknown> = {}) => ({
+  requestId: SALE_ID,
   saleId: SALE_ID,
   reservationDate: '2026-10-01',
   agreementDate: '2026-10-01',
@@ -412,6 +470,7 @@ describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
         rpcs: [
           { fn: 'submit_reservation_agreement', result: AGREEMENT_DRAFT_ID },
           { fn: 'save_reservation_agreement', result: AGREEMENT_DRAFT_ID },
+          { fn: 'create_reservation_agreement_once', result: AGREEMENT_DRAFT_ID },
         ],
       },
     );

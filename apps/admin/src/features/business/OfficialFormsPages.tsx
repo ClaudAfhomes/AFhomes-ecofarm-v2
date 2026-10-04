@@ -9,7 +9,12 @@ import {
   optionalContactNumberSchema,
   birthDateSchema,
   paymentSchemeLabel,
+  governmentIdTypeSchema,
+  optionalLandlineSchema,
 } from '@jad/contracts';
+import { formatDateTime } from '../../lib/format';
+import { useSingleFlight } from '../../lib/useSingleFlight';
+import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatMoney } from './format';
 import {
   Alert,
@@ -123,6 +128,7 @@ function Field({
     <label style={{ display: 'grid', gap: 4 }}>
       <span id={`${id}-label`}>{label}</span>
       <NormalizedInput
+        landline={/landline/i.test(label)}
         normalize={normalize}
         suggestName={isName}
         type={isPhone ? 'tel' : /email/i.test(label) ? 'email' : type}
@@ -474,6 +480,9 @@ export function CustomerApplicationEditorPage() {
   const [paymentProof, setPaymentProof] = useState(false);
   const [message, setMessage] = useState('');
   const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [idType, setIdType] = useState('');
+  const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
+  const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const documents = useQuery({
@@ -507,6 +516,7 @@ export function CustomerApplicationEditorPage() {
       if (!mime || !ocrFile.size || ocrFile.size > MAX_BYTES)
         throw new Error('Choose a non-empty JPEG, PNG or PDF up to 10 MiB.');
       const grant = await requestUploadGrant({
+        idType: governmentIdTypeSchema.parse(idType),
         subjectType: 'customer',
         subjectId: customerId,
         mime,
@@ -534,11 +544,13 @@ export function CustomerApplicationEditorPage() {
     onSuccess: (grant) => setIdPreview(grant.url),
     onError: () => setMessage('ID preview unavailable. Try again.'),
   });
-  const optionalPhonesValid = [
-    primary.landline,
-    secondary?.landline,
-    meta.recommenderContact,
-  ].every((value) => optionalContactNumberSchema.safeParse(value).success);
+  const optionalPhonesValid =
+    [meta.recommenderContact].every(
+      (value) => optionalContactNumberSchema.safeParse(value).success,
+    ) &&
+    [primary.landline, secondary?.landline].every(
+      (value) => optionalLandlineSchema.safeParse(value).success,
+    );
   useEffect(() => {
     const app = existing.data;
     if (!app) return;
@@ -582,26 +594,31 @@ export function CustomerApplicationEditorPage() {
     reservationPaymentProofReceived: paymentProof,
   });
   const save = useMutation({
-    mutationFn: () => {
-      const checked = createCustomerApplicationSchema.safeParse(payload());
-      if (!checked.success) {
-        document
-          .querySelector<HTMLInputElement>(
-            '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
-          )
-          ?.focus();
-        throw new Error(
-          checked.error.issues
-            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
-            .join('; '),
-        );
-      }
-      return id
-        ? updateCustomerApplication(id, checked.data)
-        : createCustomerApplication(checked.data);
-    },
+    mutationFn: () =>
+      runSave(async () => {
+        const checked = createCustomerApplicationSchema.safeParse(payload());
+        if (!checked.success) {
+          document
+            .querySelector<HTMLInputElement>(
+              '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
+            )
+            ?.focus();
+          throw new Error(
+            checked.error.issues
+              .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+              .join('; '),
+          );
+        }
+        return id
+          ? updateCustomerApplication(id, checked.data)
+          : createCustomerApplication({
+              ...checked.data,
+              requestId: applicationRequest.forPayload(checked.data),
+            });
+      }),
     onSuccess: (app) => {
-      setMessage('Draft saved.');
+      setMessage('Application saved as draft.');
+      applicationRequest.complete();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
     },
@@ -669,14 +686,16 @@ export function CustomerApplicationEditorPage() {
         const field = fields[key];
         return field && field.confidence !== null && field.confidence >= 0.8 ? field.value : null;
       };
-      setPrimary({
-        ...primary,
-        firstName: confident('firstName') ?? primary.firstName,
-        middleName: confident('middleName') ?? primary.middleName,
-        lastName: confident('lastName') ?? primary.lastName,
-        birthDate: confident('dateOfBirth') ?? primary.birthDate,
-        permanentAddressLine1: confident('address') ?? primary.permanentAddressLine1,
-      });
+      setPrimary((current) => ({
+        ...current,
+        firstName: current.firstName || confident('firstName') || '',
+        middleName: current.middleName || confident('middleName') || undefined,
+        lastName: current.lastName || confident('lastName') || '',
+        birthDate: current.birthDate || confident('dateOfBirth') || '',
+        permanentAddressLine1: current.permanentAddressLine1 || confident('address') || '',
+      }));
+      const suggestedType = governmentIdTypeSchema.safeParse(confident('idType'));
+      if (suggestedType.success) setIdType((current) => current || suggestedType.data);
       setMessage(
         doc.ocrStatus === 'completed'
           ? 'OCR completed — review and correct suggestions before saving.'
@@ -819,7 +838,14 @@ export function CustomerApplicationEditorPage() {
             <legend>VALID ID</legend>
             <p>Valid ID: {validId ? 'Uploaded ✓' : 'Required / Missing'}</p>
             {serverCurrentDocument ? (
-              <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+              <>
+                <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                <p>
+                  ID type:{' '}
+                  {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
+                    'Missing — review the identity document'}
+                </p>
+              </>
             ) : null}
             {ocrFile ? (
               <div role="status">
@@ -836,6 +862,22 @@ export function CustomerApplicationEditorPage() {
                 </Button>
               </div>
             ) : null}
+            <label>
+              ID Type *
+              <select
+                aria-label="ID Type"
+                value={idType}
+                disabled={uploadId.isPending || ocr.isPending}
+                onChange={(event) => setIdType(event.target.value)}
+              >
+                <option value="">Select ID type</option>
+                {governmentIdTypeSchema.options.map((value) => (
+                  <option key={value} value={value}>
+                    {value.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label>
               Upload ID{' '}
               <input
@@ -863,9 +905,16 @@ export function CustomerApplicationEditorPage() {
             </label>
             <Button
               onClick={() => uploadId.mutate()}
-              disabled={!ocrFile || !customerId || uploadId.isPending || ocr.isPending}
+              disabled={
+                !ocrFile ||
+                !customerId ||
+                !idType ||
+                uploadId.isPending ||
+                ocr.isPending ||
+                save.isPending
+              }
             >
-              Upload ID
+              {uploadId.isPending ? 'Uploading…' : 'Upload ID'}
             </Button>
             <Button
               onClick={() => ocr.mutate()}
@@ -890,6 +939,32 @@ export function CustomerApplicationEditorPage() {
                   Review identity document
                 </Link>
               </>
+            ) : null}
+            {serverCurrentDocument ? (
+              <div>
+                <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
+                {Object.entries(serverCurrentDocument.extractedFields).length ? (
+                  <>
+                    <p>
+                      Detected suggestions — verify against the ID and correct the form manually. ID
+                      numbers remain masked; use document review to confirm them.
+                    </p>
+                    <dl>
+                      {Object.entries(serverCurrentDocument.extractedFields).map(([key, field]) => (
+                        <div key={key}>
+                          <dt>{key}</dt>
+                          <dd>
+                            {field.value ?? 'Not detected'}
+                            {field.confidence !== null
+                              ? ` (${Math.round(field.confidence * 100)}% confidence)`
+                              : ''}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </>
+                ) : null}
+              </div>
             ) : null}
             {idPreview ? (
               <a href={idPreview} target="_blank" rel="noreferrer">
@@ -1026,18 +1101,19 @@ export function CustomerApplicationEditorPage() {
                 save.isPending ||
                 uploadId.isPending ||
                 ocr.isPending ||
-                Boolean(ocrFile) ||
                 !optionalPhonesValid ||
                 Object.values(invalidFields).some(Boolean)
               }
             >
-              Save draft
+              {save.isPending ? 'Saving…' : 'Save draft'}
             </Button>{' '}
             {id && editable ? (
               <Button
                 onClick={() => submit.mutate()}
                 disabled={
                   !consent ||
+                  save.isPending ||
+                  !serverCurrentDocument?.reviewedFields?.idType ||
                   uploadId.isPending ||
                   ocr.isPending ||
                   Boolean(ocrFile) ||
@@ -1194,10 +1270,20 @@ export function ReservationAgreementsPage() {
                       : 'Pending signature'}
                   </td>
                   <td>
-                    <StatusChip label={item.status} />
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        whiteSpace: 'nowrap',
+                        minWidth: 'max-content',
+                      }}
+                    >
+                      <StatusChip
+                        label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                      />
+                    </span>
                   </td>
-                  <td>{item.submittedAt ?? '—'}</td>
-                  <td>{item.createdAt}</td>
+                  <td>{item.submittedAt ? formatDateTime(item.submittedAt) : '—'}</td>
+                  <td>{formatDateTime(item.createdAt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1214,6 +1300,9 @@ export function ReservationAgreementsPage() {
 }
 
 export function ReservationAgreementEditorPage() {
+  const reservationRequest = useMutationRequest();
+  const runReservationSave =
+    useSingleFlight<Awaited<ReturnType<typeof createReservationAgreement>>>();
   const { id } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -1323,9 +1412,17 @@ export function ReservationAgreementEditorPage() {
   });
   const save = useMutation({
     mutationFn: () =>
-      id ? updateReservationAgreement(id, payload()) : createReservationAgreement(payload()),
+      runReservationSave(() =>
+        id
+          ? updateReservationAgreement(id, payload())
+          : createReservationAgreement({
+              ...payload(),
+              requestId: reservationRequest.forPayload(payload()),
+            }),
+      ),
     onSuccess: (agreement) => {
-      setMessage('Draft saved.');
+      setMessage('Reservation saved.');
+      reservationRequest.complete();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
       if (!id) navigate(`/admin/sales/reservations/${agreement.id}`, { replace: true });
     },
@@ -1576,7 +1673,7 @@ export function ReservationAgreementEditorPage() {
         </p>
         <p>
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            Save draft
+            {save.isPending ? 'Saving…' : 'Save draft'}
           </Button>{' '}
           {id && editable ? (
             <Button onClick={() => submit.mutate()} disabled={submit.isPending}>

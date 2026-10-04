@@ -113,7 +113,7 @@ describe('other writers normalize through the same contracts', () => {
   it('official-form saves normalize optional holder text before the RPC', async () => {
     const db = holder.db as FakeSupabase;
     db.rpcs.push({
-      fn: 'save_customer_application',
+      fn: 'create_customer_application_once',
       result: 'aaaaaaaa-0000-4000-8000-0000000000a1',
     });
     const { default: formsHandler } = await import('./official-forms.js');
@@ -124,6 +124,7 @@ describe('other writers normalize through the same contracts', () => {
         query: { familyPath: 'customer-applications' },
         headers: { authorization: `Bearer ${TOKEN.admin}` },
         body: {
+          requestId: UUID.viewerStaff,
           customerId: UUID.viewerStaff,
           planId: UUID.viewerStaff,
           tier: 'GOLD',
@@ -157,7 +158,9 @@ describe('other writers normalize through the same contracts', () => {
       res as never,
     );
     expect(state.status).toBe(201);
-    const call = db.calls.find((c) => c.op === 'rpc' && c.table === 'save_customer_application');
+    const call = db.calls.find(
+      (c) => c.op === 'rpc' && c.table === 'create_customer_application_once',
+    );
     const primary = (call?.arg as Record<string, Record<string, unknown>>).p_primary;
     expect(primary).toMatchObject({
       lastName: 'jimenez',

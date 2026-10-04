@@ -1,3 +1,4 @@
+import { runIdempotencyChecks } from './idempotency-integration.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 /**
  * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
@@ -389,6 +390,7 @@ const staff = {} as Record<string, string>;
  * while they leaked. The names are a hardcoded constant, never input.
  */
 const BASELINE_TABLES = [
+  'identity_documents',
   'customers',
   'staff_users',
   'card_sales',
@@ -414,6 +416,11 @@ const BASELINE_TABLES = [
 const baseline = new Map<string, number>();
 
 const captureBaseline = async (): Promise<void> => {
+  baseline.set(
+    'private.mutation_requests',
+    (await db.query<{ n: number }>('select count(*)::int n from private.mutation_requests'))
+      .rows[0]!.n,
+  );
   for (const table of BASELINE_TABLES) {
     const r = await db.query<{ n: number }>(`select count(*)::int as n from public.${table}`);
     baseline.set(table, r.rows[0]!.n);
@@ -1560,8 +1567,8 @@ async function main(): Promise<void> {
     const membershipId = String(activation.membership_id);
     check('activation returned a membership', !!membershipId);
     check(
-      '  membership number was issued',
-      !!activation.membership_number,
+      '  activation issues a cryptographically random membership number',
+      /^MBS-([0-9A-F]{8}-){3}[0-9A-F]{8}$/.test(String(activation.membership_number)),
       String(activation.membership_number),
     );
     check('  QR token was generated', !!activation.qr_token);
@@ -1810,7 +1817,10 @@ async function main(): Promise<void> {
       check(
         `  ${fn.proname} pins search_path`,
         /search_path\s*=\s*public/.test(config) ||
-          /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(config),
+          /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(
+            config,
+          ) ||
+          /search_path\s*=\s*pg_catalog,\s*public,\s*(private,\s*)?pg_temp/.test(config),
         config,
       );
     }
@@ -7137,13 +7147,63 @@ async function main(): Promise<void> {
           !!rowB.customerId && !!rowB.saleId && !!rowB.membershipId,
         );
         check(
-          'membership number uses the MBS sequence',
-          /^MBS-\d{6}$/.test(rowB.membershipNumber),
+          'membership number uses 128-bit random format',
+          /^MBS-(?:[0-9A-F]{8}-){3}[0-9A-F]{8}$/.test(rowB.membershipNumber),
           rowB.membershipNumber,
         );
         const member = await one<Record<string, unknown>>(
           'select * from public.memberships where id = $1',
           [rowB.membershipId],
+        );
+        const samples = await db.query<{ code: string }>(
+          'select private.next_membership_number() as code from generate_series(1,1001)',
+        );
+        check(
+          '1001 allocated codes match random format',
+          samples.rows.every((row) => /^MBS-(?:[0-9A-F]{8}-){3}[0-9A-F]{8}$/.test(row.code)),
+        );
+        eq(
+          '1001 allocated codes are unique',
+          new Set(samples.rows.map((row) => row.code)).size,
+          1001,
+        );
+        check(
+          'allocated codes are not monotonically increasing',
+          samples.rows.some((row, index) => index > 0 && row.code < samples.rows[index - 1]!.code),
+        );
+        const definition = await one<{ definition: string }>(
+          "select pg_get_functiondef('private.next_membership_number()'::regprocedure) as definition",
+        );
+        const raw = rowB.membershipNumber.replace(/^MBS-/, '').replace(/-/g, '');
+        if (!/^[0-9A-F]{32}$/.test(raw)) throw new Error('Invalid synthetic collision fixture');
+        await db.query('create temporary sequence allocator_attempt');
+        await db.query(`create function pg_temp.collision_rng(integer) returns bytea language plpgsql as $$ begin
+          if nextval('pg_temp.allocator_attempt')=1 then return decode('${raw}','hex'); end if;
+          return gen_random_bytes($1); end $$`);
+        await db.query(
+          definition.definition
+            .replace('private.next_membership_number()', 'pg_temp.test_allocator()')
+            .replace('gen_random_bytes(16)', 'pg_temp.collision_rng(16)'),
+        );
+        const retry = await one<{ code: string }>('select pg_temp.test_allocator() as code');
+        check(
+          'allocator retries an occupied code using real PostgreSQL',
+          retry.code !== rowB.membershipNumber,
+        );
+        eq(
+          'collision required a second random draw',
+          (
+            await one<{ attempts: string }>(
+              'select last_value::text as attempts from pg_temp.allocator_attempt',
+            )
+          ).attempts,
+          '2',
+        );
+        await db.query(
+          `create or replace function pg_temp.collision_rng(integer) returns bytea language sql as $$ select decode('${raw}','hex') $$`,
+        );
+        await throws('allocator fails closed after bounded collisions', () =>
+          db.query('select pg_temp.test_allocator()'),
         );
         eq('member is active', String(member.status), 'active');
         eq(
@@ -8198,6 +8258,17 @@ async function main(): Promise<void> {
           sets.every((r) => r.rows.length === 0),
         );
       }
+      section('50. durable mutation concurrency, retry, rollback and private ACL');
+      await runIdempotencyChecks({
+        db,
+        url: target.url,
+        actor: staff['super-admin']!,
+        seller: staff['ost']!,
+        employee: staff['hr']!,
+        run: RUN,
+        createdCustomers: createdCustomerIds,
+        check,
+      });
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -8237,6 +8308,9 @@ async function main(): Promise<void> {
         ))!.rows.map((r) => r.id);
 
         await db?.query('begin');
+        await db?.query('delete from private.mutation_requests where actor_id = any($1::uuid[])', [
+          staffSet,
+        ]);
         await db?.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
         await db?.query('delete from public.audit_events where actor_id = any($1::uuid[])', [
           authSet,
@@ -8396,6 +8470,11 @@ async function main(): Promise<void> {
         // points_ledger and redemptions carry no run prefix, so there is nothing
         // to grep them by once their parents are gone.
         const leaks: string[] = [];
+        const requestsRemaining = (
+          await db.query<{ n: number }>('select count(*)::int n from private.mutation_requests')
+        ).rows[0]!.n;
+        if (requestsRemaining !== baseline.get('private.mutation_requests'))
+          leaks.push('private.mutation_requests: cleanup mismatch');
         for (const table of BASELINE_TABLES) {
           const after = await db?.query<{ n: number }>(
             `select count(*)::int as n from public.${table}`,

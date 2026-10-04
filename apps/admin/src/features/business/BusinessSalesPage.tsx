@@ -1,7 +1,19 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Sale } from '@jad/contracts';
+import { useSession } from '../../lib/session';
+import { RecordPaymentDialog, VerifyDialog } from './BusinessFinanceQueuePage';
 import { paymentSchemeLabel } from '@jad/contracts';
-import { Button, EmptyState, ErrorState, FilterBar, PageHeader, Select, StatusChip } from '@jad/ui';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  Select,
+  StatusChip,
+} from '@jad/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { SALE_STATUS_LABEL, SALE_STATUS_TONE, formatMoney } from './format';
@@ -107,12 +119,38 @@ export function BusinessSalesPage() {
         </div>
       )}
 
-      {openId ? <SaleDetail saleId={openId} onClose={() => setOpenId(null)} /> : null}
+      {openId ? (
+        <SaleDetail
+          saleId={openId}
+          sale={query.data?.find((sale) => sale.id === openId)}
+          onClose={() => setOpenId(null)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }) {
+function SaleDetail({
+  saleId,
+  sale,
+  onClose,
+}: {
+  saleId: string;
+  sale?: Sale;
+  onClose: () => void;
+}) {
+  const { user } = useSession();
+  const client = useQueryClient();
+  const [action, setAction] = useState<'record' | 'verify' | null>(null);
+  const canHandle = user?.afHomesPermissions.some(
+    (permission) => permission.moduleKey === 'finance.payment_verification' && permission.canUpdate,
+  );
+  const refresh = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['business'] }),
+      client.invalidateQueries({ queryKey: ['reports'] }),
+    ]);
+  };
   const summary = useQuery({
     queryKey: ['business', 'sale-summary', saleId],
     queryFn: () => getSaleSummary(saleId),
@@ -122,9 +160,21 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
     queryFn: () => getSalePayments(saleId),
   });
 
+  if (action === 'record')
+    return <RecordPaymentDialog saleId={saleId} onDone={refresh} onClose={() => setAction(null)} />;
+  if (action === 'verify')
+    return <VerifyDialog saleId={saleId} onDone={refresh} onClose={() => setAction(null)} />;
   return (
-    <div style={{ marginTop: 24 }}>
-      <h2>Payment history</h2>
+    <Dialog open placement="right" onClose={onClose} title="Payment history">
+      <p>
+        {sale?.saleNumber} · {sale?.customerName} · {sale?.productName}
+      </p>
+      {canHandle ? (
+        <p>
+          <Button onClick={() => setAction('record')}>Record payment</Button>{' '}
+          <Button onClick={() => setAction('verify')}>Verify payment</Button>
+        </p>
+      ) : null}
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={summary.refetch} />
       ) : summary.data ? (
@@ -164,7 +214,7 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
             <dd>{formatMoney(summary.data.recordedTotal)}</dd>
           </div>
           <div>
-            <dt>Verified</dt>
+            <dt>Verified paid</dt>
             <dd>{formatMoney(summary.data.verifiedTotal)}</dd>
           </div>
           <div>
@@ -210,6 +260,8 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
                 <th>Status</th>
                 <th>Recorded</th>
                 <th>Verified</th>
+                <th>Recorded by</th>
+                <th>Verified by</th>
               </tr>
             </thead>
             <tbody>
@@ -236,6 +288,8 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
                   </td>
                   <td>{formatDateTime(payment.recordedAt)}</td>
                   <td>{payment.verifiedAt ? formatDateTime(payment.verifiedAt) : '—'}</td>
+                  <td>{payment.recordedBy}</td>
+                  <td>{payment.verifiedBy ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -246,6 +300,6 @@ function SaleDetail({ saleId, onClose }: { saleId: string; onClose: () => void }
       <Button variant="secondary" onClick={onClose} style={{ marginTop: 16 }}>
         Close
       </Button>
-    </div>
+    </Dialog>
   );
 }

@@ -6,6 +6,7 @@ import {
   normalizePersonName,
   optionalPersonNameSchema,
   optionalContactNumberSchema,
+  optionalLandlineSchema,
   personNameSchema,
   phoneSchema,
   PERSON_NAME_RE,
@@ -62,7 +63,7 @@ export const applicationHolderSchema = z.object({
     .max(100)
     .transform((v) => normalizeAddressField(v)),
   postalCode: z.string().trim().max(20).optional(),
-  landline: optionalContactNumberSchema,
+  landline: optionalLandlineSchema,
   mobile: phoneSchema,
   email: emailSchema,
   tinNumber: z.string().trim().max(40).optional(),
@@ -75,6 +76,8 @@ export const applicationHolderSchema = z.object({
 
 export const createCustomerApplicationSchema = z
   .object({
+    /** Required by POST creation; existing-record PATCH does not require a token. */
+    requestId: z.string().uuid().optional(),
     customerId: z.string().uuid(),
     saleId: z.string().uuid().optional(),
     planId: z.string().uuid(),
@@ -85,7 +88,10 @@ export const createCustomerApplicationSchema = z
     salesManagerName: z.string().trim().max(160).optional(),
     vipRecommenderName: z.string().trim().max(160).optional(),
     recommenderContact: optionalContactNumberSchema,
-    recommenderEmail: z.string().trim().toLowerCase().email().max(254).optional(),
+    recommenderEmail: z.preprocess(
+      (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+      emailSchema.optional(),
+    ),
     vipReferrer: z.string().trim().max(160).optional(),
     acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
     consentAcknowledged: z.boolean(),
@@ -163,6 +169,7 @@ export const reservationHolderSchema = z.object({
 
 export const createReservationAgreementSchema = z
   .object({
+    requestId: z.string().uuid().optional(),
     saleId: z.string().uuid(),
     customerApplicationId: z.string().uuid().optional(),
     /**

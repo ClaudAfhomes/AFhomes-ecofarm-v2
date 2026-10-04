@@ -85,7 +85,10 @@ function install(
     }) => Promise<unknown>;
     createUserId?: string;
     existingAuthEmails?: string[];
-    updateUser?: (id: string, attrs: { password?: string; user_metadata?: unknown }) => Promise<unknown>;
+    updateUser?: (
+      id: string,
+      attrs: { password?: string; user_metadata?: unknown },
+    ) => Promise<unknown>;
     signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   } = {},
 ) {
@@ -643,7 +646,9 @@ describe('staff deletion blockers on tables without an id column', () => {
     expect(state.status).toBe(200);
     const selects = db.calls.filter((entry) => entry.op === 'select');
     const colsFor = (table: string) =>
-      selects.filter((entry) => entry.table === table).map((entry) => (entry.arg as { cols: string }).cols);
+      selects
+        .filter((entry) => entry.table === table)
+        .map((entry) => (entry.arg as { cols: string }).cols);
     // The two tables without `id` must be probed on their reference column;
     // `select('id')` fails live with a 400 that surfaces as a 500.
     expect(colsFor('card_sale_hierarchy_snapshots')).toContain('ancestor_staff_id');
@@ -817,12 +822,17 @@ describe('staff test-account purge', () => {
   it('rejects a Super Admin target', async () => {
     enablePurge();
     const db = install();
-    addStaff(db, 'aaaaaaaa-0000-4000-8000-0000000000a9', 'qa.second@example.invalid', UUID.role.superAdmin);
+    addStaff(
+      db,
+      'aaaaaaaa-0000-4000-8000-0000000000a9',
+      'qa.second@example.invalid',
+      UUID.role.superAdmin,
+    );
     const state = await purge('aaaaaaaa-0000-4000-8000-0000000000a9');
     expect(state.status).toBe(403);
-    expect(db.rows('staff_users').some((row) => row.id === 'aaaaaaaa-0000-4000-8000-0000000000a9')).toBe(
-      true,
-    );
+    expect(
+      db.rows('staff_users').some((row) => row.id === 'aaaaaaaa-0000-4000-8000-0000000000a9'),
+    ).toBe(true);
   });
 
   it('rejects a non-test account with 409 and changes nothing', async () => {
@@ -894,9 +904,9 @@ describe('staff test-account purge', () => {
       false,
     );
     expect(db.rows('audit_events').some((row) => row.actor_id === TEST_STAFF_ID)).toBe(false);
-    expect(
-      db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID),
-    ).toBe(true);
+    expect(db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID)).toBe(
+      true,
+    );
     const actions = db.rows('audit_events').map((row) => row.action);
     expect(actions).toContain('TEST_ACCOUNT_PURGE_STARTED');
     expect(actions).toContain('TEST_ACCOUNT_PURGED');
@@ -1002,9 +1012,9 @@ describe('staff test-account purge', () => {
     const state = await purge(TEST_STAFF_ID);
     expect(state.status).toBe(409);
     expect((state.body as { error: { message: string } }).error.message).toMatch(/membership/);
-    expect(db.rows('memberships').some((row) => row.id === 'dddddddd-0000-4000-8000-0000000000a4')).toBe(
-      true,
-    );
+    expect(
+      db.rows('memberships').some((row) => row.id === 'dddddddd-0000-4000-8000-0000000000a4'),
+    ).toBe(true);
     expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
   });
 
@@ -1028,9 +1038,9 @@ describe('staff test-account purge', () => {
     expect(
       db.rows('customers').some((row) => row.id === 'cccccccc-0000-4000-8000-0000000000a5'),
     ).toBe(true);
-    expect(
-      db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID),
-    ).toBe(false);
+    expect(db.calls.some((entry) => entry.op === 'deleteUser' && entry.arg === TEST_STAFF_ID)).toBe(
+      false,
+    );
   });
 
   it('blocks when the target created published CMS content, preserving the page', async () => {
@@ -1380,7 +1390,7 @@ describe('roles', () => {
       body: { name: 'Hijacked' },
     });
     expect(state.status).toBe(403);
-    expect(err(state.body)?.message).toMatch(/system roles are protected/i);
+    expect(err(state.body)?.message).toMatch(/protected role titles/i);
   });
 
   it('refuses to convert a system role into a permissive custom role (Invariant D)', async () => {

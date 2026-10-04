@@ -117,7 +117,19 @@ async function authorizeReport(
     // Sequential attempts, never `a ?? b`: both results are truthy objects,
     // so `??` would keep only the first module and silently deny the rest.
     const result = await authorizeAfHomes(req, key as never);
-    if (!('error' in result)) return result;
+    if (!('error' in result)) {
+      if (result.roleSlug === 'employee' && report !== 'redemptions')
+        return {
+          error: {
+            status: 403,
+            error: {
+              code: 'FORBIDDEN',
+              message: 'Employees may only access their handled redemption report',
+            },
+          },
+        };
+      return result;
+    }
     last = result;
   }
   return last!;
@@ -1618,7 +1630,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const principal = await authorizeAfHomes(req, 'dashboard.view');
     if ('error' in principal) return deny(res, principal);
     return res.status(200).json({
-      reports: (Object.keys(BUILDERS) as ReportType[]).map((report) => ({ report })),
+      reports: (Object.keys(BUILDERS) as ReportType[])
+        .filter((report) => principal.roleSlug !== 'employee' || report === 'redemptions')
+        .map((report) => ({ report })),
       audit: true,
     });
   }
@@ -1646,6 +1660,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   if ('error' in auth) return deny(res, auth);
 
   let window: { from: string | null; to: string | null };
+  if (auth.roleSlug === 'employee' && report !== 'redemptions')
+    return fail(res, 'FORBIDDEN', 'Employees may only access their handled redemption report', 403);
   try {
     window = parseReportWindow(input.from, input.to);
   } catch {

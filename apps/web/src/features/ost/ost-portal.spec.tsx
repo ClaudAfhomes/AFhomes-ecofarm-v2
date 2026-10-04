@@ -13,6 +13,7 @@ import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
 import { CustomerLoginForm } from '../customer/CustomerLoginForm';
 import { Navigate, Route, Routes } from 'react-router';
+import { OstGuard } from '../../app/OstGuard';
 
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
@@ -181,10 +182,29 @@ describe('OST dashboard guard', () => {
     expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
   });
 
-  it('sends a signed-in non-OST identity back to OST login', async () => {
+  it('replaces a signed-in customer’s wrong OST entry with the customer dashboard', async () => {
     portalsBody.current = { staff: null, customer: { status: 'active' }, ost: null };
-    render('/ost/dashboard', { authUserId: 'c', email: 'member@example.invalid' });
-    expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/ost/dashboard"
+          element={
+            <OstGuard>
+              <p>OST private content</p>
+            </OstGuard>
+          }
+        />
+        <Route path="/customer" element={<h1>Authorized customer dashboard</h1>} />
+      </Routes>,
+      {
+        route: '/ost/dashboard',
+        sessionUser: { authUserId: 'c', email: 'member@example.invalid' },
+      },
+    );
+    expect(
+      await screen.findByRole('heading', { name: 'Authorized customer dashboard' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('OST private content')).not.toBeInTheDocument();
   });
 });
 

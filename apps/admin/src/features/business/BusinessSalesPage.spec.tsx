@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Sale } from '@jad/contracts';
 
@@ -48,6 +48,14 @@ const sale: Sale = {
 afterEach(() => vi.clearAllMocks());
 
 describe('Card Sales states', () => {
+  it('opens payment history in a dedicated dialog rather than appending it below sales', async () => {
+    mockedGetSales.mockResolvedValue([sale]);
+    renderWithProviders(<BusinessSalesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Payments' }));
+    expect(screen.getByRole('dialog', { name: 'Payment history' })).toHaveTextContent(
+      sale.saleNumber,
+    );
+  });
   it('shows loading while the API request is pending', () => {
     mockedGetSales.mockReturnValue(new Promise(() => {}));
     renderWithProviders(<BusinessSalesPage />);

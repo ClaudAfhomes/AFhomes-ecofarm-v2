@@ -264,7 +264,7 @@ export type ValidatedImportRow = {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FORMULA_RE = /^[=+\-@\t\r]/;
-const MEMBERSHIP_NUMBER_RE = /^MBS-\d{6}$/;
+const MEMBERSHIP_NUMBER_RE = /^MBS-(?:\d{6}|[0-9A-F]{8}(?:-[0-9A-F]{8}){3})$/;
 
 const isRealDate = (value: string) => {
   if (!DATE_RE.test(value)) return false;
@@ -473,7 +473,7 @@ export function validateImportRow(
   let membershipId: string | null = null;
   const suppliedMemberNo = nonEmpty(get('membership_number')) ? get('membership_number') : null;
   if (suppliedMemberNo && !MEMBERSHIP_NUMBER_RE.test(suppliedMemberNo))
-    err('membership_number', 'Use the MBS-000000 format or leave blank to generate');
+    err('membership_number', 'Use an existing MBS member number or leave blank to generate');
   const matchedMember = suppliedMemberNo ? ctx.membershipByNumber.get(suppliedMemberNo) : undefined;
   const matchedCustomerNo = nonEmpty(get('customer_number'))
     ? ctx.customerByNumber.get(get('customer_number'))

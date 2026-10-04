@@ -89,6 +89,7 @@ function install(
       { fn: 'next_customer_number', result: [{ customer_number: `CUS-${900000 + counter}` }] },
       { fn: 'next_sale_number', result: [{ sale_number: `SALE-${900000 + counter}` }] },
       { fn: 'record_card_payment', result: `pay-${counter}` },
+      { fn: 'record_card_payment_once', result: `pay-${counter}` },
       {
         fn: 'verify_card_payment',
         result: [
@@ -984,6 +985,7 @@ describe('payments', () => {
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
         amount: '10000.00',
         paymentType: 'down_payment',
         method: 'bank_transfer',
@@ -991,7 +993,7 @@ describe('payments', () => {
       },
     });
     expect(state.status).toBe(201);
-    const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment');
+    const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment_once');
     expect(rpc?.arg).toMatchObject({
       p_sale_id: SALE.unpaid,
       p_amount: '10000.00',
@@ -1006,6 +1008,7 @@ describe('payments', () => {
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
         amount: '10000.00',
         paymentType: 'down_payment',
         method: 'cash',
@@ -1039,6 +1042,7 @@ describe('payments', () => {
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
       body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
         amount: '100.00',
         paymentType: 'installment',
         method: 'cash',
@@ -1056,7 +1060,12 @@ describe('payments', () => {
       method: 'POST',
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.viewer,
-      body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
+      body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
+        amount: '100.00',
+        paymentType: 'installment',
+        method: 'cash',
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -1109,13 +1118,18 @@ describe('payments', () => {
 
   it('surfaces the RPC refusal when a sale is cancelled', async () => {
     install({
-      rpcErrors: { record_card_payment: { message: 'SALE_NOT_ACCEPTING_PAYMENTS:cancelled' } },
+      rpcErrors: { record_card_payment_once: { message: 'SALE_NOT_ACCEPTING_PAYMENTS:cancelled' } },
     });
     const state = await call('sales', {
       method: 'POST',
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
-      body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
+      body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
+        amount: '100.00',
+        paymentType: 'installment',
+        method: 'cash',
+      },
     });
     expect(state.status).toBe(409);
   });

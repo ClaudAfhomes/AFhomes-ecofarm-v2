@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AF Homes Phase 12 - identity document intake, OCR-assisted extraction, and
  * human-confirmed review.
  *
@@ -14,6 +14,7 @@
  *    never in a response, and ID numbers are masked on every read.
  */
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 
 import {
   currentDocumentQuerySchema,
@@ -69,6 +70,11 @@ const MODULE_FOR_SUBJECT: Record<Subject, 'sales.id_documents' | 'network.ost_re
 const SELLER_ROLES = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const;
 
 type DocRow = Record<string, unknown>;
+const reviewResultSchema = z.object({
+  document: z.record(z.string(), z.unknown()),
+  isCurrent: z.boolean(),
+  possibleDuplicate: z.boolean().nullable(),
+});
 
 const extractedOf = (
   row: DocRow,
@@ -210,7 +216,7 @@ async function currentDocumentsForSubjects(
   return result;
 }
 
-async function currentIdForSubject(
+export async function currentIdForSubject(
   db: Db,
   auth: AfHomesPrincipal,
   subjectType: Subject,
@@ -285,7 +291,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           size_bytes: input.sizeBytes,
           sha256: PENDING_SHA256,
           extracted_data: {},
-          reviewed_data: {},
+          reviewed_data: input.idType ? { fields: { idType: input.idType } } : {},
           ocr_status: 'not_requested',
           verification_status: 'pending_review',
           uploaded_by: auth.userId,
@@ -679,69 +685,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (Object.keys(fields).length === 0)
         return fail(res, 'VALIDATION_ERROR', 'At least one reviewable field is required', 400);
 
-      const now = new Date().toISOString();
-      const { data: updated, error: updateError } = await db
-        .from('identity_documents')
-        .update({
-          verification_status: parsed.data.decision,
-          reviewed_data: {
-            fields,
-            confirmedAt: now,
-            confirmedBy: auth.userId,
-            notes: parsed.data.notes ?? null,
-          },
-          reviewed_by: auth.userId,
-          reviewed_at: now,
-        })
-        .eq('id', doc.id)
-        .select('*')
-        .single();
-      if (updateError) throw updateError;
-
-      // Duplicate ID policy is UNRESOLVED: detect and flag only, never reject.
-      // No unique constraint exists on government ID numbers by design.
-      let possibleDuplicate: boolean | null = null;
-      if (parsed.data.decision === 'confirmed') {
-        const candidate = idNumberFromFields(fields);
-        if (candidate) {
-          const { data: clash } = await db
-            .from('customers')
-            .select('id')
-            .eq('government_id_number', candidate)
-            .limit(1);
-          possibleDuplicate = ((clash ?? []) as unknown[]).length > 0;
-        } else {
-          possibleDuplicate = false;
-        }
-      }
-      const action =
-        parsed.data.decision === 'confirmed'
-          ? 'IDENTITY_DOCUMENT_CONFIRMED'
-          : 'IDENTITY_DOCUMENT_REJECTED';
-      await audit(
-        db,
-        auth.userId,
-        action,
-        'identity_document',
-        String(doc.id),
-        { verificationStatus: String(doc.verification_status) },
-        {
-          documentId: String(doc.id),
-          decision: parsed.data.decision,
-          possibleDuplicate,
-        },
-      );
-      // Recomputed AFTER the decision: rejecting the current document moves
-      // currentness to the next eligible one; confirming an older one never
-      // steals it. The response and any later read use the same rule.
-      const confirmSubjectId = String(doc.customer_id ?? doc.ost_application_id ?? '');
-      const confirmCurrentId = await currentIdForSubject(db, auth, subjectType, confirmSubjectId);
-      const body = toDocument(
-        updated as DocRow,
-        confirmSubjectId,
-        (updated as DocRow).id === confirmCurrentId,
-      );
-      return res.status(200).json({ ...body, possibleDuplicate });
+      const { data, error: reviewError } = await db.rpc('review_identity_document', {
+        p_document_id: doc.id,
+        p_actor_id: auth.userId,
+        p_decision: parsed.data.decision,
+        p_fields: fields,
+        p_notes: parsed.data.notes ?? null,
+        p_id_number: idNumberFromFields(fields),
+      });
+      if (reviewError) throw reviewError;
+      const review = reviewResultSchema.parse(data);
+      const reviewed = review.document;
+      const subjectId = String(reviewed.customer_id ?? reviewed.ost_application_id ?? '');
+      const body = toDocument(reviewed, subjectId, review.isCurrent);
+      return res.status(200).json({ ...body, possibleDuplicate: review.possibleDuplicate });
     }
 
     return fail(res, 'NOT_FOUND', 'Document endpoint not found', 404);

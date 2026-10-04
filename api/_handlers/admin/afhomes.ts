@@ -831,7 +831,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const id = roleMatch[1]!;
       const { data: before } = await db.from('roles').select('*').eq('id', id).maybeSingle();
       if (!before) return fail(res, 'NOT_FOUND', 'Role not found', 404);
-      if (before.is_system) return fail(res, 'FORBIDDEN', 'System roles are protected', 403);
+      if (before.is_system) {
+        const title = z
+          .object({ name: z.string().trim().min(1).max(100) })
+          .strict()
+          .safeParse(req.body);
+        if (
+          auth.roleSlug !== 'super_admin' ||
+          ['admin', 'super_admin', 'customer'].includes(String(before.slug)) ||
+          !title.success
+        )
+          return fail(
+            res,
+            'FORBIDDEN',
+            'System access and protected role titles cannot be changed',
+            403,
+          );
+        const { error } = await db
+          .from('roles')
+          .update({ name: title.data.name, updated_at: new Date().toISOString() })
+          .eq('id', id);
+        if (error) throw error;
+        await audit(
+          db,
+          auth.userId,
+          'ROLE_DISPLAY_TITLE_UPDATED',
+          'role',
+          id,
+          { name: before.name },
+          { name: title.data.name },
+        );
+        return res
+          .status(200)
+          .json((await roleCatalog(db)).find((r: { id: string }) => r.id === id));
+      }
       if (id === auth.roleId)
         return fail(res, 'FORBIDDEN', 'You cannot edit your own role permissions', 403);
       const parsed = createAfHomesRoleSchema.partial().safeParse(req.body);

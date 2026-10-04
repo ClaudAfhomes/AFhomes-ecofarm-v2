@@ -98,7 +98,7 @@ export const isPlausibleIdentifier = (value: string): boolean =>
 export const CARD_QR_PREFIX = 'AFHOMES';
 
 /** Membership numbers are minted as `MBS-NNNNNN` (uppercase) at activation. */
-const MEMBERSHIP_NUMBER_RE = /^MBS-[A-Z0-9-]{1,32}$/;
+const MEMBERSHIP_NUMBER_RE = /^MBS-[A-Z0-9-]{1,64}$/;
 
 /**
  * The QR string a digital VIP card encodes for a membership. Stable,
@@ -148,10 +148,10 @@ export function extractMembershipNumber(raw: string): string | null {
 export async function resolveMembershipByIdentifier(
   db: {
     from: (table: string) => {
-      select: (
-        columns: string,
-      ) => {
-        or: (filter: string) => { limit: (n: number) => Promise<{ data: unknown; error: unknown }> };
+      select: (columns: string) => {
+        or: (filter: string) => {
+          limit: (n: number) => Promise<{ data: unknown; error: unknown }>;
+        };
         eq: (
           col: string,
           val: unknown,
@@ -219,7 +219,10 @@ async function toResolvedMembership(
     from: (table: string) => {
       select: (columns: string) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        eq: (col: string, val: unknown) => { maybeSingle: () => Promise<{ data: unknown; error: unknown }> };
+        eq: (
+          col: string,
+          val: unknown,
+        ) => { maybeSingle: () => Promise<{ data: unknown; error: unknown }> };
       };
     };
   },
@@ -264,8 +267,7 @@ async function toResolvedMembership(
 export function redemptionBlocker(resolved: ResolvedMembership): string | null {
   if (resolved.customer_status !== 'active')
     return `The customer account is ${resolved.customer_status}.`;
-  if (resolved.status !== 'active')
-    return `The membership is ${resolved.status}.`;
+  if (resolved.status !== 'active') return `The membership is ${resolved.status}.`;
   if (resolved.expires_at && new Date(resolved.expires_at).valueOf() <= Date.now())
     return 'The membership has expired.';
   return null;

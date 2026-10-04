@@ -219,6 +219,27 @@ async function getDetail(id: string, token?: string) {
 beforeEach(() => install());
 
 describe('employee personal service history', () => {
+  it.each(['memberships', 'sales', 'payments'])(
+    'denies employee %s reports even with a broad module grant',
+    async (report) => {
+      const db = install();
+      for (const key of [
+        'finance.card_activation',
+        'sales.card_sales',
+        'finance.payment_verification',
+      ])
+        db.rows('role_permissions').push({
+          role_id: ROLE2.employee,
+          module_id: moduleId(key),
+          can_view: true,
+          can_create: false,
+          can_update: false,
+          can_delete: false,
+        });
+      const state = await getReport(report, EMP2_TOKEN, { format: 'csv' });
+      expect(state.status).toBe(403);
+    },
+  );
   it('1. returns 200 for the employee report endpoint', async () => {
     const state = await getReport('redemptions', TOKEN2.hr);
     expect(state.status).toBe(200);

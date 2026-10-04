@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+﻿import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
@@ -181,6 +181,7 @@ describe('application private ID intake and review', () => {
     renderWithProviders(<CustomerApplicationEditorPage />);
     await screen.findByRole('option', { name: 'QA Customer' });
     fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
+    fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
     fireEvent.change(screen.getByLabelText('Upload ID'), {
       target: { files: [new File(['synthetic'], 'qa.png', { type: 'image/png' })] },
     });
@@ -250,6 +251,21 @@ describe('application private ID intake and review', () => {
     expect(screen.getByLabelText('First name')).toHaveValue('Anne-Marie');
     expect(createCustomerApplication).not.toHaveBeenCalled();
   });
+  it('preserves deliberate edits made while OCR is still running', async () => {
+    await setup();
+    let complete!: (value: IdentityDocument) => void;
+    vi.mocked(runDocumentOcr).mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await waitFor(() => expect(runDocumentOcr).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Manual' } });
+    complete(document('completed'));
+    await screen.findByText(/OCR completed/);
+    expect(screen.getByLabelText('First name')).toHaveValue('Manual');
+  });
   it('shows existing customer documents as current while a new selection stays pending', async () => {
     await setup(true);
     expect(await screen.findByText(/Current ID:.*qa.png/)).toBeInTheDocument();
@@ -265,17 +281,17 @@ describe('application private ID intake and review', () => {
   const uploadCurrent = async () => {
     await setup();
     fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
-    await screen.findByText('Current ID: qa.png');
+    await screen.findByText(/Current ID: qa\.png/);
   };
   it('keeps the current ID authoritative while replacement is pending and cancelled', async () => {
     await uploadCurrent();
     selectReplacement();
     expect(screen.getByText(/replacement.png.*Pending replacement/)).toBeInTheDocument();
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel replacement' }));
     expect(screen.queryByText(/Pending replacement/)).not.toBeInTheDocument();
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(requestUploadGrant).toHaveBeenCalledTimes(1);
   });
   it('switches current ID only after replacement bytes persist and locks both pickers', async () => {
@@ -293,7 +309,7 @@ describe('application private ID intake and review', () => {
     expect(screen.getByLabelText('Upload ID')).toBeDisabled();
     expect(screen.getByLabelText('Scan / Take Photo')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel replacement' })).toBeDisabled();
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
     finish();
     await screen.findByText('Current ID: replacement.png');
@@ -310,7 +326,7 @@ describe('application private ID intake and review', () => {
       else vi.mocked(putUploadBytes).mockRejectedValueOnce(new Error('Bytes failed'));
       fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
       await screen.findByText(stage === 'grant' ? 'Grant failed' : 'Bytes failed');
-      expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+      expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
       expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
       expect(screen.getByText(/Pending replacement/)).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Review identity document' })).toHaveAttribute(
@@ -335,7 +351,7 @@ describe('application private ID intake and review', () => {
     expect(screen.getByLabelText('Scan / Take Photo')).toBeDisabled();
     fail(new Error('OCR unavailable'));
     await screen.findByText('OCR unavailable');
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.getByLabelText('Upload ID')).toBeEnabled();
   });
   it('reopens with the old ID current and incomplete replacement metadata explicitly pending', async () => {
@@ -374,7 +390,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
     await screen.findByText('Verification could not be saved');
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
     expect(screen.getByText(/Pending replacement/)).toBeInTheDocument();
   });
@@ -390,7 +406,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
     await waitFor(() => expect(completeDocumentUpload).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('Current ID: qa.png')).toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.getByLabelText('Upload ID')).toBeDisabled();
     vi.mocked(getDocuments).mockResolvedValue([
       { ...document('completed'), originalFilename: 'replacement.png' },
@@ -409,7 +425,7 @@ describe('application private ID intake and review', () => {
     await screen.findByRole('option', { name: 'QA Customer' });
     fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
     fireEvent.click(await screen.findByRole('button', { name: 'Verify saved upload' }));
-    await screen.findByText('Current ID: qa.png');
+    await screen.findByText(/Current ID: qa\.png/);
     expect(completeDocumentUpload).toHaveBeenCalledWith(documentId);
     expect(requestUploadGrant).not.toHaveBeenCalled();
     expect(putUploadBytes).not.toHaveBeenCalled();
@@ -535,7 +551,7 @@ describe('application private ID intake and review', () => {
     renderWithProviders(<CustomerApplicationEditorPage />);
     await screen.findByRole('option', { name: 'QA Customer' });
     fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
-    await screen.findByText('Current ID: qa.png');
+    await screen.findByText(/Current ID: qa\.png/);
     expect(screen.getByText(/Retained ID:.*previous.png/)).toBeInTheDocument();
     vi.mocked(runDocumentOcr).mockResolvedValue(document('completed'));
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
@@ -560,8 +576,8 @@ describe('application private ID intake and review', () => {
     renderWithProviders(<CustomerApplicationEditorPage />);
     await screen.findByRole('option', { name: 'QA Customer' });
     fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
-    await screen.findByText('Current ID: older.png');
-    expect(screen.queryByText('Current ID: rejected.png')).not.toBeInTheDocument();
+    await screen.findByText(/Current ID: older\.png/);
+    expect(screen.queryByText(/Current ID: rejected\.png/)).not.toBeInTheDocument();
     expect(screen.getByText(/Retained ID:.*rejected.png/)).toBeInTheDocument();
   });
   it('does not optimistically promote a completed upload when the server keeps another current', async () => {
@@ -576,8 +592,8 @@ describe('application private ID intake and review', () => {
       originalFilename: 'other-current.png',
     });
     fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
-    await screen.findByText('Current ID: other-current.png');
-    expect(screen.queryByText('Current ID: qa.png')).not.toBeInTheDocument();
+    await screen.findByText(/Current ID: other-current\.png/);
+    expect(screen.queryByText(/Current ID: qa\.png/)).not.toBeInTheDocument();
   });
 });
 

@@ -10,6 +10,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+vi.mock('../../lib/portals', () => ({
+  getAuthPortals: vi.fn(async () => ({ staff: null, customer: { status: 'active' }, ost: null })),
+}));
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -63,11 +66,9 @@ describe('homepage member login', () => {
       'href',
       '/customer/activate',
     );
-    expect(scope.getByRole('link', { name: /staff login/i })).toHaveAttribute(
-      'href',
-      '/staff/login',
-    );
-    expect(scope.getByRole('link', { name: /ost login/i })).toHaveAttribute('href', '/ost/login');
+    expect(
+      scope.queryByRole('link', { name: /staff login|ost login|admin login/i }),
+    ).not.toBeInTheDocument();
     expect(main.textContent).not.toMatch(/administration login|administration console/i);
   });
 
@@ -80,10 +81,9 @@ describe('homepage member login', () => {
     expect(
       await within(main).findByRole('heading', { name: 'You are signed in', level: 2 }),
     ).toBeInTheDocument();
-    expect(within(main).getByRole('link', { name: /go to your dashboard/i })).toHaveAttribute(
-      'href',
-      '/customer',
-    );
+    expect(
+      await within(main).findByRole('link', { name: /go to your dashboard/i }),
+    ).toHaveAttribute('href', '/customer');
     expect(within(main).queryByLabelText('Password')).not.toBeInTheDocument();
   });
 });

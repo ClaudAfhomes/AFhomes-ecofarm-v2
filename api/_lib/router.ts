@@ -60,7 +60,11 @@ const BUSINESS_FAMILIES = [
     load: () => import('../_handlers/card-categories.js'),
   },
   { prefix: 'customers', module: 'customers', load: () => import('../_handlers/customers.js') },
-  { prefix: 'official-forms', module: 'forms', load: () => import('../_handlers/official-forms.js') },
+  {
+    prefix: 'official-forms',
+    module: 'forms',
+    load: () => import('../_handlers/official-forms.js'),
+  },
   {
     prefix: 'customer-imports',
     module: 'customer-imports',
@@ -198,6 +202,7 @@ export async function routeRequest(
   req: VercelRequest & { url?: string },
   res: VercelResponse,
 ): Promise<boolean> {
+  if (req.headers.authorization) res.setHeader('Cache-Control', 'private, no-store');
   const pathname = resolveRequestUrl(req).split('?')[0] ?? '/';
   const match = selectHandler(pathname, req.query);
   if (!match) return false;

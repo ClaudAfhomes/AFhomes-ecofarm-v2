@@ -54,10 +54,7 @@ function CustomerShell() {
   if (isUnauthorized(profile.error)) {
     return (
       <div className={styles.centered}>
-        <ErrorState
-          title="Your session has expired"
-          message="Please sign in again to continue."
-        />
+        <ErrorState title="Your session has expired" message="Please sign in again to continue." />
         <div className={styles.centeredActions}>
           <Button onClick={() => void signOut()} variant="secondary">
             Sign out
@@ -71,11 +68,11 @@ function CustomerShell() {
     return (
       <div className={styles.centered}>
         <ErrorState
-          title="This is not a customer account"
-          message="You are signed in, but this sign-in is not linked to an AF Homes Ecofarm customer record."
+          title="Customer access unavailable"
+          message="Your customer access could not be verified. Please sign out and contact AF Homes if this continues."
         />
         <div className={styles.centeredActions}>
-          <a href="/staff/login">Go to Staff Login</a>
+          <Button onClick={() => void signOut()}>Sign out</Button>
         </div>
       </div>
     );
@@ -84,7 +81,10 @@ function CustomerShell() {
   if (profile.isError || !profile.data) {
     return (
       <div className={styles.centered}>
-        <ErrorState title="We could not load your account" message="Please try again in a moment." />
+        <ErrorState
+          title="We could not load your account"
+          message="Please try again in a moment."
+        />
       </div>
     );
   }
@@ -107,8 +107,8 @@ function CustomerShell() {
 
       {restricted && (
         <div className={styles.restricted} role="alert">
-          <strong>Your account is {customer.status}.</strong> Your card and points are not
-          available while this is in effect. Contact AF Homes Ecofarm to restore access.
+          <strong>Your account is {customer.status}.</strong> Your card and points are not available
+          while this is in effect. Contact AF Homes Ecofarm to restore access.
         </div>
       )}
 

@@ -105,13 +105,16 @@ const PAYMENTS = [
 
 type RouteHandler = () => { status: number; body: unknown };
 const routes = new Map<string, RouteHandler>();
-const ok = (body: unknown): RouteHandler => () => ({ status: 200, body });
+const ok =
+  (body: unknown): RouteHandler =>
+  () => ({ status: 200, body });
 
 const SIGNED_IN = { authUserId: 'ffffffff-0000-4000-8000-000000000001', email: CUSTOMER.email };
 
 function install() {
   routes.clear();
   routes.set('/customer', ok(CUSTOMER));
+  routes.set('/auth/portals', ok({ staff: null, customer: { status: 'active' }, ost: null }));
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
   // The ledger carries a redemption entry so the redemptions screen has a row.
@@ -129,13 +132,19 @@ function mockFetch() {
       .split('?')[0]!;
     const handler = routes.get(path);
     if (!handler) {
-      return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: `unstubbed ${path}` } }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ error: { code: 'NOT_FOUND', message: `unstubbed ${path}` } }),
+        {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
     }
     const { status, body } = handler();
-    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
   });
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@jad/ui';
 import type { AfHomesRole } from '@jad/contracts';
 import { createAfHomesRole, getAfHomesRoles, updateAfHomesRole } from './services';
 import { AfHomesRoleFormDialog, type RoleFormInput } from './AfHomesRoleFormDialog';
@@ -14,12 +14,13 @@ export function AfHomesRolesPage() {
   const mutation = useMutation({
     mutationFn: async (input: RoleFormInput) =>
       editing
-        ? updateAfHomesRole(editing.id, input)
+        ? updateAfHomesRole(editing.id, editing.isSystem ? { name: input.name } : input)
         : createAfHomesRole({ ...input, description: input.description || undefined }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
       setCreating(false);
       setEditing(null);
+      notifySuccess({ title: 'Role updated', message: 'Role changes saved successfully.' });
     },
   });
   return (

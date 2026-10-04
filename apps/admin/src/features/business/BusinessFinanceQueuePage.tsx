@@ -1,6 +1,8 @@
 import styles from './WorkflowCards.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useState } from 'react';
+import { useSingleFlight } from '../../lib/useSingleFlight';
+import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { paymentSchemeLabel, recordPaymentSchema } from '@jad/contracts';
@@ -67,6 +69,9 @@ export function BusinessFinanceQueuePage() {
     await client.invalidateQueries({ queryKey: ['business', 'queue'] });
     // Payment reports (verified/pending/rejected totals) stay fresh too.
     await client.invalidateQueries({ queryKey: ['reports'] });
+    await client.invalidateQueries({ queryKey: ['business', 'sale-summary'] });
+    await client.invalidateQueries({ queryKey: ['business', 'sale-payments'] });
+    await client.invalidateQueries({ queryKey: ['business', 'sales'] });
   };
 
   return (
@@ -176,7 +181,7 @@ export function BusinessFinanceQueuePage() {
   );
 }
 
-function RecordPaymentDialog({
+export function RecordPaymentDialog({
   saleId,
   onDone,
   onClose,
@@ -190,6 +195,8 @@ function RecordPaymentDialog({
   const [type, setType] = useState<PaymentType>('installment');
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
+  const runPayment = useSingleFlight<Awaited<ReturnType<typeof recordPayment>>>();
+  const paymentRequest = useMutationRequest();
   const paymentInput = { amount, paymentType: type, method, ...(reference ? { reference } : {}) };
   const amountValid = recordPaymentSchema.shape.amount.safeParse(amount).success;
   const paymentValid = recordPaymentSchema.safeParse(paymentInput).success;
@@ -200,8 +207,18 @@ function RecordPaymentDialog({
   });
 
   const save = useMutation({
-    mutationFn: () => recordPayment(saleId, recordPaymentSchema.parse(paymentInput)),
-    onSuccess: onDone,
+    mutationFn: () =>
+      runPayment(() => {
+        const input = recordPaymentSchema.parse(paymentInput);
+        return recordPayment(saleId, {
+          ...input,
+          requestId: paymentRequest.forPayload({ saleId, ...input }),
+        });
+      }),
+    onSuccess: async () => {
+      await onDone();
+      paymentRequest.complete();
+    },
   });
 
   return (
@@ -214,8 +231,11 @@ function RecordPaymentDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!paymentValid || save.isPending} onClick={() => save.mutate()}>
-            Record
+          <Button
+            disabled={!paymentValid || save.isPending || save.isSuccess}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Recording…' : 'Record'}
           </Button>
         </>
       }
@@ -262,8 +282,12 @@ function RecordPaymentDialog({
               </dd>
             </div>
             <div>
-              <dt>Verified so far</dt>
+              <dt>Verified paid</dt>
               <dd>{formatMoney(summary.data.verifiedTotal)}</dd>
+            </div>
+            <div>
+              <dt>Remaining balance</dt>
+              <dd>{formatMoney(summary.data.remainingBalance)}</dd>
             </div>
           </dl>
         ) : null}
@@ -297,16 +321,25 @@ function RecordPaymentDialog({
           <input value={method} onChange={(e) => setMethod(e.target.value)} />
         </label>
         <label>
-          Reference (must be unique for this sale)
-          <input value={reference} onChange={(e) => setReference(e.target.value)} />
+          Payment reference
+          <input
+            aria-describedby="payment-reference-help"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+          />
         </label>
+        <p id="payment-reference-help">
+          Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya
+          transaction, deposit slip, or official receipt.
+        </p>
+        {save.isSuccess ? <p role="status">Payment recorded successfully.</p> : null}
         {save.error ? <p role="alert">{save.error.message}</p> : null}
       </div>
     </Dialog>
   );
 }
 
-function VerifyDialog({
+export function VerifyDialog({
   saleId,
   onDone,
   onClose,
@@ -343,6 +376,7 @@ function VerifyDialog({
       footer={<Button onClick={onClose}>Done</Button>}
     >
       <div style={{ display: 'grid', gap: 12 }}>
+        {decide.isSuccess ? <p role="status">Payment {decide.variables?.decision}.</p> : null}
         {pending.length === 0 ? (
           <p>No payment is awaiting verification.</p>
         ) : (
@@ -358,7 +392,7 @@ function VerifyDialog({
                   onClick={() => decide.mutate({ paymentId: payment.id, decision: 'verified' })}
                   disabled={decide.isPending}
                 >
-                  Verify
+                  {decide.isPending ? 'Verifying…' : 'Verify'}
                 </Button>
                 <Button
                   variant="danger"

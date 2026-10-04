@@ -42,6 +42,8 @@ export type Payment = z.infer<typeof paymentSchema>;
  * computed server-side from the payment rows.
  */
 export const recordPaymentSchema = z.object({
+  /** Stable UUID for one recording action; mandatory when reference is absent. */
+  requestId: z.string().uuid().optional(),
   amount: exactDecimalStringSchema.refine((v) => !v.startsWith('0') || /^0\.0[1-9]/.test(v), {
     message: 'amount must be greater than zero',
   }),
@@ -205,8 +207,14 @@ export const commissionRuleSchema = z.object({
   targetName: z.string().nullable(),
   rate: exactDecimalRateSchema,
   effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-  accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  effectiveUntil: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+  accreditedOnOrAfter: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
   isActive: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -217,8 +225,14 @@ export const createCommissionRuleSchema = z
     targetId: z.string().uuid(),
     rate: exactDecimalRateSchema,
     effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    effectiveUntil: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    accreditedOnOrAfter: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   })
   .refine((v) => !v.effectiveUntil || v.effectiveUntil >= v.effectiveFrom, {
     message: 'Effective until cannot precede effective from',
@@ -227,9 +241,20 @@ export const createCommissionRuleSchema = z
 export const updateCommissionRuleSchema = z
   .object({
     rate: exactDecimalRateSchema.optional(),
-    effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    effectiveUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-    accreditedOnOrAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    effectiveFrom: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    effectiveUntil: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .nullable()
+      .optional(),
+    accreditedOnOrAfter: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .nullable()
+      .optional(),
     isActive: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });

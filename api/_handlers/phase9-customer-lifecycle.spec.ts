@@ -78,6 +78,7 @@ function install(
       { fn: 'next_customer_number', result: [{ customer_number: `CUS-${910000 + counter}` }] },
       { fn: 'next_sale_number', result: [{ sale_number: `SALE-${910000 + counter}` }] },
       { fn: 'record_card_payment', result: `pay-${counter}` },
+      { fn: 'record_card_payment_once', result: `pay-${counter}` },
       {
         fn: 'verify_card_payment',
         result: [
@@ -307,10 +308,15 @@ describe('payment recording and verification', () => {
       method: 'POST',
       path: `${SALE.unpaid}/payments`,
       token: TOKEN2.finance,
-      body: { amount: '10000.00', paymentType: 'down_payment', method: 'cash' },
+      body: {
+        requestId: '99999999-9999-4999-8999-999999999999',
+        amount: '10000.00',
+        paymentType: 'down_payment',
+        method: 'cash',
+      },
     });
     expect(state.status).toBe(201);
-    const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment');
+    const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment_once');
     expect(rpc?.arg).toMatchObject({ p_sale_id: SALE.unpaid, p_amount: '10000.00' });
   });
 
