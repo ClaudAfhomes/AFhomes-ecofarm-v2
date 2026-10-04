@@ -1,6 +1,10 @@
 import type { AfHomesAction, AfHomesModuleKey, AfHomesPermission } from '@jad/contracts';
 
-import { verifiedAuthenticationMethods, verifySessionToken } from './auth-verify.js';
+import {
+  verifiedAuthenticationMethods,
+  verifySessionToken,
+  verifiedAssuranceLevel,
+} from './auth-verify.js';
 import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest } from './http.js';
 import { anonClient, serviceClient } from './rest.js';
@@ -20,6 +24,7 @@ export type AfHomesPrincipal = {
   roleName: string;
   mustChangePassword: boolean;
   permissions: AfHomesPermission[];
+  mfaRequired?: boolean;
 };
 
 export type StaffAccountSetupCandidate = {
@@ -286,6 +291,10 @@ export async function resolveAfHomesPrincipal(
     roleName: role.name,
     mustChangePassword: staff.must_change_password === true,
     permissions,
+    mfaRequired:
+      process.env.AFHOMES_REQUIRE_ADMIN_MFA === 'true' &&
+      ['admin', 'super_admin'].includes(role.slug) &&
+      (await verifiedAssuranceLevel(anon.auth, token, user.id)) !== 'aal2',
   };
 }
 
@@ -296,6 +305,10 @@ export async function authorizeAfHomes(
 ) {
   const principal = await resolveAfHomesPrincipal(req);
   if ('error' in principal) return principal;
+  if (principal.mfaRequired)
+    return {
+      error: toErrorEnvelope('FORBIDDEN', 'Complete authenticator verification to continue.', 403),
+    };
   // JAD parity: an account still running on its administrator-set temporary
   // password may only use the self-service session endpoints (GET/PATCH
   // session, POST session/password), which resolve the principal directly

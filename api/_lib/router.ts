@@ -53,6 +53,11 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * `route-coverage` can still prove every handler is reachable.
  */
 const BUSINESS_FAMILIES = [
+  {
+    prefix: 'ost-accreditation',
+    module: 'ost-accreditation',
+    load: () => import('../_handlers/ost-accreditation.js'),
+  },
   { prefix: 'card-products', module: 'cards', load: () => import('../_handlers/cards.js') },
   {
     prefix: 'card-categories',

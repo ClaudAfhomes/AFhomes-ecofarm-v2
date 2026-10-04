@@ -104,6 +104,23 @@ const newCustomerBody = {
   referralCode: 'WALK-IN',
 };
 
+const { referralCode, ...officialIdentity } = applicant;
+const officialApplicant = {
+  requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2',
+  referralCode,
+  identity: officialIdentity,
+  form: {
+    dateApplied: '2026-01-01',
+    programCategory: 'non_vip',
+    sex: 'male',
+    civilStatus: 'single',
+    governmentIdType: 'QA TEST',
+    governmentIdNumber: 'SYNTHETIC-ID',
+    applicantSignatureStatus: 'pending',
+    referrerSignatureStatus: 'pending',
+  },
+};
+
 function baseTables(): Record<string, Row[]> {
   return {
     modules: [
@@ -120,18 +137,88 @@ function baseTables(): Record<string, Row[]> {
       { id: 'r-fin', slug: 'finance', name: 'Finance', is_active: true },
     ],
     role_permissions: [
-      { role_id: 'r-sm', module_id: 'm-reg', can_view: true, can_create: false, can_update: false, can_delete: false },
-      { role_id: 'r-sm', module_id: 'm-ref', can_view: true, can_create: true, can_update: false, can_delete: false },
-      { role_id: 'r-sm', module_id: 'm-cust', can_view: true, can_create: true, can_update: true, can_delete: false },
-      { role_id: 'r-vd', module_id: 'm-ref', can_view: true, can_create: true, can_update: false, can_delete: false },
-      { role_id: 'r-vd', module_id: 'm-cust', can_view: true, can_create: true, can_update: true, can_delete: false },
-      { role_id: 'r-admin', module_id: 'm-reg', can_view: true, can_create: false, can_update: true, can_delete: false },
-      { role_id: 'r-admin', module_id: 'm-ref', can_view: true, can_create: true, can_update: false, can_delete: false },
-      { role_id: 'r-admin', module_id: 'm-cust', can_view: true, can_create: true, can_update: true, can_delete: false },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-reg',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-ref',
+        can_view: true,
+        can_create: true,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-cust',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-vd',
+        module_id: 'm-ref',
+        can_view: true,
+        can_create: true,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-vd',
+        module_id: 'm-cust',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-reg',
+        can_view: true,
+        can_create: false,
+        can_update: true,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-ref',
+        can_view: true,
+        can_create: true,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-cust',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: false,
+      },
       // Finance is deliberately NOT a seller, but holds the customer-create
       // grant here to prove the referrer rule refuses with its own message.
-      { role_id: 'r-fin', module_id: 'm-cust', can_view: true, can_create: true, can_update: false, can_delete: false },
-      { role_id: 'r-emp', module_id: 'm-red', can_view: true, can_create: true, can_update: false, can_delete: false },
+      {
+        role_id: 'r-fin',
+        module_id: 'm-cust',
+        can_view: true,
+        can_create: true,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-emp',
+        module_id: 'm-red',
+        can_view: true,
+        can_create: true,
+        can_update: false,
+        can_delete: false,
+      },
     ],
     staff_users: [
       { id: SM_ID, email: 'sm@afhomes.test', full_name: 'Sam Manager', status: 'active' },
@@ -216,7 +303,13 @@ function baseTables(): Record<string, Row[]> {
       },
     ],
     points_accounts: [
-      { id: ACCOUNT_ID, membership_id: MEMBERSHIP_ID, balance: 60000, lifetime_allocated: 60000, lifetime_redeemed: 0 },
+      {
+        id: ACCOUNT_ID,
+        membership_id: MEMBERSHIP_ID,
+        balance: 60000,
+        lifetime_allocated: 60000,
+        lifetime_redeemed: 0,
+      },
     ],
     customer_onboarding_tokens: [],
     audit_events: [],
@@ -233,9 +326,16 @@ function install() {
       [ADMIN_TOKEN]: { id: ADMIN_ID, email: 'admin@afhomes.test', email_confirmed_at: ago(200) },
       [EMP_TOKEN]: { id: EMP_ID, email: 'emp@afhomes.test', email_confirmed_at: ago(200) },
       [FIN_TOKEN]: { id: FIN_ID, email: 'fin@afhomes.test', email_confirmed_at: ago(200) },
-      [CUSTOMER_TOKEN]: { id: AUTH_USER_ID, email: 'ana.buyer@example.invalid', email_confirmed_at: ago(200) },
+      [CUSTOMER_TOKEN]: {
+        id: AUTH_USER_ID,
+        email: 'ana.buyer@example.invalid',
+        email_confirmed_at: ago(200),
+      },
     },
-    rpcs: [{ fn: 'next_customer_number', result: [{ customer_number: 'CUS-009001' }] }],
+    rpcs: [
+      { fn: 'next_customer_number', result: [{ customer_number: 'CUS-009001' }] },
+      { fn: 'submit_ost_accreditation', result: officialApplicant.requestId },
+    ],
     links: [
       { child: 'staff_role_assignments', parent: 'roles', fk: 'role_id' },
       { child: 'memberships', parent: 'customers', fk: 'customer_id' },
@@ -252,9 +352,16 @@ beforeEach(() => {
 
 type State = { status: number; body: unknown };
 const body = (s: State) => s.body as Record<string, unknown>;
-const messageOf = (s: State) => (s.body as { error: { code: string; message: string } }).error.message;
+const messageOf = (s: State) =>
+  (s.body as { error: { code: string; message: string } }).error.message;
 
-async function callOst(options: { method?: string; familyPath: string; token?: string | null; body?: unknown; query?: Record<string, string> }): Promise<State> {
+async function callOst(options: {
+  method?: string;
+  familyPath: string;
+  token?: string | null;
+  body?: unknown;
+  query?: Record<string, string>;
+}): Promise<State> {
   const { res, state } = makeRes();
   await ost(
     makeReq({
@@ -269,28 +376,56 @@ async function callOst(options: { method?: string; familyPath: string; token?: s
   return state;
 }
 
-async function callCustomers(options: { method?: string; path: string; token?: string; body?: unknown }): Promise<State> {
+async function callCustomers(options: {
+  method?: string;
+  path: string;
+  token?: string;
+  body?: unknown;
+}): Promise<State> {
   const { res, state } = makeRes();
   await customers(
-    makeReq({ method: options.method ?? 'GET', familyPath: options.path, body: options.body, token: options.token }) as never,
+    makeReq({
+      method: options.method ?? 'GET',
+      familyPath: options.path,
+      body: options.body,
+      token: options.token,
+    }) as never,
     res as never,
   );
   return state;
 }
 
-async function callRedemptions(options: { familyPath: string; token?: string; query?: Record<string, string> }): Promise<State> {
+async function callRedemptions(options: {
+  familyPath: string;
+  token?: string;
+  query?: Record<string, string>;
+}): Promise<State> {
   const { res, state } = makeRes();
   await redemptions(
-    makeReq({ method: 'GET', familyPath: options.familyPath, token: options.token, query: options.query }) as never,
+    makeReq({
+      method: 'GET',
+      familyPath: options.familyPath,
+      token: options.token,
+      query: options.query,
+    }) as never,
     res as never,
   );
   return state;
 }
 
-async function callMemberships(options: { familyPath: string; token?: string; query?: Record<string, string> }): Promise<State> {
+async function callMemberships(options: {
+  familyPath: string;
+  token?: string;
+  query?: Record<string, string>;
+}): Promise<State> {
   const { res, state } = makeRes();
   await memberships(
-    makeReq({ method: 'GET', familyPath: options.familyPath, token: options.token, query: options.query }) as never,
+    makeReq({
+      method: 'GET',
+      familyPath: options.familyPath,
+      token: options.token,
+      query: options.query,
+    }) as never,
     res as never,
   );
   return state;
@@ -298,7 +433,10 @@ async function callMemberships(options: { familyPath: string; token?: string; qu
 
 async function callPortal(path: string): Promise<State> {
   const { res, state } = makeRes();
-  await portal(makeReq({ method: 'GET', familyPath: path, token: CUSTOMER_TOKEN }) as never, res as never);
+  await portal(
+    makeReq({ method: 'GET', familyPath: path, token: CUSTOMER_TOKEN }) as never,
+    res as never,
+  );
   return state;
 }
 
@@ -320,7 +458,7 @@ describe('OST sponsorship keeps the Sales Manager rule', () => {
       method: 'POST',
       familyPath: 'applications',
       token: null,
-      body: { ...applicant, referralCode: NON_SM_CODE },
+      body: { ...officialApplicant, referralCode: NON_SM_CODE },
     });
     expect(s.status).toBe(409);
     expect(messageOf(s)).toBe('Referrals must come from an active Sales Manager');
@@ -328,10 +466,21 @@ describe('OST sponsorship keeps the Sales Manager rule', () => {
 
   it('public submission with an SM code still succeeds', async () => {
     const db = install();
-    const s = await callOst({ method: 'POST', familyPath: 'applications', token: null, body: applicant });
+    const s = await callOst({
+      method: 'POST',
+      familyPath: 'applications',
+      token: null,
+      body: officialApplicant,
+    });
     expect(s.status).toBe(201);
-    expect(db.rows('ost_applications')).toHaveLength(1);
-    expect(db.rows('ost_applications')[0]).toMatchObject({ sponsor_staff_id: SM_ID });
+    expect(s.body).toEqual({ id: officialApplicant.requestId });
+    expect(db.calls).toContainEqual(
+      expect.objectContaining({
+        op: 'rpc',
+        table: 'submit_ost_accreditation',
+        arg: expect.objectContaining({ p_sponsor_id: SM_ID, p_source: 'public' }),
+      }),
+    );
   });
 });
 
@@ -342,13 +491,29 @@ describe('OST sponsorship keeps the Sales Manager rule', () => {
 describe('OST approval sponsor re-validation', () => {
   it('refuses with an approval-specific error when the sponsor lapses, and never swaps the sponsor', async () => {
     const db = install();
-    const submitted = await callOst({ method: 'POST', familyPath: 'applications', token: null, body: applicant });
-    expect(submitted.status).toBe(201);
-    const appId = (submitted.body as { applicationId: string }).applicationId;
+    const appId = officialApplicant.requestId;
+    db.rows('ost_applications').push({
+      id: appId,
+      referral_code_id: CODE_ID,
+      sponsor_staff_id: SM_ID,
+      first_name: applicant.firstName,
+      last_name: applicant.lastName,
+      email: applicant.email,
+      phone: applicant.phone,
+      birth_date: applicant.birthDate,
+      address: applicant.address,
+      status: 'submitted',
+      registration_details: {},
+    });
     db.rows('staff_users').find((r) => r.id === SM_ID)!.status = 'suspended';
 
     vi.stubEnv('AFHOMES_ADMIN_URL', 'https://admin.afhomes.test');
-    const s = await callOst({ method: 'POST', familyPath: `applications/${appId}/approve`, token: ADMIN_TOKEN, body: {} });
+    const s = await callOst({
+      method: 'POST',
+      familyPath: `applications/${appId}/approve`,
+      token: ADMIN_TOKEN,
+      body: {},
+    });
     expect(s.status).toBe(409);
     expect(messageOf(s)).toMatch(/cannot be approved/i);
     expect(messageOf(s)).toMatch(/sponsor is unchanged/i);
@@ -428,7 +593,12 @@ describe('customer registration validates the seller referrer', () => {
   it('a non-selling role with the create grant is refused with the customer-specific message', async () => {
     const db = install();
     const before = db.rows('customers').length;
-    const s = await callCustomers({ method: 'POST', path: '', token: FIN_TOKEN, body: newCustomerBody });
+    const s = await callCustomers({
+      method: 'POST',
+      path: '',
+      token: FIN_TOKEN,
+      body: newCustomerBody,
+    });
     expect(s.status).toBe(403);
     expect(messageOf(s)).toMatch(/selling role/i);
     expect(messageOf(s)).not.toContain('Referrals must come from an active Sales Manager');
@@ -437,7 +607,12 @@ describe('customer registration validates the seller referrer', () => {
 
   it('a Sales Manager registers with a free-text referral code and stays the referrer of record', async () => {
     const db = install();
-    const s = await callCustomers({ method: 'POST', path: '', token: SM_TOKEN, body: newCustomerBody });
+    const s = await callCustomers({
+      method: 'POST',
+      path: '',
+      token: SM_TOKEN,
+      body: newCustomerBody,
+    });
     expect(s.status).toBe(201);
     const row = db.rows('customers').find((r) => r.email === newCustomerBody.email)!;
     expect(row.referred_by_staff_id).toBe(SM_ID);
@@ -453,7 +628,9 @@ describe('customer registration validates the seller referrer', () => {
       body: { ...newCustomerBody, email: 'vd.referral@example.invalid' },
     });
     expect(s.status).toBe(201);
-    expect(db.rows('customers').find((r) => r.email === 'vd.referral@example.invalid')).toMatchObject({
+    expect(
+      db.rows('customers').find((r) => r.email === 'vd.referral@example.invalid'),
+    ).toMatchObject({
       referred_by_staff_id: VD_ID,
     });
   });
@@ -466,16 +643,37 @@ describe('customer registration validates the seller referrer', () => {
 describe('persistent membership-card identifier', () => {
   it('the QR envelope, the bare number and the secrets resolve to the same membership', async () => {
     install();
-    const qr = await callRedemptions({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: QR_TOKEN } });
-    const fb = await callRedemptions({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: ` ${FALLBACK_CODE.toLowerCase()} ` } });
-    const envelope = await callRedemptions({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: `AFHOMES:${MEMBERSHIP_NUMBER}` } });
-    const bare = await callRedemptions({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: MEMBERSHIP_NUMBER.toLowerCase() } });
+    const qr = await callRedemptions({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: QR_TOKEN },
+    });
+    const fb = await callRedemptions({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: ` ${FALLBACK_CODE.toLowerCase()} ` },
+    });
+    const envelope = await callRedemptions({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: `AFHOMES:${MEMBERSHIP_NUMBER}` },
+    });
+    const bare = await callRedemptions({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: MEMBERSHIP_NUMBER.toLowerCase() },
+    });
     expect(qr.status).toBe(200);
     expect(fb.status).toBe(200);
     expect(envelope.status).toBe(200);
     expect(bare.status).toBe(200);
     for (const s of [qr, fb, envelope, bare]) {
-      expect(body(s)).toMatchObject({ membershipId: MEMBERSHIP_ID, membershipNumber: MEMBERSHIP_NUMBER, redeemable: true, pointsBalance: 60000 });
+      expect(body(s)).toMatchObject({
+        membershipId: MEMBERSHIP_ID,
+        membershipNumber: MEMBERSHIP_NUMBER,
+        redeemable: true,
+        pointsBalance: 60000,
+      });
     }
     expect(body(qr).matchedBy).toBe('qr');
     expect(body(fb).matchedBy).toBe('fallback_code');
@@ -485,7 +683,11 @@ describe('persistent membership-card identifier', () => {
 
   it('an unknown card number gets the same generic refusal as an unknown secret', async () => {
     install();
-    const s = await callRedemptions({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: 'AFHOMES:MBS-009999' } });
+    const s = await callRedemptions({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: 'AFHOMES:MBS-009999' },
+    });
     expect(s.status).toBe(404);
     expect(messageOf(s)).toBe('No membership matches that identifier');
   });
@@ -515,9 +717,16 @@ describe('persistent membership-card identifier', () => {
 
   it('staff card lookup resolves the persistent number too', async () => {
     install();
-    const s = await callMemberships({ familyPath: 'resolve', token: EMP_TOKEN, query: { identifier: MEMBERSHIP_NUMBER } });
+    const s = await callMemberships({
+      familyPath: 'resolve',
+      token: EMP_TOKEN,
+      query: { identifier: MEMBERSHIP_NUMBER },
+    });
     expect(s.status).toBe(200);
-    expect(body(s)).toMatchObject({ membershipId: MEMBERSHIP_ID, membershipNumber: MEMBERSHIP_NUMBER });
+    expect(body(s)).toMatchObject({
+      membershipId: MEMBERSHIP_ID,
+      membershipNumber: MEMBERSHIP_NUMBER,
+    });
   });
 
   it('the portal membership exposes the persistent member code and QR payload, never a hash', async () => {

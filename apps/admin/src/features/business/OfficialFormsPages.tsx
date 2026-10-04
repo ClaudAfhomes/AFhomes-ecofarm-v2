@@ -1,11 +1,14 @@
+import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
-import type { ApplicationHolder, CreateReservationAgreementRequest } from '@jad/contracts';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import type { ApplicationHolder } from '@jad/contracts';
 import {
   createCustomerApplicationSchema,
+  registerCustomerApplicationSchema,
+  createReservationAgreementSchema,
   optionalContactNumberSchema,
   birthDateSchema,
   paymentSchemeLabel,
@@ -19,6 +22,7 @@ import { formatMoney } from './format';
 import {
   Alert,
   Button,
+  IdCapturePicker,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -42,6 +46,7 @@ import {
 } from '../documents/services';
 import {
   createCustomerApplication,
+  registerCustomerApplication,
   createReservationAgreement,
   decideCustomerApplication,
   decideReservationAgreement,
@@ -78,15 +83,6 @@ const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHolder => 
   email: '',
   printedName: '',
 });
-const saveFile = (file: { filename: string; mime: string; content: string }) => {
-  const bytes = Uint8Array.from(atob(file.content), (value) => value.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = file.filename;
-  link.click();
-  URL.revokeObjectURL(url);
-};
 const asBase64 = async (file: File) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
@@ -153,6 +149,47 @@ function Field({
   );
 }
 
+function DateField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  const id = useId();
+  const [touched, setTouched] = useState(false);
+  const todayValue = new Date().toISOString().slice(0, 10);
+  const error = touched && (required || value !== '') && !birthDateSchema.safeParse(value).success;
+  return (
+    <label style={{ display: 'grid', gap: 4 }}>
+      <span id={`${id}-label`}>{label}</span>
+      <input
+        type="date"
+        aria-labelledby={`${id}-label`}
+        aria-invalid={error || undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        value={value}
+        max={todayValue}
+        required={required}
+        onBlur={() => setTouched(true)}
+        onChange={(event) => {
+          setTouched(true);
+          onChange(event.target.value);
+        }}
+      />
+      {error ? (
+        <small id={`${id}-error`} role="alert">
+          Enter a valid past birth date in YYYY-MM-DD format.
+        </small>
+      ) : null}
+    </label>
+  );
+}
+
 function HolderFields({
   title,
   value,
@@ -196,12 +233,10 @@ function HolderFields({
           normalize={(v) => normalizeLiveHumanField('suffix', v)}
           onChange={(v) => set('suffix', v)}
         />
-        <Field
+        <DateField
           label="Birth date"
           value={value.birthDate}
-          normalize={(v) => normalizeLiveHumanField('birthDate', v)}
           onChange={(v) => set('birthDate', v)}
-          type="date"
           required
         />
         <Field
@@ -441,6 +476,26 @@ export function CustomerApplicationsPage() {
   );
 }
 
+/**
+ * Raw Zod issues (`customerId: Invalid uuid`) are never user-facing.
+ * Known selector/field failures map to actionable guidance; anything else
+ * keeps its path but with a readable message.
+ */
+export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message: string }[]) {
+  return issues
+    .map((issue) => {
+      const [head, ...rest] = issue.path;
+      if (head === 'customerId') return 'Select a customer for this application.';
+      if (head === 'planId') return 'Select a VIP plan for this application.';
+      if (head === 'saleId') return 'Select a sale for this reservation.';
+      if (head === 'customerApplicationId')
+        return 'This reservation must stay linked to its customer application.';
+      const tail = [head, ...rest].filter((p) => typeof p === 'string').join('.');
+      return tail ? `${tail}: ${issue.message}` : issue.message;
+    })
+    .join(' ');
+}
+
 export function CustomerApplicationEditorPage() {
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
@@ -577,8 +632,9 @@ export function CustomerApplicationEditorPage() {
     return () => window.clearTimeout(timer);
   }, [existing.data]);
   const payload = () => ({
-    customerId,
-    planId,
+    // Unchosen selectors stay absent: never send "" as a UUID.
+    customerId: customerId || undefined,
+    planId: planId || undefined,
     tier,
     paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
@@ -596,6 +652,26 @@ export function CustomerApplicationEditorPage() {
   const save = useMutation({
     mutationFn: () =>
       runSave(async () => {
+        if (!planId) {
+          document
+            .querySelector<HTMLSelectElement>(
+              'select[aria-label="Customer"], select[name="customer"]',
+            )
+            ?.focus();
+          throw new Error('Select a VIP plan before saving the registration application.');
+        }
+        if (!id && !customerId) {
+          const registration = registerCustomerApplicationSchema.safeParse({
+            ...payload(),
+            registerNewCustomer: true,
+          });
+          if (!registration.success)
+            throw new Error(humanizeApplicationIssues(registration.error.issues));
+          return registerCustomerApplication({
+            ...registration.data,
+            requestId: applicationRequest.forPayload(registration.data),
+          });
+        }
         const checked = createCustomerApplicationSchema.safeParse(payload());
         if (!checked.success) {
           document
@@ -603,11 +679,7 @@ export function CustomerApplicationEditorPage() {
               '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
             )
             ?.focus();
-          throw new Error(
-            checked.error.issues
-              .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
-              .join('; '),
-          );
+          throw new Error(humanizeApplicationIssues(checked.error.issues));
         }
         return id
           ? updateCustomerApplication(id, checked.data)
@@ -761,8 +833,9 @@ export function CustomerApplicationEditorPage() {
             <label>
               Customer
               <select
+                aria-label="Customer"
                 value={customerId}
-                required
+                required={Boolean(id)}
                 disabled={uploadId.isPending || ocr.isPending}
                 onChange={(e) => {
                   setCustomerId(e.target.value);
@@ -772,7 +845,7 @@ export function CustomerApplicationEditorPage() {
                   setValidId(false);
                 }}
               >
-                <option value="">Select customer</option>
+                <option value="">New customer — register with this application</option>
                 {customers.data?.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.fullName}
@@ -783,6 +856,7 @@ export function CustomerApplicationEditorPage() {
             <label>
               VIP plan
               <select
+                aria-label="VIP plan"
                 value={planId}
                 onChange={(e) => {
                   const plan = plans.data?.find((p) => p.id === e.target.value);
@@ -878,31 +952,17 @@ export function CustomerApplicationEditorPage() {
                 ))}
               </select>
             </label>
-            <label>
-              Upload ID{' '}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,application/pdf"
-                key={`upload-${pickerVersion}`}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(e) => {
-                  setOcrFile(e.target.files?.[0] ?? null);
-                }}
-              />
-            </label>{' '}
-            <label>
-              Scan / Take Photo
-              <input
-                type="file"
-                accept="image/jpeg,image/png"
-                capture="environment"
-                key={`camera-${pickerVersion}`}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(e) => {
-                  setOcrFile(e.target.files?.[0] ?? null);
-                }}
-              />
-            </label>
+            <IdCapturePicker
+              onFile={setOcrFile}
+              disabled={uploadId.isPending || ocr.isPending}
+              resetVersion={pickerVersion}
+            />
+            {ocrFile && (
+              <p>
+                Selected ID: {ocrFile.name}. Upload securely, then review OCR suggestions before
+                saving.
+              </p>
+            )}
             <Button
               onClick={() => uploadId.mutate()}
               disabled={
@@ -1154,6 +1214,11 @@ export function CustomerApplicationEditorPage() {
             ) : null}{' '}
             {id ? (
               <>
+                {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
+                  <Link to={`/admin/sales/reservations/new?application=${id}`}>
+                    Create reservation from application
+                  </Link>
+                )}
                 <Button onClick={() => void exportCustomerApplication(id, 'xlsx').then(saveFile)}>
                   Export XLSX
                 </Button>
@@ -1300,6 +1365,7 @@ export function ReservationAgreementsPage() {
 }
 
 export function ReservationAgreementEditorPage() {
+  const [searchParams] = useSearchParams();
   const reservationRequest = useMutationRequest();
   const runReservationSave =
     useSingleFlight<Awaited<ReturnType<typeof createReservationAgreement>>>();
@@ -1314,7 +1380,18 @@ export function ReservationAgreementEditorPage() {
   const sales = useQuery({ queryKey: ['sales'], queryFn: () => getSales() });
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
   const [saleId, setSaleId] = useState('');
-  const [customerApplicationId, setCustomerApplicationId] = useState('');
+  const [customerApplicationId, setCustomerApplicationId] = useState(
+    () => searchParams.get('application') ?? '',
+  );
+  const applications = useQuery({
+    queryKey: ['customer-applications', 'reservation-source'],
+    queryFn: () => getCustomerApplications(),
+  });
+  const sourceApplication = useQuery({
+    queryKey: ['customer-application', 'reservation-source', customerApplicationId],
+    queryFn: () => getCustomerApplication(customerApplicationId),
+    enabled: Boolean(customerApplicationId) && !id,
+  });
   // Imported tier context (IST XLSX `vip_tier`). Display/validation only:
   // the server always derives the authoritative tier from the selected sale
   // and rejects a mismatch.
@@ -1352,6 +1429,35 @@ export function ReservationAgreementEditorPage() {
   });
   const [message, setMessage] = useState('');
   useEffect(() => {
+    const app = sourceApplication.data;
+    if (!app || id || !['submitted', 'approved'].includes(app.status)) return;
+    const holder = (value: ApplicationHolder) => ({
+      holderType: value.holderType,
+      name: [value.firstName, value.middleName, value.lastName, value.suffix]
+        .filter(Boolean)
+        .join(' '),
+      address: [
+        value.permanentAddressLine1,
+        value.permanentAddressLine2,
+        value.cityMunicipality,
+        value.province,
+        value.postalCode,
+      ]
+        .filter(Boolean)
+        .join(', '),
+      contactNumber: value.mobile,
+      email: value.email,
+      tinNumber: value.tinNumber ?? '',
+    });
+    const timer = window.setTimeout(() => {
+      setPrimary({ ...holder(app.primary), holderType: 'PRIMARY' });
+      setSecondary(app.secondary ? { ...holder(app.secondary), holderType: 'SECONDARY' } : null);
+      setVipTier(app.tier);
+      if (app.saleId) setSaleId(app.saleId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sourceApplication.data, id]);
+  useEffect(() => {
     const agreement = existing.data;
     if (!agreement) return;
     const timer = window.setTimeout(() => {
@@ -1387,8 +1493,9 @@ export function ReservationAgreementEditorPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [existing.data]);
-  const payload = (): CreateReservationAgreementRequest => ({
-    saleId,
+  const payload = () => ({
+    // An unchosen sale stays absent: never send "" as a UUID.
+    saleId: saleId || undefined,
     ...(customerApplicationId ? { customerApplicationId } : {}),
     ...(vipTier === 'BRONZE' || vipTier === 'SILVER' || vipTier === 'GOLD'
       ? { vipTier: vipTier as 'BRONZE' | 'SILVER' | 'GOLD' }
@@ -1412,14 +1519,20 @@ export function ReservationAgreementEditorPage() {
   });
   const save = useMutation({
     mutationFn: () =>
-      runReservationSave(() =>
-        id
-          ? updateReservationAgreement(id, payload())
+      runReservationSave(() => {
+        if (!saleId) throw new Error('Select a sale for this reservation.');
+        if (!id && !customerApplicationId)
+          throw new Error('Choose an eligible Customer Application before creating a reservation.');
+        const checked = createReservationAgreementSchema.safeParse(payload());
+        if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
+        const body = checked.data;
+        return id
+          ? updateReservationAgreement(id, body)
           : createReservationAgreement({
-              ...payload(),
-              requestId: reservationRequest.forPayload(payload()),
-            }),
-      ),
+              ...body,
+              requestId: reservationRequest.forPayload(body),
+            });
+      }),
     onSuccess: (agreement) => {
       setMessage('Reservation saved.');
       reservationRequest.complete();
@@ -1561,13 +1674,31 @@ export function ReservationAgreementEditorPage() {
         </label>{' '}
         <Button onClick={autoFill}>Auto-fill from sale</Button>
         <label>
-          Customer application (optional)
-          <input
+          Source Customer Application
+          <select
             value={customerApplicationId}
-            placeholder="Application UUID"
+            aria-label="Source Customer Application"
             onChange={(e) => setCustomerApplicationId(e.target.value)}
-          />
+          >
+            <option value="">Choose a submitted or approved application</option>
+            {applications.data
+              ?.filter((app) => ['submitted', 'approved'].includes(app.status))
+              .map((app) => (
+                <option key={app.id} value={app.id}>
+                  {app.applicationNumber} — {app.applicantName}
+                </option>
+              ))}
+          </select>
         </label>
+        {sourceApplication.data && (
+          <p>
+            Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
+            {sourceApplication.data.tier} ·{' '}
+            {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
+            {formatMoney(sourceApplication.data.vipAmount)}. Select the matching existing card sale
+            if the application has not yet been linked.
+          </p>
+        )}
         <label>
           Imported tier context (validates secondary; sale tier stays authoritative)
           <NormalizedInput

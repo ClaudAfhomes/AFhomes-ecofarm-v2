@@ -24,7 +24,7 @@ interface CustomerSessionContextValue {
   user: CustomerSessionUser | null;
   /** True when the session lookup itself failed, as opposed to a clean sign-out. */
   sessionError: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Re-run the session lookup, e.g. after a suspension changes server-side. */
   revalidate: () => Promise<void>;
@@ -93,11 +93,15 @@ export function CustomerSessionProvider({
   }, [client, resolve, seeded]);
 
   const signIn = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string, captchaToken?: string) => {
       if (!client) throw new Error('Supabase is not configured');
       // The normal Supabase Auth password flow. The server never proxies a
       // sign-in and never mints a token of its own.
-      const { error } = await client.auth.signInWithPassword({ email, password });
+      const { error } = await client.auth.signInWithPassword({
+        email,
+        password,
+        ...(captchaToken ? { options: { captchaToken } } : {}),
+      });
       if (error) throw new Error(error.message);
       await resolve();
     },

@@ -1,4 +1,5 @@
 import { runIdempotencyChecks } from './idempotency-integration.js';
+import { runOstAccreditationChecks } from './ost-accreditation-integration.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 /**
  * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
@@ -8267,6 +8268,15 @@ async function main(): Promise<void> {
         employee: staff['hr']!,
         run: RUN,
         createdCustomers: createdCustomerIds,
+        check,
+      });
+      section('51. OST accreditation, renewal, import and private ACL');
+      await runOstAccreditationChecks({
+        db,
+        url: target.url,
+        actor: staff['super-admin']!,
+        sponsor: staff['sm']!,
+        run: RUN,
         check,
       });
     } catch (error) {

@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
+import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@jad/ui';
+import { env } from '../../lib/env';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
@@ -20,6 +21,8 @@ export function OstLoginPage() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaVersion, setCaptchaVersion] = useState(0);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
@@ -41,7 +44,10 @@ export function OstLoginPage() {
     setServerError(null);
     setPending(true);
     try {
-      await signIn(email, password);
+      if (env.VITE_TURNSTILE_SITE_KEY) {
+        if (!captchaToken) throw new Error('Complete security verification.');
+        await signIn(email, password, captchaToken);
+      } else await signIn(email, password);
       const portals = await getAuthPortals();
       if (portals.ost?.status === 'active') {
         navigate('/ost/dashboard', { replace: true });
@@ -60,6 +66,9 @@ export function OstLoginPage() {
     } catch {
       setServerError('We could not sign you in with that email and password.');
       setPending(false);
+    } finally {
+      setCaptchaToken(null);
+      setCaptchaVersion((v) => v + 1);
     }
   };
 
@@ -122,6 +131,11 @@ export function OstLoginPage() {
         </div>
 
         <div className={styles.submitRow}>
+          <TurnstileChallenge
+            siteKey={env.VITE_TURNSTILE_SITE_KEY}
+            onToken={setCaptchaToken}
+            resetVersion={captchaVersion}
+          />
           <Button loadingLabel="Signing in…" type="submit" loading={pending} disabled={pending}>
             Sign in
           </Button>

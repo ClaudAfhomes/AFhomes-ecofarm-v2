@@ -11,7 +11,11 @@ import { createHash } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildOstRegistrationUrl, normalizeOstReferralCode } from '@jad/contracts';
+import {
+  buildOstRegistrationUrl,
+  normalizeOstReferralCode,
+  submitOstApplicationSchema,
+} from '@jad/contracts';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
@@ -309,10 +313,36 @@ beforeEach(() => {
   vi.unstubAllEnvs();
 });
 
+// Legacy approval tests start with a historical application fixture, rather
+// than invoking the retired flat public registration contract.
 const submit = async (db: FakeSupabase, body: unknown) => {
+  const input = submitOstApplicationSchema.parse(body);
+  const code = db.rows('referral_codes').find((r) => r.code_hash === hash(input.referralCode));
+  if (!code) throw new Error('QA referral fixture missing');
+  const { data, error } = await db
+    .from('ost_applications')
+    .insert({
+      referral_code_id: code.id,
+      sponsor_staff_id: code.sponsor_staff_id,
+      email: input.email,
+      phone: input.phone,
+      first_name: input.firstName,
+      middle_name: input.middleName ?? null,
+      last_name: input.lastName,
+      birth_date: input.birthDate,
+      address: input.address,
+      registration_details: {},
+      status: 'submitted',
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  if (!data) throw new Error('Legacy QA fixture was not inserted');
+  return { status: 201, body: { applicationId: String(data.id), status: 'submitted' } };
+};
+const legacySubmission = async (body: unknown) => {
   const { res, state } = makeRes();
-  await ost(makeReq({ method: 'POST', familyPath: 'applications', body }) as never, res as never);
-  void db;
+  await ost(makeReq({ method: 'POST', familyPath: 'applications', body }), res);
   return state;
 };
 
@@ -368,33 +398,22 @@ describe('OST referral resolution', () => {
 });
 
 describe('OST application submission', () => {
-  it('5. freezes the sponsor from the code: a smuggled sponsor id is ignored', async () => {
+  it('5. rejects a flat legacy payload carrying a sponsor override', async () => {
     const db = install();
-    const state = await submit(db, { ...applicant, sponsorStaffId: SM2_ID });
-    expect(state.status).toBe(201);
-    const rows = (holder.db as FakeSupabase).rows('ost_applications');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.sponsor_staff_id).toBe(SM_ID);
-    expect(rows[0]!.referral_code_id).toBe(CODE_ID);
-    expect(rows[0]!.status).toBe('submitted');
+    expect((await legacySubmission({ ...applicant, sponsorStaffId: SM2_ID })).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
   });
-
-  it('6. accepts a valid application and audits without secrets', async () => {
-    install();
-    const state = await submit(holder.db as FakeSupabase, applicant);
-    expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({ status: 'submitted' });
-    const audits = (holder.db as FakeSupabase).rows('audit_events');
-    expect(audits.map((a) => a.action)).toContain('OST_APPLICATION_SUBMITTED');
-    expect(JSON.stringify(audits)).not.toContain(RAW_CODE);
-    expect(JSON.stringify(audits)).not.toContain(hash(RAW_CODE));
-  });
-
-  it('7. blocks a duplicate pending application for the same email', async () => {
+  it('6. requires official details and a request UUID at the legacy address', async () => {
     const db = install();
-    expect((await submit(db, applicant)).status).toBe(201);
-    const retry = await submit(db, { ...applicant, firstName: 'Oscar Segundo' });
-    expect(retry.status).toBe(409);
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
+    expect(db.rows('audit_events')).toHaveLength(0);
+  });
+  it('7. repeated legacy flat submissions cannot bypass official registration', async () => {
+    const db = install();
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
   });
 
   it('8. denies unauthenticated and unpermissioned application listing', async () => {
@@ -787,24 +806,27 @@ describe('OST approval state guards', () => {
     ).toHaveLength(0);
   });
 
-  it('26. a duplicate email in different case is refused while reviewable', async () => {
+  it('26. a differently cased legacy email still requires the official contract', async () => {
     const db = install();
-    expect((await submit(db, applicant)).status).toBe(201);
-    expect((await submit(db, { ...applicant, email: 'OSCAR@EXAMPLE.INVALID' })).status).toBe(409);
+    await submit(db, applicant);
+    expect((await legacySubmission({ ...applicant, email: 'OSCAR@EXAMPLE.INVALID' })).status).toBe(
+      400,
+    );
+    expect(db.rows('ost_applications')).toHaveLength(1);
   });
-
-  it('27. an email is reusable after a terminal decision', async () => {
+  it('27. terminal legacy applications do not enable new flat registrations', async () => {
     for (const status of ['rejected', 'withdrawn']) {
       const db = install();
       seedApplication(db, { id: APP_ID, status, email: applicant.email });
-      expect((await submit(db, applicant)).status).toBe(201);
+      expect((await legacySubmission(applicant)).status).toBe(400);
+      expect(db.rows('ost_applications')).toHaveLength(1);
     }
   });
-
-  it('28. an email stays blocked while changes are requested', async () => {
+  it('28. a legacy changes-requested record remains unchanged after a flat retry', async () => {
     const db = install();
     seedApplication(db, { id: APP_ID, status: 'changes_requested', email: applicant.email });
-    expect((await submit(db, applicant)).status).toBe(409);
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')[0]?.status).toBe('changes_requested');
   });
 
   it('29. approval without an admin URL fails closed before inviting', async () => {

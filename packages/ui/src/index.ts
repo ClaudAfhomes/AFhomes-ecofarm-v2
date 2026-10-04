@@ -94,3 +94,6 @@ export { OverflowMenu } from './components/OverflowMenu.js';
 export type { OverflowMenuItem, OverflowMenuProps } from './components/OverflowMenu.js';
 
 export { NormalizedInput } from './components/NormalizedInput.js';
+export { OstOfficialFields } from './components/OstOfficialFields.js';
+export { IdCapturePicker } from './components/IdCapturePicker.js';
+export { TurnstileChallenge } from './components/TurnstileChallenge.js';

@@ -55,8 +55,14 @@ export function sanitizeAuditValue(
 
 /** One-line human summary for the audit table. Never includes payload data. */
 export function auditSummary(action: string, entityType: string, entityId: string | null): string {
-  const ref = entityId ? ` ${entityId.slice(0, 18)}` : '';
-  return `${action} · ${entityType}${ref}`;
+  void entityId; // Technical references remain available in explicit metadata.
+  const humanize = (value: string) =>
+    value
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .toLowerCase()
+      .replace(/^./, (c) => c.toUpperCase());
+  return `${humanize(action)} · ${humanize(entityType)}`;
 }
 
 export function maskEmail(email: unknown): string | null {

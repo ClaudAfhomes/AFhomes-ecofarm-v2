@@ -1,3 +1,5 @@
+import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
+import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
  * AF Homes Phase 8 - OST registration and approval (SM -> OST).
@@ -18,12 +20,10 @@ import {
   OST_REVIEWABLE_STATUSES,
   createOstReferralCodeSchema,
   normalizeOstReferralCode,
-  normalizePersonName,
   ostMeSchema,
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
-  submitOstApplicationSchema,
 } from '@jad/contracts';
 
 import {
@@ -135,52 +135,6 @@ async function nextOstNumber(db: Db): Promise<string> {
   return newOstNumberFallback();
 }
 
-type SponsorCheck =
-  | { ok: true; id: string; fullName: string; email: string }
-  | { ok: false; status: 403 | 404 | 409; message: string };
-
-/**
- * OST sponsorship validation: the sponsor of an OST referral code must be an
- * ACTIVE SALES MANAGER holding an active role.
- *
- * This rule belongs ONLY to the OST sponsorship context (public code
- * resolution, public application submission, and the approval re-check),
- * because an approved OST is inserted into the genealogy as `ost` directly
- * under a `sales_manager`. It must never be reused for customer/card-sale
- * referrals or for generic referral-code issuance - those contexts have
- * their own validators below.
- */
-async function validateOstSponsor(db: Db, sponsorStaffId: string): Promise<SponsorCheck> {
-  const { data: staff } = await db
-    .from('staff_users')
-    .select('id, full_name, email, status')
-    .eq('id', sponsorStaffId)
-    .maybeSingle();
-  if (!staff) return { ok: false, status: 404, message: 'Sponsor not found' };
-  if (staff.status !== 'active')
-    return { ok: false, status: 409, message: 'The sponsoring Sales Manager is not active' };
-  const { data: assignment } = await db
-    .from('staff_role_assignments')
-    .select('role_id')
-    .eq('staff_id', sponsorStaffId)
-    .maybeSingle();
-  if (!assignment?.role_id)
-    return { ok: false, status: 409, message: 'Sponsor holds no sales role' };
-  const { data: role } = await db
-    .from('roles')
-    .select('slug, is_active')
-    .eq('id', assignment.role_id)
-    .maybeSingle();
-  if (!role?.is_active || role.slug !== 'sales_manager')
-    return { ok: false, status: 409, message: 'Referrals must come from an active Sales Manager' };
-  return {
-    ok: true,
-    id: String(staff.id),
-    fullName: String(staff.full_name),
-    email: String(staff.email),
-  };
-}
-
 /**
  * Approval-time re-validation of the FROZEN sponsor.
  *
@@ -260,19 +214,6 @@ async function resolveCode(db: Db, rawCode: string): Promise<CodeCheck> {
   return { ok: true, codeRow: codeRow as Record<string, unknown>, sponsor };
 }
 
-/** True when the address already has a reviewable application (case-insensitive). */
-async function hasReviewableApplication(db: Db, email: string): Promise<boolean> {
-  const { data } = await db
-    .from('ost_applications')
-    .select('id, email, status')
-    .in('status', REVIEWABLE);
-  const rows = ((data ?? []) as Record<string, unknown>[]).filter((r) =>
-    REVIEWABLE.includes(String(r.status)),
-  );
-  const needle = email.trim().toLowerCase();
-  return rows.some((r) => String(r.email ?? '').toLowerCase() === needle);
-}
-
 function sellerScoped(auth: AfHomesPrincipal): boolean {
   return ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(auth.roleSlug);
 }
@@ -342,112 +283,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    /* ---------------- public: submit an application ---------------- */
-    if (subPath(req) === 'applications' && method(req) === 'POST') {
-      const verdict = consumeIdentifierAttempt(req, 'public-ost-submit');
-      if (!verdict.allowed)
-        return fail(res, 'RATE_LIMITED', 'Too many attempts. Try again shortly.', 429);
-      const parsed = submitOstApplicationSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid OST application', 400);
-      const input = parsed.data;
-
-      const checked = await resolveCode(db, input.referralCode);
-      if (!checked.ok)
-        return fail(
-          res,
-          checked.status === 404 ? 'NOT_FOUND' : 'CONFLICT',
-          checked.message,
-          checked.status,
-        );
-
-      // Self-referral: the applicant cannot be their own sponsor.
-      if (input.email.trim().toLowerCase() === checked.sponsor.email.trim().toLowerCase())
-        return fail(
-          res,
-          'VALIDATION_ERROR',
-          'The sponsor cannot sponsor their own application',
-          400,
-        );
-
-      // A registered staff/OST email cannot apply again.
-      const { data: existingStaff } = await db
-        .from('staff_users')
-        .select('id')
-        .eq('email', input.email)
-        .maybeSingle();
-      if (existingStaff)
-        return fail(res, 'CONFLICT', 'An account with this email already exists', 409);
-      const { data: existingMember } = await db
-        .from('ost_members')
-        .select('id')
-        .eq('email', input.email)
-        .maybeSingle();
-      if (existingMember)
-        return fail(res, 'CONFLICT', 'An OST member with this email already exists', 409);
-
-      if (await hasReviewableApplication(db, input.email))
-        return fail(res, 'CONFLICT', 'An application with this email is already under review', 409);
-
-      // The sponsor is frozen from the code. Any `sponsorStaffId` smuggled in
-      // the body is not part of the schema and is ignored here by construction.
-      const { data, error } = await db
-        .from('ost_applications')
-        .insert({
-          referral_code_id: checked.codeRow.id,
-          sponsor_staff_id: checked.sponsor.id,
-          email: input.email,
-          phone: input.phone,
-          first_name: input.firstName,
-          middle_name:
-            input.middleName === undefined ? null : normalizePersonName(input.middleName),
-          last_name: input.lastName,
-          birth_date: input.birthDate,
-          address: input.address,
-          registration_details: {},
-          status: 'submitted',
-        })
-        .select('*')
-        .single();
-      if (error) {
-        if ((error as { code?: string }).code === '23505')
-          return fail(
-            res,
-            'CONFLICT',
-            'An application with this email is already under review',
-            409,
-          );
-        throw error;
-      }
-      const row = data as Record<string, unknown>;
-
-      // Consume one use of the code. Best-effort under concurrency: the
-      // CHECK (use_count <= max_uses) is the backstop and a retryable insert
-      // above already serialized on the pending-email guard.
-      await db
-        .from('referral_codes')
-        .update({ use_count: Number(checked.codeRow.use_count ?? 0) + 1 })
-        .eq('id', checked.codeRow.id);
-
-      await audit(
-        db,
-        checked.sponsor.id,
-        'OST_APPLICATION_SUBMITTED',
-        'ost_application',
-        String(row.id),
-        null,
-        {
-          applicationId: String(row.id),
-          sponsorStaffId: checked.sponsor.id,
-          status: 'submitted',
-        },
-      );
-      return res.status(201).json({
-        applicationId: String(row.id),
-        referenceNumber: String(row.id),
-        status: 'submitted',
-        submittedAt: isoOrNull(row.submitted_at) ?? new Date().toISOString(),
-      });
-    }
+    // The legacy address shares the official contract and atomic RPC. Flat
+    // pre-accreditation payloads cannot create new bypass applications.
+    if (subPath(req) === 'applications' && method(req) === 'POST')
+      return accreditationHandler({ ...req, query: { ...req.query, familyPath: 'public' } }, res);
 
     /* ---------------- staff: list applications (scoped) ---------------- */
     if (subPath(req) === 'applications' && method(req) === 'GET') {
@@ -553,6 +392,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!app) return fail(res, 'NOT_FOUND', 'OST application not found', 404);
+      if (
+        app.registration_details?.officialAccreditation &&
+        /\/(reject|request-changes)$/.test(subPath(req))
+      )
+        return fail(res, 'CONFLICT', 'Use the official accreditation review workflow.', 409);
+
+      if (app.registration_details?.officialAccreditation) {
+        return fail(
+          res,
+          'CONFLICT',
+          'Use official accreditation approval with management-approved validity dates.',
+          409,
+        );
+      }
 
       // Idempotent repeat: an approved application returns its member.
       if (app.status === 'approved') {
@@ -748,6 +601,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!app) return fail(res, 'NOT_FOUND', 'OST application not found', 404);
+      if (
+        app.registration_details?.officialAccreditation &&
+        /\/(reject|request-changes)$/.test(subPath(req))
+      )
+        return fail(res, 'CONFLICT', 'Use the official accreditation review workflow.', 409);
       if (!REVIEWABLE.includes(String(app.status)))
         return fail(
           res,
@@ -806,6 +664,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!app) return fail(res, 'NOT_FOUND', 'OST application not found', 404);
+      if (
+        app.registration_details?.officialAccreditation &&
+        /\/(reject|request-changes)$/.test(subPath(req))
+      )
+        return fail(res, 'CONFLICT', 'Use the official accreditation review workflow.', 409);
       if (!['submitted', 'under_review'].includes(String(app.status)))
         return fail(
           res,
@@ -992,6 +855,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // grant) may issue on behalf of an SM via an explicit sponsor field;
       // sellers may never name anyone but themselves.
       const body = jsonBody(req) as Record<string, unknown> | null;
+      if (
+        parsed.data.sponsorStaffId &&
+        parsed.data.sponsorStaffId !== auth.userId &&
+        !['admin', 'super_admin'].includes(auth.roleSlug)
+      )
+        return fail(
+          res,
+          'FORBIDDEN',
+          'Only Admin or Super Admin may issue on behalf of another Sales Manager.',
+          403,
+        );
       let sponsorId = auth.userId;
       const requestedSponsor =
         typeof body?.sponsorStaffId === 'string' ? body.sponsorStaffId : undefined;

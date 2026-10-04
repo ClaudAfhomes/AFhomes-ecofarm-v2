@@ -47,7 +47,7 @@ describe('audit metadata redaction', () => {
 
   it('never leaks payload data through the one-line summary', () => {
     expect(auditSummary('COMMISSION_QUALIFIED', 'commission', 'abc')).toBe(
-      'COMMISSION_QUALIFIED · commission abc',
+      'Commission qualified · Commission',
     );
   });
 

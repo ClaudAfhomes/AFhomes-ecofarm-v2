@@ -5,6 +5,7 @@ import {
   canTransitionCustomerApplication,
   canTransitionReservationAgreement,
   createCustomerApplicationSchema,
+  registerCustomerApplicationSchema,
   createReservationAgreementSchema,
   customerApplicationDecisionSchema,
   normalizeAddressField,
@@ -656,6 +657,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'customer-applications' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
+      const newRegistration = registerCustomerApplicationSchema
+        .safeExtend({ requestId: z.string().uuid() })
+        .safeParse(jsonBody(req));
+      if (newRegistration.success) {
+        const {
+          primary,
+          secondary,
+          requestId,
+          registerNewCustomer: _mode,
+          ...header
+        } = newRegistration.data;
+        const { data, error } = await db.rpc('register_customer_application_once', {
+          p_request_id: requestId,
+          p_actor_id: auth.userId,
+          p_header: normalizeApplicationHeader(header),
+          p_primary: normalizeHolderOptionals(primary),
+          p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
+        });
+        if (error) throw error;
+        return res.status(201).json(await getApplication(db, rpcId(data)));
+      }
       const parsed = createCustomerApplicationSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -816,12 +838,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
       const { primary, secondary, scheduleNotes, vipTier, requestId, ...input } = parsed.data;
+      if (!input.customerApplicationId)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Choose an eligible Customer Application before creating a reservation.',
+          400,
+        );
       if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
       if (vipTier) {
         const conflict = await tierConflictForSale(db, input.saleId, vipTier);
         if (conflict) return fail(res, 'CONFLICT', conflict, 409);
       }
-      const { data, error } = await db.rpc('create_reservation_agreement_once', {
+      const { data, error } = await db.rpc('reserve_from_customer_application_once', {
         p_request_id: requestId,
         p_actor_id: auth.userId,
         p_input: { ...input, ...(vipTier ? { vipTier } : {}) },

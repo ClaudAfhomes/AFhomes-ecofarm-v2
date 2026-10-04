@@ -7,6 +7,12 @@
  */
 import {
   ostApplicationSchema,
+  ostMutationResultSchema,
+  ostAccreditationRecordsSchema,
+  ostImportPreviewSchema,
+  ostFileSchema,
+  type ManualOstAccreditation,
+  type SubmitOstRenewal,
   ostMemberSchema,
   ostReferralCodeIssuedSchema,
   ostReferralCodeRecordSchema,
@@ -24,6 +30,56 @@ import {
 
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });
+export const registerOfficialOst = (body: ManualOstAccreditation) =>
+  post('/ost-accreditation/manual', ostMutationResultSchema, body);
+export const getOstSponsors = () =>
+  requestList('/ost-accreditation/sponsors', z.object({ id: z.string().uuid(), name: z.string() }));
+export const getAccreditation = (kind: 'members' | 'applications', id: string) =>
+  request(`/ost-accreditation/${kind}/${id}`, ostAccreditationRecordsSchema);
+export const endorseAccreditation = (id: string, signedOn?: string) =>
+  post(`/ost-accreditation/applications/${id}/endorse`, ostMutationResultSchema, {
+    signedOn: signedOn || null,
+  });
+export const confirmAccreditationSignatures = (
+  id: string,
+  applicantSignedOn: string,
+  referrerSignedOn: string,
+) =>
+  post(`/ost-accreditation/applications/${id}/signatures`, ostMutationResultSchema, {
+    applicantSignedOn,
+    referrerSignedOn,
+  });
+export const reviewAccreditation = (
+  id: string,
+  action: 'reject' | 'request-changes',
+  notes: string,
+) =>
+  post(`/ost-accreditation/applications/${id}/decision`, ostMutationResultSchema, {
+    action,
+    notes,
+  });
+export const approveAccreditation = (id: string, startsOn: string, expiresOn: string) =>
+  post(`/ost-accreditation/applications/${id}/approve`, ostMutationResultSchema, {
+    startsOn,
+    expiresOn,
+  });
+export const submitRenewal = (id: string, body: SubmitOstRenewal) =>
+  post(`/ost-accreditation/members/${id}/renew`, ostMutationResultSchema, body);
+export const reviseRenewal = (id: string, body: SubmitOstRenewal) =>
+  post(`/ost-accreditation/renewals/${id}/revise`, ostMutationResultSchema, body);
+export const decideRenewal = (
+  id: string,
+  action: 'endorse' | 'approve' | 'reject' | 'request-changes',
+  notes = '',
+) => post(`/ost-accreditation/renewals/${id}/decision`, ostMutationResultSchema, { action, notes });
+export const parseOstImport = (body: unknown) =>
+  post('/ost-accreditation/imports/parse', ostImportPreviewSchema, body);
+export const confirmOstImport = (id: string) =>
+  post(`/ost-accreditation/imports/${id}/confirm`, ostImportPreviewSchema, {});
+export const downloadOstFile = (
+  kind: 'template' | 'official-template' | 'export',
+  format: 'csv' | 'xlsx' = 'csv',
+) => request(`/ost-accreditation/${kind}?format=${format}`, ostFileSchema);
 
 export const getOstApplications = (status = '', search = ''): Promise<OstApplication[]> => {
   const params = new URLSearchParams();

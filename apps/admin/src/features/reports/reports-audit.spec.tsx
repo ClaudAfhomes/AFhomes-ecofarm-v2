@@ -257,7 +257,7 @@ describe('Phase 30 audit page', () => {
   it('renders rows with pagination and opens redacted metadata', async () => {
     const user = userEvent.setup();
     render('/admin/audit');
-    expect(await screen.findByText('APPLICATION_SUBMITTED')).toBeInTheDocument();
+    expect(await screen.findByText('Application submitted')).toBeInTheDocument();
     expect(screen.getByText('1–1 of 1')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Metadata' }));
     expect(await screen.findByText('Event metadata (redacted)')).toBeInTheDocument();
@@ -269,7 +269,7 @@ describe('Phase 30 audit page', () => {
   it('exports audit CSV through the filtered endpoint', async () => {
     const user = userEvent.setup();
     render('/admin/audit');
-    await screen.findByText('APPLICATION_SUBMITTED');
+    await screen.findByText('Application submitted');
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => {
       const call = requests.find(

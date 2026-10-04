@@ -436,6 +436,7 @@ const draftHolderRow = {
 const validAgreementBody = (overrides: Record<string, unknown> = {}) => ({
   requestId: SALE_ID,
   saleId: SALE_ID,
+  customerApplicationId: APP_ID,
   reservationDate: '2026-10-01',
   agreementDate: '2026-10-01',
   primarySignatureStatus: 'received',
@@ -470,7 +471,7 @@ describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
         rpcs: [
           { fn: 'submit_reservation_agreement', result: AGREEMENT_DRAFT_ID },
           { fn: 'save_reservation_agreement', result: AGREEMENT_DRAFT_ID },
-          { fn: 'create_reservation_agreement_once', result: AGREEMENT_DRAFT_ID },
+          { fn: 'reserve_from_customer_application_once', result: AGREEMENT_DRAFT_ID },
         ],
       },
     );

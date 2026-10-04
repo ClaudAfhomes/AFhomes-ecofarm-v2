@@ -33,6 +33,17 @@ export const acquisitionChannelSchema = z.enum([
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+/**
+ * Blank selector values (`""`) must never reach a UUID validator: an unchosen
+ * customer/plan/sale is "missing", not "an invalid UUID". Coercing to
+ * `undefined` turns the failure into `Required`, which the UI maps to a
+ * friendly "select …" message instead of `customerId: Invalid uuid`.
+ */
+const blankToUndefined = (value: unknown) =>
+  typeof value === 'string' && !value.trim() ? undefined : value;
+const requiredUuid = z.preprocess(blankToUndefined, z.string().uuid());
+const optionalUuid = z.preprocess(blankToUndefined, z.string().uuid().optional());
+
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
   lastName: personNameSchema,
@@ -74,47 +85,58 @@ export const applicationHolderSchema = z.object({
   printedName: z.string().trim().min(1).max(180).transform(normalizePersonName),
 });
 
-export const createCustomerApplicationSchema = z
-  .object({
-    /** Required by POST creation; existing-record PATCH does not require a token. */
-    requestId: z.string().uuid().optional(),
-    customerId: z.string().uuid(),
-    saleId: z.string().uuid().optional(),
-    planId: z.string().uuid(),
-    tier: vipTierSchema,
-    paymentScheme: paymentSchemeSchema,
-    primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
-    secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
-    salesManagerName: z.string().trim().max(160).optional(),
-    vipRecommenderName: z.string().trim().max(160).optional(),
-    recommenderContact: optionalContactNumberSchema,
-    recommenderEmail: z.preprocess(
-      (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
-      emailSchema.optional(),
-    ),
-    vipReferrer: z.string().trim().max(160).optional(),
-    acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
-    consentAcknowledged: z.boolean(),
-    acknowledgedAt: dateSchema,
-    primarySignatureStatus: signatureStatusSchema,
-    secondarySignatureStatus: signatureStatusSchema.optional(),
-    validIdReceived: z.boolean(),
-    reservationPaymentProofReceived: z.boolean(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.secondary && value.tier !== 'GOLD')
-      ctx.addIssue({
-        code: 'custom',
-        path: ['secondary'],
-        message: 'Secondary holder is Gold-only',
-      });
-    if (!value.secondary && value.secondarySignatureStatus)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['secondarySignatureStatus'],
-        message: 'Secondary signature requires a secondary holder',
-      });
-  });
+const customerApplicationInputSchema = z.object({
+  /** Required by POST creation; existing-record PATCH does not require a token. */
+  requestId: z.string().uuid().optional(),
+  customerId: requiredUuid,
+  saleId: optionalUuid,
+  planId: requiredUuid,
+  tier: vipTierSchema,
+  paymentScheme: paymentSchemeSchema,
+  primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
+  secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
+  salesManagerName: z.string().trim().max(160).optional(),
+  vipRecommenderName: z.string().trim().max(160).optional(),
+  recommenderContact: optionalContactNumberSchema,
+  recommenderEmail: z.preprocess(
+    (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+    emailSchema.optional(),
+  ),
+  vipReferrer: z.string().trim().max(160).optional(),
+  acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
+  consentAcknowledged: z.boolean(),
+  acknowledgedAt: dateSchema,
+  primarySignatureStatus: signatureStatusSchema,
+  secondarySignatureStatus: signatureStatusSchema.optional(),
+  validIdReceived: z.boolean(),
+  reservationPaymentProofReceived: z.boolean(),
+});
+const validateApplicationHolders = (
+  value: { tier: string; secondary?: unknown; secondarySignatureStatus?: unknown },
+  ctx: z.RefinementCtx,
+) => {
+  if (value.secondary && value.tier !== 'GOLD')
+    ctx.addIssue({
+      code: 'custom',
+      path: ['secondary'],
+      message: 'Secondary holder is Gold-only',
+    });
+  if (!value.secondary && value.secondarySignatureStatus)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['secondarySignatureStatus'],
+      message: 'Secondary signature requires a secondary holder',
+    });
+};
+export const createCustomerApplicationSchema = customerApplicationInputSchema.superRefine(
+  validateApplicationHolders,
+);
+
+export const registerCustomerApplicationSchema = customerApplicationInputSchema
+  .omit({ customerId: true })
+  .extend({ registerNewCustomer: z.literal(true) })
+  .superRefine(validateApplicationHolders);
+export type RegisterCustomerApplicationRequest = z.infer<typeof registerCustomerApplicationSchema>;
 
 export const customerApplicationSchema = createCustomerApplicationSchema.extend({
   id: z.string().uuid(),
@@ -170,8 +192,8 @@ export const reservationHolderSchema = z.object({
 export const createReservationAgreementSchema = z
   .object({
     requestId: z.string().uuid().optional(),
-    saleId: z.string().uuid(),
-    customerApplicationId: z.string().uuid().optional(),
+    saleId: requiredUuid,
+    customerApplicationId: optionalUuid,
     /**
      * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
      * for economics: the sale's plan tier is authoritative, and a conflict is

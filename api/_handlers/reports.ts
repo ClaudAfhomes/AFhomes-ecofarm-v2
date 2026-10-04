@@ -1453,10 +1453,41 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
       if (error) throw error;
+      const actorIds = [
+        ...new Set(
+          ((data ?? []) as Row[])
+            .map((row) => isoOrNull(row.actor_id))
+            .filter((id): id is string => id !== null),
+        ),
+      ];
+      const actors = actorIds.length
+        ? await db
+            .from('staff_users')
+            .select('id,full_name,staff_role_assignments(roles(name))')
+            .in('id', actorIds)
+        : { data: [], error: null };
+      if (actors.error) throw actors.error;
+      const actorNames = new Map<string, { name: string; role: string | null }>();
+      for (const person of (actors.data ?? []) as Row[]) {
+        const assignments = Array.isArray(person.staff_role_assignments)
+          ? person.staff_role_assignments
+          : [];
+        const assignment: unknown = assignments[0];
+        const role =
+          assignment && typeof assignment === 'object' && 'roles' in assignment
+            ? assignment.roles
+            : null;
+        actorNames.set(String(person.id), {
+          name: String(person.full_name ?? 'Staff account'),
+          role: role && typeof role === 'object' && 'name' in role ? String(role.name) : null,
+        });
+      }
       const events = ((data ?? []) as Row[]).map((row) => ({
         id: row.id,
         createdAt: row.created_at,
         actorId: isoOrNull(row.actor_id),
+        actorName: actorNames.get(String(row.actor_id))?.name ?? null,
+        actorRole: actorNames.get(String(row.actor_id))?.role ?? null,
         action: String(row.action ?? ''),
         entityType: String(row.entity_type ?? ''),
         entityId:

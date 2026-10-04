@@ -14,7 +14,13 @@ import { buildOstRegistrationUrl } from '@jad/contracts';
 
 import { env } from '../../lib/env';
 import { formatDateTime } from '../../lib/format';
-import { createReferralCode, getMyReferralCodes, getOstApplications } from './services';
+import {
+  createReferralCode,
+  getMyReferralCodes,
+  getOstApplications,
+  getOstSponsors,
+} from './services';
+import { useSession } from '../../lib/session';
 
 /**
  * The Sales Manager self-service screen: my referral codes with their QR,
@@ -27,6 +33,14 @@ import { createReferralCode, getMyReferralCodes, getOstApplications } from './se
  */
 export function OstReferralCodesPage() {
   const client = useQueryClient();
+  const { user } = useSession();
+  const onBehalf = ['admin', 'super_admin'].includes(user?.roleSlug ?? '');
+  const [sponsorStaffId, setSponsorStaffId] = useState('');
+  const sponsors = useQuery({
+    queryKey: ['ost', 'sponsors'],
+    queryFn: getOstSponsors,
+    enabled: onBehalf,
+  });
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
   const codes = useQuery({ queryKey: ['ost', 'my-codes'], queryFn: getMyReferralCodes });
@@ -47,7 +61,15 @@ export function OstReferralCodesPage() {
   const [copied, setCopied] = useState(false);
 
   const issue = useMutation({
-    mutationFn: () => createReferralCode({ maxUses, expiresInHours }),
+    mutationFn: () => {
+      if (onBehalf && !sponsorStaffId)
+        throw new Error('Choose an active Sales Manager to issue on their behalf.');
+      return createReferralCode({
+        maxUses,
+        expiresInHours,
+        ...(onBehalf ? { sponsorStaffId } : {}),
+      });
+    },
     onSuccess: (result) => {
       // The raw code is returned exactly once. Keep it on screen until the
       // next issuance; it is never fetched again.
@@ -112,6 +134,19 @@ export function OstReferralCodesPage() {
       <div
         style={{ display: 'flex', gap: 12, alignItems: 'end', marginBottom: 24, flexWrap: 'wrap' }}
       >
+        {onBehalf && (
+          <label>
+            Issue on behalf of Sales Manager
+            <select value={sponsorStaffId} onChange={(e) => setSponsorStaffId(e.target.value)}>
+              <option value="">Choose an active Sales Manager</option>
+              {sponsors.data?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           Max uses
           <input

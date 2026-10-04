@@ -8,6 +8,8 @@ import { z } from 'zod';
 const vitePublicEnvSchema = z.object({
   /** Base URL of the AF Homes REST API. Defaults to same-origin `/api/v1`. */
   VITE_API_BASE_URL: z.string().min(1).default('/api/v1'),
+  /** Public widget key; the verification secret belongs only in Supabase Auth. */
+  VITE_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
   /** Base URL of the Admin application for cross-origin redirects from the web origin. */
   VITE_ADMIN_URL: z.string().min(1).default('http://localhost:5174/admin'),
   /** Base URL of the Web (public/member) application for cross-origin redirects from the admin origin. */

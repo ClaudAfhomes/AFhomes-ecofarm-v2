@@ -74,7 +74,8 @@ vi.mock('./features/redemption/services', () => ({
   commitRedemption: vi.fn(),
 }));
 
-vi.mock('./features/reports/services', () => ({
+vi.mock('./features/reports/services', async (original) => ({
+  ...(await original()),
   getReport: vi.fn(),
   getAudit: vi.fn(),
   exportReport: vi.fn(),
@@ -420,7 +421,7 @@ describe('Phase 33 tables scroll instead of breaking', () => {
   it('audit metadata stays behind an explicit control, not an overflowing cell', async () => {
     atWidth(390, false);
     renderApp('/admin/audit');
-    expect(await screen.findByText('PAYMENT_RECORDED')).not.toBeNull();
+    expect(await screen.findAllByText('Payment recorded')).toHaveLength(2);
     expect(document.querySelector('.table-scroll')).not.toBeNull();
   });
 

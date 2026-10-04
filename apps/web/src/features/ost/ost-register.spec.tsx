@@ -3,12 +3,13 @@
  * frozen at submission. The form carries no sponsor field - hidden or
  * otherwise - so the applicant cannot choose or swap sponsors.
  */
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+import { OstRenewalPage } from './OstRenewalPage';
 
 const RESOLUTION = {
   sponsorName: 'Sam Manager',
@@ -62,10 +63,10 @@ function mockFetch() {
 function install(over: Record<string, RouteHandler> = {}) {
   routes.clear();
   routes.set('GET /ost/referrals/OST-ABCDEF-123456', ok(RESOLUTION));
-  routes.set('POST /ost/applications', () => ({
+  routes.set('POST /ost-accreditation/public', () => ({
     status: 201,
     body: {
-      applicationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
       referenceNumber: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
       status: 'submitted',
       submittedAt: '2026-09-28T00:00:00.000Z',
@@ -82,6 +83,49 @@ beforeEach(() => {
   vi.stubGlobal('fetch', mockFetch());
 });
 
+it('shows a readable own-renewal date error without posting', async () => {
+  const id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+  routes.set(
+    '/ost/me',
+    ok({
+      fullName: 'QA OST',
+      ostNumber: 'OST-QA',
+      status: 'active',
+      sponsorName: 'QA SM',
+      approvedAt: '2025-01-01',
+    }),
+  );
+  routes.set(
+    `/ost-accreditation/members/${id}`,
+    ok({
+      registration: null,
+      renewals: [],
+      terms: [
+        {
+          id,
+          starts_on: '2025-01-01',
+          expires_on: '2026-01-01',
+          displayStatus: 'expired',
+          approved_at: '2025-01-01',
+        },
+      ],
+    }),
+  );
+  routes.set('/ost-accreditation/sponsors', ok({ data: [], meta: { total: 0 } }));
+  renderWithProviders(<OstRenewalPage />, {
+    sessionUser: { authUserId: id, email: 'qa@example.invalid' },
+  });
+  await screen.findByRole('button', { name: 'Submit renewal for review' });
+  fireEvent.change(screen.getByLabelText('date Of Renewal'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('requested Start'), { target: { value: '2026-02-01' } });
+  fireEvent.change(screen.getByLabelText('requested End'), { target: { value: '2026-01-01' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit renewal for review' }));
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Expiry must be on or after the start',
+  );
+  expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+});
+
 async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('First name'), 'Oscar');
   await user.type(screen.getByLabelText('Last name'), 'Trainee');
@@ -91,6 +135,11 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Street address'), '1 Farm Road');
   await user.type(screen.getByLabelText('City'), 'Tagaytay');
   await user.type(screen.getByLabelText('Province'), 'Cavite');
+  await user.selectOptions(screen.getByLabelText('Program category'), 'non_vip');
+  await user.selectOptions(screen.getByLabelText('Sex'), 'male');
+  await user.selectOptions(screen.getByLabelText('Civil status'), 'single');
+  await user.type(screen.getByLabelText('Government ID type'), 'QA TEST');
+  await user.type(screen.getByLabelText('Government ID number'), 'SYNTHETIC-ID');
 }
 
 describe('public OST registration', () => {
@@ -130,12 +179,13 @@ describe('public OST registration', () => {
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: 'Submit application' }));
     expect(await screen.findByText('Application received')).toBeInTheDocument();
-    const post = requests.find((r) => r.method === 'POST' && r.path === '/ost/applications');
+    const post = requests.find(
+      (r) => r.method === 'POST' && r.path === '/ost-accreditation/public',
+    );
     expect(post?.body).toMatchObject({
       referralCode: 'OST-ABCDEF-123456',
-      firstName: 'Oscar',
-      lastName: 'Trainee',
-      email: 'oscar@example.invalid',
+      identity: { firstName: 'Oscar', lastName: 'Trainee', email: 'oscar@example.invalid' },
+      form: { programCategory: 'non_vip', governmentIdType: 'QA TEST' },
     });
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsorStaffId');
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsor_staff_id');
@@ -143,7 +193,7 @@ describe('public OST registration', () => {
 
   it('surfaces a server refusal without navigating away', async () => {
     install({
-      'POST /ost/applications': () => ({
+      'POST /ost-accreditation/public': () => ({
         status: 409,
         body: { error: { code: 'CONFLICT', message: 'An application is already under review.' } },
       }),

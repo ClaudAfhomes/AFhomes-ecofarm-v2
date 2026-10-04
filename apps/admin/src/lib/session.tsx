@@ -42,12 +42,13 @@ export interface SessionUser {
    * The server re-checks it authoritatively on every call.
    */
   testPurgeEnabled?: boolean;
+  mfaRequired?: boolean;
 }
 interface SessionContextValue {
   status: SessionStatus;
   user: SessionUser | null;
   sessionError: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<void>;
   revalidate: () => Promise<void>;
   logout: () => void;
 }
@@ -118,6 +119,7 @@ export function SessionProvider({
         status: parsed.status,
         mustChangePassword: parsed.mustChangePassword,
         testPurgeEnabled: parsed.testPurgeEnabled,
+        mfaRequired: parsed.mfaRequired,
       });
       setStatus('authenticated');
       setSessionError(false);
@@ -147,9 +149,13 @@ export function SessionProvider({
     setStatus('unauthenticated');
   }, [client]);
   const signIn = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string, captchaToken?: string) => {
       if (!client) throw new Error('Supabase is not configured');
-      const { error } = await client.auth.signInWithPassword({ email, password });
+      const { error } = await client.auth.signInWithPassword({
+        email,
+        password,
+        ...(captchaToken ? { options: { captchaToken } } : {}),
+      });
       if (error) throw new Error(error.message);
       await resolve();
     },

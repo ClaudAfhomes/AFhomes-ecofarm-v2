@@ -5,6 +5,7 @@ import { useSession } from '../lib/session';
 import { entryPortal, loginPathFor } from '../lib/portal';
 import { canAccessNavTarget } from './navigation';
 import styles from './RequireRole.module.css';
+import { operationsPath, staffPortalPath } from '@jad/contracts';
 
 function Loading() {
   return (
@@ -30,10 +31,26 @@ export function RequireRole({ children }: { children: ReactNode }) {
   // JAD parity: a session still on its temporary password can only visit
   // My Account until the forced change completes (the server 403s every
   // module-guarded endpoint in the meantime).
-  if (user?.mustChangePassword === true && location.pathname !== '/admin/profile') {
-    return <Navigate to="/admin/profile" replace />;
+  if (user?.mustChangePassword === true && operationsPath(location.pathname) !== '/admin/profile') {
+    return <Navigate to={staffPortalPath(user?.roleSlug, '/admin/profile')} replace />;
   }
-  if (!canAccessNavTarget(user?.afHomesPermissions, location.pathname))
+  if (
+    user?.mustChangePassword !== true &&
+    user?.mfaRequired &&
+    operationsPath(location.pathname) !== '/admin/mfa'
+  )
+    return <Navigate to="/admin/mfa" replace />;
+  if (
+    operationsPath(location.pathname) === '/admin/mfa' &&
+    !['admin', 'super_admin'].includes(user?.roleSlug ?? '')
+  )
+    return <Forbidden />;
+  if (
+    operationsPath(location.pathname) === '/admin/mfa' &&
+    ['admin', 'super_admin'].includes(user?.roleSlug ?? '')
+  )
+    return <>{children}</>;
+  if (!canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname)))
     return (
       <Forbidden
         action={sessionError ? <Button onClick={() => void revalidate()}>Retry</Button> : undefined}

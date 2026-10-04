@@ -9,6 +9,7 @@ import { OstApplicationDetailPage } from './OstApplicationDetailPage';
 import { OstApplicationsPage } from './OstApplicationsPage';
 import { OstMembersPage } from './OstMembersPage';
 import { OstReferralCodesPage } from './OstReferralCodesPage';
+import { OstAccreditationHistoryPage } from './OstAccreditationPages';
 import {
   approveOstApplication,
   createReferralCode,
@@ -18,9 +19,20 @@ import {
   getOstMembers,
   rejectOstApplication,
   requestOstApplicationChanges,
+  getAccreditation,
+  submitRenewal,
 } from './services';
 
 vi.mock('./services', () => ({
+  submitRenewal: vi.fn(),
+  reviseRenewal: vi.fn(),
+  decideRenewal: vi.fn(),
+  registerOfficialOst: vi.fn(),
+  parseOstImport: vi.fn(),
+  confirmOstImport: vi.fn(),
+  downloadOstFile: vi.fn(),
+  getOstSponsors: vi.fn().mockResolvedValue([]),
+  getAccreditation: vi.fn().mockResolvedValue({ registration: null, terms: [], renewals: [] }),
   getOstApplications: vi.fn(),
   getOstApplication: vi.fn(),
   approveOstApplication: vi.fn(),
@@ -81,6 +93,38 @@ const STAFF: SessionUser = {
 };
 
 const APP_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+
+it('shows a readable renewal date error without sending a mutation', async () => {
+  vi.mocked(getAccreditation).mockResolvedValueOnce({
+    registration: null,
+    renewals: [],
+    terms: [
+      {
+        id: APP_ID,
+        starts_on: '2025-01-01',
+        expires_on: '2026-01-01',
+        displayStatus: 'expired',
+        approved_at: '2025-01-01',
+      },
+    ],
+  });
+  mockedGetOstMembers.mockResolvedValueOnce([MEMBER]);
+  renderWithProviders(
+    <Routes>
+      <Route path="/members/:id" element={<OstAccreditationHistoryPage />} />
+    </Routes>,
+    { user: STAFF, route: `/members/${MEMBER.id}` },
+  );
+  await screen.findByRole('button', { name: 'Submit renewal' });
+  fireEvent.change(screen.getByLabelText('date Of Renewal'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('requested Start'), { target: { value: '2026-02-01' } });
+  fireEvent.change(screen.getByLabelText('requested End'), { target: { value: '2026-01-01' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit renewal' }));
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Expiry must be on or after the start',
+  );
+  expect(submitRenewal).not.toHaveBeenCalled();
+});
 
 const APP: OstApplication = {
   id: APP_ID,

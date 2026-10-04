@@ -18,7 +18,22 @@ const calls = vi.hoisted(() => ({
 vi.mock('./services', async (original) => ({
   ...(await original()),
   getCustomers: async () => [],
-  getSales: async () => [],
+  getCustomerApplications: async () => [
+    {
+      id: '00000000-0000-4000-8000-000000000003',
+      status: 'submitted',
+      applicationNumber: 'QA-APP',
+      applicantName: 'QA HOLDER',
+    },
+  ],
+  getCustomerApplication: async () => null,
+  getSales: async () => [
+    {
+      id: '00000000-0000-4000-8000-000000000002',
+      saleNumber: 'QA-SALE',
+      customerName: 'QA HOLDER',
+    },
+  ],
   getCardProducts: async () => [
     {
       id: '00000000-0000-4000-8000-000000000001',
@@ -122,6 +137,20 @@ it('actual IST tier Unicode expansion uses the shared prefix mapping', async () 
 });
 it('actual IST tier retains the existing canonical enum payload behavior', async () => {
   const { input, user } = await tier('gold');
+  // The save now validates the whole official form. A tier assertion needs a
+  // valid sale/holder fixture; an empty form must not reach a creation API.
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Source Customer Application' }),
+    '00000000-0000-4000-8000-000000000003',
+  );
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Card sale' }),
+    '00000000-0000-4000-8000-000000000002',
+  );
+  await user.type(screen.getByLabelText('name'), 'QA HOLDER');
+  await user.type(screen.getByLabelText('address'), '1 QA STREET');
+  await user.type(screen.getByLabelText('contactNumber'), '09171234567');
+  await user.type(screen.getByLabelText('email'), 'qa@example.com');
   await user.click(screen.getByRole('button', { name: 'Save draft' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalled());
   expect(calls.reservation.mock.calls[0]?.[0].vipTier).toBe('GOLD');

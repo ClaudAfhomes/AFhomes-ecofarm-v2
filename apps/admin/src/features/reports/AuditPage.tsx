@@ -12,7 +12,7 @@ import {
 
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { downloadExport, exportAudit, getAudit } from './services';
+import { downloadExport, exportAudit, getAudit, humanizeReportLabel } from './services';
 
 const PAGE_SIZE = 50;
 
@@ -150,10 +150,12 @@ export function AuditPage() {
                   <tr key={String(event.id)}>
                     <td>{formatDateTime(event.createdAt)}</td>
                     <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {event.actorId ?? '—'}
+                      {event.actorName ??
+                        (event.actorId ? 'Former staff account' : 'System / public applicant')}
+                      {event.actorRole && <small>{event.actorRole}</small>}
                     </td>
-                    <td>{event.action}</td>
-                    <td>{event.entityType}</td>
+                    <td>{humanizeReportLabel(event.action)}</td>
+                    <td>{humanizeReportLabel(event.entityType)}</td>
                     <td>{event.summary}</td>
                     <td>
                       <Button size="sm" variant="secondary" onClick={() => setOpenId(event.id)}>

@@ -42,6 +42,7 @@ const application = {
 const reservation = {
   requestId,
   saleId: SALE.submitted,
+  customerApplicationId: UUID.viewerStaff,
   reservationDate: '2026-01-01',
   agreementDate: '2026-01-01',
   primarySignatureStatus: 'pending',
@@ -73,7 +74,7 @@ const cases = [
     name: 'reservation',
     handler: forms,
     path: 'reservations',
-    rpc: 'create_reservation_agreement_once',
+    rpc: 'reserve_from_customer_application_once',
     body: reservation,
   },
 ];

@@ -1,3 +1,4 @@
+import { downloadFile } from '../../lib/download';
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 
 import { useState } from 'react';
@@ -23,6 +24,7 @@ import {
 
 import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
+import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import {
@@ -58,6 +60,13 @@ const EMPTY: CreateCustomerRequest = {
 export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
+  const navigate = useNavigate();
+  const sellerRegistration = [
+    'vice_director',
+    'senior_sales_manager',
+    'sales_manager',
+    'ost',
+  ].includes(user?.roleSlug ?? '');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   // Live search: the list follows the settled term automatically; the Search
@@ -114,16 +123,6 @@ export function BusinessCustomersPage() {
   const [copyStatus, setCopyStatus] = useState('');
   const [importMessage, setImportMessage] = useState('');
   const [importErrors, setImportErrors] = useState<{ field: string; message: string }[]>([]);
-
-  const downloadFile = (file: { filename: string; mime: string; content: string }) => {
-    const bytes = Uint8Array.from(atob(file.content), (char) => char.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.filename;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
 
   const importXlsx = async (file: File) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -227,26 +226,32 @@ export function BusinessCustomersPage() {
             >
               Download import template
             </Button>
-            <label>
-              <span className="sr-only">Import customer XLSX</span>
-              <input
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void importXlsx(file);
-                  event.target.value = '';
-                }}
-              />
-            </label>
+            {!sellerRegistration && (
+              <label>
+                <span className="sr-only">Import customer XLSX</span>
+                <input
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importXlsx(file);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+            )}
             <Button
               onClick={() => {
+                if (sellerRegistration) {
+                  navigate('/admin/customers/applications/new');
+                  return;
+                }
                 setImportMessage('');
                 setImportErrors([]);
                 setOpen(true);
               }}
             >
-              Register customer
+              {sellerRegistration ? 'New Customer Application' : 'Register customer'}
             </Button>
           </>
         }

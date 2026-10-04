@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -31,6 +32,10 @@ const STATUSES = [
  * Approving or rejecting happens on the detail screen, never from this list.
  */
 export function OstApplicationsPage() {
+  const { user } = useSession();
+  const canCreate = user?.afHomesPermissions.some(
+    (p) => p.moduleKey === 'network.ost_registrations' && p.canCreate,
+  );
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
@@ -48,6 +53,11 @@ export function OstApplicationsPage() {
         description="Registration applications under your Sales Manager referral. The sponsor is frozen at submission and cannot be changed here."
       />
 
+      <p>
+        {canCreate && <Link to="/admin/ost/applications/new">Register OST</Link>}
+        {' · '}
+        <Link to="/admin/ost/applications/import-export">Import / export OST</Link>
+      </p>
       <FilterBar
         search={<SearchField label="Search OST applications" value={search} onChange={setSearch} />}
         filters={
@@ -103,8 +113,7 @@ export function OstApplicationsPage() {
                           ? 'success'
                           : app.status === 'rejected'
                             ? 'danger'
-                            : app.status === 'under_review' ||
-                                app.status === 'changes_requested'
+                            : app.status === 'under_review' || app.status === 'changes_requested'
                               ? 'warning'
                               : 'neutral'
                       }

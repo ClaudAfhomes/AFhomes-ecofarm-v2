@@ -65,6 +65,8 @@ export function OstMembersPage() {
                   <td>{formatDateTime(member.approvedAt)}</td>
                   <td>
                     <Link to={`/admin/genealogy/${member.id}`}>Genealogy</Link>
+                    {' · '}
+                    <Link to={`/admin/ost/members/${member.id}`}>Validity / renewal</Link>
                   </td>
                 </tr>
               ))}

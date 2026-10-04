@@ -554,3 +554,9 @@ export type {
 export { memberLookupSchema, type MemberLookup } from './schemas/customer-import.js';
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';
+export * from './schemas/ost-accreditation.js';
+export { staffPortalBase, operationsPath, staffPortalPath } from './schemas/portal-routing.js';
+export {
+  registerCustomerApplicationSchema,
+  type RegisterCustomerApplicationRequest,
+} from './schemas/official-forms.js';

@@ -49,7 +49,10 @@ export function OstDashboardPage() {
           <Field
             label="Status"
             value={
-              <StatusChip label={record.status} tone={record.status === 'active' ? 'success' : 'warning'} />
+              <StatusChip
+                label={record.status}
+                tone={record.status === 'active' ? 'success' : 'warning'}
+              />
             }
           />
           <Field label="Sponsor" value={record.sponsorName} />
@@ -57,7 +60,7 @@ export function OstDashboardPage() {
         </FieldList>
         <p className={styles.notice}>
           Applications you sponsor appear after applicants register with your referral code.{' '}
-          <Link to="/ost/register">Registration page</Link>
+          <Link to="/ost/renewal">Accreditation history and renewal</Link>
         </p>
       </Card>
     </>

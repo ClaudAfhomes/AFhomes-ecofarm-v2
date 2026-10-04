@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useSession } from '../../lib/session';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { Button, ConfirmDialog, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { ostMemberSchema } from '@jad/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import {
@@ -9,6 +11,11 @@ import {
   getOstApplication,
   rejectOstApplication,
   requestOstApplicationChanges,
+  getAccreditation,
+  endorseAccreditation,
+  confirmAccreditationSignatures,
+  approveAccreditation,
+  reviewAccreditation,
 } from './services';
 import {
   ACCEPTED_MIME,
@@ -26,6 +33,14 @@ import {
  * from submission; this screen offers no way to change it.
  */
 export function OstApplicationDetailPage() {
+  const { user } = useSession();
+  const management =
+    ['admin', 'super_admin', 'senior_sales_manager', 'vice_director'].includes(
+      user?.roleSlug ?? '',
+    ) &&
+    user?.afHomesPermissions?.some(
+      (p) => p.moduleKey === 'network.ost_registrations' && p.canUpdate,
+    );
   const { id = '' } = useParams();
   const client = useQueryClient();
   const query = useQuery({
@@ -33,20 +48,52 @@ export function OstApplicationDetailPage() {
     queryFn: () => getOstApplication(id),
   });
   const [reason, setReason] = useState('');
+  const [signedOn, setSignedOn] = useState('');
+  const [applicantSignedOn, setApplicantSignedOn] = useState('');
+  const signatures = useMutation({
+    mutationFn: () => confirmAccreditationSignatures(id, applicantSignedOn, signedOn),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['ost'] });
+      setOutcome('Paper signatures confirmed. Sponsoring Sales Manager endorsement is required.');
+    },
+  });
   const [outcome, setOutcome] = useState<string | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  const [startsOn, setStartsOn] = useState('');
+  const [expiresOn, setExpiresOn] = useState('');
+  const records = useQuery({
+    queryKey: ['ost', 'application-accreditation', id],
+    queryFn: () => getAccreditation('applications', id),
+  });
+  const official = Boolean(records.data?.registration);
+  const endorsement = useMutation({
+    mutationFn: () => endorseAccreditation(id, signedOn),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['ost'] });
+      setOutcome('Sales Manager endorsement recorded.');
+    },
+  });
 
   const approve = useMutation({
-    mutationFn: () => approveOstApplication(id),
+    mutationFn: () =>
+      official ? approveAccreditation(id, startsOn, expiresOn) : approveOstApplication(id),
     onSuccess: (member) => {
-      setOutcome(`Approved. OST member ${member.ostNumber} created under ${member.sponsorName}.`);
+      const legacy = ostMemberSchema.safeParse(member);
+      setOutcome(
+        legacy.success
+          ? `Approved. OST member ${legacy.data.ostNumber} created under ${legacy.data.sponsorName}.`
+          : 'Accreditation approved and invitation issued.',
+      );
       void client.invalidateQueries({ queryKey: ['ost'] });
     },
     onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Approval failed.'),
   });
 
   const reject = useMutation({
-    mutationFn: () => rejectOstApplication(id, reason.trim()),
+    mutationFn: () =>
+      official
+        ? reviewAccreditation(id, 'reject', reason.trim())
+        : rejectOstApplication(id, reason.trim()),
     onSuccess: () => {
       setOutcome('Rejected.');
       setReason('');
@@ -56,7 +103,10 @@ export function OstApplicationDetailPage() {
   });
 
   const requestChanges = useMutation({
-    mutationFn: () => requestOstApplicationChanges(id, reason.trim()),
+    mutationFn: () =>
+      official
+        ? reviewAccreditation(id, 'request-changes', reason.trim())
+        : requestOstApplicationChanges(id, reason.trim()),
     onSuccess: () => {
       setOutcome('Changes requested.');
       setReason('');
@@ -136,12 +186,95 @@ export function OstApplicationDetailPage() {
 
       {reviewable ? (
         <div style={{ marginTop: 24, display: 'grid', gap: 12, maxWidth: 560 }}>
+          {official && (
+            <>
+              <h2>Official accreditation review</h2>
+              <p>
+                Form {records.data?.registration?.form_number}. Applicant signature:{' '}
+                {records.data?.registration?.applicant_signature_status}. Referrer signature:{' '}
+                {records.data?.registration?.referrer_signature_status}. Endorsement:{' '}
+                {records.data?.registration?.endorsed_at ? 'Received' : 'Pending'}.
+              </p>
+              <label>
+                Actual referrer signature date
+                <input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={signedOn}
+                  onChange={(e) => setSignedOn(e.target.value)}
+                />
+              </label>
+              <label>
+                Actual applicant signature date
+                <input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={applicantSignedOn}
+                  onChange={(e) => setApplicantSignedOn(e.target.value)}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                disabled={
+                  signatures.isPending ||
+                  !signedOn ||
+                  !applicantSignedOn ||
+                  !(
+                    management ||
+                    (user?.roleSlug === 'sales_manager' && user?.id === app.sponsorStaffId)
+                  )
+                }
+                onClick={() => signatures.mutate()}
+              >
+                Confirm received paper signatures
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={
+                  endorsement.isPending ||
+                  user?.roleSlug !== 'sales_manager' ||
+                  user?.id !== app.sponsorStaffId
+                }
+                onClick={() => endorsement.mutate()}
+              >
+                Endorse as sponsoring Sales Manager
+              </Button>
+              <label>
+                Management-approved start
+                <input
+                  type="date"
+                  required
+                  value={startsOn}
+                  onChange={(e) => setStartsOn(e.target.value)}
+                />
+              </label>
+              <label>
+                Management-approved expiry
+                <input
+                  type="date"
+                  required
+                  min={startsOn}
+                  value={expiresOn}
+                  onChange={(e) => setExpiresOn(e.target.value)}
+                />
+              </label>
+              <p>No default accreditation duration is configured. Use management-approved dates.</p>
+              {endorsement.isError && <p role="alert">{endorsement.error.message}</p>}
+              {signatures.isError && <p role="alert">{signatures.error.message}</p>}
+            </>
+          )}
           <Button
             onClick={() => {
               setOutcome(null);
               setConfirmApprove(true);
             }}
-            disabled={approve.isPending || reject.isPending || requestChanges.isPending}
+            disabled={
+              (official && !management) ||
+              approve.isPending ||
+              reject.isPending ||
+              requestChanges.isPending ||
+              (official && (!startsOn || !expiresOn || !records.data?.registration?.endorsed_at))
+            }
           >
             {approve.isPending ? 'Approving…' : 'Approve as OST'}
           </Button>
@@ -174,6 +307,7 @@ export function OstApplicationDetailPage() {
               requestChanges.mutate();
             }}
             disabled={
+              (official && !management) ||
               requestChanges.isPending ||
               reject.isPending ||
               approve.isPending ||
@@ -190,6 +324,7 @@ export function OstApplicationDetailPage() {
               reject.mutate();
             }}
             disabled={
+              (official && !management) ||
               reject.isPending ||
               approve.isPending ||
               requestChanges.isPending ||

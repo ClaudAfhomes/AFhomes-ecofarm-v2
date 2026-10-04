@@ -81,7 +81,12 @@ export function formatCell(key: string, value: unknown): string {
     }
     return String(value);
   }
-  if (typeof value !== 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return value.map((item) => formatCell(key, item)).join(' · ');
+  if (typeof value === 'object')
+    return Object.entries(value)
+      .map(([label, item]) => `${humanizeReportLabel(label)}: ${formatCell(label, item)}`)
+      .join(' · ');
+  if (typeof value !== 'string') return String(value);
   if (
     /^(0|[1-9][0-9]*)\.\d{2}$/.test(value) &&
     /price|paid|remaining|value|amount|total|fee|down|monthly/i.test(key)
@@ -92,25 +97,12 @@ export function formatCell(key: string, value: unknown): string {
   return value;
 }
 
-/** Envelope bytes as a Blob - pure apart from `atob`, so it is unit-testable. */
-export function exportToBlob(envelope: Pick<ReportExport, 'mime' | 'content'>): Blob {
-  const binary = atob(envelope.content);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: envelope.mime });
+export function humanizeReportLabel(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/^./, (c) => c.toUpperCase());
 }
 
-/** Trigger a file download for a validated export envelope. */
-export function downloadExport(
-  envelope: Pick<ReportExport, 'mime' | 'content' | 'filename'>,
-): void {
-  const blob = exportToBlob(envelope);
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = envelope.filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
+export { envelopeBlob as exportToBlob, downloadFile as downloadExport } from '../../lib/download';

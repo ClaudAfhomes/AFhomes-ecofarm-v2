@@ -5,6 +5,8 @@
  */
 import {
   ostApplicationSubmittedSchema,
+  ostMutationResultSchema,
+  type SubmitOstAccreditation,
   ostMeSchema,
   ostReferralResolutionSchema,
   type OstApplicationSubmitted,
@@ -33,3 +35,8 @@ export const submitOstApplication = (
 export const getOstMe = (): Promise<OstMe> => request('/ost/me', ostMeSchema);
 
 export type { OstApplicationSubmitted, OstMe, OstReferralResolution };
+export const submitOfficialOstAccreditation = (body: SubmitOstAccreditation) =>
+  request('/ost-accreditation/public', ostMutationResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });

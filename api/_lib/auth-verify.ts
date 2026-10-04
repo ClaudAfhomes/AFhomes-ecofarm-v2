@@ -48,6 +48,20 @@ export async function verifySessionToken(
 }
 
 export type VerifiedAuthenticationMethod = 'invite' | 'password' | 'recovery' | string;
+export async function verifiedAssuranceLevel(
+  auth: AuthClaimsVerifier,
+  jwt: string,
+  expectedSubject?: string,
+): Promise<'aal1' | 'aal2' | null> {
+  try {
+    const { data, error } = await auth.getClaims(jwt);
+    if (error || !data?.claims?.sub || (expectedSubject && data.claims.sub !== expectedSubject))
+      return null;
+    return data.claims.aal === 'aal2' ? 'aal2' : data.claims.aal === 'aal1' ? 'aal1' : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Read the authentication methods from a separately verified JWT. Supabase

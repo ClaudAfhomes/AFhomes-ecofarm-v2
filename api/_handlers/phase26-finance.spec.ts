@@ -800,6 +800,7 @@ describe('Phase 26 integration flow', () => {
     const deadline = spotCashDeadlineFrom(start);
     expect(deadline).toBe('2026-10-04T10:00:00.000Z');
     const partial = summarizePayments({
+      now: new Date(start),
       cashPrice: '60000.00',
       minimumDownPayment: '20000.00',
       payments: [{ amount: '20000.00', status: 'verified' }],
@@ -810,6 +811,7 @@ describe('Phase 26 integration flow', () => {
     expect(partial.fullyPaid).toBe(false);
     expect(partial.spotCashState).toBe('within_deadline');
     const full = summarizePayments({
+      now: new Date(start),
       cashPrice: '60000.00',
       minimumDownPayment: '20000.00',
       payments: [

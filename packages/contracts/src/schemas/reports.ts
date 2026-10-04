@@ -110,6 +110,8 @@ export const auditEventSchema = z.object({
   id: z.union([z.string(), z.number()]),
   createdAt: z.string(),
   actorId: z.string().nullable(),
+  actorName: z.string().nullable().optional(),
+  actorRole: z.string().nullable().optional(),
   action: z.string(),
   entityType: z.string(),
   entityId: z.string().nullable(),

@@ -5,13 +5,21 @@ import { useSession } from '../lib/session';
 import { logoutPathForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
+import { staffPortalPath, operationsPath } from '@jad/contracts';
 
 export function AdminLayout() {
   const { user, logout } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
-  const crumbs = useMemo(() => breadcrumbItems(location.pathname), [location.pathname]);
+  const crumbs = useMemo(
+    () =>
+      breadcrumbItems(operationsPath(location.pathname))?.map((item) => ({
+        ...item,
+        ...(item.to ? { to: staffPortalPath(user?.roleSlug, item.to) } : {}),
+      })),
+    [location.pathname, user?.roleSlug],
+  );
   // JAD parity: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
@@ -26,7 +34,19 @@ export function AdminLayout() {
             </div>
           </div>
         }
-        navItems={gated ? [] : navItemsForPermissions(user?.afHomesPermissions)}
+        navItems={
+          gated
+            ? []
+            : navItemsForPermissions(user?.afHomesPermissions).map((item) => ({
+                ...item,
+                to: staffPortalPath(user?.roleSlug, item.to),
+                dropdown: item.dropdown?.map((child) =>
+                  'to' in child
+                    ? { ...child, to: staffPortalPath(user?.roleSlug, child.to) }
+                    : child,
+                ),
+              }))
+        }
         navLabel="AF Homes administration"
         menuLabel="Open navigation"
         menuPosition="right"
@@ -35,7 +55,11 @@ export function AdminLayout() {
             name={user?.name}
             role={user?.roleName}
             items={[
-              { label: 'My Account', icon: 'user', to: '/admin/profile' },
+              {
+                label: 'My Account',
+                icon: 'user',
+                to: staffPortalPath(user?.roleSlug, '/admin/profile'),
+              },
               { label: '-', icon: 'user' },
               { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
             ]}

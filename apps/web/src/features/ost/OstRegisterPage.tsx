@@ -6,11 +6,13 @@ import {
   normalizeEmail,
   normalizePersonName,
   normalizePhilippinePhone,
-  type SubmitOstApplicationRequest,
+  type SubmitOstAccreditation,
+  officialOstFormDefaults,
+  parseOfficialOstFields,
 } from '@jad/contracts';
-import { NormalizedInput, AuthLayout, Button } from '@jad/ui';
+import { NormalizedInput, AuthLayout, Button, OstOfficialFields } from '@jad/ui';
 
-import { resolveOstReferral, submitOstApplication } from './services';
+import { resolveOstReferral, submitOfficialOstAccreditation } from './services';
 import authStyles from '../customer/auth.module.css';
 
 /**
@@ -43,9 +45,11 @@ export function OstRegisterPage() {
     postalCode: '',
   });
   const [error, setError] = useState<string | null>(null);
+  const [official, setOfficial] = useState(officialOstFormDefaults);
+  const [requestId] = useState(() => crypto.randomUUID());
 
   const submission = useMutation({
-    mutationFn: (body: SubmitOstApplicationRequest) => submitOstApplication(body),
+    mutationFn: (body: SubmitOstAccreditation) => submitOfficialOstAccreditation(body),
     onSuccess: () => setError(null),
     onError: (cause) => setError(cause instanceof Error ? cause.message : 'Submission failed.'),
   });
@@ -53,21 +57,30 @@ export function OstRegisterPage() {
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    const parsedOfficial = parseOfficialOstFields(official);
+    if (!parsedOfficial.success) {
+      setError(parsedOfficial.error.issues[0]?.message ?? 'Check the official form.');
+      return;
+    }
     void submission
       .mutateAsync({
         referralCode: code,
-        firstName: normalizePersonName(form.firstName),
-        middleName: form.middleName.trim() ? normalizePersonName(form.middleName) : undefined,
-        lastName: normalizePersonName(form.lastName),
-        email: normalizeEmail(form.email) ?? form.email.trim(),
-        phone: normalizePhilippinePhone(form.phone) ?? form.phone.trim(),
-        birthDate: form.birthDate,
-        address: {
-          line1: normalizeAddressField(form.line1),
-          city: normalizeAddressField(form.city),
-          province: normalizeAddressField(form.province),
-          postalCode: form.postalCode.trim() || undefined,
-          countryCode: 'PH',
+        requestId,
+        form: parsedOfficial.data,
+        identity: {
+          firstName: normalizePersonName(form.firstName),
+          middleName: form.middleName.trim() ? normalizePersonName(form.middleName) : undefined,
+          lastName: normalizePersonName(form.lastName),
+          email: normalizeEmail(form.email) ?? form.email.trim(),
+          phone: normalizePhilippinePhone(form.phone) ?? form.phone.trim(),
+          birthDate: form.birthDate,
+          address: {
+            line1: normalizeAddressField(form.line1),
+            city: normalizeAddressField(form.city),
+            province: normalizeAddressField(form.province),
+            postalCode: form.postalCode.trim() || undefined,
+            countryCode: 'PH',
+          },
         },
       })
       .catch(() => {
@@ -94,7 +107,7 @@ export function OstRegisterPage() {
           <p className={authStyles.body}>
             Your OST application is pending review under{' '}
             {resolution.data?.sponsorName ?? 'your sponsor'}. Your reference is{' '}
-            <strong>{submission.data.referenceNumber}</strong>. Keep it for follow-ups.
+            <strong>{submission.data.id}</strong>. Keep it for follow-ups.
           </p>
           <p className={authStyles.body}>
             Approval is a manual administrative review. You will be invited to create your seller
@@ -269,6 +282,10 @@ export function OstRegisterPage() {
             onChange={set('postalCode')}
             maxLength={20}
             autoComplete="postal-code"
+          />
+          <OstOfficialFields
+            values={official}
+            onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
           />
           <Button type="submit" disabled={!resolution.data || submission.isPending}>
             {submission.isPending ? 'Submitting…' : 'Submit application'}

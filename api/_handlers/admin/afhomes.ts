@@ -685,6 +685,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mustChangePassword: principal.mustChangePassword,
         permissions: principal.permissions,
         testPurgeEnabled: isTestPurgeEnabled(),
+        mfaRequired: principal.mfaRequired ?? false,
       });
     }
     // My Account display-name update (JAD parity: PATCH /admin/session).

@@ -220,6 +220,13 @@ export const getCustomerApplications = (
 };
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
   request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
+export const registerCustomerApplication = (
+  input: import('@jad/contracts').RegisterCustomerApplicationRequest,
+) =>
+  request('/official-forms/customer-applications', customerApplicationSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
   post(
     '/official-forms/customer-applications',

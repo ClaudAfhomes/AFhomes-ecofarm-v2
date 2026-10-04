@@ -193,6 +193,7 @@ export type OstMember = z.infer<typeof ostMemberSchema>;
 /* ------------------------------------------------------------------ */
 
 export const createOstReferralCodeSchema = z.object({
+  sponsorStaffId: z.string().uuid().optional(),
   maxUses: z.number().int().min(1).max(100).default(10),
   expiresInHours: z.number().int().min(24).max(720).default(168),
 });

@@ -16,6 +16,7 @@ import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemption
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { OstLoginPage } from '../features/ost/OstLoginPage';
 import { OstDashboardPage } from '../features/ost/OstDashboardPage';
+import { OstRenewalPage } from '../features/ost/OstRenewalPage';
 import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
 import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
@@ -23,7 +24,9 @@ import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
 import { OstGuard } from './OstGuard';
 
-const HomePage = lazy(() => import('../features/customer/HomeLoginPage').then((m) => ({ default: m.HomeLoginPage })));
+const HomePage = lazy(() =>
+  import('../features/customer/HomeLoginPage').then((m) => ({ default: m.HomeLoginPage })),
+);
 const ExperiencesPage = lazy(() => import('../marketing/pages/Experiences'));
 const SmartWellnessHotelPage = lazy(() => import('../marketing/pages/SmartWellnessHotel'));
 const ALMJapaneseRestaurantPage = lazy(() => import('../marketing/pages/ALMJapaneseRestaurant'));
@@ -89,6 +92,14 @@ export default function App() {
       {/* Public OST portal. Registration is referral-first and login needs an
           approved OST record; the dashboard is guarded separately below. */}
       <Route path="/ost/register" element={<OstRegisterPage />} />
+      <Route
+        path="/ost/renewal"
+        element={
+          <OstGuard>
+            <OstRenewalPage />
+          </OstGuard>
+        }
+      />
       <Route path="/ost/login" element={<OstLoginPage />} />
       <Route path="/ost/forgot-password" element={<OstForgotPasswordPage />} />
       <Route path="/ost/reset-password" element={<OstResetPasswordPage />} />

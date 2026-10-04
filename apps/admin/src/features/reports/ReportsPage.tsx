@@ -1,4 +1,3 @@
-import { formatMoney } from '../business/format';
 import styles from './ReportsPage.module.css';
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -311,15 +310,7 @@ export function ReportsPage() {
                               .replace(/^./, (c) => c.toUpperCase())}
                   </dt>
                   <dd>
-                    <strong>
-                      {typeof value === 'object'
-                        ? JSON.stringify(value)
-                        : typeof value === 'string' && /^-?\d+\.\d{2}$/.test(value)
-                          ? formatMoney(value)
-                          : typeof value === 'number'
-                            ? value.toLocaleString('en-PH')
-                            : String(value)}
-                    </strong>
+                    <strong>{formatCell(key, value)}</strong>
                   </dd>
                 </div>
               ))}

@@ -122,6 +122,7 @@ export const afHomesSessionSchema = z.object({
    * authoritatively on every call.
    */
   testPurgeEnabled: z.boolean(),
+  mfaRequired: z.boolean().optional(),
 });
 export type AfHomesSession = z.infer<typeof afHomesSessionSchema>;
 

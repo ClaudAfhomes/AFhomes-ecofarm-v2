@@ -30,14 +30,43 @@ export const STAFF_PORTAL_ROLES = [
 ] as const;
 
 export const isAdminPortalRole = (roleSlug: string | null | undefined): boolean =>
-  typeof roleSlug === 'string' &&
-  (ADMIN_PORTAL_ROLES as readonly string[]).includes(roleSlug);
+  typeof roleSlug === 'string' && (ADMIN_PORTAL_ROLES as readonly string[]).includes(roleSlug);
 
 export const isStaffPortalRole = (roleSlug: string | null | undefined): boolean =>
-  typeof roleSlug === 'string' &&
-  (STAFF_PORTAL_ROLES as readonly string[]).includes(roleSlug);
+  typeof roleSlug === 'string' && (STAFF_PORTAL_ROLES as readonly string[]).includes(roleSlug);
 
 export const staffPortalRoleSchema = z.enum(STAFF_PORTAL_ROLES);
+
+/** Technical slugs select the namespace; editable role display names never do. */
+export function staffPortalBase(roleSlug: string | null | undefined): string {
+  if (roleSlug === 'employee') return '/employee';
+  if (roleSlug === 'finance') return '/finance';
+  if (roleSlug === 'hr') return '/hr';
+  if (['vice_director', 'senior_sales_manager', 'sales_manager'].includes(roleSlug ?? ''))
+    return '/sales';
+  if (roleSlug === 'ost') return '/ost';
+  return '/admin';
+}
+export function operationsPath(path: string): string {
+  const match = path.match(/^\/(employee|finance|hr|sales)(\/.*)?$/);
+  if (!match) return path;
+  const suffix = match[2] ?? '';
+  if (
+    match[1] === 'finance' &&
+    /^\/(payments|activation|commissions|commission-settings)(\/|$)/.test(suffix)
+  )
+    return `/admin/finance${suffix}`;
+  return `/admin${suffix}`;
+}
+export function staffPortalPath(roleSlug: string | null | undefined, path: string): string {
+  const logical = operationsPath(path);
+  const base = staffPortalBase(roleSlug);
+  if (logical !== '/admin' && !logical.startsWith('/admin/')) return path;
+  let suffix = logical.slice('/admin'.length);
+  if (base === '/finance' && suffix.startsWith('/finance/'))
+    suffix = suffix.slice('/finance'.length);
+  return `${base}${suffix}`;
+}
 
 export type PortalIdentity = {
   /** Staff role slug, or null when the Auth user holds no staff row. */
