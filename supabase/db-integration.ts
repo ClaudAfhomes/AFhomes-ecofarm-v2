@@ -8310,12 +8310,24 @@ async function main(): Promise<void> {
           ),
         );
         check('target refusal names the boundary', /INVALID_BUSINESS_ID_TARGET/.test(badTarget));
-        // 1,000 candidates in one query: unique, well-formed, not sequential.
+        // 1,000 candidates in one query: well-formed and not sequential.
+        // Raw draws are independent, so a repeat IS possible and expected here:
+        // over 32^5 = 33,554,432 the expected number of collisions at n=1000 is
+        // ~0.015 (the birthday effect). Uniqueness is therefore a property of
+        // STORED values, enforced by the UNIQUE constraint and the retry - not of
+        // the generator's output - so this asserts the birthday-aware bound and
+        // the real invariant is proven separately by the "holds no duplicates"
+        // backfill checks below.
         const batch = await db.query<{ c: string }>(
           `select private.af_candidate('AF-PAY') as c from generate_series(1,1000)`,
         );
         const vals = batch.rows.map((r) => r.c);
-        check('1000 candidates are unique', new Set(vals).size === 1000, String(new Set(vals).size));
+        const distinct = new Set(vals).size;
+        check(
+          '1000 candidates are unique apart from at most a birthday repeat',
+          distinct >= vals.length - 2,
+          `${distinct} distinct of ${vals.length}`,
+        );
         check(
           '1000 candidates match AF-PAY-XXXXX with no ambiguous symbols',
           vals.every((v) => afRe('AF-PAY').test(v)),
@@ -8430,6 +8442,203 @@ async function main(): Promise<void> {
           freshDir.rows.some((r) => (r.record as { id: string }).id === freshId),
           freshNo,
         );
+      }
+      section('54. Customer Code: separate AF-CC identifier, backfill, search and isolation');
+      {
+        const CC5 = '[A-HJ-NP-Z2-9]{8}';
+        const ccRe = new RegExp(`^AF-CC-${CC5}$`);
+        const afRe = (prefix: string) => new RegExp(`^${prefix}-[A-HJ-NP-Z2-9]{5}$`);
+
+        // The extension must not have changed any existing prefix's format.
+        const cus = (await one<{ c: string }>(`select private.af_candidate('AF-CUS') as c`)).c;
+        check('AF-CUS is still exactly 5 characters', afRe('AF-CUS').test(cus), cus);
+        const emp = (await one<{ c: string }>(`select private.af_candidate('AF-EMP') as c`)).c;
+        check('AF-EMP is still exactly 5 characters', afRe('AF-EMP').test(emp), emp);
+        const cc = (await one<{ c: string }>(`select private.af_candidate('AF-CC') as c`)).c;
+        check('AF-CC is exactly 8 characters from the readable alphabet', ccRe.test(cc), cc);
+        check('a Customer Code is never a Customer ID', !afRe('AF-CUS').test(cc), cc);
+
+        const bogus = await throws('arbitrary prefix still refused for AF-CC', () =>
+          db.query(`select private.af_candidate('AF-CCODE')`),
+        );
+        check('prefix refusal names the boundary', /INVALID_BUSINESS_PREFIX/.test(bogus));
+        const wrongTarget = await throws(
+          'AF-CUS cannot claim customers.customer_code',
+          () =>
+            db.query(
+              `select private.claim_af_id('AF-CUS','public.customers'::regclass,'customer_code')`,
+            ),
+        );
+        check('wrong target for the code refused', /INVALID_BUSINESS_ID_TARGET/.test(wrongTarget));
+        const rightTarget = await one<{ c: string }>(
+          `select private.claim_af_id('AF-CC','public.customers'::regclass,'customer_code') as c`,
+        );
+        check('AF-CC claims only customers.customer_code', ccRe.test(rightTarget.c), rightTarget.c);
+
+        // 1,000 generated codes: well-formed, not sequential. The uniqueness
+        // invariant is about STORED values (see the backfill checks below), not
+        // about independent random draws, which may legitimately repeat.
+        const batch = await db.query<{ c: string }>(
+          `select private.af_candidate('AF-CC') as c from generate_series(1,1000)`,
+        );
+        const codes = batch.rows.map((r) => r.c);
+        check(
+          '1000 Customer Codes are unique apart from at most a birthday repeat',
+          new Set(codes).size >= codes.length - 2,
+          `${new Set(codes).size} distinct of ${codes.length}`,
+        );
+        check(
+          '1000 Customer Codes are AF-CC-XXXXXXXX with no ambiguous symbols',
+          codes.every((v) => ccRe.test(v)),
+          codes.find((v) => !ccRe.test(v)) ?? '',
+        );
+        check(
+          '1000 Customer Codes are not sequential',
+          codes.join(',') !== [...codes].sort().join(','),
+        );
+
+        // Backfill: complete, unique, well-formed.
+        for (const [label, sql] of [
+          ['customers.customer_code has no nulls', `select count(*)::int n from public.customers where customer_code is null`],
+          [
+            'customers.customer_code has no duplicates',
+            `select count(*)::int n from (select customer_code from public.customers group by customer_code having count(*)>1) d`,
+          ],
+          [
+            'every Customer Code is well-formed',
+            `select count(*)::int n from public.customers where customer_code !~ '^AF-CC-[A-HJ-NP-Z2-9]{8}$'`,
+          ],
+        ] as const) {
+          eq(label, (await one<{ n: number }>(sql)).n, 0);
+        }
+        const col = await one<{ nullable: string; dflt: string | null }>(
+          `select is_nullable as nullable, column_default as dflt from information_schema.columns
+           where table_schema='public' and table_name='customers' and column_name='customer_code'`,
+        );
+        eq('customer_code is NOT NULL', col.nullable, 'NO');
+        check('new inserts default a Customer Code', typeof col.dflt === 'string');
+        const uniq = await one<{ n: number }>(
+          `select count(*)::int n from pg_index i where i.indrelid='public.customers'::regclass
+             and i.indisunique and i.indnatts=1
+             and (select attname from pg_attribute where attrelid=i.indrelid and attnum=i.indkey[0])='customer_code'`,
+        );
+        eq('customer_code is UNIQUE', uniq.n, 1);
+
+        // Customer IDs are untouched: no legacy row was rewritten, and no ID
+        // was ever turned into a code.
+        const asCode = await one<{ n: number }>(
+          `select count(*)::int n from public.customers where customer_number like 'AF-CC-%'`,
+        );
+        eq('no customer_number holds an AF-CC value', asCode.n, 0);
+        const legacyIds = await one<{ n: number }>(
+          `select count(*)::int n from public.customers where customer_number ~ '^CUS-[0-9]{6}$'`,
+        );
+        check(
+          'legacy CUS- customer IDs are still present and unchanged',
+          legacyIds.n > 0,
+          String(legacyIds.n),
+        );
+        const legacy = await one<{ id: string; customer_number: string; customer_code: string }>(
+          `select id, customer_number, customer_code from public.customers
+           where customer_number = 'CUS-900001'`,
+        );
+        eq('the legacy fixture keeps its original Customer ID', legacy.customer_number, 'CUS-900001');
+        check(
+          'the legacy fixture gained an independent Customer Code',
+          ccRe.test(legacy.customer_code),
+          legacy.customer_code,
+        );
+        check(
+          'the Customer Code is not derived from the Customer ID',
+          !legacy.customer_code.includes(legacy.customer_number),
+          legacy.customer_code,
+        );
+
+        // Search resolves the code, case-insensitively, for authorized callers.
+        for (const term of [legacy.customer_code, legacy.customer_code.toLowerCase()]) {
+          const found = await db.query<{ customer_id: string }>(
+            'select * from public.search_customer_ids($1)',
+            [term],
+          );
+          check(
+            `search_customer_ids resolves ${term === legacy.customer_code ? 'the' : 'a lower-cased'} Customer Code`,
+            found.rows.some((r) => r.customer_id === legacy.id),
+          );
+          const dir = await db.query<{ record: { id: string; customer_code: string } }>(
+            'select * from public.customer_directory($1::jsonb)',
+            [JSON.stringify({ search: term, limit: 5 })],
+          );
+          check(
+            `customer_directory resolves ${term === legacy.customer_code ? 'the' : 'a lower-cased'} Customer Code`,
+            dir.rows.some((r) => r.record.id === legacy.id && r.record.customer_code === legacy.customer_code),
+          );
+        }
+
+        // Every creation path inherits the DEFAULT: a customer inserted without
+        // an explicit code still receives both identifiers.
+        const newId = uuidFor('cc:new-customer');
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1, 'CUS-900002', 'Code', 'Default', '1990-01-01', $2, '09175550003', 'prospect')`,
+          [newId, `${RUN}-cc-default@example.invalid`],
+        );
+        createdCustomerIds.push(newId);
+        const created = await one<{ customer_number: string; customer_code: string }>(
+          `select customer_number, customer_code from public.customers where id = $1`,
+          [newId],
+        );
+        check(
+          'an insert without an explicit code still receives one',
+          ccRe.test(created.customer_code),
+          created.customer_code,
+        );
+
+        // Two concurrent inserts must never agree on a Customer Code.
+        const racer = new Client({ connectionString: target.url });
+        racer.on('error', () => {});
+        await racer.connect();
+        try {
+          const insertSql = (number: string) =>
+            `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+             values ($1,'${number}','Race','Customer','1990-01-01',$2,'09175550004','prospect') returning customer_code`;
+          const [a, b] = await Promise.all([
+            db.query<{ customer_code: string }>(insertSql('CUS-900003'), [
+              uuidFor('cc:race:a'),
+              `${RUN}-cc-race-a@example.invalid`,
+            ]),
+            racer.query<{ customer_code: string }>(insertSql('CUS-900004'), [
+              uuidFor('cc:race:b'),
+              `${RUN}-cc-race-b@example.invalid`,
+            ]),
+          ]);
+          createdCustomerIds.push(uuidFor('cc:race:a'), uuidFor('cc:race:b'));
+          check(
+            'two concurrent inserts never share a Customer Code',
+            a.rows[0]!.customer_code !== b.rows[0]!.customer_code,
+            `${a.rows[0]!.customer_code} vs ${b.rows[0]!.customer_code}`,
+          );
+        } finally {
+          await racer.end();
+        }
+
+        // Not an auth secret and not overexposed: the browser roles have no
+        // column privilege and cannot execute the search RPCs.
+        for (const role of ['anon', 'authenticated'] as const) {
+          const colAccess = await one<{ allowed: boolean }>(
+            // The 4-argument form is (user, table, column, privilege); the
+            // 3-argument one is (table, column, privilege) and would silently
+            // read the role as a relation.
+            `select has_column_privilege($1,'public.customers','customer_code','SELECT') as allowed`,
+            [role],
+          );
+          eq(`${role} has no direct SELECT on customers.customer_code`, colAccess.allowed, false);
+          const denied = await throws(`${role} cannot resolve a Customer Code`, () =>
+            asBrowserRole(target.url, role, null, (client) =>
+              client.query(`select * from public.search_customer_ids('${legacy.customer_code}')`),
+            ),
+          );
+          check('denial names the privilege boundary', /permission denied/.test(denied));
+        }
       }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));

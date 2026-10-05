@@ -30,19 +30,49 @@ export const AF_ID_PREFIXES = [
 ] as const;
 export type AfIdPrefix = (typeof AF_ID_PREFIXES)[number];
 
-/** Strict `PREFIX-XXXXX` matcher. Legacy numbers (CUS-, SALE-, ...) never match. */
-export const afIdPattern = (prefix: AfIdPrefix): RegExp =>
-  new RegExp(`^${prefix}-[${AF_ID_ALPHABET}]{5}$`);
+/**
+ * The Customer Code. A SEPARATE identifier from the Customer ID
+ * (`AF-CUS-*`): this is the stable customer-facing lookup/reference code, and
+ * the two are independently generated. 8 characters, not 5.
+ */
+export const AF_CODE_PREFIX = 'AF-CC';
+export type AfCodePrefix = typeof AF_CODE_PREFIX;
+export type AfBusinessPrefix = AfIdPrefix | AfCodePrefix;
 
-export const isAfId = (prefix: AfIdPrefix, value: unknown): boolean =>
+/** Suffix length per prefix. Customer Code is the only 8-character value. */
+export const AF_SUFFIX_LENGTH: Record<AfBusinessPrefix, number> = {
+  'AF-CUS': 5,
+  'AF-SALES': 5,
+  'AF-CSALE': 5,
+  'AF-EMP': 5,
+  'AF-APP': 5,
+  'AF-RES': 5,
+  'AF-OST': 5,
+  'AF-ACC': 5,
+  'AF-REN': 5,
+  'AF-PAY': 5,
+  'AF-COM': 5,
+  'AF-RED': 5,
+  'AF-IMP': 5,
+  [AF_CODE_PREFIX]: 8,
+};
+
+/** Strict `PREFIX-XXXXX` (or `AF-CC-XXXXXXXX`) matcher. Legacy numbers never match. */
+export const afIdPattern = (prefix: AfBusinessPrefix): RegExp =>
+  new RegExp(`^${prefix}-[${AF_ID_ALPHABET}]{${AF_SUFFIX_LENGTH[prefix]}}$`);
+
+export const isAfId = (prefix: AfBusinessPrefix, value: unknown): boolean =>
   typeof value === 'string' && afIdPattern(prefix).test(value);
 
 /** Response field: present once the business-ids migration has run. */
-export const afBusinessIdSchema = (prefix: AfIdPrefix) =>
+export const afBusinessIdSchema = (prefix: AfBusinessPrefix) =>
   z
     .string()
     .regex(afIdPattern(prefix))
     .nullish();
+
+/** Customer Code field. Additive and nullish so a pre-migration payload parses. */
+export const customerCodeSchema = afBusinessIdSchema(AF_CODE_PREFIX);
 
 /**
  * Search matching shared by client and handler tests: case-insensitive

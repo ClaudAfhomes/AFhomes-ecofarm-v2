@@ -150,7 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await db
         .from('customers')
         .select(
-          'id, customer_number, first_name, middle_name, last_name, suffix, email, phone, birth_date, address, status, created_at, updated_at',
+          'id, customer_number, customer_code, first_name, middle_name, last_name, suffix, email, phone, birth_date, address, status, created_at, updated_at',
         )
         .eq('id', principal.customerId)
         .maybeSingle();
@@ -162,6 +162,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({
         id: row.id,
         customerNumber: row.customer_number,
+        // Own code only: the principal is resolved from the session, so this
+        // cannot be pointed at another customer.
+        customerCode: row.customer_code ?? null,
         firstName: row.first_name,
         middleName: isoOrNull(row.middle_name),
         lastName: row.last_name,

@@ -354,6 +354,12 @@ export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;
 export const customerSchema = z.object({
   id: z.string().uuid(),
   customerNumber: z.string(),
+  /**
+   * Customer Code (AF-CC-XXXXXXXX): the customer's own stable reference code.
+   * NOT the Customer ID in `customerNumber`, and not an authorization token.
+   * Nullish only so a pre-migration payload still parses.
+   */
+  customerCode: z.string().nullish(),
   fullName: z.string(),
   email: z.string(),
   phone: z.string(),

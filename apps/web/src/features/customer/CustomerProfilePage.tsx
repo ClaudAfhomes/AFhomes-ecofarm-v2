@@ -1,4 +1,5 @@
-import { ErrorState, StatusChip, type StatusTone } from '@jad/ui';
+import { ErrorState, StatusChip, type StatusTone, Button } from '@jad/ui';
+import { useState } from 'react';
 
 import { useCustomerProfileQuery } from './queries';
 import { isForbidden } from './http';
@@ -19,6 +20,22 @@ import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
  */
 export function CustomerProfilePage() {
   const profile = useCustomerProfileQuery();
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  /**
+   * The Customer Code is the customer's OWN reference code, shown so they can
+   * quote it at a desk. Copying it is a convenience only: it is not a credential
+   * and nothing in the portal accepts it in place of a sign-in.
+   */
+  const copyCustomerCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      setCodeCopied(false);
+    }
+  };
 
   if (profile.isLoading) return <p role="status">Loading your profile…</p>;
   if (profile.isError) {
@@ -48,7 +65,23 @@ export function CustomerProfilePage() {
     <>
       <Card title="Your details">
         <FieldList>
-          <Field label="Customer number" value={customer.customerNumber} />
+          <Field label="Customer ID" value={customer.customerNumber} />
+          {customer.customerCode ? (
+            <Field
+              label="Customer Code"
+              value={
+                <>
+                  <code>{customer.customerCode}</code>{' '}
+                  <Button
+                    variant="secondary"
+                    onClick={() => void copyCustomerCode(customer.customerCode!)}
+                  >
+                    {codeCopied ? 'Copied' : 'Copy Customer Code'}
+                  </Button>
+                </>
+              }
+            />
+          ) : null}
           <Field label="Full name" value={customer.fullName} />
           <Field label="First name" value={customer.firstName} />
           <Field label="Middle name" value={customer.middleName ?? '—'} />

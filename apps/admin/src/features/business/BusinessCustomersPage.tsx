@@ -379,7 +379,7 @@ export function BusinessCustomersPage() {
           <table>
             <thead>
               <tr>
-                <th>Number</th>
+                <th>Customer ID / Code</th>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -392,7 +392,18 @@ export function BusinessCustomersPage() {
             <tbody>
               {customers.data?.map((customer) => (
                 <tr key={customer.id}>
-                  <td>{customer.customerNumber}</td>
+                  <td>
+                    {customer.customerNumber}
+                    {/* The customer's own Customer Code, so staff can match what
+                        the member quotes at a desk. It is a second line, never
+                        the primary identifier, and it is never an export column. */}
+                    {customer.customerCode ? (
+                      <>
+                        <br />
+                        <small>{customer.customerCode}</small>
+                      </>
+                    ) : null}
+                  </td>
                   <td>{customer.fullName}</td>
                   <td>{customer.email}</td>
                   <td>{customer.phone}</td>

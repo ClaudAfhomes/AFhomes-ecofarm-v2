@@ -65,6 +65,9 @@ export function customerHasActiveMembership(row: Record<string, unknown>): boole
 const toCustomer = (row: Record<string, unknown>) => ({
   id: row.id,
   customerNumber: row.customer_number,
+  // The customer's own Customer Code, distinct from the Customer ID above.
+  // Returned to authorized staff only; it authorizes nothing.
+  customerCode: (row.customer_code as string | null | undefined) ?? null,
   fullName: fullName(row),
   email: row.email,
   phone: row.phone,

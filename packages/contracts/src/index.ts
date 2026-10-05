@@ -231,12 +231,19 @@ export type {
 export {
   AF_ID_ALPHABET,
   AF_ID_PREFIXES,
+  AF_SUFFIX_LENGTH,
+  AF_CODE_PREFIX,
   afIdPattern,
   isAfId,
   afBusinessIdSchema,
+  customerCodeSchema,
   matchesBusinessId,
 } from './schemas/business-ids.js';
-export type { AfIdPrefix } from './schemas/business-ids.js';
+export type {
+  AfIdPrefix,
+  AfCodePrefix,
+  AfBusinessPrefix,
+} from './schemas/business-ids.js';
 
 export {
   paymentSchema,

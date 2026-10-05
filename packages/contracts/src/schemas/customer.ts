@@ -75,6 +75,12 @@ export type CustomerActivationResult = z.infer<typeof customerActivationResultSc
 export const customerProfileSchema = z.object({
   id: z.string().uuid(),
   customerNumber: z.string(),
+  /**
+   * Customer Code (AF-CC-XXXXXXXX) - the customer's own stable reference code.
+   * Separate from `customerNumber`, which is the Customer ID, and it authorizes
+   * nothing. Nullish only so a pre-migration payload still parses.
+   */
+  customerCode: z.string().nullish(),
   firstName: z.string(),
   middleName: z.string().nullable(),
   lastName: z.string(),
