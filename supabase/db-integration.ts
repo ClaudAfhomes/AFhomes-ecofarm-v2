@@ -262,6 +262,13 @@ const createdCustomerIds: string[] = [];
 const createdStaffIds: string[] = [];
 /** Auth users created for the Phase 3 portal section (not staff). */
 const createdAuthIds: string[] = [];
+/**
+ * OST fixture ids for the legacy-ID rehearsal. Teardown is registered with the
+ * suite's own cleanup rather than only at the end of the section, because a
+ * deliberately injected failure can abort the section mid-way and leak rows
+ * that would then fail cleanup's row-count proof for everything.
+ */
+const legacyOstFixtureIds: string[] = [];
 
 /**
  * Deterministic uuid per label, so a re-run never collides and a test failure can
@@ -8640,6 +8647,531 @@ async function main(): Promise<void> {
           check('denial names the privilege boundary', /permission denied/.test(denied));
         }
       }
+
+      section('55. Legacy business-ID upgrade: alias preservation and identity invariants');
+      {
+        // Local helpers: this section must not widen shared suite scope.
+        const scalar = async (sql: string): Promise<string> =>
+          (await db!.query<{ v: string }>(sql)).rows[0]!.v;
+        const aliasCount = async (): Promise<number> =>
+          Number((await db!.query<{ n: string }>('select count(*) as n from private.business_id_aliases')).rows[0]!.n);
+        // Identity, money and points must be identical before and after: only the
+        // human-facing business-ID column is allowed to differ.
+        const snapshotInvariants = async () => ({
+          counts: await scalar(
+            `select concat_ws('|',
+              (select count(*) from public.customers),(select count(*) from public.card_sales),
+              (select count(*) from public.customer_applications),(select count(*) from public.reservation_agreements),
+              (select count(*) from public.ost_members),(select count(*) from public.redemptions),
+              (select count(*) from private.ost_registration_details),(select count(*) from private.ost_accreditation_renewals),
+              (select count(*) from public.memberships),(select count(*) from public.payments),(select count(*) from public.commissions))`,
+          ),
+          uuids: await scalar(
+            `select md5(string_agg(t,'|' order by t)) from (
+              select id::text t from public.customers union all select id::text from public.card_sales
+              union all select id::text from public.customer_applications union all select id::text from public.reservation_agreements
+              union all select id::text from public.ost_members union all select id::text from public.redemptions
+              union all select id::text from public.memberships) s`,
+          ),
+          codes: await scalar(
+            `select coalesce(string_agg(customer_code,'|' order by customer_code),'') from public.customers`,
+          ),
+          memberships: await scalar(
+            `select coalesce(string_agg(coalesce(membership_number,'~'),'|' order by id),'') from public.memberships`,
+          ),
+          payments: await scalar(
+            `select concat((select count(*) from public.payments),'/',coalesce(sum(amount::numeric),0)) from public.payments`,
+          ),
+          commissions: await scalar(
+            `select concat((select count(*) from public.commissions),'/',coalesce(sum(amount::numeric),0)) from public.commissions`,
+          ),
+          points: await scalar(
+            `select concat((select count(*) from public.points_accounts),'/',coalesce(sum(balance),0)) from public.points_accounts`,
+          ),
+        });
+        // The conversion is exercised against synthetic legacy rows, never
+        // against an empty database: an assertion that can only pass because no
+        // rows exist is not a check.
+        type Target = {
+          entity: string;
+          table: string;
+          column: string;
+          key: string;
+          legacy: string;
+          modern: RegExp;
+        };
+        const targets: Target[] = [
+          { entity: 'customer', table: 'public.customers', column: 'customer_number', key: 'id', legacy: 'CUS-9000', modern: /^AF-CUS-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'card_sale', table: 'public.card_sales', column: 'sale_number', key: 'id', legacy: 'SALE-9000', modern: /^AF-CSALE-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'customer_application', table: 'public.customer_applications', column: 'application_number', key: 'id', legacy: 'APP-9000', modern: /^AF-APP-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'reservation_agreement', table: 'public.reservation_agreements', column: 'reservation_number', key: 'id', legacy: 'RES-9000', modern: /^AF-RES-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'ost_member', table: 'public.ost_members', column: 'ost_number', key: 'id', legacy: 'OST-9000', modern: /^AF-OST-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'redemption', table: 'public.redemptions', column: 'redemption_number', key: 'id', legacy: 'RDM-9000', modern: /^AF-RED-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'ost_renewal', table: 'private.ost_accreditation_renewals', column: 'renewal_number', key: 'id', legacy: 'REN-9000', modern: /^AF-REN-[A-HJ-NP-Z2-9]{5}$/ },
+          { entity: 'ost_accreditation', table: 'private.ost_registration_details', column: 'form_number', key: 'application_id', legacy: 'AF-9000', modern: /^AF-ACC-[A-HJ-NP-Z2-9]{5}$/ },
+        ];
+
+        // One synthetic customer per legacy number proves random, non-sequential
+        // allocation; the other tables reuse an existing row so no fixture graph
+        // has to be rebuilt, which keeps their UUIDs and counts untouched.
+        const seededCustomers: { id: string; legacy: string; code: string }[] = [];
+        for (const [i] of ['CUS-900001', 'CUS-900002', 'CUS-900003'].entries()) {
+          const id = uuidFor(`legacy:cus:${i}`);
+          const number = `CUS-${RUN}${i}`;
+          const created = await db.query<{ customer_code: string }>(
+            `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+             values ($1,$2,'Legacy','Customer','1990-01-01',$3,'09175550004','prospect') returning customer_code`,
+            [id, number, `${RUN}-legacy-${i}@example.invalid`],
+          );
+          createdCustomerIds.push(id);
+          seededCustomers.push({ id, legacy: number, code: created.rows[0]!.customer_code });
+        }
+        check(
+          'three legacy customer numbers seeded with distinct Customer Codes',
+          new Set(seededCustomers.map((c) => c.code)).size === 3,
+        );
+
+        const exercised: string[] = [];
+        const exercisedRowKeys = new Map<string, string>();
+        const forcedValues = new Map<string, string>();
+        for (const t of targets) {
+          // The three OST types are seeded explicitly below; reuse an existing
+          // row only for the five public tables.
+          if (t.entity.startsWith('ost_')) continue;
+          const row = await db.query<{ key: string }>(
+            `select ${t.key} as key from ${t.table} order by ${t.key} limit 1`,
+          );
+          if (!row.rows[0]) continue;
+          const key = row.rows[0]!.key;
+          // Run-unique so it can never collide with a legacy fixture another
+          // section already created.
+          const forced = `${t.legacy}-${RUN}`;
+          await db.query(
+            `update ${t.table} set ${t.column} = $1 where ${t.key} = $2`,
+            [forced, key],
+          );
+          await db.query(
+            `insert into private.business_id_aliases (entity_type, entity_id, old_identifier, migration_source)
+             values ($1,$2,$3,'pre-test') on conflict (entity_type, old_identifier) do update set is_active = false`,
+            [t.entity, key, forced],
+          );
+          exercised.push(t.entity);
+          exercisedRowKeys.set(t.entity, key);
+          forcedValues.set(t.entity, forced);
+        }
+        // Minimum OST fixture graph, so the three OST entity types are proven by
+        // EXECUTED rows rather than by reading the shipped function body. Real
+        // FK edges throughout: sponsor -> referral code -> application -> member
+        // -> accreditation -> term -> renewal. No orphan rows, no weakened
+        // constraints.
+        const sponsorId = staff['sm'];
+        const ostMemberId = uuidFor('legacy:ost:member');
+        check('the OST sponsor exists for the fixture graph', Boolean(sponsorId));
+        const legacyOstNumber = 'OST-000903';
+        const legacyFormNumber = `AF-${'a1b2c3d4e5f60718'.repeat(2)}`;
+        const legacyRenewalNumber = 'REN-000904';
+        const ostApplicationId = uuidFor('legacy:ost:app');
+        // ost_members.id references auth.users, so the member needs a real auth
+        // user and staff profile - not an orphan uuid.
+        const termId = uuidFor('legacy:ost:term');
+        const renewalId = uuidFor('legacy:ost:renewal');
+        const referralCodeId = uuidFor('legacy:ost:code');
+        legacyOstFixtureIds.push(renewalId, termId, ostApplicationId, ostMemberId, referralCodeId);
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          ostMemberId,
+          `${RUN}-legacy-ost@example.invalid`,
+        ]);
+        createdAuthIds.push(ostMemberId);
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status)
+           values ($1,$2,'Legacy Ost Member','active')`,
+          [ostMemberId, `${RUN}-legacy-ost@example.invalid`],
+        );
+        createdStaffIds.push(ostMemberId);
+        await db.query(
+          `insert into public.referral_codes (id, code_hash, code_hint, sponsor_staff_id, expires_at, created_by)
+           values ($1,$2,$3,$4, now() + interval '1 year', $4)`,
+          [
+            referralCodeId,
+            (await db.query<{ h: string }>('select private.hash_token($1) as h', [RUN + '-legacy-ost']))
+              .rows[0]!.h,
+            `${RUN.slice(0, 6)}-HINT`,
+            sponsorId,
+          ],
+        );
+        await db.query(
+          `insert into public.ost_applications
+             (id, referral_code_id, sponsor_staff_id, email, phone, first_name, last_name,
+              birth_date, address, status)
+           values ($1,$2,$3,$4,'+639171234567','Legacy','Ost','1993-04-04',
+             '{"line1": "1 Farm Road", "city": "Tagaytay", "province": "Cavite", "countryCode": "PH"}',
+             'submitted')`,
+          [ostApplicationId, referralCodeId, sponsorId, `${RUN}-legacy-ost@example.invalid`],
+        );
+        await db.query(
+          `insert into public.ost_members
+             (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone, status, approved_by)
+           values ($1,$2,$3,$4,'Legacy Ost Member',$5,'+639170000903','active',$6)`,
+          [ostMemberId, ostApplicationId, sponsorId, legacyOstNumber, `${RUN}-legacy-ost@example.invalid`, staff['super-admin']],
+        );
+        await db.query(
+          `insert into private.ost_registration_details
+             (application_id, request_id, payload_hash, date_applied, form_number, program_category,
+              official_details, referrer_snapshot, applicant_signature_status, referrer_signature_status,
+              applicant_signed_on, referrer_signed_on, source, created_by)
+           values ($1,$2,$3,'2026-09-01',$4,'vip_holder','{}','{}','received','received',
+             '2026-09-01','2026-09-01','manual',$5)`,
+          [
+            ostApplicationId,
+            uuidFor('legacy:ost:req'),
+            'b'.repeat(64),
+            legacyFormNumber,
+            staff['super-admin'],
+          ],
+        );
+        await db.query(
+          `insert into private.ost_accreditation_terms
+             (id, ost_id, application_id, starts_on, expires_on, status, approved_by)
+           values ($1,$2,$3,'2026-09-01','2027-09-01','active',$4)`,
+          [termId, ostMemberId, ostApplicationId, staff['super-admin']],
+        );
+        await db.query(
+          `insert into private.ost_accreditation_renewals
+             (id, renewal_number, request_id, payload_hash, ost_id, prior_term_id, date_of_renewal,
+              requested_start, requested_end, applicant_snapshot, original_accreditation_date,
+              last_expiry_date, old_sponsor_staff_id, referrer_snapshot, applicant_signature_status,
+              referrer_signature_status, created_by)
+           values ($1,$2,$3,$4,$5,$6,'2026-09-15','2027-09-01','2028-09-01','{}','2026-09-01',
+             '2027-09-01',$7,'{}','received','received',$7)`,
+          [renewalId, legacyRenewalNumber, uuidFor('legacy:ost:renewal-req'), 'c'.repeat(64), ostMemberId, termId, sponsorId],
+        );
+
+        // OST entity types are now seeded explicitly, so drop them from the
+        // "reuse an existing row" list and record their legacy identifiers.
+        const ostTargets = new Map<string, { key: string; legacy: string }>([
+          ['ost_member', { key: ostMemberId, legacy: legacyOstNumber }],
+          ['ost_accreditation', { key: ostApplicationId, legacy: legacyFormNumber }],
+          ['ost_renewal', { key: renewalId, legacy: legacyRenewalNumber }],
+        ]);
+        const seededEntities: {
+          entity: string;
+          table: string;
+          key: string;
+          legacy: string;
+          modern: RegExp;
+          id: string;
+        }[] = [];
+
+        const emptyTargets = targets.filter(
+          (t) => !exercised.includes(t.entity) && !ostTargets.has(t.entity),
+        );
+        check(
+          'the conversion targets every whitelisted entity type',
+          emptyTargets.length === 0,
+          `reused-row ${exercised.join(',')}; seeded-row ${[...ostTargets.keys()].join(',')}; missing ${emptyTargets.map((t) => t.entity).join(',') || 'none'}`,
+        );
+        for (const t of targets) {
+          const seeded = ostTargets.get(t.entity);
+          seededEntities.push({
+            entity: t.entity,
+            table: t.table,
+            key: seeded ? seeded.key : (exercisedRowKeys.get(t.entity) ?? ''),
+            legacy: seeded ? seeded.legacy : (forcedValues.get(t.entity) ?? ''),
+            modern: t.modern,
+            id: seeded ? seeded.key : (exercisedRowKeys.get(t.entity) ?? ''),
+          });
+        }
+        check(
+          'all eight entity types have an executed row to convert',
+          seededEntities.every((e) => Boolean(e.key)),
+          seededEntities.map((e) => `${e.entity}:${e.key ? 'ok' : 'MISSING'}`).join(','),
+        );
+        // Rows may legitimately not exist for every entity type in a fresh
+        // disposable database, so coverage of ALL eight is proven from the
+        // shipped function body rather than by silently skipping.
+        const whitelist = await one<{ n: number }>(
+          `select count(*)::int as n from unnest(
+             array['AF-CUS','AF-CSALE','AF-APP','AF-RES','AF-OST','AF-ACC','AF-REN','AF-RED']) as p(prefix)
+           where strpos(pg_get_functiondef('private.upgrade_legacy_business_ids()'::regprocedure), p.prefix) > 0`,
+        );
+        eq('the shipped conversion declares all eight prefixes', whitelist.n, 8);
+
+        // Identity and money invariants, captured before the conversion runs.
+        const beforeSnapshotHash = await scalar(
+          `select md5(coalesce(string_agg(coalesce(cash_price_snapshot::text,'~')||'|'||coalesce(reservation_fee_snapshot::text,'~')||'|'||coalesce(required_initial_snapshot::text,'~'),',' order by id),'')) from public.card_sales`,
+        );
+        const before = await snapshotInvariants();
+
+        const converted = Number(
+          (
+            await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n')
+          ).rows[0]!.n,
+        );
+        check('the conversion reports the rows it rewrote', converted >= 3, `${converted}`);
+
+        const after = await snapshotInvariants();
+        const afterSnapshotHash = await scalar(
+          `select md5(coalesce(string_agg(coalesce(cash_price_snapshot::text,'~')||'|'||coalesce(reservation_fee_snapshot::text,'~')||'|'||coalesce(required_initial_snapshot::text,'~'),',' order by id),'')) from public.card_sales`,
+        );
+        eq('row counts identical across every converted table', after.counts, before.counts);
+        eq('UUID sets identical: no row was recreated', after.uuids, before.uuids);
+        eq('Customer Codes byte-identical', after.codes, before.codes);
+        eq('membership numbers byte-identical', after.memberships, before.memberships);
+        eq('payment totals unchanged', after.payments, before.payments);
+        eq('commission totals unchanged', after.commissions, before.commissions);
+        eq('points balances unchanged', after.points, before.points);
+
+        const convertedCustomers = await db.query<{ id: string; customer_number: string }>(
+          `select id, customer_number from public.customers where id = any($1::uuid[])
+           order by customer_number`,
+          [seededCustomers.map((c) => c.id)],
+        );
+        eq('every legacy customer number became AF-CUS', convertedCustomers.rows.length, 3);
+        check(
+          'converted customer numbers match the approved format',
+          convertedCustomers.rows.every((r) => r.customer_number.match(/^AF-CUS-[A-HJ-NP-Z2-9]{5}$/)),
+          convertedCustomers.rows.map((r) => r.customer_number).join(','),
+        );
+        check(
+          'three legacy numbers produce three INDEPENDENT random values, not a sequence',
+          new Set(convertedCustomers.rows.map((r) => r.customer_number.slice(-5))).size === 3 &&
+            !convertedCustomers.rows.some((r) => /^AF-CUS-0000\d$/.test(r.customer_number)),
+          convertedCustomers.rows.map((r) => r.customer_number).join(','),
+        );
+
+        for (const c of seededCustomers) {
+          const byOld = await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+            `select entity_id, current_identifier, via_alias from private.resolve_business_identifier('customer', $1)`,
+            [c.legacy],
+          );
+          const byNew = await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+            `select entity_id, current_identifier, via_alias from private.resolve_business_identifier('customer', $1)`,
+            [byOld.rows[0]?.current_identifier ?? ''],
+          );
+          eq(`legacy ${c.legacy} resolves to the same customer UUID`, byOld.rows[0]?.entity_id, c.id);
+          eq(`legacy ${c.legacy} reports the CURRENT AF id`, byOld.rows[0]?.current_identifier, byNew.rows[0]?.current_identifier);
+          eq(`current AF id resolves directly, not via alias`, byNew.rows[0]?.via_alias, false);
+          check(`legacy ${c.legacy} was reached through the alias table`, byOld.rows[0]?.via_alias === true);
+        }
+        const caseInsensitive = await db.query<{ entity_id: string }>(
+          `select entity_id from private.resolve_business_identifier('customer', $1)`,
+          [seededCustomers[0]!.legacy.toLowerCase()],
+        );
+        eq('alias lookup is case-insensitive', caseInsensitive.rows[0]?.entity_id, seededCustomers[0]!.id);
+
+        const unknown = await db.query<{ entity_id: string | null }>(
+          `select entity_id from private.resolve_business_identifier('customer', $1)`,
+          ['CUS-DOES-NOT-EXIST'],
+        );
+        eq('an unknown identifier resolves to no row at all', unknown.rows.length, 0);
+
+        // Idempotency: a second run must not mint a new id or duplicate aliases.
+        const aliasesBefore = await aliasCount();
+        const second = Number(
+          (
+            await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n')
+          ).rows[0]!.n,
+        );
+        const stable = await db.query<{ customer_number: string }>(
+          'select customer_number from public.customers where id = $1',
+          [seededCustomers[0]!.id],
+        );
+        const firstConverted = stable.rows[0]!.customer_number;
+        eq('a second run rewrites nothing', second, 0);
+        eq('a second run adds no duplicate alias', await aliasCount(), aliasesBefore);
+        eq('a second run leaves the identifier untouched', stable.rows[0]!.customer_number, firstConverted);
+
+        // Already-modern identifiers are never regenerated.
+        const modernUntouched = await db.query<{ n: number }>(
+          `select count(*)::int as n from public.customers
+            where customer_code is not null and customer_number !~ '^AF-CUS-[A-HJ-NP-Z2-9]{5}$'`,
+        );
+        eq('no customer number is left in a legacy format', modernUntouched.rows[0]!.n, 0);
+
+        // The alias table is private and the resolver is server-side only.
+        for (const role of ['anon', 'authenticated'] as const) {
+          const tableAccess = await one<{ allowed: boolean }>(
+            `select has_table_privilege($1,'private.business_id_aliases','SELECT') as allowed`,
+            [role],
+          );
+          eq(`${role} cannot read the alias table`, tableAccess.allowed, false);
+          const fnAccess = await one<{ allowed: boolean }>(
+            `select has_function_privilege($1,'private.resolve_business_identifier(text,text)','EXECUTE') as allowed`,
+            [role],
+          );
+          eq(`${role} cannot execute the resolver`, fnAccess.allowed, false);
+          const upgradeAccess = await one<{ allowed: boolean }>(
+            `select has_function_privilege($1,'private.upgrade_legacy_business_ids()','EXECUTE') as allowed`,
+            [role],
+          );
+          eq(`${role} cannot run the conversion`, upgradeAccess.allowed, false);
+        }
+        check(
+          'the alias table stores identifiers only - no credential column',
+          (
+            await db.query<{ column_name: string }>(
+              `select column_name from information_schema.columns
+                where table_schema='private' and table_name='business_id_aliases'`,
+            )
+          ).rows
+            .map((r) => r.column_name)
+            .every((c) => !/(token|secret|password|hash|government|id_number|qr)/i.test(c)),
+        );
+
+        // Every one of the eight entity types: the legacy identifier and the NEW
+        // identifier must resolve to the SAME UUID, with via_alias set correctly.
+        for (const e of seededEntities) {
+          const before = (
+            await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+              `select entity_id, current_identifier, via_alias from private.resolve_business_identifier($1,$2)`,
+              [e.entity, e.legacy],
+            )
+          ).rows[0];
+          eq(`${e.entity}: the legacy identifier resolves to the same key`, before?.entity_id, e.key);
+          check(
+            `${e.entity}: the legacy identifier was reached through the alias`,
+            before?.via_alias === true,
+            `${e.legacy}`,
+          );
+          const after = (
+            await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+              `select entity_id, current_identifier, via_alias from private.resolve_business_identifier($1,$2)`,
+              [e.entity, before?.current_identifier ?? ''],
+            )
+          ).rows[0];
+          eq(`${e.entity}: old and new identifier resolve to the SAME uuid`, after?.entity_id, before?.entity_id);
+          eq(`${e.entity}: the new identifier resolves directly`, after?.via_alias, false);
+          check(
+            `${e.entity}: the stored identifier is the approved random AF format`,
+            e.modern.test(before?.current_identifier ?? ''),
+            `${e.legacy} -> ${before?.current_identifier}`,
+          );
+          const lowercased = (
+            await db.query<{ entity_id: string }>(
+              `select entity_id from private.resolve_business_identifier($1,$2)`,
+              [e.entity, (before?.current_identifier ?? '').toLowerCase()],
+            )
+          ).rows[0];
+          eq(`${e.entity}: the AF identifier resolves case-insensitively`, lowercased?.entity_id, e.key);
+        }
+
+        // Authorized search accepts the legacy alias and still returns the record.
+        const searched = await db.query<{ customer_id: string }>(
+          'select customer_id from public.search_customer_ids($1)',
+          [seededCustomers[0]!.legacy],
+        );
+        eq('authorized search resolves the legacy alias', searched.rows[0]?.customer_id, seededCustomers[0]!.id);
+        const byCode = await db.query<{ customer_id: string }>(
+          'select customer_id from public.search_customer_ids($1)',
+          [seededCustomers[0]!.code],
+        );
+        eq('the Customer Code still resolves after the upgrade', byCode.rows[0]?.customer_id, seededCustomers[0]!.id);
+
+        // An alias is an identifier, never an authorization token: a caller who
+        // is not the owner still gets nothing through the customer portal path.
+        const denied = await throws('customer portal rejects another customer by legacy alias', () =>
+          asBrowserRole(target.url, 'authenticated', uuidFor('legacy:owner'), (client) =>
+            client.query('select * from public.customer_directory($1::jsonb)', [JSON.stringify({ search: seededCustomers[0]!.legacy })]),
+          ),
+        );
+        check('an alias never grants unauthorized access', /permission denied/.test(denied), denied);
+
+        // 17. An already-modern identifier is skipped and gains NO alias.
+        const modernCustomerId = uuidFor('legacy:modern');
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1,'AF-CUS-K7M4Q','Modern','Customer','1990-01-01',$2,'09175550005','prospect')`,
+          [modernCustomerId, `${RUN}-modern@example.invalid`],
+        );
+        createdCustomerIds.push(modernCustomerId);
+        const modernAliasBefore = await aliasCount();
+        await db.query('select private.upgrade_legacy_business_ids()');
+        const modernAfter = (
+          await db.query<{ customer_number: string; customer_code: string }>(
+            'select customer_number, customer_code from public.customers where id = $1',
+            [modernCustomerId],
+          )
+        ).rows[0]!;
+        eq('an already-modern identifier is left exactly as it was', modernAfter.customer_number, 'AF-CUS-K7M4Q');
+        eq('an already-modern record gains no alias', await aliasCount(), modernAliasBefore);
+
+        // 19. current_identifier_snapshot is evidence only: the resolver must
+        // still return the canonical value from the entity table.
+        const snapshotProbe = seededEntities.find((e) => e.entity === 'customer')!;
+        const canonical = (
+          await db.query<{ current_identifier: string }>(
+            `select current_identifier from private.resolve_business_identifier('customer',$1)`,
+            [snapshotProbe.legacy],
+          )
+        ).rows[0]!.current_identifier;
+        await db.query(
+          `update private.business_id_aliases set current_identifier_snapshot = 'TAMPERED-SNAPSHOT'
+            where entity_type = 'customer' and old_identifier = $1`,
+          [snapshotProbe.legacy],
+        );
+        const afterTamper = (
+          await db.query<{ current_identifier: string }>(
+            `select current_identifier from private.resolve_business_identifier('customer',$1)`,
+            [snapshotProbe.legacy],
+          )
+        ).rows[0]!.current_identifier;
+        eq('the resolver ignores the snapshot and returns the canonical column', afterTamper, canonical);
+        check(
+          'the stored snapshot really was tampered with, so the check is not vacuous',
+          canonical !== 'TAMPERED-SNAPSHOT',
+        );
+
+        // 15. An ambiguous legacy identifier must FAIL the conversion rather than
+        // retarget someone else's alias. Isolated transaction so the refusal
+        // cannot poison the suite.
+        await db.query('begin');
+        let ambiguityRefused = '';
+        try {
+          const conflictingCustomer = uuidFor('legacy:conflict');
+          await db.query(
+            `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+             values ($1,'CUS-CONFLICT-1','Conflict','Owner','1990-01-01',$2,'09175550006','prospect')`,
+            [conflictingCustomer, `${RUN}-conflict-owner@example.invalid`],
+          );
+          // An alias for that legacy value already pointing at a DIFFERENT row.
+          await db.query(
+            `insert into private.business_id_aliases (entity_type, entity_id, old_identifier, migration_source)
+             values ('customer',$1,'CUS-CONFLICT-1','planted')`,
+            [seededCustomers[0]!.id],
+          );
+          await db.query('select private.upgrade_legacy_business_ids()');
+          ambiguityRefused = 'DID NOT RAISE';
+        } catch (error) {
+          ambiguityRefused = safeErrorMessage(error);
+        } finally {
+          await db.query('rollback');
+        }
+        check(
+          'an ambiguous legacy identifier fails the conversion instead of retargeting the alias',
+          /LEGACY_ID_ALIAS_MISSING/.test(ambiguityRefused),
+          ambiguityRefused,
+        );
+
+        // 21. Historical evidence is not rewritten: a sale's frozen price
+        // snapshot is byte-identical before and after.
+        eq('frozen sale snapshots are untouched', afterSnapshotHash, beforeSnapshotHash);
+
+        // Remove the OST graph in reverse FK order. These rows carry no run
+        // prefix on every column, so leaving them would fail cleanup's
+        // row-count proof for the whole suite.
+        await db.query('delete from private.ost_accreditation_renewals where id = $1', [renewalId]);
+        await db.query('delete from private.ost_accreditation_terms where id = $1', [termId]);
+        await db.query('delete from private.ost_registration_details where application_id = $1', [
+          ostApplicationId,
+        ]);
+        await db.query('delete from public.ost_members where id = $1', [ostMemberId]);
+        await db.query('delete from public.ost_applications where id = $1', [ostApplicationId]);
+        await db.query('delete from public.referral_codes where id = $1', [referralCodeId]);
+        await db.query(
+          `delete from private.business_id_aliases where entity_id = any($1::uuid[])`,
+          [[ostMemberId, ostApplicationId, renewalId]],
+        );
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -8822,6 +9354,27 @@ async function main(): Promise<void> {
         await db?.query('delete from public.staff_invitations where invited_by = any($1::uuid[])', [
           staffSet,
         ]);
+        if (legacyOstFixtureIds.length > 0) {
+          const ids = legacyOstFixtureIds;
+          await db?.query(
+            'delete from private.ost_accreditation_renewals where id = any($1::uuid[])',
+            [ids],
+          );
+          await db?.query('delete from private.ost_accreditation_terms where id = any($1::uuid[])', [
+            ids,
+          ]);
+          await db?.query(
+            'delete from private.ost_registration_details where application_id = any($1::uuid[])',
+            [ids],
+          );
+          await db?.query('delete from public.ost_members where id = any($1::uuid[])', [ids]);
+          await db?.query('delete from public.ost_applications where id = any($1::uuid[])', [ids]);
+          await db?.query('delete from public.referral_codes where id = any($1::uuid[])', [ids]);
+          await db?.query(
+            'delete from private.business_id_aliases where entity_id = any($1::uuid[])',
+            [ids],
+          );
+        }
         await db?.query(
           'delete from public.ost_applications where sponsor_staff_id = any($1::uuid[])',
           [staffSet],
