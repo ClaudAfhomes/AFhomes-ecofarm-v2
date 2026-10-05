@@ -1,4 +1,4 @@
-﻿import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
@@ -20,6 +20,7 @@ import {
   getDocuments,
   getCurrentDocument,
   completeDocumentUpload,
+  confirmDocument,
   putUploadBytes,
   requestUploadGrant,
   runDocumentOcr,
@@ -55,6 +56,7 @@ vi.mock('../documents/services', async (original) => ({
   getDocuments: vi.fn(),
   getCurrentDocument: vi.fn(),
   completeDocumentUpload: vi.fn(),
+  confirmDocument: vi.fn(),
   putUploadBytes: vi.fn(),
   requestUploadGrant: vi.fn(),
   runDocumentOcr: vi.fn(),
@@ -172,6 +174,11 @@ describe('application private ID intake and review', () => {
       expiresAt: '2026-10-03T12:00:00Z',
     });
     vi.mocked(putUploadBytes).mockResolvedValue(undefined);
+    // One flow: "Detect fields" uploads the selected file and then runs OCR, so
+    // OCR is mocked by default. Tests that exercise OCR failure or timing
+    // override it.
+    vi.mocked(runDocumentOcr).mockResolvedValue(document('completed'));
+    vi.mocked(confirmDocument).mockImplementation(async () => document('completed'));
     vi.mocked(completeDocumentUpload).mockImplementation(async () => {
       const transfer = vi.mocked(putUploadBytes).mock.calls.at(-1);
       const doc = { ...document('completed'), originalFilename: transfer?.[1].name ?? 'qa.png' };
@@ -209,10 +216,93 @@ describe('application private ID intake and review', () => {
       uploadedAt: '2026-10-01',
       reviewedAt: null,
     });
+  // Regression: the picker and a legacy standalone "Upload ID" button used to
+  // both exist, so there were two controls over one selected file. "Detect
+  // fields" performs the upload, so the picker is the only entry point.
+  it('offers one upload entry point and no duplicate Upload ID button', async () => {
+    await setup();
+    expect(screen.queryByRole('button', { name: 'Upload ID' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload an ID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
+  });
+  it('routes Take a photo to the camera-capture input, never the ordinary picker', async () => {
+    await setup();
+    const picker = screen.getByLabelText('Upload ID');
+    const camera = screen.getByLabelText('Scan / Take Photo');
+    expect(camera).toHaveAttribute('capture', 'environment');
+    expect(camera).toHaveAttribute('accept', 'image/*');
+    expect(camera).not.toBe(picker);
+    const pickerClick = vi.spyOn(picker, 'click');
+    const cameraClick = vi.spyOn(camera, 'click');
+    fireEvent.click(screen.getByRole('button', { name: 'Take a photo' }));
+    expect(cameraClick).toHaveBeenCalledTimes(1);
+    expect(pickerClick).not.toHaveBeenCalled();
+    // A desktop browser ignores `capture`, so the same input still accepts a
+    // chosen file. That captured file must join the one secure pipeline.
+    const captured = new File(['cam'], 'capture.jpg', { type: 'image/jpeg' });
+    fireEvent.change(camera, { target: { files: [captured] } });
+    expect(await screen.findByText(/Selected ID: capture\.jpg/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await waitFor(() => expect(putUploadBytes).toHaveBeenCalledTimes(1));
+    expect(putUploadBytes).toHaveBeenCalledWith('https://safe-test.example/signed-upload', captured);
+    expect(requestUploadGrant).toHaveBeenCalledWith(
+      expect.objectContaining({ mime: 'image/jpeg', originalFilename: 'capture.jpg' }),
+    );
+  });
+  it('keeps Detect fields disabled until an ID file is selected', async () => {
+    await setup(true);
+    expect(await screen.findByText(/Current ID: qa\.png/)).toBeInTheDocument();
+    cleanup();
+    vi.mocked(getDocuments).mockResolvedValue([]);
+    vi.mocked(getCurrentDocument).mockResolvedValue(null);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    await screen.findByRole('option', { name: 'QA Customer' });
+    fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
+    expect(await screen.findByRole('button', { name: 'Detect fields' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Upload ID'), {
+      target: { files: [new File(['x'], 'x.png', { type: 'image/png' })] },
+    });
+    expect(screen.getByRole('button', { name: 'Detect fields' })).toBeEnabled();
+  });
+  // Regression: Submit is gated on an ID type recorded on the identity
+  // document, and that field was only ever writable from /admin/documents, so
+  // from this screen the requirement was unreachable and Submit stayed
+  // permanently disabled with no indication of the missing step.
+  it('makes the missing ID-type review reachable in place and persists it server-side', async () => {
+    await setup(true);
+    fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
+    expect(await screen.findByText(/Submit needs the ID type recorded/)).toBeInTheDocument();
+
+    // The action is offered, and it is only enabled once an ID type is chosen.
+    cleanup();
+    vi.mocked(getDocuments).mockResolvedValue([document('completed')]);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    await screen.findByRole('option', { name: 'QA Customer' });
+    fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
+    await screen.findByRole('button', { name: 'Record ID type on this ID' });
+    expect(screen.getByRole('button', { name: 'Record ID type on this ID' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
+    expect(screen.getByRole('button', { name: 'Record ID type on this ID' })).toBeEnabled();
+
+    vi.mocked(getDocuments).mockResolvedValue([
+      { ...document('completed'), reviewedFields: { idType: 'passport' } },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Record ID type on this ID' }));
+    await screen.findByText(/ID type recorded on the identity document/);
+    // Only the ID type leaves this screen; document numbers stay write-only, and
+    // the record is written by the server, never optimistically in the browser.
+    expect(confirmDocument).toHaveBeenCalledWith(documentId, {
+      decision: 'confirmed',
+      fields: { idType: 'passport' },
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/Submit needs the ID type recorded/)).toBeNull(),
+    );
+  });
   it('uploads to the selected customer, autofills confident suggestions, and preserves manual corrections', async () => {
     await setup();
     vi.mocked(runDocumentOcr).mockResolvedValue(document('completed'));
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText('Valid ID: Uploaded ✓');
     expect(requestUploadGrant).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -280,7 +370,7 @@ describe('application private ID intake and review', () => {
     });
   const uploadCurrent = async () => {
     await setup();
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText(/Current ID: qa\.png/);
   };
   it('keeps the current ID authoritative while replacement is pending and cancelled', async () => {
@@ -304,7 +394,7 @@ describe('application private ID intake and review', () => {
           finish = resolve;
         }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await waitFor(() => expect(putUploadBytes).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText('Upload ID')).toBeDisabled();
     expect(screen.getByLabelText('Scan / Take Photo')).toBeDisabled();
@@ -324,7 +414,7 @@ describe('application private ID intake and review', () => {
       if (stage === 'grant')
         vi.mocked(requestUploadGrant).mockRejectedValueOnce(new Error('Grant failed'));
       else vi.mocked(putUploadBytes).mockRejectedValueOnce(new Error('Bytes failed'));
-      fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
       await screen.findByText(stage === 'grant' ? 'Grant failed' : 'Bytes failed');
       expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
       expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
@@ -358,7 +448,7 @@ describe('application private ID intake and review', () => {
     await uploadCurrent();
     selectReplacement();
     vi.mocked(putUploadBytes).mockRejectedValueOnce(new Error('Bytes failed'));
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText('Bytes failed');
     cleanup();
     vi.mocked(getDocuments).mockResolvedValue([
@@ -388,7 +478,7 @@ describe('application private ID intake and review', () => {
     vi.mocked(completeDocumentUpload).mockRejectedValueOnce(
       new Error('Verification could not be saved'),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText('Verification could not be saved');
     expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
@@ -404,7 +494,7 @@ describe('application private ID intake and review', () => {
           finish = resolve;
         }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await waitFor(() => expect(completeDocumentUpload).toHaveBeenCalledTimes(2));
     expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.getByLabelText('Upload ID')).toBeDisabled();
@@ -591,7 +681,7 @@ describe('application private ID intake and review', () => {
       ...document('completed'),
       originalFilename: 'other-current.png',
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Upload ID' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText(/Current ID: other-current\.png/);
     expect(screen.queryByText(/Current ID: qa\.png/)).not.toBeInTheDocument();
   });

@@ -40,6 +40,7 @@ import {
   getDocuments,
   getCurrentDocument,
   completeDocumentUpload,
+  confirmDocument,
   putUploadBytes,
   requestUploadGrant,
   runDocumentOcr,
@@ -777,6 +778,22 @@ export function CustomerApplicationEditorPage() {
     onError: (e) =>
       setMessage(e instanceof Error ? e.message : 'OCR failed; continue with manual entry.'),
   });
+  const confirmIdType = useMutation({
+    mutationFn: async () => {
+      if (!serverCurrentDocument) throw new Error('Upload and verify an ID first.');
+      const document = await confirmDocument(serverCurrentDocument.id, {
+        decision: 'confirmed',
+        // Only the ID type is recorded here. Identity-document numbers stay
+        // write-only and are never sent from this screen.
+        fields: { idType: governmentIdTypeSchema.parse(idType) },
+      });
+      await Promise.all([documents.refetch(), currentDocument.refetch()]);
+      return document;
+    },
+    onSuccess: () =>
+      setMessage('ID type recorded on the identity document. The application can be submitted.'),
+    onError: (e) => setMessage(e instanceof Error ? e.message : 'Could not record the ID type.'),
+  });
   const decide = useMutation({
     mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') =>
       decideCustomerApplication(id!, decision, 'Reviewed by authorized staff.'),
@@ -957,25 +974,12 @@ export function CustomerApplicationEditorPage() {
               disabled={uploadId.isPending || ocr.isPending}
               resetVersion={pickerVersion}
             />
-            {ocrFile && (
-              <p>
-                Selected ID: {ocrFile.name}. Upload securely, then review OCR suggestions before
-                saving.
+            {ocrFile ? (
+              <p role="status">
+                Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and
+                read the OCR suggestions.
               </p>
-            )}
-            <Button
-              onClick={() => uploadId.mutate()}
-              disabled={
-                !ocrFile ||
-                !customerId ||
-                !idType ||
-                uploadId.isPending ||
-                ocr.isPending ||
-                save.isPending
-              }
-            >
-              {uploadId.isPending ? 'Uploading…' : 'Upload ID'}
-            </Button>
+            ) : null}
             <Button
               onClick={() => ocr.mutate()}
               disabled={
@@ -987,6 +991,24 @@ export function CustomerApplicationEditorPage() {
             >
               {ocr.isPending || uploadId.isPending ? 'Processing…' : 'Detect fields'}
             </Button>
+            {/* Submit requires an ID type recorded on the identity document, and
+                that field is only ever written by the document-confirm endpoint.
+                Without this the requirement is unreachable from this screen and
+                Submit stays disabled after a successful upload, so the reviewer
+                records the ID type here through the same secure document
+                pipeline. The gate itself is unchanged. */}
+            {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
+              <p role="status">
+                Submit needs the ID type recorded against this identity document.{' '}
+                <Button
+                  variant="secondary"
+                  disabled={!idType || confirmIdType.isPending || uploadId.isPending}
+                  onClick={() => confirmIdType.mutate()}
+                >
+                  {confirmIdType.isPending ? 'Recording…' : 'Record ID type on this ID'}
+                </Button>
+              </p>
+            ) : null}
             {serverCurrentDocument ? (
               <>
                 <Button
