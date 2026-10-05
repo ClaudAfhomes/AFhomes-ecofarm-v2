@@ -375,9 +375,14 @@ describe('membership screen', () => {
     expect(
       await screen.findByRole('heading', { name: /my digital vip card/i }),
     ).toBeInTheDocument();
-    // The member code is the membership number: always visible, never rotated.
-    expect(screen.getAllByText('MBS-000777').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole('button', { name: /copy member code/i })).toBeInTheDocument();
+    // The Membership Code IS the membership number: always visible, never rotated,
+    // and shown exactly once. It used to render twice (as "Membership" and as
+    // "Member Code"), which read as two different credentials.
+    expect(screen.getByText('MBS-000777')).toBeInTheDocument();
+    expect(screen.getAllByText('MBS-000777')).toHaveLength(1);
+    expect(screen.queryByText('Member Code')).not.toBeInTheDocument();
+    expect(screen.getByText('Membership Code')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy membership code/i })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
   });
 

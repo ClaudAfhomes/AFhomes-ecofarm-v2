@@ -33,7 +33,7 @@ export const hashIdentifier = (value: string): string =>
 export const IDENTIFIER_MIN = 4;
 export const IDENTIFIER_MAX = 200;
 
-export type IdentifierKind = 'qr' | 'fallback_code' | 'card_number';
+export type IdentifierKind = 'qr' | 'fallback_code' | 'card_number' | 'legacy_alias';
 
 /** The minimal row a resolution needs. Deliberately no customer fields. */
 export type ResolvedMembership = {
@@ -161,6 +161,15 @@ export async function resolveMembershipByIdentifier(
         };
       };
     };
+    // Used only for the legacy membership alias fallback. Optional because the
+    // in-memory Supabase fake used by handler tests does not model `private`
+    // schema RPCs; a client without it simply has no alias support, which is
+    // accurate rather than a silent failure. The production service client
+    // always has it.
+    rpc?: (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: unknown }>;
   },
   rawIdentifier: string,
 ): Promise<Resolution | null> {
@@ -202,10 +211,40 @@ export async function resolveMembershipByIdentifier(
     .eq('membership_number', cardNumber)
     .maybeSingle();
   if (numberError) throw numberError;
-  if (!numbered) return null;
+  if (numbered) {
+    return {
+      matchedBy: 'card_number',
+      membership: await toResolvedMembership(db, numbered as Record<string, unknown>),
+    };
+  }
+
+  // Not the current number. It may still be a LEGACY sequential code preserved as
+  // a membership alias by the 20261028000001 upgrade, and support, printed cards
+  // and receipts still quote those. Resolution only: the caller still has to
+  // re-check membership status, expiry, balance and its own permission, so an
+  // alias authorizes nothing. This fallback is deliberately confined to this
+  // transaction path - public.search_customer_ids and public.customer_directory
+  // are NOT modified, so general customer search never resolves a Membership
+  // Code.
+  if (!db.rpc) return null;
+  const { data: aliased, error: aliasError } = await db.rpc(
+    'resolve_membership_code',
+    { p_identifier: cardNumber },
+  );
+  if (aliasError) throw aliasError;
+  const aliasRows = (aliased as { membership_id?: string }[] | null) ?? [];
+  const aliasId = aliasRows[0]?.membership_id;
+  if (!aliasId) return null;
+  const { data: aliasedRow, error: aliasedRowError } = await db
+    .from('memberships')
+    .select(SELECT_MEMBERSHIP)
+    .eq('id', aliasId)
+    .maybeSingle();
+  if (aliasedRowError) throw aliasedRowError;
+  if (!aliasedRow) return null;
   return {
-    matchedBy: 'card_number',
-    membership: await toResolvedMembership(db, numbered as Record<string, unknown>),
+    matchedBy: 'legacy_alias',
+    membership: await toResolvedMembership(db, aliasedRow as Record<string, unknown>),
   };
 }
 

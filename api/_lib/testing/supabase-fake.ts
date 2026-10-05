@@ -765,6 +765,52 @@ export class FakeSupabase {
         error: null,
       };
     }
+    if (!entry && fn === 'resolve_membership_code') {
+      // Mirrors private.resolve_membership_code from migration 20261028000001:
+      // trim, strip an `AFHOMES:` envelope, match the CURRENT membership_number
+      // first, then fall back to a legacy membership alias and return the
+      // canonical current number. Resolution only - it never authorizes a
+      // redemption, exactly as in production. No match is a clean no-rows
+      // result, which is what turns a scan of an unknown code into a 404.
+      const raw = String(args.p_identifier ?? '').trim();
+      const wanted = raw.replace(/^AFHOMES:/i, '').toUpperCase();
+      const noRows = { data: [], error: null };
+      if (!wanted) return noRows;
+      const current = this.rows('memberships').find(
+        (r) => String(r.membership_number ?? '').toUpperCase() === wanted,
+      );
+      if (current)
+        return {
+          data: [
+            {
+              membership_id: current.id,
+              current_number: current.membership_number,
+              via_alias: false,
+            },
+          ],
+          error: null,
+        };
+      const alias = this.rows('business_id_aliases').find(
+        (r) =>
+          r.entity_type === 'membership' &&
+          r.is_active !== false &&
+          String(r.old_identifier ?? '').toUpperCase() === wanted,
+      );
+      if (!alias) return noRows;
+      const membership = this.rows('memberships').find((r) => r.id === alias.entity_id);
+      if (!membership) return noRows;
+      return {
+        data: [
+          {
+            membership_id: membership.id,
+            current_number: membership.membership_number,
+            via_alias: true,
+          },
+        ],
+        error: null,
+      };
+    }
+
     if (!entry && fn === 'customer_directory') {
       const filters = z.record(z.string(), z.unknown()).parse(args.p_filters ?? {});
       let records = (this.tables.customers ?? [])

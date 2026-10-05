@@ -7335,13 +7335,7 @@ async function main(): Promise<void> {
           'select customer_number from public.customers where id = $1',
           [rowB.customerId],
         );
-        for (const search of [
-          'Legacy Member',
-          'Lega',
-          customerB.customer_number,
-          rowB.membershipNumber,
-          'AFHOMES:' + rowB.membershipNumber,
-        ]) {
+        for (const search of ['Legacy Member', 'Lega', customerB.customer_number]) {
           const found = await db.query<{ customer_id: string }>(
             'select * from public.search_customer_ids($1)',
             [search],
@@ -7349,6 +7343,28 @@ async function main(): Promise<void> {
           check(
             'normal search finds imported member: ' + search,
             found.rows.some((r) => r.customer_id === rowB.customerId),
+          );
+        }
+        // A Membership Code is a TRANSACTION identifier, not a customer-search
+        // term. Since 20261028000001 general customer search must not resolve
+        // one; the protected redemption path does, via the membership resolver.
+        for (const search of [rowB.membershipNumber, 'AFHOMES:' + rowB.membershipNumber]) {
+          const viaCustomerSearch = await db.query<{ customer_id: string }>(
+            'select * from public.search_customer_ids($1)',
+            [search],
+          );
+          check(
+            'normal search does NOT resolve a Membership Code: ' + search,
+            !viaCustomerSearch.rows.some((r) => r.customer_id === rowB.customerId),
+          );
+          const viaMembership = await db.query<{ membership_id: string }>(
+            'select membership_id from private.resolve_membership_code($1)',
+            [search],
+          );
+          eq(
+            'the transaction path still resolves that Membership Code: ' + search,
+            viaMembership.rows[0]?.membership_id,
+            rowB.membershipId,
           );
         }
         const token = await one<{ token: string }>(
@@ -8151,8 +8167,6 @@ async function main(): Promise<void> {
             ['full name', { search: 'Release Active' }],
             ['partial name', { search: 'lease Act' }],
             ['customer number', { search: active.customer_number }],
-            ['membership number', { search: active.membership_number }],
-            ['member code', { search: 'AFHOMES:' + active.membership_number }],
             ['fallback', { search: 'a1b2-c3d4', identifier: 'A1B2C3D4' }],
             ['Active VIP', { search: 'Release Active', category: 'ACTIVE_VIP' }],
             ['tier', { search: 'Release Active', tier: 'GOLD' }],
@@ -8162,6 +8176,19 @@ async function main(): Promise<void> {
             check(
               'service directory ' + label,
               r.rows.some((x) => x.record.id === active.id),
+            );
+          }
+          // Since 20261028000001 the customer directory must NOT answer to a
+          // Membership Code. It is a transaction identifier and belongs to the
+          // protected redemption path only.
+          for (const [label, term] of [
+            ['membership number', active.membership_number],
+            ['member code envelope', 'AFHOMES:' + active.membership_number],
+          ] as const) {
+            const r = await query({ search: term, limit: 5000 });
+            check(
+              'service directory does NOT resolve a Membership Code: ' + label,
+              !r.rows.some((x) => x.record.id === active.id),
             );
           }
           const sellerRecord = (await query({ limit: 5000 })).rows.find(
@@ -8646,6 +8673,376 @@ async function main(): Promise<void> {
           );
           check('denial names the privilege boundary', /permission denied/.test(denied));
         }
+      }
+
+      section('56. Legacy membership-code upgrade: alias, invariants and transaction-only lookup');
+      {
+        // Seed legacy sequential memberships against synthetic customers so the
+        // conversion is proven by executed rows, and so every invariant below is
+        // a real before/after comparison rather than a table that happens to be
+        // empty.
+        const legacyMemberNumber = `MBS-900${RUN}`.slice(0, 10);
+        // Derive sequential numbers that are certainly unused: earlier sections
+        // already own MBS-000001..N, and a hard-coded value would collide with
+        // an existing alias and trip the fail-loud guard for the wrong reason.
+        const maxSequential = (
+          await one<{ n: number }>(
+            `select coalesce(max(nullif(regexp_replace(membership_number,'^MBS-',''),'')::int),0) as n
+               from public.memberships where membership_number ~ '^MBS-[0-9]{6}$'`,
+          )
+        ).n;
+        const nextSequential = (offset: number): string =>
+          `MBS-${String(maxSequential + offset).padStart(6, '0')}`;
+        const sequential =
+          /^MBS-[0-9]{6}$/.test(legacyMemberNumber) &&
+          (Number(legacyMemberNumber.slice(4)) || 0) > maxSequential
+            ? legacyMemberNumber
+            : nextSequential(1);
+        // Reuse an existing membership rather than building a sale + staff fixture
+        // graph: the row already has a real customer, sale, activator and both
+        // credential hashes, so every invariant below is a genuine comparison.
+        const existingMembership = (
+          await db.query<{ id: string; customer_id: string }>(
+            'select id, customer_id from public.memberships order by id limit 1',
+          )
+        ).rows[0];
+        check('a membership exists to exercise the conversion', Boolean(existingMembership));
+        const legacyMembershipId = existingMembership!.id;
+        const legacyCustomerId = existingMembership!.customer_id;
+        await db.query('update public.memberships set membership_number = $1 where id = $2', [
+          sequential,
+          legacyMembershipId,
+        ]);
+
+        const scalar56 = async (sql: string, params: unknown[] = []): Promise<string> =>
+          (await db!.query<{ v: string }>(sql, params)).rows[0]!.v;
+        // Everything that must be byte-identical across the upgrade.
+        const membershipInvariants = async () => ({
+          uuid: await scalar56(
+            `select md5(string_agg(id::text,'|' order by id)) from public.memberships where id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+          customer: await scalar56(
+            `select md5(string_agg(customer_id::text,'|' order by id)) from public.memberships where id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+          qr: await scalar56(
+            `select md5(coalesce(string_agg(coalesce(qr_token_hash,'~'),'|' order by id),'')) from public.memberships where id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+          fallback: await scalar56(
+            `select md5(coalesce(string_agg(coalesce(fallback_code_hash,'~'),'|' order by id),'')) from public.memberships where id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+          meta: await scalar56(
+            `select md5(string_agg(status||'|'||points_balance||'|'||coalesce(activated_at::text,'~')||'|'||coalesce(expires_at::text,'~'),';' order by id)) from public.memberships where id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+          customerCode: await scalar56(
+            `select md5(coalesce(customer_code,'~')) from public.customers where id = $1`,
+            [legacyCustomerId],
+          ),
+          customerNumber: await scalar56(`select customer_number from public.customers where id = $1`, [
+            legacyCustomerId,
+          ]),
+          points: await scalar56(
+            `select md5(string_agg(membership_id::text||'='||balance,'|' order by membership_id)) from public.points_accounts where membership_id = any($1::uuid[])`,
+            [invariantIds],
+          ),
+        });
+        const invariantIds = [legacyMembershipId];
+        const before56 = await membershipInvariants();
+
+        const converted56 = Number(
+          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n')).rows[0]!
+            .n,
+        );
+        check('the membership conversion reports the rows it rewrote', converted56 >= 1, `${converted56}`);
+
+        const after56 = await membershipInvariants();
+        eq('membership UUID set unchanged', after56.uuid, before56.uuid);
+        eq('membership customer relation unchanged', after56.customer, before56.customer);
+        eq('QR token hashes unchanged', after56.qr, before56.qr);
+        eq('fallback code hashes unchanged', after56.fallback, before56.fallback);
+        eq('status / points_balance / activated_at / expires_on unchanged', after56.meta, before56.meta);
+        eq('Customer Code byte-identical', after56.customerCode, before56.customerCode);
+        eq('Customer ID byte-identical', after56.customerNumber, before56.customerNumber);
+        eq('points account balances unchanged', after56.points, before56.points);
+
+        const upgraded = (
+          await db.query<{ id: string; membership_number: string }>(
+            'select id, membership_number from public.memberships where id = $1',
+            [legacyMembershipId],
+          )
+        ).rows[0]!;
+        eq('the legacy membership UUID is unchanged', upgraded.id, legacyMembershipId);
+        check(
+          'the sequential membership number became a 128-bit random code',
+          /^MBS-[0-9A-F]{8}(-[0-9A-F]{8}){3}$/.test(upgraded.membership_number),
+          upgraded.membership_number,
+        );
+        const stillSequential = await one<{ n: number }>(
+          `select count(*)::int n from public.memberships where membership_number ~ '^MBS-[0-9]{6}$'`,
+        );
+        eq('no sequential membership number survives anywhere', stillSequential.n, 0);
+
+        // Transaction-only resolution: legacy alias, current code, QR token.
+        for (const [label, term] of [
+          ['legacy alias', sequential],
+          ['lowercased legacy alias', sequential.toLowerCase()],
+          ['current code', upgraded.membership_number],
+          ['AFHOMES envelope of the legacy alias', `AFHOMES:${sequential}`],
+        ] as const) {
+          const r = await db.query<{ membership_id: string; current_number: string; via_alias: boolean }>(
+            'select * from private.resolve_membership_code($1)',
+            [term],
+          );
+          eq(`transaction lookup resolves the ${label} to the same membership`, r.rows[0]?.membership_id, legacyMembershipId);
+          eq(`transaction lookup returns the CURRENT code for the ${label}`, r.rows[0]?.current_number, upgraded.membership_number);
+        }
+        const viaNew = await db.query<{ via_alias: boolean }>(
+          'select via_alias from private.resolve_membership_code($1)',
+          [upgraded.membership_number],
+        );
+        eq('the current code resolves directly, not via alias', viaNew.rows[0]?.via_alias, false);
+        const viaLegacy = await db.query<{ via_alias: boolean }>(
+          'select via_alias from private.resolve_membership_code($1)',
+          [sequential],
+        );
+        eq('the legacy code resolves through the alias', viaLegacy.rows[0]?.via_alias, true);
+        const unknownCode = await db.query<{ membership_id: string }>(
+          'select membership_id from private.resolve_membership_code($1)',
+          ['MBS-999999'],
+        );
+        eq('an unknown membership code resolves to no row', unknownCode.rows.length, 0);
+
+        // CRITICAL: general customer search must NOT resolve a Membership Code.
+        for (const term of [sequential, upgraded.membership_number, `AFHOMES:${sequential}`]) {
+          const viaCustomerSearch = await db.query<{ customer_id: string }>(
+            'select customer_id from public.search_customer_ids($1)',
+            [term],
+          );
+          eq(`customer search does NOT resolve Membership Code ${term}`, viaCustomerSearch.rows.length, 0);
+          const viaDirectory = await db.query<{ record: unknown }>(
+            `select record from public.customer_directory($1::jsonb)`,
+            [JSON.stringify({ search: term })],
+          );
+          const directoryHit = viaDirectory.rows.some((row) => {
+            const rec = row.record as { id?: string };
+            return rec?.id === legacyCustomerId;
+          });
+          eq(`customer_directory does NOT resolve Membership Code ${term}`, directoryHit, false);
+        }
+        // ...but customer identifiers still work, including the Customer Code.
+        const customerCode = (
+          await one<{ c: string }>('select customer_code c from public.customers where id = $1', [
+            legacyCustomerId,
+          ])
+        ).c;
+        const customerNumber = (
+          await one<{ n: string }>('select customer_number n from public.customers where id = $1', [
+            legacyCustomerId,
+          ])
+        ).n;
+        for (const term of [customerNumber, customerCode]) {
+          const r = await db.query<{ customer_id: string }>(
+            'select customer_id from public.search_customer_ids($1)',
+            [term],
+          );
+          eq(`customer search still resolves ${term}`, r.rows[0]?.customer_id, legacyCustomerId);
+        }
+
+        // Idempotency.
+        const aliasesBefore56 = (
+          await one<{ n: number }>('select count(*)::int n from private.business_id_aliases where entity_type=$1', [
+            'membership',
+          ])
+        ).n;
+        const second56 = Number(
+          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n')).rows[0]!
+            .n,
+        );
+        eq('a second membership run rewrites nothing', second56, 0);
+        eq(
+          'a second membership run adds no duplicate alias',
+          (await one<{ n: number }>('select count(*)::int n from private.business_id_aliases where entity_type=$1', ['membership'])).n,
+          aliasesBefore56,
+        );
+        eq(
+          'a second membership run leaves the code untouched',
+          (
+            await one<{ n: string }>('select membership_number n from public.memberships where id=$1', [
+              legacyMembershipId,
+            ])
+          ).n,
+          upgraded.membership_number,
+        );
+        const ambiguous = await one<{ n: number }>(
+          `select count(*)::int n from (select entity_type, lower(old_identifier) k from private.business_id_aliases
+             group by 1,2 having count(*)>1) d`,
+        );
+        eq('no ambiguous membership alias', ambiguous.n, 0);
+
+// An already-randomized membership is skipped and gains NO alias. This is a
+        // real row, so the check cannot pass just because the table is empty.
+        const randomMembership = (
+          await db.query<{ id: string; membership_number: string }>(
+            `select id, membership_number from public.memberships
+              where membership_number ~ '^MBS-[0-9A-F]{8}(-[0-9A-F]{8}){3}$' order by id limit 1`,
+          )
+        ).rows[0];
+        if (randomMembership) {
+          const aliasesBeforeSkip = (
+            await one<{ n: number }>(
+              `select count(*)::int n from private.business_id_aliases where entity_type = 'membership'`,
+            )
+          ).n;
+          await db.query('select private.upgrade_legacy_membership_numbers()');
+          const stillRandom = (
+            await db.query<{ membership_number: string }>(
+              'select membership_number from public.memberships where id = $1',
+              [randomMembership.id],
+            )
+          ).rows[0]!;
+          eq('an already-randomized membership code is left exactly as it was', stillRandom.membership_number, randomMembership.membership_number);
+          eq(
+            'an already-randomized membership gains no alias',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from private.business_id_aliases where entity_type = 'membership'`,
+              )
+            ).n,
+            aliasesBeforeSkip,
+          );
+        } else {
+          check(
+            'a membership already in canonical format exists to prove the skip path',
+            false,
+            'no randomized membership available in this fixture graph',
+          );
+        }
+
+        // A suspended membership is IDENTIFIED by its legacy alias but must still
+        // be refused by the redemption transaction. Identity resolution and
+        // transaction authorization are separate decisions.
+        const suspendedTarget = (
+          await db.query<{ id: string }>(
+            `select id from public.memberships where status = 'suspended' order by id limit 1`,
+          )
+        ).rows[0];
+        if (suspendedTarget) {
+          const suspendedSequential = nextSequential(2);
+          await db.query(
+            `update public.memberships set membership_number = $1 where id = $2`,
+            [suspendedSequential, suspendedTarget.id],
+          );
+          // Run the conversion so the legacy value becomes a real alias rather
+          // than still being the current number.
+          await db.query('select private.upgrade_legacy_membership_numbers()');
+          const suffix = (
+            await one<{ n: string }>(
+              `select right(membership_number, 8) as n from public.memberships where id = $1`,
+              [suspendedTarget.id],
+            )
+          ).n;
+          const resolved = await db.query<{ membership_id: string; via_alias: boolean }>(
+            'select membership_id, via_alias from private.resolve_membership_code($1)',
+            [suspendedSequential],
+          );
+          eq(
+            'a suspended membership is still IDENTIFIED through its legacy alias',
+            resolved.rows[0]?.membership_id,
+            suspendedTarget.id,
+          );
+          eq('and that identification is reported as via_alias', resolved.rows[0]?.via_alias, true);
+          const afterSuspended = (
+            await db.query<{ status: string }>('select status from public.memberships where id=$1', [
+              suspendedTarget.id,
+            ])
+          ).rows[0]!;
+          eq('resolving a suspended membership did NOT change its status', afterSuspended.status, 'suspended');
+          void suffix;
+          await db.query(
+            'delete from private.business_id_aliases where entity_type=$1 and entity_id=$2',
+            ['membership', suspendedTarget.id],
+          );
+        } else {
+          check('a suspended membership exists to prove status is not a gate', false, 'none available');
+        }
+
+        // Ambiguity: an alias that already points at a DIFFERENT membership must
+        // not silently retarget. The migration is idempotent and skips
+        // already-converted rows, so the collision is proven through the unique
+        // constraint the alias table relies on, in an isolated transaction.
+        const ambiguousValue = nextSequential(3);
+        await db.query('begin');
+        let ambiguityRefused = '';
+        try {
+          await db.query(
+            `insert into private.business_id_aliases (entity_type, entity_id, old_identifier, migration_source)
+             values ('membership', $1, $2, 'planted')`,
+            [legacyCustomerId, ambiguousValue],
+          );
+          await db.query(
+            `insert into private.business_id_aliases (entity_type, entity_id, old_identifier, migration_source)
+             values ('membership', $1, $2, 'planted-duplicate')`,
+            [legacyMembershipId, ambiguousValue],
+          );
+          ambiguityRefused = 'DID NOT RAISE';
+        } catch (error) {
+          ambiguityRefused = safeErrorMessage(error);
+        } finally {
+          await db.query('rollback');
+        }
+        check(
+          'an ambiguous membership alias is refused, never silently retargeted',
+          /business_id_aliases_(old|entity_old)_unique|duplicate key/i.test(ambiguityRefused),
+          ambiguityRefused,
+        );
+
+        // Security: the alias table and both functions stay server-side only.
+        for (const role of ['anon', 'authenticated'] as const) {
+          eq(
+            `${role} cannot read the alias table`,
+            (await one<{ a: boolean }>(`select has_table_privilege($1,'private.business_id_aliases','SELECT') a`, [role])).a,
+            false,
+          );
+          eq(
+            `${role} cannot execute the membership resolver`,
+            (
+              await one<{ a: boolean }>(
+                `select has_function_privilege($1,'private.resolve_membership_code(text)','EXECUTE') a`,
+                [role],
+              )
+            ).a,
+            false,
+          );
+          eq(
+            `${role} cannot execute the membership conversion`,
+            (
+              await one<{ a: boolean }>(
+                `select has_function_privilege($1,'private.upgrade_legacy_membership_numbers()','EXECUTE') a`,
+                [role],
+              )
+            ).a,
+            false,
+          );
+        }
+        check(
+          'service_role may resolve a membership code for the redemption path',
+          (
+            await one<{ a: boolean }>(
+              `select has_function_privilege('service_role','private.resolve_membership_code(text)','EXECUTE') a`,
+            )
+          ).a,
+        );
+
+        // Remove the alias row this section created so cleanup's row-count proof is
+        // unaffected; the membership itself stays, as a converted row should.
+        await db.query(
+          'delete from private.business_id_aliases where entity_type = $1 and entity_id = any($2::uuid[])',
+          ['membership', invariantIds],
+        );
       }
 
       section('55. Legacy business-ID upgrade: alias preservation and identity invariants');

@@ -18,9 +18,15 @@ import type { CustomerCredentials } from './services';
  * Every active membership carries a persistent, re-displayable card:
  *
  * - the membership number IS the member code (stable, typable at any desk);
- * - the QR encodes `AFHOMES:<member code>` and nothing else - no name, no
- *   customer number beyond the code itself, no government ID, no token, no
- *   JWT, no NFC involvement of any kind;
+ * - the QR renders the one-time `qrToken` - an opaque, rotated secret whose
+ *   SHA-256 hash is what the backend matches. It is deliberately NOT the visible
+ *   Membership Code: embedding a displayable code in a scannable surface would
+ *   leak it to every photograph of the card. (An earlier version of this comment
+ *   claimed the QR encoded `AFHOMES:<member code>`; that described the legacy
+ *   card envelope the backend still ACCEPTS as compatible lookup input, not what
+ *   this portal renders.)
+ * - no name, no customer number, no government ID and no NFC involvement of any
+ *   kind is encoded in the QR;
  * - viewing the card never rotates anything: the code and the QR are the
  *   same on every visit, and staff resolve them to the same membership.
  *
@@ -87,7 +93,7 @@ export function CustomerMembershipPage() {
               </dd>
             </div>
             <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Membership</dt>
+              <dt className={styles.fieldLabel}>Membership Code</dt>
               <dd className={`${styles.digitalValue} ${styles.mono}`}>{card.membershipNumber}</dd>
             </div>
             <div className={styles.digitalRow}>
@@ -122,8 +128,9 @@ export function CustomerMembershipPage() {
             </p>
           )}
           <div className={styles.credentialText}>
-            <p className={styles.fieldLabel}>Member Code</p>
-            <p className={styles.credentialCode}>{card.memberCode}</p>
+            {/* The Membership Code is shown ONCE, in the summary above as
+                "Membership Code". It used to be repeated here as "Member Code"
+                with the same value, which read as two different credentials. */}
             <p className={styles.notice}>
               Show this QR or code at any AF Homes Ecofarm desk. It never changes, and viewing
               it never invalidates anything.
@@ -133,7 +140,7 @@ export function CustomerMembershipPage() {
                 {showQr ? 'Hide QR' : 'Show QR'}
               </Button>
               <Button variant="secondary" onClick={() => void copyMemberCode()}>
-                {copied ? 'Copied' : 'Copy Member Code'}
+                {copied ? 'Copied' : 'Copy Membership Code'}
               </Button>
             </div>
           </div>
