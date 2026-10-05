@@ -13,6 +13,30 @@ import type { AfHomesPrincipal } from './afhomes-access.js';
 import type { serviceClient } from './rest.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
+/**
+ * Response shapes for the export and duplicate-scan queries below. These results
+ * are untyped PostgREST payloads, so without an explicit type the callback
+ * parameters have no contextual type and the build breaks (TS7006) whenever the
+ * Supabase client generic does not resolve - which is what happens in Vercel's
+ * function-bundling typecheck. Asserting the response types the rows in every
+ * environment; Zod still re-validates sponsor rows at runtime.
+ */
+type QueryResult<T> = { data: T[] | null; error: { message: string } | null };
+type OstExportRow = {
+  ost_number: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  status: string;
+};
+type SponsorScanRow = {
+  id: string;
+  status: string;
+  staff_role_assignments: { roles: { slug: string; is_active: boolean } }[];
+};
+type ContactRow = { email: string; phone: string };
+type StaffEmailRow = { email: string };
+
 export async function handleOstImport(
   req: VercelRequest,
   res: VercelResponse,
@@ -64,11 +88,12 @@ export async function handleOstImport(
         .limit(5001);
       if (['vice_director', 'senior_sales_manager', 'sales_manager'].includes(actor.roleSlug))
         query = query.eq('sponsor_staff_id', actor.userId);
-      const result = await query;
+      const result = (await query) as QueryResult<OstExportRow>;
       if (result.error) return failed();
-      if (result.data.length > 5000)
+      const found = result.data ?? [];
+      if (found.length > 5000)
         return fail(res, 'VALIDATION_ERROR', 'Narrow the export below 5,000 records.', 400);
-      rows = result.data.map((r) => [r.ost_number, r.full_name, r.email, r.phone, r.status]);
+      rows = found.map((r) => [r.ost_number, r.full_name, r.email, r.phone, r.status]);
     }
     const bytes =
       format === 'csv'
@@ -114,7 +139,7 @@ export async function handleOstImport(
       const batch = inputs.slice(offset, offset + 100);
       const emails = [...new Set(batch.map((i) => i.identity.email))];
       const phones = [...new Set(batch.map((i) => i.identity.phone))];
-      const results = await Promise.all([
+      const results = (await Promise.all([
         db
           .from('staff_users')
           .select('id,status,staff_role_assignments(roles(slug,is_active))')
@@ -130,7 +155,12 @@ export async function handleOstImport(
           .in('phone', phones)
           .in('status', ['submitted', 'under_review', 'changes_requested', 'approved']),
         db.from('staff_users').select('email').in('email', emails),
-      ]);
+      ])) as [
+        QueryResult<SponsorScanRow>,
+        QueryResult<ContactRow>,
+        QueryResult<ContactRow>,
+        QueryResult<StaffEmailRow>,
+      ];
       if (results.some((r) => r.error)) return failed();
       for (const sponsor of results[0].data ?? []) {
         const checked = z

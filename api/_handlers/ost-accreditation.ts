@@ -18,6 +18,20 @@ import { handleOstImport } from '../_lib/ost-import-handler.js';
 import { validateOstSponsor } from '../_lib/ost-sponsor.js';
 
 const uuid = z.string().uuid();
+
+/**
+ * One `staff_users` row as the sponsors query reads it. The embedded
+ * `staff_role_assignments` is re-checked with Zod at every use site, so this type
+ * states the query's shape and never replaces that runtime validation.
+ */
+type SponsorCandidate = {
+  id: string;
+  full_name: string;
+  status: string;
+  staff_role_assignments: { roles: { slug: string; is_active: boolean } }[];
+};
+type StaffUsersResult = { data: SponsorCandidate[] | null; error: { message: string } | null };
+
 function rpcFailure(res: VercelResponse, error: { message: string; code?: string }) {
   const text = error.message;
   if (error.code === '42501')
@@ -111,12 +125,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (member.error || !member.data)
         return fail(res, 'FORBIDDEN', 'An active OST account is required.', 403);
     }
-    const result = await db
+    // The payload shape is declared here rather than taken from the Supabase
+    // client: this result is an untyped PostgREST payload whose inferred type
+    // collapses to `any` whenever the client generic does not resolve (Vercel's
+    // function-bundling typecheck does exactly that, which raised TS7006 on
+    // `row`). Asserting the response gives `row` a real type in every
+    // environment. The per-row Zod check below still validates at runtime.
+    const result = (await db
       .from('staff_users')
       .select('id,full_name,status,staff_role_assignments(roles(slug,is_active))')
-      .eq('status', 'active');
+      .eq('status', 'active')) as StaffUsersResult;
     if (result.error) return rpcFailure(res, result.error);
-    const sponsors = result.data
+    const sponsors = (result.data ?? [])
       .filter((row) => {
         const parsed = z
           .object({
