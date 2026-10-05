@@ -192,6 +192,7 @@ export const customerPointsLedgerSchema = listResponseSchema(customerPointsEntry
  */
 export const customerPaymentSchema = z.object({
   id: z.string().uuid(),
+  paymentNumber: z.string().nullish(),
   saleId: z.string().uuid(),
   amount: z.string(),
   paymentType: z.string().nullable(),

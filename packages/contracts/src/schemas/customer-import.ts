@@ -324,6 +324,8 @@ export type CustomerExportRow = Record<(typeof CUSTOMER_EXPORT_COLUMNS)[number],
 
 export const customerImportJobSchema = z.object({
   id: z.string().uuid(),
+  /** Public import job ID (AF-IMP-XXXXX). Nullish only pre-migration. */
+  jobNumber: z.string().nullish(),
   sourceType: importSourceSchema,
   sourceName: z.string(),
   googleSheetId: z.string().nullable(),

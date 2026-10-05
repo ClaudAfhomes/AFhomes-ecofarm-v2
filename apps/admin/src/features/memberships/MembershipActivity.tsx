@@ -104,6 +104,7 @@ export function MembershipActivity({
             <ol>
               {payments.data.map((payment) => (
                 <li key={payment.id}>
+                  {payment.paymentNumber ? `${payment.paymentNumber} · ` : null}
                   {formatMoney(payment.amount)} · {payment.paymentType.replaceAll('_', ' ')} ·{' '}
                   <StatusChip label={payment.status} /> · {formatDateTime(payment.recordedAt)}
                 </li>

@@ -182,6 +182,7 @@ export function BusinessCommissionsPage() {
           <table>
             <thead>
               <tr>
+                <th>Commission</th>
                 <th>Sale</th>
                 <th>Beneficiary</th>
                 <th>Basis</th>
@@ -196,6 +197,7 @@ export function BusinessCommissionsPage() {
             <tbody>
               {query.data?.map((commission) => (
                 <tr key={commission.id}>
+                  <td>{commission.commissionNumber ?? '—'}</td>
                   <td>{commission.saleNumber}</td>
                   <td>{commission.beneficiaryName}</td>
                   <td>{formatMoney(commission.basisAmount)}</td>

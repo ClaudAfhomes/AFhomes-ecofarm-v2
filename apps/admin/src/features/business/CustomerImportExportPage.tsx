@@ -332,6 +332,7 @@ export function CustomerImportExportPage() {
           <table>
             <thead>
               <tr>
+                <th>Job</th>
                 <th>Source</th>
                 <th>Type</th>
                 <th>Status</th>
@@ -347,6 +348,7 @@ export function CustomerImportExportPage() {
             <tbody>
               {jobs.data.map((job) => (
                 <tr key={job.id}>
+                  <td>{job.jobNumber ?? '—'}</td>
                   <td>{job.sourceName}</td>
                   <td>{job.sourceType}</td>
                   <td>

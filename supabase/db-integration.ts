@@ -3355,7 +3355,7 @@ async function main(): Promise<void> {
     eq('balance after is exactly cost less', String(receipt.balanceAfter), String(before - 2000));
     check(
       'a redemption number was issued',
-      /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)),
+      /^(RDM-\d{6}|AF-RED-[A-HJ-NP-Z2-9]{5})$/.test(String(receipt.redemptionNumber)),
       String(receipt.redemptionNumber),
     );
     check(
@@ -3706,7 +3706,7 @@ async function main(): Promise<void> {
       rollbackBefore,
     );
     const rollbackNumbers = await one<{ n: number }>(
-      `select count(*)::int as n from public.redemptions where redemption_number like 'RDM-%'`,
+      `select count(*)::int as n from public.redemptions where redemption_number like 'RDM-%' or redemption_number like 'AF-RED-%'`,
     );
     check(
       'a number may have been consumed, which is harmless and not a ledger entry',
@@ -4178,7 +4178,7 @@ async function main(): Promise<void> {
     eq('  including every redemption they made', debits.length, 2);
     check(
       '  and the redemption numbers join through',
-      debits.every((r) => /^RDM-\d{6}$/.test(String(r.redemption_number))),
+      debits.every((r) => /^(RDM-\d{6}|AF-RED-[A-HJ-NP-Z2-9]{5})$/.test(String(r.redemption_number))),
       debits.map((r) => r.redemption_number).join(','),
     );
     check(
@@ -5300,7 +5300,7 @@ async function main(): Promise<void> {
       );
       const saleNo = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
         .sale_number;
-      check('sale number is non-blank and sequenced', /^SALE-/.test(saleNo), saleNo);
+      check('sale number is non-blank and sequenced', /^(SALE-|AF-CSALE-)/.test(saleNo), saleNo);
       const saleId = uuidFor('e2e:sale:gold');
       const expectedComm = await one<{ v: string }>(
         'select round($1::numeric * $2::numeric, 2)::text as v',
@@ -5869,7 +5869,7 @@ async function main(): Promise<void> {
       );
       check(
         'redemption number issued',
-        /^RDM-\d{6}$/.test(String(receipt.redemptionNumber)),
+        /^(RDM-\d{6}|AF-RED-[A-HJ-NP-Z2-9]{5})$/.test(String(receipt.redemptionNumber)),
         String(receipt.redemptionNumber),
       );
       const balanceAfter = await one<{ b: number }>(
@@ -6539,8 +6539,8 @@ async function main(): Promise<void> {
       eq('next_ost_number returns exactly one row', ostNumbers.rows.length, 1);
       const ostNumber = ostNumbers.rows[0]!.ost_number;
       check(
-        'the OST number is non-blank and sequenced',
-        typeof ostNumber === 'string' && /^OST-\d{6}$/.test(ostNumber),
+        'the OST number is a non-blank AF business ID (legacy OST- sequenced rows stay valid)',
+        typeof ostNumber === 'string' && /^(OST-\d{6}|AF-OST-[A-HJ-NP-Z2-9]{5})$/.test(ostNumber),
         JSON.stringify(ostNumber),
       );
 
@@ -8279,6 +8279,158 @@ async function main(): Promise<void> {
         run: RUN,
         check,
       });
+      section('53. AF business IDs: random allocation, backfill, legacy compatibility');
+      {
+        const AF5 = '[A-HJ-NP-Z2-9]{5}';
+        const afRe = (prefix: string) => new RegExp(`^${prefix}-${AF5}$`);
+        // Allocators answer the new format; the card sale is AF-CSALE, never AF-SALES.
+        const cn = (await one<{ customer_number: string }>('select * from public.next_customer_number()'))
+          .customer_number;
+        check('new customers allocate AF-CUS-XXXXX', afRe('AF-CUS').test(cn), cn);
+        const sn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
+          .sale_number;
+        check(
+          'new card sales allocate AF-CSALE-XXXXX, not AF-SALES',
+          afRe('AF-CSALE').test(sn) && !sn.startsWith('AF-SALES-'),
+          sn,
+        );
+        const rn = (await one<{ redemption_number: string }>('select * from public.next_redemption_number()'))
+          .redemption_number;
+        check('new redemptions allocate AF-RED-XXXXX', afRe('AF-RED').test(rn), rn);
+        const on = (await one<{ ost_number: string }>('select * from public.next_ost_number()')).ost_number;
+        check('new OST members allocate AF-OST-XXXXX', afRe('AF-OST').test(on), on);
+        // Prefixes are server-chosen: arbitrary input is refused.
+        const badPrefix = await throws('arbitrary prefix refused', () =>
+          db.query(`select private.af_candidate('BOGUS')`),
+        );
+        check('prefix refusal names the boundary', /INVALID_BUSINESS_PREFIX/.test(badPrefix));
+        const badTarget = await throws('arbitrary claim target refused', () =>
+          db.query(
+            `select private.claim_af_id('AF-CUS','public.payments'::regclass,'payment_number')`,
+          ),
+        );
+        check('target refusal names the boundary', /INVALID_BUSINESS_ID_TARGET/.test(badTarget));
+        // 1,000 candidates in one query: unique, well-formed, not sequential.
+        const batch = await db.query<{ c: string }>(
+          `select private.af_candidate('AF-PAY') as c from generate_series(1,1000)`,
+        );
+        const vals = batch.rows.map((r) => r.c);
+        check('1000 candidates are unique', new Set(vals).size === 1000, String(new Set(vals).size));
+        check(
+          '1000 candidates match AF-PAY-XXXXX with no ambiguous symbols',
+          vals.every((v) => afRe('AF-PAY').test(v)),
+          vals.find((v) => !afRe('AF-PAY').test(v)) ?? '',
+        );
+        check(
+          '1000 candidates are not sequential',
+          vals.join(',') !== [...vals].sort().join(','),
+        );
+        // Two connections racing the same allocator must never agree.
+        const racer = new Client({ connectionString: target.url });
+        racer.on('error', () => {});
+        await racer.connect();
+        try {
+          const claimSql = `select private.claim_af_id('AF-RED','public.redemptions'::regclass,'redemption_number') as c`;
+          const [first, second] = await Promise.all([
+            db.query<{ c: string }>(claimSql),
+            racer.query<{ c: string }>(claimSql),
+          ]);
+          check(
+            'concurrent claims never return the same stored value',
+            first.rows[0]!.c !== second.rows[0]!.c,
+            `${first.rows[0]!.c} vs ${second.rows[0]!.c}`,
+          );
+        } finally {
+          await racer.end();
+        }
+        // Backfilled columns: every row numbered, no duplicates.
+        for (const [table, column, prefix] of [
+          ['public.payments', 'payment_number', 'AF-PAY'],
+          ['public.commissions', 'commission_number', 'AF-COM'],
+          ['public.customer_import_jobs', 'job_number', 'AF-IMP'],
+          ['public.staff_users', 'employee_number', 'AF-EMP'],
+        ] as const) {
+          const missing = await one<{ n: number }>(
+            `select count(*)::int as n from ${table} where ${column} is null`,
+          );
+          eq(`${table}.${column} fully backfilled`, missing.n, 0);
+          const dupes = await one<{ n: number }>(
+            `select count(*)::int as n from (select ${column} from ${table} group by ${column} having count(*) > 1) d`,
+          );
+          eq(`${table}.${column} holds no duplicates`, dupes.n, 0);
+          const sample = await one<Record<string, string>>(
+            `select ${column} as c from ${table} limit 1`,
+          );
+          check(
+            `${table}.${column} matches ${prefix}-XXXXX`,
+            afRe(prefix).test(String(sample.c)),
+            String(sample.c),
+          );
+        }
+        // Staff identity: sales roles hold both numbers, others hold only AF-EMP.
+        const smRow = await one<{ employee_number: string; sales_number: string | null }>(
+          'select employee_number, sales_number from public.staff_users where id = $1',
+          [staff['sm']],
+        );
+        check(
+          'a Sales Manager holds AF-EMP and AF-SALES',
+          afRe('AF-EMP').test(smRow.employee_number) &&
+            typeof smRow.sales_number === 'string' &&
+            afRe('AF-SALES').test(smRow.sales_number),
+          `${smRow.employee_number} / ${smRow.sales_number}`,
+        );
+        const hrRow = await one<{ employee_number: string; sales_number: string | null }>(
+          'select employee_number, sales_number from public.staff_users where id = $1',
+          [staff['hr']],
+        );
+        check(
+          'a non-sales employee holds AF-EMP and no sales number',
+          afRe('AF-EMP').test(hrRow.employee_number) && hrRow.sales_number === null,
+          `${hrRow.employee_number} / ${String(hrRow.sales_number)}`,
+        );
+        // Legacy rows keep working: an explicit CUS- number inserts and resolves.
+        const legacyId = uuidFor('bizid:legacy-customer');
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1, 'CUS-900001', 'Legacy', 'Compat', '1990-01-01', $2, '09175550001', 'prospect')`,
+          [legacyId, `${RUN}-legacy@example.invalid`],
+        );
+        createdCustomerIds.push(legacyId);
+        const legacyFound = await db.query<{ customer_id: string }>(
+          'select * from public.search_customer_ids($1)',
+          ['CUS-900001'],
+        );
+        check(
+          'a legacy CUS- number still resolves after the rollout',
+          legacyFound.rows.some((r) => r.customer_id === legacyId),
+        );
+        const legacyDir = await db.query(
+          'select * from public.customer_directory($1::jsonb)',
+          [JSON.stringify({ search: 'cus-900001', limit: 5 })],
+        );
+        check(
+          'a legacy CUS- number stays searchable case-insensitively',
+          legacyDir.rows.some((r) => (r.record as { id: string }).id === legacyId),
+        );
+        const freshNo = (
+          await one<{ customer_number: string }>('select * from public.next_customer_number()')
+        ).customer_number;
+        const freshId = uuidFor('bizid:fresh-customer');
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1, $2, 'Fresh', 'Afid', '1990-01-01', $3, '09175550002', 'prospect')`,
+          [freshId, freshNo, `${RUN}-fresh@example.invalid`],
+        );
+        createdCustomerIds.push(freshId);
+        const freshDir = await db.query('select * from public.customer_directory($1::jsonb)', [
+          JSON.stringify({ search: freshNo.toLowerCase(), limit: 5 }),
+        ]);
+        check(
+          'a fresh AF-CUS number is searchable once stored',
+          freshDir.rows.some((r) => (r.record as { id: string }).id === freshId),
+          freshNo,
+        );
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {

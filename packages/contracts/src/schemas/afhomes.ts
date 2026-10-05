@@ -98,6 +98,10 @@ export const afHomesStaffSchema = z.object({
   departmentName: z.string().nullable(),
   roleId: z.string().uuid(),
   roleName: z.string(),
+  /** Stable company employee number (AF-EMP-XXXXX). Null only pre-migration. */
+  employeeNumber: z.string().nullish(),
+  /** Sales-person ID (AF-SALES-XXXXX). Null for never-sales staff. */
+  salesNumber: z.string().nullish(),
   restrictions: z.array(afHomesRestrictionSchema),
   mustChangePassword: z.boolean(),
   invitedAt: z.string().nullable(),

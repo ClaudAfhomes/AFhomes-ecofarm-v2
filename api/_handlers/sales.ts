@@ -659,6 +659,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res,
         (data ?? []).map((row: Record<string, unknown>) => ({
           id: row.id,
+          paymentNumber: (row.payment_number as string | null | undefined) ?? null,
           saleId: row.sale_id,
           customerId: isoOrNull(row.customer_id),
           amount: row.amount,

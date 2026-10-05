@@ -159,6 +159,8 @@ async function staffCatalog(db: Db) {
         departmentName: deptById.get(String(row.department_id)) ?? null,
         roleId,
         roleName: role.name,
+        employeeNumber: (row.employee_number as string | null | undefined) ?? null,
+        salesNumber: (row.sales_number as string | null | undefined) ?? null,
         restrictions: (restrictions ?? [])
           .filter((r: Record<string, unknown>) => r.staff_id === row.id)
           .map((r: Record<string, unknown>) => ({

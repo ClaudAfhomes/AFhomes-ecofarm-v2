@@ -74,6 +74,7 @@ const sendFile = (res: VercelResponse, filename: string, mime: string, bytes: Ui
 
 const shapeJob = (row: Record<string, unknown>) => ({
   id: row.id,
+  jobNumber: (row.job_number as string | null | undefined) ?? null,
   sourceType: row.source_type,
   sourceName: row.source_name,
   googleSheetId: row.google_sheet_id ?? null,

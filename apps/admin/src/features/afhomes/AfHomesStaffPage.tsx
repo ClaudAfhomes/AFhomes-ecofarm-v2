@@ -160,7 +160,9 @@ export function AfHomesStaffPage() {
         (item) =>
           (status === 'all' || item.status === status) &&
           (roleFilter === 'all' || item.roleId === roleFilter) &&
-          `${item.fullName} ${item.email}`.toLowerCase().includes(debouncedSearch.toLowerCase()),
+          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''} ${item.salesNumber ?? ''}`
+            .toLowerCase()
+            .includes(debouncedSearch.toLowerCase()),
       ) ?? [],
     [staff.data, status, roleFilter, debouncedSearch],
   );
@@ -218,7 +220,7 @@ export function AfHomesStaffPage() {
         search={
           <SearchField
             label="Search staff"
-            placeholder="Search name or email"
+            placeholder="Search name, email or AF ID"
             value={search}
             onChange={(value) => {
               setSearch(value);
@@ -301,6 +303,18 @@ export function AfHomesStaffPage() {
                       <strong>{item.fullName}</strong>
                       <br />
                       <small>{item.email}</small>
+                      {item.employeeNumber ? (
+                        <>
+                          <br />
+                          <small>{item.employeeNumber}</small>
+                        </>
+                      ) : null}
+                      {item.salesNumber ? (
+                        <>
+                          <br />
+                          <small>{item.salesNumber}</small>
+                        </>
+                      ) : null}
                     </td>
                     <td>
                       <StatusChip label={item.roleName} tone="neutral" />

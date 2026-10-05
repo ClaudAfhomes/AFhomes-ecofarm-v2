@@ -349,7 +349,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (saleIds.length === 0) return list(res, []);
       const { data, error } = await db
         .from('payments')
-        .select('id, sale_id, amount, payment_type, method, reference, status, recorded_at, verified_at')
+        .select('id, sale_id, payment_number, amount, payment_type, method, reference, status, recorded_at, verified_at')
         .in('sale_id', saleIds)
         .order('recorded_at', { ascending: false })
         .limit(100);
@@ -358,6 +358,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res,
         ((data ?? []) as Record<string, unknown>[]).map((row) => ({
           id: row.id,
+          paymentNumber: (row.payment_number as string | null | undefined) ?? null,
           saleId: row.sale_id,
           amount: row.amount,
           paymentType: isoOrNull(row.payment_type),

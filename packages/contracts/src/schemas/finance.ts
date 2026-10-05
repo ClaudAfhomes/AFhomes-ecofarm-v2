@@ -21,6 +21,8 @@ import {
 export const paymentSchema = z.object({
   id: z.string().uuid(),
   saleId: z.string().uuid(),
+  /** System payment ID (AF-PAY-XXXXX). Nullish only pre-migration. */
+  paymentNumber: z.string().nullish(),
   customerId: z.string().uuid().nullable(),
   amount: exactDecimalStringSchema,
   paymentType: paymentTypeSchema,
@@ -183,6 +185,8 @@ export type PointsLedgerEntry = z.infer<typeof pointsLedgerEntrySchema>;
 
 export const commissionSchema = z.object({
   id: z.string().uuid(),
+  /** Public commission ID (AF-COM-XXXXX). Nullish only pre-migration. */
+  commissionNumber: z.string().nullish(),
   saleId: z.string().uuid(),
   saleNumber: z.string(),
   beneficiaryType: z.enum(['staff', 'ost']),

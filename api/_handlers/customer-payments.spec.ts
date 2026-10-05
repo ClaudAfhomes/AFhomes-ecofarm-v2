@@ -157,6 +157,7 @@ describe('customer payment history', () => {
     expect(data(state.body)).toHaveLength(2);
     expect(data(state.body)[0]).toEqual({
       id: 'cccccccc-0000-4000-8000-0000000000a1',
+      paymentNumber: null,
       saleId: SALE_A,
       amount: '20000.00',
       paymentType: 'installment',

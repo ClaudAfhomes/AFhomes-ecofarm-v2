@@ -229,6 +229,16 @@ export type {
 } from './schemas/sales.js';
 
 export {
+  AF_ID_ALPHABET,
+  AF_ID_PREFIXES,
+  afIdPattern,
+  isAfId,
+  afBusinessIdSchema,
+  matchesBusinessId,
+} from './schemas/business-ids.js';
+export type { AfIdPrefix } from './schemas/business-ids.js';
+
+export {
   paymentSchema,
   recordPaymentSchema,
   verifyPaymentSchema,

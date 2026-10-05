@@ -45,6 +45,7 @@ const toCommission = (row: Record<string, unknown>) => {
   const sale = (row.card_sales ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
+    commissionNumber: (row.commission_number as string | null | undefined) ?? null,
     saleId: row.sale_id,
     saleNumber: String(sale.sale_number ?? ''),
     beneficiaryType: row.beneficiary_type,
@@ -313,7 +314,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) => toCommission(row));
         const filtered = shaped.filter((c) =>
-          matchesSearch(search, [c.saleNumber, c.beneficiaryName, c.status, c.id]),
+          matchesSearch(search, [c.commissionNumber, c.saleNumber, c.beneficiaryName, c.status, c.id]),
         );
         return res.status(200).json({
           data: filtered.slice(offset, offset + limit),
