@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { cn } from '../../lib/cn';
 import { ArrowRight } from '../../components/ui/icons';
 import { buttonClassName, type ButtonVariant } from '@jad/ui';
+import styles from './Button.module.css';
 
 type Variant =
   'primary' | 'accent' | 'secondary' | 'outline' | 'outline-light' | 'ghost-light' | 'text';
@@ -57,7 +58,14 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
-  const classes = cn(base, buttonClassName(variants[variant], size), className);
+  // Pill + elevation finish for every marketing action except the flat `text`
+  // variant, which stays an unadorned inline link.
+  const classes = cn(
+    base,
+    buttonClassName(variants[variant], size),
+    variant === 'text' ? undefined : styles.action,
+    className,
+  );
 
   const inner = (
     <>

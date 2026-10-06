@@ -12,7 +12,12 @@ export default defineConfig(({ mode }) => ({
   // inlines `VITE_`-prefixed vars, so server-only keys in that file stay safe.
   // Without this, a documented root-only setup leaves VITE_SUPABASE_URL empty
   // and staff login fails with a generic "could not sign you in".
-  envDir: fileURLToPath(new URL('../../', import.meta.url)),
+  // Tests stay hermetic: under `vitest` (mode === 'test') the app-local dir is
+  // used, so a developer's real `.env.local` can never leak into assertions.
+  envDir:
+    mode === 'test'
+      ? fileURLToPath(new URL('./', import.meta.url))
+      : fileURLToPath(new URL('../../', import.meta.url)),
   plugins: [react()],
   resolve: {
     alias: {

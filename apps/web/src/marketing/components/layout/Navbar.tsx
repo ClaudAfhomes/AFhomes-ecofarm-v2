@@ -160,18 +160,13 @@ export function Navbar() {
 
   return (
     <>
-      <header
-        className={cn(
-          'fixed inset-x-0 top-0 z-50 transition-all duration-300',
-          solid
-            ? 'border-b border-line bg-cream-50/95 text-navy-900 shadow-soft backdrop-blur-md'
-            : 'border-b border-transparent bg-transparent text-cream-50',
-        )}
-      >
+      <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-5 sm:pt-4">
         <div
           className={cn(
-            'mx-auto flex w-full max-w-[var(--container-site)] items-center justify-between px-5 sm:px-8',
-            solid ? 'h-14 sm:h-16' : 'h-16 sm:h-20',
+            'mx-auto flex w-full max-w-[var(--container-site)] items-center justify-between gap-4 rounded-full py-2 pr-2 pl-4 transition-all duration-300 sm:pl-5',
+            solid
+              ? 'border border-line bg-cream-50/90 text-navy-900 shadow-lift backdrop-blur-xl'
+              : 'border border-cream-50/25 bg-navy-950/30 text-cream-50 shadow-soft backdrop-blur-md',
           )}
         >
           <Logo />
@@ -225,7 +220,7 @@ export function Navbar() {
                     transition={{ duration: 0.25, ease: EASE }}
                     className="absolute top-full left-0 pt-3"
                   >
-                    <div className="w-[34rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-line bg-cream-50 p-3 shadow-lift">
+                    <div className="w-[34rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl border border-line bg-cream-50 p-3 shadow-lift">
                       <p className="label-caps px-3 pt-2 pb-3 text-ink-400">
                         The AFhomes Experience
                       </p>
@@ -304,19 +299,9 @@ export function Navbar() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {isDesktop && (
-              <Button
-                to="/experiences"
-                variant={lightText ? 'accent' : 'primary'}
-                size="sm"
-                withArrow
-              >
-                Explore AFhomes
-              </Button>
-            )}
-            {isDesktop && (
-              <Button to="/customer/login" variant="secondary" size="sm">
+              <Button to="/customer/login" variant="primary" size="md" className="px-8">
                 Login
               </Button>
             )}
@@ -330,8 +315,10 @@ export function Navbar() {
                 aria-label={menuOpen ? 'Close menu' : 'Open menu'}
                 onClick={() => setMenuOpen((open) => !open)}
                 className={cn(
-                  'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
-                  lightText ? 'text-cream-50' : 'border border-line bg-white/70 text-navy-900',
+                  'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+                  lightText
+                    ? 'bg-cream-50/15 text-cream-50'
+                    : 'border border-line bg-white/70 text-navy-900',
                 )}
               >
                 <span className="relative block h-3 w-5" aria-hidden="true">
@@ -444,10 +431,7 @@ export function Navbar() {
               </ul>
 
               <motion.div variants={menuItem} className="mt-8 flex flex-col gap-3">
-                <Button to="/experiences" variant="primary" size="lg" withArrow className="w-full">
-                  Explore AFhomes
-                </Button>
-                <Button to="/customer/login" variant="secondary" size="lg" className="w-full">
+                <Button to="/customer/login" variant="primary" size="lg" className="w-full">
                   Login
                 </Button>
                 <a

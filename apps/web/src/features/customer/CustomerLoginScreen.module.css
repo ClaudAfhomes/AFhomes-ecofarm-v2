@@ -1,0 +1,37 @@
+/*
+ * Member login breadcrumb (standalone `/customer/login`).
+ *
+ * The screen itself renders in the shared `AuthLayout` shell - the same
+ * layout as the staff and admin entries - so only the breadcrumb needs local
+ * styles here. Built on @jad/ui tokens only: this route renders outside the
+ * marketing shell, where the marketing stylesheet is never loaded.
+ */
+
+.crumbs {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+}
+
+.crumbLink {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.crumbLink:hover {
+  color: var(--color-brand-primary);
+  text-decoration: underline;
+}
+
+.crumbSeparator {
+  color: var(--color-text-muted);
+}
+
+.crumbCurrent {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}

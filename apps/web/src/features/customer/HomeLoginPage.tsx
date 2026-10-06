@@ -8,21 +8,18 @@ import { DevelopmentJourney } from '../../marketing/components/home/DevelopmentJ
 import { VipTeaser } from '../../marketing/components/home/VipTeaser';
 import { WhyAfhomes } from '../../marketing/components/home/WhyAfhomes';
 import { CtaBanner } from '../../marketing/components/home/CtaBanner';
-import { HomeLoginSplit } from './HomeLoginSplit';
+import { Hero } from '../../marketing/components/home/Hero';
 
 /**
- * The root URL: the AF Homes homepage with the member sign-in beside the
- * hero, and every other homepage section below it unchanged.
- *
- * The marketing `Hero` is replaced by the split (same CMS copy, same
- * imagery); all remaining sections render verbatim so marketing assertions
- * keep holding.
+ * The root URL: the pure AF Homes marketing homepage. Member sign-in lives
+ * behind the navbar Login entry (`/customer/login`, which keeps the
+ * hero + login split) — the landing hero itself carries no form.
  */
 export function HomeLoginPage() {
   return (
     <>
       <Seo title="AFhomes — Amazing & Fun. Your Home Away From Home." path="/" />
-      <HomeLoginSplit />
+      <Hero />
       <BrandIntro />
       <Ecosystem />
       <SmartWellnessSection />

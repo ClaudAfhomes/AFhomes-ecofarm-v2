@@ -197,7 +197,7 @@ describe('customer guard', () => {
   it('sends an unauthenticated visitor to the sign-in screen', async () => {
     render('/customer', false);
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
     ).toBeInTheDocument();
     // The guard must not even ask for customer data without a session.
     expect(requests).not.toContain('/customer');
@@ -208,7 +208,7 @@ describe('customer guard', () => {
     async (route) => {
       render(route, false);
       expect(
-        await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+        await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
       ).toBeInTheDocument();
     },
   );
@@ -261,7 +261,7 @@ describe('customer guard', () => {
     expect(
       await screen.findByRole(
         'heading',
-        { name: 'Sign in to your card', level: 2 },
+        { name: 'Sign in to your card', level: 1 },
         { timeout: 3000 },
       ),
     ).toBeInTheDocument();
@@ -566,7 +566,7 @@ describe('customer session provider', () => {
     expect(
       await screen.findByRole(
         'heading',
-        { name: 'Sign in to your card', level: 2 },
+        { name: 'Sign in to your card', level: 1 },
         { timeout: 3000 },
       ),
     ).toBeInTheDocument();

@@ -5,10 +5,16 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // Single shared env source: repo-root `.env.local` (see AGENTS.md). Vite only
   // inlines `VITE_`-prefixed vars, so server-only keys in that file stay safe.
-  envDir: fileURLToPath(new URL('../../', import.meta.url)),
+  // Tests stay hermetic: under `vitest` (mode === 'test') the app-local dir is
+  // used, so a developer's real `.env.local` can never leak URLs or keys into
+  // assertions that pin schema defaults (e.g. recovery redirect origins).
+  envDir:
+    mode === 'test'
+      ? fileURLToPath(new URL('./', import.meta.url))
+      : fileURLToPath(new URL('../../', import.meta.url)),
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -34,4 +40,4 @@ export default defineConfig({
     // Full-suite files run in parallel; heavy user-event flows need headroom.
     testTimeout: 30000,
   },
-});
+}));

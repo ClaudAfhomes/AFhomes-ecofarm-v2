@@ -176,7 +176,7 @@ describe('Phase 33 customer portal at mobile widths', () => {
     atWidth(width);
     render('/customer/login', false);
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
     ).toBeInTheDocument();
   });
 

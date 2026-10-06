@@ -1,0 +1,36 @@
+/*
+ * Marketing action styling (public site only).
+ *
+ * The shared @jad/ui Button supplies structure and color; this layer adds the
+ * premium marketing finish: full pill radius, soft elevation, and a gentle
+ * hover lift. It loads after the ui stylesheet, so tied declarations win
+ * here. The `text` variant stays flat (no pill, no shadow).
+ */
+
+.action {
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    filter 160ms ease;
+}
+
+.action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  filter: none;
+}
+
+.action:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
+}
+
+.action:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 3px;
+}
