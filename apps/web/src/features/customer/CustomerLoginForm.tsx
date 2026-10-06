@@ -153,6 +153,8 @@ export function CustomerLoginForm() {
           Activate your membership
         </Link>
       </p>
+      <div className={styles.divider} aria-hidden="true" />
+      <p className={styles.note}>Use the email address on your membership record.</p>
     </form>
   );
 }

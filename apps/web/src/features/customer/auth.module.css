@@ -54,7 +54,10 @@
   display: grid;
 }
 
-.form button {
+/* Submit spacing applies to submit buttons only: the password visibility
+   toggle is also a <button> inside .form, and a broad rule here pushed it
+   12px below vertical center. */
+.form button[type='submit'] {
   margin-top: var(--space-3);
 }
 
@@ -93,6 +96,12 @@
 
 .promptLink:hover {
   text-decoration: underline;
+}
+
+.divider {
+  height: 1px;
+  background: var(--color-border-subtle);
+  margin-block: var(--space-1);
 }
 
 .note {

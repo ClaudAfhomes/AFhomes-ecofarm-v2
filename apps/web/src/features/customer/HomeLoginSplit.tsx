@@ -77,14 +77,17 @@ export function HomeLoginSplit({ noIndex = false }: { noIndex?: boolean }) {
             </p>
           </div>
           <div
-            className="rounded-2xl bg-cream-50 p-6 shadow-2xl sm:p-8"
+            className="rounded-2xl bg-cream-50 p-6 shadow-2xl ring-1 ring-line sm:p-8"
             aria-label="Member sign in"
           >
             {status === 'authenticated' ? (
               <SignedInPanel onSignOut={() => void signOut()} />
             ) : (
               <>
-                <p className="label-caps text-pine-950/70">Member Login</p>
+                <p className="label-caps flex items-center gap-3 text-pine-950/70">
+                  <span className="h-px w-8 bg-gold-500" aria-hidden="true" />
+                  Member Login
+                </p>
                 <h2 className="font-display mt-2 text-3xl font-medium text-pine-950">
                   Sign in to your card
                 </h2>
@@ -121,7 +124,10 @@ function SignedInPanel({ onSignOut }: { onSignOut: () => void }) {
   if (location.pathname === '/customer/login' && to) return <PortalRedirect to={to} />;
   return (
     <div>
-      <p className="label-caps text-pine-950/70">Member Login</p>
+      <p className="label-caps flex items-center gap-3 text-pine-950/70">
+        <span className="h-px w-8 bg-gold-500" aria-hidden="true" />
+        Member Login
+      </p>
       <h2 className="font-display mt-2 text-3xl font-medium text-pine-950">You are signed in</h2>
       <p className="mt-4 text-pine-950/80">
         {to ? (

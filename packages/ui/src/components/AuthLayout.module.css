@@ -7,7 +7,10 @@
  */
 
 .page {
-  background-color: var(--color-bg-canvas);
+  background:
+    radial-gradient(1100px 520px at 85% -10%, var(--color-accent-subtle), transparent 60%),
+    radial-gradient(900px 480px at -10% 110%, var(--color-brand-soft), transparent 55%),
+    var(--color-bg-canvas);
   min-height: 100vh;
 }
 
@@ -18,6 +21,7 @@
   justify-content: center;
   padding: var(--space-4) var(--space-4);
   background-color: var(--color-brand-deep);
+  border-bottom: 1px solid rgba(220, 192, 106, 0.35);
 }
 
 .masthead::before,
@@ -55,14 +59,16 @@
   }
 }
 
-/* Brand panel - full-height sticky column, deep-green ecofarm gradient. */
+/* Brand panel - full-height sticky column, deep-green ecofarm gradient with
+   a soft gold glow and vignette for a premium editorial finish. */
 .brandPanel {
   position: relative;
   display: none;
   overflow: hidden;
   background-color: var(--color-brand-deep);
   background-image:
-    linear-gradient(180deg, rgba(14, 43, 32, 0.38), rgba(14, 43, 32, 0.94)),
+    radial-gradient(120% 60% at 50% 0%, rgba(220, 192, 106, 0.16), transparent 60%),
+    linear-gradient(180deg, rgba(14, 43, 32, 0.3), rgba(14, 43, 32, 0.94)),
     url('https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1600&q=80');
   background-size: cover;
   background-position: center;
@@ -82,9 +88,9 @@
   inset: 0;
   background: linear-gradient(
     200deg,
-    rgba(14, 43, 32, 0.25) 0%,
-    rgba(14, 43, 32, 0.55) 45%,
-    rgba(14, 43, 32, 0.85) 100%
+    rgba(14, 43, 32, 0.15) 0%,
+    rgba(14, 43, 32, 0.5) 45%,
+    rgba(14, 43, 32, 0.88) 100%
   );
 }
 
@@ -138,12 +144,21 @@
   max-width: 44ch;
 }
 
-/* Form column - centered, constrained, strongly spaced. */
+/* Form column - centered airy canvas; on desktop the form rests at vertical
+   center beside the sticky brand panel. */
 .formColumn {
   display: grid;
   justify-items: center;
   align-content: start;
   padding: var(--space-10) var(--space-4) var(--space-16);
+}
+
+@media (min-width: 1024px) {
+  .formColumn {
+    align-content: center;
+    min-height: 100vh;
+    padding-block: var(--space-16);
+  }
 }
 
 @media (min-width: 640px) {
@@ -152,11 +167,24 @@
   }
 }
 
+/* Floating premium card: soft elevation and generous padding lift the form
+   off the canvas. Wide variant stays opt-in per screen. */
 .formPanel {
   display: grid;
   gap: var(--space-6);
   width: 100%;
   max-width: var(--auth-form-max);
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-8) var(--space-6);
+}
+
+@media (min-width: 640px) {
+  .formPanel {
+    padding: var(--space-10) var(--space-8);
+  }
 }
 
 /* Wide variant for complex multi-field forms - opt-in per screen. */
@@ -171,6 +199,9 @@
 
 .eyebrow {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   font-size: var(--text-caption);
   font-weight: 600;
   text-transform: uppercase;
@@ -178,9 +209,21 @@
   color: var(--color-accent-strong);
 }
 
+.eyebrow::before {
+  content: '';
+  width: 28px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent-light);
+}
+
 .heading h1 {
   margin: 0;
+  font-family: var(--font-family-display);
   font-size: var(--text-h2);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 .lead {
@@ -195,4 +238,8 @@
 }
 .formPanel button[type='submit'] {
   width: 100%;
+  box-shadow: var(--shadow-sm);
+}
+.formPanel button[type='submit']:not(:disabled) {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.1));
 }
