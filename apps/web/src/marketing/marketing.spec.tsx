@@ -40,9 +40,7 @@ describe('public route coverage', () => {
     const { main } = await chrome();
     expect(within(main).getByText(marker, { exact: false })).toBeInTheDocument();
     // Marketing shell: brand nav + footer, never the portal shell.
-    expect(
-      screen.getByRole('link', { name: 'AFhomes — Home Away From Home' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'AFhomes — Home Away From Home' })).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).toBeInTheDocument();
   });
 
@@ -98,18 +96,16 @@ describe('public route coverage', () => {
     await vi.waitFor(() => expect(document.title).toContain('Page not found'), {
       timeout: 20000,
     });
-    expect(document.querySelector('meta[name="robots"]')).toHaveAttribute('content', 'noindex, follow');
+    expect(document.querySelector('meta[name="robots"]')).toHaveAttribute(
+      'content',
+      'noindex, follow',
+    );
   });
 
-  it('does not port the old standalone admin', async () => {
+  it('serves the local-dev staff entry on /admin/login, not the marketing 404', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
-    expect(
-      await screen.findByRole(
-        'heading',
-        { name: 'This page is taking a rest day.' },
-        { timeout: 20000 },
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Administration Login')).toBeInTheDocument();
+    expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });
 });
 
@@ -128,9 +124,10 @@ describe('header and navigation', () => {
       expect(screen.getAllByRole('link', { name: label })[0]).toBeInTheDocument();
     }
     // No standalone "Home" link: the brand mark links home.
-    expect(
-      screen.getByRole('link', { name: 'AFhomes — Home Away From Home' }),
-    ).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'AFhomes — Home Away From Home' })).toHaveAttribute(
+      'href',
+      '/',
+    );
     expect(screen.getByText('Important Notice')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
   });
@@ -153,6 +150,23 @@ describe('header and navigation', () => {
     // The menu plays its exit transition first.
     await waitForElementToBeRemoved(() => screen.queryByRole('dialog'), { timeout: 20000 });
   });
+
+  it('exposes a single member Login entry that routes to /customer/login', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />, { route: '/' });
+    await chrome();
+    // jsdom matchMedia never matches desktop, so the entry lives in the menu.
+    await user.click(screen.getByRole('button', { name: 'Open menu' }));
+    const dialog = await screen.findByRole('dialog');
+    const login = within(dialog).getByRole('link', { name: 'Login' });
+    expect(login).toHaveAttribute('href', '/customer/login');
+    // Staff/admin entries stay URL-only: never advertised in the public nav.
+    expect(within(dialog).queryByRole('link', { name: /staff/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+    await user.click(login);
+    expect(await screen.findByLabelText(/Email/)).toBeInTheDocument();
+    expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
+  });
 });
 
 describe('homepage critical sections', () => {
@@ -160,7 +174,9 @@ describe('homepage critical sections', () => {
     renderWithProviders(<App />, { route: '/' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines')).toBeInTheDocument();
+    expect(
+      scope.getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines'),
+    ).toBeInTheDocument();
     expect(scope.getByText('A pioneer in homestyle hospitality')).toBeInTheDocument();
     expect(scope.getByText('A destination, arriving in chapters.')).toBeInTheDocument();
     // All three VIP tiers load asynchronously from the static content.
@@ -194,10 +210,9 @@ describe('contact and inquiry form', () => {
     renderWithProviders(<App />, { route: '/contact' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByRole('link', { name: /claudmarsjimenez.afhomes@gmail.com/i })).toHaveAttribute(
-      'href',
-      expect.stringContaining('mailto:'),
-    );
+    expect(
+      scope.getByRole('link', { name: /claudmarsjimenez.afhomes@gmail.com/i }),
+    ).toHaveAttribute('href', expect.stringContaining('mailto:'));
     expect(scope.getByLabelText(/Name/)).toBeInTheDocument();
     expect(scope.getByLabelText(/Message/)).toBeInTheDocument();
     expect(scope.getByRole('button', { name: /Send message/ })).toBeInTheDocument();
@@ -227,9 +242,9 @@ describe('contact and inquiry form', () => {
       await user.click(screen.getByRole('button', { name: /Send message/ }));
 
       expect(await screen.findByText('Request saved locally.')).toBeInTheDocument();
-      expect(
-        (window.location as unknown as { href: string }).href,
-      ).toMatch(/^mailto:claudmarsjimenez\.afhomes@gmail\.com\?/);
+      expect((window.location as unknown as { href: string }).href).toMatch(
+        /^mailto:claudmarsjimenez\.afhomes@gmail\.com\?/,
+      );
       const outbox = JSON.parse(localStorage.getItem('afhomes.inquiries.v1') ?? '[]') as {
         name: string;
       }[];
@@ -264,7 +279,9 @@ describe('stories, FAQ, and VIP pages', () => {
     renderWithProviders(<App />, { route: '/faq' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(await scope.findByText('Who is the AFhomes Group?', undefined, { timeout: 20000 })).toBeInTheDocument();
+    expect(
+      await scope.findByText('Who is the AFhomes Group?', undefined, { timeout: 20000 }),
+    ).toBeInTheDocument();
     await user.click(scope.getByRole('tab', { name: /VIP Privilege/ }));
     expect(
       await scope.findByText('What is the purpose of the VIP Privilege Program?', undefined, {

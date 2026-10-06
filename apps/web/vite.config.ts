@@ -6,6 +6,9 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // Single shared env source: repo-root `.env.local` (see AGENTS.md). Vite only
+  // inlines `VITE_`-prefixed vars, so server-only keys in that file stay safe.
+  envDir: fileURLToPath(new URL('../../', import.meta.url)),
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

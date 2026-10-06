@@ -315,6 +315,11 @@ export function Navbar() {
                 Explore AFhomes
               </Button>
             )}
+            {isDesktop && (
+              <Button to="/customer/login" variant="secondary" size="sm">
+                Login
+              </Button>
+            )}
 
             {/* Mobile toggle */}
             <div className="lg:hidden">
@@ -441,6 +446,9 @@ export function Navbar() {
               <motion.div variants={menuItem} className="mt-8 flex flex-col gap-3">
                 <Button to="/experiences" variant="primary" size="lg" withArrow className="w-full">
                   Explore AFhomes
+                </Button>
+                <Button to="/customer/login" variant="secondary" size="lg" className="w-full">
+                  Login
                 </Button>
                 <a
                   href={`mailto:${siteConfig.email}`}

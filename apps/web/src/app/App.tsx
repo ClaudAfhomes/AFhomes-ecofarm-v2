@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router';
+import { Navigate, Route, Routes } from 'react-router';
 
 import { NotFound } from '@jad/ui';
 
@@ -13,6 +13,7 @@ import { CustomerPaymentsPage } from '../features/customer/CustomerPaymentsPage'
 import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
 import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemptionsPage';
+import { AdminEntryPage, StaffLoginEntryPage } from '../features/staff/StaffEntryPage';
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { OstLoginPage } from '../features/ost/OstLoginPage';
 import { OstDashboardPage } from '../features/ost/OstDashboardPage';
@@ -83,6 +84,14 @@ export default function App() {
       </Route>
 
       <Route path="/customer/login" element={<CustomerLoginPage />} />
+      {/* Local-dev staff entry (see StaffEntryPage). Production serves
+          `/admin/*` from the admin bundle via vercel.json, so these web routes
+          are a dev convenience: sign in here, continue on the staff console
+          origin. Bare paths render the matching login (never a dashboard). */}
+      <Route path="/admin/login" element={<AdminEntryPage />} />
+      <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+      <Route path="/staff/login" element={<StaffLoginEntryPage />} />
+      <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
       <Route path="/customer/activate" element={<CustomerActivatePage />} />
       {/* Phase 16 recovery: public by necessity, alongside login/activate.
           Static segments outrank the marketing `:slug`, so these can never be

@@ -24,7 +24,14 @@ import { routeRequest } from './_lib/router.js';
 
 // ---------------------------------------------------------------------------
 // Load root .env (Node-compatible, no Vite). Mirrors supabase/seed.ts.
+// Root `.env.local` is the documented single override file (see AGENTS.md),
+// so it must be loaded here: the previous version only read root `.env` plus
+// the per-app files, which meant a root-only setup left SUPABASE_URL and the
+// service key empty and every authenticated call failed. Real process env
+// (shell / Vercel dashboard) always wins; among files, later files win so
+// apps/<app>/.env.local can still override the shared root file.
 // ---------------------------------------------------------------------------
+const initialEnvKeys = new Set(Object.keys(process.env));
 function loadEnvFile(path: string) {
   try {
     const content = fs.readFileSync(path, 'utf8');
@@ -34,12 +41,25 @@ function loadEnvFile(path: string) {
       const eq = trimmed.indexOf('=');
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
-      if (!(key in process.env) && value) process.env[key] = value;
+      let value = trimmed.slice(eq + 1).trim();
+      // Allow quoted values pasted from dashboards (`KEY="val"`).
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!key || !value) continue;
+      // Never overwrite a real environment variable; files only fill gaps
+      // (later files overwrite earlier files so app-specific wins over root).
+      if (initialEnvKeys.has(key)) continue;
+      process.env[key] = value;
     }
   } catch {}
 }
 loadEnvFile('.env');
+loadEnvFile('.env.local');
 loadEnvFile('apps/web/.env.local');
 loadEnvFile('apps/admin/.env.local');
 
