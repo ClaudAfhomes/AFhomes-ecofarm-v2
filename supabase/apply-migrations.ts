@@ -57,6 +57,8 @@ type Target = {
   connectionString: string;
   migrationsDir: string;
   files: string[];
+  /** Every AF Homes migration on disk, unfiltered, so `--only` can report what it skips. */
+  allFiles: string[];
   problems: string[];
 };
 
@@ -130,7 +132,13 @@ function readTarget(): Target {
   const migrationsDir = path.resolve('supabase/migrations');
   if (!fs.existsSync(migrationsDir) || !fs.statSync(migrationsDir).isDirectory()) {
     problems.push(`${migrationsDir} is not a directory. Run this from the repository root.`);
-    return { connectionString: connectionString ?? '', migrationsDir, files: [], problems };
+    return {
+      connectionString: connectionString ?? '',
+      migrationsDir,
+      files: [],
+      allFiles: [],
+      problems,
+    };
   }
 
   let files = fs
@@ -142,6 +150,7 @@ function readTarget(): Target {
       'Non-AF Homes migration found in active path. The retired JAD set must stay out.',
     );
 
+  const allFiles = files;
   if (ONLY_ARGUMENT) {
     const versions = ONLY_ARGUMENT.slice(7).split(',');
     if (versions.some((v) => !/^\d{14}$/.test(v)) || new Set(versions).size !== versions.length)
@@ -155,7 +164,13 @@ function readTarget(): Target {
     throw new Error(`Refusing migration:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
   }
 
-  return { connectionString: connectionString ?? '', migrationsDir, files, problems };
+  return {
+    connectionString: connectionString ?? '',
+    migrationsDir,
+    files,
+    allFiles,
+    problems,
+  };
 }
 
 /* ---------------------------------------------------------------- */
@@ -164,7 +179,66 @@ function readTarget(): Target {
 
 async function main(): Promise<void> {
   // 1. Every guard runs before a client exists.
-  const { connectionString, migrationsDir, files, problems } = readTarget();
+  const { connectionString, migrationsDir, files, allFiles, problems } = readTarget();
+
+  if (CHECK_ONLY && ONLY_ARGUMENT) {
+    // Production preflight for one exact version. This OPENS A CONNECTION but runs
+    // only SELECTs against the history table: no migration file is read, no
+    // transaction is opened, no DDL is sent. Plain `--check` stays connection-free,
+    // so a dry run still works with no database password at all.
+    console.log(`[afhomes:migrate] target project  : ${EXPECTED_PROJECT_REF} (PRODUCTION)`);
+    // Print the selection BEFORE any connection is opened, so a dry run with bad
+    // configuration still shows exactly which file was chosen.
+    console.log(`[afhomes:migrate] migrations dir   : ${migrationsDir}`);
+    console.log(`[afhomes:migrate] migrations found : ${files.length}`);
+    for (const [index, file] of files.entries()) {
+      console.log(`  ${String(index + 1).padStart(2)}. ${file}`);
+    }
+    if (problems.length > 0) {
+      console.log('[afhomes:migrate] BLOCKERS (a real run would refuse):');
+      for (const problem of problems) console.log(`  - ${problem}`);
+      process.exitCode = 1;
+      return;
+    }
+    const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
+    try {
+      await client.connect();
+      await client.query('create schema if not exists supabase_migrations');
+      await client.query(
+        'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
+      );
+      const selected = files[0]!;
+      const selectedVersion = selected.split('_', 1)[0]!;
+      const isApplied = async (version: string) =>
+        (
+          await client.query('select 1 from supabase_migrations.schema_migrations where version=$1', [
+            version,
+          ])
+        ).rowCount
+          ? true
+          : false;
+      const selectedApplied = await isApplied(selectedVersion);
+      console.log(`[afhomes:migrate] selected        : ${selected}`);
+      console.log(`[afhomes:migrate] applied already : ${selectedApplied}`);
+      const earlierUnapplied: string[] = [];
+      for (const candidate of allFiles) {
+        const version = candidate.split('_', 1)[0]!;
+        if (version === selectedVersion) continue;
+        if (!(await isApplied(version))) earlierUnapplied.push(candidate);
+      }
+      console.log(
+        `[afhomes:migrate] earlier UNAPPLIED : ${earlierUnapplied.length} (would be SKIPPED, ` +
+          `never applied)`,
+      );
+      for (const skipped of earlierUnapplied) console.log(`  SKIPPED: ${skipped}`);
+      if (selectedApplied)
+        console.log('[afhomes:migrate] Nothing to do: the selected migration is already applied.');
+      console.log('[afhomes:migrate] Read-only: zero migration SQL was executed.');
+    } finally {
+      await client.end();
+    }
+    return;
+  }
 
   if (CHECK_ONLY) {
     // Preflight only. No Client is constructed, so no socket is opened and no
@@ -229,6 +303,33 @@ async function main(): Promise<void> {
     await client.query(
       'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
     );
+    // `--only` deliberately permits skipping an earlier unapplied migration, so say
+    // so loudly rather than letting the operator discover it from the history table.
+    // Every one of these is still unapplied after this run; skipping is not applying.
+    if (ONLY_ARGUMENT && files.length === 1) {
+      const selected = files[0]!;
+      const earlierUnapplied: string[] = [];
+      for (const candidate of allFiles) {
+        const version = candidate.split('_', 1)[0]!;
+        if (version === selected.split('_', 1)[0]) continue;
+        const applied = await client.query(
+          'select 1 from supabase_migrations.schema_migrations where version=$1',
+          [version],
+        );
+        if (!applied.rowCount) earlierUnapplied.push(candidate);
+      }
+      if (earlierUnapplied.length > 0) {
+        console.warn(
+          `[afhomes:migrate] WARNING: ${selected} is being applied while ` +
+            `${earlierUnapplied.length} EARLIER migration(s) remain UNAPPLIED:`,
+        );
+        for (const skipped of earlierUnapplied) console.warn(`  SKIPPED: ${skipped}`);
+        console.warn(
+          '[afhomes:migrate] They will NOT be applied by this run. Confirm each is ' +
+            'intentionally skipped before deploying code that depends on it.',
+        );
+      }
+    }
     let appliedCount = 0;
     for (const file of files) {
       const version = file.split('_', 1)[0]!;
