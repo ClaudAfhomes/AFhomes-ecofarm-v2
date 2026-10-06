@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AuthPortals } from '@jad/contracts';
 
@@ -83,7 +83,7 @@ describe('staff entry routes', () => {
     ['/staff/login', 'Staff Login'],
   ])('renders %s outside marketing chrome', async (route, title) => {
     renderWithProviders(<App />, { route });
-    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
   });
 
@@ -91,5 +91,18 @@ describe('staff entry routes', () => {
     renderWithProviders(<App />, { route });
     expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['/admin/login', 'Admin Login'],
+    ['/staff/login', 'Staff Login'],
+  ])('breadcrumbs Home > %s at the very top of the form card', async (route, current) => {
+    renderWithProviders(<App />, { route });
+    const nav = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(nav).getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
+    expect(within(nav).getByText(current)).toHaveAttribute('aria-current', 'page');
+    // Topmost inside the card: the heading follows the breadcrumb.
+    const heading = screen.getByRole('heading', { name: current });
+    expect(nav.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

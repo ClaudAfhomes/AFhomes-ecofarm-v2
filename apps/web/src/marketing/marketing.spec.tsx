@@ -104,7 +104,7 @@ describe('public route coverage', () => {
 
   it('serves the local-dev staff entry on /admin/login, not the marketing 404', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
-    expect(await screen.findByText('Admin Login')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
     expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });
 });

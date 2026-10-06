@@ -16,8 +16,7 @@ import {
   TextField,
 } from '../index';
 
-const renderWithRouter = (ui: ReactElement) =>
-  render(<MemoryRouter>{ui}</MemoryRouter>);
+const renderWithRouter = (ui: ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe('AuthLayout (JAD parity shell)', () => {
   it('renders the mobile masthead, brand panel, and a single h1', () => {
@@ -58,6 +57,26 @@ describe('AuthLayout (JAD parity shell)', () => {
     );
     expect(screen.getByText('Use your code.')).toBeInTheDocument();
     expect(container.querySelector('[class*="formPanelWide"]')).not.toBeNull();
+  });
+
+  it('renders the breadcrumb slot at the very top of the form card', () => {
+    render(
+      <AuthLayout
+        eyebrow="AF Homes Ecofarm"
+        title="Staff sign in"
+        brandTitle="Grow."
+        breadcrumb={
+          <nav aria-label="Breadcrumb">
+            <span aria-current="page">Staff Login</span>
+          </nav>
+        }
+      >
+        <form />
+      </AuthLayout>,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    const heading = screen.getByRole('heading', { level: 1, name: 'Staff sign in' });
+    expect(nav.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });
 

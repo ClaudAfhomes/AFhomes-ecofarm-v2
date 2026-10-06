@@ -150,6 +150,19 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
         }
         brandTitle="Grow with the farm you own a card in."
         brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+        breadcrumb={
+          <nav className={styles.crumbs} aria-label="Breadcrumb">
+            <Link className={styles.crumbLink} to="/">
+              Home
+            </Link>
+            <span className={styles.crumbSeparator} aria-hidden="true">
+              &gt;
+            </span>
+            <span className={styles.crumbCurrent} aria-current="page">
+              {isAdmin ? 'Admin Login' : 'Staff Login'}
+            </span>
+          </nav>
+        }
       >
         {decision?.action === 'refuse' ? (
           <Refusal

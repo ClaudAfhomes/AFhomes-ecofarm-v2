@@ -9,6 +9,8 @@ export interface AuthLayoutProps {
   lead?: string;
   brandTitle: string;
   brandLead?: string;
+  /** Optional breadcrumb rendered at the very top of the form card, above the heading. */
+  breadcrumb?: ReactNode;
   /** Form panel content (the form or a result/preview panel). */
   children: ReactNode;
   /** Wide (680px) form panel for complex multi-field forms; default is 440px. */
@@ -31,6 +33,7 @@ export function AuthLayout({
   lead,
   brandTitle,
   brandLead,
+  breadcrumb,
   children,
   wide = false,
 }: AuthLayoutProps) {
@@ -70,6 +73,7 @@ export function AuthLayout({
         </aside>
         <div className={styles.formColumn}>
           <div className={`${styles.formPanel} ${wide ? styles.formPanelWide : ''}`}>
+            {breadcrumb}
             <div className={styles.heading}>
               <p className={styles.eyebrow}>{eyebrow}</p>
               <h1>{title}</h1>

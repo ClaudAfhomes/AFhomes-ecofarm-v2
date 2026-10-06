@@ -34,18 +34,20 @@ export function CustomerLoginScreen() {
       title="Sign in to your card"
       brandTitle="Amazing & Fun. Your Home Away From Home."
       brandLead="Hospitality, wellness, dining, nature and experiences in Laguna, Philippines."
+      breadcrumb={
+        <nav className={styles.crumbs} aria-label="Breadcrumb">
+          <Link className={styles.crumbLink} to="/">
+            Home
+          </Link>
+          <span className={styles.crumbSeparator} aria-hidden="true">
+            &gt;
+          </span>
+          <span className={styles.crumbCurrent} aria-current="page">
+            Customer Login
+          </span>
+        </nav>
+      }
     >
-      <nav className={styles.crumbs} aria-label="Breadcrumb">
-        <Link className={styles.crumbLink} to="/">
-          Home
-        </Link>
-        <span className={styles.crumbSeparator} aria-hidden="true">
-          &gt;
-        </span>
-        <span className={styles.crumbCurrent} aria-current="page">
-          Customer Login
-        </span>
-      </nav>
       {status === 'authenticated' ? (
         <SignedInPanel onSignOut={() => void signOut()} />
       ) : (

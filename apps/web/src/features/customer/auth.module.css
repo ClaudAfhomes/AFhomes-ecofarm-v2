@@ -104,6 +104,36 @@
   margin-block: var(--space-1);
 }
 
+/* Breadcrumb above staff entry forms (mirrors the member login crumbs). */
+.crumbs {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+}
+
+.crumbLink {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.crumbLink:hover {
+  color: var(--color-brand-primary);
+  text-decoration: underline;
+}
+
+.crumbSeparator {
+  color: var(--color-text-muted);
+}
+
+.crumbCurrent {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
 .note {
   margin: 0;
   text-align: center;
