@@ -18,7 +18,7 @@ import {
 
 const renderWithRouter = (ui: ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
-describe('AuthLayout (JAD parity shell)', () => {
+describe('AuthLayout (AF Homes auth shell)', () => {
   it('renders the mobile masthead, brand panel, and a single h1', () => {
     render(
       <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
@@ -152,7 +152,7 @@ describe('Alert', () => {
   });
 });
 
-describe('MetricCard (JAD QueueCard grammar)', () => {
+describe('MetricCard (AF Homes queue-card pattern)', () => {
   it('renders icon, value, label, and description', () => {
     renderWithRouter(
       <MetricCard label="Pending payments" value={7} icon="clock" description="Awaiting review" />,

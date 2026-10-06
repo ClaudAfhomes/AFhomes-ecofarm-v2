@@ -70,7 +70,7 @@ export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
   request(`/admin/afhomes/staff/${id}`, afHomesStaffSchema);
 /**
- * JAD-parity staff creation: the administrator sets a temporary password and
+ * AF Homes staff creation: the administrator sets a temporary password and
  * the account starts gated on `mustChangePassword`. The secret travels to
  * Supabase Auth only and is never stored in an AF Homes table. (The legacy
  * `inviteAfHomesStaff` invitation callback is retired for standard
@@ -160,7 +160,7 @@ export const getAnalyticsOverview = (period: AnalyticsPeriod): Promise<Analytics
   request(`/analytics?period=${encodeURIComponent(period)}`, analyticsOverviewSchema);
 
 /**
- * JAD-parity Sales Overview trend: a dedicated per-granularity series of
+ * AF Homes Sales Overview trend: a dedicated per-granularity series of
  * qualifying-sale counts and exact-decimal frozen-value totals. Independent of
  * the page-level analytics period selector.
  */
@@ -173,7 +173,7 @@ export const getAfHomesSalesTrend = (
   );
 
 /**
- * Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+ * Phase 2B operational dashboard queue cards (AF Homes queue-card pattern).
  * Server-side counts; a `null` count means the caller may not know that queue
  * and its card stays hidden. Never fetch full lists to count client-side.
  */

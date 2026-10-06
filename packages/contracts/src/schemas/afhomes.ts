@@ -213,7 +213,7 @@ export const inviteAfHomesStaffSchema = z.object({
 });
 
 /**
- * JAD-parity staff creation (Phase 20). Same identity fields as the legacy
+ * AF Homes staff creation (Phase 20). Same identity fields as the legacy
  * invitation, plus the administrator-set temporary password. The password is
  * server-validated, passed only to Supabase Auth (`auth.admin.createUser`),
  * and never stored in any AF Homes table. The confirm field is client-only
@@ -233,7 +233,7 @@ export type UpdateAfHomesStaffProfile = z.infer<typeof updateAfHomesStaffProfile
 /**
  * My Account / forced first-login password change. The current password is
  * re-verified with a fresh `signInWithPassword` (Supabase does not require
- * it by default); the new password follows the JAD >= 8 rule.
+ * it by default); the new password follows the AF Homes >= 8 rule.
  */
 export const changeAfHomesStaffPasswordSchema = z.object({
   currentPassword: z.string().min(1),

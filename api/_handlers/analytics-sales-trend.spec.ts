@@ -81,7 +81,7 @@ function activeSale(over: Record<string, unknown> = {}) {
 
 beforeEach(() => install());
 
-describe('GET /analytics/sales-trend (JAD Sales Overview parity)', () => {
+describe('GET /analytics/sales-trend (AF Homes Sales Overview pattern)', () => {
   it('routes through the analytics family without a router change', () => {
     const match = selectHandler('/api/v1/analytics/sales-trend', {});
     expect(match?.routeKey).toBe('analytics/sales-trend');

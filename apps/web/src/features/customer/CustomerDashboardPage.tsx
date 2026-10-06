@@ -17,7 +17,7 @@ import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './po
 /**
  * Customer dashboard: the member's own position in one screen.
  *
- * JAD member-dashboard structure (page header, KPI grid, membership panel,
+ * AF Homes member-dashboard structure (page header, KPI grid, membership panel,
  * recent activity) with AF Homes content: deliberately read-only and
  * deliberately narrow - name, card, status, activation and renewal dates,
  * points balance, and recent points activity. No staff-only field and no

@@ -30,7 +30,7 @@ export interface SessionUser {
   afHomesPermissions: AfHomesPermission[];
   status: 'active' | 'invited' | 'inactive' | 'suspended';
   /**
-   * JAD parity: true while the account still runs on its administrator-set
+   * AF Homes pattern: true while the account still runs on its administrator-set
    * temporary password. Optional (older test fixtures omit it) - only an
    * explicit `true` gates; `undefined` behaves as `false`.
    */

@@ -410,7 +410,7 @@ describe('customer activation request', () => {
   });
 
   it('answers for its own path only, never for a retired sibling route', async () => {
-    // `/auth/register` belonged to the retired JAD platform. Even if something
+    // `/auth/register` belonged to the retired predecessor platform. Even if something
     // dispatched it here, this handler must not answer for it.
     for (const path of ['', 'register', 'customer', 'login', 'password-reset']) {
       const { res, state } = makeRes();

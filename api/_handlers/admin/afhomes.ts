@@ -690,7 +690,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mfaRequired: principal.mfaRequired ?? false,
       });
     }
-    // My Account display-name update (JAD parity: PATCH /admin/session).
+    // My Account display-name update (AF Homes pattern: PATCH /admin/session).
     // Self-service: resolves the principal directly so it stays reachable
     // while `mustChangePassword` gates every module-guarded endpoint.
     if (path === 'session' && method === 'PATCH') {
@@ -733,7 +733,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         permissions: principal.permissions,
       });
     }
-    // My Account / forced first-login password change (JAD parity:
+    // My Account / forced first-login password change (AF Homes pattern:
     // POST /admin/session/password). Verifies the current password with a
     // fresh `signInWithPassword` (Supabase does not require it by default),
     // rotates via the Admin API, then clears the temporary-password flag.
@@ -993,7 +993,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Cannot assign a role with permissions you do not possess',
           403,
         );
-      // JAD parity: the Auth identity is created server-side with an
+      // AF Homes pattern: the Auth identity is created server-side with an
       // administrator-set temporary password (`auth.admin.createUser`), never
       // through the invitation callback. The account starts `active` but
       // gated on `must_change_password` until the forced first-login change.

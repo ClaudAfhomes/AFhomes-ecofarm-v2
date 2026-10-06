@@ -18,7 +18,7 @@ import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
 
 /**
- * My Account (JAD parity, `/admin/profile`): the signed-in staff
+ * My Account (AF Homes pattern, `/admin/profile`): the signed-in staff
  * member's identity plus the display-name and password workflows. While
  * `mustChangePassword` is set the rest of the admin panel stays locked and
  * this page is the only destination, so the password card is the forced

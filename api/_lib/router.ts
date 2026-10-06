@@ -43,8 +43,8 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * Phase 2 surface: the AF Homes operations API, the business families
  * (card products, customers, sales, payments, activation, memberships, points,
  * commissions, referrals, queues), and the health probe. Every other route
- * family (members, vouchers, withdrawals, CMS, ...) belonged to the retired JAD
- * platform and was removed - none of it had a table in the AF Homes schema.
+ * family (members, vouchers, withdrawals, CMS, ...) belonged to the retired
+ * predecessor platform and was removed - none of it had a table in the AF Homes schema.
  */
 
 /**
@@ -111,8 +111,8 @@ const BUSINESS_FAMILIES = [
   //
   // `auth` is the UNAUTHENTICATED activation entry point and carries an explicit
   // `path`, so it claims ONLY `auth/customer/activate`. Without that constraint it
-  // would also swallow `/api/v1/auth/register` - a route belonging to the retired
-  // JAD platform, which must stay unroutable. Claiming a whole prefix is how a
+  // would also swallow `/api/v1/auth/register` - a route belonging to the
+  // retired predecessor platform, which must stay unroutable. Claiming a whole prefix is how a
   // retired surface quietly comes back to life.
   //
   // `customer` (singular) is listed AFTER `customers` (plural) and cannot match

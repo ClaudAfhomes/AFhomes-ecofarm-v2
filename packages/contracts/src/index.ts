@@ -3,8 +3,8 @@
  * request/response shape exchanged over the REST API and validated at the
  * browser boundary.
  *
- * Phase 1 surface only. The JAD Realty schemas (members, sales, vouchers,
- * withdrawals, commissions, CMS, registration) were removed with the JAD
+ * Phase 1 surface only. The predecessor schemas (members, sales, vouchers,
+ * withdrawals, commissions, CMS, registration) were removed with the retired
  * handlers; new domains are added here as their Phase 2+ handlers land, so
  * client and server can never drift on a DTO.
  */
@@ -404,7 +404,7 @@ export type {
   SalesTrendReport,
 } from './schemas/analytics.js';
 
-/* ---- Phase 2B: operational dashboard queue cards (JAD QueueCard parity) ----
+/* ---- Phase 2B: operational dashboard queue cards (AF Homes queue-card pattern) ----
    Three server-side counts (null when unauthorized); no withdrawals until the
    payout workflow exists. */
 export { dashboardQueuesSchema } from './schemas/queues.js';

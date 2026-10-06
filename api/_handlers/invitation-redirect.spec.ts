@@ -1,5 +1,5 @@
 /**
- * Phase 1 (JAD parity) staff-creation integrity, executed as tests.
+ * Phase 1 (AF Homes pattern) staff-creation integrity, executed as tests.
  *
  * Standard staff onboarding creates the Supabase Auth identity FIRST with an
  * administrator-set temporary password (`auth.admin.createUser`,

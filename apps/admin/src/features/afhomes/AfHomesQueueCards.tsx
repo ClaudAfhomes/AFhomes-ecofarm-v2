@@ -21,7 +21,7 @@ interface QueueCardDef {
 }
 
 /**
- * Dashboard queue cards (JAD QueueCard parity). The OST Members card is a
+ * Dashboard queue cards (AF Homes queue-card pattern). The OST Members card is a
  * snapshot/stat card - it renders first and never participates in sorting or
  * all-clear logic. Action queues sort highest-pending-first. Withdrawals are
  * deliberately absent: the payout workflow does not exist yet.

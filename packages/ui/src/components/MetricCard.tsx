@@ -21,7 +21,7 @@ export interface MetricCardProps {
 }
 
 /**
- * Canonical stat/metric card (JAD QueueCard grammar): icon tile + optional
+ * Canonical stat/metric card (AF Homes queue-card pattern): icon tile + optional
  * status chip in the header, tabular-nums value, label, and description.
  * Presentation only - every figure comes from the caller, never computed.
  */

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+ * Phase 2B operational dashboard queue cards (AF Homes queue-card pattern).
  *
  * Three lightweight server-side counts for the dashboard top section. Each
  * count is `null` when the caller may not know it (pattern A: the endpoint
@@ -10,7 +10,7 @@ import { z } from 'zod';
  *
  * - `ostMembers`: every `ost_members` row. There is no archived/deleted
  *   member state, so the total registered membership is the whole table
- *   (JAD's non-archived member count). A snapshot/stat, not an action queue.
+ *   (the legacy non-archived member count). A snapshot/stat, not an action queue.
  * - `ostApplications`: `ost_applications` in `OST_REVIEWABLE_STATUSES`
  *   (submitted/under_review/changes_requested). Terminal states
  *   (approved/rejected/withdrawn) are decided work, never pending work.

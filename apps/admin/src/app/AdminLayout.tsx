@@ -19,7 +19,7 @@ export function AdminLayout() {
       })),
     [location.pathname, user?.roleSlug],
   );
-  // JAD parity: while the temporary password is still in force the normal
+  // AF Homes pattern: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
   return (

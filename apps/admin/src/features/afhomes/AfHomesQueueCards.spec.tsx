@@ -53,7 +53,7 @@ beforeEach(() => {
 const renderCards = (as: SessionUser = ADMIN) => renderWithProviders(<AfHomesQueueCards />, { user: as });
 
 describe('QueueCard', () => {
-  it('renders the JAD card grammar with an accessible pending label', () => {
+  it('renders the AF Homes card grammar with an accessible pending label', () => {
     renderWithProviders(
       <QueueCard to="/admin/x" label="OST Applications" icon="user" description="d" data={3} />,
     );
@@ -61,7 +61,7 @@ describe('QueueCard', () => {
   });
 });
 
-describe('AfHomesQueueCards (JAD QueueCard parity)', () => {
+describe('AfHomesQueueCards (AF Homes queue-card pattern)', () => {
   it('1/2. renders the OST Members stat with its total and a registered chip', async () => {
     renderCards();
     const card = await screen.findByRole('link', { name: 'OST Members: 25 total' });

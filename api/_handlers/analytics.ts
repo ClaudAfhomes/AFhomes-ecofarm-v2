@@ -252,13 +252,13 @@ function bucketKey(value: unknown, period: AnalyticsPeriod) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Sales Overview trend (JAD SalesTrendChart parity)                   */
+/* Sales Overview trend (AF Homes sales-trend pattern)                   */
 /* ------------------------------------------------------------------ */
 
 /**
  * The single AF Homes state that counts as a recognized sale for the Sales
  * Overview. Activation is the explicit, permission-gated recognition decision
- * after full verified payment - the same role JAD's `QUALIFYING_SALE`
+ * after full verified payment - the same role the predecessor's `QUALIFYING_SALE`
  * transition plays after `PAYMENT_VERIFIED`. Pipeline states and cancelled
  * sales are working-pipeline items or invalid sales, never recognized sales.
  */
@@ -298,7 +298,7 @@ async function salesTrend(req: VercelRequest, res: VercelResponse) {
     const kind = roleScope(principal);
     const scoped = await scopedSales(db, principal, kind);
     // Only qualifying sales feed the chart. The submission instant buckets the
-    // sale (JAD `submittedAt` semantics); a corrupt row is skipped so one bad
+    // sale (predecessor `submittedAt` semantics); a corrupt row is skipped so one bad
     // row can never fail the whole dashboard read. The yearly range starts at
     // the earliest qualifying submission even when its money is unreadable.
     const qualified = scoped.sales.filter((sale) => sale.status === QUALIFYING_SALE_STATUS);

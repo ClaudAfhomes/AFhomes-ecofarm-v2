@@ -20,10 +20,10 @@ export interface AuthLayoutProps {
 /**
  * Editorial split shell for the AF Homes auth screens.
  *
- * JAD parity structure (AuthLayout): mobile masthead + desktop two-column
+ * AF Homes structure (AuthLayout): mobile masthead + desktop two-column
  * split with a sticky full-height brand panel beside the form column.
  * AF Homes brand mapping: deep forest-green panel with a harvest-gold rule
- * and the AF Homes Ecofarm wordmark (text, never the JAD logo or realty
+ * and the AF Homes Ecofarm wordmark (text, never a predecessor logo or realty
  * imagery). Business logic lives in the consuming pages; this is
  * presentation only.
  */

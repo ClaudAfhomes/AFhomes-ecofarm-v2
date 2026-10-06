@@ -211,7 +211,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(queue);
     }
 
-    // Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+    // Phase 2B operational dashboard queue cards (AF Homes queue-card pattern).
     // Pattern A: each count additionally requires its own module, and an
     // unauthorized count reads as null - never as a zero that would hide an
     // action queue or leak a depth the caller may not know.

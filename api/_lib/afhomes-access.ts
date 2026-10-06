@@ -309,7 +309,7 @@ export async function authorizeAfHomes(
     return {
       error: toErrorEnvelope('FORBIDDEN', 'Complete authenticator verification to continue.', 403),
     };
-  // JAD parity: an account still running on its administrator-set temporary
+  // AF Homes pattern: an account still running on its administrator-set temporary
   // password may only use the self-service session endpoints (GET/PATCH
   // session, POST session/password), which resolve the principal directly
   // and never pass through here. Every module-guarded endpoint refuses until

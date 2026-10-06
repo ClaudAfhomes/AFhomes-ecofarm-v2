@@ -15,7 +15,7 @@ vi.mock('./services', async (importOriginal) => {
 /**
  * jsdom has no ResizeObserver; recharts ResponsiveContainer needs one. The
  * stub reports a fixed 800x280 viewport on observe so the chart renders
- * synchronously enough for assertions (same approach as JAD's chart spec).
+ * synchronously enough for assertions (same approach as the predecessor chart spec).
  */
 class ResizeObserverStub {
   private cb: ResizeObserverCallback;
@@ -90,7 +90,7 @@ const renderChart = () => renderWithProviders(<AfHomesTrendChart />);
 const lineD = (container: HTMLElement) =>
   (container.querySelector('.recharts-line path') as unknown as { getAttribute?: (n: string) => string } | null)?.getAttribute?.('d') ?? '';
 
-describe('periodLabel (JAD grammar)', () => {
+describe('periodLabel (AF Homes grammar)', () => {
   it('7. labels monthly keys as "Sep \'26"', () => {
     expect(periodLabel('2026-09')).toBe("Sep '26");
     expect(periodLabel('2026-01')).toBe("Jan '26");
@@ -101,7 +101,7 @@ describe('periodLabel (JAD grammar)', () => {
   });
 });
 
-describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
+describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
   it('1. renders the "Sales Overview" title', async () => {
     const { container } = renderChart();
     expect(screen.getByText('Sales Overview')).toBeInTheDocument();
@@ -142,7 +142,7 @@ describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
       expect(lineD(container)).toBe(valueGeometry);
     });
     expect(getTrend).toHaveBeenCalledTimes(1);
-    // JAD KPIs stay money/count aggregates regardless of the plotted metric.
+    // AF Homes KPIs stay money/count aggregates regardless of the plotted metric.
     expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
   });
 

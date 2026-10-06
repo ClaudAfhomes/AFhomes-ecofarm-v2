@@ -14,7 +14,7 @@ export interface FormFieldProps {
 }
 
 /**
- * Form field wrapper (JAD FormField parity): visible label with
+ * Form field wrapper (AF Homes form-field pattern): visible label with
  * required/optional marking, inline hint, and inline validation message.
  * Errors render with `role="alert"` so changes are announced.
  */

@@ -2350,7 +2350,7 @@ describe('handler surface', () => {
   });
 
   it('creates staff with a temporary password without any admin redirect target', async () => {
-    // JAD parity: creation no longer depends on the invitation callback, so
+    // AF Homes pattern: creation no longer depends on the invitation callback, so
     // no redirect URL is required at all.
     const saved = process.env.AFHOMES_ADMIN_URL;
     delete process.env.AFHOMES_ADMIN_URL;

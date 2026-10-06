@@ -63,7 +63,7 @@ const member = (id: string, status: string) => ({
 
 beforeEach(() => install());
 
-describe('GET /queues/dashboard (JAD QueueCard parity)', () => {
+describe('GET /queues/dashboard (AF Homes queue-card pattern)', () => {
   it('routes through the queues family without a router change', () => {
     expect(selectHandler('/api/v1/queues/dashboard', {})?.routeKey).toBe('queues/dashboard');
   });

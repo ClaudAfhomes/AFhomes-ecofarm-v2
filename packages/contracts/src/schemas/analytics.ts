@@ -119,16 +119,16 @@ export const analyticsOverviewSchema = z.object({
 export type AnalyticsOverview = z.infer<typeof analyticsOverviewSchema>;
 
 /* ------------------------------------------------------------------ */
-/* Sales Overview trend (JAD SalesTrendChart parity)                   */
+/* Sales Overview trend (AF Homes sales-trend pattern)                   */
 /* ------------------------------------------------------------------ */
 
 /**
- * Dedicated Sales Overview series, mirroring JAD's `salesTrendReportSchema`.
+ * Dedicated Sales Overview series, mirroring the predecessor `salesTrendReportSchema`.
  * One bucket per period (`YYYY-MM` for months, `YYYY` for years) with the
  * count of qualifying sales and the exact-decimal sum of their frozen sale
  * value. Qualifying = sale status `active` (activated membership): activation
  * is AF Homes' explicit recognition decision after full verified payment, the
- * same role JAD's `QUALIFYING_SALE` transition plays after `PAYMENT_VERIFIED`.
+ * same role the predecessor's `QUALIFYING_SALE` transition plays after `PAYMENT_VERIFIED`.
  * Pipeline and cancelled sales are never counted.
  */
 export const salesTrendGranularitySchema = z.enum(['month', 'year']);

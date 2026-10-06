@@ -87,7 +87,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/admin/afhomes/', {})).toBeNull();
   });
 
-  it('returns null for the retired JAD route families', () => {
+  it('returns null for the retired predecessor route families', () => {
     for (const path of [
       '/api/v1/admin/members',
       '/api/v1/admin/queues',
