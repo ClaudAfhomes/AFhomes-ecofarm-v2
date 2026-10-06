@@ -150,13 +150,13 @@ describe('business navigation', () => {
       view('finance.payment_verification'),
       view('finance.card_activation'),
     ]);
-    expect(nav.map((item) => item.label)).not.toContain('Sales & Customers');
+    expect(nav.map((item) => item.label)).not.toContain('Sales');
   });
 
   it('shows both groups to an Admin that holds every Phase 2 module', () => {
     const nav = navItemsForPermissions(BUSINESS_ROUTES.map((r) => view(r.module)));
     const labels = nav.map((item) => item.label);
-    expect(labels).toContain('Sales & Customers');
+    expect(labels).toContain('Sales');
     expect(labels).toContain('Finance');
   });
 

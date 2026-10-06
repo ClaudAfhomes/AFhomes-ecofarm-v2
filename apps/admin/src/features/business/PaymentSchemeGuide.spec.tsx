@@ -72,7 +72,7 @@ describe('payment scheme guide (internal IST reference)', () => {
 
   it('is reachable only with the sales grant (never customer, never anonymous)', () => {
     const sales = navItemsForPermissions([permission('dashboard.view'), permission('sales.card_sales')]);
-    const group = sales.find((item) => item.label === 'Sales & Customers');
+    const group = sales.find((item) => item.label === 'Sales');
     expect(group?.dropdown?.map((d) => ('label' in d ? d.label : ''))).toContain(
       'Payment Scheme Guide',
     );
@@ -87,7 +87,7 @@ describe('payment scheme guide (internal IST reference)', () => {
       breadcrumbItems('/admin/sales/payment-scheme-guide'),
     ).toEqual([
       { label: 'Dashboard', to: '/admin' },
-      { label: 'Sales & Customers' },
+      { label: 'Sales' },
       { label: 'Payment Scheme Guide' },
     ]);
   });

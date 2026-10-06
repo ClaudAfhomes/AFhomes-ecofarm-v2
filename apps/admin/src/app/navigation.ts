@@ -12,7 +12,7 @@ export type AdminNavItem = {
 };
 
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
+  { to: '/admin', label: 'Dashboard', icon: 'home', end: true, module: 'dashboard.view' },
   {
     // General Customer Lookup, for the GSD/Employee desk. Keyed on
     // `operations.redemption` because that is what `employee` already holds - see
@@ -26,13 +26,13 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     // `/admin/member-lookup` and is reachable from Redemption, where a till belongs.
     to: '/admin/customer-lookup',
     label: 'Customer Lookup',
-    icon: 'grid',
+    icon: 'search',
     module: 'operations.redemption',
   },
   {
     to: '/admin/sales',
-    label: 'Sales & Customers',
-    icon: 'grid',
+    label: 'Sales',
+    icon: 'file-text',
     module: 'sales.card_sales',
     dropdown: [
       { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
@@ -59,7 +59,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/finance',
     label: 'Finance',
-    icon: 'grid',
+    icon: 'dollar-sign',
     module: 'finance.payment_verification',
     dropdown: [
       {
@@ -92,7 +92,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/redemption',
     label: 'Redemption',
-    icon: 'grid',
+    icon: 'wallet',
     module: 'operations.redemption',
     dropdown: [
       { to: '/admin/redemption', label: 'Redeem Points', module: 'operations.redemption' },
@@ -127,7 +127,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/staff',
     label: 'Organization',
-    icon: 'users',
+    icon: 'gear',
     module: 'organization.staff',
     dropdown: [
       { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
@@ -143,7 +143,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/reports',
     label: 'Reports',
-    icon: 'grid',
+    icon: 'list',
     module: 'dashboard.view',
     dropdown: [
       { to: '/admin/reports', label: 'Reports', module: 'dashboard.view' },
@@ -153,7 +153,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/cms',
     label: 'Website CMS',
-    icon: 'grid',
+    icon: 'image',
     module: 'cms.pages',
     dropdown: [
       { to: '/admin/cms/pages', label: 'Pages', module: 'cms.pages' },
