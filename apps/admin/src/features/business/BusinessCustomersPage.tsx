@@ -1,5 +1,3 @@
-import { downloadFile } from '../../lib/download';
-import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,7 +13,7 @@ import {
   SearchField,
   StatusChip,
 } from '@jad/ui';
-import type { CreateCustomerRequest, Customer, CustomerOnboardingRecovery } from '@jad/contracts';
+import type { Customer, CustomerOnboardingRecovery } from '@jad/contracts';
 import {
   CUSTOMER_CATEGORY_LABELS,
   resolveCustomerCategory,
@@ -26,28 +24,13 @@ import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { normalizeLiveHumanField } from '../../lib/normalize';
 import {
   anonymizeCustomer,
-  createCustomer,
   deactivateCustomer,
   deleteCustomer,
-  getCardProducts,
   getCustomers,
   issueCustomerAccountActivation,
-  getOfficialFormTemplate,
-  previewOfficialFormImport,
 } from './services';
-import { SaleApplicationDialog } from './SaleApplicationDialog';
-
-const EMPTY: CreateCustomerRequest = {
-  firstName: '',
-  lastName: '',
-  dateOfBirth: '',
-  email: '',
-  phone: '',
-  address: { line1: '', city: '', province: '', countryCode: 'PH' },
-};
 
 /**
  * Customer registration and card application.
@@ -61,12 +44,6 @@ export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
   const navigate = useNavigate();
-  const sellerRegistration = [
-    'vice_director',
-    'senior_sales_manager',
-    'sales_manager',
-    'ost',
-  ].includes(user?.roleSlug ?? '');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   // Live search: the list follows the settled term automatically; the Search
@@ -93,26 +70,13 @@ export function BusinessCustomersPage() {
     queryKey: ['customer-seller-options'],
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
-  const products = useQuery({
-    queryKey: ['business', 'card-products'],
-    queryFn: () => getCardProducts(),
-  });
-  // New applications may only offer ACTIVE plans under ACTIVE categories.
-  // The list endpoint already returns sellable-only by default, but the
-  // filter below keeps the dialog correct even when the shared cache holds
-  // a management (all/inactive) view.
-  const activeProducts = (products.data ?? []).filter(
-    (product) => product.isActive && product.categoryIsActive,
-  );
+  const canCreate = user?.afHomesPermissions.some(p=>p.moduleKey==='sales.customers' && p.canCreate);
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
 
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<CreateCustomerRequest>(EMPTY);
-  const [selling, setSelling] = useState<string | null>(null);
   const [accountAction, setAccountAction] = useState<{
     kind: 'deactivate' | 'delete' | 'anonymize';
     customer: Customer;
@@ -121,64 +85,6 @@ export function BusinessCustomersPage() {
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [activationCustomerId, setActivationCustomerId] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState('');
-  const [importMessage, setImportMessage] = useState('');
-  const [importErrors, setImportErrors] = useState<{ field: string; message: string }[]>([]);
-
-  const importXlsx = async (file: File) => {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    const preview = await previewOfficialFormImport('customer_application', btoa(binary));
-    const f = preview.fields;
-    setForm({
-      ...EMPTY,
-      firstName: f.primary_first_name ?? '',
-      middleName: f.primary_middle_name || undefined,
-      lastName: f.primary_last_name ?? '',
-      suffix: f.primary_suffix || undefined,
-      dateOfBirth: f.primary_birth_date ?? '',
-      gender:
-        f.primary_sex?.toLowerCase() === 'male' || f.primary_sex?.toLowerCase() === 'female'
-          ? (f.primary_sex.toLowerCase() as 'male' | 'female')
-          : undefined,
-      email: f.primary_email ?? '',
-      phone: f.primary_mobile ?? '',
-      address: {
-        line1: f.primary_address_line_1 ?? '',
-        line2: f.primary_address_line_2 || undefined,
-        city: f.primary_city_municipality ?? '',
-        province: f.primary_province ?? '',
-        postalCode: f.primary_postal_code || undefined,
-        countryCode: 'PH',
-      },
-    });
-    setImportErrors(preview.errors);
-    setImportMessage(
-      'Imported fields are candidates only — review and correct every value before registering.',
-    );
-    setOpen(true);
-  };
-
-  const set = <K extends keyof CreateCustomerRequest>(key: K, value: CreateCustomerRequest[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
-
-  const create = useMutation({
-    mutationFn: () => {
-      const invalid = document.querySelector<HTMLInputElement>(
-        '[role="dialog"] [aria-invalid="true"]',
-      );
-      if (invalid) {
-        invalid.focus();
-        throw new Error('Correct the highlighted fields before registering.');
-      }
-      return createCustomer(form);
-    },
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['business', 'customers'] });
-      setForm(EMPTY);
-      setOpen(false);
-    },
-  });
   const changeAccount = useMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteCustomer(accountAction.customer.id);
@@ -217,42 +123,12 @@ export function BusinessCustomersPage() {
     <section>
       <PageHeader
         title="Customers"
-        description="Register a customer and open a card application. Financial terms are set by the product, not by the seller."
+        description="Customer directory and membership records. Start registration through a new customer application."
         actions={
           <>
-            <Button
-              variant="secondary"
-              onClick={async () => downloadFile(await getOfficialFormTemplate('customer'))}
-            >
-              Download import template
-            </Button>
-            {!sellerRegistration && (
-              <label>
-                <span className="sr-only">Import customer XLSX</span>
-                <input
-                  type="file"
-                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importXlsx(file);
-                    event.target.value = '';
-                  }}
-                />
-              </label>
-            )}
-            <Button
-              onClick={() => {
-                if (sellerRegistration) {
-                  navigate('/admin/customers/applications/new');
-                  return;
-                }
-                setImportMessage('');
-                setImportErrors([]);
-                setOpen(true);
-              }}
-            >
-              {sellerRegistration ? 'New Customer Application' : 'Register customer'}
-            </Button>
+            {canCreate && <Button onClick={() => navigate('/admin/customers/applications/new')}>
+              New customer application
+            </Button>}
           </>
         }
       />
@@ -426,16 +302,16 @@ export function BusinessCustomersPage() {
                     }
                   </td>
                   <td>
-                    <Button
+                    {canCreate && <Button
                       size="sm"
                       variant="secondary"
                       disabled={customer.status === 'cancelled'}
                       onClick={() => {
-                        setSelling(customer.id);
+                        navigate('/admin/customers/applications/new?customerId='+encodeURIComponent(customer.id));
                       }}
                     >
                       New application
-                    </Button>{' '}
+                    </Button>}{' '}
                     <OverflowMenu
                       label={`More actions for ${customer.customerNumber}`}
                       items={[
@@ -489,192 +365,6 @@ export function BusinessCustomersPage() {
         </div>
       )}
 
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Register customer"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={create.isPending || !form.firstName || !form.lastName || !form.dateOfBirth}
-              onClick={() => create.mutate()}
-            >
-              Register
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 12 }}>
-          {importMessage ? <p role="status">{importMessage}</p> : null}
-          {importErrors.length ? (
-            <div role="alert">
-              <strong>Import needs correction:</strong>
-              <ul>
-                {importErrors.map((error) => (
-                  <li key={`${error.field}:${error.message}`}>
-                    {error.field}: {error.message}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <fieldset>
-            <legend>Personal Information</legend>
-            <label>
-              First name
-              <NormalizedInput
-                suggestName
-                normalize={(value) => normalizeLiveHumanField('firstName', value)}
-                value={form.firstName}
-                onChange={(e) => set('firstName', e.target.value)}
-              />
-            </label>
-            <label>
-              Middle name
-              <NormalizedInput
-                suggestName
-                normalize={(value) => normalizeLiveHumanField('middleName', value)}
-                value={form.middleName ?? ''}
-                onChange={(e) => set('middleName', e.target.value)}
-              />
-            </label>
-            <label>
-              Last name
-              <NormalizedInput
-                suggestName
-                normalize={(value) => normalizeLiveHumanField('lastName', value)}
-                value={form.lastName}
-                onChange={(e) => set('lastName', e.target.value)}
-              />
-            </label>
-            <label>
-              Date of birth (YYYY-MM-DD)
-              <input
-                value={form.dateOfBirth}
-                onChange={(e) => set('dateOfBirth', e.target.value)}
-                placeholder="1990-05-04"
-              />
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Contact Information</legend>
-            <label>
-              Email
-              <NormalizedInput
-                value={form.email}
-                onChange={(e) => set('email', e.target.value)}
-                type="email"
-              />
-            </label>
-            <label>
-              Phone
-              <NormalizedInput
-                type="tel"
-                inputMode="tel"
-                value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
-              />
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Address</legend>
-            <label>
-              Address line
-              <NormalizedInput
-                normalize={(value) => normalizeLiveHumanField('line1', value)}
-                value={form.address.line1}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    address: {
-                      ...prev.address,
-                      line1: e.target.value,
-                    },
-                  }))
-                }
-              />
-            </label>
-            <label>
-              City
-              <NormalizedInput
-                normalize={(value) => normalizeLiveHumanField('city', value)}
-                value={form.address.city}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    address: {
-                      ...prev.address,
-                      city: e.target.value,
-                    },
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Province
-              <NormalizedInput
-                normalize={(value) => normalizeLiveHumanField('province', value)}
-                value={form.address.province}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    address: {
-                      ...prev.address,
-                      province: e.target.value,
-                    },
-                  }))
-                }
-              />
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Identity Documents</legend>
-            <label>
-              Government ID type
-              <select
-                value={form.governmentIdType ?? ''}
-                onChange={(e) =>
-                  set(
-                    'governmentIdType',
-                    e.target.value
-                      ? (e.target.value as NonNullable<CreateCustomerRequest['governmentIdType']>)
-                      : undefined,
-                  )
-                }
-              >
-                <option value="">Not provided</option>
-                <option value="philippine_id">PhilSys ID</option>
-                <option value="drivers_license">Driver&apos;s licence</option>
-                <option value="passport">Passport</option>
-                <option value="tax_id">Tax ID</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label>
-              Government ID number (stored privately, never displayed in full)
-              <input
-                value={form.governmentIdNumber ?? ''}
-                onChange={(e) => set('governmentIdNumber', e.target.value)}
-              />
-            </label>
-          </fieldset>
-          {create.error ? <p role="alert">{create.error.message}</p> : null}
-        </div>
-      </Dialog>
-
-      {selling !== null ? (
-        <SaleApplicationDialog
-          customerId={selling}
-          products={activeProducts}
-          productsPending={products.isPending}
-          productsError={products.error}
-          onClose={() => setSelling(null)}
-          onCreated={() => setSelling(null)}
-        />
-      ) : null}
       <Dialog
         open={activationResult !== null}
         onClose={closeActivationResult}

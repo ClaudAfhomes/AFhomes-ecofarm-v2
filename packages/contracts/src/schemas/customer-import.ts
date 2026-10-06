@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { vipTierSchema } from './official-forms.js';
+import { customerStatusSchema } from './lifecycle.js';
 
 export type VipTier = z.infer<typeof vipTierSchema>;
 
@@ -381,7 +382,14 @@ export const customerImportCommitResponseSchema = z.object({
 });
 export type CustomerImportCommitResponse = z.infer<typeof customerImportCommitResponseSchema>;
 
-/** Safe staff lookup: deliberately excludes contact, identity, Auth and payment fields. */
+/**
+ * Safe staff lookup: deliberately excludes contact, identity, Auth and payment fields.
+ *
+ * This is the MEMBER-TRANSACTION view. `membershipNumber` is present because the
+ * member-lookup screen is reached from a till, where the member reads their own
+ * number aloud to be matched against the card in hand. It is a different screen
+ * from general Customer Lookup - see `customerLookupSchema`.
+ */
 export const memberLookupSchema = z.object({
   membershipNumber: z.string(),
   memberName: z.string(),
@@ -395,5 +403,41 @@ export const memberLookupSchema = z.object({
   mayUsePrivileges: z.boolean(),
 });
 export type MemberLookup = z.infer<typeof memberLookupSchema>;
+
+/**
+ * General Customer Lookup, for the GSD/Employee desk.
+ *
+ * Two rules separate this from `memberLookupSchema`, and both are deliberate:
+ *
+ * 1. NO `membershipNumber`. A Membership Code is a TRANSACTION credential, not a
+ *    customer-search key. This response deliberately makes it impossible for a
+ *    GSD screen to display one, so the separation cannot rot later - there is no
+ *    field to leak, and no test to forget. The member's status is shown instead.
+ * 2. Customer Status and Membership Status are SEPARATE fields, never conflated.
+ *    A customer can be `active` with a `suspended` membership, or a `prospect`
+ *    with no membership at all, and a screen that merges them tells a GSD
+ *    operator the wrong thing about which record they are looking at.
+ *
+ * No contact details, no government ID (not even masked), no Auth internals and
+ * no credential of any kind. Points are omitted too: this is a lookup, not a
+ * till, and available points invite a redemption that belongs on the
+ * Membership Transaction screen.
+ */
+export const customerLookupSchema = z.object({
+  /** Customer ID, `AF-CUS-XXXXX`. */
+  customerNumber: z.string(),
+  /** Customer Code, `AF-CC-XXXXXXXX`. Also not a credential. */
+  customerCode: z.string().nullable(),
+  fullName: z.string(),
+  /** Canonical customer lifecycle status, kept distinct from membership. */
+  customerStatus: customerStatusSchema,
+  /** Card plan code when the customer holds a membership, else null. */
+  tier: z.string().nullable(),
+  /** Membership status when a membership exists, else null. Never a code. */
+  membershipStatus: z.string().nullable(),
+  membershipExpiresAt: z.string().nullable(),
+  category: customerCategorySchema,
+});
+export type CustomerLookup = z.infer<typeof customerLookupSchema>;
 
 export const customerSellerOptionSchema = z.object({ id: z.string().uuid(), name: z.string() });

@@ -1,3 +1,4 @@
+import { CustomerLookupPage } from '../features/memberships/CustomerLookupPage';
 import { MemberLookupPage } from '../features/memberships/MemberLookupPage';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { staffPortalPath } from '@jad/contracts';
@@ -96,7 +97,13 @@ export default function App() {
             <Route path="/staff/forgot-password" element={<StaffForgotPasswordPage />} />
             <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
             <Route element={<AdminLayout />}>
-              <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
+              {/* GSD / Employee customer desk. Read-only, and gated on the same
+          `operations.redemption` view the nav uses, so hiding the link and
+          refusing the URL cannot disagree. */}
+      <Route path="/admin/customer-lookup" element={protectedPage(<CustomerLookupPage />)} />
+      {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
+          Redemption rather than from the global nav. */}
+      <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
               <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
               <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the

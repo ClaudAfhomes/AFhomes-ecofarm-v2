@@ -820,11 +820,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'referral-codes/me' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
+      const selected = typeof req.query.sponsorStaffId === 'string' ? req.query.sponsorStaffId : auth.userId;
+      if (!createOstReferralCodeSchema.shape.sponsorStaffId.safeParse(selected).success)
+        return fail(res, 'VALIDATION_ERROR', 'Select a valid Sales Manager.', 400);
+      const sponsorCheck = await validateReferralCodeIssuer(db, { userId: auth.userId, roleSlug: auth.roleSlug }, selected);
+      if (!sponsorCheck.ok) return fail(res, 'FORBIDDEN', sponsorCheck.message, 403);
       const data = await readSearchRows(
         db
           .from('referral_codes')
           .select('id, code_hint, expires_at, max_uses, use_count, is_active, created_at')
-          .eq('sponsor_staff_id', auth.userId)
+          .eq('sponsor_staff_id', selected)
           .order('created_at', { ascending: false })
           .order('id'),
       );
@@ -887,62 +892,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sponsor.status,
         );
 
-      const { data: existing } = await db
-        .from('referral_codes')
-        .select('id, expires_at, is_active')
-        .eq('sponsor_staff_id', sponsor.id);
-      const live = ((existing ?? []) as Record<string, unknown>[]).filter(
-        (r) =>
-          r.is_active === true &&
-          (!r.expires_at || new Date(String(r.expires_at)).valueOf() > Date.now()),
-      );
-      if (live.length >= 10)
-        return fail(
-          res,
-          'CONFLICT',
-          'This sponsor already has the maximum number of live codes',
-          409,
-        );
-
       const raw = newReferralCode();
       const expiresAt = new Date(Date.now() + parsed.data.expiresInHours * 3600000).toISOString();
-      const { data, error } = await db
-        .from('referral_codes')
-        .insert({
-          code_hash: hashIdentifier(raw),
-          code_hint: `OST-…-${raw.slice(-4)}`,
-          sponsor_staff_id: sponsor.id,
-          expires_at: expiresAt,
-          max_uses: parsed.data.maxUses,
-          use_count: 0,
-          is_active: true,
-          created_by: auth.userId,
-        })
-        .select('id, code_hint, expires_at, max_uses')
-        .single();
-      if (error) {
-        if ((error as { code?: string }).code === '23505') {
-          // 48-bit collision: astronomically unlikely, safely retryable once.
-          return fail(res, 'CONFLICT', 'Code collision. Please retry.', 409);
-        }
-        throw error;
-      }
-      await audit(
-        db,
-        auth.userId,
-        'REFERRAL_CODE_ISSUED',
-        'referral_code',
-        String((data as { id: string }).id),
-        null,
-        {
-          sponsorStaffId: sponsor.id,
-          maxUses: parsed.data.maxUses,
-          expiresAt,
-        },
-      );
+      const { error } = await db.rpc('manage_ost_referral_code', {
+        p_actor: auth.userId, p_sponsor: sponsor.id, p_rotate: parsed.data.rotate,
+        p_hash: hashIdentifier(raw), p_hint: 'OST-?-' + raw.slice(-4),
+        p_expires: expiresAt, p_max_uses: parsed.data.maxUses,
+      });
+      if (error) throw error;
       return res.status(201).json({
         code: raw,
-        codeHint: String((data as { code_hint: string }).code_hint),
+        codeHint: 'OST-?-' + raw.slice(-4),
         expiresAt,
         maxUses: parsed.data.maxUses,
       });

@@ -1,5 +1,5 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
-import { memberLookupFromDirectory } from '../_lib/member-lookup.js';
+import { customerLookupFromDirectory, memberLookupFromDirectory } from '../_lib/member-lookup.js';
 /**
  * AF Homes memberships (cards), identifier resolution, and the points ledger.
  *
@@ -215,7 +215,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         limit: 50,
         sort: 'name',
       });
+      // NOTE: `membersOnly: true` is CORRECT here and must not be relaxed. This is
+      // the member-TRANSACTION screen: it lists members because the next action is
+      // a redemption, and `memberLookupSchema` carries `membershipNumber` for the
+      // till. General Customer Lookup is the separate `customer-lookup` branch
+      // below, which is the one that must not expose a Membership Code.
       const data = directory.map(({ record: r }) => memberLookupFromDirectory(r));
+      return res
+        .status(200)
+        .json({ data, meta: { total: directory[0]?.total_count ?? 0, limit: 50, offset: 0 } });
+    }
+
+    /* ---------------- general Customer Lookup (GSD / Employee) ---------------- */
+    if (subPath(req) === 'customer-lookup' && method(req) === 'GET') {
+      // READ-ONLY BY CONSTRUCTION. This branch has no sibling that can mutate, and
+      // it grants only the `view` action of one module. A GSD operator who reaches
+      // this screen can therefore never edit a customer, take a payment, activate a
+      // membership or spend points from here - not because the UI hides the buttons,
+      // but because no handler exists on this path. Adding one would be a deliberate,
+      // separately-reviewed decision.
+      //
+      // The permission is `operations.redemption` view because that is what the
+      // `employee` role already holds. Reusing it means the GSD desk needs no new
+      // role, no new module key and no new grant - see `role-baseline.ts`, where
+      // `employee` holds `operations.redemption` and deliberately holds NO
+      // `sales.customers` row. Granting `sales.customers` here would have handed a
+      // GSD operator the whole customer-master module, including create and update.
+      const auth = await authorizeAfHomes(req, 'operations.redemption');
+      if ('error' in auth) return deny(res, auth);
+      const search = String(req.query.search ?? '').trim();
+      if (search.length < 2 || search.length > 120)
+        return fail(res, 'VALIDATION_ERROR', 'Enter at least two search characters', 400);
+      const directory = await customerDirectory(db, {
+        search,
+        // NOT membersOnly. A GSD operator must be able to find a prospect, a
+        // suspended account or a cancelled one - those are exactly the calls that
+        // arrive at this desk. Filtering to members would answer "no such customer"
+        // for a customer who exists, which is worse than a wide result.
+        membersOnly: false,
+        limit: 50,
+        sort: 'name',
+      });
+      // `customer_directory` matches name, Customer ID, Customer Code, email and the
+      // legacy customer alias. It does NOT match `membership_number`, and the
+      // `20261028000001` migration removed that predicate on purpose, so a
+      // Membership Code - current, legacy or `AFHOMES:`-wrapped - finds nobody here.
+      // That separation is enforced in SQL and asserted in `db-integration.ts`; this
+      // response additionally has no field a Membership Code could be rendered into.
+      const data = directory.map(({ record: r }) => customerLookupFromDirectory(r));
       return res
         .status(200)
         .json({ data, meta: { total: directory[0]?.total_count ?? 0, limit: 50, offset: 0 } });

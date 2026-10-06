@@ -43,7 +43,7 @@ export function OstReferralCodesPage() {
   });
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
-  const codes = useQuery({ queryKey: ['ost', 'my-codes'], queryFn: getMyReferralCodes });
+  const codes = useQuery({ queryKey: ['ost', 'my-codes', onBehalf ? sponsorStaffId : 'self'], queryFn: () => getMyReferralCodes(onBehalf ? sponsorStaffId : undefined), enabled: !onBehalf || Boolean(sponsorStaffId) });
   const applications = useQuery({
     queryKey: ['ost', 'my-applications', settled],
     queryFn: () => (settled ? getOstApplications('', settled) : getOstApplications()),
@@ -59,6 +59,8 @@ export function OstReferralCodesPage() {
   const [expiresInHours, setExpiresInHours] = useState(168);
   const [issued, setIssued] = useState<{ code: string; hint: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [openedAt] = useState(() => Date.now());
+  const hasActiveCode = Boolean(codes.data?.some(c => c.isActive && Date.parse(c.expiresAt) > openedAt && c.useCount < c.maxUses));
 
   const issue = useMutation({
     mutationFn: () => {
@@ -67,6 +69,7 @@ export function OstReferralCodesPage() {
       return createReferralCode({
         maxUses,
         expiresInHours,
+        rotate: hasActiveCode,
         ...(onBehalf ? { sponsorStaffId } : {}),
       });
     },
@@ -137,7 +140,7 @@ export function OstReferralCodesPage() {
         {onBehalf && (
           <label>
             Issue on behalf of Sales Manager
-            <select value={sponsorStaffId} onChange={(e) => setSponsorStaffId(e.target.value)}>
+            <select value={sponsorStaffId} onChange={(e) => { setSponsorStaffId(e.target.value); setIssued(null); }}>
               <option value="">Choose an active Sales Manager</option>
               {sponsors.data?.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -167,13 +170,14 @@ export function OstReferralCodesPage() {
             onChange={(e) => setExpiresInHours(Number(e.target.value))}
           />
         </label>
-        <Button onClick={() => issue.mutate()} disabled={issue.isPending}>
-          {issue.isPending ? 'Issuing…' : 'Issue new code'}
+        <Button onClick={() => issue.mutate()} disabled={issue.isPending || codes.isFetching || codes.isError || (onBehalf && !sponsorStaffId)}>
+          {issue.isPending ? 'Issuing...' : hasActiveCode ? 'Rotate and revoke previous codes' : 'Issue new code'}
         </Button>
       </div>
       {issue.isError ? <ErrorState error={issue.error} onRetry={() => issue.mutate()} /> : null}
 
-      <SearchField label="Search my OST records" value={search} onChange={setSearch} />
+      <p>For security, the full code is shown only when issued. Active referral codes cannot be displayed again.</p>
+      <SearchField label="Search referral codes" value={search} onChange={setSearch} />
       {codes.isPending ? (
         <p role="status">Loading codes…</p>
       ) : codes.isError ? (

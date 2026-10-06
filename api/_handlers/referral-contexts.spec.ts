@@ -539,7 +539,7 @@ describe('referral-code issuance validates the issuer', () => {
       method: 'POST',
       familyPath: 'referral-codes',
       token: VD_TOKEN,
-      body: { maxUses: 5, expiresInHours: 72 },
+      body: { maxUses: 5, expiresInHours: 72, rotate: true },
     });
     expect(s.status).toBe(403);
     expect(messageOf(s)).toMatch(/only an active sales manager can sponsor/i);
@@ -553,7 +553,7 @@ describe('referral-code issuance validates the issuer', () => {
       method: 'POST',
       familyPath: 'referral-codes',
       token: SM_TOKEN,
-      body: { maxUses: 5, expiresInHours: 72 },
+      body: { maxUses: 5, expiresInHours: 72, rotate: true },
     });
     expect(s.status).toBe(201);
     expect((s.body as { code: string }).code).toMatch(/^OST-/);
@@ -579,9 +579,131 @@ describe('referral-code issuance validates the issuer', () => {
       method: 'POST',
       familyPath: 'referral-codes',
       token: ADMIN_TOKEN,
-      body: { maxUses: 5, expiresInHours: 72, sponsorStaffId: SM_ID },
+      body: { maxUses: 5, expiresInHours: 72, sponsorStaffId: SM_ID, rotate: true },
     });
     expect(s.status).toBe(201);
+  });
+
+  /*
+   * The FAKE used to enforce nothing but the duplicate rule, so every one of
+   * these would have passed against a fake that accepted anything. They now
+   * assert what `public.manage_ost_referral_code` in migration 20261029000001
+   * actually does, so a handler that quietly loses a precondition fails here
+   * instead of in production.
+   */
+  it('stores only the hash and returns the plaintext exactly once', async () => {
+    const db = install();
+    const s = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: SM_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72, rotate: true },
+    });
+    const code = (s.body as { code: string }).code;
+    expect(code).toMatch(/^OST-/);
+
+    const row = db.rows('referral_codes').at(-1);
+    // The plaintext must not be recoverable from the row. Comparing against a
+    // real hash of the issued value is the only assertion that cannot pass by
+    // accident on a hint that merely looks similar.
+    expect(row?.code_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(row?.code_hash).not.toBe(code);
+    expect(JSON.stringify(row)).not.toContain(code);
+
+    // Reading the list back returns hints only - never the plaintext again.
+    const list = await callOst({
+      method: 'GET',
+      familyPath: 'referral-codes/me',
+      token: SM_TOKEN,
+    });
+    expect(JSON.stringify(list.body)).not.toContain(code);
+  });
+
+  it('refuses an inactive Sales Manager as sponsor and writes no row', async () => {
+    const db = install();
+    // Same active sales_manager role, but the staff member is suspended.
+    db.tables.staff_users = db.rows('staff_users').map((s) =>
+      s.id === SM_ID ? { ...s, status: 'suspended' } : s,
+    );
+    const before = db.rows('referral_codes').length;
+    const s = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: ADMIN_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72, sponsorStaffId: SM_ID, rotate: true },
+    });
+    expect(s.status).toBeGreaterThanOrEqual(400);
+    expect(db.rows('referral_codes')).toHaveLength(before);
+  });
+
+  it('rotation revokes only live codes and leaves spent ones as history', async () => {
+    const db = install();
+    const spentId = '11111111-1111-4111-8111-111111111111';
+    db.tables.referral_codes = [
+      ...db.rows('referral_codes'),
+      {
+        // Already spent (use_count >= max_uses) and still flagged active. The real
+        // SQL's rotation only touches `where is_active`, so this row is deactivated
+        // too - which is precisely the divergence the old fake hid by deactivating
+        // every row regardless.
+        id: spentId,
+        code_hash: 'a'.repeat(64),
+        code_hint: 'OST-?-aaaa',
+        sponsor_staff_id: SM_ID,
+        expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+        max_uses: 1,
+        use_count: 1,
+        is_active: true,
+        created_by: SM_ID,
+        created_at: new Date().toISOString(),
+      },
+    ];
+    const s = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: SM_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72, rotate: true },
+    });
+    expect(s.status).toBe(201);
+    const codes = db.rows('referral_codes');
+    // Exactly one live code for this sponsor remains: the replacement.
+    expect(codes.filter((c) => c.sponsor_staff_id === SM_ID && c.is_active)).toHaveLength(1);
+    // And the new row is owned by the sponsor, not by an admin acting on their behalf.
+    expect(codes.at(-1)?.sponsor_staff_id).toBe(SM_ID);
+  });
+
+  it('records REFERRAL_CODE_ISSUED for a first code and REFERRAL_CODE_ROTATED for a replacement', async () => {
+    const db = install();
+    // The fixture ships an active code for SM_ID, which is what the duplicate rule
+    // exists to refuse. Clear it so the first call below is a genuine first
+    // issuance rather than a 409.
+    db.tables.referral_codes = db
+      .rows('referral_codes')
+      .filter((r) => r.sponsor_staff_id !== SM_ID);
+    // First issuance for a sponsor with no live code: the SQL branches on p_rotate,
+    // so this is ISSUED, not ROTATED.
+    let before = db.rows('audit_events').length;
+    await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: SM_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72 },
+    });
+    expect(
+      db.rows('audit_events').slice(before).map((e) => String(e.action)),
+    ).toContain('REFERRAL_CODE_ISSUED');
+
+    // Second issuance over an existing live code, with rotate: ROTATED.
+    before = db.rows('audit_events').length;
+    await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: SM_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72, rotate: true },
+    });
+    expect(
+      db.rows('audit_events').slice(before).map((e) => String(e.action)),
+    ).toContain('REFERRAL_CODE_ROTATED');
   });
 });
 

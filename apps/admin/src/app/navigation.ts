@@ -14,8 +14,18 @@ export type AdminNavItem = {
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: 'grid', end: true, module: 'dashboard.view' },
   {
-    to: '/admin/member-lookup',
-    label: 'VIP Member Lookup',
+    // General Customer Lookup, for the GSD/Employee desk. Keyed on
+    // `operations.redemption` because that is what `employee` already holds - see
+    // `role-baseline.ts`, where employee deliberately has NO `sales.customers` row.
+    // Reusing the existing key keeps this a read-only screen without inventing a
+    // module or widening a role.
+    //
+    // It REPLACES the old top-level "VIP Member Lookup", which presented a member
+    // TRANSACTION screen as a system-wide general lookup and displayed Membership
+    // Codes to anyone who could see the nav. That screen still exists at
+    // `/admin/member-lookup` and is reachable from Redemption, where a till belongs.
+    to: '/admin/customer-lookup',
+    label: 'Customer Lookup',
     icon: 'grid',
     module: 'operations.redemption',
   },
@@ -92,6 +102,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         module: 'operations.redemption',
       },
       { to: '/admin/redemption/items', label: 'Redemption Catalog', module: 'operations.catalog' },
+      // The member-TRANSACTION lookup, where a Membership Code is legitimately shown
+      // because the next action is a redemption. Moved out of the global nav and into
+      // Redemption so it is no longer presented as a system-wide general lookup.
+      { to: '/admin/member-lookup', label: 'Member Lookup', module: 'operations.redemption' },
     ],
   },
   {

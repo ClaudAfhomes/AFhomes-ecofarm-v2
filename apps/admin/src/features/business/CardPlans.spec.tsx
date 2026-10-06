@@ -89,24 +89,6 @@ const JADE: CardProduct = {
   sortOrder: 5,
 };
 
-const RETIRED: CardProduct = {
-  ...GOLD,
-  id: '55555555-5555-4535-8555-555555555555',
-  code: 'LEGACY',
-  name: 'Legacy Card',
-  isActive: false,
-  sortOrder: 40,
-};
-
-const SHELVED: CardProduct = {
-  ...GOLD,
-  id: '66666666-6666-4636-8666-666666666666',
-  code: 'SHELVED',
-  name: 'Shelved Gold',
-  categoryIsActive: false,
-  sortOrder: 15,
-};
-
 const MEMBERSHIP: CardCategory = {
   id: MEMBERSHIP_CATEGORY_ID,
   slug: 'membership',
@@ -175,12 +157,6 @@ const CUSTOMER_ADMIN: SessionUser = {
   ],
 };
 
-async function openApplicationDialog() {
-  const { getCustomers } = await import('./services');
-  vi.mocked(getCustomers).mockResolvedValue([CUSTOMER]);
-  renderWithProviders(<BusinessCustomersPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'New application' }));
-}
 
 afterEach(() => vi.clearAllMocks());
 
@@ -447,41 +423,6 @@ describe('Card Plans states', () => {
         isActive: false,
       }),
     );
-  });
-});
-
-describe('New Card Application plan options', () => {
-  it('lists active plans dynamically from the backend, with no hardcoded set', async () => {
-    mockedGetCardProducts.mockResolvedValue([GOLD, JADE]);
-    await openApplicationDialog();
-    expect(await screen.findByText('Jade — JADE')).toBeInTheDocument();
-    expect(screen.getByText('Gold — GOLD')).toBeInTheDocument();
-  });
-
-  it('excludes inactive plans from the application options', async () => {
-    mockedGetCardProducts.mockResolvedValue([GOLD, RETIRED]);
-    await openApplicationDialog();
-    expect(await screen.findByText('Gold — GOLD')).toBeInTheDocument();
-    expect(screen.queryByText('Legacy Card — LEGACY')).not.toBeInTheDocument();
-  });
-
-  it('shows a plans loading state inside the dialog', async () => {
-    mockedGetCardProducts.mockReturnValue(new Promise(() => {}));
-    await openApplicationDialog();
-    expect(await screen.findByText('Loading card plans…')).toBeInTheDocument();
-  });
-
-  it('shows an empty state when no active plan exists', async () => {
-    mockedGetCardProducts.mockResolvedValue([RETIRED]);
-    await openApplicationDialog();
-    expect(await screen.findByText('No active card plans available.')).toBeInTheDocument();
-  });
-
-  it('excludes an active plan shelved under an inactive category', async () => {
-    mockedGetCardProducts.mockResolvedValue([GOLD, SHELVED]);
-    await openApplicationDialog();
-    expect(await screen.findByText('Gold — GOLD')).toBeInTheDocument();
-    expect(screen.queryByText('Shelved Gold — SHELVED')).not.toBeInTheDocument();
   });
 });
 

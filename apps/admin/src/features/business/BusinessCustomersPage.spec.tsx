@@ -49,7 +49,7 @@ const STAFF: SessionUser = {
   roleSlug: 'admin',
   roleName: 'Admin',
   status: 'active',
-  afHomesPermissions: [grant('sales.customers', { canUpdate: true })],
+  afHomesPermissions: [grant('sales.customers', { canCreate: true, canUpdate: true })],
 };
 
 const SUPER: SessionUser = { ...STAFF, id: 'u-super', roleSlug: 'super_admin' };

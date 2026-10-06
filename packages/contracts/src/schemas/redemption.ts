@@ -110,10 +110,16 @@ export const redemptionPreviewSchema = z.object({
    *
    * `qr` / `fallback_code` are the one-time secrets; `card_number` is the
    * persistent membership number (bare or the `AFHOMES:` QR envelope) from a
-   * digital VIP card. All three identify the same row, and none authorizes
-   * anything by itself.
+   * digital VIP card; `legacy_alias` is a pre-upgrade sequential code such as
+   * `MBS-000004`, preserved by the `20261028000001` membership-code upgrade.
+   * All four identify the same row, and none authorizes anything by itself.
+   *
+   * This must stay in step with `IdentifierKind` in `api/_lib/identifier.ts`,
+   * which is the only producer. When it lagged, a legacy code resolved
+   * successfully on the server and was then discarded by the client at this
+   * schema - see `redemption.spec.ts`.
    */
-  matchedBy: z.enum(['qr', 'fallback_code', 'card_number']),
+  matchedBy: z.enum(['qr', 'fallback_code', 'card_number', 'legacy_alias']),
 });
 export type RedemptionPreview = z.infer<typeof redemptionPreviewSchema>;
 

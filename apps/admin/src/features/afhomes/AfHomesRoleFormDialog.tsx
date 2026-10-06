@@ -13,6 +13,33 @@ const blankPermissions = (): AfHomesPermission[] =>
     canDelete: false,
   }));
 
+/**
+ * Whether a role's access is locked for the viewer.
+ *
+ * ONE definition, on purpose. This predicate used to be written out three times:
+ * the list-page button, the detail-page button and this dialog. The copies
+ * disagreed - the list page knew only `admin`/`super_admin` and forgot both
+ * `customer` and the system-role rule - so a non-Super-Admin was shown an
+ * "Edit access" button on the `employee` role and then received a disabled
+ * "View Employee access" dialog. That is the reported symptom, and it was a
+ * label disagreeing with its own gate, not a missing permission.
+ *
+ * `admin`, `super_admin` and `customer` are never editable by anyone, and no
+ * non-Super-Admin may edit a system role. This mirrors the server gate in
+ * `api/_handlers/admin/afhomes.ts`, which is the real boundary - this only
+ * decides what the screen claims.
+ */
+export function isRoleAccessProtected(
+  role: { slug: string; isSystem: boolean } | null | undefined,
+  viewerRoleSlug: string | undefined,
+): boolean {
+  if (!role) return false;
+  return (
+    ['admin', 'super_admin', 'customer'].includes(role.slug) ||
+    (role.isSystem && viewerRoleSlug !== 'super_admin')
+  );
+}
+
 export interface RoleFormInput {
   name: string;
   description: string;
@@ -40,6 +67,7 @@ export function AfHomesRoleFormDialog({
     role?.isSystem &&
     user?.roleSlug === 'super_admin' &&
     !['admin', 'super_admin', 'customer'].includes(role.slug);
+  const protectedAccess = isRoleAccessProtected(role, user?.roleSlug);
   // Form state mounts fresh per open session: callers pass a `key` that
   // changes with each open (new vs. which role), so initializers below run
   // exactly on open and no effect-sync is needed.
@@ -74,9 +102,9 @@ export function AfHomesRoleFormDialog({
       onClose={onClose}
       title={
         role
-          ? role.isSystem
+          ? protectedAccess
             ? `View ${role.name} access`
-            : `Edit ${role.name}`
+            : `Edit ${role.name} access`
           : 'Create custom role'
       }
       footer={
@@ -84,7 +112,7 @@ export function AfHomesRoleFormDialog({
           <Button variant="secondary" onClick={onClose}>
             {role?.isSystem ? 'Close' : 'Cancel'}
           </Button>
-          {!role?.isSystem || titleEditable ? (
+          {!protectedAccess ? (
             <Button
               disabled={!name.trim() || saving}
               onClick={() => onSave({ name, description, isActive: active, permissions })}
@@ -95,17 +123,11 @@ export function AfHomesRoleFormDialog({
         </>
       }
     >
-      {titleEditable ? (
-        <label>
-          Display title
-          <input value={name} onChange={(event) => setName(event.target.value)} disabled={saving} />
-        </label>
-      ) : null}
-      <fieldset disabled={role?.isSystem}>
-        <legend>{role?.isSystem ? 'Protected system access — read only' : 'Role access'}</legend>
+      <fieldset disabled={protectedAccess || saving}>
+        <legend>{protectedAccess ? 'Protected access — read only' : 'Role access'}</legend>
         <div style={{ display: 'grid', gap: 12 }}>
           <label>
-            Name
+            {titleEditable ? 'Display title' : 'Name'}
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <label>

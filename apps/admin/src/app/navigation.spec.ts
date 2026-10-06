@@ -11,18 +11,56 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
 });
 
 describe('AF Homes navigation', () => {
-  it('places lookup after Dashboard and hides compatibility document links without weakening route guards', () => {
+  it('places Customer Lookup after Dashboard and hides compatibility document links without weakening route guards', () => {
     const grants = [
       permission('dashboard.view'),
       permission('operations.redemption'),
       permission('sales.id_documents'),
     ];
     const items = navItemsForPermissions(grants);
-    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'VIP Member Lookup']);
+    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'Customer Lookup']);
     expect(JSON.stringify(items)).not.toContain('/admin/documents');
     expect(canAccessNavTarget([], '/admin/documents')).toBe(false);
     expect(canAccessNavTarget([], '/admin/documents/test')).toBe(false);
     expect(canAccessNavTarget(grants, '/admin/documents/test')).toBe(true);
+  });
+
+  it('keeps the member-TRANSACTION lookup out of the global nav', () => {
+    // The member lookup shows Membership Codes, so it must not be presented as a
+    // system-wide general lookup. It belongs under Redemption, next to the action
+    // that follows it.
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('operations.redemption'),
+    ]);
+    const topLevel = items.filter((item) => !item.dropdown).map((item) => item.to);
+    expect(topLevel).not.toContain('/admin/member-lookup');
+    expect(topLevel).toContain('/admin/customer-lookup');
+    const redemption = items.find((item) => item.to === '/admin/redemption');
+    // A dropdown child may be a divider rather than a link, so narrow before
+    // reading `to` instead of asserting on the union type.
+    const redemptionTargets = (redemption?.dropdown ?? []).flatMap((child) =>
+      'to' in child ? [child.to] : [],
+    );
+    expect(redemptionTargets).toContain('/admin/member-lookup');
+  });
+
+  it('reserves Customer Lookup to the operations.redemption grant', () => {
+    // The employee/GSD role holds `operations.redemption` and no `sales.customers`
+    // row, so this is the check that keeps the GSD desk reachable without widening
+    // anyone's permissions.
+    const employee = [permission('dashboard.view'), permission('operations.redemption')];
+    expect(canAccessNavTarget(employee, '/admin/customer-lookup')).toBe(true);
+    // A dropdown child may be a divider rather than a link, so narrow before reading
+    // `to` instead of asserting on the union.
+    const targets = navItemsForPermissions(employee).flatMap((item) =>
+      item.dropdown
+        ? item.dropdown.flatMap((child) => ('to' in child ? [child.to] : []))
+        : [item.to],
+    );
+    expect(targets.filter((to) => to?.includes('customer-lookup'))).toEqual([
+      '/admin/customer-lookup',
+    ]);
   });
   it('shows only server-granted groups and links', () => {
     const items = navItemsForPermissions([

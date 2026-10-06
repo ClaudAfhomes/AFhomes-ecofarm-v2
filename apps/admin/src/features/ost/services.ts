@@ -107,8 +107,8 @@ export const getOstMembers = (search = ''): Promise<OstMember[]> =>
     ostMemberSchema,
   );
 
-export const getMyReferralCodes = (): Promise<OstReferralCodeRecord[]> =>
-  requestList('/ost/referral-codes/me', ostReferralCodeRecordSchema);
+export const getMyReferralCodes = (sponsorStaffId?: string): Promise<OstReferralCodeRecord[]> =>
+  requestList('/ost/referral-codes/me' + (sponsorStaffId ? '?sponsorStaffId=' + encodeURIComponent(sponsorStaffId) : ''), ostReferralCodeRecordSchema);
 
 export const createReferralCode = (
   input: CreateOstReferralCodeRequest,

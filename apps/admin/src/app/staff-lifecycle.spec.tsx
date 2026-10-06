@@ -97,10 +97,24 @@ const STAFF_ROW = {
   createdAt: '2026-09-01T00:00:00.000Z',
 };
 
+// A CUSTOM, non-system role, because that is what this test is about: the detail
+// page renders a role a Super Admin is allowed to edit.
+//
+// It previously used `slug: 'admin'` with `isSystem: false`. That combination is
+// unreachable - Phase 1 seeds `admin` as a system role, so `is_system` is always
+// true for that slug. The impossible fixture made the OLD label check
+// (`!record.isSystem`) say "Edit role" for a role that
+// `public.update_operational_role` refuses outright, by slug, even for a Super
+// Admin. The shared predicate therefore correctly answered "View access" and the
+// test failed.
+//
+// This was the defect the release fixes, not the predicate: a screen that offers
+// "Edit role" for a role the server will refuse is the label/gate disagreement
+// that motivated `isRoleAccessProtected` in the first place.
 const ROLE_ROW = {
   id: 'r-admin',
-  slug: 'admin',
-  name: 'Admin',
+  slug: 'qa_custom_role',
+  name: 'QA Custom Role',
   description: 'Operations admin',
   isSystem: false,
   isActive: true,

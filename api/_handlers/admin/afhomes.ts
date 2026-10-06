@@ -877,12 +877,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         !permissionsAreSubset(parsed.data.permissions, auth.permissions)
       )
         return fail(res, 'FORBIDDEN', 'Cannot grant permissions you do not possess', 403);
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (parsed.data.name) patch.name = parsed.data.name;
-      if (parsed.data.description !== undefined) patch.description = parsed.data.description;
-      if (parsed.data.isActive !== undefined) patch.is_active = parsed.data.isActive;
-      await db.from('roles').update(patch).eq('id', id);
-      if (parsed.data.permissions) await replaceRolePermissions(db, id, parsed.data.permissions);
+      // Authorization is ENFORCED IN SQL, not only here. `update_operational_role`
+      // (migration 20261029000001) re-derives the actor from p_actor, re-locks the
+      // role, and re-checks the protected-role, self-role and subset rules. This
+      // handler is an early, friendly refusal - it is NOT the boundary. The direct
+      // table update it replaced had no server-side subset rule at all and could
+      // leave a role half-configured if the permission rewrite failed.
+      const { error: rpcError } = await db.rpc('update_operational_role', {
+        p_actor: auth.userId,
+        p_role: id,
+        p_input: parsed.data,
+      });
+      if (rpcError) {
+        const message = String((rpcError as { message?: string }).message ?? '');
+        if (/FORBIDDEN/.test(message))
+          return fail(res, 'FORBIDDEN', 'This role cannot be edited', 403);
+        if (/VALIDATION_ERROR/.test(message))
+          return fail(res, 'VALIDATION_ERROR', 'Invalid role update', 400);
+        if (/NOT_FOUND/.test(message)) return fail(res, 'NOT_FOUND', 'Role not found', 404);
+        throw rpcError;
+      }
       await audit(db, auth.userId, 'ROLE_UPDATED', 'role', id, before, parsed.data);
       return res.status(200).json((await roleCatalog(db)).find((r: { id: string }) => r.id === id));
     }

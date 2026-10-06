@@ -283,6 +283,29 @@ export class FakeSupabase {
     return (this.tables[table] ??= []);
   }
 
+  /**
+   * The role slug of an ACTIVE staff member, or null.
+   *
+   * Stands in for `private.mutation_actor_role`, which the real SQL calls to
+   * resolve an actor's authority. Returns null when the staff member does not
+   * exist, is not active, or holds no active role - so a fake assertion can never
+   * accidentally grant authority to someone the database would refuse.
+   *
+   * When a member holds several roles the first is returned, which is sufficient
+   * for the two call sites: both functions accept only a specific set of slugs,
+   * and multi-role ambiguity is a database question, not a fake one.
+   */
+  private actorRoleSlug(staffId: string): string | null {
+    const staff = this.rows('staff_users').find((s) => s.id === staffId);
+    if (!staff || staff.status !== 'active') return null;
+    for (const assignment of this.rows('staff_role_assignments')) {
+      if (assignment.staff_id !== staffId) continue;
+      const role = this.rows('roles').find((r) => r.id === assignment.role_id);
+      if (role && role.is_active !== false) return String(role.slug);
+    }
+    return null;
+  }
+
   auth = {
     getUser: async (token: string) => {
       const user = this.tokens[token];
@@ -765,6 +788,76 @@ export class FakeSupabase {
         error: null,
       };
     }
+    if (!entry && fn === 'update_operational_role') {
+      const role = this.rows('roles').find(r => r.id === args.p_role);
+      if (!role) return { data: null, error: { message: 'NOT_FOUND: Role not found' } };
+      const input = args.p_input as FakeRow;
+      if (this.writeErrors.role_permissions || this.writeErrors.roles)
+        return { data: null, error: this.writeErrors.role_permissions ?? this.writeErrors.roles };
+      if (input.name !== undefined) role.name = input.name;
+      if (input.description !== undefined) role.description = input.description;
+      if (input.isActive !== undefined) role.is_active = input.isActive;
+      if (Array.isArray(input.permissions)) {
+        this.tables.role_permissions = this.rows('role_permissions').filter(p => p.role_id !== args.p_role);
+        for (const raw of input.permissions) {
+          const p = raw as FakeRow;
+          const module = this.rows('modules').find(m => m.key === p.moduleKey);
+          this.rows('role_permissions').push({ role_id: args.p_role, module_id: module?.id,
+            can_view:p.canView, can_create:p.canCreate, can_update:p.canUpdate, can_delete:p.canDelete });
+        }
+      }
+      return { data: null, error: null };
+    }
+    if (!entry && fn === 'manage_ost_referral_code') {
+      // This fake previously checked nothing but the duplicate rule, so a handler
+      // that issued a code on behalf of an inactive Vice Director - which the real
+      // SQL refuses - stayed green here and failed only in production. The checks
+      // below mirror `public.manage_ost_referral_code` in migration 20261029000001.
+      // The real SQL is deliberately NOT weakened to match a simpler fake.
+      const actorRole = this.actorRoleSlug(String(args.p_actor));
+      if (
+        !actorRole ||
+        !['admin', 'super_admin', 'sales_manager'].includes(actorRole) ||
+        (actorRole === 'sales_manager' && args.p_actor !== args.p_sponsor)
+      ) {
+        return {
+          data: null,
+          error: { message: 'FORBIDDEN: Only active Sales Managers or administrators may issue' },
+        };
+      }
+      // The sponsor must be an ACTIVE staff member holding an ACTIVE sales_manager
+      // role. Mirrors the `FOR UPDATE` join on staff_users x roles in the SQL.
+      const sponsor = this.rows('staff_users').find((s) => s.id === args.p_sponsor);
+      const sponsorIsSalesManager = this.rows('staff_role_assignments').some((a) => {
+        if (a.staff_id !== args.p_sponsor) return false;
+        const r = this.rows('roles').find((x) => x.id === a.role_id);
+        return r?.slug === 'sales_manager' && r?.is_active !== false;
+      });
+      if (!sponsor || sponsor.status !== 'active' || !sponsorIsSalesManager) {
+        return {
+          data: null,
+          error: { message: 'FORBIDDEN: Only an active Sales Manager can sponsor an OST account' },
+        };
+      }
+      const live = this.rows('referral_codes').filter(r => r.sponsor_staff_id === args.p_sponsor && r.is_active && Date.parse(String(r.expires_at)) > Date.now() && Number(r.use_count) < Number(r.max_uses));
+      if (live.length && !args.p_rotate) return { data:null,error:{message:'CONFLICT: An active referral code already exists. Rotate it to generate a replacement'} };
+      if (!/^[a-f0-9]{64}$/.test(String(args.p_hash)) || Number(args.p_max_uses) < 1 || Number(args.p_max_uses) > 100 || Date.parse(String(args.p_expires)) <= Date.now()) {
+        return { data: null, error: { message: 'VALIDATION_ERROR: Invalid referral code' } };
+      }
+      // Rotation deactivates ONLY live codes, exactly like the SQL's
+      // `where sponsor_staff_id = p_sponsor and is_active`. The previous fake
+      // deactivated every row for the sponsor, including already-spent and
+      // expired ones - so the fake silently rewrote history that SQL preserves.
+      if (args.p_rotate) for (const row of this.rows('referral_codes')) if (row.sponsor_staff_id === args.p_sponsor && row.is_active) row.is_active=false;
+      const id=randomUUID();
+      this.rows('referral_codes').push({id,code_hash:args.p_hash,code_hint:args.p_hint,sponsor_staff_id:args.p_sponsor,
+        expires_at:args.p_expires,max_uses:args.p_max_uses,use_count:0,is_active:true,created_by:args.p_actor,created_at:new Date().toISOString()});
+      this.rows('audit_events').push({id:randomUUID(),actor_id:args.p_actor,
+        action:args.p_rotate?'REFERRAL_CODE_ROTATED':'REFERRAL_CODE_ISSUED',entity_type:'referral_code',
+        entity_id:id,after_data:{sponsorStaffId:args.p_sponsor},created_at:new Date().toISOString()});
+      return {data:id,error:null};
+    }
+
     if (!entry && fn === 'resolve_membership_code') {
       // Mirrors private.resolve_membership_code from migration 20261028000001:
       // trim, strip an `AFHOMES:` envelope, match the CURRENT membership_number

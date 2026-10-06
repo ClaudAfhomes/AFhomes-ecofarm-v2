@@ -514,7 +514,8 @@ export function CustomerApplicationEditorPage() {
   });
   const customers = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers() });
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
-  const [customerId, setCustomerId] = useState('');
+  const [applicationSearch] = useSearchParams();
+  const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
   const [planId, setPlanId] = useState('');
   const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('BRONZE');
   const [paymentScheme, setPaymentScheme] = useState<
@@ -607,6 +608,30 @@ export function CustomerApplicationEditorPage() {
     [primary.landline, secondary?.landline].every(
       (value) => optionalLandlineSchema.safeParse(value).success,
     );
+  // WHY THIS IS A LIST AND NOT A `disabled` EXPRESSION.
+  //
+  // Submit used to be disabled by a silent nine-term `||`. The reported symptom
+  // was "Submit cannot be clicked", and that grey button was the entire visible
+  // explanation. Two of the terms were traps a user could not reason about: any
+  // replacement ID photo stages `ocrFile`, which greys Submit until "Detect
+  // fields" is pressed; and the ID-type gate needs a confirmed document. Neither
+  // was stated anywhere on screen.
+  //
+  // A disabled control is also unfocusable, so a keyboard or screen-reader user
+  // is not merely uninformed - the button does not exist for them at all.
+  //
+  // Same conditions, one derived list, rendered next to the button. Blocking is
+  // unchanged; only the silence is removed. Transient states (a mutation in
+  // flight) are deliberately NOT blockers - they are not something to fix.
+  const submitBlockers: string[] = [];
+  if (!consent) submitBlockers.push('Certification and consent must be ticked.');
+  if (!serverCurrentDocument?.reviewedFields?.idType)
+    submitBlockers.push('Record the ID type on the uploaded identity document.');
+  if (ocrFile) submitBlockers.push('Run "Detect fields" to upload the selected ID photo.');
+  if (!optionalPhonesValid)
+    submitBlockers.push('Correct the recommender contact or landline number.');
+  if (Object.values(invalidFields).some(Boolean))
+    submitBlockers.push('Correct the highlighted fields.');
   useEffect(() => {
     const app = existing.data;
     if (!app) return;
@@ -698,9 +723,18 @@ export function CustomerApplicationEditorPage() {
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
   });
   const submit = useMutation({
-    mutationFn: () => submitCustomerApplication(id!),
+    mutationFn: async () => {
+      const checked = createCustomerApplicationSchema.safeParse(payload());
+      if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
+      if (!checked.data.consentAcknowledged) throw new Error('Certification and consent are required.');
+      // A lost Submit response must retry the transition, not edit a submitted record.
+      const latest = await getCustomerApplication(id!);
+      if (latest.status === 'submitted') return submitCustomerApplication(id!);
+      await updateCustomerApplication(id!, checked.data);
+      return submitCustomerApplication(id!);
+    },
     onSuccess: () => {
-      setMessage('Application submitted.');
+      setMessage('Customer application submitted successfully.');
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
     },
@@ -1150,7 +1184,7 @@ export function CustomerApplicationEditorPage() {
             ))}
           </fieldset>
           <fieldset>
-            <legend>CERTIFICATION AND RESERVATION REQUIREMENTS</legend>
+            <legend>APPLICATION CERTIFICATION</legend>
             <label>
               <input
                 type="checkbox"
@@ -1167,14 +1201,7 @@ export function CustomerApplicationEditorPage() {
               />{' '}
               Valid government ID with specimen signatures received
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={paymentProof}
-                onChange={(e) => setPaymentProof(e.target.checked)}
-              />{' '}
-              Reservation payment proof received
-            </label>
+
           </fieldset>
           <p>
             <Button
@@ -1190,22 +1217,29 @@ export function CustomerApplicationEditorPage() {
               {save.isPending ? 'Saving…' : 'Save draft'}
             </Button>{' '}
             {id && editable ? (
-              <Button
-                onClick={() => submit.mutate()}
-                disabled={
-                  !consent ||
-                  save.isPending ||
-                  !serverCurrentDocument?.reviewedFields?.idType ||
-                  uploadId.isPending ||
-                  ocr.isPending ||
-                  Boolean(ocrFile) ||
-                  submit.isPending ||
-                  !optionalPhonesValid ||
-                  Object.values(invalidFields).some(Boolean)
-                }
-              >
-                Submit
-              </Button>
+              <>
+                {submitBlockers.length > 0 ? (
+                  <Alert variant="warning" title="Cannot submit yet:">
+                    <ul>
+                      {submitBlockers.map((blocker) => (
+                        <li key={blocker}>{blocker}</li>
+                      ))}
+                    </ul>
+                  </Alert>
+                ) : null}{' '}
+                <Button
+                  onClick={() => submit.mutate()}
+                  disabled={
+                    submitBlockers.length > 0 ||
+                    save.isPending ||
+                    uploadId.isPending ||
+                    ocr.isPending ||
+                    submit.isPending
+                  }
+                >
+                  {submit.isPending ? 'Submitting...' : 'Submit'}
+                </Button>
+              </>
             ) : null}{' '}
             {id && existing.data?.status === 'submitted' ? (
               <>

@@ -19,9 +19,15 @@ import {
   getAfHomesStaff,
   updateAfHomesRole,
 } from './services';
-import { AfHomesRoleFormDialog, type RoleFormInput } from './AfHomesRoleFormDialog';
+import {
+  AfHomesRoleFormDialog,
+  isRoleAccessProtected,
+  type RoleFormInput,
+} from './AfHomesRoleFormDialog';
+import { useSession } from '../../lib/session';
 
 export function AfHomesRoleDetailPage() {
+  const { user } = useSession();
   const { id } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -58,11 +64,11 @@ export function AfHomesRoleDetailPage() {
         description="Role definition, assignments, and change history"
         actions={
           <>
-            {!record.isSystem ? (
+            {(
               <Button variant="ghost" onClick={() => setEditing(true)}>
-                Edit role
+                {isRoleAccessProtected(record, user?.roleSlug) ? 'View access' : 'Edit role'}
               </Button>
-            ) : null}{' '}
+            )}{' '}
             <Button variant="secondary" onClick={() => navigate('/admin/roles')}>
               Back to roles
             </Button>

@@ -277,6 +277,12 @@ export function RedemptionWorkflowPage() {
           {preview.matchedBy === 'card_number' && (
             <p className={styles.hint}>Identified by member code.</p>
           )}
+          {preview.matchedBy === 'legacy_alias' && (
+            /* A pre-upgrade sequential code such as MBS-000004, still on a printed
+               card or an old receipt. It resolved, so say so: a member who quoted
+               an old number should not be left wondering whether it worked. */
+            <p className={styles.hint}>Identified by an older member code on file.</p>
+          )}
 
           {!preview.redeemable && (
             <div className={styles.blocked} role="alert">

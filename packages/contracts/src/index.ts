@@ -568,7 +568,12 @@ export type {
   CustomerActivationError,
 } from './schemas/customer.js';
 
-export { memberLookupSchema, type MemberLookup } from './schemas/customer-import.js';
+export {
+  memberLookupSchema,
+  type MemberLookup,
+  customerLookupSchema,
+  type CustomerLookup,
+} from './schemas/customer-import.js';
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';
 export * from './schemas/ost-accreditation.js';

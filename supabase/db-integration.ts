@@ -7080,6 +7080,13 @@ async function main(): Promise<void> {
             countryCode: 'PH',
           },
           customerStatus: 'prospect',
+          // STALE FIXTURE. The card_sales insert in `import_legacy_member` hardcodes
+          // `seller_type = 'staff'` and reads `seller_staff_id` from this payload key,
+          // so without it the sale is inserted with NO seller and the older Phase 14
+          // hierarchy trigger raises SALE_SELLER_REQUIRED (SQLSTATE 23514). The rule is
+          // legitimate and this fixture predates the trigger, so the fixture supplies
+          // the Sales Manager who is running the import rather than the rule weakening.
+          sellerStaffId: actor,
           paymentScheme: 'spot_cash',
           historicalSaleTotal: goldPlan.cash_price,
           notes: null,
@@ -7433,6 +7440,45 @@ async function main(): Promise<void> {
         const plan = await one<{ id: string; cash_price: string }>(
           "select id,cash_price from public.card_plans where code='GOLD'",
         );
+        // §47 commits through `commit_customer_import_row`, whose seller attribution
+        // is read from `raw_data`, NOT from `normalized_data`:
+        //   v_code := coalesce(raw_data->>'referral_code', raw_data->>'seller_code')
+        //   v_seller := referral_codes.sponsor_staff_id where code_hash = hash(code)
+        // The fixture inserted only `normalized_data`, so `raw_data` was NULL, no
+        // seller credential resolved, and the sale was inserted with a NULL seller -
+        // which the OLDER Phase 14 hierarchy trigger correctly refuses
+        // (SALE_SELLER_REQUIRED, SQLSTATE 23514). The suite's other referral row is
+        // deleted before this section runs, so §47 needs its own.
+        //
+        // The rule stands and the applied migration is untouched. Plaintext exists
+        // only here in test memory; the table stores the SHA-256 hash, exactly as the
+        // referral feature requires.
+        const importSellerCode = 'OST-SEC47-' + RUN.slice(1, 7).toUpperCase().padEnd(6, 'X');
+        const importSellerCodeId = uuidFor('import:row47:seller-code');
+        await db.query(
+          `insert into public.referral_codes
+             (id, code_hash, code_hint, sponsor_staff_id, expires_at, max_uses, use_count, is_active, created_by)
+           values ($1, private.hash_token($2), $3, $4, now() + interval '7 days', 10, 0, true, $4)`,
+          [
+            importSellerCodeId,
+            importSellerCode,
+            'OST-?-' + importSellerCode.slice(-4),
+            staff['sm'],
+          ],
+        );
+        // Prove the hash resolves to exactly one ACTIVE row owned by the Sales
+        // Manager, so a fixture-shape mistake cannot masquerade as a pass later.
+        eq(
+          'the section-47 seller code resolves to the Sales Manager via the production lookup',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.referral_codes
+                where code_hash = private.hash_token($1) and is_active and sponsor_staff_id = $2`,
+              [importSellerCode, staff['sm']],
+            )
+          ).n,
+          1,
+        );
         const mkRow = async (label: string, category = 'ACTIVE_VIP', balance = 500) => {
           const id = uuidFor('import:row47:' + label);
           const person = {
@@ -7467,7 +7513,7 @@ async function main(): Promise<void> {
             requireMember: true,
           };
           await db.query(
-            "insert into public.customer_import_rows(id, import_job_id, row_number, validation_status, action, normalized_data) values($1,$2,$3,'valid','CREATE',$4)",
+            "insert into public.customer_import_rows(id, import_job_id, row_number, validation_status, action, normalized_data, raw_data) values($1,$2,$3,'valid','CREATE',$4,$5)",
             [
               id,
               jobId,
@@ -7479,6 +7525,11 @@ async function main(): Promise<void> {
                   )
                 ).n,
               JSON.stringify(normalized),
+              // `seller_code` is the credential the applied RPC actually reads. It
+              // is deliberately NOT `sellerStaffId`: production never reads that key
+              // out of `raw_data`, so putting it there would look like a fix and
+              // resolve nothing.
+              JSON.stringify({ seller_code: importSellerCode }),
             ],
           );
           return id;
@@ -7634,6 +7685,36 @@ async function main(): Promise<void> {
         const plan = await one<{ id: string; cash_price: string }>(
           "select id,cash_price from card_plans where code='GOLD'",
         );
+        // Same defect class as section 47, different section: `commit_customer_import_row`
+        // reads seller attribution from `raw_data`, never from `normalized_data`, so a row
+        // without `raw_data.seller_code` is inserted with a NULL seller and the older
+        // Phase 14 hierarchy trigger refuses it. This section needs its own live,
+        // active referral code because the one section 47 made is deleted at its end.
+        const releaseSellerCode =
+          'OST-SEC48-' + RUN.slice(1, 7).toUpperCase().padEnd(6, 'X');
+        const releaseSellerCodeId = uuidFor('import:row48:seller-code');
+        await db.query(
+          `insert into referral_codes
+             (id, code_hash, code_hint, sponsor_staff_id, expires_at, max_uses, use_count, is_active, created_by)
+           values ($1, private.hash_token($2), $3, $4, now() + interval '7 days', 10, 0, true, $4)`,
+          [
+            releaseSellerCodeId,
+            releaseSellerCode,
+            'OST-?-' + releaseSellerCode.slice(-4),
+            staff['sm'],
+          ],
+        );
+        eq(
+          'the section-48 seller code resolves to the Sales Manager via the production lookup',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from referral_codes
+                where code_hash = private.hash_token($1) and is_active and sponsor_staff_id = $2`,
+              [releaseSellerCode, staff['sm']],
+            )
+          ).n,
+          1,
+        );
         let serial = 0;
         const person = (label: string) => ({
           firstName: 'Release',
@@ -7664,8 +7745,14 @@ async function main(): Promise<void> {
             ...overrides,
           };
           await db.query(
-            "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,normalized_data) values($1,$2,$3,'valid','CREATE',$4)",
-            [id, job, ++serial, JSON.stringify(normalized)],
+            "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,normalized_data,raw_data) values($1,$2,$3,'valid','CREATE',$4,$5)",
+            [
+              id,
+              job,
+              ++serial,
+              JSON.stringify(normalized),
+              JSON.stringify({ seller_code: releaseSellerCode }),
+            ],
           );
           return id;
         };
@@ -7712,21 +7799,34 @@ async function main(): Promise<void> {
         eq('explicit legacy origin', sale.origin, 'legacy_import');
         eq('sale links job', sale.import_job_id, job);
         eq('sale links exact row', sale.import_row_id, id);
-        eq('unknown seller stays unknown', sale.seller_staff_id, null);
+        // STALE ASSERTIONS, CORRECTED. These two used to assert `seller_staff_id` is
+        // NULL and that no hierarchy snapshot is written. Both are now impossible: the
+        // Phase 14 trigger on `card_sales` refuses a sale with no seller
+        // (SALE_SELLER_REQUIRED, SQLSTATE 23514), so a legacy import row must carry a
+        // seller credential in `raw_data` or it cannot create a sale at all. The rule
+        // is legitimate; these expectations were written before it.
+        //
+        // The fixture now supplies the Sales Manager's live referral code, so the sale
+        // IS attributed and the referral hierarchy IS snapshotted - which is the
+        // real-world behaviour once an import carries seller attribution. The
+        // genuine defect this exposed (an import that omits seller attribution dies on
+        // a raw trigger instead of a clear validation error) is filed separately as a
+        // forward-only migration and is NOT papered over here.
+        eq('seller is attributed from raw_data', sale.seller_staff_id, staff['sm'] ?? null);
         eq(
           'historical frozen total differs from current plan',
           sale.cash_price_snapshot,
           '12000.00',
         );
         eq(
-          'historical import creates no hierarchy',
+          'attributed historical import records its referral hierarchy',
           (
             await one<{ n: number }>(
               'select count(*)::int as n from card_sale_hierarchy_snapshots where sale_id=$1',
               [member.saleId],
             )
-          ).n,
-          0,
+          ).n > 0,
+          true,
         );
         eq(
           'historical import creates no commission',
@@ -9569,6 +9669,300 @@ async function main(): Promise<void> {
           [[ostMemberId, ostApplicationId, renewalId]],
         );
       }
+    section(
+      '57. Operational access: referral management and role editing are grant-bound',
+    );
+    // Migration 20261029000001 delivers two SECURITY DEFINER functions that the API
+    // calls with the service role, and whose absence in production was a live outage.
+    // A grant is a property of a REAL database: the in-memory fake cannot answer
+    // "can service_role execute this", and a text assertion over the migration file
+    // only proves the words are present, not that Postgres bound them.
+    //
+    // So this section executes both functions against real Postgres and asserts the
+    // grants AND the behaviour, including every refusal the business rules depend on.
+    {
+      const referralSig =
+        'public.manage_ost_referral_code(uuid,uuid,boolean,text,text,timestamptz,integer)';
+      const roleSig = 'public.update_operational_role(uuid,uuid,jsonb)';
+      for (const [name, sig] of [
+        ['manage_ost_referral_code', referralSig],
+        ['update_operational_role', roleSig],
+      ] as const) {
+        eq(
+          `${name} exists exactly once`,
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+                where p.proname=$1 and ns.nspname='public'`,
+              [name],
+            )
+          ).n,
+          1,
+        );
+        for (const browserRole of ['anon', 'authenticated']) {
+          eq(
+            `${browserRole} cannot execute ${name}`,
+            (
+              await one<{ a: boolean }>(
+                `select has_function_privilege($1,$2,'EXECUTE') a`,
+                [browserRole, sig],
+              )
+            ).a,
+            false,
+          );
+        }
+        // The whole point of the migration: the API reaches these with service_role,
+        // so without this grant every call is a 42883 undefined_function.
+        eq(
+          `service_role can execute ${name}`,
+          (
+            await one<{ a: boolean }>(
+              `select has_function_privilege('service_role',$1,'EXECUTE') a`,
+              [sig],
+            )
+          ).a,
+          true,
+        );
+      }
+      // The helper must stay private-only. Granting it would let a browser role ask
+      // the database about arbitrary staff members' permissions.
+      eq(
+        'private.has_permission_for_user is reachable by no browser role and not service_role',
+        (
+          await one<{ a: boolean }>(
+            `select has_function_privilege('anon','private.has_permission_for_user(uuid,text,text)','EXECUTE')
+                    or has_function_privilege('authenticated','private.has_permission_for_user(uuid,text,text)','EXECUTE')
+                    or has_function_privilege('service_role','private.has_permission_for_user(uuid,text,text)','EXECUTE') a`,
+          )
+        ).a,
+        false,
+      );
+
+      // Synthetic principals. staff_users.id references auth.users(id) and that FK is
+      // enforced, so the Auth row comes first - the same order the main suite uses.
+      const opSm = uuidFor('ops-sm');
+      const opVd = uuidFor('ops-vd');
+      const opAdmin = uuidFor('ops-admin');
+      for (const [id, label] of [
+        [opSm, 'sm'],
+        [opVd, 'vd'],
+        [opAdmin, 'admin'],
+      ] as const) {
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          id,
+          `${RUN}-ops-${label}@example.invalid`,
+        ]);
+      }
+      createdStaffIds.push(opSm, opVd, opAdmin);
+      const opRoleIds = await db.query<{ id: string; slug: string }>(
+        `select id, slug from public.roles where slug in ('sales_manager','vice_director','admin')`,
+      );
+      const opRole = (slug: string) => opRoleIds.rows.find((r) => r.slug === slug)!.id;
+      await db.query(
+        `insert into public.staff_users (id, email, full_name, status) values
+           ($1,$2,'Ops SM','active'),($3,$4,'Ops VD','active'),($5,$6,'Ops Admin','active')`,
+        [
+          opSm,
+          `${RUN}-ops-sm@example.invalid`,
+          opVd,
+          `${RUN}-ops-vd@example.invalid`,
+          opAdmin,
+          `${RUN}-ops-admin@example.invalid`,
+        ],
+      );
+      await db.query(
+        `insert into public.staff_role_assignments (staff_id, role_id) values ($1,$4),($2,$5),($3,$6)`,
+        [opSm, opVd, opAdmin, opRole('sales_manager'), opRole('vice_director'), opRole('admin')],
+      );
+
+      const issueCode = async (actor: string, sponsor: string, rotate: boolean) =>
+        db.query<{ id: string }>(
+          `select public.manage_ost_referral_code($1::uuid,$2::uuid,$3,
+             encode(sha256(convert_to($4,'UTF8')),'hex'),'OST-?-probe',now()+interval '72 hours',5) id`,
+          [actor, sponsor, rotate, `${RUN}-probe-${Math.random()}`],
+        );
+      const ok = (name: string, condition: boolean) => check(name, condition);
+      /** Runs a call expected to be refused and returns the database's message. */
+      const refusal = async (fn: () => Promise<unknown>): Promise<string> => {
+        try {
+          await fn();
+          return '';
+        } catch (error) {
+          return safeErrorMessage(error);
+        }
+      };
+
+      const first = await issueCode(opSm, opSm, false);
+      eq('an ACTIVE Sales Manager may issue for themselves', typeof first.rows[0]?.id, 'string');
+
+      // A plain second issue must be refused; otherwise duplicates accumulate silently.
+      ok(
+        'a second live code is refused unless rotation is explicit',
+        /CONFLICT/.test(
+          await refusal(() => issueCode(opSm, opSm, false)),
+        ),
+      );
+
+      await issueCode(opSm, opSm, true);
+      eq(
+        'exactly ONE live code remains after rotation',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n from public.referral_codes where sponsor_staff_id=$1 and is_active`,
+            [opSm],
+          )
+        ).n,
+        1,
+      );
+
+      ok(
+        'an admin may NOT sponsor through a Vice Director',
+        /active Sales Manager/.test(
+          await refusal(() => issueCode(opAdmin, opVd, true)),
+        ),
+      );
+      ok(
+        'a Vice Director cannot issue for themselves at all',
+        /Only active Sales Managers or administrators/.test(
+          await refusal(() => issueCode(opVd, opVd, true)),
+        ),
+      );
+
+      // An Admin issuing ON BEHALF must produce a code owned by the selected SM, with
+      // the Admin recorded only as the issuer. Ownership by whoever clicked is the
+      // defect this prevents.
+      await issueCode(opAdmin, opSm, true);
+      const owned = await one<{ sponsor: string; creator: string }>(
+        `select sponsor_staff_id::text sponsor, created_by::text creator
+           from public.referral_codes where sponsor_staff_id=$1
+          order by created_at desc limit 1`,
+        [opSm],
+      );
+      eq('an admin-issued code is owned by the SELECTED sponsor', owned.sponsor, opSm);
+      eq('...while created_by records the admin actor', owned.creator, opAdmin);
+
+      // An INACTIVE Sales Manager cannot sponsor. Suspended, so the check has to be
+      // re-read from the staff row rather than cached in a role lookup.
+      await db.query(`update public.staff_users set status='suspended' where id=$1`, [opSm]);
+      ok(
+        'an INACTIVE Sales Manager cannot sponsor',
+        /active Sales Manager/.test(
+          await refusal(() => issueCode(opAdmin, opSm, true)),
+        ),
+      );
+      await db.query(`update public.staff_users set status='active' where id=$1`, [opSm]);
+
+      eq(
+        'only hashes are stored, never plaintext',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n from public.referral_codes where code_hash !~ '^[a-f0-9]{64}$'`,
+          )
+        ).n,
+        0,
+      );
+      const opAudit = await db.query<{ action: string }>(
+        `select action from public.audit_events where entity_type='referral_code'`,
+      );
+      const opActions = opAudit.rows.map((r) => r.action);
+      ok('REFERRAL_CODE_ISSUED is audited', opActions.includes('REFERRAL_CODE_ISSUED'));
+      ok('REFERRAL_CODE_ROTATED is audited', opActions.includes('REFERRAL_CODE_ROTATED'));
+
+      /* ---------------- role editing ---------------- */
+      const financeRole = (
+        await one<{ id: string }>(`select id from public.roles where slug='finance'`)
+      ).id;
+      ok(
+        'a plain Admin cannot edit a SYSTEM role',
+        /Protected role/.test(
+          await refusal(
+            () =>
+              db.query(
+                `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"Renamed"}'::jsonb)`,
+                [opAdmin, financeRole],
+              ),
+          ),
+        ),
+      );
+      for (const [label, slug] of [
+        ['super_admin', 'super_admin'],
+        ['customer', 'customer'],
+      ] as const) {
+        const id = (await one<{ id: string }>(`select id from public.roles where slug=$1`, [slug])).id;
+        ok(
+          `${label} is never editable`,
+          /Protected role/.test(
+            await refusal(
+              () =>
+                db.query(
+                  `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"x"}'::jsonb)`,
+                  [opAdmin, id],
+                ),
+            ),
+          ),
+        );
+      }
+      // Nobody may edit a role they personally hold, which would otherwise be a
+      // quiet self-promotion path.
+      const ownRoleId = (
+        await one<{ id: string }>(
+          `select role_id::text id from public.staff_role_assignments where staff_id=$1 limit 1`,
+          [opAdmin],
+        )
+      ).id;
+      ok(
+        'nobody may edit a role they personally hold',
+        /Protected role/.test(
+          await refusal(
+            () =>
+              db.query(
+                `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"x"}'::jsonb)`,
+                [opAdmin, ownRoleId],
+              ),
+          ),
+        ),
+      );
+      // The subset rule: an Admin cannot grant what it does not hold.
+      ok(
+        'an Admin cannot grant a permission it does not hold',
+        /do not possess|Protected role/.test(
+          await refusal(
+            () =>
+              db.query(`select public.update_operational_role($1::uuid,$2::uuid,$3::jsonb)`, [
+                opAdmin,
+                ownRoleId,
+                JSON.stringify({
+                  permissions: [
+                    {
+                      moduleKey: 'finance.commission_payouts',
+                      canView: true,
+                      canCreate: true,
+                      canUpdate: false,
+                      canDelete: false,
+                    },
+                  ],
+                }),
+              ]),
+          ),
+        ),
+      );
+      eq(
+        'no ROLE_PERMISSIONS_UPDATED event was written by a refused edit',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n from public.audit_events where action='ROLE_PERMISSIONS_UPDATED'`,
+          )
+        ).n,
+        0,
+      );
+
+      // Referral rows created above are synthetic and must not survive, or cleanup's
+      // whole-table row-count proof fails on the next run.
+      await db.query(`delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])`, [
+        [opSm, opVd, opAdmin],
+      ]);
+    }
+
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -9778,7 +10172,16 @@ async function main(): Promise<void> {
         );
         // staff_role_assignments and staff_permission_restrictions cascade from
         // staff_users, so they need no statement of their own.
-        await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
+        // Sections 47 and 48 each create their own live referral code, sponsored by the
+      // synthetic Sales Manager, because `commit_customer_import_row` resolves the sale
+      // seller from `raw_data.seller_code` and the Phase 14 trigger refuses a sale with
+      // no seller. `referral_codes.sponsor_staff_id` is a RESTRICT foreign key, so any
+      // survivor makes the `staff_users` delete below fail and takes the whole cleanup
+      // with it. Delete every synthetic staff member's codes, not just section 57's.
+      await db?.query('delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])', [
+        staffSet,
+      ]);
+      await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
         await db?.query('delete from auth.users where id = any($1::uuid[])', [authSet]);
         await db?.query('delete from public.redemption_items where code like $1', [`${RUN}-%`]);
         await db?.query('commit');

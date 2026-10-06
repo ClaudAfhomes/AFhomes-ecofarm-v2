@@ -4,23 +4,29 @@ import { Link } from 'react-router';
 import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@jad/ui';
 import type { AfHomesRole } from '@jad/contracts';
 import { createAfHomesRole, getAfHomesRoles, updateAfHomesRole } from './services';
-import { AfHomesRoleFormDialog, type RoleFormInput } from './AfHomesRoleFormDialog';
+import {
+  AfHomesRoleFormDialog,
+  isRoleAccessProtected,
+  type RoleFormInput,
+} from './AfHomesRoleFormDialog';
+import { useSession } from '../../lib/session';
 
 export function AfHomesRolesPage() {
   const queryClient = useQueryClient();
+  const { user } = useSession();
   const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
   const [editing, setEditing] = useState<AfHomesRole | null>(null);
   const [creating, setCreating] = useState(false);
   const mutation = useMutation({
     mutationFn: async (input: RoleFormInput) =>
       editing
-        ? updateAfHomesRole(editing.id, editing.isSystem ? { name: input.name } : input)
+        ? updateAfHomesRole(editing.id, input)
         : createAfHomesRole({ ...input, description: input.description || undefined }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
       setCreating(false);
       setEditing(null);
-      notifySuccess({ title: 'Role updated', message: 'Role changes saved successfully.' });
+      notifySuccess({ title: 'Role updated', message: `${editing?.name ?? 'Role'} permissions updated successfully.` });
     },
   });
   return (
@@ -74,7 +80,9 @@ export function AfHomesRolesPage() {
                     </td>
                     <td>
                       <Button size="sm" variant="secondary" onClick={() => setEditing(role)}>
-                        {role.isSystem ? 'View access' : 'Edit'}
+                        {isRoleAccessProtected(role, user?.roleSlug)
+                          ? 'View access'
+                          : 'Edit access'}
                       </Button>
                     </td>
                   </tr>
