@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
-import { validateRecoveryPassword } from '@jad/shared';
+import { Alert, AuthLayout, Button, PasswordChecklist, PasswordField, TextField } from '@jad/ui';
+import { passwordRuleStates, validateRecoveryPassword } from '@jad/shared';
 
 import { useActivateMutation } from './queries';
 import { useCustomerSession } from '../../lib/customer-session';
@@ -121,7 +121,7 @@ export function CustomerActivatePage() {
     <AuthLayout
       eyebrow="AF Homes Ecofarm"
       title="Activate your account"
-      lead="Use the activation code you received from the AF Homes Ecofarm branch that registered you, then choose a password."
+      lead="Use your branch activation code."
       brandTitle="Your farm membership, in your pocket."
       brandLead="Track points, view your digital membership card, and follow your payments."
     >
@@ -150,9 +150,9 @@ export function CustomerActivatePage() {
             setFieldError(null);
           }}
           autoComplete="new-password"
-          hint="At least 10 characters, with a lowercase letter, an uppercase letter and a digit."
           error={fieldError ?? undefined}
         />
+        {password.length > 0 && <PasswordChecklist items={passwordRuleStates(password)} />}
 
         <PasswordField
           id="activation-password-confirm"

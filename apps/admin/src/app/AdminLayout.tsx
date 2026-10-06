@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@jad/ui';
 import { useSession } from '../lib/session';
-import { logoutPathForRole } from '../lib/portal';
+import { logoutUrlForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath } from '@jad/contracts';
@@ -10,7 +10,6 @@ import { staffPortalPath, operationsPath } from '@jad/contracts';
 export function AdminLayout() {
   const { user, logout } = useSession();
   const location = useLocation();
-  const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(
     () =>
@@ -80,10 +79,13 @@ export function AdminLayout() {
         open={confirm}
         onCancel={() => setConfirm(false)}
         onConfirm={() => {
-          const target = logoutPathForRole(user?.roleSlug);
+          // Sign-out leaves the staff console for the web-hosted entries
+          // (`:5173/...` locally, same origin in production). The sign-out is
+          // awaited first so no usable session survives the unload - otherwise
+          // the entry would bounce straight back into the console.
+          const target = logoutUrlForRole(user?.roleSlug);
           setConfirm(false);
-          logout();
-          navigate(target);
+          void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
         message="Sign out of AF Homes administration?"

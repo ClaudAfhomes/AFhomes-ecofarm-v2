@@ -6,6 +6,7 @@ import {
   classifyRecoveryRequestError,
   isAllowedRecoveryRedirect,
   isValidRecoveryEmail,
+  passwordRuleStates,
   validateRecoveryPassword,
 } from './auth-recovery.js';
 
@@ -25,6 +26,27 @@ describe('recovery password policy (mirrors the activation contract)', () => {
     expect(isValidRecoveryEmail('staff@afhomes.test')).toBe(true);
     expect(isValidRecoveryEmail('not-an-email')).toBe(false);
     expect(isValidRecoveryEmail('')).toBe(false);
+  });
+});
+
+describe('passwordRuleStates (live view of the same policy)', () => {
+  it('marks every rule met exactly when the validator accepts', () => {
+    const met = passwordRuleStates('NewPass1234');
+    expect(met).toHaveLength(4);
+    expect(met.every((rule) => rule.met)).toBe(true);
+    expect(validateRecoveryPassword('NewPass1234')).toBeNull();
+  });
+
+  it('flips each rule independently', () => {
+    const byId = Object.fromEntries(passwordRuleStates('Short1Aa').map((r) => [r.id, r.met]));
+    expect(byId).toEqual({ length: false, lowercase: true, uppercase: true, digit: true });
+    expect(passwordRuleStates('alllowercase1').find((r) => r.id === 'uppercase')?.met).toBe(false);
+    expect(passwordRuleStates('ALLUPPERCASE1').find((r) => r.id === 'lowercase')?.met).toBe(false);
+    expect(passwordRuleStates('NoDigitsHereAa').find((r) => r.id === 'digit')?.met).toBe(false);
+  });
+
+  it('marks nothing met for an empty password', () => {
+    expect(passwordRuleStates('').every((rule) => !rule.met)).toBe(true);
   });
 });
 

@@ -70,6 +70,17 @@ export function logoutPathForRole(roleSlug: string | undefined): string {
   return roleSlug === 'admin' || roleSlug === 'super_admin' ? '/admin/login' : '/staff/login';
 }
 
+/**
+ * Absolute post-sign-out destination on the public origin (`:5173/...`
+ * locally, same origin in production). Sign-out always leaves the staff
+ * console: the next sign-in starts at the web-hosted entries, whose
+ * successful handoff returns here. Built on `logoutPathForRole`, so the two
+ * can never disagree about which entry a role belongs to.
+ */
+export function logoutUrlForRole(roleSlug: string | undefined): string {
+  return `${webBase()}${logoutPathForRole(roleSlug)}`;
+}
+
 export type PortalDecision =
   | { action: 'forward'; to: string }
   | { action: 'refuse'; message: string; linkTo: string; linkLabel: string };

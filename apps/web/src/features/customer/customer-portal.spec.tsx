@@ -796,6 +796,24 @@ describe('activation password policy', () => {
     await user.click(screen.getByRole('button', { name: 'Activate my account' }));
     expect(await screen.findByText('The passwords do not match')).toBeInTheDocument();
   });
+
+  it('shows a live rule checklist while typing, before submit', async () => {
+    const user = userEvent.setup();
+    render('/customer/activate', false);
+    // Untouched password: no checklist yet.
+    expect(screen.queryByRole('list', { name: 'Password requirements' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Password'), 'abc');
+    const list = await screen.findByRole('list', { name: 'Password requirements' });
+    expect(within(list).getByText('One lowercase letter')).toBeInTheDocument();
+    expect(within(list).getAllByText('(missing)')).toHaveLength(3);
+    // A compliant password flips every row to met.
+    await user.clear(screen.getByLabelText('Password'));
+    await user.type(screen.getByLabelText('Password'), 'StrongPass123');
+    await screen.findAllByText('(met)');
+    expect(
+      within(screen.getByRole('list', { name: 'Password requirements' })).queryByText('(missing)'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('activation existing-account recovery', () => {

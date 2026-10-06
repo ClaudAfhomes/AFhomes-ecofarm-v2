@@ -50,7 +50,7 @@ interface SessionContextValue {
   sessionError: boolean;
   signIn: (email: string, password: string, captchaToken?: string) => Promise<void>;
   revalidate: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -74,7 +74,7 @@ function TestSessionProvider({
       sessionError: false,
       signIn: async () => {},
       revalidate: async () => {},
-      logout: () => {},
+      logout: async () => {},
     }),
     [user],
   );
@@ -139,14 +139,22 @@ export function SessionProvider({
     };
   }, [client, resolve]);
 
-  const logout = useCallback(() => {
-    void client?.auth.signOut();
-    // Drop every cached row with the session: the next login must never see
-    // the previous user's customers, redemptions or reports, and polling
-    // queries must not keep firing against a signed-out client.
-    queryClient.clear();
-    setUser(null);
-    setStatus('unauthenticated');
+  const logout = useCallback(async () => {
+    // Awaited by callers that navigate away afterwards: Supabase revokes
+    // server-side before dropping the local session, so leaving early could
+    // strand a usable token behind (and the next entry would bounce straight
+    // back in). Local state is cleared even if the revoke throws, still
+    // inside this call, so a failed sign-out still signs out locally.
+    try {
+      await client?.auth.signOut();
+    } finally {
+      // Drop every cached row with the session: the next login must never see
+      // the previous user's customers, redemptions or reports, and polling
+      // queries must not keep firing against a signed-out client.
+      queryClient.clear();
+      setUser(null);
+      setStatus('unauthenticated');
+    }
   }, [client]);
   const signIn = useCallback(
     async (email: string, password: string, captchaToken?: string) => {

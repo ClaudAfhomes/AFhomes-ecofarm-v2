@@ -23,6 +23,27 @@ export function toAdminUrl(path: string): string {
   return `${adminOrigin()}${path}`;
 }
 
+/** True for loopback hosts: the only hosts a local dev server ever uses. */
+function isLoopback(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+/**
+ * Pure tripwire for the local-dev footgun behind the "login bounced me to
+ * production" symptom: the page runs on a loopback dev server while the
+ * configured staff console is remote. Ports are ignored on purpose
+ * (`:5173` vs `:5174` share one host by design). Unit-tested; the only
+ * impure part is the call site, which warns in DEV only.
+ */
+export function isAdminOriginMismatch(adminUrl: string, currentHostname: string): boolean {
+  if (!isLoopback(currentHostname)) return false;
+  try {
+    return !isLoopback(new URL(adminUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export type StaffEntryDecision =
   | { action: 'forward'; to: string }
   | { action: 'refuse'; message: string; linkTo: string; linkLabel: string };

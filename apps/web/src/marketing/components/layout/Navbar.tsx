@@ -301,8 +301,13 @@ export function Navbar() {
 
           <div className="flex items-center gap-2 sm:gap-3">
             {isDesktop && (
-              <Button to="/customer/login" variant="primary" size="md" className="px-8">
-                Login
+              <Button to="/customer/login" variant="secondary" size="md" className="px-7">
+                Sign In
+              </Button>
+            )}
+            {isDesktop && (
+              <Button to="/customer/activate" variant="primary" size="md" className="px-8">
+                Sign Up
               </Button>
             )}
 
@@ -431,8 +436,11 @@ export function Navbar() {
               </ul>
 
               <motion.div variants={menuItem} className="mt-8 flex flex-col gap-3">
-                <Button to="/customer/login" variant="primary" size="lg" className="w-full">
-                  Login
+                <Button to="/customer/login" variant="secondary" size="lg" className="w-full">
+                  Sign In
+                </Button>
+                <Button to="/customer/activate" variant="primary" size="lg" className="w-full">
+                  Sign Up
                 </Button>
                 <a
                   href={`mailto:${siteConfig.email}`}

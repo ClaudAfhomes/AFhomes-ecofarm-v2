@@ -151,19 +151,23 @@ describe('header and navigation', () => {
     await waitForElementToBeRemoved(() => screen.queryByRole('dialog'), { timeout: 20000 });
   });
 
-  it('exposes a single member Login entry that routes to /customer/login', async () => {
+  it('exposes member Sign In and Sign Up entries that route to the portal', async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />, { route: '/' });
     await chrome();
-    // jsdom matchMedia never matches desktop, so the entry lives in the menu.
+    // jsdom matchMedia never matches desktop, so the entries live in the menu.
     await user.click(screen.getByRole('button', { name: 'Open menu' }));
     const dialog = await screen.findByRole('dialog');
-    const login = within(dialog).getByRole('link', { name: 'Login' });
-    expect(login).toHaveAttribute('href', '/customer/login');
+    const signIn = within(dialog).getByRole('link', { name: 'Sign In' });
+    expect(signIn).toHaveAttribute('href', '/customer/login');
+    expect(within(dialog).getByRole('link', { name: 'Sign Up' })).toHaveAttribute(
+      'href',
+      '/customer/activate',
+    );
     // Staff/admin entries stay URL-only: never advertised in the public nav.
     expect(within(dialog).queryByRole('link', { name: /staff/i })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
-    await user.click(login);
+    await user.click(signIn);
     expect(await screen.findByLabelText(/Email/)).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
   });

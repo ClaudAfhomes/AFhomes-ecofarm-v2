@@ -12,6 +12,7 @@ import {
   entryPortal,
   loginPathFor,
   logoutPathForRole,
+  logoutUrlForRole,
   rememberEntryPortal,
   resolvePostLoginDestination,
 } from './portal';
@@ -159,6 +160,14 @@ describe('logout + entry tracking', () => {
     expect(logoutPathForRole('admin')).toBe('/admin/login');
     expect(logoutPathForRole('employee')).toBe('/staff/login');
     expect(logoutPathForRole(undefined)).toBe('/staff/login');
+  });
+
+  it('lands sign-out on the public origin entries, never the console', () => {
+    // Hermetic test env carries the schema defaults (http://localhost:5173).
+    expect(logoutUrlForRole('super_admin')).toBe('http://localhost:5173/admin/login');
+    expect(logoutUrlForRole('admin')).toBe('http://localhost:5173/admin/login');
+    expect(logoutUrlForRole('finance')).toBe('http://localhost:5173/staff/login');
+    expect(logoutUrlForRole(undefined)).toBe('http://localhost:5173/staff/login');
   });
 
   it('defaults to the admin entry and remembers the staff entry', () => {

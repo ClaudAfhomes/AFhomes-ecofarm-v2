@@ -59,6 +59,11 @@ export { TextField } from './components/TextField.js';
 export type { TextFieldProps } from './components/TextField.js';
 export { PasswordField } from './components/PasswordField.js';
 export type { PasswordFieldProps } from './components/PasswordField.js';
+export { PasswordChecklist } from './components/PasswordChecklist.js';
+export type {
+  PasswordChecklistItem,
+  PasswordChecklistProps,
+} from './components/PasswordChecklist.js';
 export { MetricCard } from './components/MetricCard.js';
 export type { MetricCardProps } from './components/MetricCard.js';
 export { FilterBar } from './components/FilterBar.js';

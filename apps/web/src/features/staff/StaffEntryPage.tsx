@@ -9,6 +9,7 @@ import { getAuthPortals } from '../../lib/portals';
 import {
   adminOrigin,
   decideStaffEntry,
+  isAdminOriginMismatch,
   type StaffEntryDecision,
   type StaffEntryPortal,
 } from '../../lib/staff-entry';
@@ -42,6 +43,22 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
   const [decision, setDecision] = useState<StaffEntryDecision | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+
+  // Local-dev tripwire: a remote staff-console origin here means a successful
+  // sign-in would bounce out of local dev into production. Warn once in DEV
+  // (never in production builds, and never with the URL - hosts only).
+  useEffect(() => {
+    if (
+      import.meta.env.DEV &&
+      isAdminOriginMismatch(env.VITE_ADMIN_URL, window.location.hostname)
+    ) {
+      console.warn(
+        '[staff-entry] VITE_ADMIN_URL is remote while this page runs on localhost: ' +
+          'staff handoff will leave local dev. Set VITE_ADMIN_URL=http://localhost:5174/admin ' +
+          'in the root .env.local and restart Vite.',
+      );
+    }
+  }, []);
 
   // An already-authenticated session arriving at either entry is routed, not
   // bounced: allowed here it hands off to the console, otherwise it learns the

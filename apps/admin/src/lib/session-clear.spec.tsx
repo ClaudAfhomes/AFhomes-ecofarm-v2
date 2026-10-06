@@ -30,7 +30,7 @@ vi.mock('./supabase', () => ({
 import { queryClient } from './query';
 import { SessionProvider, useSession } from './session';
 
-function LogoutProbe({ onReady }: { onReady: (logout: () => void) => void }) {
+function LogoutProbe({ onReady }: { onReady: (logout: () => Promise<void>) => void }) {
   const { logout, status } = useSession();
   onReady(logout);
   return <p>status:{status}</p>;
@@ -44,7 +44,7 @@ describe('logout cache cleanup', () => {
     queryClient.setQueryData(['reports', 'redemptions'], { stale: 'previous-user-rows' });
 
     const clear = vi.spyOn(queryClient, 'clear');
-    let logout!: () => void;
+    let logout!: () => Promise<void>;
     render(
       <SessionProvider>
         <LogoutProbe onReady={(fn) => (logout = fn)} />
@@ -56,7 +56,7 @@ describe('logout cache cleanup', () => {
     });
 
     await act(async () => {
-      logout();
+      await logout();
     });
     expect(auth.signOut).toHaveBeenCalled();
     expect(clear).toHaveBeenCalled();
