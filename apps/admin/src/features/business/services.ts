@@ -2,7 +2,7 @@
  * AF Homes Phase 2 business API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
- * against `@jad/contracts`. No ad-hoc `fetch`, and no `any`.
+ * against `@afhomes/contracts`. No ad-hoc `fetch`, and no `any`.
  *
  * Nothing here decides authorization: every screen may show a control, and the
  * server is the only thing that decides whether the action is allowed.
@@ -67,7 +67,7 @@ import {
   type UpdateCardCategoryRequest,
   type UpdateCardProductRequest,
   type VerifyPaymentRequest,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,
@@ -221,7 +221,7 @@ export const getCustomerApplications = (
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
   request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
 export const registerCustomerApplication = (
-  input: import('@jad/contracts').RegisterCustomerApplicationRequest,
+  input: import('@afhomes/contracts').RegisterCustomerApplicationRequest,
 ) =>
   request('/official-forms/customer-applications', customerApplicationSchema, {
     method: 'POST',

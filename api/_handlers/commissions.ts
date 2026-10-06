@@ -21,7 +21,7 @@ import {
   markCommissionPaidSchema,
   qualifyCommissionSchema,
   updateCommissionRuleSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

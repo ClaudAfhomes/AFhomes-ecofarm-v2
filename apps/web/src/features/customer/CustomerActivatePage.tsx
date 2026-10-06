@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordChecklist, PasswordField, TextField } from '@jad/ui';
-import { passwordRuleStates, validateRecoveryPassword } from '@jad/shared';
+import { Alert, AuthLayout, Button, PasswordChecklist, PasswordField, TextField } from '@afhomes/ui';
+import { passwordRuleStates, validateRecoveryPassword } from '@afhomes/shared';
 
 import { useActivateMutation } from './queries';
 import { useCustomerSession } from '../../lib/customer-session';

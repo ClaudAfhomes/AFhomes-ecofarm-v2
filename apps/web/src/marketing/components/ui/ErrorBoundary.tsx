@@ -1,4 +1,4 @@
-import { Button } from '@jad/ui';
+import { Button } from '@afhomes/ui';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportError } from '../../lib/telemetry';
 

@@ -3,7 +3,7 @@
  *
  * The screen itself renders in the shared `AuthLayout` shell - the same
  * layout as the staff and admin entries - so only the breadcrumb needs local
- * styles here. Built on @jad/ui tokens only: this route renders outside the
+ * styles here. Built on @afhomes/ui tokens only: this route renders outside the
  * marketing shell, where the marketing stylesheet is never loaded.
  */
 

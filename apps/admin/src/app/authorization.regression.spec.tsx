@@ -14,10 +14,10 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import { SessionProvider, type SessionUser } from '../lib/session';
-import { ErrorState } from '@jad/ui';
+import { ErrorState } from '@afhomes/ui';
 import { renderWithProviders } from '../test/utils';
 import { ADMIN_NAV_ITEMS, canViewModule, navItemsForPermissions } from './navigation';
 import { RequireRole } from './RequireRole';

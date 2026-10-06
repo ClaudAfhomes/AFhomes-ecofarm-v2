@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Button, Dialog } from '@jad/ui';
-import { afHomesModuleKeySchema, type AfHomesPermission, type AfHomesRole } from '@jad/contracts';
+import { Button, Dialog } from '@afhomes/ui';
+import { afHomesModuleKeySchema, type AfHomesPermission, type AfHomesRole } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 
 const MODULES = afHomesModuleKeySchema.options;

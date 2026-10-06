@@ -7,7 +7,7 @@ import {
   normalizeTier,
   parseGoogleSheetUrl,
   resolveCustomerCategory,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import {
   MAX_IMPORT_ROWS,
   customerExportCsv,
@@ -22,7 +22,7 @@ import {
   validateImportRow,
   type ImportContext,
 } from './customer-import.js';
-import { CUSTOMER_IMPORT_COLUMNS } from '@jad/contracts';
+import { CUSTOMER_IMPORT_COLUMNS } from '@afhomes/contracts';
 import { toXlsx } from './report-export.js';
 
 const ctx = (overrides: Partial<ImportContext> = {}): ImportContext => ({

@@ -21,7 +21,7 @@ import {
   documentListQuerySchema,
   documentConfirmSchema,
   documentUploadRequestSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
 import {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 import { actionAllowed, permissionsAreSubset } from './afhomes-access.js';
 
 const held: AfHomesPermission[] = [

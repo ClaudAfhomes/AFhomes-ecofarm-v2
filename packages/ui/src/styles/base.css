@@ -1,5 +1,5 @@
 /*
- * Shared base + accessibility contract (@jad/ui/base.css).
+ * Shared base + accessibility contract (@afhomes/ui/base.css).
  * Consumed by every app before its own global styles: box-sizing, body
  * defaults, visible focus, screen-reader helpers, skip link, reduced motion.
  */
@@ -94,37 +94,37 @@ svg {
  * middle of the viewport. Every notification is a proper modal (backdrop +
  * no outside-click): the overlay below is intentionally visible and dark
  * enough to block the page while a notification is displayed. */
-.jad-swal-container {
+.afhomes-swal-container {
   align-items: center;
   justify-content: center;
 }
 
-.jad-swal-container.swal2-backdrop-show {
+.afhomes-swal-container.swal2-backdrop-show {
   background-color: rgba(20, 27, 34, 0.55);
 }
 
-.jad-swal-popup {
+.afhomes-swal-popup {
   margin: auto;
   font-family: var(--font-family-sans);
   border-radius: var(--radius-md);
 }
 
-.jad-swal-title {
+.afhomes-swal-title {
   color: var(--color-text-primary);
   font-size: var(--text-h3);
 }
 
-.jad-swal-text {
+.afhomes-swal-text {
   color: var(--color-text-secondary);
 }
 
-.jad-swal-confirm {
+.afhomes-swal-confirm {
   background-color: var(--color-brand-primary);
   border-radius: var(--radius-sm);
   font-weight: 600;
 }
 
-.jad-swal-confirm:focus {
+.afhomes-swal-confirm:focus {
   box-shadow: 0 0 0 3px var(--color-state-focus);
 }
 

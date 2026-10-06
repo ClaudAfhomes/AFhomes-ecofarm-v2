@@ -1,6 +1,6 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { afHomesRoleSchema } from '@jad/contracts';
+import { afHomesRoleSchema } from '@afhomes/contracts';
 import { renderWithProviders, within } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { AfHomesRolesPage } from './AfHomesRolesPage';

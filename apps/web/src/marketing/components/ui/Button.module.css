@@ -1,7 +1,7 @@
 /*
  * Marketing action styling (public site only).
  *
- * The shared @jad/ui Button supplies structure and color; this layer adds the
+ * The shared @afhomes/ui Button supplies structure and color; this layer adds the
  * premium marketing finish: full pill radius, soft elevation, and a gentle
  * hover lift. It loads after the ui stylesheet, so tied declarations win
  * here. The `text` variant stays flat (no pill, no shadow).

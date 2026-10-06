@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@jad/ui';
-import type { CmsDocument, CmsDocumentKey } from '@jad/contracts';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import type { CmsDocument, CmsDocumentKey } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
 import { getCmsDocuments, publishCmsDocument, saveCmsDocument } from './services';

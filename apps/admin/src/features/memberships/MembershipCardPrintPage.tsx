@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useParams } from 'react-router';
-import { Button, ErrorState, QrCode, StatusChip } from '@jad/ui';
+import { Button, ErrorState, QrCode, StatusChip } from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getMembershipCard, markMembershipPrinted } from './services';

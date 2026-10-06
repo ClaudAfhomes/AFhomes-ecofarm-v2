@@ -1,7 +1,7 @@
 /**
  * Client-side submit normalization (admin SPA).
  *
- * Mirrors the server's shared contracts (`@jad/contracts` input schemas) so a
+ * Mirrors the server's shared contracts (`@afhomes/contracts` input schemas) so a
  * form shows the stored form immediately. The server remains authoritative: a
  * caller that bypasses these helpers is still validated and normalized by the
  * API schemas on write.
@@ -19,7 +19,7 @@ import {
   type CreateCustomerApplicationRequest,
   type CreateCustomerRequest,
   type CreateReservationAgreementRequest,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 const upper = (value: string): string => normalizePersonName(value);
 const upperOpt = (value: string | undefined): string | undefined =>

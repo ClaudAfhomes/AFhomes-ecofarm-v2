@@ -1,4 +1,4 @@
-import { customerLookupSchema, memberLookupSchema } from '@jad/contracts';
+import { customerLookupSchema, memberLookupSchema } from '@afhomes/contracts';
 import { isoOrNull } from './handler-kit.js';
 export function memberLookupFromDirectory(r: Record<string, unknown>) {
   return memberLookupSchema.parse({

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { ErrorState, MetricCard, PageHeader, StatusChip } from '@jad/ui';
+import { ErrorState, MetricCard, PageHeader, StatusChip } from '@afhomes/ui';
 import { getGenealogyNode, getGenealogySummary, getGenealogyUpline } from './services';
 import styles from './GenealogyDetailsPage.module.css';
 

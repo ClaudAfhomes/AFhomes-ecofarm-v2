@@ -5,7 +5,7 @@ import {
   createCmsPageSchema,
   updateCmsDocumentSchema,
   updateCmsPageSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { randomUUID } from 'node:crypto';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';

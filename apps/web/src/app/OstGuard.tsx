@@ -1,7 +1,7 @@
 ﻿import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Spinner } from '@jad/ui';
+import { Spinner } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { getAuthPortals } from '../lib/portals';

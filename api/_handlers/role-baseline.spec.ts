@@ -1,7 +1,7 @@
 /**
  * AF Homes Phase 2 - default role permission baseline.
  *
- * Proves the matrix in `@jad/contracts` (`role-baseline.ts`, the authority),
+ * Proves the matrix in `@afhomes/contracts` (`role-baseline.ts`, the authority),
  * the migration SQL carrying it, and the enforced behaviour agree:
  *
  *  1. MIGRATION TEXT - every matrix tuple is present verbatim, exactly 70
@@ -29,7 +29,7 @@ import {
   BASELINE_ROW_COUNT,
   DEFAULT_ROLE_BASELINE,
   type AfHomesPermission,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';

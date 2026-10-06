@@ -1,4 +1,4 @@
-import type { ApiErrorCode } from '@jad/contracts';
+import type { ApiErrorCode } from '@afhomes/contracts';
 
 /**
  * Normalized API error mapped from the shared error envelope. Carries the

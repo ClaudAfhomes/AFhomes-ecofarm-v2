@@ -1,13 +1,13 @@
 import { useContext, useEffect, useId, useState, type ComponentProps } from 'react';
 import { HumanInputValidity } from './human-input-validity';
-import { NormalizedInput } from '@jad/ui';
+import { NormalizedInput } from '@afhomes/ui';
 import {
   personNameSchema,
   phoneSchema,
   emailSchema,
   exactDecimalStringSchema,
   optionalLandlineSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 /** Shared contract validation for interacted-with human fields. Server validation remains mandatory. */
 export function HumanInput({

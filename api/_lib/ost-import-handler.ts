@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseGoogleSheetUrl } from '@jad/contracts';
+import { parseGoogleSheetUrl } from '@afhomes/contracts';
 import {
   OST_IMPORT_COLUMNS,
   ostImportSourceSchema,

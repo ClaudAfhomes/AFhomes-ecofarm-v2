@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Sale } from '@jad/contracts';
+import type { Sale } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 import { RecordPaymentDialog, VerifyDialog } from './BusinessFinanceQueuePage';
-import { paymentSchemeLabel } from '@jad/contracts';
+import { paymentSchemeLabel } from '@afhomes/contracts';
 import {
   Button,
   Dialog,
@@ -13,7 +13,7 @@ import {
   PageHeader,
   Select,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { SALE_STATUS_LABEL, SALE_STATUS_TONE, formatMoney } from './format';

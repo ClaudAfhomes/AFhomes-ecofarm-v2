@@ -15,7 +15,7 @@ export interface PasswordChecklistProps {
 /**
  * Live password-rule checklist: one row per rule with a green check when the
  * rule is met and a red x while it is missing. Presentation only - callers
- * compute `items` (e.g. from `@jad/shared#passwordRuleStates`) on every
+ * compute `items` (e.g. from `@afhomes/shared#passwordRuleStates`) on every
  * keystroke and keep their submit-time validator as the authority.
  */
 export function PasswordChecklist({ items }: PasswordChecklistProps) {

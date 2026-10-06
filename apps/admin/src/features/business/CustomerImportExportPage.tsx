@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { CUSTOMER_CATEGORY_LABELS, customerSellerOptionSchema } from '@jad/contracts';
-import type { CustomerImportParseResponse } from '@jad/contracts';
+import { CUSTOMER_CATEGORY_LABELS, customerSellerOptionSchema } from '@afhomes/contracts';
+import type { CustomerImportParseResponse } from '@afhomes/contracts';
 import {
   Alert,
   Button,
@@ -11,7 +11,7 @@ import {
   ErrorState,
   PageHeader,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
 import {

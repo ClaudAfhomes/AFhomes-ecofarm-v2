@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { SalesTrendGranularity } from '@jad/contracts';
+import type { SalesTrendGranularity } from '@afhomes/contracts';
 
 import { getAfHomesSalesTrend } from './services';
 

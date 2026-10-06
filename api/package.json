@@ -7,8 +7,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jad/contracts": "workspace:*",
-    "@jad/shared": "workspace:*",
+    "@afhomes/contracts": "workspace:*",
+    "@afhomes/shared": "workspace:*",
     "@supabase/auth-js": "2.117.2",
     "@supabase/supabase-js": "2.117.2",
     "nodemailer": "10.0.10",

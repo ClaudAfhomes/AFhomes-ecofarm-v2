@@ -9,7 +9,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import { ADMIN_NAV_ITEMS, navItemsForPermissions } from '../../app/navigation';
 import { RequireRole } from '../../app/RequireRole';

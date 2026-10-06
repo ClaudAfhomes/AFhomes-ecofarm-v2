@@ -14,7 +14,7 @@
  *
  * Callers continue to program against this stable repository interface.
  */
-import { cmsPublicContentSchema } from '@jad/contracts';
+import { cmsPublicContentSchema } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
 import { experiences } from '../data/mock/experiences';
 import { faqCategories } from '../data/mock/faq';

@@ -20,7 +20,7 @@ import {
   resolveCustomerCategory,
   type CustomerCategory,
   type CustomerExportRow,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { escapeCsvCell, toCsv, toXlsx, type XlsxColumn } from './report-export.js';
 
 /* ------------------------------------------------------------------ */

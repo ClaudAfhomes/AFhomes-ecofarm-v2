@@ -4,7 +4,7 @@ import {
   cmsMediaSchema,
   cmsPageSchema,
   type CmsDocumentKey,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import {
   protectedRequest as request,
   protectedRequestList as requestList,

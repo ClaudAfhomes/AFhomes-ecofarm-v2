@@ -16,7 +16,7 @@ import {
   normalizePostalCode,
   updateCustomerSchema,
   customerCategorySchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { isSellingRole } from '../_lib/commerce.js';

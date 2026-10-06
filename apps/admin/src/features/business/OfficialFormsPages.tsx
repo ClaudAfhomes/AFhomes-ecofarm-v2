@@ -4,7 +4,7 @@ import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { ApplicationHolder } from '@jad/contracts';
+import type { ApplicationHolder } from '@afhomes/contracts';
 import {
   createCustomerApplicationSchema,
   registerCustomerApplicationSchema,
@@ -14,7 +14,7 @@ import {
   paymentSchemeLabel,
   governmentIdTypeSchema,
   optionalLandlineSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { formatDateTime } from '../../lib/format';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
@@ -29,7 +29,7 @@ import {
   PageHeader,
   SearchField,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';

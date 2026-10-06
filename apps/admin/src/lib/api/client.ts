@@ -1,4 +1,4 @@
-import { listResponseSchema } from '@jad/contracts';
+import { listResponseSchema } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';

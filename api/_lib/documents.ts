@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { maskGovernmentId } from '@jad/contracts';
+import { maskGovernmentId } from '@afhomes/contracts';
 
 export const DOCUMENT_MIME_ALLOWLIST = ['image/jpeg', 'image/png', 'application/pdf'] as const;
 export type DocumentMime = (typeof DOCUMENT_MIME_ALLOWLIST)[number];

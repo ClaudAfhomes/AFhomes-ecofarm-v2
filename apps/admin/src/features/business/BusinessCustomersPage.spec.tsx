@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission, Customer } from '@jad/contracts';
+import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { renderWithProviders } from '../../test/utils';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CommissionRule } from '@jad/contracts';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import type { CommissionRule } from '@afhomes/contracts';
+import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
 
 import { formatRate } from './format';
 import {

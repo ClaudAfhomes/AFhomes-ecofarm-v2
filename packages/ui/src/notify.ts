@@ -18,12 +18,12 @@ export interface NotifyInput {
 }
 
 const baseClasses = {
-  container: 'jad-swal-container',
-  popup: 'jad-swal-popup',
-  title: 'jad-swal-title',
-  htmlContainer: 'jad-swal-text',
-  confirmButton: 'jad-swal-confirm',
-  timerProgressBar: 'jad-swal-timer',
+  container: 'afhomes-swal-container',
+  popup: 'afhomes-swal-popup',
+  title: 'afhomes-swal-title',
+  htmlContainer: 'afhomes-swal-text',
+  confirmButton: 'afhomes-swal-confirm',
+  timerProgressBar: 'afhomes-swal-timer',
 } as const;
 
 /**

@@ -9,8 +9,8 @@ import {
   QrCode,
   SearchField,
   StatusChip,
-} from '@jad/ui';
-import { buildOstRegistrationUrl } from '@jad/contracts';
+} from '@afhomes/ui';
+import { buildOstRegistrationUrl } from '@afhomes/contracts';
 
 import { env } from '../../lib/env';
 import { formatDateTime } from '../../lib/format';

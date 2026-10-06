@@ -15,8 +15,8 @@ import {
   PageHeader,
   Select,
   StatusChip,
-} from '@jad/ui';
-import type { AfHomesDepartment, AfHomesRole, AfHomesStaff } from '@jad/contracts';
+} from '@afhomes/ui';
+import type { AfHomesDepartment, AfHomesRole, AfHomesStaff } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 import {
   deactivateAfHomesStaff,

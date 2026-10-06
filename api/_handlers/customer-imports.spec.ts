@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toXlsx } from '../_lib/report-export.js';
-import { CUSTOMER_IMPORT_COLUMNS } from '@jad/contracts';
+import { CUSTOMER_IMPORT_COLUMNS } from '@afhomes/contracts';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown }));

@@ -12,7 +12,7 @@ import {
   ErrorState,
   PageHeader,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import {
   getAfHomesRoleAudit,
   getAfHomesRoleById,

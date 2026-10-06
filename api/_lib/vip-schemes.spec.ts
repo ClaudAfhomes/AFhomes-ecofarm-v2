@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { validateSchemeTransition } from '@jad/contracts';
+import { validateSchemeTransition } from '@afhomes/contracts';
 
 import {
   calculateCommission,

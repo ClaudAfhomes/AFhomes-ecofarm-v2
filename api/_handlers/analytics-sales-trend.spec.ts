@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { salesTrendReportSchema } from '@jad/contracts';
+import { salesTrendReportSchema } from '@afhomes/contracts';
 import {
   SALE,
   STAFF2,

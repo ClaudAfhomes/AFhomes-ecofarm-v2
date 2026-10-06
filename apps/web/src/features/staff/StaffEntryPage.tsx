@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@jad/ui';
-import type { AuthPortals } from '@jad/contracts';
+import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@afhomes/ui';
+import type { AuthPortals } from '@afhomes/contracts';
 import { env } from '../../lib/env';
 
 import { useCustomerSession } from '../../lib/customer-session';

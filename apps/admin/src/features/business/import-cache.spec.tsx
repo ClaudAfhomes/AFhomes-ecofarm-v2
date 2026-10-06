@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { expect, it, vi } from 'vitest';
-import type { CustomerImportParseResponse } from '@jad/contracts';
+import type { CustomerImportParseResponse } from '@afhomes/contracts';
 import { CustomerImportExportPage } from './CustomerImportExportPage';
 import { confirmCustomerImport, parseCustomerImport } from './services';
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AuthPortals } from '@jad/contracts';
+import type { AuthPortals } from '@afhomes/contracts';
 import { decideCustomerLogin } from './CustomerLoginForm';
 const staff = (roleSlug: string, mustChangePassword = false): AuthPortals => ({
   staff: { roleSlug, roleName: roleSlug, status: 'active', mustChangePassword },

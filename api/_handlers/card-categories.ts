@@ -14,7 +14,7 @@ import {
   createCardCategorySchema,
   normalizeCategorySlug,
   updateCardCategorySchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

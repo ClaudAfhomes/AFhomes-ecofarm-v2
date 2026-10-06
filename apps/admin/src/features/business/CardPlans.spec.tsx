@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CardCategory, CardProduct, Customer } from '@jad/contracts';
+import type { CardCategory, CardProduct, Customer } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';

@@ -17,8 +17,8 @@ import {
   Select,
   StatusChip,
   TextField,
-} from '@jad/ui';
-import { PERSON_NAME_RE, type AfHomesStaff } from '@jad/contracts';
+} from '@afhomes/ui';
+import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

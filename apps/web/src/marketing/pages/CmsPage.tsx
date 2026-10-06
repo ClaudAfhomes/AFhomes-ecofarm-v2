@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { cmsPageSchema, type CmsSection } from '@jad/contracts';
+import { cmsPageSchema, type CmsSection } from '@afhomes/contracts';
 import { Navigate, useParams } from 'react-router';
 
 import { request } from '../../lib/api/client';

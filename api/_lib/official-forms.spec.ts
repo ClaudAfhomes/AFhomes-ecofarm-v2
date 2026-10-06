@@ -6,7 +6,7 @@ import {
   createReservationAgreementSchema,
   customerApplicationDecisionSchema,
   reservationAgreementDecisionSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import {
   CUSTOMER_IMPORT_HEADERS,
   IST_IMPORT_HEADERS,

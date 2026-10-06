@@ -1,6 +1,6 @@
 ﻿import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
-import { Spinner } from '@jad/ui';
+import { Spinner } from '@afhomes/ui';
 import { useQuery } from '@tanstack/react-query';
 import { getAuthPortals } from '../lib/portals';
 import { portalDashboard } from '../lib/portal-destination';

@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SalesTrendReport } from '@jad/contracts';
+import type { SalesTrendReport } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import { AfHomesTrendChart, TrendChartSkeleton, periodLabel } from './AfHomesTrendChart';

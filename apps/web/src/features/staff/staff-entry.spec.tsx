@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { AuthPortals } from '@jad/contracts';
+import type { AuthPortals } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';

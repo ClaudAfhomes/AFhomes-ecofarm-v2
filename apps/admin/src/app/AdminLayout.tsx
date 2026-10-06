@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@jad/ui';
+import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
-import { staffPortalPath, operationsPath } from '@jad/contracts';
+import { staffPortalPath, operationsPath } from '@afhomes/contracts';
 
 export function AdminLayout() {
   const { user, logout } = useSession();

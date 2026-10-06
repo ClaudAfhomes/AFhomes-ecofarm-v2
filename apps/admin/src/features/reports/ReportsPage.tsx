@@ -10,7 +10,7 @@ import {
   SearchField,
   Select,
   Skeleton,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

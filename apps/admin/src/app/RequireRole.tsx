@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
-import { Button, Forbidden, Skeleton, Spinner } from '@jad/ui';
+import { Button, Forbidden, Skeleton, Spinner } from '@afhomes/ui';
 import { Navigate, useLocation } from 'react-router';
 import { useSession } from '../lib/session';
 import { entryPortal, loginPathFor } from '../lib/portal';
 import { canAccessNavTarget } from './navigation';
 import styles from './RequireRole.module.css';
-import { operationsPath, staffPortalPath } from '@jad/contracts';
+import { operationsPath, staffPortalPath } from '@afhomes/contracts';
 
 function Loading() {
   return (

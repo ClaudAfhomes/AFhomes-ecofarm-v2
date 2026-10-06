@@ -1,6 +1,6 @@
 import { Children, Fragment, cloneElement, isValidElement, type ReactNode } from 'react';
 import { Route, type RouteProps } from 'react-router';
-import { staffPortalPath } from '@jad/contracts';
+import { staffPortalPath } from '@afhomes/contracts';
 
 export function roleRoutes(children: ReactNode): ReactNode {
   return Children.map(children, (child) => {

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditResponse, Membership, MembershipCard } from '@jad/contracts';
+import type { AuditResponse, Membership, MembershipCard } from '@afhomes/contracts';
 import { Route, Routes } from 'react-router';
 
 import { renderWithProviders } from '../../test/utils';

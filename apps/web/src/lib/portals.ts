@@ -4,7 +4,7 @@
  * `GET /auth/portals` resolves the bearer's own staff/customer/OST rows.
  * Login screens route on it; it authorizes nothing.
  */
-import { authPortalsSchema, type AuthPortals } from '@jad/contracts';
+import { authPortalsSchema, type AuthPortals } from '@afhomes/contracts';
 
 import { request } from './api/client';
 

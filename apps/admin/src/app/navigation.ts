@@ -1,5 +1,5 @@
-import type { AfHomesModuleKey, AfHomesPermission } from '@jad/contracts';
-import type { BreadcrumbItem, SidebarItem } from '@jad/ui';
+import type { AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
+import type { BreadcrumbItem, SidebarItem } from '@afhomes/ui';
 
 export type NavLink = { to: string; label: string; module: AfHomesModuleKey };
 export type AdminNavItem = {

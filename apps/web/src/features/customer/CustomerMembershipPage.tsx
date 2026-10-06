@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Button, Dialog, ErrorState, QrCode, StatusChip, type StatusTone } from '@jad/ui';
-import { paymentSchemeLabel } from '@jad/contracts';
+import { Button, Dialog, ErrorState, QrCode, StatusChip, type StatusTone } from '@afhomes/ui';
+import { paymentSchemeLabel } from '@afhomes/contracts';
 
 import {
   useCustomerMembershipQuery,

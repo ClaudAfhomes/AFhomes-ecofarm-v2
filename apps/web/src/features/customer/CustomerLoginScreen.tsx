@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { AuthLayout, Button } from '@jad/ui';
+import { AuthLayout, Button } from '@afhomes/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';

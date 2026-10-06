@@ -35,10 +35,10 @@ importers:
 
   api:
     dependencies:
-      '@jad/contracts':
+      '@afhomes/contracts':
         specifier: workspace:*
         version: link:../packages/contracts
-      '@jad/shared':
+      '@afhomes/shared':
         specifier: workspace:*
         version: link:../packages/shared
       '@supabase/auth-js':
@@ -72,16 +72,16 @@ importers:
 
   apps/admin:
     dependencies:
-      '@jad/config':
+      '@afhomes/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@jad/contracts':
+      '@afhomes/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@jad/shared':
+      '@afhomes/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@jad/ui':
+      '@afhomes/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@supabase/supabase-js':
@@ -166,16 +166,16 @@ importers:
 
   apps/web:
     dependencies:
-      '@jad/config':
+      '@afhomes/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@jad/contracts':
+      '@afhomes/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@jad/shared':
+      '@afhomes/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@jad/ui':
+      '@afhomes/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@supabase/supabase-js':
@@ -295,7 +295,7 @@ importers:
 
   packages/shared:
     dependencies:
-      '@jad/contracts':
+      '@afhomes/contracts':
         specifier: workspace:*
         version: link:../contracts
     devDependencies:

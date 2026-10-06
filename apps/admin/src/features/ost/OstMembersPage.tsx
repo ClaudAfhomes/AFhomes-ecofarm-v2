@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { EmptyState, ErrorState, PageHeader, SearchField, StatusChip } from '@jad/ui';
+import { EmptyState, ErrorState, PageHeader, SearchField, StatusChip } from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { getOstMembers } from './services';

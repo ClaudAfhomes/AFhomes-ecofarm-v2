@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router';
-import { Button, ErrorState, Spinner } from '@jad/ui';
+import { Button, ErrorState, Spinner } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { CustomerGuard } from './CustomerGuard';

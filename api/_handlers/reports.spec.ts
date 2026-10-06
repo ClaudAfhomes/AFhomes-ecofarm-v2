@@ -8,7 +8,7 @@
  * labelled so a drift from `role-baseline.ts` is visible here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportExportSchema, reportResponseSchema } from '@jad/contracts';
+import { reportExportSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,

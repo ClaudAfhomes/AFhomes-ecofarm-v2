@@ -7,7 +7,7 @@
  * links the resolver walks. Nothing here is production data - ids are stable
  * literals so assertions can name them.
  */
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import type { FakeRow, FakeTables } from './supabase-fake.js';
 

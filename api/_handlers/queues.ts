@@ -7,7 +7,7 @@ import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
  */
 import { z } from 'zod';
 import { summarizePayments } from '../_lib/commerce.js';
-import { dashboardQueuesSchema, OST_REVIEWABLE_STATUSES, SALE_ACTIVATABLE } from '@jad/contracts';
+import { dashboardQueuesSchema, OST_REVIEWABLE_STATUSES, SALE_ACTIVATABLE } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

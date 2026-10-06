@@ -1,4 +1,4 @@
-import { genealogyNodeSchema,genealogySummarySchema } from '@jad/contracts';
+import { genealogyNodeSchema,genealogySummarySchema } from '@afhomes/contracts';
 import { protectedRequest as request,protectedRequestList as requestList } from '../../lib/api/client';
 export const getGenealogy=()=>requestList('/genealogy',genealogyNodeSchema);
 export const getGenealogyNode=(id:string)=>request(`/genealogy/${id}`,genealogyNodeSchema);

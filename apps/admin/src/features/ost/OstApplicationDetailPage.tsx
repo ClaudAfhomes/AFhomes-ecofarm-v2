@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useSession } from '../../lib/session';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { Button, ConfirmDialog, ErrorState, PageHeader, StatusChip } from '@jad/ui';
-import { ostMemberSchema } from '@jad/contracts';
+import { Button, ConfirmDialog, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { ostMemberSchema } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import {

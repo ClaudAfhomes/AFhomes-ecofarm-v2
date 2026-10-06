@@ -9,7 +9,7 @@ import {
   SearchField,
   Select,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import { getGenealogy } from './services';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 

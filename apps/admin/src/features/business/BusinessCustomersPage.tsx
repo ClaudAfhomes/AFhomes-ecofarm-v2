@@ -12,13 +12,13 @@ import {
   PageHeader,
   SearchField,
   StatusChip,
-} from '@jad/ui';
-import type { Customer, CustomerOnboardingRecovery } from '@jad/contracts';
+} from '@afhomes/ui';
+import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
 import {
   CUSTOMER_CATEGORY_LABELS,
   resolveCustomerCategory,
   customerSellerOptionSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';

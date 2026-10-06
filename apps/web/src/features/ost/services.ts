@@ -13,7 +13,7 @@ import {
   type OstMe,
   type OstReferralResolution,
   type SubmitOstApplicationRequest,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { request } from '../../lib/api/client';
 

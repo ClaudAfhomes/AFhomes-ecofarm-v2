@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { AuthLayout, Button, ErrorState } from '@jad/ui';
+import { AuthLayout, Button, ErrorState } from '@afhomes/ui';
 import { getSupabaseClient } from '../../lib/supabase';
 import { useSession } from '../../lib/session';
 

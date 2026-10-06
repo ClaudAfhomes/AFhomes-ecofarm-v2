@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ErrorState, StatusChip } from '@jad/ui';
-import type { AfHomesPermission } from '@jad/contracts';
+import { ErrorState, StatusChip } from '@afhomes/ui';
+import type { AfHomesPermission } from '@afhomes/contracts';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
 import { getReport } from '../reports/services';

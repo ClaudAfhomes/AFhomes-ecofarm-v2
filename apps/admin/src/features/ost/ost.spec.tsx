@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OstApplication, OstMember, OstReferralCodeRecord } from '@jad/contracts';
+import type { OstApplication, OstMember, OstReferralCodeRecord } from '@afhomes/contracts';
 import { Route, Routes } from 'react-router';
 
 import { renderWithProviders } from '../../test/utils';

@@ -24,7 +24,7 @@ import {
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import {
   authorizeAfHomes,

@@ -11,7 +11,7 @@ import {
   SearchField,
   Select,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import {

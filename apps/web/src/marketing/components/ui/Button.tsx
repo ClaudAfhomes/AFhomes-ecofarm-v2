@@ -2,7 +2,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cn } from '../../lib/cn';
 import { ArrowRight } from '../../components/ui/icons';
-import { buttonClassName, type ButtonVariant } from '@jad/ui';
+import { buttonClassName, type ButtonVariant } from '@afhomes/ui';
 import styles from './Button.module.css';
 
 type Variant =

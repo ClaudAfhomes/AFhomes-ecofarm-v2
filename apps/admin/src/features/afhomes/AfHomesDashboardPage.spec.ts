@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AfHomesPermission, AnalyticsOverview } from '@jad/contracts';
+import type { AfHomesPermission, AnalyticsOverview } from '@afhomes/contracts';
 import { dashboardActions, dashboardMetrics } from './AfHomesDashboardPage';
 
 const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({

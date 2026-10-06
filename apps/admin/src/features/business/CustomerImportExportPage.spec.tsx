@@ -1,7 +1,7 @@
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import { CustomerImportExportPage } from './CustomerImportExportPage';
 import { renderWithProviders } from '../../test/utils';

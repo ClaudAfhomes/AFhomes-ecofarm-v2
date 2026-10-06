@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type {
   CreateCustomerApplicationRequest,
   CreateReservationAgreementRequest,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import {
   CustomerApplicationEditorPage,
   ReservationAgreementEditorPage,

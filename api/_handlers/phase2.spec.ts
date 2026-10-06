@@ -1,4 +1,4 @@
-import { commissionSchema, financeQueueItemSchema } from '@jad/contracts';
+import { commissionSchema, financeQueueItemSchema } from '@afhomes/contracts';
 /**
  * AF Homes Phase 2 - business API coverage.
  *

@@ -3,7 +3,7 @@ import {
   analyticsPeriodSchema,
   salesTrendReportSchema,
   type AnalyticsPeriod,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { deny, fail, type Db } from '../_lib/handler-kit.js';

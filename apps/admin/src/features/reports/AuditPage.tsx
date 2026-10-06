@@ -8,7 +8,7 @@ import {
   PageHeader,
   SearchField,
   Skeleton,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

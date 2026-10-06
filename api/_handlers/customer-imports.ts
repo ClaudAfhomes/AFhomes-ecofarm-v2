@@ -8,7 +8,7 @@ import {
   customerImportJobSchema,
   customerImportParseResponseSchema,
   type CustomerExportRow,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
   MAX_IMPORT_BYTES,
@@ -246,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!parsed.data.sheetUrl)
             return fail(res, 'VALIDATION_ERROR', 'A Google Sheets URL is required', 400);
           const csv = await fetchGoogleSheetCsv(parsed.data.sheetUrl);
-          const { parseGoogleSheetUrl: parseUrl } = await import('@jad/contracts');
+          const { parseGoogleSheetUrl: parseUrl } = await import('@afhomes/contracts');
           sheetId = parseUrl(parsed.data.sheetUrl)?.spreadsheetId ?? null;
           matrix = parseCsvMatrix(csv);
         } else {

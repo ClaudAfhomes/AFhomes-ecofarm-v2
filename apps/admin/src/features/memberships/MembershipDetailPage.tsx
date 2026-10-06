@@ -2,8 +2,8 @@ import styles from '../business/WorkflowCards.module.css';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Button, ConfirmDialog, Dialog, ErrorState, PageHeader, QrCode, StatusChip } from '@jad/ui';
-import type { ReissuedMembershipCard } from '@jad/contracts';
+import { Button, ConfirmDialog, Dialog, ErrorState, PageHeader, QrCode, StatusChip } from '@afhomes/ui';
+import type { ReissuedMembershipCard } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/format';

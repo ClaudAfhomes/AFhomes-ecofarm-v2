@@ -5,7 +5,7 @@ import {
   createAfHomesStaffSchema,
   updateAfHomesStaffProfileSchema,
   type AfHomesPermission,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 
 import {

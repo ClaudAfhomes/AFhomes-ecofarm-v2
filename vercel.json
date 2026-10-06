@@ -1,6 +1,6 @@
 {
   "framework": null,
-  "installCommand": "pnpm install --filter=!@jad/db-testing",
+  "installCommand": "pnpm install --filter=!@afhomes/db-testing",
   "buildCommand": "pnpm typecheck:deploy && node scripts/prepare-vercel-env.mjs && pnpm exec turbo run build && node scripts/assemble-vercel-output.mjs",
   "outputDirectory": "vercel-static",
   "functions": {

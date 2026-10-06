@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { dashboardQueuesSchema } from '@jad/contracts';
+import { dashboardQueuesSchema } from '@afhomes/contracts';
 import {
   STAFF2,
   TOKEN,

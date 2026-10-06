@@ -1,4 +1,4 @@
-import { ErrorState } from '@jad/ui';
+import { ErrorState } from '@afhomes/ui';
 
 import { useCustomerLedgerQuery } from './queries';
 import { isForbidden } from './http';

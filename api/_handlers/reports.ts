@@ -28,7 +28,7 @@ import {
   reportResponseSchema,
   reportTypeSchema,
   type ReportType,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { auditSummary, maskEmail, maskPhone, sanitizeAuditValue } from '../_lib/audit-sanitize.js';

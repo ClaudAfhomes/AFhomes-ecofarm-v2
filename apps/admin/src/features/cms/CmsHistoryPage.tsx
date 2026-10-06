@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { EmptyState, ErrorState, PageHeader, Skeleton } from '@jad/ui';
+import { EmptyState, ErrorState, PageHeader, Skeleton } from '@afhomes/ui';
 import { getCmsHistory } from './services';
 import styles from './cms.module.css';
 export function CmsHistoryPage() {

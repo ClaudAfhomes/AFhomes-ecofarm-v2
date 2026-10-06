@@ -1,5 +1,5 @@
-import { resolveCustomerCategory, type CustomerCategory } from '@jad/contracts';
-import { addMoney } from '@jad/shared';
+import { resolveCustomerCategory, type CustomerCategory } from '@afhomes/contracts';
+import { addMoney } from '@afhomes/shared';
 import type { Db } from './handler-kit.js';
 
 /** Normal records only: import provenance never changes a business category. */

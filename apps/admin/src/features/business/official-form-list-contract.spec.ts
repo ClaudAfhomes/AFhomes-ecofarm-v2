@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { customerApplicationSchema, reservationAgreementSchema } from '@jad/contracts';
+import { customerApplicationSchema, reservationAgreementSchema } from '@afhomes/contracts';
 import { setApiAccessTokenForTests } from '../../lib/api/client';
 import { getCustomerApplications, getReservationAgreements } from './services';
 

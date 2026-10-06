@@ -1,8 +1,8 @@
 /* Admin app global styles - the shared design system (tokens/base) comes from
- * @jad/ui. Only app-specific overrides live here. */
+ * @afhomes/ui. Only app-specific overrides live here. */
 
 /* Horizontal scroll for wide operational tables on short viewports.
-   Matches the shared `.table-scroll` contract in @jad/ui base styles. */
+   Matches the shared `.table-scroll` contract in @afhomes/ui base styles. */
 .table-scroll {
   width: 100%;
   max-width: 100%;

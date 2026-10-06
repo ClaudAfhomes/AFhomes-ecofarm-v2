@@ -19,7 +19,7 @@ import {
   type CustomerPointsEntry,
   type CustomerPointsSummary,
   type CustomerProfile,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { request, requestList } from '../../lib/api/client';
 

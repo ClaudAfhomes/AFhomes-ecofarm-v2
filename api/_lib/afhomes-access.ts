@@ -1,4 +1,4 @@
-import type { AfHomesAction, AfHomesModuleKey, AfHomesPermission } from '@jad/contracts';
+import type { AfHomesAction, AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
 
 import {
   verifiedAuthenticationMethods,

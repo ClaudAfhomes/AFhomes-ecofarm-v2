@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Sale } from '@jad/contracts';
+import type { Sale } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import { BusinessSalesPage } from './BusinessSalesPage';

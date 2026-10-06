@@ -24,9 +24,4 @@ afterEach(() => {
   cleanup();
   Swal.close();
   vi.unstubAllGlobals();
-  try {
-    localStorage.removeItem('jad:mock:session');
-  } catch {
-    // storage unavailable
-  }
 });

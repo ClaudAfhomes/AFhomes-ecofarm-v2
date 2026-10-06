@@ -3,7 +3,7 @@ import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
 import { useState } from 'react';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CardCategory, CardProduct } from '@jad/contracts';
+import type { CardCategory, CardProduct } from '@afhomes/contracts';
 import {
   Button,
   Dialog,
@@ -14,7 +14,7 @@ import {
   SearchField,
   Select,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { formatMoney, formatPoints, formatRate } from './format';
 import {

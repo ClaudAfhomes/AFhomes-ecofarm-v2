@@ -12,7 +12,7 @@
  * server-side. A staff row here does not grant a staff capability, and a
  * customer row here does not prove an active membership.
  */
-import { authPortalsSchema } from '@jad/contracts';
+import { authPortalsSchema } from '@afhomes/contracts';
 
 import { verifySessionToken } from '../_lib/auth-verify.js';
 import { fail, type Db, mapRpcError, method } from '../_lib/handler-kit.js';

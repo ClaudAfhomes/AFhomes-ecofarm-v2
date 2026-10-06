@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { phase2World, phase2WorldTokens, TOKEN, UUID } from '../_lib/testing/phase2-fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
-import { ostFileSchema } from '@jad/contracts';
+import { ostFileSchema } from '@afhomes/contracts';
 const holder = vi.hoisted(() => ({ db: null as FakeSupabase | null }));
 vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
 const handler = (await import('./ost-accreditation.js')).default;

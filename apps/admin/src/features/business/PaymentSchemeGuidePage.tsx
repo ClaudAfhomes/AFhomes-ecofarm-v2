@@ -9,9 +9,9 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import { useQuery } from '@tanstack/react-query';
-import { divideMoneyExact, formatMoney, multiplyMoney, subtractMoney } from '@jad/shared';
+import { divideMoneyExact, formatMoney, multiplyMoney, subtractMoney } from '@afhomes/shared';
 
 import { getCardProducts } from './services';
 import styles from './PaymentSchemeGuidePage.module.css';

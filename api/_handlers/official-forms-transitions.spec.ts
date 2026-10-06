@@ -3,7 +3,7 @@ import {
   createCommissionRuleSchema,
   createCustomerApplicationSchema,
   reservationAgreementListItemSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { calculateCommission } from '../_lib/commerce.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 

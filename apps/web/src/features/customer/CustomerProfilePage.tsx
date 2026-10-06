@@ -1,4 +1,4 @@
-import { ErrorState, StatusChip, type StatusTone, Button } from '@jad/ui';
+import { ErrorState, StatusChip, type StatusTone, Button } from '@afhomes/ui';
 import { useState } from 'react';
 
 import { useCustomerProfileQuery } from './queries';

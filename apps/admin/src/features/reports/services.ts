@@ -1,6 +1,6 @@
 /**
  * Phase 15 report API client. Every call goes through `lib/api/client` and is
- * validated against `@jad/contracts`. Exports arrive as base64-in-JSON
+ * validated against `@afhomes/contracts`. Exports arrive as base64-in-JSON
  * envelopes; this module turns them back into downloads. The browser never
  * computes a report row - it only renders what the scoped server query
  * returned.
@@ -12,7 +12,7 @@ import {
   type AuditResponse,
   type ReportExport,
   type ReportResponse,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { protectedRequest as request } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { formatMoney, formatPoints } from '../business/format';

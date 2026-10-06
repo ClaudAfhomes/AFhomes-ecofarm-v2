@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
-import type { AfHomesModuleKey, DashboardQueues } from '@jad/contracts';
-import { EmptyState, ErrorState, Icon, Skeleton, StatusChip } from '@jad/ui';
-import type { IconName } from '@jad/ui';
+import type { AfHomesModuleKey, DashboardQueues } from '@afhomes/contracts';
+import { EmptyState, ErrorState, Icon, Skeleton, StatusChip } from '@afhomes/ui';
+import type { IconName } from '@afhomes/ui';
 
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';

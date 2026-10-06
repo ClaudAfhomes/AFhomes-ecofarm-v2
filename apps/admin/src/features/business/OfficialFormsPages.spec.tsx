@@ -2,8 +2,8 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
-import { customerSchema, identityDocumentSchema } from '@jad/contracts';
-import type { IdentityDocument } from '@jad/contracts';
+import { customerSchema, identityDocumentSchema } from '@afhomes/contracts';
+import type { IdentityDocument } from '@afhomes/contracts';
 import {
   CustomerApplicationEditorPage,
   CustomerApplicationsPage,

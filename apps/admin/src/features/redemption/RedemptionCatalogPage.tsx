@@ -11,12 +11,12 @@ import {
   Select,
   Skeleton,
   StatusChip,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import {
   createRedemptionItemRequestSchema,
   type CreateRedemptionItemRequest,
   type RedemptionItem,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

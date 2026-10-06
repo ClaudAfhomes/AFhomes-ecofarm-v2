@@ -10,8 +10,8 @@ import {
   SearchField,
   Select,
   StatusChip,
-} from '@jad/ui';
-import type { Commission } from '@jad/contracts';
+} from '@afhomes/ui';
+import type { Commission } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';

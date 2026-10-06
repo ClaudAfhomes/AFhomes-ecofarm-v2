@@ -2,7 +2,7 @@
  * AF Homes Phase 10 membership card-management API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
- * against `@jad/contracts`. The browser never sees a credential hash, and
+ * against `@afhomes/contracts`. The browser never sees a credential hash, and
  * plaintext codes exist only in the once-only reissue response, held in React
  * state until the dialog closes.
  */
@@ -17,7 +17,7 @@ import {
   type Membership,
   type MembershipCard,
   type ReissuedMembershipCard,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,

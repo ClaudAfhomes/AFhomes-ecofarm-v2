@@ -5,7 +5,7 @@
  * canonicalize to +63, and invalid names/phones/dates are refused with 400.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { submitOstApplicationSchema } from '@jad/contracts';
+import { submitOstApplicationSchema } from '@afhomes/contracts';
 
 import { phase2World, phase2WorldTokens } from '../_lib/testing/phase2-fixtures.js';
 import { TOKEN, UUID } from '../_lib/testing/fixtures.js';

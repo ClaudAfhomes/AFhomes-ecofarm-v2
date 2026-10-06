@@ -9,8 +9,8 @@ import {
   type SubmitOstAccreditation,
   officialOstFormDefaults,
   parseOfficialOstFields,
-} from '@jad/contracts';
-import { NormalizedInput, AuthLayout, Button, OstOfficialFields } from '@jad/ui';
+} from '@afhomes/contracts';
+import { NormalizedInput, AuthLayout, Button, OstOfficialFields } from '@afhomes/ui';
 
 import { resolveOstReferral, submitOfficialOstAccreditation } from './services';
 import authStyles from '../customer/auth.module.css';

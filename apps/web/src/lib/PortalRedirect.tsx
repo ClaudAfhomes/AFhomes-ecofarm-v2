@@ -1,6 +1,6 @@
 ﻿import { useEffect } from 'react';
 import { Navigate } from 'react-router';
-import { Spinner } from '@jad/ui';
+import { Spinner } from '@afhomes/ui';
 
 export function PortalRedirect({ to }: { to: string }) {
   const external = to.startsWith('/admin');

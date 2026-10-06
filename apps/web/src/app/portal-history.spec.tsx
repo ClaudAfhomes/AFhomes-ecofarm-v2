@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { authPortalsSchema } from '@jad/contracts';
+import { authPortalsSchema } from '@afhomes/contracts';
 import { CustomerSessionProvider } from '../lib/customer-session';
 import { getAuthPortals } from '../lib/portals';
 import { portalDashboard } from '../lib/portal-destination';

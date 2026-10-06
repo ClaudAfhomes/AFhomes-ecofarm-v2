@@ -1,5 +1,5 @@
 {
-  "name": "@jad/admin",
+  "name": "@afhomes/admin",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,10 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jad/config": "workspace:*",
-    "@jad/contracts": "workspace:*",
-    "@jad/shared": "workspace:*",
-    "@jad/ui": "workspace:*",
+    "@afhomes/config": "workspace:*",
+    "@afhomes/contracts": "workspace:*",
+    "@afhomes/shared": "workspace:*",
+    "@afhomes/ui": "workspace:*",
     "@supabase/supabase-js": "2.117.2",
     "@tanstack/react-query": "^5.101.4",
     "jsqr": "^1.4.0",

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { manualOstAccreditationSchema } from '@jad/contracts';
+import { manualOstAccreditationSchema } from '@afhomes/contracts';
 import { randomUUID } from 'node:crypto';
 import {
   MAX_IMPORT_BYTES,

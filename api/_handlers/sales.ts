@@ -18,7 +18,7 @@ import {
   hierarchyAllowsUpline,
   paymentSchemeLabel,
   SALE_ACTIVATABLE,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

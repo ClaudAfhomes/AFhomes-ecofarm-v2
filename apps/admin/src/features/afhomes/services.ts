@@ -19,7 +19,7 @@ import {
   type SalesTrendGranularity,
   type SalesTrendReport,
   type StaffTestPurgeResponse,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,

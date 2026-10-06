@@ -7,7 +7,7 @@
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../test/utils';
 import App from './App';

@@ -9,8 +9,8 @@
  *   base so e.g. `bg-pine-800` beats the reset's `button{background:...}`.
  * - Page-level rules (background, fonts, selection, focus, tap, motion kill
  *   switch) live under `.afh-public` in `@layer base`, never on `body`/`html`,
- *   so the customer portal keeps the @jad/ui shell untouched.
- * - `:root` collisions with @jad/ui tokens were audited: the only shared
+ *   so the customer portal keeps the @afhomes/ui shell untouched.
+ * - `:root` collisions with @afhomes/ui tokens were audited: the only shared
  *   names are `--radius-sm/md/lg`, and the unlayered ui values win ties only
  *   for `--radius-sm` (6px vs 8px on two minor portal elements); md/lg values
  *   are identical. Marketing never uses `rounded-sm/md`.
@@ -212,7 +212,7 @@
 
 @layer base {
   /* Page shell for every public marketing route. Scoped (not body/html)
-     so the customer portal keeps the @jad/ui shell untouched. */
+     so the customer portal keeps the @afhomes/ui shell untouched. */
   .afh-public {
     background-color: var(--color-cream-50);
     font-family: var(--font-sans);

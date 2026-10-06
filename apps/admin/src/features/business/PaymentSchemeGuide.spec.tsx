@@ -1,6 +1,6 @@
 import { screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions } from '../../app/navigation';

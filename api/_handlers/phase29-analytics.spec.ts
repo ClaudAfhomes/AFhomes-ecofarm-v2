@@ -25,7 +25,7 @@
  *   callers never share scope (no cache layer exists in the handler).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { analyticsOverviewSchema, reportResponseSchema } from '@jad/contracts';
+import { analyticsOverviewSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,

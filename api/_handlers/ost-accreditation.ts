@@ -6,7 +6,7 @@ import {
   submitOstAccreditationSchema,
   submitOstRenewalSchema,
   ostRenewalDecisionSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { authorizeAfHomes, resolveAfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { deny, fail, jsonBody, method, subPath } from '../_lib/handler-kit.js';
 import { hashIdentifier } from '../_lib/identifier.js';

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, Spinner, StatusChip } from '@jad/ui';
-import type { RedemptionItem, RedemptionPreview, RedemptionReceipt } from '@jad/contracts';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, Spinner, StatusChip } from '@afhomes/ui';
+import type { RedemptionItem, RedemptionPreview, RedemptionReceipt } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
 import { ApiError } from '../../lib/api/errors';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@jad/ui';
-import type { CmsPage } from '@jad/contracts';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import type { CmsPage } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 import { createCmsPage, getCmsPages, publishCmsPage, updateCmsPage } from './services';
 import styles from './cms.module.css';

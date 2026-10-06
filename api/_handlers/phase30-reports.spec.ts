@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportResponseSchema } from '@jad/contracts';
+import { reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,

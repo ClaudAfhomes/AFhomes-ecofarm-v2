@@ -5,8 +5,8 @@ import {
   buildRecoveryRedirect,
   classifyRecoveryRequestError,
   isValidRecoveryEmail,
-} from '@jad/shared';
-import { Alert, AuthLayout, Button, TextField } from '@jad/ui';
+} from '@afhomes/shared';
+import { Alert, AuthLayout, Button, TextField } from '@afhomes/ui';
 
 import { env } from '../../lib/env';
 import { getSupabaseClient } from '../../lib/supabase';

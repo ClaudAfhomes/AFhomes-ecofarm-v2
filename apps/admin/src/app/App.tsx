@@ -1,11 +1,11 @@
 import { CustomerLookupPage } from '../features/memberships/CustomerLookupPage';
 import { MemberLookupPage } from '../features/memberships/MemberLookupPage';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { staffPortalPath } from '@jad/contracts';
+import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
-import { NotFound } from '@jad/ui';
+import { NotFound } from '@afhomes/ui';
 import { AfHomesDashboardPage } from '../features/afhomes/AfHomesDashboardPage';
 import { AfHomesDepartmentsPage } from '../features/afhomes/AfHomesDepartmentsPage';
 import { AfHomesRoleDetailPage } from '../features/afhomes/AfHomesRoleDetailPage';

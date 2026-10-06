@@ -1,14 +1,14 @@
 /**
  * The single typed API client for the customer portal. Every request goes
  * through here - no ad-hoc `fetch` in a feature - and every response is
- * validated against a `@jad/contracts` schema, so a drifting payload surfaces as
+ * validated against a `@afhomes/contracts` schema, so a drifting payload surfaces as
  * an error instead of silently rendering undefined.
  *
  * Auth: the customer's Supabase access token is attached as
  * `Authorization: Bearer`. `/auth/customer/activate` is unauthenticated and
  * simply sends no header.
  */
-import { listResponseSchema } from '@jad/contracts';
+import { listResponseSchema } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';

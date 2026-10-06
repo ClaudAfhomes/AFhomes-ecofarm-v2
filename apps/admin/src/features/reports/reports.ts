@@ -7,7 +7,7 @@
  * `REPORT_MODULES` gate in `api/_handlers/reports.ts` - the server is
  * authoritative when they disagree.
  */
-import type { AfHomesModuleKey } from '@jad/contracts';
+import type { AfHomesModuleKey } from '@afhomes/contracts';
 
 export type ReportColumn = { key: string; label: string };
 

@@ -15,7 +15,7 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { getRedemptionItems, getRedemptions } from './services';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

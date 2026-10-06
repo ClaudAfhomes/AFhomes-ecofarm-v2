@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { membershipSchema, pointsAccountSchema, type AfHomesPermission } from '@jad/contracts';
+import { membershipSchema, pointsAccountSchema, type AfHomesPermission } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { MembershipActivity } from './MembershipActivity';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';

@@ -21,7 +21,7 @@ import {
   afHomesStaffSchema,
   paymentSchema,
   type AfIdPrefix,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import {
   CUSTOMER,

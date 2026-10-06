@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
-import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@jad/contracts';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';

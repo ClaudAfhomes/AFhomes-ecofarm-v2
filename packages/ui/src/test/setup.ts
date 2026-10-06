@@ -4,9 +4,4 @@ import { afterEach } from 'vitest';
 
 afterEach(() => {
   cleanup();
-  try {
-    localStorage.removeItem('jad:mock:session');
-  } catch {
-    // storage unavailable
-  }
 });

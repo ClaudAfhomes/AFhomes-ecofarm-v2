@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { currentIdForSubject } from './documents.js';
-import { governmentIdTypeSchema } from '@jad/contracts';
+import { governmentIdTypeSchema } from '@afhomes/contracts';
 import {
   canTransitionCustomerApplication,
   canTransitionReservationAgreement,
@@ -15,7 +15,7 @@ import {
   reservationAgreementDecisionSchema,
   type CustomerApplicationStatus,
   type ReservationAgreementStatus,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
 import {

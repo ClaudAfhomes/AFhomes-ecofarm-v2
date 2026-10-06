@@ -15,7 +15,7 @@ import {
   buildOstRegistrationUrl,
   normalizeOstReferralCode,
   submitOstApplicationSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 

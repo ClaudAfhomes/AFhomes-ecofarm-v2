@@ -2,7 +2,7 @@
  * AF Homes Phase 8 OST onboarding API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
- * against `@jad/contracts`. The browser never names a sponsor: submission
+ * against `@afhomes/contracts`. The browser never names a sponsor: submission
  * carries the referral code and review carries no sponsor field at all.
  */
 import {
@@ -21,7 +21,7 @@ import {
   type OstMember,
   type OstReferralCodeIssued,
   type OstReferralCodeRecord,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,

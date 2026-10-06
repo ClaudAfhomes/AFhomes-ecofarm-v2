@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { resolveCustomerCategory } from '@jad/contracts';
-import { addMoney } from '@jad/shared';
+import { resolveCustomerCategory } from '@afhomes/contracts';
+import { addMoney } from '@afhomes/shared';
 /**
  * In-memory Supabase client fake for API handler tests.
  *

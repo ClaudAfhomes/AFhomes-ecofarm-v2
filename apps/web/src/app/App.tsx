@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
-import { NotFound } from '@jad/ui';
+import { NotFound } from '@afhomes/ui';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
 import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';

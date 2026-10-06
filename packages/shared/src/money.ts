@@ -1,4 +1,4 @@
-import { EXACT_DECIMAL_STRING_RE } from '@jad/contracts';
+import { EXACT_DECIMAL_STRING_RE } from '@afhomes/contracts';
 
 /**
  * Money display helpers - DESIGN-SYSTEM.md §9.
@@ -8,7 +8,7 @@ import { EXACT_DECIMAL_STRING_RE } from '@jad/contracts';
  * string for display and never perform arithmetic. No float math anywhere.
  */
 
-/** Exact-decimal money regex lives in `@jad/contracts` (single source, API-SPEC §1.3). */
+/** Exact-decimal money regex lives in `@afhomes/contracts` (single source, API-SPEC §1.3). */
 
 /** Exact-decimal string → integer cents, using BigInt so values never lose precision. */
 function toCents(value: string): bigint {

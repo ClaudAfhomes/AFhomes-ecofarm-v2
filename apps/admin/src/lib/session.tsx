@@ -7,8 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { AfHomesPermission } from '@jad/contracts';
-import { afHomesSessionSchema } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
+import { afHomesSessionSchema } from '@afhomes/contracts';
 import { protectedRequest } from './api/client';
 import { ApiError } from './api/errors';
 import { queryClient } from './query';

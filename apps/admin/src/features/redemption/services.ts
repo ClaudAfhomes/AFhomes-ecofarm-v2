@@ -2,7 +2,7 @@
  * AF Homes redemption API client (staff side).
  *
  * Every call goes through `lib/api/client`, which validates the response against
- * `@jad/contracts`. No ad-hoc `fetch`, and no `any`.
+ * `@afhomes/contracts`. No ad-hoc `fetch`, and no `any`.
  *
  * Nothing here decides authorization: a screen may show a control, and the server
  * is the only thing that decides whether the action is allowed. Nothing here
@@ -22,7 +22,7 @@ import {
   type RedemptionItem,
   type RedemptionPreview,
   type RedemptionReceipt,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 
 import {

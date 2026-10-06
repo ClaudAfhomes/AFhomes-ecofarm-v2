@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { Button, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
 import { confirmDocument, getDocument, getDocumentAccessUrl, runDocumentOcr } from './services';

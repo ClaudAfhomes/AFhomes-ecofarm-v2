@@ -2,7 +2,7 @@
  * AF Homes Phase 12 identity-document API client (staff side).
  *
  * Every call goes through `lib/api/client`, which validates the response
- * against `@jad/contracts`. The binary PUT to a signed upload URL is the one
+ * against `@afhomes/contracts`. The binary PUT to a signed upload URL is the one
  * exception: it is a raw byte transfer, not a JSON API call, and it carries
  * no credentials or session - the URL signature is the authorization.
  */
@@ -16,7 +16,7 @@ import {
   type DocumentUploadGrant,
   type DocumentUploadRequest,
   type IdentityDocument,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,

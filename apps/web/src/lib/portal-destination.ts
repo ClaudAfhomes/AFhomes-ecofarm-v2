@@ -1,4 +1,4 @@
-﻿import type { AuthPortals } from '@jad/contracts';
+﻿import type { AuthPortals } from '@afhomes/contracts';
 
 /** Uses only the server's identity readback, never editable Auth metadata. */
 export function portalDashboard(

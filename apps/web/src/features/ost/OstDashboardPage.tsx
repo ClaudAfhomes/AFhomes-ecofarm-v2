@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, ErrorState, StatusChip } from '@jad/ui';
+import { Button, ErrorState, StatusChip } from '@afhomes/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';

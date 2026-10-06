@@ -197,7 +197,7 @@ Local API: `pnpm exec tsx api/dev-server.ts` (`:3000`; Vite proxies `/api`).
 > manager binary", `pnpm` is not on `PATH` — use `npx pnpm <cmd>` or put a
 > `pnpm` shim on `PATH` (this repo has an untracked `.tmp-bin/pnpm.cmd`).
 
-Single spec: `pnpm --filter @jad/api exec vitest run <path>` (same per workspace).
+Single spec: `pnpm --filter api exec vitest run <path>` (same per workspace).
 
 ## Database integration suite
 
@@ -236,7 +236,7 @@ the migrations assume but never create (`auth.users`, `auth.uid()`, the
   customer onboarding: a hashed, single-use, expiring **token** is issued; the
   customer sets their own password.
 - **Money is exact-decimal text** with a `CHECK` regex on every money/rate
-  column. No float math anywhere — use the `BigInt` helpers from `@jad/shared`
+  column. No float math anywhere — use the `BigInt` helpers from `@afhomes/shared`
   (TypeScript) and `numeric` + `private.money()` (Postgres). `to_char` is
   deliberately unused in the money path.
 - **A sale is a frozen commercial record.** `card_sales` stores
@@ -378,19 +378,19 @@ works, and a test that cannot fail is not a test.** `pnpm test:db:local` and
 
 ## Conventions
 
-- Styling: CSS Modules per component; tokens in `@jad/ui`. `@/*` maps to
+- Styling: CSS Modules per component; tokens in `@afhomes/ui`. `@/*` maps to
   `apps/<app>/src`.
 - Tests colocated as `<target>.spec.ts(x)`. Both apps use
   `renderWithProviders` from `src/test/utils.tsx` (fresh retry-free
   `QueryClient`, `MemoryRouter`, resolved `SessionProvider`). `installMockApi`
-  and the `@jad/mock` package were removed with JAD - do not reintroduce them.
+  and the `@afhomes/mock` package were removed with JAD - do not reintroduce them.
 - API handler tests use the in-memory Supabase fake in
   `api/_lib/testing/` (`supabase-fake.ts`, `fixtures.ts`). It supports unique-key
   enforcement, column defaults, and read-only vs write-only error injection, so
   tests exercise real handler code (real resolver, real Zod, real query chains)
   without a database. It is excluded from the Vercel upload.
 - All HTTP goes through `apps/<app>/src/lib/api/client.ts`
-  (`request`/`requestList`), which validates against `@jad/contracts`. No
+  (`request`/`requestList`), which validates against `@afhomes/contracts`. No
   ad-hoc `fetch` in features.
 - Client route guards are **UX only**; the server is the security boundary.
 - Prettier: `semi`, `singleQuote`, `printWidth: 100`, `trailingComma: all`.
@@ -580,13 +580,13 @@ sanctioned whole-object read — it parses through a `VITE_`-only Zod object, an
 
 ## Known debt
 
-- **Workspace packages are still named `@jad/*`** (`@jad/contracts`,
-  `@jad/shared`, `@jad/ui`, `@jad/config`, plus the `api` and app package
-  names). This is churn debt from the JAD era, deliberately **not** mixed into
-  security or test work. Do not read it as a signal to reintroduce JAD, and do
-  not rename it in a change that also touches authorization — the rename is
-  repo-wide and `vercel.json`'s `includeFiles: "packages/**"` is load-bearing
-  for the deployed function.
+- **Workspace packages were renamed `@jad/*` → `@afhomes/*`** (`@afhomes/contracts`,
+  `@afhomes/shared`, `@afhomes/ui`, `@afhomes/config`, `@afhomes/web`,
+  `@afhomes/admin`, `@afhomes/db-testing`; `api` was already neutral). The rename
+  was deliberately done as one isolated, behavior-free change: never mix a
+  repo-wide rename into work that touches authorization, and never narrow
+  `vercel.json`'s `includeFiles: "packages/**"` — it is load-bearing for the
+  deployed function.
 
 ## Deployment
 
@@ -612,7 +612,7 @@ typechecking.
 
 - `functions["api/router.ts"].includeFiles` **must stay `packages/**`**.
   Narrowing it crashes the deployed function with
-  `ERR_MODULE_NOT_FOUND .../@jad/contracts/src/index.ts`.
+  `ERR_MODULE_NOT_FOUND .../@afhomes/contracts/src/index.ts`.
 - Exactly **one** Vercel Function is discovered: `api/router.ts`. Everything
   under `api/_handlers/` and `api/_lib/` is underscore-prefixed, so Vercel never
   turns it into a function — keep it that way (the Hobby plan caps at 12).
@@ -623,13 +623,13 @@ typechecking.
 - `VITE_WEB_URL`/`VITE_ADMIN_URL` are derived from
   `VERCEL_PROJECT_PRODUCTION_URL`. Do **not** set them in the Vercel env - that
   pins them to one host and breaks preview deployments.
-- `installCommand` is `pnpm install --filter=!@jad/db-testing`, so the initial
+- `installCommand` is `pnpm install --filter=!@afhomes/db-testing`, so the initial
   install covers 8 of 9 workspace projects and never touches
   `embedded-postgres`. Vercel still runs a second, unfiltered install
   (`Scope: all 9 workspace projects`) while processing function outputs — that
   reinstall is Vercel platform behavior, not a repo dependency: nothing in the
-  codebase depends on `@jad/db-testing` (no manifest lists it, the `api/`
-  function imports only `@jad/contracts` and `@jad/shared`, and there are no
+  codebase depends on `@afhomes/db-testing` (no manifest lists it, the `api/`
+  function imports only `@afhomes/contracts` and `@afhomes/shared`, and there are no
   relative imports into `packages/`). The extra install succeeds silently
   because `allowBuilds` permits exactly the two `embedded-postgres` platform
   packages; the native binary is never loaded by the deployed function, which

@@ -6,8 +6,8 @@ import type {
   AfHomesPermission,
   AnalyticsOverview,
   AnalyticsPeriod,
-} from '@jad/contracts';
-import { paymentSchemeLabel } from '@jad/contracts';
+} from '@afhomes/contracts';
+import { paymentSchemeLabel } from '@afhomes/contracts';
 import {
   buttonClassName,
   EmptyState,
@@ -23,8 +23,8 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
-} from '@jad/ui';
-import type { IconName } from '@jad/ui';
+} from '@afhomes/ui';
+import type { IconName } from '@afhomes/ui';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
 import { AfHomesQueueCards } from './AfHomesQueueCards';

@@ -17,10 +17,10 @@ import {
   createCardProductSchema,
   normalizePlanCode,
   updateCardProductSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
-import { compareMoney } from '@jad/shared';
+import { compareMoney } from '@afhomes/shared';
 import {
   audit,
   deny,

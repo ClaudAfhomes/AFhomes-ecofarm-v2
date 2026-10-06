@@ -5,7 +5,7 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { paymentSchemeLabel, recordPaymentSchema } from '@jad/contracts';
+import { paymentSchemeLabel, recordPaymentSchema } from '@afhomes/contracts';
 import {
   Table,
   TableHead,
@@ -21,8 +21,8 @@ import {
   SearchField,
   StatusChip,
   TextField,
-} from '@jad/ui';
-import type { FinanceQueueItem, PaymentType } from '@jad/contracts';
+} from '@afhomes/ui';
+import type { FinanceQueueItem, PaymentType } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { SPOT_CASH_LABEL, formatMoney } from './format';

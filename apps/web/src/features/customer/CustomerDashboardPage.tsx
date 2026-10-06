@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { paymentSchemeLabel } from '@jad/contracts';
+import { paymentSchemeLabel } from '@afhomes/contracts';
 import {
   EmptyState,
   ErrorState,
@@ -8,7 +8,7 @@ import {
   Skeleton,
   StatusChip,
   type StatusTone,
-} from '@jad/ui';
+} from '@afhomes/ui';
 
 import { useCustomerLedgerQuery, useCustomerMembershipQuery, useCustomerProfileQuery, useCustomerPointsQuery } from './queries';
 import { isForbidden, isNotFound } from './http';

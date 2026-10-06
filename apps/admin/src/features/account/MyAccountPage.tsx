@@ -12,7 +12,7 @@ import {
   PasswordField,
   StatusChip,
   TextField,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';

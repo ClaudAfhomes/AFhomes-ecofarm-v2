@@ -6,7 +6,7 @@
  * under `/admin/*` and permission-gated - the distinction is identity entry
  * plus authorization, never duplicated screens.
  */
-import { isAdminPortalRole, isStaffPortalRole, type AuthPortals } from '@jad/contracts';
+import { isAdminPortalRole, isStaffPortalRole, type AuthPortals } from '@afhomes/contracts';
 
 import { env } from './env';
 

@@ -34,7 +34,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { customerActivationRequestSchema } from '@jad/contracts';
+import { customerActivationRequestSchema } from '@afhomes/contracts';
 
 import { fail, isoOrNull, jsonBody, type Db, mapRpcError, subPath } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';

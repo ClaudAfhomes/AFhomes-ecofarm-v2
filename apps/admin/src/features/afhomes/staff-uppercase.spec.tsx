@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { AfHomesStaffPage } from './AfHomesStaffPage';
-import { afHomesRoleSchema } from '@jad/contracts';
+import { afHomesRoleSchema } from '@afhomes/contracts';
 import { getAfHomesRoles } from './services';
 
 vi.mock('./services', () => ({

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@jad/ui';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
 import { createAfHomesDepartment, getAfHomesDepartments } from './services';
 
 export function AfHomesDepartmentsPage() {

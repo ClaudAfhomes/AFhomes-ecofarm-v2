@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { afHomesSessionSchema, staffAccountSetupSchema } from '@jad/contracts';
-import type { StaffAccountSetup } from '@jad/contracts';
-import { validateRecoveryPassword } from '@jad/shared';
-import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
+import { afHomesSessionSchema, staffAccountSetupSchema } from '@afhomes/contracts';
+import type { StaffAccountSetup } from '@afhomes/contracts';
+import { validateRecoveryPassword } from '@afhomes/shared';
+import { Alert, AuthLayout, Button, PasswordField, TextField } from '@afhomes/ui';
 
 import { protectedRequest as request } from '../../lib/api/client';
 import { getSupabaseClient } from '../../lib/supabase';

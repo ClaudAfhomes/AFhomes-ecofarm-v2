@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { memberLookupSchema, CUSTOMER_CATEGORY_LABELS } from '@jad/contracts';
-import { Button, PageHeader, SearchField, ErrorState, EmptyState, StatusChip } from '@jad/ui';
+import { memberLookupSchema, CUSTOMER_CATEGORY_LABELS } from '@afhomes/contracts';
+import { Button, PageHeader, SearchField, ErrorState, EmptyState, StatusChip } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';

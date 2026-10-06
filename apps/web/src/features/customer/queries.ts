@@ -17,7 +17,7 @@ import {
   getCustomerProfile,
   reissueCardCredentials,
 } from './services';
-import type { CustomerActivationRequest } from '@jad/contracts';
+import type { CustomerActivationRequest } from '@afhomes/contracts';
 
 /** The customer's own record. Also the ownership check: a 403 here means the
  *  signed-in Auth user is not a customer at all. */

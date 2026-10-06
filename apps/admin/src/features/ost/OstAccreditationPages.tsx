@@ -8,8 +8,8 @@ import {
   officialOstFormDefaults,
   parseOfficialOstFields,
   submitOstRenewalSchema,
-} from '@jad/contracts';
-import { Button, ErrorState, OstOfficialFields, PageHeader, StatusChip } from '@jad/ui';
+} from '@afhomes/contracts';
+import { Button, ErrorState, OstOfficialFields, PageHeader, StatusChip } from '@afhomes/ui';
 import {
   getOstSponsors,
   registerOfficialOst,

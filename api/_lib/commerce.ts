@@ -8,15 +8,15 @@
  * and are re-asserted against the RPC behaviour in the handler tests.
  *
  * Money is an exact-decimal STRING end to end. Arithmetic goes through
- * `@jad/shared`, which uses BigInt centavo - no float ever participates.
+ * `@afhomes/shared`, which uses BigInt centavo - no float ever participates.
  */
-import { addMoney, compareMoney, divideMoneyExact, multiplyMoney, subtractMoney } from '@jad/shared';
+import { addMoney, compareMoney, divideMoneyExact, multiplyMoney, subtractMoney } from '@afhomes/shared';
 import type {
   PaymentScheme,
   PaymentStatus,
   SaleFinancialSummary,
   SpotCashState,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { SPOT_CASH_DAYS } from './constants.js';
 
@@ -254,7 +254,7 @@ const SCHEME_DEFAULTS = {
 
 /**
  * Exact division of an exact-decimal amount by a positive integer month count.
- * Single implementation lives in `@jad/shared` (also used for display math);
+ * Single implementation lives in `@afhomes/shared` (also used for display math);
  * it throws rather than rounding, so an inexact schedule is a loud error.
  */
 function divideSchedule(amount: string, months: number): string {

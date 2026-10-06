@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@jad/ui';
-import type { AfHomesRole } from '@jad/contracts';
+import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
+import type { AfHomesRole } from '@afhomes/contracts';
 import { createAfHomesRole, getAfHomesRoles, updateAfHomesRole } from './services';
 import {
   AfHomesRoleFormDialog,

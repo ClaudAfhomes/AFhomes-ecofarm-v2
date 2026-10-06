@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { analyticsOverviewSchema } from '@jad/contracts';
+import { analyticsOverviewSchema } from '@afhomes/contracts';
 import {
   STAFF2,
   TOKEN,

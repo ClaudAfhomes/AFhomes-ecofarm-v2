@@ -7,7 +7,7 @@
  * the relationship id they were created under, so a later correction never
  * rewrites past attribution.
  */
-import { createReferralSchema, correctReferralSchema, hierarchyAllowsUpline } from '@jad/contracts';
+import { createReferralSchema, correctReferralSchema, hierarchyAllowsUpline } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

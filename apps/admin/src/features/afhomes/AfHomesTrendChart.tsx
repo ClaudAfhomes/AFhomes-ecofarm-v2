@@ -9,9 +9,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addMoney, formatMoney } from '@jad/shared';
-import type { SalesTrendGranularity } from '@jad/contracts';
-import { EmptyState, ErrorState, Icon, Spinner } from '@jad/ui';
+import { addMoney, formatMoney } from '@afhomes/shared';
+import type { SalesTrendGranularity } from '@afhomes/contracts';
+import { EmptyState, ErrorState, Icon, Spinner } from '@afhomes/ui';
 
 import { useAfHomesSalesTrend } from './useAfHomesSalesTrend';
 import styles from './AfHomesDashboardPage.module.css';

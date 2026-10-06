@@ -6,8 +6,8 @@ import {
   ostAccreditationRecordsSchema,
   ostMutationResultSchema,
   submitOstRenewalSchema,
-} from '@jad/contracts';
-import { Button, ErrorState, PageHeader } from '@jad/ui';
+} from '@afhomes/contracts';
+import { Button, ErrorState, PageHeader } from '@afhomes/ui';
 import { useCustomerSession } from '../../lib/customer-session';
 import { request, requestList } from '../../lib/api/client';
 import { getOstMe } from './services';

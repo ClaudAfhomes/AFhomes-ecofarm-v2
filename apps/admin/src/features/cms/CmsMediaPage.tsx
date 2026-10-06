@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton } from '@jad/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton } from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import { deleteCmsMedia, getCmsMedia, uploadCmsMedia } from './services';
 import styles from './cms.module.css';

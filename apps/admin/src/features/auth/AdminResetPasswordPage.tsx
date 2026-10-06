@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { validateRecoveryPassword } from '@jad/shared';
-import { Alert, AuthLayout, Button, PasswordField } from '@jad/ui';
+import { validateRecoveryPassword } from '@afhomes/shared';
+import { Alert, AuthLayout, Button, PasswordField } from '@afhomes/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
 import styles from './AdminLoginPage.module.css';
