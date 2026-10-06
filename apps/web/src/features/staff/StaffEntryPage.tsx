@@ -142,10 +142,10 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
     <main>
       <AuthLayout
         eyebrow="AF Homes Ecofarm"
-        title={isAdmin ? 'Administration Login' : 'Staff Login'}
+        title={isAdmin ? 'Admin Login' : 'Staff Login'}
         lead={
           isAdmin
-            ? 'Restricted to Super Admin and Admin. You will continue to the staff console.'
+            ? 'Super Admin and Admin only.'
             : 'Finance, HR, operations and the sales network. You will continue to the staff console.'
         }
         brandTitle="Grow with the farm you own a card in."

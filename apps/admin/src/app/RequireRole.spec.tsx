@@ -30,17 +30,17 @@ function LocationProbe() {
 describe('admin authentication routes', () => {
   it('renders the administration login page at /admin/login', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
-    expect(await screen.findByRole('heading', { name: 'Administration Login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
   });
 
   it('redirects an unauthenticated /admin request to the administration login page', async () => {
     renderWithProviders(<App />, { route: '/admin' });
-    expect(await screen.findByRole('heading', { name: 'Administration Login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
   });
 
   it('redirects an unauthenticated nested admin route to the same login page', async () => {
     renderWithProviders(<App />, { route: '/admin/products' });
-    expect(await screen.findByRole('heading', { name: 'Administration Login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
   });
 
   it('redirects an authenticated Super Admin away from login to the dashboard', async () => {

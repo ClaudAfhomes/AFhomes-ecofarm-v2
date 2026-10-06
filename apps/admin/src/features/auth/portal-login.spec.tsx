@@ -138,10 +138,10 @@ async function signInAs(email = 'fin@afhomes.test', password = 'Password123!') {
 }
 
 describe('portal entries render', () => {
-  it('serves the Administration Login at /admin/login with no staff links', async () => {
+  it('serves the Admin Login at /admin/login with no staff links', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
     expect(
-      await screen.findByRole('heading', { name: 'Administration Login' }),
+      await screen.findByRole('heading', { name: 'Admin Login' }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /staff login/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /customer login/i })).not.toBeInTheDocument();

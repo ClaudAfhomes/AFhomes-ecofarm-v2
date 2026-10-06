@@ -79,7 +79,7 @@ describe('isAdminOriginMismatch', () => {
 
 describe('staff entry routes', () => {
   it.each([
-    ['/admin/login', 'Administration Login'],
+    ['/admin/login', 'Admin Login'],
     ['/staff/login', 'Staff Login'],
   ])('renders %s outside marketing chrome', async (route, title) => {
     renderWithProviders(<App />, { route });
