@@ -14,7 +14,16 @@ import { describe, expect, it } from 'vitest';
 const MIGRATION = fileURLToPath(
   new URL('../../supabase/migrations/20260928000001_afhomes_phase4_redemption.sql', import.meta.url),
 );
-const sql = readFileSync(MIGRATION, 'utf8');
+/**
+ * The migration, normalized to LF.
+ *
+ * The lock-order assertions below locate fragments containing a literal `\n`,
+ * and the comment stripper drops a line only when it starts with `--`. Both are
+ * sensitive to the checkout's line endings: on CRLF the fragments never appear
+ * in the body, so a correct lock order reads as a missing one. Normalizing once,
+ * at the read, keeps every assertion below line-ending agnostic.
+ */
+const sql = readFileSync(MIGRATION, 'utf8').replace(/\r\n?/g, '\n');
 
 /** The file with every `--` comment line removed, so prose cannot satisfy a
  *  structural assertion (or trip one). */

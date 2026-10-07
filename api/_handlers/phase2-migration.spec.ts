@@ -37,13 +37,23 @@ const MIGRATIONS = path.resolve(
   '../../supabase/migrations',
 );
 
+/**
+ * Read one migration, normalized to LF.
+ *
+ * Normalization is load-bearing, not cosmetic: the comment stripper below
+ * matches `--.*$`, and on a CRLF checkout every line ends in a `\r` that `.`
+ * cannot consume, so `$` never matches, the comment survives, and prose like
+ * "found by executing this on a real PostgreSQL" is misread as executable code.
+ * Normalizing once, at the read, keeps every assertion below line-ending
+ * agnostic.
+ */
 const read = (prefix: string) => {
   const file = fs
     .readdirSync(MIGRATIONS)
     .filter((n) => n.startsWith(prefix) && n.endsWith('.sql'))
     .sort()[0];
   if (!file) throw new Error(`no migration starting with ${prefix}`);
-  return fs.readFileSync(path.join(MIGRATIONS, file), 'utf8');
+  return fs.readFileSync(path.join(MIGRATIONS, file), 'utf8').replace(/\r\n?/g, '\n');
 };
 
 const schema = read('20260927000001');
