@@ -82,8 +82,8 @@ describe('exact decimal money', () => {
 });
 
 describe('afHomesModuleKeySchema', () => {
-  it('exposes the 24 existing keys plus four narrowly scoped Phase 6 CMS keys plus bulk import', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(29);
+  it('exposes the 24 existing keys plus four CMS keys plus bulk import plus three communications keys', () => {
+    expect(afHomesModuleKeySchema.options).toHaveLength(32);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
@@ -109,6 +109,7 @@ describe('afHomesModuleKeySchema', () => {
       'operations.',
       'governance.',
       'cms.',
+      'communications.',
     ]) {
       expect(
         keys.some((k) => k.startsWith(group)),

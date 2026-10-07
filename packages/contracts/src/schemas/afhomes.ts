@@ -44,6 +44,9 @@ export const afHomesModuleKeySchema = z.enum([
   'cms.media',
   'cms.settings',
   'cms.history',
+  'communications.messages',
+  'communications.announcements',
+  'communications.notifications',
 ]);
 export type AfHomesModuleKey = z.infer<typeof afHomesModuleKeySchema>;
 

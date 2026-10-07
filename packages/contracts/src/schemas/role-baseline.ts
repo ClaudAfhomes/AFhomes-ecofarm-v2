@@ -12,7 +12,7 @@
  * Rules this table obeys (each pinned by `role-baseline.spec.ts` in this
  * package and by the migration's own CHECKs):
  *
- * - Only the 24 keys of `afHomesModuleKeySchema` appear. No new vocabulary.
+ * - Only the 32 keys of `afHomesModuleKeySchema` appear. No new vocabulary.
  * - `canDelete` is false everywhere: no handler exposes a delete endpoint,
  *   so a delete grant would authorize nothing and only widen the surface.
  * - `canCreate`/`canUpdate` imply `canView` (the database CHECK enforces it).
@@ -36,6 +36,12 @@
  *   create/update grant would authorize nothing.
  * - `operations.catalog` create/update (catalog maintenance) belongs to
  *   `admin` only. `employee` reads the catalog in order to redeem.
+ * - `communications.*` follows the approved communications matrix: every
+ *   operational role may send a message and read/write their own
+ *   notifications; only `admin` may write announcements; group management
+ *   (`communications.messages` update) belongs to `admin` plus the three
+ *   management tiers. `canDelete` stays false - messages, announcements and
+ *   notifications have no delete endpoint, only archive.
  */
 import type { AfHomesModuleKey } from './afhomes.js';
 
@@ -135,6 +141,9 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     vcu('organization.roles'),
     vcu('organization.staff'),
     v('governance.audit'),
+    vcu('communications.messages'),
+    vcu('communications.announcements'),
+    vu('communications.notifications'),
   ],
   finance: [
     v('dashboard.view'),
@@ -145,8 +154,18 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     v('sales.customers'),
     v('sales.card_sales'),
     v('sales.card_plans'),
+    vc('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
   ],
-  hr: [v('dashboard.view'), vcu('organization.staff'), vc('organization.departments')],
+  hr: [
+    v('dashboard.view'),
+    vcu('organization.staff'),
+    vc('organization.departments'),
+    vc('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
+  ],
   vice_director: [
     v('dashboard.view'),
     vc('sales.card_sales'),
@@ -158,6 +177,9 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     v('network.ost_members'),
     v('network.ost_registrations'),
     v('network.commissions'),
+    vcu('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
   ],
   senior_sales_manager: [
     v('dashboard.view'),
@@ -168,6 +190,9 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     v('network.genealogy'),
     v('network.referrals'),
     v('network.commissions'),
+    vcu('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
   ],
   sales_manager: [
     v('dashboard.view'),
@@ -180,6 +205,9 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     v('network.ost_members'),
     v('network.ost_registrations'),
     v('network.commissions'),
+    vcu('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
   ],
   ost: [
     v('dashboard.view'),
@@ -190,8 +218,18 @@ export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[
     v('network.commissions'),
     v('network.referrals'),
     v('network.genealogy'),
+    vc('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
   ],
-  employee: [v('dashboard.view'), vc('operations.redemption'), v('operations.catalog')],
+  employee: [
+    v('dashboard.view'),
+    vc('operations.redemption'),
+    v('operations.catalog'),
+    vc('communications.messages'),
+    v('communications.announcements'),
+    vu('communications.notifications'),
+  ],
 };
 
 /** Flat row count, for reporting only. Never assert behaviour from a count. */
