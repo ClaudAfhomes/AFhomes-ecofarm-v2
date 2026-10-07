@@ -431,6 +431,10 @@ const BASELINE_TABLES = [
   'communication_announcement_audiences',
   'communication_announcement_recipients',
   'notifications',
+  // Section 58 creates a department so the `department` audience kind has a real
+  // target. It carries no run prefix, so only the pre-run row count can catch one
+  // that survived.
+  'departments',
 ] as const;
 const baseline = new Map<string, number>();
 
@@ -9989,6 +9993,7 @@ async function main(): Promise<void> {
     {
       const commAnnouncements = modules['communications.announcements']!.id;
       const commMessages = modules['communications.messages']!.id;
+      const commNotifications = modules['communications.notifications']!.id;
 
       // One extra principal, and one DENY-ONLY restriction on it. The employee
       // role holds communications.announcements view=true, so the restriction
@@ -10026,6 +10031,33 @@ async function main(): Promise<void> {
             [actor, conversation],
           )
         ).rows.map((r) => r.sequence);
+      /**
+       * Visible message IDs, newest first: the id-keyed twin of
+       * `visibleSequences`. An exclusion has to be proven against the identifier
+       * the row actually carries, not against a different kind of value.
+       */
+      const visibleMessageIds = async (actor: string, conversation: string) =>
+        (
+          await db.query<{ id: string }>(
+            `select id from public.communication_visible_messages($1,$2) order by sequence desc`,
+            [actor, conversation],
+          )
+        ).rows.map((r) => r.id);
+      /**
+       * Two real PostgreSQL sessions running one statement each at the same
+       * time - the section 50 idiom. `communication_create_conversation` takes a
+       * lock the second caller must actually wait on, and re-running the same
+       * calls one after another never exercises that wait.
+       */
+      const concurrent = async (sql: string, args: unknown[][]) => {
+        const clients = args.map(() => new Client({ connectionString: target.url }));
+        try {
+          await Promise.all(clients.map((c) => c.connect()));
+          return await Promise.all(clients.map((c, i) => c.query(sql, args[i])));
+        } finally {
+          await Promise.all(clients.map((c) => c.end()));
+        }
+      };
       /** unread for one conversation, or null when the caller has no open interval. */
       const unreadFor = async (actor: string, conversation: string) => {
         const rows = await db.query<{ unread: string; total: string }>(
@@ -10349,22 +10381,23 @@ async function main(): Promise<void> {
         ]),
         '2',
       );
-      const gapMessage = (
-        await one<{ id: string }>(
-          `select id from public.communication_messages
-          where conversation_id = $1 and sequence = 2`,
-          [group],
-        )
-      ).id;
+      // This compared a list of SEQUENCE strings against a message UUID. The two can
+      // never be equal, so the assertion passed whatever the database did: a
+      // false pass that proved only that a string is not a uuid. Both sides are
+      // ids now, read back through the same RPC a client uses, so a member that
+      // widens its own window over a closed interval fails here.
+      const preRemoval = await messageId(group, '1');
+      const gapMessage = await messageId(group, '2');
+      const afterRemoval = await visibleMessageIds(financeStaff, group);
       eq(
-        'a removed member still sees what they could read while they were in',
-        (await visibleSequences(financeStaff, group)).join(','),
-        '1',
+        'a removed member still sees exactly what they could read while they were in',
+        afterRemoval.join(','),
+        preRemoval,
       );
-      eq(
+      check(
         'a removed member cannot see the message sent after they left',
-        (await visibleSequences(financeStaff, group)).includes(gapMessage) ? 'visible' : 'hidden',
-        'hidden',
+        !afterRemoval.includes(gapMessage),
+        `visible=${afterRemoval.join(',')}`,
       );
       eq(
         'a removed member has no unread row for the conversation at all',
@@ -10398,10 +10431,17 @@ async function main(): Promise<void> {
         ]),
         '3',
       );
+      const postReadd = await messageId(group, '3');
+      const afterReadd = await visibleMessageIds(financeStaff, group);
       eq(
         'the boundary is exact: the gap message stays invisible, the new one is visible',
-        (await visibleSequences(financeStaff, group)).join(','),
-        '3,1',
+        afterReadd.join(','),
+        `${postReadd},${preRemoval}`,
+      );
+      check(
+        '...naming the gap message itself: it is still not among the visible ids',
+        !afterReadd.includes(gapMessage),
+        `visible=${afterReadd.join(',')}`,
       );
       // Sequence 1 is counted because this member's read marker belongs to the
       // NEW interval (default -1); sequence 2 is excluded because it falls in the
@@ -11010,6 +11050,246 @@ async function main(): Promise<void> {
         '0',
       );
 
+      /* ---------- 13: a TRULY concurrent direct create, from both sides ---------- */
+      // Block 6 is sequential, so it only ever proved the idempotent return. It
+      // cannot prove the thing the function is written for: two sessions that
+      // both pass the existence check before either inserts, which is exactly
+      // what the pg_advisory_xact_lock on the sorted pair exists to serialise.
+      // One connection each, both statements in flight, DIFFERENT request ids,
+      // so the durable-request registry cannot make the second call a replay.
+      const raceSql = `select public.communication_create_conversation($1,'direct',null,$2::uuid[],$3) as out`;
+      const raced = await concurrent(raceSql, [
+        [adminStaff, [peer], uuidFor('comm:req:race:a')],
+        [peer, [adminStaff], uuidFor('comm:req:race:b')],
+      ]);
+      const raceA = raced[0]!.rows[0]!.out;
+      const raceB = raced[1]!.rows[0]!.out;
+      eq('two overlapping direct creates return the SAME conversation', raceA, raceB);
+      eq(
+        '...and exactly one conversation row exists for that pair',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.communication_conversations
+             where kind = 'direct'
+               and direct_lowest = least($1::uuid,$2::uuid)
+               and direct_highest = greatest($1::uuid,$2::uuid)`,
+            [adminStaff, peer],
+          )
+        ).n,
+        1,
+      );
+      // Both outcomes must be RECORDED against the one conversation. One of the
+      // two recorded nothing and the loser silently became a no-op instead of an
+      // answer; two different ids here would mean the pair was not serialized.
+      eq(
+        'both concurrent requests recorded a completed result against one conversation',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from private.mutation_requests
+             where actor_id = any($1::uuid[]) and request_id = any($2::uuid[])
+               and result_identifier = $3::uuid`,
+            [
+              [adminStaff, peer],
+              [uuidFor('comm:req:race:a'), uuidFor('comm:req:race:b')],
+              raceA,
+            ],
+          )
+        ).n,
+        2,
+      );
+
+      /* ---------- 14: audience filtering per KIND, and the union that dedupes ---------- */
+      // Only `all_staff` had been executed, and an audience filter that ignored
+      // its kind entirely would still have passed that one case. Every kind is
+      // executed here against an EXACT expected set, so a filter that leaked
+      // extra staff - or dropped a member - fails. One department holds two of
+      // the staff these announcements may reach; every other principal, the
+      // publisher and super_admin included, is outside it, so the expected set is
+      // never vacuously the whole company.
+      const audienceDept = uuidFor('comm:dept');
+      await db.query('insert into public.departments (id, code, name) values ($1,$2,$3)', [
+        audienceDept,
+        `C${RUN.replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase()}`,
+        `Comms Audience ${RUN}`,
+      ]);
+      await db.query('update public.staff_users set department_id = $1 where id = any($2::uuid[])', [
+        audienceDept,
+        [financeStaff, ostStaff],
+      ]);
+      const setOf = (ids: string[]) => [...ids].sort().join(',');
+      /**
+       * The publish filter's eligible population, resolved INDEPENDENTLY of the
+       * announcement: active staff, an active role, the view action,
+       * super_admin-by-slug, minus the deny-only restriction. Section 42 creates
+       * a second active finance principal, so a role audience cannot be pinned
+       * to one literal id - but it can still be pinned to an EXACT set, and a
+       * filter that ignored the audience kind would return this whole population.
+       */
+      const eligibleForAnnouncements = async (extra = '', params: unknown[] = []) =>
+        (
+          await db.query<{ staff_id: string }>(
+            `select s.id as staff_id from public.staff_users s
+               join public.staff_role_assignments ra on ra.staff_id = s.id
+               join public.roles r on r.id = ra.role_id and r.is_active
+               join public.modules mo on mo.key = 'communications.announcements' and mo.is_active
+               left join public.role_permissions rp on rp.role_id = r.id and rp.module_id = mo.id
+               left join public.staff_permission_restrictions deny
+                      on deny.staff_id = s.id and deny.module_id = mo.id
+              where s.status = 'active'
+                and (r.slug = 'super_admin' or coalesce(rp.can_view, false))
+                and not coalesce(deny.deny_view, false) ${extra}`,
+            params,
+          )
+        ).rows.map((r) => r.staff_id);
+      const publishAudience = async (label: string, audiences: unknown[]) => {
+        const announcement = uuidFor(`comm:announcement:${label}`);
+        await callUuid(`public.communication_save_announcement($1,$2,$3,$4,$5::jsonb)`, [
+          adminStaff,
+          announcement,
+          `Audience ${label}`,
+          'An announcement whose audience is not every active staff member.',
+          JSON.stringify(audiences),
+        ]);
+        const count = await callInt(`public.communication_publish_announcement($1,$2,$3)`, [
+          adminStaff,
+          announcement,
+          uuidFor(`comm:req:publish:${label}`),
+        ]);
+        return { announcement, count, recipients: await announcementRecipients(announcement) };
+      };
+
+      const byRole = await publishAudience('role', [{ kind: 'role', roleSlug: 'finance' }]);
+      const financeHolders = await eligibleForAnnouncements('and r.slug = $1', ['finance']);
+      eq(
+        'a role audience freezes EXACTLY the active holders of that role',
+        setOf(byRole.recipients),
+        setOf(financeHolders),
+      );
+      eq('...and publish reports that same set size', byRole.count, financeHolders.length);
+      const allEligible = await eligibleForAnnouncements();
+      check(
+        '...and that set is a strict, non-empty subset of every eligible staff member',
+        financeHolders.length > 0 && financeHolders.length < allEligible.length,
+        `role=${financeHolders.length} all=${allEligible.length}`,
+      );
+
+      const byDepartment = await publishAudience('department', [
+        { kind: 'department', departmentId: audienceDept },
+      ]);
+      eq(
+        "a department audience freezes EXACTLY that department's active staff",
+        setOf(byDepartment.recipients),
+        setOf([financeStaff, ostStaff]),
+      );
+      eq(
+        '...and reaches neither the publisher nor super_admin',
+        byDepartment.recipients.filter((r) => r === adminStaff || r === superStaff).length,
+        0,
+      );
+
+      const byStaff = await publishAudience('staff', [{ kind: 'staff', staffId: ostStaff }]);
+      eq(
+        'an explicit staff audience freezes EXACTLY that one member',
+        setOf(byStaff.recipients),
+        ostStaff,
+      );
+
+      // The overlap the union exists for: one member reachable through two
+      // audience rows must be frozen ONCE and notified ONCE, not twice.
+      const overlapping = await publishAudience('overlap', [
+        { kind: 'department', departmentId: audienceDept },
+        { kind: 'staff', staffId: financeStaff },
+      ]);
+      eq(
+        'an overlapping audience deduplicates to the union, not the sum',
+        setOf(overlapping.recipients),
+        setOf([financeStaff, ostStaff]),
+      );
+      eq('...and publish reports the deduplicated size', overlapping.count, 2);
+      eq(
+        '...delivering exactly one notification to the member reachable twice',
+        await notificationCount(financeStaff, overlapping.announcement),
+        1,
+      );
+      eq(
+        '...and one to the member reachable once',
+        await notificationCount(ostStaff, overlapping.announcement),
+        1,
+      );
+
+      /* ---------- 15: the read RPCs refuse a principal without the permission ---------- */
+      // The permission gate on these two was read in the file, never executed,
+      // and every call above came from a principal that holds the view.
+      await db.query(`select public.communication_send_message($1,$2,$3,$4)`, [
+        financeStaff,
+        directPeer,
+        'read-gate probe',
+        uuidFor('comm:req:gate:1'),
+      ]);
+      const gateSequence = (
+        await one<{ sequence: string }>(
+          `select sequence::text as sequence from public.communication_messages
+           where conversation_id = $1 order by sequence desc limit 1`,
+          [directPeer],
+        )
+      ).sequence;
+      const gateNotification = await notificationFor(peer, await messageId(directPeer, gateSequence));
+      check('the probe left the member one unread notification to test', gateNotification !== null);
+      // Blocks 1 and 2 already marked this member's earlier notifications read,
+      // so the refusal is proven by the count being UNCHANGED, not by zero.
+      const readBefore = (
+        await one<{ n: number }>(
+          `select count(*)::int as n from public.notifications
+           where recipient_staff_id = $1 and read_at is not null`,
+          [peer],
+        )
+      ).n;
+      await deny(peer, commNotifications);
+      const refusedOne = await throws(
+        'communication_mark_notification_read refuses an actor without the view permission',
+        () =>
+          db.query(`select public.communication_mark_notification_read($1,$2)`, [
+            peer,
+            gateNotification,
+          ]),
+      );
+      check(
+        '...by the permission, not by ownership of the row',
+        refusedOne.includes('MUTATION_FORBIDDEN'),
+        refusedOne,
+      );
+      const refusedAll = await throws(
+        'communication_mark_all_notifications_read refuses an actor without the view permission',
+        () => db.query(`select public.communication_mark_all_notifications_read($1,null)`, [peer]),
+      );
+      check(
+        '...and mark-all is refused the same way',
+        refusedAll.includes('MUTATION_FORBIDDEN'),
+        refusedAll,
+      );
+      eq('neither refused call moved the target read_at', await readAt(gateNotification), null);
+      eq(
+        "...nor changed how many of this member's notifications are read",
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.notifications
+             where recipient_staff_id = $1 and read_at is not null`,
+            [peer],
+          )
+        ).n,
+        readBefore,
+      );
+      await undeny(peer, commNotifications);
+      await db.query(`select public.communication_mark_notification_read($1,$2)`, [
+        peer,
+        gateNotification,
+      ]);
+      eq(
+        'the same call succeeds once the permission is restored',
+        await readAt(gateNotification),
+        'read',
+      );
+
       // Every synthetic row this section wrote, removed here and again in the
       // suite cleanup. Reverse foreign-key order: notifications and recipients
       // reference staff and announcements, announcements are referenced by both,
@@ -11042,6 +11322,11 @@ async function main(): Promise<void> {
       ]) {
         await db.query(statement, [commIds]);
       }
+      // The audience rows above are the only thing holding this department - its
+      // foreign key is ON DELETE RESTRICT - so it goes after them and not one
+      // statement earlier. `staff_users.department_id` is SET NULL, so dropping
+      // the department cannot strand a synthetic staff member.
+      await db.query('delete from public.departments where id = $1', [audienceDept]);
     }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
