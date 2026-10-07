@@ -26,10 +26,18 @@ const MIGRATIONS = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../supabase/migrations',
 );
-const sql = fs.readFileSync(
-  path.join(MIGRATIONS, '20261031000001_afhomes_communications_foundation.sql'),
-  'utf8',
-);
+const sql = fs
+  .readFileSync(
+    path.join(MIGRATIONS, '20261031000001_afhomes_communications_foundation.sql'),
+    'utf8',
+  )
+  // Normalise CRLF FIRST. This checkout has core.autocrlf=true, so the file
+  // arrives with \r\n. In JS `.` does not match `\r` and `$` without the `m`
+  // flag only matches end-of-string, so a `/--.*$/` stripper silently matches
+  // NOTHING on CRLF: `code` kept every comment and this file's assertions
+  // passed or failed depending on how git happened to check the file out.
+  // Same normalisation the phase 2/3/4 migration specs already do.
+  .replace(/\r\n?/g, '\n');
 /** SQL with `--` line comments stripped, so assertions judge code, not prose. */
 const code = sql
   .split('\n')
@@ -696,6 +704,16 @@ describe('every mutating entry point re-validates the actor in SQL before writin
     // Spelled out so the failure reads as the defect it is.
     expect(code, 'no `set <alias>.` SET target may exist').not.toMatch(
       /\bupdate\s+(?:public\.)?(\w+)\s+\1\s+set\s+\1\s*\./i,
+    );
+    // These two comments are what makes the guard above readable, and Phase 5
+    // was burned by exactly this: a regex matching a comment that DOCUMENTED
+    // the old defect, which invited deleting the comment to go green. Assert
+    // they survive, so the fix above stays comment-blind instead.
+    expect(sql, 'the comment explaining the FIRST-call defect must survive').toContain(
+      '(`set n.read_at`) on the FIRST call',
+    );
+    expect(sql, 'the comment explaining bare SET targets must survive').toContain(
+      'Bare SET target again: `set n.read_at` is a syntax error',
     );
   });
 
