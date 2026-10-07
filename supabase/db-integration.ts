@@ -4768,18 +4768,20 @@ async function main(): Promise<void> {
     // is "the file says the right thing and the database does not" - for
     // example a runner that skipped the file, or a hand-edited row.
     {
-      // Counts include the bulk-import grant: migration 20261019000002 gives
-      // the Admin role one governance.customer_import row (view/create/update,
-      // never delete), so admin holds 21 of 71 total rows.
+      // Counts include the bulk-import grant (migration 20261019000002 gives
+      // the Admin role one governance.customer_import row, view/create/update,
+      // never delete) and the communications grants (migration 20261031000001
+      // gives every operational role three communications.* rows), so admin
+      // holds 24 of 95 total rows.
       const expectedCounts: Record<string, number> = {
-        admin: 21,
-        finance: 8,
-        hr: 3,
-        vice_director: 10,
-        senior_sales_manager: 8,
-        sales_manager: 10,
-        ost: 8,
-        employee: 3,
+        admin: 24,
+        finance: 11,
+        hr: 6,
+        vice_director: 13,
+        senior_sales_manager: 11,
+        sales_manager: 13,
+        ost: 11,
+        employee: 6,
         customer: 0,
         super_admin: 0,
       };
@@ -4801,8 +4803,8 @@ async function main(): Promise<void> {
       }
       const total = [...counted.values()].reduce((sum, n) => sum + n, 0);
       check(
-        'the baseline installs 71 rows in total and no other role holds rows',
-        total === 71,
+        'the baseline installs 95 rows in total and no other role holds rows',
+        total === 95,
         `total=${total}`,
       );
 
@@ -4900,15 +4902,16 @@ async function main(): Promise<void> {
         JSON.stringify(res),
       );
 
-      // Idempotency: re-applying the real migration file changes nothing
-      // (the import grant from 20261019000002 is a different row and survives).
+      // Idempotency: re-applying BOTH real baseline files changes nothing (the
+      // import grant from 20261019000002 is a different row and survives).
       await db.query(readMigration('20260930000001_afhomes_role_permission_baseline.sql'));
+      await db.query(readMigration('20261031000001_afhomes_communications_foundation.sql'));
       const recount = (
         await db.query<{ n: number }>('select count(*)::int as n from public.role_permissions')
       ).rows[0]!.n;
       check(
-        're-applying the baseline migration leaves exactly 71 rows',
-        recount === 71,
+        're-applying the baseline migrations leaves exactly 95 rows',
+        recount === 95,
         `count=${recount}`,
       );
     }
