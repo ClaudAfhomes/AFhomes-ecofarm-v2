@@ -1,5 +1,5 @@
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
@@ -43,7 +43,12 @@ export function OstReferralCodesPage() {
   });
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
-  const codes = useQuery({ queryKey: ['ost', 'my-codes', onBehalf ? sponsorStaffId : 'self'], queryFn: () => getMyReferralCodes(onBehalf ? sponsorStaffId : undefined), enabled: !onBehalf || Boolean(sponsorStaffId) });
+  const codes = useQuery({
+    queryKey: ['ost', 'my-codes', onBehalf ? sponsorStaffId : 'self'],
+    queryFn: () => getMyReferralCodes(onBehalf ? sponsorStaffId : undefined),
+    enabled: !onBehalf || Boolean(sponsorStaffId),
+    refetchInterval: 30_000,
+  });
   const applications = useQuery({
     queryKey: ['ost', 'my-applications', settled],
     queryFn: () => (settled ? getOstApplications('', settled) : getOstApplications()),
@@ -59,10 +64,20 @@ export function OstReferralCodesPage() {
   const [expiresInHours, setExpiresInHours] = useState(168);
   const [issued, setIssued] = useState<{ code: string; hint: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [openedAt] = useState(() => Date.now());
-  const hasActiveCode = Boolean(codes.data?.some(c => c.isActive && Date.parse(c.expiresAt) > openedAt && c.useCount < c.maxUses));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const hasActiveCode = Boolean(
+    codes.data?.some((c) => c.isActive && Date.parse(c.expiresAt) > now && c.useCount < c.maxUses),
+  );
 
   const issue = useMutation({
+    onMutate: () => {
+      setIssued(null);
+      setCopied(false);
+    },
     mutationFn: () => {
       if (onBehalf && !sponsorStaffId)
         throw new Error('Choose an active Sales Manager to issue on their behalf.');
@@ -112,6 +127,7 @@ export function OstReferralCodesPage() {
           }}
         >
           <h2>New code issued (shown once)</h2>
+          <p>Save this code now. It cannot be viewed again.</p>
           <p>
             <strong>{issued.code}</strong> <StatusChip label={issued.hint} tone="neutral" />
           </p>
@@ -131,6 +147,15 @@ export function OstReferralCodesPage() {
           >
             {copied ? 'Copied' : 'Copy code and link'}
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setIssued(null);
+              issue.reset();
+            }}
+          >
+            Dismiss code
+          </Button>
         </div>
       ) : null}
 
@@ -140,7 +165,15 @@ export function OstReferralCodesPage() {
         {onBehalf && (
           <label>
             Issue on behalf of Sales Manager
-            <select value={sponsorStaffId} onChange={(e) => { setSponsorStaffId(e.target.value); setIssued(null); }}>
+            <select
+              value={sponsorStaffId}
+              disabled={issue.isPending}
+              onChange={(e) => {
+                setSponsorStaffId(e.target.value);
+                setIssued(null);
+                issue.reset();
+              }}
+            >
               <option value="">Choose an active Sales Manager</option>
               {sponsors.data?.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -170,15 +203,37 @@ export function OstReferralCodesPage() {
             onChange={(e) => setExpiresInHours(Number(e.target.value))}
           />
         </label>
-        <Button onClick={() => issue.mutate()} disabled={issue.isPending || codes.isFetching || codes.isError || (onBehalf && !sponsorStaffId)}>
-          {issue.isPending ? 'Issuing...' : hasActiveCode ? 'Rotate and revoke previous codes' : 'Issue new code'}
+        <Button
+          onClick={() => issue.mutate()}
+          disabled={
+            issue.isPending || codes.isFetching || codes.isError || (onBehalf && !sponsorStaffId)
+          }
+        >
+          {issue.isPending
+            ? 'Issuing...'
+            : hasActiveCode
+              ? 'Rotate and revoke previous codes'
+              : 'Issue new code'}
         </Button>
       </div>
-      {issue.isError ? <ErrorState error={issue.error} onRetry={() => issue.mutate()} /> : null}
+      {issue.isError ? (
+        <ErrorState
+          error={issue.error}
+          onRetry={() => {
+            issue.reset();
+            void codes.refetch();
+          }}
+        />
+      ) : null}
 
-      <p>For security, the full code is shown only when issued. Active referral codes cannot be displayed again.</p>
+      <p>
+        For security, the full code is shown only when issued. Active referral codes cannot be
+        displayed again.
+      </p>
       <SearchField label="Search referral codes" value={search} onChange={setSearch} />
-      {codes.isPending ? (
+      {onBehalf && !sponsorStaffId ? (
+        <EmptyState title="Choose an active Sales Manager to view their referral credentials" />
+      ) : codes.isPending ? (
         <p role="status">Loading codes…</p>
       ) : codes.isError ? (
         <ErrorState error={codes.error} onRetry={codes.refetch} />
@@ -195,6 +250,7 @@ export function OstReferralCodesPage() {
                 <th>Hint</th>
                 <th>Uses</th>
                 <th>Expires</th>
+                <th>Created</th>
                 <th>Active</th>
               </tr>
             </thead>
@@ -206,10 +262,25 @@ export function OstReferralCodesPage() {
                     {code.useCount}/{code.maxUses}
                   </td>
                   <td>{formatDateTime(code.expiresAt)}</td>
+                  <td>{formatDateTime(code.createdAt)}</td>
                   <td>
                     <StatusChip
-                      label={code.isActive ? 'active' : 'inactive'}
-                      tone={code.isActive ? 'success' : 'neutral'}
+                      label={
+                        !code.isActive
+                          ? 'revoked'
+                          : Date.parse(code.expiresAt) <= now
+                            ? 'expired'
+                            : code.useCount >= code.maxUses
+                              ? 'exhausted'
+                              : 'active'
+                      }
+                      tone={
+                        code.isActive &&
+                        Date.parse(code.expiresAt) > now &&
+                        code.useCount < code.maxUses
+                          ? 'success'
+                          : 'neutral'
+                      }
                     />
                   </td>
                 </tr>
