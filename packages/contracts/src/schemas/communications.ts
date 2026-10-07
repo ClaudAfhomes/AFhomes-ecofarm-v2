@@ -210,30 +210,54 @@ export const markConversationReadRequestSchema = z
   .strict();
 export type MarkConversationReadRequest = z.infer<typeof markConversationReadRequestSchema>;
 
+/** Cap on one announcement's targeting rules; a broadcast is `all_staff`.
+ *  Declared before the schema that consumes it. */
+export const ANNOUNCEMENT_MAX_AUDIENCES = 50;
+
 export const announcementDraftRequestSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
     body: z.string().trim().min(1).max(10000),
-    audiences: z.array(audienceInputSchema).min(1),
+    /** Bounded at BOTH ends: an empty audience list is a draft that reaches
+     *  nobody, and an unbounded one turns one draft into a per-staff fan-out
+     *  the request validator cannot see coming. */
+    audiences: z.array(audienceInputSchema).min(1).max(ANNOUNCEMENT_MAX_AUDIENCES),
   })
   .strict();
 export type AnnouncementDraftRequest = z.infer<typeof announcementDraftRequestSchema>;
 
-/** Cap on one announcement's targeting rules; a broadcast is `all_staff`. */
-export const ANNOUNCEMENT_MAX_AUDIENCES = 50;
-
 export const createConversationRequestSchema = z
   .object({
     kind: z.enum(['direct', 'group']),
-    /** Optional and display-only; a direct conversation derives its title
-     *  from the participants server-side. */
-    title: z.string().trim().max(120).optional(),
+    /** Display-only, and REQUIRED for a group: a nameless group is
+     *  unmanageable in the list. A direct conversation omits it and derives
+     *  its title from the participants server-side. */
+    title: z.string().trim().max(200).optional(),
     /** The creator is added by the server and is NOT in this list. A direct
      *  conversation is exactly one other participant; a group is 1..49. */
     participantIds: z.array(z.string().uuid()).min(1).max(49),
     requestId: z.string().uuid(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    // A direct conversation is the creator plus ONE other person. The array
+    // bound alone would let `kind: 'direct'` smuggle in a whole roster, which
+    // would then be created without a title and without group management.
+    if (value.kind === 'direct' && value.participantIds.length !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['participantIds'],
+        message: 'A direct conversation has exactly one other participant',
+      });
+    }
+    if (value.kind === 'group' && !value.title) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['title'],
+        message: 'Name the group',
+      });
+    }
+  });
 export type CreateConversationRequest = z.infer<typeof createConversationRequestSchema>;
 
 /**
@@ -252,12 +276,19 @@ export type AddMemberRequest = z.infer<typeof addMemberRequestSchema>;
 /* Message cursor codec                                               */
 /* ------------------------------------------------------------------ */
 
-export const messageCursorSchema = z.object({
-  v: z.literal(1),
-  conversationId: z.string().uuid(),
-  createdAt: z.string(),
-  id: z.string().uuid(),
-});
+/**
+ * Strict: a cursor carrying a key this codec does not understand is REJECTED,
+ * not silently stripped. Stripping would mean the payload asserted something
+ * the decoder ignored, which is exactly the shape of a smuggled field.
+ */
+export const messageCursorSchema = z
+  .object({
+    v: z.literal(1),
+    conversationId: z.string().uuid(),
+    createdAt: z.string(),
+    id: z.string().uuid(),
+  })
+  .strict();
 export type MessageCursor = z.infer<typeof messageCursorSchema>;
 
 /**
@@ -287,20 +318,21 @@ export function encodeMessageCursor(cursor: MessageCursor): string {
 
 /**
  * Decode and re-validate. Throws on anything unrecognised, on a version other
- * than 1, and on a cursor minted for a DIFFERENT conversation - that last check
- * is the whole reason the conversation id travels inside the payload.
+ * than 1, and on a cursor minted for a DIFFERENT conversation.
  *
- * `expectedConversationId` is omitted only where the caller genuinely has no
- * single conversation in context; every message-list call passes it.
+ * `expectedConversationId` is REQUIRED, and the comparison is unconditional.
+ * It was optional once, which meant a handler that simply forgot to pass it
+ * would happily accept a cursor from another conversation and page through
+ * messages the caller is not a member of - a cross-conversation read. Making
+ * the parameter mandatory turns that omission into a compile error, and the
+ * conversation id travelling inside the payload is what makes the check
+ * possible at all.
  */
-export function decodeMessageCursor(
-  cursor: string,
-  expectedConversationId?: string,
-): MessageCursor {
+export function decodeMessageCursor(cursor: string, expectedConversationId: string): MessageCursor {
   const parsed = messageCursorSchema.safeParse(decodeCursorJson(cursor));
   if (!parsed.success) throw new Error('Malformed message cursor');
   if (parsed.data.v !== 1) throw new Error('Unsupported message cursor version');
-  if (expectedConversationId && parsed.data.conversationId !== expectedConversationId) {
+  if (parsed.data.conversationId !== expectedConversationId) {
     throw new Error('Message cursor belongs to a different conversation');
   }
   return parsed.data;

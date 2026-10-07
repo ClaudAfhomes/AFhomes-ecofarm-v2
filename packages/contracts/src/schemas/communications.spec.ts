@@ -29,11 +29,16 @@ import {
   messageCursorSchema,
   notificationSchema,
   addMemberRequestSchema,
+  ANNOUNCEMENT_MAX_AUDIENCES,
 } from './communications.js';
 import { ANNOUNCEMENT_TRANSITIONS, announcementStatusSchema } from './lifecycle.js';
 
 const UUID_A = '00000000-0000-4000-8000-000000000001';
 const UUID_B = '00000000-0000-4000-8000-000000000002';
+
+/** base64url, matching what `encodeMessageCursor` emits. */
+const b64 = (value: string) =>
+  btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 const message = {
   id: UUID_A,
@@ -175,6 +180,28 @@ describe('announcementDraftRequestSchema', () => {
         .success,
     ).toBe(false);
   });
+
+  it('rejects an over-limit audience list', () => {
+    const audience = { kind: 'staff' as const, staffId: UUID_A };
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        kind: 'staff' as const,
+        staffId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      }));
+    expect(many(ANNOUNCEMENT_MAX_AUDIENCES).length).toBe(50);
+    expect(
+      announcementDraftRequestSchema.safeParse({ ...draft, audiences: many(50) }).success,
+    ).toBe(true);
+    expect(
+      announcementDraftRequestSchema.safeParse({ ...draft, audiences: many(51) }).success,
+    ).toBe(false);
+    expect(announcementDraftRequestSchema.safeParse({ ...draft, audiences: [] }).success).toBe(
+      false,
+    );
+    expect(
+      announcementDraftRequestSchema.safeParse({ ...draft, audiences: [audience] }).success,
+    ).toBe(true);
+  });
 });
 
 describe('communicationAnnouncementSchema', () => {
@@ -237,7 +264,12 @@ describe('announcement lifecycle', () => {
 });
 
 describe('createConversationRequestSchema', () => {
-  const base = { kind: 'group' as const, participantIds: [UUID_A, UUID_B], requestId: UUID_A };
+  const base = {
+    kind: 'group' as const,
+    title: 'Sales Team',
+    participantIds: [UUID_A, UUID_B],
+    requestId: UUID_A,
+  };
 
   it('rejects an empty participant list', () => {
     expect(createConversationRequestSchema.safeParse({ ...base, participantIds: [] }).success).toBe(
@@ -278,6 +310,41 @@ describe('createConversationRequestSchema', () => {
     expect(
       createConversationRequestSchema.safeParse({
         kind: 'direct',
+        participantIds: [UUID_A],
+        requestId: UUID_A,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a direct conversation carrying more than one participant', () => {
+    // A direct conversation is the creator plus ONE other person. Anything
+    // larger is a group and must be created as one, so it can be named,
+    // scoped and managed.
+    expect(
+      createConversationRequestSchema.safeParse({
+        kind: 'direct',
+        participantIds: [UUID_A, UUID_B],
+        requestId: UUID_A,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires a non-empty group title within 1..200 characters', () => {
+    for (const bad of [undefined, '', '   ', 'x'.repeat(201)]) {
+      expect(
+        createConversationRequestSchema.safeParse({
+          kind: 'group',
+          title: bad,
+          participantIds: [UUID_A],
+          requestId: UUID_A,
+        }).success,
+        String(bad),
+      ).toBe(false);
+    }
+    expect(
+      createConversationRequestSchema.safeParse({
+        kind: 'group',
+        title: 'x'.repeat(200),
         participantIds: [UUID_A],
         requestId: UUID_A,
       }).success,
@@ -332,7 +399,7 @@ describe('message cursor codec', () => {
   };
 
   it('round-trips to an identical payload', () => {
-    const decoded = decodeMessageCursor(encodeMessageCursor(payload));
+    const decoded = decodeMessageCursor(encodeMessageCursor(payload), UUID_B);
     expect(decoded).toEqual(payload);
   });
 
@@ -348,17 +415,52 @@ describe('message cursor codec', () => {
     expect(() => decodeMessageCursor(cursor, UUID_B)).not.toThrow();
   });
 
-  it('rejects a version other than 1', () => {
-    const forged = btoa(JSON.stringify({ ...payload, v: 2 }))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-    expect(() => decodeMessageCursor(forged, UUID_B)).toThrow();
-    expect(messageCursorSchema.safeParse('not-base64url-json').success).toBe(false);
+  it('requires the caller to name the conversation it is decoding for', () => {
+    // The second parameter is REQUIRED, not optional: an optional binding check
+    // is a cross-conversation read waiting to happen, because a later handler
+    // that forgets it silently accepts a foreign cursor. `@ts-expect-error`
+    // fails the build if the parameter ever becomes optional again.
+    // @ts-expect-error - expectedConversationId is deliberately not optional
+    expect(() => decodeMessageCursor(encodeMessageCursor(payload))).toThrow();
   });
 
-  it('rejects a payload that is not a cursor at all', () => {
+  it('rejects a version other than 1', () => {
+    expect(() => decodeMessageCursor(b64(JSON.stringify({ ...payload, v: 2 })), UUID_B)).toThrow();
+    expect(() => decodeMessageCursor(b64(JSON.stringify({ ...payload, v: 0 })), UUID_B)).toThrow();
+    expect(() =>
+      decodeMessageCursor(b64(JSON.stringify({ ...payload, v: '1' })), UUID_B),
+    ).toThrow();
+  });
+
+  it('rejects a cursor carrying an extra key', () => {
+    // messageCursorSchema is strict: a cursor with a field this codec does not
+    // understand is rejected, never silently stripped. A stripped key would
+    // mean the payload said something the decoder ignored.
+    const forged = b64(JSON.stringify({ ...payload, sequence: 99 }));
+    expect(messageCursorSchema.safeParse({ ...payload, sequence: 99 }).success).toBe(false);
+    expect(() => decodeMessageCursor(forged, UUID_B)).toThrow();
+  });
+
+  it('rejects a cursor that is not decodable JSON', () => {
+    // Asserted against the DECODER, not only against the schema: a schema
+    // assertion passes even if the decode path stops validating at all.
+    expect(() => decodeMessageCursor('not-base64url-json', UUID_B)).toThrow();
     expect(() => decodeMessageCursor('bm90LWpzb24', UUID_B)).toThrow();
+    expect(() => decodeMessageCursor('', UUID_B)).toThrow();
+    expect(() => decodeMessageCursor(b64('plain text, not json'), UUID_B)).toThrow();
+    expect(() => decodeMessageCursor(b64(JSON.stringify({})), UUID_B)).toThrow();
+    expect(() => decodeMessageCursor(b64(JSON.stringify([1, 2, 3])), UUID_B)).toThrow();
+  });
+
+  it('rejects a cursor missing a required field', () => {
+    for (const partial of [
+      { v: 1, conversationId: UUID_B, createdAt: payload.createdAt },
+      { v: 1, conversationId: UUID_B, id: UUID_A },
+      { v: 1, createdAt: payload.createdAt, id: UUID_A },
+      { conversationId: UUID_B, createdAt: payload.createdAt, id: UUID_A },
+    ]) {
+      expect(() => decodeMessageCursor(b64(JSON.stringify(partial)), UUID_B)).toThrow();
+    }
   });
 });
 
