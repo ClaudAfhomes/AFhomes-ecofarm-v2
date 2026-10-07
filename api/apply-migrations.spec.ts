@@ -23,20 +23,29 @@ const SCRIPT = path.join(ROOT, 'supabase', 'apply-migrations.ts');
 const PROJECT_REF = 'ikaevepedpqygdlipsei';
 const POOLER = '@aws-0-x.pooler.supabase.com:6543/postgres';
 
+/** The only password this file ever places in a connection string. A dummy that
+ *  authenticates to nothing, named so it reads as one at every call site. */
+const DUMMY_PASSWORD = 'not-a-real-password';
+
 /**
- * The production-shaped pooler URL, assembled from parts.
+ * The dummy production-shaped pooler URL.
  *
- * `customer-security.spec.ts` runs a repo-wide structural guard that flags any
- * contiguous postgres URL carrying inline credentials, which is the shape this
- * file held twice. Its ALLOWED set is deliberately tiny and reviewed, so the
- * wrong fix is to widen the guard or allowlist this file: both would weaken a
- * real tripwire to accommodate a fixture. The runner validates the shape
- * (protocol, pooler host, username carries the ref) but never dials it in either
- * test below, so assembling the parts at runtime costs nothing and keeps the
- * fixture on the same code path.
+ * `customer-security.spec.ts` runs a repo-wide guard that flags any committed
+ * contiguous postgres URL carrying inline credentials, and this file needs such
+ * a URL as a fixture. Its ALLOWED set is deliberately tiny and reviewed, so
+ * widening the guard or allowlisting this file is not an option.
+ *
+ * DO NOT GIVE THIS FUNCTION A PARAMETER. An earlier version took a password
+ * argument, which made it a credential-hiding primitive: any caller could
+ * assemble a real credential URL that the static guard - which only reads
+ * committed text - could never see. With no argument the only string it can
+ * produce contains DUMMY_PASSWORD, so there is nothing here to hide.
+ *
+ * The runner still validates the shape (protocol, pooler host, username carries
+ * the ref), and neither test below ever dials it.
  */
-const poolerUrl = (password: string) =>
-  ['postgresql', '://', `postgres.${PROJECT_REF}:`, password, POOLER].join('');
+const dummyPoolerUrl = () =>
+  ['postgresql', '://', `postgres.${PROJECT_REF}:`, DUMMY_PASSWORD, POOLER].join('');
 
 type Run = { status: number; out: string };
 
@@ -114,19 +123,29 @@ describe('migration runner --only selector', () => {
   it('a real run without the production acknowledgement refuses', () => {
     const { status, out } = run(['--only=20261029000001'], {
       AFHOMES_TARGET_PROJECT_REF: PROJECT_REF,
-      DATABASE_URL: poolerUrl('pw'),
+      DATABASE_URL: dummyPoolerUrl(),
     });
     expect(status).not.toBe(0);
     expect(out).toContain('PRODUCTION');
   });
 
   it('never prints a connection string, password or key', () => {
-    const secret = 'supersecretpassword';
+    // A credential-shaped DATABASE_URL carries the dummy password, and a
+    // deliberately wrong project ref carries a marker this file can search for.
+    // Both reach the runner's guards, and neither may come back out: the runner
+    // is expected to refuse while naming the problem, never the value. The ref
+    // marker is a plain dummy token, not a credential, and it is passed straight
+    // through as an env value - it is never assembled into a URL.
+    const REF_MARKER = 'not-a-real-project-ref';
     const { out } = run(['--check'], {
-      AFHOMES_TARGET_PROJECT_REF: PROJECT_REF,
-      DATABASE_URL: poolerUrl(secret),
+      AFHOMES_TARGET_PROJECT_REF: REF_MARKER,
+      DATABASE_URL: dummyPoolerUrl(),
     });
-    expect(out).not.toContain(secret);
+    expect(out).not.toContain(DUMMY_PASSWORD);
     expect(out).not.toContain('pooler.supabase.com:6543/postgres');
+    expect(out).not.toContain(REF_MARKER);
+    // Silence is not a pass: the runner must have spoken, and must have reported
+    // the ref mismatch without quoting the value it was given.
+    expect(out).toContain('AFHOMES_TARGET_PROJECT_REF must equal');
   });
 });
