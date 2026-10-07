@@ -256,6 +256,20 @@ describe('the invariants that make the model safe are real constraints', () => {
 
   it('keys messages by (conversation_id, sequence) and by a stable keyset', () => {
     expect(declares('unique (conversation_id, sequence)')).toBe(true);
+    // One interval per POINT IN TIME, and deliberately PARTIAL: every founding
+    // member joins at sequence 0, because the conversation holds no messages
+    // yet and all of them must see it from the first one. A plain UNIQUE over
+    // (conversation_id, joined_sequence) therefore made every group
+    // conversation with more than one other participant impossible to create.
+    expect(declares('unique (conversation_id, joined_sequence)')).toBe(false);
+    expect(
+      declares(
+        'create unique index if not exists communication_conversation_members_sequence_idx ' +
+          'on public.communication_conversation_members (conversation_id, joined_sequence) ' +
+          'where joined_sequence > 0',
+      ),
+      'one-interval-per-sequence partial unique',
+    ).toBe(true);
     expect(
       declares(
         'create index if not exists communication_messages_keyset_idx ' +
@@ -463,16 +477,32 @@ describe('browser roles hold nothing here', () => {
 });
 
 describe('every mutating entry point re-validates the actor in SQL before writing', () => {
-  it.each(MUTATING_FUNCTIONS.filter((n) => n !== 'communication_mark_read'))(
-    'public.%s authorizes before its first write',
-    (name) => {
-      const body = fn(name);
-      const guard = body.indexOf('private.mutation_actor_role');
-      expect(guard, `${name} must call private.mutation_actor_role`).toBeGreaterThan(0);
-      const firstWrite = body.search(/\b(insert\s+into|update\s+public|delete\s+from)\b/i);
-      expect(firstWrite, `${name} writes before it authorizes`).toBeGreaterThan(guard);
-    },
-  );
+  it.each(MUTATING_FUNCTIONS)('public.%s authorizes before its first write', (name) => {
+    const body = fn(name);
+    const guard = body.indexOf('private.mutation_actor_role');
+    expect(guard, `${name} must call private.mutation_actor_role`).toBeGreaterThan(0);
+    const firstWrite = body.search(/\b(insert\s+into|update\s+public|delete\s+from)\b/i);
+    expect(firstWrite, `${name} writes before it authorizes`).toBeGreaterThan(guard);
+  });
+
+  it('re-validates the actor in mark_read, then scopes the write to their own membership', () => {
+    const body = fn('communication_mark_read');
+    // An actor check was missing here, so a member whose communications.messages
+    // view was DENIED could still advance their own read marker - the one
+    // mutating entry point that mutated state on membership alone.
+    expect(body, 'communication_mark_read must call private.mutation_actor_role').toMatch(
+      /perform private\.mutation_actor_role\(p_actor, *'communications\.messages', *'view'\)/i,
+    );
+    expect(
+      body.search(/private\.mutation_actor_role/i),
+      'the actor is authorized before the message lookup',
+    ).toBeLessThan(body.search(/from public\.communication_messages/i));
+    // ...and the write is scoped to the actor's OWN open membership row.
+    expect(
+      body.search(/private\.mutation_actor_role/i),
+      'communication_mark_read writes before it authorizes',
+    ).toBeLessThan(body.search(/update\s+public/i));
+  });
 
   it('marks the conversation read only through its own membership row', () => {
     const body = squash(fn('communication_mark_read'));
@@ -531,6 +561,84 @@ describe('every mutating entry point re-validates the actor in SQL before writin
     expect(body).toMatch(/s\.status = 'active'/i);
     expect(body).toMatch(/private\.mutation_result\(p_actor, *'announcement\.publish'/i);
     expect(body).toMatch(/private\.complete_mutation\(p_actor, *'announcement\.publish'/i);
+  });
+
+  it('resolves announcement recipients with the SAME permission predicate the message fan-out uses', () => {
+    // The recipient set is frozen, so a filter that ignores deny-only
+    // restrictions permanently over-delivers: a staff member whose
+    // communications.announcements view is denied was still made a recipient
+    // and still got the notification. The predicate must be identical to the
+    // one in communication_send_message - same joins, same super_admin-by-slug
+    // arm, same deny subtraction - or the two paths drift apart.
+    const recipientsFor = (body: string) => {
+      const start = body.search(/insert into public\.communication_announcement_recipients/i);
+      const end = body.indexOf('on conflict', start);
+      return body.slice(start, end < 0 ? body.length : end);
+    };
+    const publish = recipientsFor(fn('communication_publish_announcement'));
+    const fanout = (() => {
+      const body = fn('communication_send_message');
+      const start = body.search(/insert into public\.notifications/i);
+      return body.slice(start);
+    })();
+
+    for (const fragment of [
+      /left join public\.role_permissions rp on rp\.role_id = r\.id and rp\.module_id = mo\.id/i,
+      /left join public\.staff_permission_restrictions deny on deny\.staff_id = s\.id and deny\.module_id = mo\.id/i,
+      /r\.slug = 'super_admin' or coalesce\(rp\.can_view, false\)/i,
+      /not coalesce\(deny\.deny_view, false\)/i,
+    ]) {
+      const text = fragment.source.replace(/\\ /g, ' ');
+      expect(publish, `publish recipient select missing ${text}`).toMatch(fragment);
+      // The same predicate must appear in the message fan-out, so the two
+      // paths cannot be fixed independently later.
+      expect(fanout, `message fan-out missing ${text}`).toMatch(fragment);
+    }
+    // The only difference is the module each path fans out over, and that join
+    // must be present in BOTH - a missing modules join would silently drop every
+    // recipient.
+    expect(publish).toMatch(
+      /public\.modules mo on mo\.key = 'communications\.announcements' and mo\.is_active/i,
+    );
+    expect(fanout).toMatch(
+      /public\.modules mo on mo\.key = 'communications\.messages' and mo\.is_active/i,
+    );
+  });
+
+  it('serializes a direct-pair create on the SORTED pair before it inserts', () => {
+    const body = fn('communication_create_conversation');
+    // Canonical ordering alone is not enough: two concurrent creates for the
+    // same pair with different request ids both passed the existence check and
+    // one died on the unique index instead of returning the existing
+    // conversation, which is what the approved spec requires.
+    const lock = body.search(/pg_advisory_xact_lock\(hashtextextended\(/i);
+    expect(lock, 'a transaction-scoped advisory lock guards the pair').toBeGreaterThan(0);
+    // Both pair ids must be in the lock key, so the lock is on the PAIR and not
+    // on one participant.
+    expect(body.slice(lock, lock + 240)).toMatch(/v_low/);
+    expect(body.slice(lock, lock + 240)).toMatch(/v_high/);
+    // The lock is taken before the insert, and the existence re-check runs after
+    // the lock: check-then-insert without a lock is the race itself.
+    expect(lock, 'the lock must precede the direct insert').toBeLessThan(
+      body.search(/insert into public\.communication_conversations/i),
+    );
+    const recheck = body.search(/where c\.kind = 'direct' and c\.direct_lowest = v_low/i);
+    expect(recheck, 'the pair must be re-checked under the lock').toBeGreaterThan(lock);
+    expect(recheck).toBeLessThan(body.search(/insert into public\.communication_conversations/i));
+  });
+
+  it('never uses an alias-qualified SET target', () => {
+    // PostgreSQL rejects `update t n set n.col = ...`: a SET column must be
+    // bare, the alias belongs in FROM/WHERE only. Two functions shipped that
+    // way and `create or replace function` did not refuse them, so both raised
+    // a syntax error on their first real call and nothing caught it.
+    for (const m of code.matchAll(/\bset\s+([a-z_][a-z0-9_]*)\s*\.\s*[a-z_]/gi)) {
+      expect(m[0], `alias-qualified SET target: ${m[0]} (alias ${m[1]})`).not.toMatch(/\./);
+    }
+    // Spelled out so the failure reads as the defect it is.
+    expect(code, 'no `set <alias>.` SET target may exist').not.toMatch(
+      /\bupdate\s+(?:public\.)?(\w+)\s+\1\s+set\s+\1\s*\./i,
+    );
   });
 
   it('closes the interval and raises exactly one removal notification', () => {

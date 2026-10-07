@@ -86,9 +86,48 @@ create table if not exists public.communication_conversation_members (
   last_read_sequence bigint not null default -1,
   last_read_at timestamptz null,
   joined_at timestamptz not null default now(),
-  left_at timestamptz null,
-  unique (conversation_id, joined_sequence)
+  left_at timestamptz null
 );
+
+-- One interval per POINT IN TIME, so a re-adding member can never collide with
+-- an existing interval. It is deliberately PARTIAL on `joined_sequence > 0`:
+-- every founding member joins at sequence 0, because the conversation holds no
+-- messages yet and all of them must see it from the first one. A plain UNIQUE
+-- over (conversation_id, joined_sequence) therefore makes every group
+-- conversation with more than one other participant impossible to create -
+-- found by EXECUTING communication_create_conversation, which nothing had ever
+-- called. Re-adding takes current_sequence + 1, which is strictly greater than
+-- 0 whenever anything has been said.
+create unique index if not exists communication_conversation_members_sequence_idx on public.communication_conversation_members (conversation_id, joined_sequence) where joined_sequence > 0;
+
+-- Reconcile a database that already received the earlier table-level UNIQUE.
+-- `create or replace function` never touches a table constraint, and this file
+-- is declared safe to apply to a database of unknown provenance, so the
+-- superseded constraint is dropped by name RESOLVED FROM THE CATALOG (never
+-- assumed) - the same idiom section 4 uses for the idempotency CHECK. Without
+-- it, re-applying the file would stack the partial index on top of a constraint
+-- that still forbids two founding members.
+do $$
+declare
+  c record;
+begin
+  for c in
+    select con.conname
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and rel.relname = 'communication_conversation_members'
+       and con.contype = 'u'
+       and array_length(con.conkey, 1) = 2
+       and con.conkey @> array[
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'conversation_id'),
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'joined_sequence')]
+  loop
+    execute format('alter table public.communication_conversation_members drop constraint %I', c.conname);
+  end loop;
+end $$;
 
 -- The direct pair is identified by the two staff ids in a fixed order, so the
 -- same two people can never open two direct conversations.
@@ -408,6 +447,23 @@ begin
     end if;
     select x into v_low from unnest(v_members) as t(x) order by x asc limit 1;
     select x into v_high from unnest(v_members) as t(x) order by x desc limit 1;
+    -- Canonical ordering alone is NOT enough. Two concurrent creates for the
+    -- same pair with different request ids both pass the existence check and one
+    -- dies on the direct-pair unique index, while the approved spec says the
+    -- same pair returns that conversation. The lock is taken on the SORTED pair
+    -- so it is the pair that serializes - a lock on one participant would
+    -- serialize two unrelated conversations instead.
+    perform pg_advisory_xact_lock(hashtextextended(
+      'communication.direct:' || v_low::text || ':' || v_high::text, 0));
+    -- Re-checked UNDER the lock: check-then-insert without one is the race.
+    select c.id into v_conversation from public.communication_conversations c
+     where c.kind = 'direct' and c.direct_lowest = v_low and c.direct_highest = v_high;
+    if v_conversation is not null then
+      -- Recorded like any other successful outcome, so a client retry with the
+      -- same request id returns the same conversation through the registry.
+      perform private.complete_mutation(p_actor, 'conversation.create', p_request_id, v_payload, v_conversation);
+      return v_conversation;
+    end if;
     insert into public.communication_conversations (kind, created_by, direct_lowest, direct_highest)
     values ('direct', p_actor, v_low, v_high)
     returning id into v_conversation;
@@ -595,12 +651,15 @@ returns void language plpgsql security definer set search_path = public, private
 declare
   v_message public.communication_messages%rowtype;
 begin
+  -- Actor standing is re-validated FIRST, exactly like every other mutating
+  -- entry point. Membership alone was the gap: a member whose
+  -- communications.messages view is denied could still advance their own read
+  -- marker, which is a state change nobody should be able to make. Membership
+  -- then decides WHICH messages this actor may mark.
+  perform private.mutation_actor_role(p_actor, 'communications.messages', 'view');
   select m.* into v_message from public.communication_messages m
    where m.id = p_message_id and m.conversation_id = p_conversation;
   if not found then raise exception 'MESSAGE_NOT_FOUND' using errcode = 'P0002'; end if;
-  -- Authorization is MEMBERSHIP, not a permission: the actor must hold a live
-  -- interval that covers this message. No actor permission is consulted,
-  -- because reading your own conversation is not a staff capability.
   if not exists (select 1 from public.communication_conversation_members mem
                    where mem.conversation_id = p_conversation and mem.staff_id = p_actor and mem.left_sequence is null
                      and mem.joined_sequence <= v_message.sequence
@@ -692,17 +751,32 @@ begin
   if v_row.status <> 'draft' then raise exception 'ANNOUNCEMENT_NOT_DRAFT' using errcode = '22023'; end if;
   -- The audience is resolved as a UNION over currently-active staff, so a
   -- role, a department and an individual overlap without double delivery.
+  --
+  -- The recipient set is FROZEN, so this filter is permanent: a staff member who
+  -- is denied communications.announcements here is denied for good. It therefore
+  -- carries the IDENTICAL predicate the message fan-out in
+  -- communication_send_message uses - active staff, an active role, the view
+  -- action, super_admin-by-slug, MINUS the deny-only restriction. Filtering on
+  -- `s.status` alone froze a denied staff member into this table and delivered
+  -- them the notification anyway.
   insert into public.communication_announcement_recipients (announcement_id, staff_id, published_at)
   select p_announcement, s.id, now()
     from public.staff_users s
+    join public.staff_role_assignments ra on ra.staff_id = s.id
+    join public.roles r on r.id = ra.role_id and r.is_active
+    join public.modules mo on mo.key = 'communications.announcements' and mo.is_active
+    left join public.role_permissions rp on rp.role_id = r.id and rp.module_id = mo.id
+    left join public.staff_permission_restrictions deny on deny.staff_id = s.id and deny.module_id = mo.id
    where s.status = 'active'
+     and (r.slug = 'super_admin' or coalesce(rp.can_view, false))
+     and not coalesce(deny.deny_view, false)
      and (exists (select 1 from public.communication_announcement_audiences a
                    where a.announcement_id = p_announcement and a.audience_kind = 'all_staff')
        or exists (select 1 from public.communication_announcement_audiences a
-                   join public.roles r on r.slug = a.role_slug and r.is_active
-                   join public.staff_role_assignments ra on ra.role_id = r.id
+                   join public.roles aud_role on aud_role.slug = a.role_slug and aud_role.is_active
+                   join public.staff_role_assignments aud_ra on aud_ra.role_id = aud_role.id
                   where a.announcement_id = p_announcement and a.audience_kind = 'role'
-                    and ra.staff_id = s.id)
+                    and aud_ra.staff_id = s.id)
        or exists (select 1 from public.communication_announcement_audiences a
                    join public.departments dp on dp.id = a.department_id and dp.is_active
                   where a.announcement_id = p_announcement and a.audience_kind = 'department'
@@ -772,7 +846,11 @@ begin
   perform private.mutation_actor_role(p_actor, 'communications.notifications', 'view');
   -- recipient_staff_id is part of the predicate, so a notification can only
   -- ever be read by the staff member it belongs to.
-  update public.notifications n set n.read_at = now()
+  -- The SET target is bare: PostgreSQL rejects an alias-qualified SET column
+  -- (`set n.read_at`) on the FIRST call, and `create or replace function` does
+  -- not validate a plpgsql body, so the invalid statement installed cleanly.
+  -- Found by executing this function - nothing had ever called it.
+  update public.notifications n set read_at = now()
    where n.id = p_notification and n.recipient_staff_id = p_actor and n.read_at is null;
 end $$;
 
@@ -782,8 +860,9 @@ declare
   v_count int;
 begin
   perform private.mutation_actor_role(p_actor, 'communications.notifications', 'view');
+  -- Bare SET target again: `set n.read_at` is a syntax error, not a style choice.
   update public.notifications n
-     set n.read_at = now()
+     set read_at = now()
    where n.recipient_staff_id = p_actor
      and n.read_at is null
      and n.created_at <= coalesce(p_cutoff, now());

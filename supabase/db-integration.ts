@@ -420,6 +420,17 @@ const BASELINE_TABLES = [
   'reservation_agreement_holders',
   'reservation_agreement_schedule',
   'reservation_agreement_documents',
+  // The seven communications relations are in the list because section 57 calls
+  // the communications RPCs for real: a leaked recipient, notification or
+  // message row would survive forever - none of them carries the run prefix,
+  // and a cleanup that inspects only the parent is not a cleanup check.
+  'communication_conversations',
+  'communication_conversation_members',
+  'communication_messages',
+  'communication_announcements',
+  'communication_announcement_audiences',
+  'communication_announcement_recipients',
+  'notifications',
 ] as const;
 const baseline = new Map<string, number>();
 
@@ -9966,6 +9977,713 @@ async function main(): Promise<void> {
       ]);
     }
 
+    /* ---------------------------------------------------------------- */
+    section('58. communications RPCs EXECUTED against real PostgreSQL');
+    /* ---------------------------------------------------------------- */
+    // `create or replace function` does NOT validate a plpgsql body, so an
+    // invalid statement shipped with the whole suite green at 1558/1558: no
+    // test ever CALLED any of these fifteen functions. Text assertions cannot
+    // catch that class of defect. Everything below is an actual invocation, and
+    // every one of them ran green once the two UPDATE-SET targets and the
+    // missing actor check were fixed.
+    {
+      const commAnnouncements = modules['communications.announcements']!.id;
+      const commMessages = modules['communications.messages']!.id;
+
+      // One extra principal, and one DENY-ONLY restriction on it. The employee
+      // role holds communications.announcements view=true, so the restriction
+      // is the only thing that can keep this staff member out of a recipient
+      // set - a test that passed because the role lacked the grant proves
+      // nothing about the deny path.
+      // This section lives in the suite's `finally` block, a different scope
+      // from the `try` block where section 4 declares its own staff factory,
+      // so the principal is built here.
+      const deniedStaff = uuidFor('comm:denied');
+      await db.query('insert into auth.users (id, email) values ($1,$2)', [
+        deniedStaff,
+        `${RUN}-comm-denied@example.invalid`,
+      ]);
+      await db.query(
+        `insert into public.staff_users (id,email,full_name,status)
+       values ($1,$2,'Comms Denied','active')`,
+        [deniedStaff, `${RUN}-comm-denied@example.invalid`],
+      );
+      await db.query(
+        'insert into public.staff_role_assignments (staff_id,role_id) values ($1,$2)',
+        [deniedStaff, roles['employee']!],
+      );
+      createdStaffIds.push(deniedStaff);
+
+      const callUuid = async (call: string, params: unknown[]) =>
+        (await one<{ out: string }>(`select ${call} as out`, params)).out;
+      const callInt = async (call: string, params: unknown[]) =>
+        (await one<{ out: number }>(`select ${call} as out`, params)).out;
+      /** Sequences a member can currently see, newest first. */
+      const visibleSequences = async (actor: string, conversation: string) =>
+        (
+          await db.query<{ sequence: string }>(
+            `select sequence::text from public.communication_visible_messages($1,$2) order by sequence desc`,
+            [actor, conversation],
+          )
+        ).rows.map((r) => r.sequence);
+      /** unread for one conversation, or null when the caller has no open interval. */
+      const unreadFor = async (actor: string, conversation: string) => {
+        const rows = await db.query<{ unread: string; total: string }>(
+          `select unread::text, total_unread::text from public.communication_unread_counts($1)
+          where conversation_id = $2`,
+          [actor, conversation],
+        );
+        return rows.rows[0] ?? null;
+      };
+      const announcementRecipients = async (announcement: string) =>
+        (
+          await db.query<{ staff_id: string }>(
+            `select staff_id from public.communication_announcement_recipients
+            where announcement_id = $1 order by staff_id`,
+            [announcement],
+          )
+        ).rows.map((r) => r.staff_id);
+      const notificationCount = async (recipient: string, entity: string) =>
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.notifications
+            where recipient_staff_id = $1 and entity_id = $2`,
+            [recipient, entity],
+          )
+        ).n;
+      /** A notification is addressed by the MESSAGE it names, never by recency:
+       * "newest first" is a tie when two sends land in the same clock tick,
+       * which made this section read back the wrong row. */
+      const messageId = async (conversation: string, sequence: string) =>
+        (
+          await one<{ id: string }>(
+            `select id from public.communication_messages
+            where conversation_id = $1 and sequence = $2::bigint`,
+            [conversation, sequence],
+          )
+        ).id;
+      const notificationFor = async (recipient: string, entity: string) =>
+        (
+          await one<{ id: string } | undefined>(
+            `select id from public.notifications
+            where recipient_staff_id = $1 and entity_id = $2`,
+            [recipient, entity],
+          )
+        )?.id ?? null;
+      const readAt = async (notification: string | null) =>
+        notification
+          ? (
+              await one<{ read: string | null }>(
+                `select case when read_at is null then null else 'read' end as read
+                 from public.notifications where id = $1`,
+                [notification],
+              )
+            ).read
+          : null;
+      const deny = async (staffId: string, moduleId: string) => {
+        await db.query(
+          `insert into public.staff_permission_restrictions (staff_id, module_id, deny_view)
+         values ($1,$2,true)`,
+          [staffId, moduleId],
+        );
+      };
+      const undeny = async (staffId: string, moduleId: string) => {
+        await db.query(
+          `delete from public.staff_permission_restrictions where staff_id = $1 and module_id = $2`,
+          [staffId, moduleId],
+        );
+      };
+
+      const peer = staff['hr']!; // employee role: messages create, announcements view
+      const financeStaff = staff['finance']!;
+      const ostStaff = staff['ost']!;
+      const smStaff = staff['sm-alt']!;
+      const adminStaff = staff['admin']!;
+      const superStaff = staff['super-admin']!;
+
+      /* ---------- 1 + 3: the two notification readers EXECUTE ---------- */
+      // communication_mark_notification_read shipped
+      //   `update public.notifications n set n.read_at = now()`
+      // which PostgreSQL rejects on the FIRST call: a SET target is never
+      // alias-qualified. Calling it is the only proof that it runs.
+      const directPeer = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [peer, [financeStaff], uuidFor('comm:req:direct:a')],
+      );
+      eq(
+        'a direct conversation stores its pair in canonical order',
+        (
+          await one<{ ordered: boolean }>(
+            `select direct_lowest < direct_highest as ordered
+             from public.communication_conversations where id = $1`,
+            [directPeer],
+          )
+        ).ordered,
+        true,
+      );
+      eq(
+        'the first message takes sequence 1',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          financeStaff,
+          directPeer,
+          'probe one',
+          uuidFor('comm:req:msg:a1'),
+        ]),
+        '1',
+      );
+
+      const notifOne = await notificationFor(peer, await messageId(directPeer, '1'));
+      check('the recipient holds an unread message notification', notifOne !== null);
+      await db.query(`select public.communication_mark_notification_read($1,$2)`, [
+        peer,
+        notifOne,
+      ]);
+      eq(
+        'communication_mark_notification_read EXECUTES and read_at becomes non-null',
+        await readAt(notifOne),
+        'read',
+      );
+      // The row-count proof the void return type cannot give directly: with the
+      // only unread row already marked, "mark all" must report zero.
+      eq(
+        '...and it marked exactly the one row it owned (nothing left to mark)',
+        await callInt(`public.communication_mark_all_notifications_read($1,null)`, [peer]),
+        0,
+      );
+      await db.query(`select public.communication_mark_notification_read($1,$2)`, [
+        peer,
+        notifOne,
+      ]);
+      eq(
+        'a second call is a no-op, not an error',
+        await callInt(`public.communication_mark_all_notifications_read($1,null)`, [peer]),
+        0,
+      );
+
+      /* ---------- 2: mark_all respects the cutoff and only its own rows ---------- */
+      await db.query(`select public.communication_send_message($1,$2,$3,$4)`, [
+        financeStaff,
+        directPeer,
+        'probe two',
+        uuidFor('comm:req:msg:a2'),
+      ]);
+      const notifTwo = await notificationFor(peer, await messageId(directPeer, '2'));
+      check('the second message produced a second notification', notifTwo !== notifOne);
+      // A third party with an unread notification of their own: if mark-all
+      // ever reached past `recipient_staff_id = p_actor`, this row would move.
+      const directOther = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [peer, [smStaff], uuidFor('comm:req:direct:b')],
+      );
+      await db.query(`select public.communication_send_message($1,$2,$3,$4)`, [
+        peer,
+        directOther,
+        'third party',
+        uuidFor('comm:req:msg:b1'),
+      ]);
+      const notifThird = await notificationFor(smStaff, await messageId(directOther, '1'));
+      // ...and one more for the caller, created strictly AFTER the cutoff.
+      await db.query(`select public.communication_send_message($1,$2,$3,$4)`, [
+        financeStaff,
+        directPeer,
+        'probe three',
+        uuidFor('comm:req:msg:a3'),
+      ]);
+      const notifLate = await notificationFor(peer, await messageId(directPeer, '3'));
+      check(
+        'the third message produced a third, distinct notification',
+        notifLate !== notifTwo && notifLate !== notifOne,
+      );
+
+      // The cutoff is derived FROM THE DATA, inside SQL, and never round-tripped
+      // through a JS Date: `now()` carries microseconds and node-pg truncates to
+      // milliseconds, so a read-back cutoff lands BELOW the stored value and
+      // `created_at <= cutoff` fails on the row it was taken from. Windows' clock
+      // granularity is also coarse enough that two back-to-back statements can
+      // share one timestamp, which made a wall-clock cutoff a coin flip.
+      //
+      // The EARLY row is moved backwards rather than the late row forwards: a
+      // forward shift leaves created_at in the future, and the later
+      // "mark everything" call, whose cutoff is now(), then excludes it too.
+      await db.query(
+        `update public.notifications
+          set created_at = (select c.created_at from public.notifications c where c.id = $1)
+                           - interval '1 second'
+        where id = $2`,
+        [notifLate, notifTwo],
+      );
+      eq(
+        'communication_mark_all_notifications_read EXECUTES and returns a row count',
+        await callInt(
+          `public.communication_mark_all_notifications_read(
+           $1, (select created_at from public.notifications where id = $2))`,
+          [peer, notifTwo],
+        ),
+        1,
+      );
+      eq('the notification at the cutoff is read', await readAt(notifTwo), 'read');
+      eq('a notification created after the cutoff stays unread', await readAt(notifLate), null);
+      eq("another member's notification is untouched", await readAt(notifThird), null);
+
+      /* ---------- 3: cross-user mark-read is refused ---------- */
+      await db.query(`select public.communication_mark_notification_read($1,$2)`, [
+        financeStaff,
+        notifLate,
+      ]);
+      eq(
+        'staff B cannot mark staff A notification read - the row stays unread',
+        await readAt(notifLate),
+        null,
+      );
+      eq(
+        'marking everything left marks only the one row after the cutoff',
+        await callInt(`public.communication_mark_all_notifications_read($1,null)`, [peer]),
+        1,
+      );
+      eq(
+        'a third call with nothing unread returns zero',
+        await callInt(`public.communication_mark_all_notifications_read($1,null)`, [peer]),
+        0,
+      );
+
+      /* ---------- 4: a denied staff member is never a recipient ---------- */
+      // The publish recipient filter ignored deny-only restrictions, so a staff
+      // member whose announcements view was denied was frozen into
+      // communication_announcement_recipients AND received the notification.
+      check(
+        'the denied principal would otherwise qualify (employee holds announcements view)',
+        (
+          await one<{ can_view: boolean }>(
+            `select rp.can_view from public.role_permissions rp
+             join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+             join public.staff_role_assignments ra on ra.role_id = r.id
+            where ra.staff_id = $1 and m.key = 'communications.announcements'`,
+            [deniedStaff],
+          )
+        ).can_view === true,
+      );
+      await deny(deniedStaff, commAnnouncements);
+      const announcement = uuidFor('comm:announcement:all');
+      await callUuid(`public.communication_save_announcement($1,$2,$3,$4,$5::jsonb)`, [
+        adminStaff,
+        announcement,
+        'All staff notice',
+        'Body of the all-staff notice.',
+        JSON.stringify([{ kind: 'all_staff' }]),
+      ]);
+      const recipientCount = await callInt(
+        `public.communication_publish_announcement($1,$2,$3)`,
+        [adminStaff, announcement, uuidFor('comm:req:publish:a')],
+      );
+      const recipients = await announcementRecipients(announcement);
+      check('publish reports a recipient count', recipientCount > 0, `count=${recipientCount}`);
+      check(
+        'a denied staff member is NOT frozen into the recipient set',
+        !recipients.includes(deniedStaff),
+      );
+      eq(
+        'a denied staff member receives NO announcement notification',
+        await notificationCount(deniedStaff, announcement),
+        0,
+      );
+      check(
+        'an eligible staff member IS a recipient',
+        recipients.includes(peer),
+        `recipients=${recipients.length}`,
+      );
+      eq(
+        '...and holds exactly one announcement notification',
+        await notificationCount(peer, announcement),
+        1,
+      );
+      check(
+        'super_admin is a recipient by slug, holding no role_permissions row at all',
+        recipients.includes(superStaff),
+      );
+      eq(
+        'super_admin gets no more than one notification row for it',
+        await notificationCount(superStaff, announcement),
+        1,
+      );
+      await undeny(deniedStaff, commAnnouncements);
+
+      /* ---------- 5: membership intervals are honored end to end ---------- */
+      const group = await callUuid(
+        `public.communication_create_conversation($1,'group',$2,$3::uuid[],$4)`,
+        [ostStaff, 'Interval probe', [financeStaff, smStaff], uuidFor('comm:req:group:a')],
+      );
+      eq(
+        'the first group message takes sequence 1',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          ostStaff,
+          group,
+          'before removal',
+          uuidFor('comm:req:g:1'),
+        ]),
+        '1',
+      );
+      await db.query(`select public.communication_remove_member($1,$2,$3)`, [
+        smStaff,
+        group,
+        financeStaff,
+      ]);
+      eq(
+        'removal closes the interval AT the next sequence, not after it',
+        (
+          await one<{ left: string }>(
+            `select left_sequence::text as left from public.communication_conversation_members
+            where conversation_id = $1 and staff_id = $2 order by joined_sequence desc limit 1`,
+            [group, financeStaff],
+          )
+        ).left,
+        '2',
+      );
+      eq(
+        'the message after removal takes sequence 2',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          ostStaff,
+          group,
+          'while removed',
+          uuidFor('comm:req:g:2'),
+        ]),
+        '2',
+      );
+      const gapMessage = (
+        await one<{ id: string }>(
+          `select id from public.communication_messages
+          where conversation_id = $1 and sequence = 2`,
+          [group],
+        )
+      ).id;
+      eq(
+        'a removed member still sees what they could read while they were in',
+        (await visibleSequences(financeStaff, group)).join(','),
+        '1',
+      );
+      eq(
+        'a removed member cannot see the message sent after they left',
+        (await visibleSequences(financeStaff, group)).includes(gapMessage) ? 'visible' : 'hidden',
+        'hidden',
+      );
+      eq(
+        'a removed member has no unread row for the conversation at all',
+        String(await unreadFor(financeStaff, group)),
+        'null',
+      );
+
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        group,
+        financeStaff,
+      ]);
+      eq(
+        're-adding opens a second interval, leaving the gap behind',
+        (
+          await one<{ joined: string }>(
+            `select joined_sequence::text as joined from public.communication_conversation_members
+            where conversation_id = $1 and staff_id = $2 and left_sequence is null`,
+            [group, financeStaff],
+          )
+        ).joined,
+        '3',
+      );
+      eq(
+        'the message after re-adding takes sequence 3',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          ostStaff,
+          group,
+          'after re-adding',
+          uuidFor('comm:req:g:3'),
+        ]),
+        '3',
+      );
+      eq(
+        'the boundary is exact: the gap message stays invisible, the new one is visible',
+        (await visibleSequences(financeStaff, group)).join(','),
+        '3,1',
+      );
+      // Sequence 1 is counted because this member's read marker belongs to the
+      // NEW interval (default -1); sequence 2 is excluded because it falls in the
+      // gap, which is the property under test.
+      eq(
+        'the unread count excludes the gap message',
+        (await unreadFor(financeStaff, group))?.unread,
+        '2',
+      );
+
+      /* ---------- 6: duplicate direct create returns the same conversation ---------- */
+      // Canonical ordering alone was not enough: two concurrent creates for the
+      // same pair both passed the existence check and one died on the unique
+      // index. The approved spec says the same pair returns that conversation.
+      const dupFirst = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [financeStaff, [ostStaff], uuidFor('comm:req:dup:1')],
+      );
+      const dupSecond = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [financeStaff, [ostStaff], uuidFor('comm:req:dup:2')],
+      );
+      // ...and from the OTHER side, so the lock key must be the SORTED pair:
+      // a lock on one participant would serialize two different conversations.
+      const dupThird = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [ostStaff, [financeStaff], uuidFor('comm:req:dup:3')],
+      );
+      eq('a second create for the same pair returns the same conversation', dupSecond, dupFirst);
+      eq('...from either side of the pair', dupThird, dupFirst);
+      eq(
+        'exactly one conversation row exists for that pair',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.communication_conversations
+            where kind = 'direct'
+              and direct_lowest = least($1::uuid,$2::uuid)
+              and direct_highest = greatest($1::uuid,$2::uuid)`,
+            [financeStaff, ostStaff],
+          )
+        ).n,
+        1,
+      );
+
+      /* ---------- 7: an idempotent send writes one message and one notification ---------- */
+      const directIdem = await callUuid(
+        `public.communication_create_conversation($1,'direct',null,$2::uuid[],$3)`,
+        [financeStaff, [smStaff], uuidFor('comm:req:direct:idem')],
+      );
+      const idemRequest = uuidFor('comm:req:idem');
+      const idemFirst = await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+        smStaff,
+        directIdem,
+        'idempotent body',
+        idemRequest,
+      ]);
+      const idemSecond = await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+        smStaff,
+        directIdem,
+        'idempotent body',
+        idemRequest,
+      ]);
+      eq('a retried request id returns the same sequence', idemSecond, idemFirst);
+      eq('...and that sequence is 1', idemFirst, '1');
+      eq(
+        'exactly one message row exists for the retried request',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.communication_messages
+            where conversation_id = $1 and sequence = 1`,
+            [directIdem],
+          )
+        ).n,
+        1,
+      );
+      const idemMessage = (
+        await one<{ id: string }>(
+          `select id from public.communication_messages
+          where conversation_id = $1 and sequence = 1`,
+          [directIdem],
+        )
+      ).id;
+      eq(
+        'the retry wrote no second notification for the eligible member',
+        await notificationCount(financeStaff, idemMessage),
+        1,
+      );
+
+      /* ---------- 8: sequences strictly increase, timestamps never regress ---------- */
+      const burst: string[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        burst.push(
+          await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+            peer,
+            directPeer,
+            `burst ${i}`,
+            uuidFor(`comm:req:burst:${i}`),
+          ]),
+        );
+      }
+      check(
+        'sequences strictly increase across consecutive sends',
+        burst.every((s, i) => i === 0 || BigInt(s) > BigInt(burst[i - 1]!)),
+        burst.join(','),
+      );
+      const ordered = await db.query<{ sequence: string; created_at: Date }>(
+        `select sequence::text, created_at from public.communication_messages
+        where conversation_id = $1 order by created_at asc, id asc`,
+        [directPeer],
+      );
+      check(
+        'created_at is non-decreasing and agrees with sequence order',
+        ordered.rows.every(
+          (r, i) => i === 0 || r.created_at >= ordered.rows[i - 1]!.created_at,
+        ) &&
+          ordered.rows.every(
+            (r, i) => i === 0 || BigInt(r.sequence) > BigInt(ordered.rows[i - 1]!.sequence),
+          ),
+        ordered.rows.map((r) => `${r.sequence}@${r.created_at.toISOString()}`).join(' '),
+      );
+      // The keyset read path pages on (created_at desc, id desc); if that order
+      // ever disagreed with sequence, a reload would show messages out of order.
+      eq(
+        'the keyset the read path pages on returns descending sequences',
+        (
+          await db.query<{ sequence: string }>(
+            `select sequence::text from public.communication_messages
+            where conversation_id = $1 order by created_at desc, id desc limit 3`,
+            [directPeer],
+          )
+        ).rows
+          .map((r) => r.sequence)
+          .join(','),
+        `${burst[3]},${burst[2]},${burst[1]}`,
+      );
+
+      /* ---------- 9: an empty audience raises and leaves nothing behind ---------- */
+      const empty = uuidFor('comm:announcement:empty');
+      await callUuid(`public.communication_save_announcement($1,$2,$3,$4,$5::jsonb)`, [
+        adminStaff,
+        empty,
+        'Nobody hears this',
+        'An audience no active staff member holds.',
+        JSON.stringify([{ kind: 'role', roleSlug: 'no-such-role' }]),
+      ]);
+      const refusal = await throws('publishing to an empty audience is refused', () =>
+        db.query(`select public.communication_publish_announcement($1,$2,$3)`, [
+          adminStaff,
+          empty,
+          uuidFor('comm:req:publish:empty'),
+        ]),
+      );
+      check(
+        'the refusal names the empty audience',
+        refusal.includes('ANNOUNCEMENT_NO_RECIPIENTS'),
+        refusal,
+      );
+      eq(
+        'the refusal leaves no partial recipient write',
+        (await announcementRecipients(empty)).length,
+        0,
+      );
+      eq(
+        'the refusal leaves no partial notification write',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int as n from public.notifications where entity_id = $1`,
+            [empty],
+          )
+        ).n,
+        0,
+      );
+      eq(
+        'the announcement is still a draft',
+        (
+          await one<{ status: string }>(
+            `select status from public.communication_announcements where id = $1`,
+            [empty],
+          )
+        ).status,
+        'draft',
+      );
+
+      /* ---------- 10: mark_read re-validates the actor AND the membership ---------- */
+      const directMessage = (
+        await one<{ id: string }>(
+          `select id from public.communication_messages
+          where conversation_id = $1 and sequence = 2`,
+          [directPeer],
+        )
+      ).id;
+      const notAMember = await throws('communication_mark_read refuses a non-member', () =>
+        db.query(`select public.communication_mark_read($1,$2,$3)`, [
+          ostStaff,
+          directPeer,
+          directMessage,
+        ]),
+      );
+      check(
+        'a non-member is refused by membership',
+        notAMember.includes('MESSAGE_NOT_VISIBLE'),
+        notAMember,
+      );
+      await deny(peer, commMessages);
+      const deniedMark = await throws(
+        'communication_mark_read refuses a member whose module view is denied',
+        () =>
+          db.query(`select public.communication_mark_read($1,$2,$3)`, [
+            peer,
+            directPeer,
+            directMessage,
+          ]),
+      );
+      check(
+        'the actor is re-validated before the write',
+        deniedMark.includes('MUTATION_FORBIDDEN'),
+        deniedMark,
+      );
+      eq(
+        'the refused call moved no read marker',
+        (
+          await one<{ last: string }>(
+            `select last_read_sequence::text as last
+             from public.communication_conversation_members
+            where conversation_id = $1 and staff_id = $2 and left_sequence is null`,
+            [directPeer, peer],
+          )
+        ).last,
+        '-1',
+      );
+      await undeny(peer, commMessages);
+      await db.query(`select public.communication_mark_read($1,$2,$3)`, [
+        peer,
+        directPeer,
+        directMessage,
+      ]);
+      eq(
+        'the same call succeeds once the actor is eligible again',
+        (
+          await one<{ last: string }>(
+            `select last_read_sequence::text as last
+             from public.communication_conversation_members
+            where conversation_id = $1 and staff_id = $2 and left_sequence is null`,
+            [directPeer, peer],
+          )
+        ).last,
+        '2',
+      );
+
+      // Every synthetic row this section wrote, removed here and again in the
+      // suite cleanup. Reverse foreign-key order: notifications and recipients
+      // reference staff and announcements, announcements are referenced by both,
+      // and conversations are referenced by messages and members. `createdStaffIds`
+      // is the recorded set PLUS every run-prefixed principal, resolved by the
+      // cleanup from the database - a missing .push() is what once leaked a staff
+      // member forever while the check still passed.
+      const commIds = [...createdStaffIds];
+      for (const statement of [
+        'delete from public.notifications where recipient_staff_id = any($1::uuid[])',
+        `delete from public.communication_announcement_recipients
+        where staff_id = any($1::uuid[])
+           or announcement_id in (select id from public.communication_announcements
+                                   where created_by = any($1::uuid[]))`,
+        `delete from public.communication_announcement_audiences
+        where staff_id = any($1::uuid[])
+           or announcement_id in (select id from public.communication_announcements
+                                   where created_by = any($1::uuid[]))`,
+        `delete from public.communication_announcements
+        where created_by = any($1::uuid[]) or updated_by = any($1::uuid[])`,
+        `delete from public.communication_messages
+        where sender_staff_id = any($1::uuid[])
+           or conversation_id in (select id from public.communication_conversations
+                                   where created_by = any($1::uuid[]))`,
+        `delete from public.communication_conversation_members
+        where staff_id = any($1::uuid[])
+           or conversation_id in (select id from public.communication_conversations
+                                   where created_by = any($1::uuid[]))`,
+        'delete from public.communication_conversations where created_by = any($1::uuid[])',
+      ]) {
+        await db.query(statement, [commIds]);
+      }
+    }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -10184,6 +10902,53 @@ async function main(): Promise<void> {
       await db?.query('delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])', [
         staffSet,
       ]);
+      // Communications rows reference staff_users ON DELETE RESTRICT in five
+      // places (notifications, recipients, conversations, members, messages)
+      // and announcements ON DELETE RESTRICT in two, so they have to go first
+      // or this delete fails on the FK and the leak check never reports. The
+      // order is the reverse of the foreign keys, identical to section 57's
+      // own teardown.
+      await db?.query(
+        'delete from public.notifications where recipient_staff_id = any($1::uuid[])',
+        [staffSet],
+      );
+      await db?.query(
+        `delete from public.communication_announcement_recipients
+           where staff_id = any($1::uuid[])
+              or announcement_id in (select id from public.communication_announcements
+                                      where created_by = any($1::uuid[]))`,
+        [staffSet],
+      );
+      await db?.query(
+        `delete from public.communication_announcement_audiences
+           where staff_id = any($1::uuid[])
+              or announcement_id in (select id from public.communication_announcements
+                                      where created_by = any($1::uuid[]))`,
+        [staffSet],
+      );
+      await db?.query(
+        `delete from public.communication_announcements
+           where created_by = any($1::uuid[]) or updated_by = any($1::uuid[])`,
+        [staffSet],
+      );
+      await db?.query(
+        `delete from public.communication_messages
+           where sender_staff_id = any($1::uuid[])
+              or conversation_id in (select id from public.communication_conversations
+                                      where created_by = any($1::uuid[]))`,
+        [staffSet],
+      );
+      await db?.query(
+        `delete from public.communication_conversation_members
+           where staff_id = any($1::uuid[])
+              or conversation_id in (select id from public.communication_conversations
+                                      where created_by = any($1::uuid[]))`,
+        [staffSet],
+      );
+      await db?.query(
+        'delete from public.communication_conversations where created_by = any($1::uuid[])',
+        [staffSet],
+      );
       await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
         await db?.query('delete from auth.users where id = any($1::uuid[])', [authSet]);
         await db?.query('delete from public.redemption_items where code like $1', [`${RUN}-%`]);
