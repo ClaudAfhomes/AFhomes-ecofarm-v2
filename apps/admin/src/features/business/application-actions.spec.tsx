@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { Route, Routes } from 'react-router';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { customerApplicationSchema, type CustomerApplicationStatus } from '@jad/contracts';
+import { customerApplicationSchema, type CustomerApplicationStatus } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { CustomerApplicationEditorPage } from './OfficialFormsPages';
 import {
