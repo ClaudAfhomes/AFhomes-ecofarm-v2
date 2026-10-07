@@ -10651,6 +10651,207 @@ async function main(): Promise<void> {
         '2',
       );
 
+      /* ---------- 11: membership interval uniqueness is keyed PER STAFF ---------- */
+      // A conversation-scoped unique (conversation_id, joined_sequence) cannot
+      // work, twice over: every founder joins at sequence 0, and two members
+      // added with no message in between BOTH take current_sequence + 1. The
+      // key is therefore (conversation_id, staff_id, joined_sequence), which
+      // still forbids the one thing that matters - one staff member opening two
+      // intervals from the same sequence - and permits a founding cohort.
+      const intervalGroup = await callUuid(
+        `public.communication_create_conversation($1,'group',$2,$3::uuid[],$4)`,
+        [ostStaff, 'Interval uniqueness', [smStaff], uuidFor('comm:req:group:b')],
+      );
+      eq(
+        'both founders joined at sequence 0 - the cohort that made the old key unusable',
+        (
+          await one<{ joined: string }>(
+            `select count(*) filter (where joined_sequence = 0)::text as joined
+             from public.communication_conversation_members
+             where conversation_id = $1 and left_sequence is null`,
+            [intervalGroup],
+          )
+        ).joined,
+        '2',
+      );
+
+      // Two adds, back to back, with NO message between them. Both land on
+      // current_sequence + 1; under the conversation-scoped key the second one
+      // died on a unique violation.
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        intervalGroup,
+        financeStaff,
+      ]);
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        intervalGroup,
+        adminStaff,
+      ]);
+      eq(
+        'the group holds four open member rows after two back-to-back adds',
+        (
+          await one<{ open: string }>(
+            `select count(*)::text as open
+             from public.communication_conversation_members
+             where conversation_id = $1 and left_sequence is null`,
+            [intervalGroup],
+          )
+        ).open,
+        '4',
+      );
+      eq(
+        'both added members share the same starting sequence (0+1): legal, and the point',
+        (
+          await one<{ shared: string }>(
+            `select count(*) filter (where joined_sequence = 1)::text as shared
+             from public.communication_conversation_members
+             where conversation_id = $1 and left_sequence is null`,
+            [intervalGroup],
+          )
+        ).shared,
+        '2',
+      );
+      eq(
+        'every open interval in that group is valid (left null, joined >= 0, nothing inverted)',
+        (
+          await one<{ bad: string }>(
+            `select count(*) filter (where joined_sequence < 0
+                                      or (left_sequence is not null and left_sequence <= joined_sequence))::text as bad
+             from public.communication_conversation_members
+             where conversation_id = $1`,
+            [intervalGroup],
+          )
+        ).bad,
+        '0',
+      );
+
+      // Re-add: the closed interval stays on the record and the new one opens
+      // beside it. Both rows are (conversation, peer, ...), so the per-staff key
+      // must tolerate a SECOND, DIFFERENT starting sequence - and the new
+      // interval must never re-open over the history the member could already
+      // read, which is what a continuation would do.
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        intervalGroup,
+        peer,
+      ]);
+      eq(
+        'the message after adding a member takes sequence 1',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          smStaff,
+          intervalGroup,
+          'before removal',
+          uuidFor('comm:req:g:b1'),
+        ]),
+        '1',
+      );
+      await db.query(`select public.communication_remove_member($1,$2,$3)`, [
+        smStaff,
+        intervalGroup,
+        peer,
+      ]);
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        intervalGroup,
+        peer,
+      ]);
+      eq(
+        'a member added, removed and re-added holds exactly two member rows',
+        (
+          await one<{ rows: string }>(
+            `select count(*)::text as rows
+             from public.communication_conversation_members
+             where conversation_id = $1 and staff_id = $2`,
+            [intervalGroup, peer],
+          )
+        ).rows,
+        '2',
+      );
+      eq(
+        '...one of them closed and one of them open',
+        (
+          await one<{ shape: string }>(
+            `select count(*) filter (where left_sequence is null)::text
+                    || '/' || count(*) filter (where left_sequence is not null)::text as shape
+             from public.communication_conversation_members
+             where conversation_id = $1 and staff_id = $2`,
+            [intervalGroup, peer],
+          )
+        ).shape,
+        '1/1',
+      );
+      eq(
+        'the re-added interval is a NEW interval, not a continuation: two distinct starts',
+        (
+          await one<{ starts: string }>(
+            `select string_agg(joined_sequence::text, ',' order by joined_sequence) as starts
+             from public.communication_conversation_members
+             where conversation_id = $1 and staff_id = $2`,
+            [intervalGroup, peer],
+          )
+        ).starts,
+        '1,2',
+      );
+      eq(
+        '...and it never re-opens over the history the member could already read',
+        (
+          await one<{ abuts: boolean }>(
+            `select (select max(joined_sequence) from public.communication_conversation_members
+              where conversation_id = $1 and staff_id = $2)
+                   >= (select min(left_sequence) from public.communication_conversation_members
+                       where conversation_id = $1 and staff_id = $2) as abuts`,
+            [intervalGroup, peer],
+          )
+        ).abuts,
+        true,
+      );
+
+      // And the per-staff key still FIRES. Both rows are closed, so
+      // one_open_idx cannot be what rejects them - only a repeat of
+      // (conversation, staff, joined_sequence) can. Own transaction and own
+      // savepoint: SAVEPOINT needs a transaction block, and a denied statement
+      // aborts it, so every probe after it would report the abort instead of
+      // its own reason. `throws` is not used here because it needs the callback
+      // to REJECT, and this callback must roll back before it does.
+      await db.query('begin');
+      await db.query('savepoint interval_dup');
+      let duplicateInterval = '';
+      try {
+        await db.query(
+          `insert into public.communication_conversation_members
+                  (conversation_id, staff_id, joined_sequence, left_sequence)
+           values ($1,$2,900,901), ($1,$2,900,902)`,
+          [intervalGroup, peer],
+        );
+      } catch (error) {
+        duplicateInterval = safeErrorMessage(error);
+      }
+      await db.query('rollback to savepoint interval_dup');
+      await db.query('rollback');
+      check(
+        'the same staff member cannot hold two intervals from one sequence',
+        duplicateInterval.includes('duplicate key'),
+        duplicateInterval,
+      );
+      check(
+        '...and the PER-STAFF interval index is what refuses it, not the one-open rule',
+        duplicateInterval.includes('communication_conversation_members_interval_idx'),
+        duplicateInterval,
+      );
+      eq(
+        'the refused insert left no row behind',
+        (
+          await one<{ rows: string }>(
+            `select count(*)::text as rows
+             from public.communication_conversation_members
+             where conversation_id = $1 and joined_sequence = 900`,
+            [intervalGroup],
+          )
+        ).rows,
+        '0',
+      );
+
       // Every synthetic row this section wrote, removed here and again in the
       // suite cleanup. Reverse foreign-key order: notifications and recipients
       // reference staff and announcements, announcements are referenced by both,

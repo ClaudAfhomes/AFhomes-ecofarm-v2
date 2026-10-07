@@ -256,20 +256,6 @@ describe('the invariants that make the model safe are real constraints', () => {
 
   it('keys messages by (conversation_id, sequence) and by a stable keyset', () => {
     expect(declares('unique (conversation_id, sequence)')).toBe(true);
-    // One interval per POINT IN TIME, and deliberately PARTIAL: every founding
-    // member joins at sequence 0, because the conversation holds no messages
-    // yet and all of them must see it from the first one. A plain UNIQUE over
-    // (conversation_id, joined_sequence) therefore made every group
-    // conversation with more than one other participant impossible to create.
-    expect(declares('unique (conversation_id, joined_sequence)')).toBe(false);
-    expect(
-      declares(
-        'create unique index if not exists communication_conversation_members_sequence_idx ' +
-          'on public.communication_conversation_members (conversation_id, joined_sequence) ' +
-          'where joined_sequence > 0',
-      ),
-      'one-interval-per-sequence partial unique',
-    ).toBe(true);
     expect(
       declares(
         'create index if not exists communication_messages_keyset_idx ' +
@@ -280,6 +266,34 @@ describe('the invariants that make the model safe are real constraints', () => {
     // The display snapshot is denormalized on purpose: a message must still
     // read correctly after a staff member is renamed.
     expect(tableBody('communication_messages')).toMatch(/sender_full_name\s+text\s+not null/i);
+  });
+
+  it('keys the membership interval uniqueness PER STAFF, not per conversation', () => {
+    // Several members legitimately share a joined_sequence: every founder
+    // joins at 0, and two members added with no message in between both take
+    // current_sequence + 1. Only ONE staff holding two intervals from the same
+    // sequence is the defect.
+    expect(
+      declares(
+        'create unique index if not exists communication_conversation_members_interval_idx ' +
+          'on public.communication_conversation_members (conversation_id, staff_id, joined_sequence)',
+      ),
+      'per-staff interval unique',
+    ).toBe(true);
+    expect(declares('unique (conversation_id, joined_sequence)')).toBe(false);
+    // Neither the old conversation-scoped index nor the exclusion it used
+    // (joined_sequence > 0) may survive: the name is never written in the SQL,
+    // it is resolved from pg_index by the exact column list it indexes.
+    expect(declares('communication_conversation_members_sequence_idx')).toBe(false);
+    expect(declares('where joined_sequence > 0')).toBe(false);
+    expect(
+      declares(
+        'ix.indkey::smallint[] = array[' +
+          "(select attnum from pg_attribute where attrelid = rel.oid and attname = 'conversation_id')," +
+          "(select attnum from pg_attribute where attrelid = rel.oid and attname = 'joined_sequence')]::smallint[]",
+      ),
+      'the superseded index is dropped by its resolved column list',
+    ).toBe(true);
   });
 
   it('requires exactly one audience discriminator on every row', () => {

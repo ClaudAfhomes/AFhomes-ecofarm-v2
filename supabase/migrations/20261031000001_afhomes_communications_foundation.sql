@@ -89,24 +89,15 @@ create table if not exists public.communication_conversation_members (
   left_at timestamptz null
 );
 
--- One interval per POINT IN TIME, so a re-adding member can never collide with
--- an existing interval. It is deliberately PARTIAL on `joined_sequence > 0`:
--- every founding member joins at sequence 0, because the conversation holds no
--- messages yet and all of them must see it from the first one. A plain UNIQUE
--- over (conversation_id, joined_sequence) therefore makes every group
--- conversation with more than one other participant impossible to create -
--- found by EXECUTING communication_create_conversation, which nothing had ever
--- called. Re-adding takes current_sequence + 1, which is strictly greater than
--- 0 whenever anything has been said.
-create unique index if not exists communication_conversation_members_sequence_idx on public.communication_conversation_members (conversation_id, joined_sequence) where joined_sequence > 0;
-
 -- Reconcile a database that already received the earlier table-level UNIQUE.
 -- `create or replace function` never touches a table constraint, and this file
 -- is declared safe to apply to a database of unknown provenance, so the
 -- superseded constraint is dropped by name RESOLVED FROM THE CATALOG (never
 -- assumed) - the same idiom section 4 uses for the idempotency CHECK. Without
--- it, re-applying the file would stack the partial index on top of a constraint
--- that still forbids two founding members.
+-- it, re-applying the file would stack the replacement index on top of a
+-- constraint that still forbids two founding members. This runs BEFORE the
+-- index drop below, because a constraint-backed index cannot be dropped while
+-- its constraint still exists.
 do $$
 declare
   c record;
@@ -128,6 +119,46 @@ begin
     execute format('alter table public.communication_conversation_members drop constraint %I', c.conname);
   end loop;
 end $$;
+
+-- The conversation-scoped unique index this file used to declare (partial on
+-- `joined_sequence > 0`) is dropped by name RESOLVED FROM THE CATALOG, never
+-- assumed: it is identified by the exact column list it indexes, so the name is
+-- never written here. Leaving it would keep the defect it introduced - two
+-- members added back to back with no message in between both take
+-- `current_sequence + 1` and would collide.
+do $$
+declare
+  i record;
+begin
+  for i in
+    select idx.relname
+      from pg_index ix
+      join pg_class idx on idx.oid = ix.indexrelid
+      join pg_class rel on rel.oid = ix.indrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and rel.relname = 'communication_conversation_members'
+       and ix.indisunique
+       and ix.indkey::smallint[] = array[
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'conversation_id'),
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'joined_sequence')]::smallint[]
+  loop
+    execute format('drop index if exists public.%I', i.relname);
+  end loop;
+end $$;
+
+-- One interval per STAFF per starting point in time. Uniqueness is per staff,
+-- never per conversation: several members legitimately share a
+-- `joined_sequence` - that is exactly what a founding cohort is (every founder
+-- joins at sequence 0, so they all see the conversation from its first
+-- message), and what two members added with no message sent between them are
+-- (both take `current_sequence + 1`). Keying on the conversation alone made
+-- every group with more than two participants impossible to create, and then,
+-- once excluded, made adding two members back to back impossible. What must
+-- never happen is ONE staff member holding two intervals that start at the same
+-- sequence, which a re-add would otherwise be free to create.
+create unique index if not exists communication_conversation_members_interval_idx on public.communication_conversation_members (conversation_id, staff_id, joined_sequence);
 
 -- The direct pair is identified by the two staff ids in a fixed order, so the
 -- same two people can never open two direct conversations.
