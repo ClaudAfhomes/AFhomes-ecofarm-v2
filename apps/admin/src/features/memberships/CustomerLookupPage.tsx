@@ -45,8 +45,8 @@ export function CustomerLookupPage() {
   return (
     <section>
       <PageHeader
-        title="Customer Lookup"
-        description="Find any customer by Customer ID, Customer Code, or name. Read-only."
+        title="Membership Lookup"
+        description="Find a customer or member by Customer ID, Customer Code, or name. Read-only."
       />
       <form
         className={styles.search}
@@ -70,13 +70,13 @@ export function CustomerLookupPage() {
         </Button>
       </form>
       {activeTerm.length < 2 ? (
-        <EmptyState title="Enter at least two characters to find a customer" />
+        <EmptyState title="Enter at least two characters to find a customer or member" />
       ) : customers.isPending ? (
         <p role="status">Looking up customers - </p>
       ) : customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : customers.data?.length === 0 ? (
-        <EmptyState title="No matching customers" />
+        <EmptyState title="No matching customers or members" />
       ) : (
         customers.data?.map((c) => (
           <article className={styles.member} key={c.customerNumber}>

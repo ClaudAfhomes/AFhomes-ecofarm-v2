@@ -25,7 +25,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     // Codes to anyone who could see the nav. That screen still exists at
     // `/admin/member-lookup` and is reachable from Redemption, where a till belongs.
     to: '/admin/customer-lookup',
-    label: 'Customer Lookup',
+    label: 'Membership Lookup',
     icon: 'grid',
     module: 'operations.redemption',
   },
@@ -190,8 +190,12 @@ const REPORT_MODULES: readonly AfHomesModuleKey[] = [
 const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
   REPORT_MODULES.some((key) => canViewModule(permissions, key));
 
-export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
+export function navItemsForPermissions(
+  permissions?: readonly AfHomesPermission[],
+  roleSlug?: string,
+): SidebarItem[] {
   return ADMIN_NAV_ITEMS.flatMap((item) => {
+    if (item.to === '/admin/customer-lookup' && roleSlug !== 'employee') return [];
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
@@ -211,6 +215,8 @@ export function canAccessNavTarget(
   pathname: string,
 ): boolean {
   if (pathname === '/admin/reports') return canViewReports(permissions);
+  if (pathname === '/admin/customer-lookup')
+    return canViewModule(permissions, 'operations.redemption');
   // Compatibility-only document routes remain protected after removing navigation.
   if (pathname === '/admin/documents' || pathname.startsWith('/admin/documents/'))
     return canViewModule(permissions, 'sales.id_documents');

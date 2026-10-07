@@ -3,6 +3,7 @@ import { it, expect, vi } from 'vitest';
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList } from '../../lib/api/client';
+import { RequireRole } from '../../app/RequireRole';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
@@ -76,7 +77,7 @@ it('queries the customer-lookup endpoint, not the member-transaction lookup', as
     target: { value: 'AF-CC-1A2B3C4D' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-  await screen.findByText('No matching customers');
+  await screen.findByText('No matching customers or members');
   expect(vi.mocked(requestList).mock.calls[0]?.[0]).toContain('/memberships/customer-lookup');
 });
 
@@ -87,9 +88,65 @@ it('prompts for more characters below the minimum instead of querying', async ()
     target: { value: 'A' },
   });
   expect(
-    screen.getByText('Enter at least two characters to find a customer'),
+    screen.getByText('Enter at least two characters to find a customer or member'),
   ).toBeInTheDocument();
   expect(vi.mocked(requestList)).not.toHaveBeenCalled();
+});
+
+it.each(['employee', 'admin', 'super_admin'])(
+  'preserves authorized direct lookup for %s',
+  async (roleSlug) => {
+    renderWithProviders(
+      <RequireRole>
+        <CustomerLookupPage />
+      </RequireRole>,
+      {
+        route: roleSlug === 'employee' ? '/employee/customer-lookup' : '/admin/customer-lookup',
+        user: {
+          id: 'qa-staff',
+          name: 'QA STAFF',
+          email: 'qa@example.test',
+          roleId: 'qa-role',
+          roleSlug,
+          roleName: roleSlug,
+          status: 'active',
+          afHomesPermissions: [
+            {
+              moduleKey: 'operations.redemption',
+              canView: true,
+              canCreate: false,
+              canUpdate: false,
+              canDelete: false,
+            },
+          ],
+        },
+      },
+    );
+    expect(await screen.findByRole('heading', { name: 'Membership Lookup' })).toBeInTheDocument();
+    expect(screen.queryByText('Customer Lookup')).not.toBeInTheDocument();
+  },
+);
+it('denies the direct lookup to a customer without staff permissions', async () => {
+  renderWithProviders(
+    <RequireRole>
+      <CustomerLookupPage />
+    </RequireRole>,
+    {
+      route: '/admin/customer-lookup',
+      user: {
+        id: 'qa-customer',
+        name: 'QA CUSTOMER',
+        email: 'qa@example.test',
+        roleId: 'qa-role',
+        roleSlug: 'customer',
+        roleName: 'Customer',
+        status: 'active',
+        afHomesPermissions: [],
+      },
+    },
+  );
+  expect(await screen.findByText('Access denied')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Membership Lookup' })).not.toBeInTheDocument();
 });
 
 it('offers no mutating control at all', async () => {

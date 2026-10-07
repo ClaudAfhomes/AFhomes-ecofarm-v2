@@ -36,7 +36,7 @@ export function AdminLayout() {
         navItems={
           gated
             ? []
-            : navItemsForPermissions(user?.afHomesPermissions).map((item) => ({
+            : navItemsForPermissions(user?.afHomesPermissions, user?.roleSlug).map((item) => ({
                 ...item,
                 to: staffPortalPath(user?.roleSlug, item.to),
                 dropdown: item.dropdown?.map((child) =>
