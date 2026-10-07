@@ -59,7 +59,9 @@ It includes the requested JadRealty comparison (remote develop inspected), propo
 
 Architecture is proposed, not implemented. Tables/functions/RPCs/new migrations created: NONE. UI/chat/announcement/notification changes: NONE. Seller-validation fix and new import tests: NOT IMPLEMENTED. Customer access unchanged. No final-architecture or approval claim.
 
-Four items are recorded in the spec as **OPEN DECISION** and need a reviewer answer rather than a silent implementation choice: employee/GSD recipient scope; OST initiation direction (upline-only); the group-creation predicate versus the current-group-manager condition; and whether member removal sends a notification. Every other item in the required review checklist is answered in the spec, and the #19 status was corrected to ALREADY APPLIED / immutable historical state.
+**Approval status: APPROVED FOR IMPLEMENTATION PLANNING — 2026-10-07.** The four former OPEN DECISIONS were resolved by the human reviewer and are now recorded in the spec as "Approved decisions": (1) Employee/GSD may initiate with all active staff in the same active department plus Admin/Super Admin — not HR/Finance-only; (2) OST initiation stays its own active authoritative upline chain plus Admin/Super Admin; (3) group creation does not require a preexisting group-manager membership, only every post-creation management action does; (4) removal creates exactly one generic recipient-owned `group_removal` notification that restores nothing.
+
+**Implementation plan:** `docs/superpowers/plans/2026-10-07-afhomes-communications-implementation.md` — 28 tasks, planning only. One documented deviation from the spec's API path table: the family is registered as a top-level prefix, so the API is `/api/v1/communications/**`, because `api/_lib/router.ts` matches `/admin/afhomes/*` before `BUSINESS_FAMILIES` and would 404 a nested communications family.
 
 ## Security and UAT (items 42, 61–63)
 

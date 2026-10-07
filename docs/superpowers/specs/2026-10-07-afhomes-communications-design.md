@@ -1,6 +1,6 @@
 # AF Homes communications — proposed specification
 
-Status: DRAFT — requires human approval before migrations or feature code.
+Status: **APPROVED FOR IMPLEMENTATION PLANNING — 2026-10-07.** Four decisions below were resolved by the human reviewer; feature code and migrations are gated on the implementation-execution approval.
 Date: 2026-10-07 (Asia/Singapore).
 Branch: `feature/afhomes-communications`.
 Verified base: `origin/claud/develop` at `ce19f95ddfade2e8eaf3c2ac730289c506b5dc28`.
@@ -49,10 +49,10 @@ Add only `communications.messages`, `communications.announcements`, and `communi
 | SSM | Own active authoritative hierarchy: ancestors and descendants, plus Admin/Super Admin | Create/manage within this scope | Targeted published only | Own only |
 | SM | Own active authoritative hierarchy: ancestors and descendants, plus Admin/Super Admin | Create/manage within this scope | Targeted published only | Own only |
 | OST | Active authoritative upline chain only, plus Admin/Super Admin | No group management; explicit eligible invitation allowed | Targeted published only | Own only |
-| Employee / GSD | Active HR/Finance in same non-null department, plus Admin/Super Admin | No group management; explicit eligible invitation allowed | Targeted published only | Own only |
+| Employee / GSD | Active staff in the same active department, plus Admin/Super Admin | No group management; explicit eligible invitation allowed | Targeted published only | Own only |
 | Customer | No staff directory or internal chat | Denied | Deferred | Deferred; preserve any existing customer behavior |
 
-Message grants: all listed staff roles get view/create for read/send/direct initiation; only Super Admin/Admin/VD/SSM/SM get update for controlled group creation and membership management. No message delete grant. Announcements: staff view; Admin create/update; Super Admin full. Notifications: staff view/update only. Publish/archive require announcement update AND Super Admin/Admin role. Group actions require message update AND an allowed management role AND current group-manager membership. A custom role's grants do not silently confer organization-wide relationship scope.
+Message grants: all listed staff roles get view/create for read/send/direct initiation; only Super Admin/Admin/VD/SSM/SM get update for controlled group creation and membership management. No message delete grant. Announcements: staff view; Admin create/update; Super Admin full. Notifications: staff view/update only. Publish/archive require announcement update AND Super Admin/Admin role. **Group creation** requires message update AND an allowed management role AND all initial members inside the creator's current scope — the current-group-manager-membership condition does not apply at creation, because the conversation does not yet exist. **Every other group-management action** (add member, remove member, archive) requires message update AND an allowed management role AND current group-manager membership. A custom role's grants do not silently confer organization-wide relationship scope.
 
 Recipient search returns only eligible active staff with ID/name/role, never the general staff-directory endpoint, emails, government IDs or unrelated hierarchy. Exact-ID mutations use the same server predicate. Initiation authorization uses the initiating manager's scope; recipients may reply through active conversation membership without acquiring directory access to other participants. Members see participant names for their authorized conversation, not searchable organization staff.
 
@@ -84,7 +84,7 @@ Proposed public tables, each with RLS enabled and ALL privileges revoked from PU
 4. `communication_announcements`: UUID, title (1–200), body (1–10,000), lifecycle, creator/updater FKs, timestamps, publish time.
 5. `communication_announcement_audiences`: announcement FK and exactly one audience discriminator: all_staff/role/department/staff with matching nullable FK columns. Unique audience tuples, no comma-separated targeting.
 6. `communication_announcement_recipients`: announcement/staff composite key, publication timestamp, nullable read_at. Frozen recipients and independent receipts.
-7. `notifications`: UUID, non-null recipient staff FK, type message/announcement, title (1–200), bounded generic summary, entity type/UUID, created_at/read_at. Unique `(recipient,type,entity_id)`; recipient/date and partial unread indexes.
+7. `notifications`: UUID, non-null recipient staff FK, type message/announcement/group_removal, title (1–200), bounded generic summary, entity type/UUID, created_at/read_at. Unique `(recipient,type,entity_id)`; recipient/date and partial unread indexes.
 
 FKs restrict deletion of protected history. No cascade removal of messages/membership history. Browser roles get no communication-table SELECT and no communication RPC execution. Service-role access is explicitly scoped to needed tables/functions. No blanket function grant. RPCs use hardened search paths and fully qualified relations, revalidate the server-derived actor's standing, role, effective permission, and resource membership/scope. Never trust supplied sender, recipient ownership, role, status, timestamp, price, or Auth metadata.
 
@@ -133,7 +133,7 @@ Published content/audiences are immutable in this release; correction uses a new
 
 ## Notifications and audit
 
-Notifications are generated only for committed new messages to currently active eligible members other than sender and for announcement publication recipients. Summaries are generic (no message body, secrets or sensitive previews). Following a notification rechecks destination authorization; ownership of notification never grants chat/announcement access. Removed/inactive recipients get no future messages or notifications. Mark-all uses only principal identity and server cutoff, leaving concurrently later arrivals unread.
+Notifications are generated only for committed new messages to currently active eligible members other than sender, for announcement publication recipients, and for group removal (approved decision 4: exactly one generic, recipient-owned `group_removal` row per removal, created in the same transaction that closes the membership interval; it restores nothing and exposes nothing beyond the conversation id). Summaries are generic (no message body, secrets or sensitive previews). Following a notification rechecks destination authorization; ownership of notification never grants chat/announcement access. Removed/inactive recipients get no future messages or notifications. Mark-all uses only principal identity and server cutoff, leaving concurrently later arrivals unread.
 
 Use existing `audit_events`: conversation created/archived, member added/removed, announcement created/updated/published/archived. Store actor/resource IDs and bounded administrative metadata, never message body, credentials or recipient contact information. No routine read audit. Notification/read/message mutations remain transactional even without per-message audit. No moderation in this release.
 
@@ -173,14 +173,14 @@ UI checks: send retry, no duplicate polled messages, unseen arrival remains unre
 
 Commit only explicit feature files after approved implementation and passing checks; separate communications and import commits. Push only feature branch and report actual Preview URL/status. Production deployment forbidden. Authenticated UAT and physical camera UAT remain PENDING until actually performed.
 
-## OPEN DECISIONS
+## Approved decisions (human, 2026-10-07)
 
-Unresolved by this draft. Each needs an explicit reviewer answer; no implementation behavior is chosen silently.
+These four resolved the OPEN DECISIONS raised in the previous revision. They are FINAL unless implementation evidence reveals a hard technical contradiction.
 
-1. **Employee/GSD recipient scope.** The role table currently limits Employee/GSD initiation to *active HR/Finance staff in the same non-null department, plus Admin/Super Admin*. That excludes peer employees, OST, SM, VD and VD subordinates, so an employee cannot reach most of the organization. Intended, or should it be all active staff in the same department, or all active staff?
-2. **OST initiation direction.** OST is currently limited to its own active authoritative *upline* chain, so an OST cannot message their own downline or peers. Intended as supervisor-only visibility, or should OST use the employee same-department scope?
-3. **Group-creation predicate.** The permission rule reads "group actions require message update AND an allowed management role AND current group-manager membership", but at creation no group-manager membership exists yet. Proposed resolution for approval: creation requires message update AND an allowed management role AND all initial members inside the creator's current scope; the current-manager-membership condition applies only to post-creation member actions.
-4. **Removal notification.** Notifications are currently generated only for committed messages and announcement publication. A removed member therefore receives no notification and is not shown participant changes, so removal is silent. Should removal generate a one-time recipient-owned notification, or stay silent by design?
+1. **Employee/GSD chat scope.** GSD keeps the technical slug `employee`. It may initiate chat with **all active staff in the same active department**, plus Admin and Super Admin. It is NOT limited to HR/Finance, and it gains no organization-wide staff discovery. No `gsd` backend role is introduced.
+2. **OST chat scope.** OST initiation remains its **own active authoritative upline chain**, plus Admin and Super Admin. No peer-OST discovery, no downline discovery, no organization-wide directory. OST may reply in any conversation where it is already an authorized active member.
+3. **Group creation rule.** Group creation requires `communications.messages` update, an allowed management role, and every initial member inside the creator's current eligible scope. The "current group-manager membership" condition does **not** apply at creation, because the conversation does not yet exist; it applies only afterwards, to add member, remove member, archive and every other group-management action.
+4. **Group removal notification.** An active staff member removed from a group receives exactly **one** recipient-owned, generic `group_removal` notification. It carries no message body, no sensitive participant information, no secrets and no contact details. Following it opens the conversation in **read-only historical mode** and restores nothing: no membership, no future messages, no post-removal participant changes, no post-removal unread counts.
 
 ## Approval requested
 
