@@ -296,6 +296,50 @@ describe('the invariants that make the model safe are real constraints', () => {
     ).toBe(true);
   });
 
+  it('admits a ZERO-LENGTH membership interval and refuses only an inverted one', () => {
+    // `communication_add_member` and `communication_remove_member` both take
+    // `current_sequence + 1`, and `current_sequence` only advances when a
+    // MESSAGE is sent. A member added and removed with nobody speaking in
+    // between therefore gets joined_sequence = left_sequence, which is an
+    // ordinary outcome - and under `left_sequence > joined_sequence` the
+    // removal raised, so the interval could not be recorded at all.
+    // Visibility needs no change to make that safe: the predicate
+    // `joined_sequence <= sequence AND (left is null OR sequence < left)`
+    // yields the EMPTY SET on a zero-length interval, which is exactly right -
+    // a member who saw nothing saw nothing.
+    expect(
+      declares('check (left_sequence is null or left_sequence >= joined_sequence)'),
+      'the interval CHECK must permit equality',
+    ).toBe(true);
+    expect(declares('left_sequence > joined_sequence'), 'the strict form IS the defect').toBe(
+      false,
+    );
+    // Reconciled forward-only, by a name RESOLVED from pg_constraint: this file
+    // is applied a second time by the DB suite, `create table if not exists`
+    // never revisits an existing table, so without the drop the `add constraint`
+    // would collide and the whole migration would abort. The selector matches the
+    // CHECK as a SET of its two interval columns, never by generated name and
+    // never by an assumed conkey ORDER.
+    expect(code).toMatch(
+      /alter table public\.communication_conversation_members\s+drop constraint %I/i,
+    );
+    expect(code).toMatch(
+      /con\.contype = 'c'\s+and array_length\(con\.conkey, 1\) = 2\s+and con\.conkey @> array\[/i,
+    );
+    for (const column of ['joined_sequence', 'left_sequence']) {
+      expect(code).toMatch(
+        new RegExp(
+          `\\(select attnum from pg_attribute\\s+where attrelid = rel\\.oid and attname = '${column}'\\)`,
+          'i',
+        ),
+      );
+    }
+    expect(
+      declares('add constraint communication_conversation_members_left_sequence_check'),
+      'the relaxed CHECK is re-added under a stable name',
+    ).toBe(true);
+  });
+
   it('requires exactly one audience discriminator on every row', () => {
     const arms: Record<string, string[]> = {
       all_staff: [],

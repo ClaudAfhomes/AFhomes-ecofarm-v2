@@ -10713,11 +10713,11 @@ async function main(): Promise<void> {
         '2',
       );
       eq(
-        'every open interval in that group is valid (left null, joined >= 0, nothing inverted)',
+        'every interval in that group is valid (joined >= 0, nothing inverted; a zero-length interval is legal)',
         (
           await one<{ bad: string }>(
             `select count(*) filter (where joined_sequence < 0
-                                      or (left_sequence is not null and left_sequence <= joined_sequence))::text as bad
+                                      or (left_sequence is not null and left_sequence < joined_sequence))::text as bad
              from public.communication_conversation_members
              where conversation_id = $1`,
             [intervalGroup],
@@ -10847,6 +10847,164 @@ async function main(): Promise<void> {
              from public.communication_conversation_members
              where conversation_id = $1 and joined_sequence = 900`,
             [intervalGroup],
+          )
+        ).rows,
+        '0',
+      );
+
+      /* ---------- 12: a ZERO-LENGTH interval is recordable, and grants nothing ---------- */
+      // The defect this section pins. add_member and remove_member both take
+      // `current_sequence + 1`, and `current_sequence` only advances when a
+      // MESSAGE is sent. A member added and removed with nobody speaking in
+      // between therefore gets joined_sequence = left_sequence: an ordinary flow.
+      // Under `left_sequence > joined_sequence` the removal raised a check
+      // violation, so the departure could not be recorded AT ALL. Relaxing the
+      // CHECK to `>=` is safe with no read-path change, because every visibility
+      // predicate is `joined_sequence <= sequence and (left is null or
+      // sequence < left)` - on a zero-length interval those two arms are
+      // unsatisfiable together, so the predicate yields the EMPTY SET.
+      const zeroGroup = await callUuid(
+        `public.communication_create_conversation($1,'group',$2,$3::uuid[],$4)`,
+        [ostStaff, 'Zero-length interval', [smStaff], uuidFor('comm:req:group:zero')],
+      );
+      eq(
+        'the fresh group has sent nothing, so every boundary is the same sequence',
+        (
+          await one<{ seq: string }>(
+            `select current_sequence::text as seq
+             from public.communication_conversations where id = $1`,
+            [zeroGroup],
+          )
+        ).seq,
+        '0',
+      );
+      await db.query(`select public.communication_add_member($1,$2,$3)`, [
+        smStaff,
+        zeroGroup,
+        adminStaff,
+      ]);
+      // NO savepoint here, deliberately: this call must PERSIST, and rolling back
+      // to one would undo the very removal this section is proving. The suite runs
+      // outside a transaction, so a raised statement rolls back its own implicit
+      // transaction and poisons nothing after it. The probe that MUST roll back is
+      // the failing one, below.
+      let zeroRemoval = '';
+      try {
+        await db.query(`select public.communication_remove_member($1,$2,$3)`, [
+          smStaff,
+          zeroGroup,
+          adminStaff,
+        ]);
+      } catch (error) {
+        zeroRemoval = safeErrorMessage(error);
+      }
+      check(
+        'a member removed with NO message in between is recordable',
+        zeroRemoval === '',
+        zeroRemoval,
+      );
+      eq(
+        'the interval is closed and exactly zero-length (left = joined = 1)',
+        (
+          await one<{ shape: string }>(
+            `select left_sequence::text || '/' || (joined_sequence = left_sequence)::text as shape
+             from public.communication_conversation_members
+             where conversation_id = $1 and staff_id = $2`,
+            [zeroGroup, adminStaff],
+          )
+        ).shape,
+        '1/true',
+      );
+      eq(
+        '...in ONE row, not a second interval',
+        (
+          await one<{ rows: string }>(
+            `select count(*)::text as rows
+             from public.communication_conversation_members
+             where conversation_id = $1 and staff_id = $2`,
+            [zeroGroup, adminStaff],
+          )
+        ).rows,
+        '1',
+      );
+      // Sent AFTER the removal, so the emptiness below is not vacuous: with no
+      // message in the conversation at all, an OPEN interval would also see
+      // nothing. A member whose window is zero-length must see nothing even
+      // though a message exists.
+      eq(
+        'the message sent after the removal takes sequence 1',
+        await callUuid(`public.communication_send_message($1,$2,$3,$4)`, [
+          ostStaff,
+          zeroGroup,
+          'after the zero-length removal',
+          uuidFor('comm:req:zero:1'),
+        ]),
+        '1',
+      );
+      eq(
+        'a message sent after the removal exists and the creator still sees it',
+        (await visibleSequences(ostStaff, zeroGroup)).join(','),
+        '1',
+      );
+      eq(
+        'a zero-length interval grants NO visibility: not the message sent after it',
+        (await visibleSequences(adminStaff, zeroGroup)).join(','),
+        '',
+      );
+      eq(
+        'the removal notification was written, exactly once, and is the group_removal one',
+        (
+          await one<{ shape: string }>(
+            `select count(*)::text || '/' || coalesce(string_agg(distinct notification_type, ','), 'none') as shape
+             from public.notifications
+             where recipient_staff_id = $1 and entity_id = $2`,
+            [adminStaff, zeroGroup],
+          )
+        ).shape,
+        '1/group_removal',
+      );
+
+      // The relaxation must not hollow the invariant out. A genuinely INVERTED
+      // interval (left < joined) is still refused, and by THIS CHECK: joined 902
+      // collides with no interval index and left_sequence is not null, so no
+      // unique index can fire - and the constraint is NAMED in the message, which
+      // is what proves which rule refused it. Own transaction, own savepoint: a
+      // denied statement aborts the enclosing transaction, so every probe after it
+      // would report the abort instead of its own reason. `throws` is not used
+      // here because it needs the callback to REJECT, and this one must roll back.
+      await db.query('begin');
+      await db.query('savepoint zero_inverted');
+      let invertedInterval = '';
+      try {
+        await db.query(
+          `insert into public.communication_conversation_members
+                  (conversation_id, staff_id, joined_sequence, left_sequence)
+           values ($1,$2,902,901)`,
+          [zeroGroup, adminStaff],
+        );
+      } catch (error) {
+        invertedInterval = safeErrorMessage(error);
+      }
+      await db.query('rollback to savepoint zero_inverted');
+      await db.query('rollback');
+      check(
+        'a genuinely inverted interval is still refused',
+        invertedInterval.includes('violates check constraint'),
+        invertedInterval,
+      );
+      check(
+        '...by the interval CHECK itself, named in the message',
+        invertedInterval.includes('communication_conversation_members_left_sequence_check'),
+        invertedInterval,
+      );
+      eq(
+        'the refused insert left no row behind',
+        (
+          await one<{ rows: string }>(
+            `select count(*)::text as rows
+             from public.communication_conversation_members
+             where conversation_id = $1 and joined_sequence = 902`,
+            [zeroGroup],
           )
         ).rows,
         '0',

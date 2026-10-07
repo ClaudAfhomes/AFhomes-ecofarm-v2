@@ -76,18 +76,83 @@ create table if not exists public.communication_conversations (
 -- One row per (conversation, staff, visit). Leaving is never a row deletion:
 -- the interval is closed, so the message history a member could once read
 -- stays readable and the audit trail keeps its shape.
+--
+-- `left_sequence` carries NO inline CHECK here: the constraint is added below,
+-- under a stable name, so a database that already received an earlier version of
+-- this column can have its superseded CHECK replaced without naming it.
 create table if not exists public.communication_conversation_members (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.communication_conversations(id) on delete restrict,
   staff_id uuid not null references public.staff_users(id) on delete restrict,
   is_manager boolean not null default false,
   joined_sequence bigint not null check (joined_sequence >= 0),
-  left_sequence bigint null check (left_sequence is null or left_sequence > joined_sequence),
+  left_sequence bigint null,
   last_read_sequence bigint not null default -1,
   last_read_at timestamptz null,
   joined_at timestamptz not null default now(),
   left_at timestamptz null
 );
+
+-- WHY EQUALITY IS ALLOWED, i.e. why this is `>=` and was `>`.
+--
+-- Both communication_add_member and communication_remove_member close their
+-- boundary at `current_sequence + 1`, and `current_sequence` only advances when
+-- a MESSAGE is sent. A member who is added and removed with nobody speaking in
+-- between therefore gets `joined_sequence = left_sequence = current_sequence +
+-- 1` - an ordinary outcome of an ordinary flow. Under `left_sequence >
+-- joined_sequence` the removal raised a check violation and that member's
+-- interval could not be recorded AT ALL, which is the defect this replaces.
+--
+-- A zero-length interval is legitimate and means "was a member for a window
+-- containing no messages". No read path needs to change to make it safe: every
+-- visibility predicate is
+--     joined_sequence <= message.sequence
+--     and (left_sequence is null or message.sequence < left_sequence)
+-- and when `left_sequence = joined_sequence` the second arm demands
+-- `sequence < joined_sequence` while the first demands
+-- `joined_sequence <= sequence` - unsatisfiable together, so the predicate
+-- yields the EMPTY SET. A member whose window held no message sees no message,
+-- which is exactly the truth. Only a genuinely INVERTED interval
+-- (`left_sequence < joined_sequence`) is refused, because it describes a
+-- membership that ends before it starts.
+--
+-- The drop is by the generated constraint name, RESOLVED FROM THE CATALOG
+-- rather than assumed. It is identified as the CHECK over exactly the two
+-- interval columns, matched as a SET (`@>` plus a length of two) because
+-- `pg_constraint.conkey` lists the referenced columns in order of first
+-- appearance in the expression, not in table order - so pinning the order
+-- would make the selector silently stop matching. Same idiom the UNIQUE
+-- reconciliation below uses. This is load-bearing, not tidiness:
+-- `create table if not exists` never revisits an existing table and this file is
+-- re-applied (the suite applies it a second time on purpose), so without the
+-- drop the `add constraint` below would collide with the copy already present
+-- and the whole migration would abort. The re-add re-validates every existing
+-- row: `>` implies `>=`, so nothing that was legal before can become illegal.
+do $$
+declare
+  c record;
+begin
+  for c in
+    select con.conname
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and rel.relname = 'communication_conversation_members'
+       and con.contype = 'c'
+       and array_length(con.conkey, 1) = 2
+       and con.conkey @> array[
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'joined_sequence'),
+         (select attnum from pg_attribute
+           where attrelid = rel.oid and attname = 'left_sequence')]
+  loop
+    execute format('alter table public.communication_conversation_members drop constraint %I', c.conname);
+  end loop;
+end $$;
+
+alter table public.communication_conversation_members
+  add constraint communication_conversation_members_left_sequence_check
+  check (left_sequence is null or left_sequence >= joined_sequence);
 
 -- Reconcile a database that already received the earlier table-level UNIQUE.
 -- `create or replace function` never touches a table constraint, and this file
