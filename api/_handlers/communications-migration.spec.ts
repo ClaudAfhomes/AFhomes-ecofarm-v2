@@ -1,17 +1,16 @@
 /**
  * Text-level pins for the AF Homes communications foundation migration.
  *
- * This spec lives beside the migration it guards, not in the `api` workspace,
- * because its subject IS the SQL file: column names, partial unique indexes,
- * the exact permission tuples, the widened idempotency registry, and the
- * privilege revokes. Those are properties of the file's text, so reading the
- * text is the only honest way to assert them - and it needs no database, so a
- * case can never pass because a database happened to be in the expected state.
+ * The subject IS the SQL file: column names, partial unique indexes, the exact
+ * permission tuples, the widened idempotency registry, and the privilege
+ * revokes. Those are properties of the file's text, so reading the text is the
+ * only honest way to assert them - and it needs no database, so a case can
+ * never pass because a database happened to be in the expected state.
  *
- * Run from the repository root (the api workspace has no vitest config and
- * cannot see this path):
- *   corepack pnpm --filter api exec vitest run --root .. \
- *     supabase/migrations/communications-migration.spec.ts
+ * The file sits with the other migration specs in `api/_handlers/` so it runs
+ * in the `api` workspace suite. It used to live in `supabase/migrations/`,
+ * which no project script covers, so it was an orphaned test that could not
+ * fail because nothing executed it.
  *
  * The SQL itself is proven by EXECUTION in `pnpm test:db:local`, which applies
  * every migration to a disposable PostgreSQL. This file is the cheap guard
@@ -23,9 +22,14 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const MIGRATION = '20261031000001_afhomes_communications_foundation.sql';
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const sql = fs.readFileSync(path.join(HERE, MIGRATION), 'utf8');
+const MIGRATIONS = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../supabase/migrations',
+);
+const sql = fs.readFileSync(
+  path.join(MIGRATIONS, '20261031000001_afhomes_communications_foundation.sql'),
+  'utf8',
+);
 /** SQL with `--` line comments stripped, so assertions judge code, not prose. */
 const code = sql
   .split('\n')
