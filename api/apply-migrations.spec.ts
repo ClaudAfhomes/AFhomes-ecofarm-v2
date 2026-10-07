@@ -61,11 +61,7 @@ describe('migration runner --only selector', () => {
   });
 
   it('refuses repeated selectors', () => {
-    const { status, out } = run([
-      '--check',
-      '--only=20261029000001',
-      '--only=20261013000001',
-    ]);
+    const { status, out } = run(['--check', '--only=20261029000001', '--only=20261013000001']);
     expect(status).not.toBe(0);
     expect(out).toContain('exactly one --only');
   });
@@ -96,19 +92,19 @@ describe('migration runner --only selector', () => {
   it('a real run without the production acknowledgement refuses', () => {
     const { status, out } = run(['--only=20261029000001'], {
       AFHOMES_TARGET_PROJECT_REF: 'ikaevepedpqygdlipsei',
-      DATABASE_URL: 'postgresql://postgres.ikaevepedpqygdlipsei:pw@aws-0-x.pooler.supabase.com:6543/postgres',
+      DATABASE_URL: 'postgresql://db.ikaevepedpqygdlipsei.supabase.co/postgres',
     });
     expect(status).not.toBe(0);
     expect(out).toContain('PRODUCTION');
   });
 
   it('never prints a connection string, password or key', () => {
-    const secret = 'supersecretpassword';
+    const secret = 'NOT_A_REAL_PASSWORD';
     const { out } = run(['--check'], {
       AFHOMES_TARGET_PROJECT_REF: 'ikaevepedpqygdlipsei',
-      DATABASE_URL: `postgresql://postgres.ikaevepedpqygdlipsei:${secret}@aws-0-x.pooler.supabase.com:6543/postgres`,
+      DATABASE_URL: `postgresql://db.ikaevepedpqygdlipsei.supabase.co/postgres?password=${secret}`,
     });
     expect(out).not.toContain(secret);
-    expect(out).not.toContain('pooler.supabase.com:6543/postgres');
+    expect(out).not.toContain('db.ikaevepedpqygdlipsei.supabase.co/postgres');
   });
 });

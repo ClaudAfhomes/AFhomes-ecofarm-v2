@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 const MIGRATION = fileURLToPath(
   new URL('../../supabase/migrations/20260928000001_afhomes_phase4_redemption.sql', import.meta.url),
 );
-const sql = readFileSync(MIGRATION, 'utf8');
+const sql = readFileSync(MIGRATION, 'utf8').replace(/\r\n/g, '\n');
 
 /** The file with every `--` comment line removed, so prose cannot satisfy a
  *  structural assertion (or trip one). */
