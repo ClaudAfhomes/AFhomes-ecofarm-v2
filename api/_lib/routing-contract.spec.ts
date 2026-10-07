@@ -55,7 +55,7 @@ vi.mock('../_lib/storage.js', () => ({
   downloadObject: async () => ({ error: 'storage unavailable in routing tests' }),
 }));
 
-const { routeRequest } = await import('../_lib/router.js');
+const { routeRequest, selectHandler } = await import('../_lib/router.js');
 
 function install() {
   holder.db = new FakeSupabase({
@@ -321,6 +321,44 @@ describe('router -> handler contract matrix', () => {
     r = await dispatch('/health');
     expect(r.handled).toBe(true);
     expect((r.body as { service?: string }).service).toBe('afhomes-api');
+  });
+
+  it('routes /api/v1/communications/** to the communications family', async () => {
+    let r = await dispatch('/api/v1/communications/recipients', { token: TOKEN.admin });
+    expect(r.handled).toBe(true);
+    // The stub answers every path itself, so this must NOT be the router's own
+    // `No handler for ...` (which leaves handled === false).
+    expect(message(r.body)).not.toMatch(/No handler for/);
+
+    // The family prefix is stripped before dispatch: the handler sees `recipients`,
+    // never `communications/recipients`.
+    const query: Record<string, string | string[] | undefined> = {};
+    const match = selectHandler('/api/v1/communications/recipients', query);
+    expect(query.familyPath).toBe('recipients');
+    expect(match?.routeKey).toBe('communications.messages/recipients');
+
+    r = await dispatch('/api/v1/communications', { token: TOKEN.admin });
+    expect(r.handled).toBe(true);
+    expect(message(r.body)).not.toMatch(/No handler for/);
+  });
+
+  it('does NOT route /api/v1/admin/afhomes/communications to the communications family', async () => {
+    // Documented and REJECTED alternative. `selectHandler` matches
+    // `^/api(?:/v1)?/admin/afhomes/(.+)$` BEFORE consulting BUSINESS_FAMILIES, so
+    // the nested prefix is swallowed by the admin/afhomes handler and can never
+    // reach the communications family - registering one there would be dead code.
+    const query: Record<string, string | string[] | undefined> = {};
+    const match = selectHandler('/api/v1/admin/afhomes/communications/recipients', query);
+    expect(query.afPath).toBe('communications/recipients');
+    expect(query.familyPath).toBeUndefined();
+    expect(match?.routeKey).toBe('admin/afhomes/communications/recipients');
+
+    const r = await dispatch('/api/v1/admin/afhomes/communications/recipients', {
+      token: TOKEN.admin,
+    });
+    // It reaches the admin/afhomes handler, which 404s the unknown sub-path.
+    expect(r.handled).toBe(true);
+    expect(r.status).toBe(404);
   });
 
   it('unknown paths miss the router with the safe envelope', async () => {

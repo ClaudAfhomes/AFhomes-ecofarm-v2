@@ -92,7 +92,7 @@ Use service-role-mediated read RPCs as needed for interval filtering and bounded
 
 ## API contracts
 
-Prefix `/admin/afhomes/communications`; add literal handler loaders to the existing router. Contracts live in `packages/contracts/src/schemas/communications.ts` and exports; lifecycle strings come from the existing lifecycle authority. All inputs, query parameters and outputs use Zod, with unknown mutation fields rejected. UUID request IDs retained across retry; actor always resolved from staff session. Content stays plain text and is never case-folded or rendered as HTML.
+Prefix `/api/v1/communications`, as a top-level router family: `selectHandler` matches `^/api(?:/v1)?/admin/afhomes/(.+)$` before it consults `BUSINESS_FAMILIES`, so an `admin/afhomes/communications` prefix would be swallowed by the admin/afhomes handler and never reach this family. Add literal handler loaders to the existing router. Contracts live in `packages/contracts/src/schemas/communications.ts` and exports; lifecycle strings come from the existing lifecycle authority. All inputs, query parameters and outputs use Zod, with unknown mutation fields rejected. UUID request IDs retained across retry; actor always resolved from staff session. Content stays plain text and is never case-folded or rendered as HTML.
 
 | Method / suffix | Input and result |
 | --- | --- |

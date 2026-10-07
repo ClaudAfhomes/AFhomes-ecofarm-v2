@@ -140,6 +140,17 @@ const BUSINESS_FAMILIES = [
     module: 'operations.redemption',
     load: () => import('../_handlers/redemptions.js'),
   },
+  // Communications: messages, groups, announcements and notifications. TOP-LEVEL
+  // by design, NOT `admin/afhomes/communications`: `selectHandler` matches
+  // `^/api(?:/v1)?/admin\/afhomes\/(.+)$` BEFORE consulting BUSINESS_FAMILIES, so
+  // a nested prefix would be swallowed by api/_handlers/admin/afhomes.ts and
+  // 404 there - unreachable dead code. `api/_lib/routing-contract.spec.ts` pins
+  // both halves of that decision.
+  {
+    prefix: 'communications',
+    module: 'communications.messages',
+    load: () => import('../_handlers/communications.js'),
+  },
   {
     prefix: 'cms',
     module: 'cms',
