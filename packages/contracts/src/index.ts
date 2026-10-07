@@ -143,6 +143,7 @@ export {
   paymentTypeSchema,
   membershipStatusSchema,
   commissionStatusSchema,
+  announcementStatusSchema,
   customerApplicationStatusSchema,
   reservationAgreementStatusSchema,
   pointsEntryTypeSchema,
@@ -165,6 +166,7 @@ export {
   canTransitionCustomerApplication,
   canTransitionReservationAgreement,
   hierarchyAllowsUpline,
+  ANNOUNCEMENT_TRANSITIONS,
 } from './schemas/lifecycle.js';
 export type {
   CustomerStatus,
@@ -173,6 +175,7 @@ export type {
   PaymentType,
   MembershipStatus,
   CommissionStatus,
+  AnnouncementStatus,
   CustomerApplicationStatus,
   ReservationAgreementStatus,
   PointsEntryType,
@@ -576,6 +579,12 @@ export {
 } from './schemas/customer-import.js';
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';
+/* ---- Staff communications (conversations, announcements, notifications) ----
+   API prefix `/api/v1/communications/**`. Every request schema is `.strict()`
+   and none of them carries a sender, recipient, role, status or timestamp the
+   server owns. Announcement status strings come from `lifecycle.js`. */
+export * from './schemas/communications.js';
+
 export * from './schemas/ost-accreditation.js';
 export { staffPortalBase, operationsPath, staffPortalPath } from './schemas/portal-routing.js';
 export {

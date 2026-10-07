@@ -65,6 +65,12 @@ export const commissionStatusSchema = z.enum([
 ]);
 export type CommissionStatus = z.infer<typeof commissionStatusSchema>;
 
+/** Staff announcement = TRANSACTION HEADER, never a broadcast that can be
+ *  recalled. `draft` is editable, `published` is frozen with its resolved
+ *  audience, `archived` is terminal. */
+export const announcementStatusSchema = z.enum(['draft', 'published', 'archived']);
+export type AnnouncementStatus = z.infer<typeof announcementStatusSchema>;
+
 /* ------------------------------------------------------------------ */
 /* Official paper-form transaction lifecycles (single source)          */
 /* ------------------------------------------------------------------ */
@@ -272,6 +278,21 @@ const RESERVATION_AGREEMENT_TRANSITIONS: Record<
   submitted: ['executed', 'cancelled', 'draft'],
   executed: [],
   cancelled: [],
+};
+
+/**
+ * Publishing is one-way forward and archive is terminal. There is no
+ * `published -> draft`: a published announcement is frozen with the audience
+ * it resolved, so "unpublishing" would silently change who already read it.
+ * Archiving hides it; it does not rewrite it.
+ */
+export const ANNOUNCEMENT_TRANSITIONS: Record<
+  AnnouncementStatus,
+  readonly AnnouncementStatus[]
+> = {
+  draft: ['published'],
+  published: ['archived'],
+  archived: [],
 };
 
 function canTransition<T extends string>(
