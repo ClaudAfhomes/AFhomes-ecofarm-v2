@@ -86,6 +86,7 @@ vi.mock('./services', async (original) => ({
     expectedProposalHash: 'a'.repeat(64),
     asOf: '2026-09-02T00:00:00.000Z',
     offerKind: 'newly_confirmed_offer',
+    sellerName: 'QA SELLER NAME',
     terms: {
       customerId: '00000000-0000-4000-8000-000000000004',
       planId: '00000000-0000-4000-8000-000000000001',
@@ -215,7 +216,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   // purchase creates the agreement first and the sale only at finalization, so
   // the selector is removed rather than merely ignored.
   expect(screen.queryByRole('combobox', { name: 'Card sale' })).not.toBeInTheDocument();
-  expect(await screen.findByText('00000000-0000-4000-8000-000000000005')).toBeInTheDocument();
+  expect(await screen.findByText('QA SELLER NAME')).toBeInTheDocument();
   await user.type(screen.getByLabelText('name'), 'QA HOLDER');
   await user.type(screen.getByLabelText('address'), '1 QA STREET');
   await user.type(screen.getByLabelText('contactNumber'), '09171234567');
@@ -228,9 +229,11 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   expect(
     purchaseReservationCreateSchema.safeParse(calls.reservation.mock.calls[0]?.[0]).error,
   ).toBeUndefined();
+  await user.click(await screen.findByRole('button', { name: 'OK' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   await user.clear(input);
   await user.type(input, 'silver member');
-  await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
+  await user.click(await screen.findByRole('button', { name: 'Create Reservation Agreement' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalledTimes(2));
   expect(calls.reservation.mock.calls[1]?.[0]).not.toHaveProperty('vipTier');
 });

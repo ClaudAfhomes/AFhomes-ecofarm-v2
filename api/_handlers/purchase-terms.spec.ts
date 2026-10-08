@@ -135,6 +135,7 @@ function install(
           reviewed_data: { fields: { idType: 'passport' } },
         },
       ],
+      staff_users: [{ id: SELLER_ID, full_name: 'QA SELLER' }],
       customers: [{ id: CUSTOMER_ID, created_by: SELLER_ID }],
       reservation_agreements: [],
       audit_events: [],
@@ -150,9 +151,13 @@ function install(
 /** The RPC call for `fn`, not merely the last call: the handler reads back after it. */
 const rpcCall = (db: FakeSupabase, fn: string) => db.calls.filter((c) => c.table === fn);
 
-async function call(
-  opts: { path: string; method?: string; token?: string; body?: unknown; query?: Record<string, string> },
-) {
+async function call(opts: {
+  path: string;
+  method?: string;
+  token?: string;
+  body?: unknown;
+  query?: Record<string, string>;
+}) {
   const { res, state } = makeRes();
   await forms(
     makeReq({
@@ -179,6 +184,7 @@ describe('purchase terms proposal (server-authoritative offer)', () => {
     expect(response.status).toBe(200);
     expect(purchaseTermsProposalSchema.safeParse(response.body).success).toBe(true);
     expect(response.body).toMatchObject({
+      sellerName: 'QA SELLER',
       expectedProposalHash: HASH,
       terms: { totalPrice: '54000.00', reservationFee: '10000.00' },
     });
@@ -490,14 +496,17 @@ describe('application decisions are atomic transitions', () => {
       body: { requestId },
     });
     expect(response.status).toBe(200);
-    expect(rpcCall(holder.db as FakeSupabase, 'decide_purchase_application_once')[0]?.arg).toMatchObject(
-      { p_decision: 'draft' },
-    );
+    expect(
+      rpcCall(holder.db as FakeSupabase, 'decide_purchase_application_once')[0]?.arg,
+    ).toMatchObject({ p_decision: 'draft' });
   });
 
   it('requires a request id for decisions and reopens', async () => {
     install();
-    for (const path of [`customer-applications/${APP_ID}/decision`, `customer-applications/${APP_ID}/reopen`]) {
+    for (const path of [
+      `customer-applications/${APP_ID}/decision`,
+      `customer-applications/${APP_ID}/reopen`,
+    ]) {
       const response = await call({ path, method: 'POST', body: {} });
       expect(response.status).toBe(400);
     }

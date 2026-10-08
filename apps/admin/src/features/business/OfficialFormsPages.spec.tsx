@@ -70,6 +70,11 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.clearAllMocks());
+async function dismissNotice() {
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
+}
 
 const application = {
   id: 'app-1',
@@ -307,6 +312,7 @@ describe('application private ID intake and review', () => {
     await setup();
     vi.mocked(runDocumentOcr).mockResolvedValue(document('completed'));
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await dismissNotice();
     await screen.findByText('Valid ID: Uploaded ✓');
     expect(requestUploadGrant).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -321,6 +327,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText(/OCR completed/);
+    await dismissNotice();
     expect(screen.getByLabelText('First name')).toHaveValue('Ana');
     expect(screen.getByLabelText('Last name')).toHaveValue('');
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'McDonald' } });
@@ -340,6 +347,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText('OCR failed; continue with manual entry.');
+    await dismissNotice();
     expect(screen.getByText('Valid ID: Uploaded ✓')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Anne-Marie' } });
     expect(screen.getByLabelText('First name')).toHaveValue('Anne-Marie');
@@ -375,6 +383,7 @@ describe('application private ID intake and review', () => {
   const uploadCurrent = async () => {
     await setup();
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await dismissNotice();
     await screen.findByText(/Current ID: qa\.png/);
   };
   it('keeps the current ID authoritative while replacement is pending and cancelled', async () => {
@@ -420,6 +429,7 @@ describe('application private ID intake and review', () => {
       else vi.mocked(putUploadBytes).mockRejectedValueOnce(new Error('Bytes failed'));
       fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
       await screen.findByText(stage === 'grant' ? 'Grant failed' : 'Bytes failed');
+      await dismissNotice();
       expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
       expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
       expect(screen.getByText(/Pending replacement/)).toBeInTheDocument();
@@ -445,6 +455,7 @@ describe('application private ID intake and review', () => {
     expect(screen.getByLabelText('Scan / Take Photo')).toBeDisabled();
     fail(new Error('OCR unavailable'));
     await screen.findByText('OCR unavailable');
+    await dismissNotice();
     expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.getByLabelText('Upload ID')).toBeEnabled();
   });

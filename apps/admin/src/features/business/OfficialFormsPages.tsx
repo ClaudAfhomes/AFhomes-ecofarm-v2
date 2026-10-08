@@ -29,6 +29,8 @@ import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
 import { formatMoney } from './format';
 import {
+  notifySuccess,
+  notifyWarning,
   Alert,
   Button,
   IdCapturePicker,
@@ -561,7 +563,7 @@ export function CustomerApplicationEditorPage() {
   const [consent, setConsent] = useState(false);
   const [validId, setValidId] = useState(false);
   const [paymentProof, setPaymentProof] = useState(false);
-  const [message, setMessage] = useState('');
+  const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   const [ocrFile, setOcrFile] = useState<File | null>(null);
   const [idType, setIdType] = useState('');
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
@@ -741,7 +743,7 @@ export function CustomerApplicationEditorPage() {
             });
       }),
     onSuccess: (app) => {
-      setMessage('Application saved as draft.');
+      notifySuccess({ title: 'Success', message: 'Application saved as draft.' });
       applicationRequest.complete();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
@@ -772,7 +774,7 @@ export function CustomerApplicationEditorPage() {
       return submitCustomerApplication(id!, confirmation);
     },
     onSuccess: () => {
-      setMessage('Customer application submitted successfully.');
+      notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
       void existing.refetch();
       void proposal.refetch();
@@ -872,15 +874,21 @@ export function CustomerApplicationEditorPage() {
   // retry replays the original decision instead of attempting a second one.
   const decisionRequest = useMutationRequest();
   const decide = useMutation({
-    mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') =>
-      decideCustomerApplication(
+    mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') => {
+      if (decision === 'approved' && !existing.data?.purchaseTermsId) {
+        throw new Error(
+          'Reopen to review purchase terms, check the offer and identity document, then submit again before approving.',
+        );
+      }
+      return decideCustomerApplication(
         id!,
         decision,
         decisionRequest.forPayload({ applicationId: id, decision }),
         'Reviewed by authorized staff.',
-      ),
+      );
+    },
     onSuccess: () => {
-      setMessage('Decision recorded.');
+      notifySuccess({ title: 'Success', message: 'Decision recorded.' });
       decisionRequest.complete();
       void existing.refetch();
       void proposal.refetch();
@@ -907,7 +915,10 @@ export function CustomerApplicationEditorPage() {
       });
     },
     onSuccess: () => {
-      setMessage('Purchase terms confirmed and frozen for this application.');
+      notifySuccess({
+        title: 'Success',
+        message: 'Purchase terms confirmed and frozen for this application.',
+      });
       setReviewReason('');
       reviewRequest.complete();
       void existing.refetch();
@@ -924,7 +935,7 @@ export function CustomerApplicationEditorPage() {
         reopenRequest.forPayload({ applicationId: id, decision: 'draft' }),
       ),
     onSuccess: () => {
-      setMessage('Application reopened as draft.');
+      notifySuccess({ title: 'Success', message: 'Application reopened as draft.' });
       reopenRequest.complete();
       void existing.refetch();
       void proposal.refetch();
@@ -959,7 +970,6 @@ export function CustomerApplicationEditorPage() {
         <p>
           <Link to="/admin/customers/applications">Back to applications</Link>
         </p>
-        {message ? <Alert variant="info">{message}</Alert> : null}
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1407,7 +1417,9 @@ export function CustomerApplicationEditorPage() {
                 Reject
               </Button>{' '}
               <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-                Reopen to draft
+                {existing.data.purchaseTermsId
+                  ? 'Reopen to draft'
+                  : 'Reopen to review purchase terms'}
               </Button>{' '}
             </>
           ) : null}{' '}
@@ -1706,7 +1718,7 @@ export function ReservationAgreementEditorPage() {
     paymentDate: '',
     remarks: '',
   });
-  const [message, setMessage] = useState('');
+  const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   useEffect(() => {
     const app = sourceApplication.data;
     if (!app || id || !['submitted', 'approved'].includes(app.status)) return;
@@ -1866,7 +1878,7 @@ export function ReservationAgreementEditorPage() {
             });
       }),
     onSuccess: (agreement) => {
-      setMessage('Reservation saved.');
+      notifySuccess({ title: 'Success', message: 'Reservation saved.' });
       reservationRequest.complete();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
       if (!id) navigate(`/admin/sales/reservations/${agreement.id}`, { replace: true });
@@ -1876,7 +1888,7 @@ export function ReservationAgreementEditorPage() {
   const submit = useMutation({
     mutationFn: () => submitReservationAgreement(id!),
     onSuccess: () => {
-      setMessage('Agreement submitted.');
+      notifySuccess({ title: 'Success', message: 'Agreement submitted.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
     },
@@ -1886,7 +1898,7 @@ export function ReservationAgreementEditorPage() {
     mutationFn: (decision: 'executed' | 'cancelled') =>
       decideReservationAgreement(id!, decision, 'Reviewed by authorized seller.'),
     onSuccess: () => {
-      setMessage('Decision recorded.');
+      notifySuccess({ title: 'Success', message: 'Decision recorded.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
     },
@@ -1895,7 +1907,7 @@ export function ReservationAgreementEditorPage() {
   const reopen = useMutation({
     mutationFn: () => reopenReservationAgreement(id!),
     onSuccess: () => {
-      setMessage('Agreement reopened as draft.');
+      notifySuccess({ title: 'Success', message: 'Agreement reopened as draft.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
     },
@@ -1970,7 +1982,6 @@ export function ReservationAgreementEditorPage() {
       <p>
         <Link to="/admin/sales/reservations">Back to agreements</Link>
       </p>
-      {message ? <Alert variant="info">{message}</Alert> : null}
       {existing.data ? (
         <p>
           Status: {existing.data.status} · Tier: {existing.data.tier} · Total:{' '}
@@ -2032,8 +2043,8 @@ export function ReservationAgreementEditorPage() {
             <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
             <dt>Installment months</dt>
             <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
-            <dt>Seller staff reference</dt>
-            <dd>{proposal.data.terms.sellerStaffId}</dd>
+            <dt>Seller</dt>
+            <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
             <dt>Benefits</dt>
             <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
             <dt>Purchase terms reference</dt>

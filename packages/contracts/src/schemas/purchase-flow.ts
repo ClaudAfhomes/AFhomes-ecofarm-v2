@@ -189,6 +189,7 @@ export const purchaseTermsSchema = purchaseTermsObject.superRefine(validatePurch
 export type PurchaseTerms = z.infer<typeof purchaseTermsSchema>;
 
 export const purchaseTermsProposalSchema = z.strictObject({
+  sellerName: z.string().nullable().optional(),
   applicationId: uuid,
   expectedProposalHash: z.string().regex(/^[0-9a-f]{64}$/),
   asOf: timestamp,

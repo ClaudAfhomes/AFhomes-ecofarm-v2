@@ -19,6 +19,7 @@ const buildOffer = () =>
     expectedProposalHash: 'a'.repeat(64),
     asOf: '2026-10-07T00:00:00.000Z',
     offerKind: 'submission',
+    sellerName: 'QA SELLER',
     terms: {
       applicationId: id,
       customerId: id,
@@ -70,6 +71,7 @@ const detail = (status: CustomerApplicationStatus) =>
   customerApplicationSchema.parse({
     id,
     applicationNumber: 'QA APPLICATION',
+    purchaseTermsId: id,
     customerId: id,
     planId: id,
     tier: 'BRONZE',
@@ -172,6 +174,9 @@ it('dispatches submitted decisions and reopen', async () => {
         'Reviewed by authorized staff.',
       ),
     );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), {
+      timeout: 4000,
+    });
     await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
   }
   fireEvent.click(screen.getByRole('button', { name: 'Reopen to draft' }));
@@ -210,4 +215,23 @@ it('does not expose a new application form when an existing application fails to
   await screen.findByText('Application could not be loaded');
   expect(screen.queryByText('New Customer Application')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+});
+
+it('guides legacy submitted applications through terms capture instead of a doomed approval', async () => {
+  vi.mocked(getCustomerApplication).mockResolvedValue({
+    ...detail('submitted'),
+    purchaseTermsId: null,
+  });
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/customers/applications/:id" element={<CustomerApplicationEditorPage />} />
+    </Routes>,
+    { route: '/admin/customers/applications/' + id },
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+  expect(await screen.findByRole('dialog')).toHaveTextContent('Reopen to review purchase terms');
+  expect(decideCustomerApplication).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Reopen to review purchase terms' })).toBeEnabled();
 });

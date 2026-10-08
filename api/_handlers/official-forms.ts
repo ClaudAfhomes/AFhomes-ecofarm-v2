@@ -948,7 +948,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const proposal = purchaseTermsProposalSchema.safeParse(data);
       if (!proposal.success)
         return fail(res, 'INTERNAL', 'Purchase terms proposal is unavailable', 500);
-      return res.status(200).json(proposal.data);
+      const { data: seller, error: sellerError } = await db
+        .from('staff_users')
+        .select('full_name')
+        .eq('id', proposal.data.terms.sellerStaffId)
+        .maybeSingle();
+      if (sellerError) throw sellerError;
+      return res.status(200).json({
+        ...proposal.data,
+        sellerName: (seller as { full_name?: string } | null)?.full_name ?? null,
+      });
     }
     const appReview = route(
       req,
