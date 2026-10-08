@@ -9,10 +9,9 @@
  * server trusts. Names are display values and are never proof of hierarchy -
  * a submitted name is re-resolved against the provider and discarded.
  *
- * A provider may serve names with broken encoding (the current mirror emits
- * `U+00C3 U+00B1` for the n-with-tilde). Names are therefore passed through
- * verbatim: repairing them would invent spelling the authority did not send,
- * and this schema must not become a hidden transcoder.
+ * Names keep the authority's casing and spelling exactly. Any encoding repair is
+ * the provider adapter's job and happens before a value reaches this schema, so
+ * this schema must never become a transcoder.
  */
 import { z } from 'zod';
 

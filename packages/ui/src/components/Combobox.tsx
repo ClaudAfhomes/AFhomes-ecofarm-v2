@@ -108,6 +108,14 @@ export function Combobox({
   const optionId = (index: number) => `${id}-option-${uid}-${index}`;
 
   const showList = open && !disabled && !error;
+  /**
+   * A status message describes the LIST, so it is only meaningful while the user
+   * is looking at the list or a request is actually in flight. Otherwise a
+   * lazily-loaded, not-yet-touched combbox would announce "Loading provinces…"
+   * forever - `isPending` is true for a DISABLED query in TanStack Query v5 - or
+   * claim an unfetched list is empty, which is a different and wrong statement.
+   */
+  const showStatus = showList || loading;
   const statusText = loading
     ? `${loadingLabel}…`
     : !loading && matches.length === 0 && filter.trim().length > 0
@@ -209,7 +217,7 @@ export function Combobox({
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${errorId} ${hintId}` : hintId}
           disabled={disabled}
-          placeholder={disabled ? disabledHint : placeholder}
+          placeholder={placeholder}
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -249,7 +257,7 @@ export function Combobox({
         </div>
       ) : null}
 
-      {!error && statusText ? (
+      {!error && showStatus && statusText ? (
         <div className={styles.status} role="status">
           {statusText}
         </div>

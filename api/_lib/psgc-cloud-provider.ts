@@ -8,10 +8,10 @@
  *   GET /provinces/{code}/cities-municipalities  -> { data: [{ code, name, type, ... }] }
  *   GET /cities-municipalities/{code}/barangays  -> { data: [{ code, name, ... }] }
  *
- * Codes are 10 digits at every level. Names are passed through byte-for-byte:
- * the service currently serves some names with a broken encoding (`n` with
- * tilde arrives as `U+00C3 U+00B1`), and "repairing" that here would invent a
- * spelling the authority never published.
+ * Codes are 10 digits at every level. Names are the authority's own spelling and
+ * are never re-cased, trimmed of meaning, or "tidied". The ONE thing this module
+ * does to a name is undo the service's encoding damage - see `repairMojibake` -
+ * because that damage is a lost byte sequence, not a different spelling.
  *
  * ONE HARD-WON RULE: the query-filter form (`?province_code=`) is accepted by
  * the service and SILENTLY IGNORED - it returns every province's rows. Only the
@@ -81,6 +81,44 @@ function rows(payload: unknown): Record<string, unknown>[] {
 }
 
 /**
+ * Recover text that was UTF-8 decoded as Latin-1.
+ *
+ * The service serves some names mangled: a published `n` with tilde is delivered
+ * as U+00C3 U+00B1, so `Biñan` reads `"City of BiÃ±an"`. That is a lost byte
+ * sequence, not a different spelling, so the original is recoverable exactly -
+ * this re-reads the string as Latin-1 bytes and decodes those as UTF-8.
+ *
+ * It deliberately does nothing in three cases, because each would be a guess:
+ *
+ * - a code point above U+00FF cannot have come from this mistake, so the string
+ *   is already correct (or uses a script we should not touch);
+ * - bytes that are not valid UTF-8 mean the string was already correct - `Biñan`
+ *   encodes to F1, an invalid lead byte, so the round-trip fails and is refused;
+ * - a repair that changes nothing is not a repair.
+ *
+ * A name mixing mangled Latin-1 with other scripts is left alone rather than
+ * partially rewritten. No such name has been observed in PSGC.
+ */
+export function repairMojibake(value: string): string {
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code > 0xff) return value;
+    bytes[index] = code;
+  }
+  try {
+    const repaired = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return repaired === value ? value : repaired;
+  } catch {
+    return value;
+  }
+}
+
+/** The official name, with the provider's encoding damage undone. */
+const officialName = (value: unknown): unknown =>
+  typeof value === 'string' ? repairMojibake(value) : value;
+
+/**
  * Parse one row through its contract. A row that fails is a provider defect and
  * fails the whole response: returning a partial list would let a user save an
  * address against a hierarchy the provider never confirmed.
@@ -97,7 +135,9 @@ export const psgcCloudAddressProvider: AddressProvider = {
   name: 'psgc-cloud-v2',
 
   async provinces(): Promise<Province[]> {
-    return rows(await getJson('/provinces')).map((row) => parseRow(provinceSchema, row));
+    return rows(await getJson('/provinces')).map((row) =>
+      parseRow(provinceSchema, { code: row.code, name: officialName(row.name) }),
+    );
   },
 
   async localities(provinceCode: string): Promise<Locality[]> {
@@ -111,7 +151,7 @@ export const psgcCloudAddressProvider: AddressProvider = {
       if (!type) throw new AddressProviderError('PROVIDER_BAD_RESPONSE');
       return parseRow(localitySchema, {
         code: row.code,
-        name: row.name,
+        name: officialName(row.name),
         type,
         provinceCode,
       });
@@ -121,7 +161,11 @@ export const psgcCloudAddressProvider: AddressProvider = {
   async barangays(localityCode: string): Promise<Barangay[]> {
     const raw = rows(await getJson(`/cities-municipalities/${segment(localityCode)}/barangays`));
     return raw.map((row) =>
-      parseRow(barangaySchema, { code: row.code, name: row.name, localityCode }),
+      parseRow(barangaySchema, {
+        code: row.code,
+        name: officialName(row.name),
+        localityCode,
+      }),
     );
   },
 };

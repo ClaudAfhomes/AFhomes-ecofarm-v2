@@ -230,6 +230,27 @@ describe('Combobox states', () => {
     expect(screen.queryAllByRole('option')).toHaveLength(0);
   });
 
+  it('says nothing at all until the list is opened', () => {
+    // A combobox nobody has touched must not claim to be loading, nor claim the
+    // reference list is empty. `isPending` is true for a DISABLED query in
+    // TanStack Query v5, so a lazily-fetched list would otherwise announce
+    // "Loading provinces…" forever before the user ever reached for it - and an
+    // unfetched empty list would read as "no provinces exist", which is a lie.
+    setup({ options: [] });
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no .* to show/i)).not.toBeInTheDocument();
+  });
+
+  it('does say the list is empty once the user has opened it', async () => {
+    const { user } = setup({ options: [] });
+
+    await user.click(box());
+
+    expect(screen.getByText(/no .* to show/i)).toBeInTheDocument();
+  });
+
   it('shows a safe error with a retry, never a raw failure', async () => {
     const onRetry = vi.fn();
     const { user } = setup({
@@ -262,6 +283,17 @@ describe('Combobox states', () => {
     setup({ disabled: true, disabledHint: 'Select a province first' });
 
     expect(screen.getByText('Select a province first')).toBeInTheDocument();
+  });
+
+  it('explains a disabled level exactly once, not as both hint and placeholder', () => {
+    // The reason a level is disabled is the same sentence twice if it is also the
+    // placeholder: two identical grey lines stacked under one field. The visible
+    // hint is also the aria-describedby target, so it is the one to keep.
+    setup({ disabled: true, disabledHint: 'Select a province first' });
+
+    expect(screen.getAllByText('Select a province first')).toHaveLength(1);
+    // No placeholder at all: `disabledHint` must never double as one.
+    expect(box()).not.toHaveAttribute('placeholder');
   });
 });
 

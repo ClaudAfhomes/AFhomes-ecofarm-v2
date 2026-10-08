@@ -61,9 +61,10 @@ describe('rankOptions', () => {
     expect(names(rankOptions(all, 'binyan'))[0]).toBe('Biñan');
   });
 
-  it('still matches a name whose diacritics are mangled by the provider', () => {
-    // The upstream service serves some names with a broken encoding. Search must
-    // not become the thing that breaks because of it.
+  it('still finds a name whose bytes arrive mangled, as a safety net', () => {
+    // The provider adapter repairs this upstream, so it should never reach the
+    // ranker. If some future source skips that step, the fuzzy tier must still
+    // surface the entry rather than silently making it unfindable.
     const all = opts('City of BiÃ±an', 'Bacoor');
 
     expect(names(rankOptions(all, 'binyan'))[0]).toBe('City of BiÃ±an');

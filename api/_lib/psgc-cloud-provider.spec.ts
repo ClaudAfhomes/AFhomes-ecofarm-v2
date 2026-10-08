@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AddressProviderError } from './address-provider.js';
-import { psgcCloudAddressProvider } from './psgc-cloud-provider.js';
+import { psgcCloudAddressProvider, repairMojibake } from './psgc-cloud-provider.js';
 
 /** Real `Response` objects - only the transport is stubbed, never the parser. */
 const json = (body: unknown, status = 200) =>
@@ -109,6 +109,74 @@ describe('psgcCloudAddressProvider.barangays', () => {
       { code: '0403406003', name: 'Dayap', localityCode: '0403406000' },
     ]);
     expect(seen[0]).toContain('/cities-municipalities/0403406000/barangays');
+  });
+});
+
+describe('repairMojibake', () => {
+  // The service decodes UTF-8 bytes as Latin-1, so a published `n` with tilde
+  // arrives as U+00C3 U+00B1. These are the exact strings observed live.
+  it('recovers a name whose UTF-8 was decoded as Latin-1', () => {
+    expect(repairMojibake('City of BiÃ±an')).toBe('City of Biñan');
+    expect(repairMojibake('Los BaÃ±os')).toBe('Los Baños');
+  });
+
+  it('recovers a three-byte sequence, not just two', () => {
+    // U+20AC EURO SIGN is E2 82 AC; decoded as Latin-1 that is "â\x82¬".
+    expect(repairMojibake('Price â\x82¬')).toBe('Price €');
+  });
+
+  it('leaves a correctly-encoded name completely alone', () => {
+    expect(repairMojibake('Biñan')).toBe('Biñan');
+    expect(repairMojibake('Baños')).toBe('Baños');
+  });
+
+  it('leaves plain ASCII alone', () => {
+    expect(repairMojibake('Calauan')).toBe('Calauan');
+  });
+
+  it('leaves text outside Latin-1 alone', () => {
+    // It cannot have come from UTF-8 read as Latin-1, so touching it would be a guess.
+    expect(repairMojibake('Calamba 日本')).toBe('Calamba 日本');
+  });
+
+  it('is idempotent', () => {
+    expect(repairMojibake(repairMojibake('City of BiÃ±an'))).toBe('City of Biñan');
+  });
+
+  it('never throws, whatever it is handed', () => {
+    for (const value of ['', 'Ã', 'ÃÃ', '\u0080', 'Ã±Ã±', 'a'.repeat(500)]) {
+      expect(() => repairMojibake(value)).not.toThrow();
+    }
+  });
+});
+
+describe('psgcCloudAddressProvider name encoding', () => {
+  it('stores the repaired official spelling, not the mangled bytes', async () => {
+    stubFetch(() =>
+      json({
+        data: [
+          { code: '0403403000', name: 'City of BiÃ±an', type: 'City' },
+          { code: '0403405000', name: 'Los BaÃ±os', type: 'City' },
+        ],
+      }),
+    );
+
+    expect(await psgcCloudAddressProvider.localities('0403400000')).toEqual([
+      { code: '0403403000', name: 'City of Biñan', type: 'city', provinceCode: '0403400000' },
+      { code: '0403405000', name: 'Los Baños', type: 'city', provinceCode: '0403400000' },
+    ]);
+  });
+
+  it('repairs barangay names too', async () => {
+    stubFetch(() => json({ data: [{ code: '0403406003', name: 'NiÃ±og' }] }));
+
+    expect((await psgcCloudAddressProvider.barangays('0403406000'))[0]?.name).toBe('Niñog');
+  });
+
+  it('leaves a correctly-encoded name byte-identical through the adapter', async () => {
+    stubFetch(() => json({ data: [{ code: '0403403000', name: 'Biñan' }] }));
+
+    expect((await psgcCloudAddressProvider.provinces())[0]?.name).toBe('Biñan');
   });
 });
 

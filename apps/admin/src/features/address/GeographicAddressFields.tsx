@@ -103,10 +103,13 @@ export function GeographicAddressFields({
         required
         disabled={disabled}
         onOpen={() => setProvinceOpened(true)}
-        loading={provinces.isPending}
         loadingLabel="Loading provinces"
         error={provinces.isError ? 'Unable to load provinces. Try again.' : null}
         onRetry={() => void provinces.refetch()}
+        // `isFetching`, not `isPending`: a query that is not enabled (nothing has
+        // been typed and no record was loaded) stays `isPending` forever in v5,
+        // which would announce a load that was never started.
+        loading={provinces.isFetching}
         value={provinceOption}
         options={provinces.data ?? []}
         onSelect={(option) =>
@@ -125,7 +128,7 @@ export function GeographicAddressFields({
         required
         disabled={!localityUnlocked}
         disabledHint={localityHint}
-        loading={Boolean(value.provinceCode) && localities.isPending}
+        loading={localities.isFetching}
         loadingLabel="Loading cities and municipalities"
         error={
           Boolean(value.provinceCode) && localities.isError
@@ -154,7 +157,7 @@ export function GeographicAddressFields({
         required
         disabled={!barangayUnlocked}
         disabledHint={barangayHint}
-        loading={Boolean(value.cityMunicipalityCode) && barangays.isPending}
+        loading={barangays.isFetching}
         loadingLabel="Loading barangays"
         error={
           Boolean(value.cityMunicipalityCode) && barangays.isError

@@ -10,7 +10,8 @@
  * - Matching normalises case, runs of whitespace, and diacritics. The DISPLAYED
  *   name is never rewritten. `Biñan` must stay `Biñan` in the list even though
  *   it is matched as `binyan`, because the provider's spelling is the official
- *   one and this function has no authority to change it.
+ *   one and this function has no authority to change it. Encoding damage is
+ *   repaired upstream, in the provider adapter, before a name ever arrives here.
  * - The order inside a tier is the provider's order. `sort` is stable, so equal
  *   scores never reshuffle between renders.
  */
@@ -34,11 +35,10 @@ export const RANK = {
  * Fold to a comparable key: lowercase, diacritics stripped, whitespace collapsed.
  *
  * `NFD` + combining-mark removal is enough for correctly-encoded names, so
- * `Biñan` is found by typing `binyan`. It cannot rescue a name the provider
- * served already-mojibake'd; that one is reached by the fuzzy tier instead,
- * which is the honest place for it. Repairing those bytes here would mean
- * guessing at intended spelling in a module with no business doing so, and the
- * displayed name must stay exactly as the authority published it.
+ * `Biñan` is found by typing `binyan`. Encoding damage is repaired upstream in
+ * the provider adapter, so it should not reach here at all; the fuzzy tier
+ * below is the safety net if some future source ever ships mangled bytes. This
+ * module still never guesses at spelling - it only ever compares.
  */
 export function normalizeForMatch(value: string): string {
   return value
