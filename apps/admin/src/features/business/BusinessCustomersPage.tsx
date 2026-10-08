@@ -22,6 +22,7 @@ import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
+import { TierBadge } from './TierBadge';
 import {
   anonymizeCustomer,
   deactivateCustomer,
@@ -272,9 +273,9 @@ export function BusinessCustomersPage() {
           <table>
             <thead>
               <tr>
-                <th>Customer ID</th>
                 <th>Name</th>
                 <th>Phone</th>
+                <th>VIP Tier</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -293,9 +294,11 @@ export function BusinessCustomersPage() {
                   }}
                   className={styles.clickable}
                 >
-                  <td className={styles.idCell}>{customer.customerNumber}</td>
                   <td>{customer.fullName}</td>
                   <td className={styles.phoneCell}>{customer.phone}</td>
+                  <td>
+                    <TierBadge tier={customer.tier} />
+                  </td>
                   <td>
                     <StatusChip label={customer.status} />
                   </td>

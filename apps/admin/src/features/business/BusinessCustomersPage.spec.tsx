@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -178,23 +178,25 @@ describe('BusinessCustomersPage row actions', () => {
 });
 
 describe('BusinessCustomersPage directory table', () => {
-  it('shows only the requested columns: id, name, phone, status, actions', async () => {
+  it('shows only the requested columns: name, phone, tier, status, actions', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(
-      pageOf([row({ customerCode: 'AF-CC-1A2B3C4D' })], 1),
+      pageOf([row({ customerCode: 'AF-CC-1A2B3C4D', tier: 'GOLD' })], 1),
     );
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
-    for (const header of ['Customer ID', 'Name', 'Phone', 'Status', 'Actions']) {
+    for (const header of ['Name', 'Phone', 'VIP Tier', 'Status', 'Actions']) {
       expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
     }
-    for (const gone of ['Email', 'Government ID', 'Category']) {
+    for (const gone of ['Customer ID', 'Email', 'Government ID', 'Category']) {
       expect(screen.queryByRole('columnheader', { name: gone })).not.toBeInTheDocument();
     }
-    // Email, masked ID and code leave the table; the ID cell is the number only.
+    // Email, masked ID, code and number leave the table; tier shows as a badge.
     expect(screen.queryByText('maria@example.com')).not.toBeInTheDocument();
     expect(screen.queryByText('••••1234')).not.toBeInTheDocument();
     expect(screen.queryByText('AF-CC-1A2B3C4D')).not.toBeInTheDocument();
-    expect(screen.getByText('CUS-000001')).toBeInTheDocument();
+    expect(screen.queryByText('CUS-000001')).not.toBeInTheDocument();
+    // Scoped to the table: the tier filter also renders a GOLD option.
+    expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
   });
 
   it('fetches 10-row pages and walks them with Previous/Next', async () => {

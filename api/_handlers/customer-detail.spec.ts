@@ -55,6 +55,9 @@ const RECORD = {
   created_at: '2026-09-01T00:00:00.000Z',
   updated_at: '2026-09-02T00:00:00.000Z',
   memberships: { id: 'dddddddd-0000-4000-8000-000000000001', status: 'active' },
+  tier: 'GOLD',
+  member_status: 'active',
+  expires_at: '2027-05-05T00:00:00.000Z',
   derivedCategory: 'ACTIVE_VIP',
 };
 
@@ -101,6 +104,9 @@ describe('GET /customers/:id', () => {
       fullName: 'Maria Santos',
       status: 'active',
       derivedCategory: 'ACTIVE_VIP',
+      tier: 'GOLD',
+      membershipStatus: 'active',
+      membershipExpiresAt: '2027-05-05T00:00:00.000Z',
     });
   });
 

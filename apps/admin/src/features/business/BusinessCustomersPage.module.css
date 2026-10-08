@@ -9,7 +9,6 @@
   min-width: 720px;
 }
 
-.tableWrap td.idCell,
 .tableWrap td.phoneCell {
   white-space: nowrap;
 }

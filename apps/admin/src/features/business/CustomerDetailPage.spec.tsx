@@ -49,6 +49,9 @@ const RECORD = {
   status: 'active',
   derivedCategory: 'ACTIVE_VIP',
   hasActiveMembership: true,
+  tier: 'GOLD',
+  membershipStatus: 'active',
+  membershipExpiresAt: '2027-05-05T00:00:00.000Z',
   portalAccountActivated: false,
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-02T00:00:00.000Z',
@@ -75,9 +78,13 @@ describe('CustomerDetailPage', () => {
       'maria@example.com',
       '+639171234567',
       '••••1234',
+      'GOLD',
     ]) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
+    // Lookup-mirrored membership facts: status chip, tier, formatted expiry.
+    expect(screen.getAllByText('active').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/May.*2027/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to customers' })).toHaveAttribute(
       'href',
       '/admin/customers',

@@ -15,8 +15,9 @@ import {
 } from '@afhomes/ui';
 import { CUSTOMER_CATEGORY_LABELS } from '@afhomes/contracts';
 
-import { formatDateTime } from '../../lib/format';
+import { formatDate, formatDateTime } from '../../lib/format';
 import { getCustomerById } from './services';
+import { TierBadge } from './TierBadge';
 import styles from './CustomerDetailPage.module.css';
 
 /**
@@ -80,8 +81,25 @@ export function CustomerDetailPage() {
       ],
     },
     {
+      // Same facts as general Customer Lookup, kept separate like there: an
+      // active customer can hold a suspended membership, and conflating the
+      // two tells the operator the wrong thing about the record.
       title: 'Membership',
-      fields: [['Active membership', record.hasActiveMembership ? 'Yes' : 'No']],
+      fields: [
+        [
+          'Membership status',
+          record.membershipStatus ? (
+            <StatusChip key="membership-status" label={record.membershipStatus} />
+          ) : (
+            'None'
+          ),
+        ],
+        ['VIP tier', <TierBadge key="tier" tier={record.tier} />],
+        [
+          'Valid until',
+          record.membershipExpiresAt ? formatDate(record.membershipExpiresAt) : 'Not applicable',
+        ],
+      ],
     },
   ];
 
