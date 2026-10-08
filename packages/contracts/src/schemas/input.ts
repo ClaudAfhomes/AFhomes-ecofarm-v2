@@ -35,6 +35,20 @@ export function normalizeAddressField(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
+/**
+ * Trim and collapse an official geographic name, and change NOTHING else.
+ *
+ * Province, city/municipality and barangay are the only address fields that are
+ * NOT user prose: they come from the Philippine statistics authority, and its
+ * spelling is the record. `normalizeAddressField` would turn `Laguna` into
+ * `LAGUNA`, which stores a spelling the authority never published and makes the
+ * saved value disagree with what the selector showed. Street lines stay
+ * user-entered and keep the upper-case convention.
+ */
+export function normalizeGeographicName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
 /** Postal codes keep their characters; only surrounding space is trimmed. */
 export function normalizePostalCode(value: string): string {
   return value.trim().toUpperCase();

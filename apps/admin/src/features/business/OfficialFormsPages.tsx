@@ -91,6 +91,7 @@ import {
   updateApplicationReservation,
 } from './services';
 import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
+import { GeographicAddressFields } from '../address/GeographicAddressFields';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHolder => ({
@@ -292,19 +293,18 @@ function HolderFields({
           normalize={(v) => normalizeLiveHumanField('permanentAddressLine2', v)}
           onChange={(v) => set('permanentAddressLine2', v)}
         />
-        <Field
-          label="City / municipality"
-          value={value.cityMunicipality}
-          normalize={(v) => normalizeLiveHumanField('cityMunicipality', v)}
-          onChange={(v) => set('cityMunicipality', v)}
-          required
-        />
-        <Field
-          label="Province"
-          value={value.province}
-          normalize={(v) => normalizeLiveHumanField('province', v)}
-          onChange={(v) => set('province', v)}
-          required
+        {/*
+          Province -> city/municipality -> barangay, verified against the official
+          PSGC hierarchy. Street lines above and postal code below stay plain text:
+          those are the person's own words, these three are the authority's.
+
+          A legacy record with free-text geography and no codes renders exactly as
+          stored and is labelled unverified; nothing here invents a code for it.
+        */}
+        <GeographicAddressFields
+          idPrefix={`${value.holderType.toLowerCase()}-${title.replace(/\W+/g, '-')}`}
+          value={value}
+          onChange={(next) => onChange({ ...value, ...next })}
         />
         <Field
           label="Postal code"
@@ -1878,6 +1878,10 @@ export function ReservationAgreementEditorPage() {
       address: [
         value.permanentAddressLine1,
         value.permanentAddressLine2,
+        // Barangay before the municipality, matching how a Philippine address is
+        // written. It is simply absent for a legacy record, which keeps the old
+        // string shape intact rather than inserting a blank segment.
+        value.barangay,
         value.cityMunicipality,
         value.province,
         value.postalCode,

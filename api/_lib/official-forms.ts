@@ -77,6 +77,10 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'primary_address_line_2',
   'primary_city_municipality',
   'primary_province',
+  // Appended, never reordered: the province column keeps its position so an
+  // existing downloaded workbook still lines up. Optional on import, so a file
+  // produced before the structured selectors existed still loads.
+  'primary_barangay',
   'primary_postal_code',
   'primary_landline',
   'primary_mobile',
@@ -99,6 +103,7 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'secondary_address_line_2',
   'secondary_city_municipality',
   'secondary_province',
+  'secondary_barangay',
   'secondary_postal_code',
   'secondary_landline',
   'secondary_mobile',

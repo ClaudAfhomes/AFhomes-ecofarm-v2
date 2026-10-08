@@ -3,6 +3,7 @@ import {
   birthDateSchema,
   emailSchema,
   normalizeAddressField,
+  normalizeGeographicName,
   normalizePersonName,
   optionalPersonNameSchema,
   optionalContactNumberSchema,
@@ -11,6 +12,7 @@ import {
   phoneSchema,
   PERSON_NAME_RE,
 } from './input.js';
+import { geographicCodeSchema } from './address.js';
 import { exactDecimalStringSchema } from './money.js';
 import {
   customerApplicationStatusSchema,
@@ -64,18 +66,24 @@ export const applicationHolderSchema = z.object({
     .max(200)
     .transform((v) => normalizeAddressField(v)),
   permanentAddressLine2: z.string().trim().max(200).transform(normalizeAddressField).optional(),
-  cityMunicipality: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .transform((v) => normalizeAddressField(v)),
-  province: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .transform((v) => normalizeAddressField(v)),
+  /**
+   * The official geography. These three names come from the Philippine statistics
+   * authority rather than from a person typing, so they keep the authority's
+   * casing - see `normalizeGeographicName`. The street lines above stay
+   * user-entered and keep the upper-case convention.
+   */
+  cityMunicipality: z.string().trim().min(1).max(100).transform(normalizeGeographicName),
+  province: z.string().trim().min(1).max(100).transform(normalizeGeographicName),
+  barangay: z.string().trim().max(100).transform(normalizeGeographicName).optional(),
+  /**
+   * The verified PSGC codes, which are the actual geographic identity. All three
+   * or none: a half-verified hierarchy would persist a parent/child pair that
+   * nobody confirmed. All absent is legitimate, and is every record created
+   * before the structured selectors existed.
+   */
+  provinceCode: geographicCodeSchema.optional(),
+  cityMunicipalityCode: geographicCodeSchema.optional(),
+  barangayCode: geographicCodeSchema.optional(),
   postalCode: z.string().trim().max(20).optional(),
   landline: optionalLandlineSchema,
   mobile: phoneSchema,
@@ -114,8 +122,39 @@ const customerApplicationInputSchema = z.object({
   validIdReceived: z.boolean(),
   reservationPaymentProofReceived: z.boolean(),
 });
+/**
+ * Codes arrive as a verified triple or not at all, and this is checked per
+ * HOLDER rather than once for the application: a primary with codes and a
+ * secondary without them is a real, reachable state, and each is judged on its
+ * own. That the triple is internally CONSISTENT is the server's job - it has to
+ * re-resolve it against the authoritative hierarchy, which no client check can
+ * substitute for.
+ */
+const validateHolderLocationCodes = (
+  holder: { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
+  path: string,
+  ctx: z.RefinementCtx,
+) => {
+  if (!holder) return;
+  const present = [holder.provinceCode, holder.cityMunicipalityCode, holder.barangayCode].filter(
+    Boolean,
+  ).length;
+  if (present !== 0 && present !== 3) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [path, 'provinceCode'],
+      message: 'Provide all three location codes together, or none for a legacy free-text address',
+    });
+  }
+};
+
 const validateApplicationHolders = (
-  value: { tier: string; secondary?: unknown; secondarySignatureStatus?: unknown },
+  value: {
+    tier: string;
+    secondary?: unknown;
+    secondarySignatureStatus?: unknown;
+    primary?: unknown;
+  },
   ctx: z.RefinementCtx,
 ) => {
   if (value.secondary && value.tier !== 'GOLD')
@@ -130,6 +169,16 @@ const validateApplicationHolders = (
       path: ['secondarySignatureStatus'],
       message: 'Secondary signature requires a secondary holder',
     });
+  validateHolderLocationCodes(
+    value.primary as { provinceCode?: string } | undefined,
+    'primary',
+    ctx,
+  );
+  validateHolderLocationCodes(
+    value.secondary as { provinceCode?: string } | undefined,
+    'secondary',
+    ctx,
+  );
 };
 export const createCustomerApplicationSchema = customerApplicationInputSchema.superRefine(
   validateApplicationHolders,
