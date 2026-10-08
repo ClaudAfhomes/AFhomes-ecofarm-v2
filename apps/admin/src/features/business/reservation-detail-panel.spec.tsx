@@ -330,3 +330,33 @@ describe('Application-origin reservation detail', () => {
     await waitFor(() => expect(calls.records).toContain(`${SALE_ID}:purchase_finalized`));
   });
 });
+
+it('does not present creation snapshots as current payment totals', async () => {
+  renderDetail();
+  await screen.findByText('AF-RES-ZZZZZ');
+  expect(screen.queryByText(/Verified received: 0\.00/)).toBeNull();
+});
+it('shows the linked sale business number and labels existing draft saves correctly', async () => {
+  current = agreement({ saleId: SALE_ID, status: 'draft' });
+  finance = { ...finance, saleId: SALE_ID, saleNumber: 'AF-CSALE-QATEST' };
+  renderDetail();
+  expect(await screen.findByText('AF-CSALE-QATEST')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save draft' })).toBeTruthy();
+});
+it('loads the persisted membership and confirmation after reopening the reservation', async () => {
+  current = agreement({ saleId: SALE_ID });
+  finance = {
+    ...finance,
+    saleId: SALE_ID,
+    membership: {
+      id: 'abcdabcd-0000-4000-8000-0000000000ab',
+      membershipNumber: 'MBS-PERSISTED',
+      status: 'active',
+      pointsBalance: 10000,
+    },
+  };
+  renderDetail();
+  expect(await screen.findByText('MBS-PERSISTED')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /activate membership/i })).toBeNull();
+  expect(screen.getByRole('button', { name: /print activation confirmation/i })).toBeTruthy();
+});

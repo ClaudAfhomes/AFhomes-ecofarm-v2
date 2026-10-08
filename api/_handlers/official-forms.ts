@@ -507,6 +507,44 @@ async function agreementFinanceSummary(db: Db, id: string) {
   for (const result of [application, customer, seller, payments]) {
     if (result.error) throw result.error;
   }
+  const sale = summary.saleId
+    ? await db
+        .from('card_sales')
+        .select('sale_number')
+        .eq('id', String(summary.saleId))
+        .maybeSingle()
+    : null;
+  if (sale?.error) throw sale.error;
+  const saleNumber = (sale?.data as { sale_number?: string } | null)?.sale_number ?? null;
+  const membershipResult = summary.saleId
+    ? await db
+        .from('memberships')
+        .select('id,membership_number,status')
+        .eq('sale_id', String(summary.saleId))
+        .maybeSingle()
+    : null;
+  if (membershipResult?.error) throw membershipResult.error;
+  const member = membershipResult?.data as {
+    id: string;
+    membership_number: string;
+    status: string;
+  } | null;
+  const account = member
+    ? await db
+        .from('points_accounts')
+        .select('balance')
+        .eq('membership_id', member.id)
+        .maybeSingle()
+    : null;
+  if (account?.error) throw account.error;
+  const membership = member
+    ? {
+        id: member.id,
+        membershipNumber: member.membership_number,
+        status: member.status,
+        pointsBalance: Number((account?.data as { balance: number } | null)?.balance ?? 0),
+      }
+    : null;
   const name = (customer.data ?? {}) as Record<string, unknown>;
   const applicationRow = (application.data ?? {}) as Record<string, unknown>;
   return {
@@ -543,6 +581,8 @@ async function agreementFinanceSummary(db: Db, id: string) {
     firstVerifiedPayment: isoOrNull(summary.firstVerifiedPayment),
     spotCashDeadline: isoOrNull(summary.spotCashDeadline),
     saleId: summary.saleId,
+    saleNumber,
+    membership,
     payments: (payments.data ?? []).map((row: Record<string, unknown>) => shapePayment(row)),
   };
 }

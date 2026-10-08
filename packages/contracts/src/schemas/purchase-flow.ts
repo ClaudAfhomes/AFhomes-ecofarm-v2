@@ -1,6 +1,7 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 import {
   customerApplicationStatusSchema,
+  membershipStatusSchema,
   reservationAgreementStatusSchema,
   paymentSchemeSchema,
   type CustomerApplicationStatus,
@@ -360,6 +361,16 @@ const reservationFinance = {
 export const reservationFinanceSummarySchema = z.strictObject({
   ...reservationFinance,
   saleId: uuid.nullable(),
+  saleNumber: z.string().nullable().optional(),
+  membership: z
+    .strictObject({
+      id: uuid,
+      membershipNumber: z.string(),
+      status: membershipStatusSchema,
+      pointsBalance: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
   payments: z.array(purchasePaymentSchema),
 });
 export type ReservationFinanceSummary = z.infer<typeof reservationFinanceSummarySchema>;

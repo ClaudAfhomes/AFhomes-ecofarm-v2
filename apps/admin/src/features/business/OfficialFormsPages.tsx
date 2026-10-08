@@ -9,6 +9,7 @@ import type {
   ApplicationHolder,
   PurchaseDocumentKind,
   PurchaseReservation,
+  ReservationFinanceSummary,
 } from '@afhomes/contracts';
 import {
   createCustomerApplicationSchema,
@@ -1971,9 +1972,16 @@ export function ReservationAgreementEditorPage() {
       {existing.data ? (
         <p>
           Status: {existing.data.status} · Tier: {existing.data.tier} · Total:{' '}
-          {existing.data.totalPrice} · Verified received: {existing.data.totalPaymentReceived} ·
-          Balance: {existing.data.balance} · Submitted: {existing.data.submittedAt ?? '—'} ·
-          Executed: {existing.data.executedAt ?? '—'}
+          {existing.data.totalPrice}
+          {!applicationOrigin ? (
+            <>
+              {' '}
+              · Verified received: {existing.data.totalPaymentReceived} · Balance:{' '}
+              {existing.data.balance}
+            </>
+          ) : null}{' '}
+          · Submitted: {existing.data.submittedAt ?? '—'} · Executed:{' '}
+          {existing.data.executedAt ?? '—'}
         </p>
       ) : null}
       {summary.data ? (
@@ -2188,7 +2196,7 @@ export function ReservationAgreementEditorPage() {
         <Button onClick={() => save.mutate()} disabled={!editable || save.isPending}>
           {save.isPending
             ? 'Saving…'
-            : applicationOrigin
+            : applicationOrigin && !id
               ? 'Create Reservation Agreement'
               : 'Save draft'}
         </Button>{' '}
@@ -2324,7 +2332,11 @@ function ApplicationOriginAgreementPanel({
         <dt>Agreement state</dt>
         <dd>{lifecycle}</dd>
         <dt>Card Sale (AF-CSALE)</dt>
-        <dd>{agreement.saleId ?? 'Not created — created when the purchase is finalized'}</dd>
+        <dd>
+          {money?.saleNumber ??
+            agreement.saleId ??
+            'Not created — created when the purchase is finalized'}
+        </dd>
         <dt>Total purchase</dt>
         <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
         <dt>Included reservation amount</dt>
@@ -2429,7 +2441,7 @@ function ApplicationOriginAgreementPanel({
           </Button>
         </p>
       ) : null}
-      <MembershipConfirmation saleId={agreement.saleId} />
+      <MembershipConfirmation saleId={agreement.saleId} persisted={money?.membership} />
     </section>
   );
 }
@@ -2442,7 +2454,13 @@ function ApplicationOriginAgreementPanel({
  * call and are never re-displayable, so this panel could not show them even if it
  * wanted to.
  */
-function MembershipConfirmation({ saleId }: { saleId: string | null }) {
+function MembershipConfirmation({
+  saleId,
+  persisted,
+}: {
+  saleId: string | null;
+  persisted?: ReservationFinanceSummary['membership'];
+}) {
   const { user } = useSession();
   const canActivate =
     user?.afHomesPermissions.some(
@@ -2464,17 +2482,18 @@ function MembershipConfirmation({ saleId }: { saleId: string | null }) {
     }
   };
   if (!saleId) return null;
+  const membershipId = result?.membershipId ?? persisted?.id;
   return (
     <section aria-label="Membership activation">
       <h3>Membership</h3>
       {error ? <Alert variant="warning">{error}</Alert> : null}
-      {result ? (
+      {result || persisted ? (
         <>
           <dl>
             <dt>Membership</dt>
-            <dd>{result.membershipNumber}</dd>
-            <dt>Points allocated</dt>
-            <dd>{result.pointsAllocated}</dd>
+            <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
+            <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
+            <dd>{result?.pointsAllocated ?? persisted?.pointsBalance}</dd>
             <dt>Card Sale</dt>
             <dd>{saleId}</dd>
           </dl>
@@ -2482,7 +2501,7 @@ function MembershipConfirmation({ saleId }: { saleId: string | null }) {
             Card credentials are shown once, by the authorized activation flow, and are never
             re-displayed. Use Print Activation Confirmation for the historical record.
           </Alert>
-          <PrintActivationConfirmation membershipId={result.membershipId} />
+          {membershipId ? <PrintActivationConfirmation membershipId={membershipId} /> : null}
         </>
       ) : (
         <Button onClick={() => void activate()} disabled={!canActivate || busy}>

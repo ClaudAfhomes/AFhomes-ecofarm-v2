@@ -127,6 +127,7 @@ function install(
   options: {
     rows?: Record<string, unknown>[];
     payments?: Record<string, unknown>[];
+    linked?: boolean;
     rpcs?: { fn: string; result: unknown }[];
     rpcErrors?: Record<string, { code?: string; message: string }>;
   } = {},
@@ -170,6 +171,20 @@ function install(
           verified_at: null,
         },
       ],
+      card_sales: options.linked ? [{ id: TERMS_ID, sale_number: 'AF-CSALE-PERSISTED' }] : [],
+      memberships: options.linked
+        ? [
+            {
+              id: REQUEST_ID,
+              sale_id: TERMS_ID,
+              membership_number: 'MBS-PERSISTED',
+              status: 'active',
+              points_balance: 0,
+              qr_token_hash: 'PRIVATE',
+            },
+          ]
+        : [],
+      points_accounts: options.linked ? [{ membership_id: REQUEST_ID, balance: 10000 }] : [],
       audit_events: [],
     } as never,
     rpcs: options.rpcs ?? [{ fn: 'purchase_financial_summary', result: summary }],
@@ -621,4 +636,33 @@ it('verifies a reservation payment through the source-aware transaction', async 
       p_actor_id: '22222222-2222-4222-8222-222222222222',
     },
   );
+});
+
+describe('persisted reservation activation summary', () => {
+  it('returns the sale number and authoritative points balance without credentials', async () => {
+    install({
+      linked: true,
+      rpcs: [{ fn: 'purchase_financial_summary', result: { ...summary, saleId: TERMS_ID } }],
+    });
+    const response = await call({ path: `reservations/${RES_ID}/finance` });
+    expect(response.status).toBe(200);
+    const data = response.body;
+    expect(reservationFinanceSummarySchema.safeParse(data).success).toBe(true);
+    expect(data).toMatchObject({
+      saleNumber: 'AF-CSALE-PERSISTED',
+      membership: {
+        id: REQUEST_ID,
+        membershipNumber: 'MBS-PERSISTED',
+        status: 'active',
+        pointsBalance: 10000,
+      },
+    });
+    expect(JSON.stringify(data)).not.toContain('PRIVATE');
+    expect(Object.keys((data as { membership: object }).membership).sort()).toEqual([
+      'id',
+      'membershipNumber',
+      'pointsBalance',
+      'status',
+    ]);
+  });
 });
