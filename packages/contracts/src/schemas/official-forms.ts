@@ -323,11 +323,13 @@ export const customerApplicationListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     application_number: z.string(),
+    seller_name: z.string().nullable().optional(),
     status: customerApplicationStatusSchema,
   })
   .transform((row) => ({
     id: row.id,
     applicationNumber: row.application_number,
+    sellerName: row.seller_name ?? null,
     tier: row.tier_snapshot,
     applicantName: row.applicant_name,
     createdBy: row.created_by,

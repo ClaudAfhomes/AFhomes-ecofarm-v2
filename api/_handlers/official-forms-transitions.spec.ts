@@ -1,5 +1,6 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  customerApplicationListItemSchema,
   createCommissionRuleSchema,
   createCustomerApplicationSchema,
   reservationAgreementListItemSchema,
@@ -656,4 +657,38 @@ describe('IST list holder-aware summary', () => {
       });
     },
   );
+});
+
+describe('application list seller names', () => {
+  it.each([false, true])('resolves seller name with frozen terms=%s', async (frozen) => {
+    const creator = '11111111-1111-4111-8111-111111111111';
+    const seller = '33333333-3333-4333-8333-333333333333';
+    const terms = '55555555-5555-4555-8555-555555555555';
+    install({
+      customer_applications: [
+        {
+          id: APP_ID,
+          application_number: 'AF-APP-SELLER',
+          tier_snapshot: 'BRONZE',
+          status: 'approved',
+          created_by: creator,
+          purchase_terms_id: frozen ? terms : null,
+          created_at: '2026-10-08',
+          submitted_at: null,
+        },
+      ],
+      customer_application_purchase_terms: frozen ? [{ id: terms, seller_staff_id: seller }] : [],
+      staff_users: [
+        { id: creator, full_name: 'CREATOR NAME' },
+        { id: seller, full_name: 'SELLER NAME' },
+      ],
+    });
+    const result = await call(forms, { path: 'customer-applications' });
+    expect(result.status).toBe(200);
+    const rows = (result.body as { data: unknown[] }).data;
+    expect(customerApplicationListItemSchema.parse(rows[0])).toMatchObject({
+      createdBy: creator,
+      sellerName: frozen ? 'SELLER NAME' : 'CREATOR NAME',
+    });
+  });
 });

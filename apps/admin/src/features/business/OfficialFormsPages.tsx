@@ -473,7 +473,7 @@ export function CustomerApplicationsPage() {
                   </td>
                   <td>{app.applicantName ?? '—'}</td>
                   <td>{app.tier}</td>
-                  <td>{app.createdBy ?? '—'}</td>
+                  <td>{app.sellerName ?? '—'}</td>
                   <td>
                     <StatusChip label={app.status} />
                   </td>

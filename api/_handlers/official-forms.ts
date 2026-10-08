@@ -392,6 +392,33 @@ async function listRows(
       ]),
     );
     for (const row of rows) row.applicant_name = names.get(String(row.id)) ?? null;
+    const termsIds = rows.flatMap((row) =>
+      row.purchase_terms_id ? [String(row.purchase_terms_id)] : [],
+    );
+    const sellersByTerms = new Map<string, string>();
+    if (termsIds.length) {
+      const { data: terms, error: termsError } = await db
+        .from('customer_application_purchase_terms')
+        .select('id,seller_staff_id')
+        .in('id', termsIds);
+      if (termsError) throw termsError;
+      for (const term of (terms ?? []) as Record<string, unknown>[])
+        sellersByTerms.set(String(term.id), String(term.seller_staff_id));
+    }
+    const sellerId = (row: Record<string, unknown>) =>
+      sellersByTerms.get(String(row.purchase_terms_id)) ?? String(row.created_by ?? '');
+    const sellerIds = [...new Set(rows.map(sellerId).filter(Boolean))];
+    const sellerNames = new Map<string, string>();
+    if (sellerIds.length) {
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('id,full_name')
+        .in('id', sellerIds);
+      if (staffError) throw staffError;
+      for (const seller of (staff ?? []) as Record<string, unknown>[])
+        sellerNames.set(String(seller.id), String(seller.full_name ?? ''));
+    }
+    for (const row of rows) row.seller_name = sellerNames.get(sellerId(row)) || null;
   }
   if (table === 'reservation_agreements' && rows.length) {
     const ids = rows.map((row) => String(row.id));

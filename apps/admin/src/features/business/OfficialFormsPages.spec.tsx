@@ -76,7 +76,8 @@ const application = {
   applicationNumber: 'APP-000001',
   applicantName: 'MARIA SANTOS',
   tier: 'GOLD',
-  createdBy: 'Sam Seller',
+  createdBy: '11111111-1111-4111-8111-111111111111',
+  sellerName: 'Sam Seller',
   status: 'submitted',
   submittedAt: '2026-09-28T00:00:00.000Z',
   createdAt: '2026-09-28T00:00:00.000Z',
@@ -116,6 +117,8 @@ describe('CustomerApplicationsPage list states', () => {
     vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
     renderWithProviders(<CustomerApplicationsPage />);
     expect(await screen.findByText('APP-000001')).toBeInTheDocument();
+    expect(screen.getByText('Sam Seller')).toBeInTheDocument();
+    expect(screen.queryByText(application.createdBy)).not.toBeInTheDocument();
     // Shared FilterBar grammar: landmark search + clearable field.
     expect(screen.getByRole('search')).toBeInTheDocument();
     const search = screen.getByRole('searchbox', { name: 'Search applications' });
@@ -244,7 +247,10 @@ describe('application private ID intake and review', () => {
     expect(await screen.findByText(/Selected ID: capture\.jpg/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await waitFor(() => expect(putUploadBytes).toHaveBeenCalledTimes(1));
-    expect(putUploadBytes).toHaveBeenCalledWith('https://safe-test.example/signed-upload', captured);
+    expect(putUploadBytes).toHaveBeenCalledWith(
+      'https://safe-test.example/signed-upload',
+      captured,
+    );
     expect(requestUploadGrant).toHaveBeenCalledWith(
       expect.objectContaining({ mime: 'image/jpeg', originalFilename: 'capture.jpg' }),
     );
@@ -295,9 +301,7 @@ describe('application private ID intake and review', () => {
       decision: 'confirmed',
       fields: { idType: 'passport' },
     });
-    await waitFor(() =>
-      expect(screen.queryByText(/Submit needs the ID type recorded/)).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByText(/Submit needs the ID type recorded/)).toBeNull());
   });
   it('uploads to the selected customer, autofills confident suggestions, and preserves manual corrections', async () => {
     await setup();
