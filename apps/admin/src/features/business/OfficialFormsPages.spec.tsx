@@ -162,6 +162,35 @@ describe('CustomerApplicationsPage list states', () => {
 });
 
 describe('ReservationAgreementsPage list states', () => {
+  /**
+   * Executing an agreement hands collection to Finance, so the active IST
+   * reservation queue is asked for reservation work by default. The executed
+   * agreement stays reachable through "Include progressed" or an explicit status
+   * filter - it is never deleted, only handed over.
+   */
+  it('asks the server for reservation work by default', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([agreement] as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    expect(getReservationAgreements).toHaveBeenCalledWith(
+      expect.objectContaining({ queue: 'reservation_work' }),
+    );
+  });
+
+  it('drops the queue filter when Include progressed is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getReservationAgreements).mockResolvedValue([agreement] as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    vi.mocked(getReservationAgreements).mockClear();
+    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await waitFor(() =>
+      expect(getReservationAgreements).toHaveBeenCalledWith(
+        expect.not.objectContaining({ queue: expect.anything() }),
+      ),
+    );
+  });
+
   it('shows loading - never a phantom empty state - on first load', () => {
     vi.mocked(getReservationAgreements).mockReturnValue(new Promise(() => {}));
     renderWithProviders(<ReservationAgreementsPage />);

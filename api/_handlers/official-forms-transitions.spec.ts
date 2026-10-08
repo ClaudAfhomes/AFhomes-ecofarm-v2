@@ -861,6 +861,98 @@ describe('application work queue ownership', () => {
 });
 
 /**
+ * Queue ownership for IST reservations.
+ *
+ * Executing an agreement IS the handover to Finance: the contract is finalized
+ * and collection is owned by the payment queue. An executed agreement must
+ * therefore stop appearing as pending reservation work, exactly as a progressed
+ * application stops appearing as pending application work.
+ */
+describe('reservation work queue ownership', () => {
+  const draftId = 'bbbbbbbb-0000-4000-8000-0000000e0001';
+  const submittedId = 'bbbbbbbb-0000-4000-8000-0000000e0002';
+  const executedId = 'bbbbbbbb-0000-4000-8000-0000000e0003';
+  const finalizedId = 'bbbbbbbb-0000-4000-8000-0000000e0004';
+
+  const agreement = (id: string, status: string, saleId: string | null = null) => ({
+    id,
+    reservation_number: `AF-RES-${id.slice(-4)}`,
+    customer_application_id: null,
+    origin: 'application',
+    status,
+    sale_id: saleId,
+    tier_snapshot: 'GOLD',
+    payment_scheme_snapshot: 'spot_cash',
+    total_price_snapshot: '54000.00',
+    created_at: '2026-10-08',
+  });
+
+  function installReservations(rows: Record<string, unknown>[]) {
+    install({ reservation_agreements: rows });
+  }
+
+  const allRows = () => [
+    agreement(draftId, 'draft'),
+    agreement(submittedId, 'submitted'),
+    agreement(executedId, 'executed'),
+    agreement(finalizedId, 'executed', 'cccccccc-0000-4000-8000-0000000e0005'),
+  ];
+
+  it('hides EXECUTED agreements from the active reservation queue', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work' },
+    });
+    expect(result.status).toBe(200);
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // The handover to Finance happened, so both executed rows left the queue.
+    expect(ids).not.toContain(executedId);
+    expect(ids).not.toContain(finalizedId);
+    // Agreements still awaiting reservation work remain.
+    expect(ids).toContain(draftId);
+    expect(ids).toContain(submittedId);
+  });
+
+  it('keeps meta.total consistent with the filtered rows', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work' },
+    });
+    const body = result.body as { data: unknown[]; meta: { total: number } };
+    expect(body.data).toHaveLength(2);
+    expect(body.meta.total).toBe(2);
+  });
+
+  it('still returns executed agreements when no queue filter is sent', async () => {
+    installReservations(allRows());
+    const result = await call(forms, { path: 'reservations' });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // History must stay reachable: omitting the filter changes nothing.
+    expect(ids).toContain(executedId);
+    expect(ids).toContain(finalizedId);
+  });
+
+  it('returns the executed agreement when it is explicitly requested by status', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work', status: 'executed' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // An operator asking for executed rows explicitly gets them.
+    expect(ids).toContain(executedId);
+  });
+
+  it('rejects an unknown queue value before any database call', async () => {
+    installReservations(allRows());
+    const result = await call(forms, { path: 'reservations', query: { queue: 'nope' } });
+    expect(result.status).toBe(400);
+  });
+});
+
+/**
  * The fake must mirror the real client, never invent a friendlier API.
  *
  * `not(column, { in })` looks reasonable and passed every test, then 500'd in

@@ -312,8 +312,13 @@ export const officialFormListQuerySchema = z.object({
    * `application_work` returns only applications that still require APPLICATION
    * work: once a live reservation exists, the reservation/payment stage owns the
    * customer. It is opt-in and omitted by default, so history stays reachable.
+   *
+   * `reservation_work` returns only agreements that still require IST RESERVATION
+   * work. An EXECUTED agreement is finalized: Finance owns collection from then
+   * on, so it leaves this queue exactly as an application leaves the application
+   * queue. Also opt-in, also never destructive.
    */
-  queue: z.enum(['application_work']).optional(),
+  queue: z.enum(['application_work', 'reservation_work']).optional(),
   /** Reservations created from this application (application-origin link). */
   application: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),

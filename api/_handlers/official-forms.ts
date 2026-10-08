@@ -406,7 +406,17 @@ async function listRows(
   // become a reservation?", so this is the authoritative lookup for it.
   if (table === 'reservation_agreements' && q.application)
     query = query.eq('customer_application_id', q.application);
-  if (table === 'customer_applications' && q.queue === 'application_work') {
+  // Executing the agreement is the handover to Finance: the contract is
+  // finalized, collection is owned by the payment queue, and the agreement
+  // stops being IST reservation work. It stays fully readable and printable.
+  //
+  // An explicit `status` wins over the queue default, so asking for
+  // `status=executed` still returns executed rows. Without that, the two
+  // filters would contradict each other and report zero rows, which reads as
+  // "the data is gone" instead of "it moved to Finance".
+  if (table === 'reservation_agreements' && q.queue === 'reservation_work' && !q.status)
+    query = query.neq('status', 'executed');
+  if (table === 'customer_applications' && q.queue === 'application_work' && !q.status) {
     // The builder is thenable, so it must never cross an `await`: only the id
     // list does.
     const progressed = await progressedApplicationIds(db);

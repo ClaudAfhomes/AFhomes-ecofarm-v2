@@ -362,6 +362,8 @@ export const getReservationAgreements = (
     search?: string;
     /** Only reservations created from this customer application. */
     application?: string;
+    /** Omit to see every agreement, including executed ones. */
+    queue?: 'reservation_work';
   } = {},
 ): Promise<ReservationAgreementListItem[]> => {
   const query = new URLSearchParams();
@@ -372,6 +374,7 @@ export const getReservationAgreements = (
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
   if (params.application) query.set('application', params.application);
+  if (params.queue) query.set('queue', params.queue);
   const suffix = query.toString();
   return requestList(
     `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,

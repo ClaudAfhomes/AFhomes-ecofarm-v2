@@ -1634,14 +1634,19 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  // Default: only agreements that still need IST RESERVATION work. Executing
+  // one hands collection to Finance, so it leaves this queue. Nothing is
+  // deleted - 'Include progressed' brings the executed history back.
+  const [reservationWorkOnly, setReservationWorkOnly] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['reservation-agreements', status, tier, debouncedSearch],
+    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly],
     queryFn: () =>
       getReservationAgreements({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
       }),
     // Agreement decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
@@ -1650,7 +1655,7 @@ export function ReservationAgreementsPage() {
     <section>
       <PageHeader
         title="IST Reservation Agreements"
-        description="Contract snapshots remain separate from actual verified payment transactions."
+        description="Agreements still awaiting reservation work. Once an agreement is executed, Finance owns collection and it moves to the payment queue; it stays readable and printable here with 'Include progressed'."
         actions={<Link to="/admin/sales/reservations/new">New agreement</Link>}
       />
       <FilterBar
@@ -1665,6 +1670,16 @@ export function ReservationAgreementsPage() {
         }
         filters={
           <>
+            <label>
+              Queue
+              <select
+                value={reservationWorkOnly ? 'reservation_work' : 'all'}
+                onChange={(e) => setReservationWorkOnly(e.target.value === 'reservation_work')}
+              >
+                <option value="reservation_work">Needs reservation work</option>
+                <option value="all">Include progressed</option>
+              </select>
+            </label>
             <label>
               Status
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
