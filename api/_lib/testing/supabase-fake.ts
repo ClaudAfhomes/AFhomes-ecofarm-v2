@@ -512,10 +512,28 @@ export class FakeSupabase {
         ops.push({ t: 'in', col, vals });
         return this;
       },
-      not(col: string, neg: { in?: unknown[]; eq?: unknown; is?: unknown }) {
-        if (neg.in) ops.push({ t: 'not', col, neg: { t: 'in', col, vals: neg.in } });
-        else if ('eq' in neg) ops.push({ t: 'not', col, neg: { t: 'eq', col, val: neg.eq } });
-        else ops.push({ t: 'not', col, neg: { t: 'is', col, val: neg.is ?? null } });
+      /**
+       * Mirrors `@supabase/postgrest-js` exactly:
+       * `not(column, operator, value)`, three arguments, where `operator` is a
+       * string and `value` uses raw PostgREST syntax.
+       *
+       * This previously accepted a two-argument shape that the real client does
+       * not have, so a handler calling the wrong arity stayed green here and
+       * failed on the deployed API. An unknown operator now THROWS for the same
+       * reason the real request would fail closed.
+       */
+      not(col: string, operator: string, value: unknown) {
+        if (operator === 'in') {
+          // PostgREST writes a list as `(a,b,c)`.
+          const list = String(value).replace(/^\(|\)$/g, '');
+          ops.push({ t: 'not', col, neg: { t: 'in', col, vals: list.split(',') } });
+        } else if (operator === 'eq') {
+          ops.push({ t: 'not', col, neg: { t: 'eq', col, val: value } });
+        } else if (operator === 'is') {
+          ops.push({ t: 'not', col, neg: { t: 'is', col, val: value } });
+        } else {
+          throw new Error(`unsupported not() operator: ${operator}`);
+        }
         return this;
       },
       or(filter: string) {

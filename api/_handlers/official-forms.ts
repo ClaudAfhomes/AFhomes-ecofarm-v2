@@ -410,7 +410,12 @@ async function listRows(
     // The builder is thenable, so it must never cross an `await`: only the id
     // list does.
     const progressed = await progressedApplicationIds(db);
-    if (progressed.length) query = query.not('id', { in: progressed });
+    // `not()` is `not(column, operator, value)` - THREE arguments, and the value
+    // is raw PostgREST syntax, so an `in` list is a parenthesised string.
+    // ponytail: an explicit id list, so a reservation created outside this
+    // schema still counts. Upgrade to a SQL-side anti-join if the progressed set
+    // ever outgrows a request URL.
+    if (progressed.length) query = query.not('id', 'in', `(${progressed.join(',')})`);
   }
   const { data, error, count } = await query
     .order('created_at', { ascending: false })

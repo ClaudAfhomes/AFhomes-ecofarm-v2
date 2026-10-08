@@ -813,6 +813,35 @@ describe('application work queue ownership', () => {
     expect(body.data).toHaveLength(1);
   });
 
+  it('excludes SEVERAL progressed applications in one parenthesised list', async () => {
+    // PostgREST takes an `in` list as a raw `(a,b,c)` string, so a multi-id
+    // exclusion only works if the list is serialised correctly.
+    const second = 'aaaaaaaa-0000-4000-8000-00000000b004';
+    const third = 'aaaaaaaa-0000-4000-8000-00000000b005';
+    install({
+      customer_applications: [
+        application(progressed),
+        application(second),
+        application(third),
+        application(stillWork),
+      ],
+      reservation_agreements: [
+        agreement('bbbbbbbb-0000-4000-8000-00000000c008', progressed, 'executed'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c009', second, 'submitted'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c010', third, 'draft'),
+      ],
+    });
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).not.toContain(progressed);
+    expect(ids).not.toContain(second);
+    expect(ids).not.toContain(third);
+    expect(ids).toContain(stillWork);
+  });
+
   it('still returns progressed applications when no queue filter is sent', async () => {
     installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c007', progressed, 'executed')]);
     const result = await call(forms, { path: 'customer-applications' });
@@ -828,6 +857,41 @@ describe('application work queue ownership', () => {
       query: { queue: 'not_a_queue' },
     });
     expect(result.status).toBe(400);
+  });
+});
+
+/**
+ * The fake must mirror the real client, never invent a friendlier API.
+ *
+ * `not(column, { in })` looks reasonable and passed every test, then 500'd in
+ * production because the real `@supabase/postgrest-js` signature is
+ * `not(column, operator, value)`. This guard is why that class of false pass is
+ * now loud instead of silent.
+ */
+describe('the Supabase fake refuses non-existent filter APIs', () => {
+  it('throws when not() is called with the wrong arity', () => {
+    const db = new FakeSupabase({ tables: { customer_applications: [] } as never });
+    expect(() =>
+      (db.from('customer_applications') as unknown as {
+        not: (col: string, filter: unknown) => unknown;
+      }).not('id', { in: ['a'] }),
+    ).toThrow(/unsupported not\(\) operator/);
+  });
+
+  it('accepts the real three-argument not(column, operator, value)', async () => {
+    const db = new FakeSupabase({
+      tables: {
+        customer_applications: [
+          { id: 'keep', application_number: 'A', status: 'approved' },
+          { id: 'drop', application_number: 'B', status: 'approved' },
+        ],
+      } as never,
+    });
+    const { data } = await db
+      .from('customer_applications')
+      .select('*')
+      .not('id', 'in', '(drop)');
+    expect((data as { id: string }[]).map((row) => row.id)).toEqual(['keep']);
   });
 });
 
