@@ -112,6 +112,12 @@ describe('submit normalization', () => {
     expect(application.primary.lastName).toBe('jimenez');
     expect(application.primary.mobile).toBe('+639171234567');
     expect(application.primary.email).toBe('claud@example.com');
+    // Official geographic names are reference values, not prose: upper-casing
+    // them would store a spelling the authority never published.
+    expect(application.primary.cityMunicipality).toBe('quezon city');
+    expect(application.primary.province).toBe('metro manila');
+    // A typed street line is still user-entered text and still upper-cased.
+    expect(application.primary.permanentAddressLine1).toBe('123 MAIN ST');
 
     const reservation = normalizeReservationAgreementRequest({
       saleId: '00000000-0000-4000-8000-000000000003',

@@ -84,6 +84,10 @@ export { QrCode, downloadQrImage } from './components/QrCode.js';
 export type { QrCodeProps } from './components/QrCode.js';
 export { Select } from './components/Select.js';
 export type { SelectOption, SelectProps } from './components/Select.js';
+export { Combobox } from './components/Combobox.js';
+export type { ComboboxOption, ComboboxProps } from './components/Combobox.js';
+export { rankOptions, normalizeForMatch, RANK } from './combobox-rank.js';
+export type { Rankable } from './combobox-rank.js';
 export {
   DetailGrid,
   DetailCard,

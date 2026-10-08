@@ -167,7 +167,12 @@ describe('other writers normalize through the same contracts', () => {
       firstName: 'claud',
       middleName: 'mars',
       suffix: 'jr',
-      cityMunicipality: 'QUEZON CITY',
+      // Geographic names keep their casing. They are official reference values
+      // selected from the authority's list, so upper-casing them would store a
+      // spelling the authority never published. Every field below is still
+      // user-entered text and still upper-cased, which is the point of the split.
+      cityMunicipality: 'quezon city',
+      province: 'metro manila',
       permanentAddressLine2: 'UNIT 2, 123 RIZAL ST.',
       officeBusinessAddress: 'OFFICE AT RIZAL ST.',
       occupationBusinessName: 'SARI-SARI STORE OWNER',

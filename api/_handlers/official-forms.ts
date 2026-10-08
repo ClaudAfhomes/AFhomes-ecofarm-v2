@@ -24,6 +24,8 @@ import {
   type ReservationAgreementStatus,
 } from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { addressProvider } from '../_lib/address-source.js';
+import { verifyAddressHierarchy } from '../_lib/address-provider.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
@@ -114,6 +116,129 @@ const normalizeApplicationHeader = <
   ...(header.vipReferrer ? { vipReferrer: normalizePersonName(header.vipReferrer) } : {}),
 });
 
+/**
+ * A holder's location codes, as they arrive from a client.
+ *
+ * `verified` means the authority confirmed the whole chain. A legacy holder has
+ * none of these, which is legitimate: absence is "this record predates the
+ * selectors", not "this address is wrong".
+ */
+type HolderLocation = {
+  province?: string;
+  cityMunicipality?: string;
+  barangay?: string;
+  provinceCode?: string;
+  cityMunicipalityCode?: string;
+  barangayCode?: string;
+};
+
+/** A refusal, expressed so the caller can hand it straight to `fail`. */
+type LocationRefusal = { status: number; message: string };
+
+/**
+ * Tagged, because a bare `Record<string, unknown>` cannot be narrowed by
+ * `'status' in value`: any record may carry a `status` key, so the compiler
+ * would let a refusal fall through as a holder and vice versa.
+ */
+type LocationResult =
+  | { ok: true; holder: Record<string, unknown> }
+  | { ok: false; refusal: LocationRefusal };
+
+/**
+ * Re-resolve a submitted location against the official hierarchy and RETURN THE
+ * AUTHORITY'S OWN SPELLING.
+ *
+ * This is the security boundary, and it is deliberately not the UI. The cascading
+ * comboboxes make a mismatched combination hard to produce by hand, but a
+ * hand-crafted request body does not have to go through them, and a client-side
+ * "approved" combination proves nothing. So the codes are re-checked against the
+ * provider before anything is persisted, and the names the browser sent are
+ * DISCARDED in favour of the provider's - which is why a stored address can never
+ * disagree with the official list.
+ *
+ * An outage is NOT treated as "allow it": if the hierarchy cannot be confirmed,
+ * a coded address is refused rather than saved unverified.
+ */
+async function resolveHolderLocation(holder: HolderLocation): Promise<LocationResult> {
+  const { provinceCode, cityMunicipalityCode, barangayCode } = holder;
+  const present = [provinceCode, cityMunicipalityCode, barangayCode].filter(Boolean).length;
+
+  // No codes: a legacy free-text address. Nothing to contradict, so it passes and
+  // is stored exactly as the operator typed it.
+  if (present === 0) return { ok: true, holder };
+  if (present !== 3)
+    return {
+      ok: false,
+      refusal: {
+        status: 400,
+        message: 'Choose the province, city or municipality and barangay from the list.',
+      },
+    };
+
+  const check = await verifyAddressHierarchy(addressProvider(), {
+    provinceCode: provinceCode!,
+    localityCode: cityMunicipalityCode!,
+    barangayCode: barangayCode!,
+  });
+
+  if (check.valid)
+    return {
+      ok: true,
+      holder: {
+        ...holder,
+        province: check.hierarchy.province.name,
+        cityMunicipality: check.hierarchy.locality.name,
+        barangay: check.hierarchy.barangay.name,
+        provinceCode: check.hierarchy.province.code,
+        cityMunicipalityCode: check.hierarchy.locality.code,
+        barangayCode: check.hierarchy.barangay.code,
+      },
+    };
+
+  switch (check.reason) {
+    case 'PROVIDER_UNAVAILABLE':
+      return {
+        ok: false,
+        refusal: {
+          status: 503,
+          message: 'The address list is temporarily unavailable. Try again shortly.',
+        },
+      };
+    case 'PROVIDER_BAD_RESPONSE':
+      return {
+        ok: false,
+        refusal: { status: 502, message: 'The address list returned an unusable response.' },
+      };
+    default:
+      // Never echo the offending code back: the message must not confirm or
+      // deny a specific code to someone probing for valid ones.
+      return {
+        ok: false,
+        refusal: {
+          status: 400,
+          message:
+            'That province, city or municipality and barangay do not form a valid location. Choose them again from the list.',
+        },
+      };
+  }
+}
+
+/** Apply the resolver to both holders, refusing the whole submission on failure. */
+async function resolveHolderLocations(
+  primary: HolderLocation,
+  secondary?: HolderLocation,
+): Promise<
+  | { ok: true; primary: Record<string, unknown>; secondary: Record<string, unknown> | null }
+  | LocationRefusal
+> {
+  const resolvedPrimary = await resolveHolderLocation(primary);
+  if (!resolvedPrimary.ok) return resolvedPrimary.refusal;
+  if (!secondary) return { ok: true, primary: resolvedPrimary.holder, secondary: null };
+  const resolvedSecondary = await resolveHolderLocation(secondary);
+  if (!resolvedSecondary.ok) return resolvedSecondary.refusal;
+  return { ok: true, primary: resolvedPrimary.holder, secondary: resolvedSecondary.holder };
+}
+
 const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   holderType: row.holder_type,
   lastName: row.last_name,
@@ -126,8 +251,18 @@ const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   civilStatus: row.civil_status ?? undefined,
   permanentAddressLine1: row.permanent_address_line_1,
   permanentAddressLine2: row.permanent_address_line_2 ?? undefined,
+  /**
+   * Official geography. The codes and `barangay` are absent on every record
+   * written before the structured selectors existed, which is why each one
+   * degrades to undefined instead of being defaulted - a legacy application must
+   * read back exactly as it was stored, with no fabricated code.
+   */
   cityMunicipality: row.city_municipality,
   province: row.province,
+  barangay: row.barangay ?? undefined,
+  provinceCode: row.province_code ?? undefined,
+  cityMunicipalityCode: row.city_municipality_code ?? undefined,
+  barangayCode: row.barangay_code ?? undefined,
   postalCode: row.postal_code ?? undefined,
   landline: row.landline ?? undefined,
   mobile: row.mobile,
@@ -215,6 +350,10 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
     primary_address_line_2: String(p.permanentAddressLine2 ?? ''),
     primary_city_municipality: String(p.cityMunicipality ?? ''),
     primary_province: String(p.province ?? ''),
+    // Empty for every application written before the structured selectors
+    // existed. Blank is the honest rendering; inventing a barangay from the city
+    // name would fabricate a record.
+    primary_barangay: String(p.barangay ?? ''),
     primary_postal_code: String(p.postalCode ?? ''),
     primary_landline: String(p.landline ?? ''),
     primary_mobile: String(p.mobile ?? ''),
@@ -254,6 +393,7 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
       ['permanentAddressLine2', 'address_line_2'],
       ['cityMunicipality', 'city_municipality'],
       ['province', 'province'],
+      ['barangay', 'barangay'],
       ['postalCode', 'postal_code'],
       ['landline', 'landline'],
       ['mobile', 'mobile'],
@@ -917,12 +1057,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           registerNewCustomer: _mode,
           ...header
         } = newRegistration.data;
+        const locations = await resolveHolderLocations(primary, secondary);
+        if ('status' in locations) return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
         const { data, error } = await db.rpc('register_customer_application_once', {
           p_request_id: requestId,
           p_actor_id: auth.userId,
           p_header: normalizeApplicationHeader(header),
-          p_primary: normalizeHolderOptionals(primary),
-          p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
+          p_primary: normalizeHolderOptionals({ ...primary, ...locations.primary }),
+          p_secondary: secondary
+            ? normalizeHolderOptionals({
+                ...secondary,
+                ...(locations.secondary as Record<string, unknown>),
+              })
+            : null,
         });
         if (error) throw error;
         return res.status(201).json(await getApplication(db, rpcId(data)));
@@ -933,12 +1080,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
       const { primary, secondary, requestId, ...header } = parsed.data;
+      const locations = await resolveHolderLocations(primary, secondary);
+      if ('status' in locations) return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
       const { data, error } = await db.rpc('create_customer_application_once', {
         p_request_id: requestId,
         p_actor_id: auth.userId,
         p_header: normalizeApplicationHeader(header),
-        p_primary: normalizeHolderOptionals(primary),
-        p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
+        p_primary: normalizeHolderOptionals({ ...primary, ...locations.primary }),
+        p_secondary: secondary
+          ? normalizeHolderOptionals({
+              ...secondary,
+              ...(locations.secondary as Record<string, unknown>),
+            })
+          : null,
       });
       if (error) throw error;
       const id = rpcId(data);

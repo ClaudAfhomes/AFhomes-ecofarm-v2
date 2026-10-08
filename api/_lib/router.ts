@@ -145,6 +145,18 @@ const BUSINESS_FAMILIES = [
     module: 'cms',
     load: () => import('../_handlers/cms.js'),
   },
+  // Official Philippine address reference data (province -> city/municipality
+  // -> barangay) for the Customer Application form. Read-only. The `module`
+  // here only names the route; the handler authorizes against `sales.customers`
+  // itself, which is the screen that needs it - so this adds NO new module key.
+  //
+  // Deliberately NOT `locations`: that prefix belonged to the retired
+  // predecessor platform and must stay unroutable (see router.spec.ts).
+  {
+    prefix: 'address',
+    module: 'sales.customers',
+    load: () => import('../_handlers/address.js'),
+  },
 ] as const;
 
 export function selectHandler(

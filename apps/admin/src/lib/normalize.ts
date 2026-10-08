@@ -13,6 +13,7 @@
 import {
   normalizeAddressField,
   normalizeEmail,
+  normalizeGeographicName,
   normalizePersonName,
   normalizePhilippinePhone,
   normalizePostalCode,
@@ -127,8 +128,15 @@ function normalizeApplicationHolder<T extends ApplicationHolder>(holder: T): T {
     permanentAddressLine1: upperAddress(holder.permanentAddressLine1),
     permanentAddressLine2: upperAddressOpt(holder.permanentAddressLine2),
     officeBusinessAddress: upperAddressOpt(holder.officeBusinessAddress),
-    cityMunicipality: upperAddress(holder.cityMunicipality),
-    province: upperAddress(holder.province),
+    /**
+     * Official geographic names, chosen from the authority's list. Their casing is
+     * the record, so `upperAddress` would be wrong here: it would store
+     * `LAGUNA` where the authority published `Laguna`. Whitespace is still
+     * collapsed, because that is not information.
+     */
+    cityMunicipality: normalizeGeographicName(holder.cityMunicipality),
+    province: normalizeGeographicName(holder.province),
+    barangay: holder.barangay ? normalizeGeographicName(holder.barangay) : holder.barangay,
     postalCode: holder.postalCode ? normalizePostalCode(holder.postalCode) : holder.postalCode,
     mobile: normalizePhilippinePhone(holder.mobile) ?? holder.mobile,
     email: normalizeEmail(holder.email) ?? holder.email,
