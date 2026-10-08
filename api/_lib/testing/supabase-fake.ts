@@ -840,7 +840,7 @@ export class FakeSupabase {
       };
     }
     if (!entry && fn === 'update_operational_role') {
-      const role = this.rows('roles').find(r => r.id === args.p_role);
+      const role = this.rows('roles').find((r) => r.id === args.p_role);
       if (!role) return { data: null, error: { message: 'NOT_FOUND: Role not found' } };
       const input = args.p_input as FakeRow;
       if (this.writeErrors.role_permissions || this.writeErrors.roles)
@@ -849,12 +849,20 @@ export class FakeSupabase {
       if (input.description !== undefined) role.description = input.description;
       if (input.isActive !== undefined) role.is_active = input.isActive;
       if (Array.isArray(input.permissions)) {
-        this.tables.role_permissions = this.rows('role_permissions').filter(p => p.role_id !== args.p_role);
+        this.tables.role_permissions = this.rows('role_permissions').filter(
+          (p) => p.role_id !== args.p_role,
+        );
         for (const raw of input.permissions) {
           const p = raw as FakeRow;
-          const module = this.rows('modules').find(m => m.key === p.moduleKey);
-          this.rows('role_permissions').push({ role_id: args.p_role, module_id: module?.id,
-            can_view:p.canView, can_create:p.canCreate, can_update:p.canUpdate, can_delete:p.canDelete });
+          const module = this.rows('modules').find((m) => m.key === p.moduleKey);
+          this.rows('role_permissions').push({
+            role_id: args.p_role,
+            module_id: module?.id,
+            can_view: p.canView,
+            can_create: p.canCreate,
+            can_update: p.canUpdate,
+            can_delete: p.canDelete,
+          });
         }
       }
       return { data: null, error: null };
@@ -890,23 +898,59 @@ export class FakeSupabase {
           error: { message: 'FORBIDDEN: Only an active Sales Manager can sponsor an OST account' },
         };
       }
-      const live = this.rows('referral_codes').filter(r => r.sponsor_staff_id === args.p_sponsor && r.is_active && Date.parse(String(r.expires_at)) > Date.now() && Number(r.use_count) < Number(r.max_uses));
-      if (live.length && !args.p_rotate) return { data:null,error:{message:'CONFLICT: An active referral code already exists. Rotate it to generate a replacement'} };
-      if (!/^[a-f0-9]{64}$/.test(String(args.p_hash)) || Number(args.p_max_uses) < 1 || Number(args.p_max_uses) > 100 || Date.parse(String(args.p_expires)) <= Date.now()) {
+      const live = this.rows('referral_codes').filter(
+        (r) =>
+          r.sponsor_staff_id === args.p_sponsor &&
+          r.is_active &&
+          Date.parse(String(r.expires_at)) > Date.now() &&
+          Number(r.use_count) < Number(r.max_uses),
+      );
+      if (live.length && !args.p_rotate)
+        return {
+          data: null,
+          error: {
+            message:
+              'CONFLICT: An active referral code already exists. Rotate it to generate a replacement',
+          },
+        };
+      if (
+        !/^[a-f0-9]{64}$/.test(String(args.p_hash)) ||
+        Number(args.p_max_uses) < 1 ||
+        Number(args.p_max_uses) > 100 ||
+        Date.parse(String(args.p_expires)) <= Date.now()
+      ) {
         return { data: null, error: { message: 'VALIDATION_ERROR: Invalid referral code' } };
       }
       // Rotation deactivates ONLY live codes, exactly like the SQL's
       // `where sponsor_staff_id = p_sponsor and is_active`. The previous fake
       // deactivated every row for the sponsor, including already-spent and
       // expired ones - so the fake silently rewrote history that SQL preserves.
-      if (args.p_rotate) for (const row of this.rows('referral_codes')) if (row.sponsor_staff_id === args.p_sponsor && row.is_active) row.is_active=false;
-      const id=randomUUID();
-      this.rows('referral_codes').push({id,code_hash:args.p_hash,code_hint:args.p_hint,sponsor_staff_id:args.p_sponsor,
-        expires_at:args.p_expires,max_uses:args.p_max_uses,use_count:0,is_active:true,created_by:args.p_actor,created_at:new Date().toISOString()});
-      this.rows('audit_events').push({id:randomUUID(),actor_id:args.p_actor,
-        action:args.p_rotate?'REFERRAL_CODE_ROTATED':'REFERRAL_CODE_ISSUED',entity_type:'referral_code',
-        entity_id:id,after_data:{sponsorStaffId:args.p_sponsor},created_at:new Date().toISOString()});
-      return {data:id,error:null};
+      if (args.p_rotate)
+        for (const row of this.rows('referral_codes'))
+          if (row.sponsor_staff_id === args.p_sponsor && row.is_active) row.is_active = false;
+      const id = randomUUID();
+      this.rows('referral_codes').push({
+        id,
+        code_hash: args.p_hash,
+        code_hint: args.p_hint,
+        sponsor_staff_id: args.p_sponsor,
+        expires_at: args.p_expires,
+        max_uses: args.p_max_uses,
+        use_count: 0,
+        is_active: true,
+        created_by: args.p_actor,
+        created_at: new Date().toISOString(),
+      });
+      this.rows('audit_events').push({
+        id: randomUUID(),
+        actor_id: args.p_actor,
+        action: args.p_rotate ? 'REFERRAL_CODE_ROTATED' : 'REFERRAL_CODE_ISSUED',
+        entity_type: 'referral_code',
+        entity_id: id,
+        after_data: { sponsorStaffId: args.p_sponsor },
+        created_at: new Date().toISOString(),
+      });
+      return { data: id, error: null };
     }
 
     if (!entry && fn === 'resolve_membership_code') {
@@ -1007,6 +1051,7 @@ export class FakeSupabase {
                   ? 'fully_paid'
                   : 'partially_paid',
             verified_paid: paid,
+            frozen_total: Number(sale?.cash_price_snapshot ?? 0),
           };
         })
         .filter(

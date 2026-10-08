@@ -87,6 +87,12 @@ const toCustomer = (row: Record<string, unknown>) => ({
     ((row.memberships as { status?: unknown } | null | undefined)?.status as string | undefined) ??
     isoOrNull(row.member_status),
   membershipExpiresAt: isoOrNull(row.expires_at),
+  paymentStatus:
+    (row.payment_status as 'no_payment' | 'partially_paid' | 'fully_paid' | null | undefined) ??
+    null,
+  verifiedPaid: (row.verified_paid as string | null | undefined) ?? '0.00',
+  frozenTotal:
+    row.frozen_total === null || row.frozen_total === undefined ? '0.00' : String(row.frozen_total),
   derivedCategory: row.derivedCategory,
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,

@@ -20,7 +20,6 @@ import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
 import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
 import {
   CustomerApplicationEditorPage,
@@ -101,12 +100,14 @@ export default function App() {
               {/* GSD / Employee customer desk. Read-only, and gated on the same
           `operations.redemption` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
-      <Route path="/admin/customer-lookup" element={protectedPage(<CustomerLookupPage />)} />
-      {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
+              <Route
+                path="/admin/customer-lookup"
+                element={protectedPage(<CustomerLookupPage />)}
+              />
+              {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
           Redemption rather than from the global nav. */}
-      <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
+              <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
               <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
-              <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
               sales.card_sales nav key like the sales list; customers and
               anonymous visitors never reach the staff app at all. */}
@@ -115,10 +116,7 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
-              <Route
-                path="/admin/customers/:id"
-                element={protectedPage(<CustomerDetailPage />)}
-              />
+              <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
               <Route
                 path="/admin/customers/import-export"
                 element={protectedPage(<CustomerImportExportPage />)}

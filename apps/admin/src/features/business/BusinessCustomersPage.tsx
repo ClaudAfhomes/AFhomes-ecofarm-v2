@@ -1,4 +1,3 @@
-
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -22,6 +21,7 @@ import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
+import { SettlementBadge } from './SettlementBadge';
 import { TierBadge } from './TierBadge';
 import {
   anonymizeCustomer,
@@ -105,7 +105,6 @@ export function BusinessCustomersPage() {
     queryKey: ['customer-seller-options'],
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
-  const canCreate = user?.afHomesPermissions.some(p=>p.moduleKey==='sales.customers' && p.canCreate);
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
@@ -156,17 +155,7 @@ export function BusinessCustomersPage() {
 
   return (
     <section>
-      <PageHeader
-        title="Customers"
-        description="Customer directory and membership records. Start registration through a new customer application."
-        actions={
-          <>
-            {canCreate && <Button onClick={() => navigate('/admin/customers/applications/new')}>
-              New customer application
-            </Button>}
-          </>
-        }
-      />
+      <PageHeader title="Customers" description="Customer directory and membership records." />
 
       <FilterBar
         search={
@@ -222,37 +211,37 @@ export function BusinessCustomersPage() {
             </label>
             <label className={styles.filterLabel}>
               Seller
-                <Select
-                  aria-label="Seller"
-                  value={filters.seller}
-                  onChange={(e) => patchFilters({ seller: e.target.value })}
-                  options={[
-                    { value: '', label: 'All sellers' },
-                    ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
-                  ]}
-                />
-              </label>
-              <label className={styles.filterLabel}>
-                From
-                <input
-                  aria-label="From date"
-                  type="date"
-                  value={filters.from}
-                  onChange={(e) => patchFilters({ from: e.target.value })}
-                />
-              </label>
-              <label className={styles.filterLabel}>
-                To
-                <input
-                  aria-label="To date"
-                  type="date"
-                  value={filters.to}
-                  onChange={(e) => patchFilters({ to: e.target.value })}
-                />
-              </label>
-            </>
-          }
-        />
+              <Select
+                aria-label="Seller"
+                value={filters.seller}
+                onChange={(e) => patchFilters({ seller: e.target.value })}
+                options={[
+                  { value: '', label: 'All sellers' },
+                  ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              From
+              <input
+                aria-label="From date"
+                type="date"
+                value={filters.from}
+                onChange={(e) => patchFilters({ from: e.target.value })}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              To
+              <input
+                aria-label="To date"
+                type="date"
+                value={filters.to}
+                onChange={(e) => patchFilters({ to: e.target.value })}
+              />
+            </label>
+          </>
+        }
+      />
 
       {customers.isPending ? (
         <p role="status">Loading customers…</p>
@@ -274,7 +263,7 @@ export function BusinessCustomersPage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Phone</th>
+                <th>Payment Status</th>
                 <th>VIP Tier</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -295,7 +284,9 @@ export function BusinessCustomersPage() {
                   className={styles.clickable}
                 >
                   <td>{customer.fullName}</td>
-                  <td className={styles.phoneCell}>{customer.phone}</td>
+                  <td>
+                    <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
+                  </td>
                   <td>
                     <TierBadge tier={customer.tier} />
                   </td>
@@ -314,21 +305,6 @@ export function BusinessCustomersPage() {
                     <OverflowMenu
                       label={`More actions for ${customer.customerNumber}`}
                       items={[
-                        ...(canCreate
-                          ? [
-                              {
-                                label: 'New application',
-                                icon: 'file-text' as const,
-                                disabled: customer.status === 'cancelled',
-                                onClick: () => {
-                                  navigate(
-                                    '/admin/customers/applications/new?customerId=' +
-                                      encodeURIComponent(customer.id),
-                                  );
-                                },
-                              },
-                            ]
-                          : []),
                         ...(canIssueActivation &&
                         customer.hasActiveMembership &&
                         !customer.portalAccountActivated
@@ -381,11 +357,7 @@ export function BusinessCustomersPage() {
 
       {total > 0 ? (
         <nav aria-label="Customers pagination" className={styles.pagination}>
-          <span
-            role="status"
-            aria-label="Customer record range"
-            className={styles.paginationRange}
-          >
+          <span role="status" aria-label="Customer record range" className={styles.paginationRange}>
             Showing {rangeFrom}–{rangeTo} of {total}
           </span>
           <Button

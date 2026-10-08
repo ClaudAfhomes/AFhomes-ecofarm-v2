@@ -5,7 +5,7 @@ import type { AfHomesPermission } from '@afhomes/contracts';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
 import { getReport } from '../reports/services';
-import { formatMoney } from '../business/format';
+import { formatMoney, formatPaymentType } from '../business/format';
 import { formatDateTime } from '../../lib/format';
 
 /** Lazy, permission-scoped sections reuse existing authorized read APIs. */
@@ -105,7 +105,7 @@ export function MembershipActivity({
               {payments.data.map((payment) => (
                 <li key={payment.id}>
                   {payment.paymentNumber ? `${payment.paymentNumber} · ` : null}
-                  {formatMoney(payment.amount)} · {payment.paymentType.replaceAll('_', ' ')} ·{' '}
+                  {formatMoney(payment.amount)} · {formatPaymentType(payment.paymentType)} ·{' '}
                   <StatusChip label={payment.status} /> · {formatDateTime(payment.recordedAt)}
                 </li>
               ))}

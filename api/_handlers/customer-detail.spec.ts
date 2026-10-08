@@ -58,6 +58,7 @@ const RECORD = {
   tier: 'GOLD',
   member_status: 'active',
   expires_at: '2027-05-05T00:00:00.000Z',
+  payment_status: 'fully_paid',
   derivedCategory: 'ACTIVE_VIP',
 };
 
@@ -107,6 +108,9 @@ describe('GET /customers/:id', () => {
       tier: 'GOLD',
       membershipStatus: 'active',
       membershipExpiresAt: '2027-05-05T00:00:00.000Z',
+      paymentStatus: 'fully_paid',
+      verifiedPaid: '0.00',
+      frozenTotal: '0.00',
     });
   });
 
