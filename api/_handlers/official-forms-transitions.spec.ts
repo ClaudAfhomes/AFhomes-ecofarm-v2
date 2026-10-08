@@ -616,15 +616,22 @@ describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
 });
 
 describe('IST list holder-aware summary', () => {
-  it.each([false, true])(
-    'returns strict commercial fields with secondary holder=%s',
-    async (hasSecondary) => {
+  it.each([
+    ['sale', SALE_ID, false],
+    ['sale', SALE_ID, true],
+    ['application', null, false],
+    ['application', null, true],
+    ['application', SALE_ID, false],
+  ] as const)(
+    'returns strict commercial fields for origin=%s sale=%s secondary=%s',
+    async (origin, saleId, hasSecondary) => {
       install({
         reservation_agreements: [
           {
             id: AGREEMENT_ID,
             reservation_number: 'RES-QA',
-            sale_id: SALE_ID,
+            origin,
+            sale_id: saleId,
             tier_snapshot: 'GOLD',
             payment_scheme_snapshot: 'spot_cash',
             total_price_snapshot: '312000.00',
@@ -648,6 +655,7 @@ describe('IST list holder-aware summary', () => {
       const rows = (result.body as { data: unknown[] }).data;
       expect(rows).toHaveLength(1);
       expect(reservationAgreementListItemSchema.parse(rows[0])).toMatchObject({
+        saleId,
         applicantName: 'QA Applicant',
         paymentScheme: 'spot_cash',
         totalPrice: '312000.00',

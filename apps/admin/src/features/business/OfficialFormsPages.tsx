@@ -1591,7 +1591,7 @@ export function ReservationAgreementsPage() {
                   </td>
                   <td>{item.applicantName ?? '—'}</td>
                   <td>{item.tier}</td>
-                  <td>{item.saleId}</td>
+                  <td>{item.saleId ?? 'Not finalized'}</td>
                   <td>{paymentSchemeLabel(item.paymentScheme)}</td>
                   <td>{formatMoney(item.totalPrice)}</td>
                   <td>

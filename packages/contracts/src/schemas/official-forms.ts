@@ -341,7 +341,7 @@ export const reservationAgreementListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     reservation_number: z.string(),
-    sale_id: z.string().uuid(),
+    sale_id: z.string().uuid().nullable(),
     payment_scheme_snapshot: paymentSchemeSchema,
     total_price_snapshot: exactDecimalStringSchema,
     primary_signature_status: signatureStatusSchema,

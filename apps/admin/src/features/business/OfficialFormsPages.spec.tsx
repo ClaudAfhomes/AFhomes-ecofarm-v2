@@ -731,3 +731,11 @@ describe('IST commercial summary rendering', () => {
     },
   );
 });
+
+it('renders application-origin reservations before a sale exists', async () => {
+  vi.mocked(getReservationAgreements).mockResolvedValue([{ ...agreement, saleId: null }] as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  expect(await screen.findByText('RES-000001')).toBeInTheDocument();
+  expect(screen.getByText('Not finalized')).toBeInTheDocument();
+  expect(screen.queryByText('Agreements could not be loaded')).not.toBeInTheDocument();
+});
