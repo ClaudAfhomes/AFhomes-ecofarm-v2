@@ -934,6 +934,20 @@ export function CustomerApplicationEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = customers.data?.find((c) => c.id === customerId);
+  if (id && existing.isPending) {
+    return <p role="status">Loading application…</p>;
+  }
+  if (id && (existing.isError || !existing.data)) {
+    return (
+      <section>
+        <Link to="/admin/customers/applications">Back to applications</Link>
+        <ErrorState
+          title="Application could not be loaded"
+          onRetry={() => void existing.refetch()}
+        />
+      </section>
+    );
+  }
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section>
@@ -2008,8 +2022,8 @@ export function ReservationAgreementEditorPage() {
             <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
             <dt>Installment months</dt>
             <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
-            <dt>Seller</dt>
-            <dd>{sourceApplication.data?.salesManagerName ?? '—'}</dd>
+            <dt>Seller staff reference</dt>
+            <dd>{proposal.data.terms.sellerStaffId}</dd>
             <dt>Benefits</dt>
             <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
             <dt>Purchase terms reference</dt>

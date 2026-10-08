@@ -198,3 +198,16 @@ it.each(['xlsx', 'pdf'] as const)(
     expect(await screen.findByText('Export unavailable')).toBeInTheDocument();
   },
 );
+
+it('does not expose a new application form when an existing application fails to load', async () => {
+  vi.mocked(getCustomerApplication).mockRejectedValue(new Error('Application detail unavailable'));
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/customers/applications/:id" element={<CustomerApplicationEditorPage />} />
+    </Routes>,
+    { route: `/admin/customers/applications/${id}` },
+  );
+  await screen.findByText('Application could not be loaded');
+  expect(screen.queryByText('New Customer Application')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+});

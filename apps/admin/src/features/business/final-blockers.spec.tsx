@@ -201,6 +201,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   // purchase creates the agreement first and the sale only at finalization, so
   // the selector is removed rather than merely ignored.
   expect(screen.queryByRole('combobox', { name: 'Card sale' })).not.toBeInTheDocument();
+  expect(await screen.findByText('00000000-0000-4000-8000-000000000005')).toBeInTheDocument();
   await user.type(screen.getByLabelText('name'), 'QA HOLDER');
   await user.type(screen.getByLabelText('address'), '1 QA STREET');
   await user.type(screen.getByLabelText('contactNumber'), '09171234567');
