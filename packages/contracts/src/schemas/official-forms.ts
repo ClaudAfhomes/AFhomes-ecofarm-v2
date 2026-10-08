@@ -49,7 +49,10 @@ export const applicationHolderSchema = z.object({
   lastName: personNameSchema,
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
-  suffix: z.string().trim().max(20).optional(),
+  suffix: z.preprocess(
+    (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
+    optionalPersonNameSchema.refine((value) => value === undefined || value.length <= 20),
+  ),
   birthDate: birthDateSchema,
   sex: z.string().trim().max(30).optional(),
   citizenship: z.string().trim().max(80).optional(),
@@ -180,13 +183,18 @@ export const agreementPaymentInputSchema = z.object({
 
 export const reservationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(180)
-    .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
-    .transform(normalizePersonName),
+  // Historical application suffixes used N/A for an absent suffix. Normalize
+  // only that exact trailing marker; all other name validation remains intact.
+  name: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim().replace(/\s+n\/a$/i, '') : value),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(180)
+      .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
+      .transform(normalizePersonName),
+  ),
   address: z
     .string()
     .trim()
