@@ -52,6 +52,9 @@ vi.mock('./features/afhomes/services', () => ({
 
 vi.mock('./features/business/services', () => ({
   getSales: vi.fn(),
+
+  getCustomerApplications: vi.fn(),
+  cancelSale: vi.fn(),
   getFinanceQueue: vi.fn(),
   getActivationQueue: vi.fn(),
   getCommissions: vi.fn(),
@@ -116,7 +119,7 @@ import {
   getAfHomesDashboardQueues,
   getAfHomesSalesTrend,
 } from './features/afhomes/services';
-import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
+import { getCommissions, getCustomersPage, getFinanceQueue } from './features/business/services';
 import { getMemberships } from './features/memberships/services';
 import { getRedemptionItems, getRedemptions } from './features/redemption/services';
 import { getAudit, getReport } from './features/reports/services';
@@ -183,20 +186,6 @@ const ROLE_ROW = {
   isSystem: false,
   assignedCount: 12,
   permissions: [],
-};
-
-const SALE_ROW = {
-  id: 'sale-1',
-  saleNumber: 'SALE-000001',
-  customerName: 'Juan Dela Cruz',
-  productName: 'Gold',
-  sellerName: 'SM Ana',
-  cashPrice: '60000.00',
-  paidAmount: '20000.00',
-  balance: '40000.00',
-  status: 'payment_in_progress',
-  activatedAt: null,
-  createdAt: '2026-09-27T09:00:00.000Z',
 };
 
 const QUEUE_ROW = {
@@ -343,7 +332,6 @@ function install() {
   vi.mocked(getAnalyticsOverview).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesDashboardQueues).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesSalesTrend).mockRejectedValue(new Error('stub'));
-  vi.mocked(getSales).mockResolvedValue([SALE_ROW] as never);
   vi.mocked(getFinanceQueue).mockResolvedValue([QUEUE_ROW] as never);
   vi.mocked(getMemberships).mockResolvedValue([MEMBER_ROW] as never);
   vi.mocked(getCommissions).mockResolvedValue(COMMISSION_ROWS as never);
@@ -387,7 +375,7 @@ describe('Phase 33 viewport smoke: shell renders at every target width', () => {
 
   it('390px mobile keeps the drawer opener reachable', async () => {
     atWidth(390, false);
-    renderApp('/admin/sales');
+    renderApp('/admin/customers');
     expect(await screen.findByRole('main')).not.toBeNull();
     expect(screen.getAllByRole('button', { name: /menu/i }).length).toBeGreaterThanOrEqual(1);
   });
@@ -397,7 +385,6 @@ describe('Phase 33 tables scroll instead of breaking', () => {
   it.each([
     ['/admin/staff', 'Ana Reyes Santos Dela Cruz'],
     ['/admin/roles', 'Sales Manager'],
-    ['/admin/sales', 'SALE-000001'],
     ['/admin/finance/payments', 'SALE-000001'],
     ['/admin/memberships', 'MBS-000001'],
     ['/admin/finance/commissions', 'SALE-000001'],
@@ -488,15 +475,15 @@ describe('Phase 33 forms stack and dialogs fit', () => {
 describe('Phase 33 loading, empty, and error states fit mobile', () => {
   it('empty tables explain themselves at 390px', async () => {
     atWidth(390, false);
-    vi.mocked(getSales).mockResolvedValue([]);
-    renderApp('/admin/sales');
-    expect(await screen.findByText(/no card sales|no sales/i)).not.toBeNull();
+    vi.mocked(getCustomersPage).mockResolvedValue({ data: [], total: 0 });
+    renderApp('/admin/customers');
+    expect(await screen.findByText(/no customers found/i)).not.toBeNull();
   });
 
   it('errors wrap with a reachable retry at 390px', async () => {
     atWidth(390, false);
-    vi.mocked(getSales).mockRejectedValue(new Error('boom'));
-    renderApp('/admin/sales');
+    vi.mocked(getCustomersPage).mockRejectedValue(new Error('boom'));
+    renderApp('/admin/customers');
     expect(await screen.findByRole('button', { name: /retry/i })).not.toBeNull();
   });
 });

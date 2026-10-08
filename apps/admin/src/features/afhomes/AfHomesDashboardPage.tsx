@@ -45,7 +45,6 @@ const ACTIONS: Action[] = [
   { to: '/admin/finance/activation', label: 'Activation queue', module: 'finance.card_activation' },
   { to: '/admin/staff', label: 'Staff records', module: 'organization.staff' },
   { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
-  { to: '/admin/sales', label: 'Card sales', module: 'sales.card_sales' },
   { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
   { to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' },
   { to: '/admin/ost/applications', label: 'OST applications', module: 'network.ost_registrations' },

@@ -9,10 +9,6 @@
   min-width: 720px;
 }
 
-.tableWrap td.phoneCell {
-  white-space: nowrap;
-}
-
 .tableWrap tbody tr.clickable {
   cursor: pointer;
 }

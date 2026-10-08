@@ -273,6 +273,7 @@ export const officialFormListQuerySchema = z.object({
   status: z.string().trim().max(30).optional(),
   tier: vipTierSchema.optional(),
   seller: z.string().uuid().optional(),
+  saleId: z.string().uuid().optional(),
   from: dateSchema.optional(),
   to: dateSchema.optional(),
   search: z.string().trim().max(100).optional(),

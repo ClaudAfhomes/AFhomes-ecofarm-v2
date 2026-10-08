@@ -338,6 +338,7 @@ async function listRows(
   const q = parsed.data;
   let query = db.from(table).select('*', { count: 'exact' });
   if (q.status) query = query.eq('status', q.status);
+  if (q.saleId) query = query.eq('sale_id', q.saleId);
   if (q.tier) query = query.eq('tier_snapshot', q.tier);
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);

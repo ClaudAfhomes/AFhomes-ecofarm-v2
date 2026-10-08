@@ -166,6 +166,12 @@ export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> 
 export const getCustomerById = (id: string): Promise<Customer> =>
   request(`/customers/${id}`, customerSchema);
 
+/** Change a customer's lifecycle status. Audited server-side as CUSTOMER_EDITED. */
+export const updateCustomerStatus = (
+  id: string,
+  status: 'prospect' | 'active' | 'suspended',
+): Promise<Customer> => patch(`/customers/${id}`, customerSchema, { status });
+
 /**
  * One server-paginated customer page. The list endpoint already accepts
  * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
@@ -195,13 +201,12 @@ export const getCustomersPage = (
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
   const suffix = query.toString();
-  return requestListEnvelope(
-    `/customers${suffix ? `?${suffix}` : ''}`,
-    customerSchema,
-  ).then(({ data, meta }) => ({
-    data,
-    total: typeof meta.total === 'number' ? meta.total : data.length,
-  }));
+  return requestListEnvelope(`/customers${suffix ? `?${suffix}` : ''}`, customerSchema).then(
+    ({ data, meta }) => ({
+      data,
+      total: typeof meta.total === 'number' ? meta.total : data.length,
+    }),
+  );
 };
 
 export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnboardingRecovery> =>
@@ -242,6 +247,7 @@ export const getCustomerApplications = (
     status?: string;
     tier?: string;
     seller?: string;
+    saleId?: string;
     from?: string;
     to?: string;
     search?: string;
@@ -249,6 +255,7 @@ export const getCustomerApplications = (
 ): Promise<CustomerApplicationListItem[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
+  if (params.saleId) query.set('saleId', params.saleId);
   if (params.tier) query.set('tier', params.tier);
   if (params.seller) query.set('seller', params.seller);
   if (params.from) query.set('from', params.from);
@@ -354,13 +361,23 @@ export const exportReservationAgreement = (id: string, format: 'xlsx' | 'pdf') =
 /* Sales                                                               */
 /* ------------------------------------------------------------------ */
 
-export const getSales = (params: { status?: string } = {}): Promise<Sale[]> => {
-  const suffix = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
-  return requestList(`/sales${suffix}`, saleSchema);
+export const getSales = (
+  params: { status?: string; customerId?: string; productId?: string } = {},
+): Promise<Sale[]> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.customerId) query.set('customerId', params.customerId);
+  if (params.productId) query.set('productId', params.productId);
+  const suffix = query.toString();
+  return requestList(`/sales${suffix ? `?${suffix}` : ''}`, saleSchema);
 };
 
 export const createSale = (input: CreateSaleRequest): Promise<Sale> =>
   post('/sales', saleSchema, input);
+
+/** Cancel a draft sale. Never destroys: the record moves to `cancelled`. */
+export const cancelSale = (id: string): Promise<Sale> =>
+  post(`/sales/${id}/cancel`, saleSchema, {});
 
 /** Server-computed money state. The UI never totals a sale itself. */
 export const getSaleSummary = (saleId: string): Promise<SaleFinancialSummary> =>

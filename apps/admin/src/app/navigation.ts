@@ -35,7 +35,6 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'file-text',
     module: 'sales.card_sales',
     dropdown: [
-      { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
       {
         to: '/admin/customers/import-export',

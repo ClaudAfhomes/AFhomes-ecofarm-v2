@@ -7,11 +7,7 @@ import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
-import {
-  getCardProducts,
-  getCustomersPage,
-  issueCustomerAccountActivation,
-} from './services';
+import { getCardProducts, getCustomersPage, issueCustomerAccountActivation } from './services';
 
 vi.mock('./services', () => ({
   anonymizeCustomer: vi.fn(),
@@ -87,23 +83,14 @@ describe('BusinessCustomersPage row actions', () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
-    // No loose per-row buttons anymore - everything lives in the menu.
-    expect(
-      screen.queryByRole('button', { name: 'New application' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Deactivate account' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /activation link/i }),
-    ).not.toBeInTheDocument();
+    // No loose per-row buttons anymore - everything lives in the menu, and
+    // the application entry point is gone entirely.
+    expect(screen.queryByRole('button', { name: 'New application' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deactivate account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /activation link/i })).not.toBeInTheDocument();
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
-    expect(
-      screen.getByRole('menuitem', { name: 'New application' }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    expect(screen.queryByRole('menuitem', { name: 'New application' })).not.toBeInTheDocument();
   });
 
   it('opens the overflow with authorized actions and keeps danger distinct', async () => {
@@ -111,9 +98,7 @@ describe('BusinessCustomersPage row actions', () => {
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     const issue = screen.getByRole('menuitem', { name: 'Issue / Reissue activation link' });
     const deactivate = screen.getByRole('menuitem', { name: 'Deactivate account' });
     expect(issue).toBeInTheDocument();
@@ -121,12 +106,8 @@ describe('BusinessCustomersPage row actions', () => {
     expect(deactivate.className).not.toBe(issue.className);
     // Escape dismisses and focus returns to the trigger.
     await user.keyboard('{Escape}');
-    await waitFor(() =>
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument(),
-    );
-    expect(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    ).toHaveFocus();
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'More actions for CUS-000001' })).toHaveFocus();
   });
 
   it('hides super-admin actions from ordinary staff', async () => {
@@ -134,13 +115,9 @@ describe('BusinessCustomersPage row actions', () => {
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     expect(screen.queryByRole('menuitem', { name: 'Anonymize' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('menuitem', { name: 'Delete permanently' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete permanently' })).not.toBeInTheDocument();
   });
 
   it('offers separated destructive actions to the super admin', async () => {
@@ -148,15 +125,11 @@ describe('BusinessCustomersPage row actions', () => {
     renderWithProviders(<BusinessCustomersPage />, { user: SUPER });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
     // The guarded confirm dialog owns the destructive decision.
     expect(await screen.findByText('Permanently Delete Customer Account')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Delete permanently' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeInTheDocument();
   });
 
   it('disables deactivation for suspended customers inside the menu', async () => {
@@ -164,9 +137,7 @@ describe('BusinessCustomersPage row actions', () => {
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     expect(screen.getByRole('menuitem', { name: 'Deactivate account' })).toBeDisabled();
   });
 
@@ -178,23 +149,45 @@ describe('BusinessCustomersPage row actions', () => {
 });
 
 describe('BusinessCustomersPage directory table', () => {
-  it('shows only the requested columns: name, phone, tier, status, actions', async () => {
+  it('shows only the requested columns: name, payment, tier, status, actions', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(
-      pageOf([row({ customerCode: 'AF-CC-1A2B3C4D', tier: 'GOLD' })], 1),
+      pageOf(
+        [
+          row({
+            customerCode: 'AF-CC-1A2B3C4D',
+            tier: 'GOLD',
+            frozenTotal: '60000.00',
+            verifiedPaid: '60000.00',
+          }),
+          row({
+            id: 'c-2',
+            customerNumber: 'CUS-000002',
+            fullName: 'JOSE RIZAL',
+            frozenTotal: '60000.00',
+            verifiedPaid: '15000.00',
+          }),
+        ],
+        2,
+      ),
     );
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
-    for (const header of ['Name', 'Phone', 'VIP Tier', 'Status', 'Actions']) {
+    for (const header of ['Name', 'Payment Status', 'VIP Tier', 'Status', 'Actions']) {
       expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
     }
-    for (const gone of ['Customer ID', 'Email', 'Government ID', 'Category']) {
+    for (const gone of ['Customer ID', 'Email', 'Government ID', 'Category', 'Phone']) {
       expect(screen.queryByRole('columnheader', { name: gone })).not.toBeInTheDocument();
     }
-    // Email, masked ID, code and number leave the table; tier shows as a badge.
+    // Email, masked ID, code, number and phone leave the table.
     expect(screen.queryByText('maria@example.com')).not.toBeInTheDocument();
     expect(screen.queryByText('••••1234')).not.toBeInTheDocument();
     expect(screen.queryByText('AF-CC-1A2B3C4D')).not.toBeInTheDocument();
     expect(screen.queryByText('CUS-000001')).not.toBeInTheDocument();
+    expect(screen.queryByText('+639171234567')).not.toBeInTheDocument();
+    // Total == Paid with zero Balance reads as Fully Paid; a remaining
+    // balance with Paid below Total reads as Unsettled.
+    expect(screen.getByText('Fully Paid')).toBeInTheDocument();
+    expect(screen.getByText('Unsettled')).toBeInTheDocument();
     // Scoped to the table: the tier filter also renders a GOLD option.
     expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
   });
@@ -280,9 +273,7 @@ describe('BusinessCustomersPage directory table', () => {
     );
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     await user.click(screen.getByRole('menuitem', { name: 'Deactivate account' }));
     expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
     expect(screen.queryByText('detail view')).not.toBeInTheDocument();

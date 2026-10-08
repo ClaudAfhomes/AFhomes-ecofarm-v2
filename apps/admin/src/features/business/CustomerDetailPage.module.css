@@ -1,4 +1,189 @@
-/* Customer detail: breathing room between the back link and the card grid. */
-.back {
-  margin: 0 0 var(--space-4);
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+/* Short cards hug the top instead of stretching to the tallest neighbor. */
+.topGrid {
+  align-items: start;
+}
+
+/* The sales section spans the grid; sales stack vertically beneath it. */
+.salesSection {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Vertical stack of per-sale cards. */
+.saleStack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Grid label + control, matching the directory filter pattern. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+/* The action buttons stay on one row and scroll horizontally on narrow
+   cards instead of wrapping onto a second row. */
+.actionButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.actionButtons > * {
+  flex: 0 0 auto;
+}
+
+/* Two-column field grids on wide screens. Column flow fills column one
+   first, so JSX order stays the single source of field order (Customer:
+   identity then identifiers; Sale Details: record then money). */
+.twoCol {
+  grid-auto-flow: column;
+}
+
+.twoColRows4 {
+  grid-template-rows: repeat(4, auto);
+}
+
+.twoColRows5 {
+  grid-template-rows: repeat(5, auto);
+}
+
+@media (max-width: 639px) {
+  .twoCol {
+    grid-auto-flow: row;
+    grid-template-rows: none;
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * One solid, unmistakable treatment per action so function reads off color
+ * as well as text. Higher specificity than the design-system variants so the
+ * tone wins regardless of bundle order; every fill pairs a dark tone with
+ * white text at AA contrast. The uniform disabled rule below outranks them
+ * all so a busy control always greys.
+ */
+.actionButtons .toneAccent {
+  background-color: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  color: #ffffff;
+}
+
+.actionButtons .toneAccent:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.actionButtons .toneSlate {
+  background-color: var(--color-text-secondary);
+  border-color: var(--color-text-secondary);
+  color: #ffffff;
+}
+
+.actionButtons .toneSlate:hover:not(:disabled) {
+  filter: brightness(1.3);
+}
+
+.actionButtons .toneInfo {
+  background-color: var(--color-info);
+  border-color: var(--color-info);
+  color: #ffffff;
+}
+
+.actionButtons .toneInfo:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.actionButtons button:disabled {
+  background-color: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+  border-color: var(--color-border-default);
+}
+
+.actionsTitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Accordion disclosure for payment history: full-width bar with a rotating
+   chevron. Native <details> behavior only (the `name` attribute groups them
+   where supported); no JS state, keyboard-free. */
+.history {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface);
+}
+
+.history summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  font-size: var(--text-body-s);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-control);
+}
+
+.history summary::-webkit-details-marker {
+  display: none;
+}
+
+.history summary:hover {
+  background-color: var(--color-state-hover);
+}
+
+.history summary:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--transition-fast);
+}
+
+.history[open] .chevron {
+  transform: rotate(45deg);
+}
+
+.history[open] summary {
+  border-bottom: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+/* aria-disabled keeps the button focusable so its reason stays perceivable;
+   the native disabled look is mirrored without removing it from the tab order. */
+.actionButtons [aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
