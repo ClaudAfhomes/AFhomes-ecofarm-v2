@@ -200,6 +200,8 @@ const SALE_ROW = {
 };
 
 const QUEUE_ROW = {
+  // The Finance queue is a discriminated union; a sale-origin row must say so.
+  origin: 'sale',
   status: 'payment_in_progress',
   saleId: 'sale-1',
   saleNumber: 'SALE-000001',

@@ -22,12 +22,24 @@ import {
   StatusChip,
   TextField,
 } from '@afhomes/ui';
-import type { FinanceQueueItem, PaymentType } from '@afhomes/contracts';
+import type {
+  FinanceCollectionQueueItem,
+  FinanceQueueItem,
+  PaymentType,
+  PurchaseDocumentKind,
+} from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
+import { downloadFile } from '../../lib/download';
 import { SPOT_CASH_LABEL, formatMoney } from './format';
 import {
+  exportPurchaseDocument,
+  finalizeReservationPurchase,
   getFinanceQueue,
+  getReservationPayments,
+  getReservationFinance,
+  recordReservationPayment,
+  verifyReservationPayment,
   getSalePayments,
   getSaleSummary,
   recordPayment,
@@ -41,6 +53,123 @@ import {
  * money counts toward the price, and every total on this screen comes from
  * `sale_financial_summary`, so nobody can type a paid total or a balance.
  */
+/**
+ * Actions for an EXECUTED application-origin reservation.
+ *
+ * Four actions, and one rule: eligibility is whatever the SERVER last said.
+ * The button is enabled from the queue's own figures and the call is still
+ * refused server-side if the money changed in between — a stale "fully paid" in
+ * a browser must never produce a sale.
+ */
+function ReservationActions({
+  item,
+  canHandlePayments,
+  onDone,
+}: {
+  item: Extract<FinanceCollectionQueueItem, { origin: 'reservation' }>;
+  canHandlePayments: boolean;
+  onDone: () => Promise<void>;
+}) {
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [paymentDialog, setPaymentDialog] = useState<'record' | 'verify' | null>(null);
+  const refresh = async () => {
+    await client.invalidateQueries({
+      queryKey: ['business', 'reservation-payments', item.reservationId],
+    });
+    await onDone();
+  };
+  const payments = useQuery({
+    queryKey: ['business', 'reservation-payments', item.reservationId],
+    queryFn: () => getReservationPayments(item.reservationId),
+  });
+  const print = async (kind: PurchaseDocumentKind) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const file = await exportPurchaseDocument(item.reservationId, kind);
+      downloadFile(file);
+      await onDone();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Print failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const finalize = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await finalizeReservationPurchase(item.reservationId, crypto.randomUUID());
+      await client.invalidateQueries({ queryKey: ['business'] });
+      await client.invalidateQueries({ queryKey: ['reports'] });
+      await onDone();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Finalization failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <span>
+        {formatMoney(item.verifiedTotal)} verified of {formatMoney(item.totalPrice)} ·{' '}
+        {(payments.data ?? []).length} payment(s)
+      </span>{' '}
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={!canHandlePayments || busy}
+        onClick={() => print('reservation')}
+      >
+        Print reservation
+      </Button>{' '}
+      <Button
+        size="sm"
+        disabled={!canHandlePayments || busy}
+        onClick={() => setPaymentDialog('record')}
+      >
+        Record payment
+      </Button>{' '}
+      <Button
+        size="sm"
+        disabled={!canHandlePayments || busy}
+        onClick={() => setPaymentDialog('verify')}
+      >
+        Verify
+      </Button>{' '}
+      {paymentDialog === 'record' ? (
+        <RecordPaymentDialog
+          saleId={item.reservationId}
+          origin="reservation"
+          onDone={refresh}
+          onClose={() => setPaymentDialog(null)}
+        />
+      ) : null}
+      {paymentDialog === 'verify' ? (
+        <VerifyDialog
+          saleId={item.reservationId}
+          origin="reservation"
+          onDone={refresh}
+          onClose={() => setPaymentDialog(null)}
+        />
+      ) : null}
+      {item.fullyPaid ? (
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!canHandlePayments || busy}
+          onClick={finalize}
+        >
+          Finalize purchase
+        </Button>
+      ) : null}
+      {error ? <p role="alert">{error}</p> : null}
+    </>
+  );
+}
+
 export function BusinessFinanceQueuePage() {
   const { user } = useSession();
   const canHandlePayments =
@@ -58,11 +187,15 @@ export function BusinessFinanceQueuePage() {
     // writes invalidate instantly).
     refetchInterval: 15_000,
   });
-  const [detail, setDetail] = useState<FinanceQueueItem | null>(null);
+  const [detail, setDetail] = useState<Extract<
+    FinanceCollectionQueueItem,
+    { origin: 'sale' }
+  > | null>(null);
   const [paying, setPaying] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const currentDetail = detail
-    ? (query.data?.find((item) => item.saleId === detail.saleId) ?? detail)
+    ? (query.data?.find((item) => item.origin === 'sale' && item.saleId === detail.saleId) ??
+      detail)
     : null;
 
   const refresh = async () => {
@@ -110,44 +243,62 @@ export function BusinessFinanceQueuePage() {
             </TableHead>
             <TableBody>
               {query.data?.map((item) => (
-                <TableRow key={item.saleId}>
-                  <TableCell label="Sale">{item.saleNumber}</TableCell>
+                <TableRow key={item.origin === 'sale' ? item.saleId : item.reservationId}>
+                  <TableCell label="Sale">
+                    {item.origin === 'sale' ? item.saleNumber : item.reservationNumber}
+                  </TableCell>
                   <TableCell label="Customer">{item.customerName}</TableCell>
                   <TableCell label="VIP">{item.productName}</TableCell>
                   <TableCell label="Scheme">{paymentSchemeLabel(item.paymentScheme)}</TableCell>
-                  <TableCell label="Total">{formatMoney(item.cashPrice)}</TableCell>
+                  <TableCell label="Total">
+                    {formatMoney(item.origin === 'sale' ? item.cashPrice : item.totalPrice)}
+                  </TableCell>
                   <TableCell label="Verified">{formatMoney(item.verifiedTotal)}</TableCell>
                   <TableCell label="Balance">{formatMoney(item.remainingBalance)}</TableCell>
                   <TableCell label="Status">
                     <StatusChip label={item.status} />
                   </TableCell>
                   <TableCell label="Next Action">
-                    {item.activatable
-                      ? 'Activate membership'
-                      : item.fullyPaid
-                        ? 'Review activation'
-                        : 'Handle payment'}
+                    {item.origin === 'reservation'
+                      ? item.fullyPaid
+                        ? 'Finalize purchase'
+                        : 'Handle payment'
+                      : item.activatable
+                        ? 'Activate membership'
+                        : item.fullyPaid
+                          ? 'Review activation'
+                          : 'Handle payment'}
                   </TableCell>
                   <TableCell label="Actions">
-                    <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
-                      View details
-                    </Button>{' '}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={!canHandlePayments}
-                      onClick={() => setPaying(item.saleId)}
-                    >
-                      Record payment
-                    </Button>{' '}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={!canHandlePayments}
-                      onClick={() => setReviewing(item.saleId)}
-                    >
-                      Verify
-                    </Button>
+                    {item.origin === 'reservation' ? (
+                      <ReservationActions
+                        item={item}
+                        canHandlePayments={canHandlePayments}
+                        onDone={refresh}
+                      />
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
+                          View details
+                        </Button>{' '}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!canHandlePayments}
+                          onClick={() => setPaying(item.saleId)}
+                        >
+                          Record payment
+                        </Button>{' '}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!canHandlePayments}
+                          onClick={() => setReviewing(item.saleId)}
+                        >
+                          Verify
+                        </Button>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -156,7 +307,7 @@ export function BusinessFinanceQueuePage() {
         </div>
       )}
 
-      {currentDetail ? (
+      {currentDetail && currentDetail.origin === 'sale' ? (
         <PaymentDetails
           canHandlePayments={canHandlePayments}
           item={currentDetail}
@@ -183,10 +334,12 @@ export function BusinessFinanceQueuePage() {
 
 export function RecordPaymentDialog({
   saleId,
+  origin = 'sale',
   onDone,
   onClose,
 }: {
   saleId: string;
+  origin?: 'sale' | 'reservation';
   onDone: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -195,25 +348,38 @@ export function RecordPaymentDialog({
   const [type, setType] = useState<PaymentType>('installment');
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
-  const runPayment = useSingleFlight<Awaited<ReturnType<typeof recordPayment>>>();
+  const runPayment = useSingleFlight<
+    Awaited<ReturnType<typeof recordPayment>> | Awaited<ReturnType<typeof recordReservationPayment>>
+  >();
   const paymentRequest = useMutationRequest();
   const paymentInput = { amount, paymentType: type, method, ...(reference ? { reference } : {}) };
   const amountValid = recordPaymentSchema.shape.amount.safeParse(amount).success;
   const paymentValid = recordPaymentSchema.safeParse(paymentInput).success;
 
   const summary = useQuery({
-    queryKey: ['business', 'sale-summary', saleId],
-    queryFn: () => getSaleSummary(saleId),
+    queryKey: [
+      'business',
+      origin === 'reservation' ? 'reservation-finance' : 'sale-summary',
+      saleId,
+    ],
+    queryFn: async () => {
+      if (origin === 'sale') return getSaleSummary(saleId);
+      const finance = await getReservationFinance(saleId);
+      return { ...finance, cashPrice: finance.totalPrice };
+    },
   });
 
   const save = useMutation({
     mutationFn: () =>
       runPayment(() => {
         const input = recordPaymentSchema.parse(paymentInput);
-        return recordPayment(saleId, {
+        const body = {
           ...input,
-          requestId: paymentRequest.forPayload({ saleId, ...input }),
-        });
+          requestId: paymentRequest.forPayload({ origin, saleId, ...input }),
+        };
+        return origin === 'reservation'
+          ? recordReservationPayment(saleId, body)
+          : recordPayment(saleId, body);
       }),
     onSuccess: async () => {
       await onDone();
@@ -341,31 +507,50 @@ export function RecordPaymentDialog({
 
 export function VerifyDialog({
   saleId,
+  origin = 'sale',
   onDone,
   onClose,
 }: {
   saleId: string;
+  origin?: 'sale' | 'reservation';
   onDone: () => Promise<void>;
   onClose: () => void;
 }) {
   const [reason, setReason] = useState('');
   const payments = useQuery({
-    queryKey: ['business', 'sale-payments', saleId],
-    queryFn: () => getSalePayments(saleId),
+    queryKey: [
+      'business',
+      origin === 'reservation' ? 'reservation-payments' : 'sale-payments',
+      saleId,
+    ],
+    queryFn: async () =>
+      origin === 'reservation'
+        ? await getReservationPayments(saleId)
+        : await getSalePayments(saleId),
   });
   const pending = payments.data?.filter((p) => p.status === 'recorded') ?? [];
 
+  const verificationRequest = useMutationRequest();
   const decide = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       paymentId: string;
       decision: 'verified' | 'rejected';
       reason?: string;
     }) =>
-      verifyPayment(input.paymentId, {
-        decision: input.decision,
-        ...(input.reason ? { reason: input.reason } : {}),
-      }),
-    onSuccess: onDone,
+      origin === 'reservation'
+        ? await verifyReservationPayment(saleId, input.paymentId, {
+            requestId: verificationRequest.forPayload(input),
+            decision: input.decision,
+            ...(input.reason ? { reason: input.reason } : {}),
+          })
+        : await verifyPayment(input.paymentId, {
+            decision: input.decision,
+            ...(input.reason ? { reason: input.reason } : {}),
+          }),
+    onSuccess: async () => {
+      await onDone();
+      verificationRequest.complete();
+    },
   });
 
   return (

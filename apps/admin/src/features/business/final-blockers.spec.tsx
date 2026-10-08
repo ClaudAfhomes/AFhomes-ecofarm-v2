@@ -1,8 +1,9 @@
-﻿import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { purchaseReservationCreateSchema } from '@afhomes/contracts';
 import type {
   CreateCustomerApplicationRequest,
   CreateReservationAgreementRequest,
@@ -26,7 +27,26 @@ vi.mock('./services', async (original) => ({
       applicantName: 'QA HOLDER',
     },
   ],
-  getCustomerApplication: async () => null,
+  getCustomerApplication: async () => ({
+    id: '00000000-0000-4000-8000-000000000003',
+    status: 'approved',
+    applicationNumber: 'QA-APP',
+    applicantName: 'QA HOLDER',
+    vipAmount: '100000.00',
+    discountPercent: 0,
+    validityYears: 7,
+    yearlyPoints: 10000,
+    annualPointsTranches: 5,
+    holderLimit: 1,
+    // An application-origin reservation names its frozen terms record. Without
+    // one the UI refuses to create, which is the honest review-required state.
+    purchaseTermsId: '00000000-0000-4000-8000-000000000009',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    submittedAt: '2026-09-01T00:00:00.000Z',
+    approvedAt: '2026-09-02T00:00:00.000Z',
+    rejectedAt: null,
+  }),
   getSales: async () => [
     {
       id: '00000000-0000-4000-8000-000000000002',
@@ -45,6 +65,40 @@ vi.mock('./services', async (original) => ({
   ],
   createCustomerApplication: calls.application,
   createReservationAgreement: calls.reservation,
+  // Application-origin creation reads the server-authoritative offer first; the
+  // page refuses to create without it, so it is part of the happy path.
+  getPurchaseTermsProposal: async () => ({
+    applicationId: '00000000-0000-4000-8000-000000000003',
+    expectedProposalHash: 'a'.repeat(64),
+    asOf: '2026-09-02T00:00:00.000Z',
+    offerKind: 'newly_confirmed_offer',
+    terms: {
+      customerId: '00000000-0000-4000-8000-000000000004',
+      planId: '00000000-0000-4000-8000-000000000001',
+      sellerStaffId: '00000000-0000-4000-8000-000000000005',
+      captureKind: 'review',
+      reason: 'Reviewed in the QA fixture.',
+      tier: 'GOLD',
+      paymentScheme: 'spot_cash',
+      totalPrice: '100000.00',
+      reservationFee: '10000.00',
+      minimumDownPayment: '20000.00',
+      requiredInitial: '20000.00',
+      installmentMonths: null,
+      monthlyAmount: null,
+      spotCashDays: 7,
+      validityMonths: 84,
+      discountPercent: 0,
+      yearlyPoints: 10000,
+      annualPointsTranches: 5,
+      holderLimit: 1,
+      inclusions: ['QA benefit'],
+      commissionRuleId: null,
+      commissionRate: '0.04',
+      commissionBase: '100000.00',
+      expectedCommission: '4000.00',
+    },
+  }),
 }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
@@ -138,25 +192,30 @@ it('actual IST tier Unicode expansion uses the shared prefix mapping', async () 
 it('actual IST tier retains the existing canonical enum payload behavior', async () => {
   const { input, user } = await tier('gold');
   // The save now validates the whole official form. A tier assertion needs a
-  // valid sale/holder fixture; an empty form must not reach a creation API.
+  // valid holder fixture; an empty form must not reach a creation API.
   await user.selectOptions(
     screen.getByRole('combobox', { name: 'Source Customer Application' }),
     '00000000-0000-4000-8000-000000000003',
   );
-  await user.selectOptions(
-    screen.getByRole('combobox', { name: 'Card sale' }),
-    '00000000-0000-4000-8000-000000000002',
-  );
+  // Application-origin mode: there is NO Card sale to pick. A first-time
+  // purchase creates the agreement first and the sale only at finalization, so
+  // the selector is removed rather than merely ignored.
+  expect(screen.queryByRole('combobox', { name: 'Card sale' })).not.toBeInTheDocument();
   await user.type(screen.getByLabelText('name'), 'QA HOLDER');
   await user.type(screen.getByLabelText('address'), '1 QA STREET');
   await user.type(screen.getByLabelText('contactNumber'), '09171234567');
   await user.type(screen.getByLabelText('email'), 'qa@example.com');
-  await user.click(screen.getByRole('button', { name: 'Save draft' }));
+  await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalled());
-  expect(calls.reservation.mock.calls[0]?.[0].vipTier).toBe('GOLD');
+  // Application-origin carries the frozen terms reference and no sale id.
+  expect(calls.reservation.mock.calls[0]?.[0]).toMatchObject({ origin: 'application' });
+  expect(calls.reservation.mock.calls[0]?.[0]).not.toHaveProperty('saleId');
+  expect(
+    purchaseReservationCreateSchema.safeParse(calls.reservation.mock.calls[0]?.[0]).error,
+  ).toBeUndefined();
   await user.clear(input);
   await user.type(input, 'silver member');
-  await user.click(screen.getByRole('button', { name: 'Save draft' }));
+  await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalledTimes(2));
   expect(calls.reservation.mock.calls[1]?.[0]).not.toHaveProperty('vipTier');
 });

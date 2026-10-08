@@ -10,12 +10,50 @@ import {
   getCustomerApplication,
   reopenCustomerApplication,
 } from './services';
+import { purchaseTermsProposalSchema } from '@afhomes/contracts';
+
+/** A server-shaped offer. Built lazily: the module mock factory runs before ids. */
+const buildOffer = () =>
+  purchaseTermsProposalSchema.parse({
+    applicationId: id,
+    expectedProposalHash: 'a'.repeat(64),
+    asOf: '2026-10-07T00:00:00.000Z',
+    offerKind: 'submission',
+    terms: {
+      applicationId: id,
+      customerId: id,
+      planId: id,
+      sellerStaffId: id,
+      captureKind: 'submission',
+      tier: 'BRONZE',
+      paymentScheme: 'spot_cash',
+      totalPrice: '54000.00',
+      reservationFee: '10000.00',
+      minimumDownPayment: '10000.00',
+      requiredInitial: '10000.00',
+      installmentMonths: null,
+      monthlyAmount: null,
+      spotCashDays: 7,
+      validityMonths: 84,
+      discountPercent: 15,
+      yearlyPoints: 10000,
+      annualPointsTranches: 5,
+      holderLimit: 1,
+      inclusions: ['Priority reservation: yes'],
+      commissionRuleId: null,
+      commissionRate: '0',
+      commissionBase: '54000.00',
+      expectedCommission: '0.00',
+    },
+  });
 
 vi.mock('./services', async (original) => ({
   ...(await original()),
   getCustomers: async () => [],
   getCardProducts: async () => [],
   getCustomerApplication: vi.fn(),
+  // The offer is server-authoritative; the screen only reads and echoes its hash.
+  getPurchaseTermsProposal: vi.fn(async () => buildOffer()),
   decideCustomerApplication: vi.fn(),
   reopenCustomerApplication: vi.fn(),
   exportCustomerApplication: vi.fn(),
@@ -124,17 +162,32 @@ it('dispatches submitted decisions and reopen', async () => {
     ['Cancel', 'cancelled'],
   ] as const) {
     fireEvent.click(screen.getByRole('button', { name }));
+    // Every decision carries a request identity so a retry after a lost
+    // response replays the original result instead of deciding twice.
     await waitFor(() =>
       expect(decideCustomerApplication).toHaveBeenCalledWith(
         id,
         decision,
+        expect.stringMatching(/^[0-9a-f-]{36}$/),
         'Reviewed by authorized staff.',
       ),
     );
     await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
   }
   fireEvent.click(screen.getByRole('button', { name: 'Reopen to draft' }));
-  await waitFor(() => expect(reopenCustomerApplication).toHaveBeenCalledWith(id));
+  await waitFor(() =>
+    expect(reopenCustomerApplication).toHaveBeenCalledWith(id, expect.any(String)),
+  );
+});
+
+it('shows the server-authoritative offer with no editable price', async () => {
+  await show('draft');
+  const panel = await screen.findByRole('region', { name: 'Purchase terms offer' });
+  expect(panel).toHaveTextContent('₱54000.00');
+  // The included reservation amount is shown as its own labelled figure.
+  expect(panel).toHaveTextContent('₱10000.00');
+  // The offer is read-only: nothing on this screen can authoritatively price it.
+  expect(screen.queryByLabelText(/^Total purchase amount$/)).toBeNull();
 });
 it.each(['xlsx', 'pdf'] as const)(
   'shows %s export errors instead of rejecting silently',

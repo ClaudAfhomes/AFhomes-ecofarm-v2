@@ -24,6 +24,8 @@ const list = (data: unknown[]): Route => ({
 });
 
 const QUEUE_ITEM = {
+  // The Finance queue is a discriminated union; a sale-origin row must say so.
+  origin: 'sale',
   saleId: 'bbbbbbbb-0000-4000-8000-000000002601',
   saleNumber: 'SALE-260001',
   customerId: 'aaaaaaaa-0000-4000-8000-000000002601',
