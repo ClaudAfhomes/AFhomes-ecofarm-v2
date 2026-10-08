@@ -1,5 +1,81 @@
 # SESSION.md - handoff for a new chat session
 
+## AF Homes handoff — 2026-10-08 (UTC), admin UI overhaul session chain
+
+> Everything below this line is current AF Homes work (committed through
+> `a9f9894`). The STALE JAD block further down is untouched provenance - do
+> not act on it.
+
+### What was built (admin SPA + supporting API, all committed)
+
+**Sidebar** (`apps/admin/src/app/navigation.ts`, `packages/ui/.../Sidebar.*`)
+- Distinct icons per nav group (home/search/file-text/dollar-sign/wallet/users/gear/list/image).
+- Active-highlight left bar removed (deleted the `inset box-shadow` rule).
+- Slim custom scrollbar on the nav rail; "Sales & Customers" renamed to "Sales".
+
+**Customers directory** (`features/business/BusinessCustomersPage.*`)
+- Realtime debounced search (no button), 10-row server pagination with
+  `Showing X–Y of Z`, clickable rows → `/admin/customers/:id`.
+- Columns now: Name, Payment Status, VIP Tier (`TierBadge`: gold/silver/bronze/no-tier), Status.
+  Removed over sessions: Customer ID/Code, Email, Phone, Government ID, Category columns;
+  header + row “New application” entries.
+- Filters now: Status, Payment, Tier, Seller, dates (Category/Sort removed).
+- Payment Status = `settlementStatus()` (`format.ts`, exact-decimal via
+  `@afhomes/shared`): **Fully Paid** iff Total == Paid and Balance == 0,
+  else **Unsettled** (fail-closed); rendered as green/orange `SettlementBadge`.
+
+**Customer detail** (`CustomerDetailPage.*`, `CustomerRecordActions.tsx`)
+- Grouped cards (Customer 2-col, Contact, Verification, Membership with
+  lookup-mirrored status/tier/expiry, Card Sales with per-sale cards, single
+  **Actions** card below sales, accordion “View Payment History”).
+- Actions card: record flows (New application removed), activation link,
+  Deactivate, super-admin Anonymize/Delete, membership-status dropdown
+  (Prospect/Active/Suspended → audited PATCH), sale selector + Record/Verify
+  payment. One unique color per button (primary/gold/secondary/slate/blue/
+  red solids + ghost); single non-wrapping scroll row.
+- Payment history table: Reference shows `paymentNumber` (tooltip keeps the
+  stored ref), humanized Type/Method, staff **names** (new
+  `recordedByName`/`verifiedByName` on `GET /sales/:id/payments`).
+
+**Sales area**
+- `BusinessSalesPage` + Card Sales nav entry + route **removed** (directory,
+  dialogs, and Edit/Delete sale UI went with it; API intact).
+- New `POST /sales/:id/cancel` (draft-only, 409 on payments/membership/live
+  commissions, audited `SALE_CANCELLED`, no-probe 404s) + `saleId` filter on
+  applications list + `productId` filter on sales list.
+
+**Migrations (local-only, NOT applied to any real project)**
+- `20261030000001` id filter + `20261031000001` payment filter on
+  `customer_directory`. Lesson re-learned the hard way: recreate the RPC from
+  the *latest* body (20261028), never an older one — a stale recreate broke
+  db-integration §§49/54/56 (caught green on rerun: 1549/1549, incl. new
+  id/payment-filter checks).
+
+### Verification state
+- `tsc` clean (admin/api/contracts/supabase), eslint clean on touched files,
+  prettier applied to new files. Unit suites green on all touched areas.
+- Pre-existing failures, confirmed identical on clean HEAD (not ours):
+  `CardPlans` activation-link tests (6), `navigation.spec` Membership-Lookup
+  label, `customer-security` credential scan flagging
+  `api/apply-migrations.spec.ts`; prettier drift on older files.
+
+### Do-not-forget for next session
+- The two new migrations have only run against disposable PostgreSQL
+  (`pnpm test:db:local`). Applying to a real project needs explicit approval
+  per AGENTS.md (`pnpm db:migrate` targets production; pasting one file into
+  the SQL editor fails with `relation "public.customers" does not exist`
+  unless the full chain is applied in order).
+- Sale Edit/Delete UI currently has no entry point (page removed, backend
+  kept). Customer `status` PATCH exists and is used by the status dropdown.
+- `paymentStatus`/`verifiedPaid`/`frozenTotal`/`tier`/`membershipStatus`/
+  `membershipExpiresAt` on the customer read model are RPC-derived (null on
+  raw rows); display code must keep failing closed to Unsettled/`—`.
+
+---
+
+## Previous handoff (STALE - retired platform, provenance only)
+
+
 > ## ⚠️ STALE — describes the retired JAD Realty platform
 >
 > Every path, table, endpoint, credential, and migration below belongs to the
