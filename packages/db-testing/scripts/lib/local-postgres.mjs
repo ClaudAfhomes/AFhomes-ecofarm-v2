@@ -36,9 +36,10 @@ export function listMigrations() {
 
 /**
  * Boot a disposable PostgreSQL, install the shim, and apply every migration.
+ * @param {{ beforeMigration?: string }} [options] Exclusive baseline migration boundary.
  * @returns {{ url: string, applied: string[], client: import('pg').Client, stop: () => Promise<void> }}
  */
-export async function startDisposablePostgres() {
+export async function startDisposablePostgres({ beforeMigration } = {}) {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 
   const server = new EmbeddedPostgres({
@@ -66,10 +67,24 @@ export async function startDisposablePostgres() {
   const database = rows[0].name;
   const user = rows[0].usr;
 
+  console.log(
+    '[db-test] target host=127.0.0.1 port=' +
+      PORT +
+      ' database=' +
+      database +
+      ' pid=' +
+      fs.readFileSync(path.join(DATA_DIR, 'postmaster.pid'), 'utf8').split(/\r?\n/)[0],
+  );
   await client.query(fs.readFileSync(SHIM, 'utf8'));
 
+  const migrations = listMigrations();
+  if (beforeMigration && !migrations.includes(beforeMigration)) {
+    await client.end();
+    await server.stop();
+    throw new Error('Unknown baseline migration boundary');
+  }
   const applied = [];
-  for (const file of listMigrations()) {
+  for (const file of migrations.filter((file) => !beforeMigration || file < beforeMigration)) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
     try {
       await client.query(sql);
@@ -90,6 +105,8 @@ export async function startDisposablePostgres() {
     // will delete. It is passed by environment variable and never logged.
     url: `postgres://${user}:${LOCAL_PASSWORD}@127.0.0.1:${PORT}/${database}`,
     database,
+    dataDir: DATA_DIR,
+    pid: Number(fs.readFileSync(path.join(DATA_DIR, 'postmaster.pid'), 'utf8').split(/\r?\n/)[0]),
     applied,
     client,
     async stop() {

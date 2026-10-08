@@ -452,6 +452,23 @@ async function buildCustomers(ctx: Ctx): Promise<ReportData> {
   };
 }
 
+/**
+ * One row per payment, sale-linked or not.
+ *
+ * Finalization links the SAME payment rows to the sale, so a post-finalization
+ * read can return a row from both branches. Keying on the payment id keeps the
+ * report's money totals honest across that transition.
+ */
+function dedupeByPaymentId(rows: Row[]): Row[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const id = String(row.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 async function buildPayments(ctx: Ctx): Promise<ReportData> {
   const { db, principal, kind, window, q } = ctx;
   const saleIds = await scopedSaleIds(db, principal, kind);
@@ -478,7 +495,29 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
   let payments = ((data ?? []) as Row[]).filter((row) =>
     inReportWindow(row.recorded_at, window.from, window.to),
   );
-  const saleIdsSeen = [...new Set(payments.map((row) => String(row.sale_id)))];
+  // Pre-sale rows. A reservation-origin payment has no card sale yet, so the
+  // sale-scoped read above cannot see it. They are reported ONLY to an unscoped
+  // caller with no seller or plan filter: a scope-limited caller already sees no
+  // out-of-scope sales, and a reservation carries its plan and seller through
+  // the frozen terms, so attributing it without that join would be a guess.
+  // Finalization links the SAME rows to the sale, and the merge dedupes by payment
+  // id so nothing is ever counted twice.
+  if (!saleIds && !q.planId && !q.seller) {
+    let reservationQuery = db.from('payments').select('*').eq('origin', 'reservation');
+    if (q.status) reservationQuery = reservationQuery.eq('status', q.status);
+    if (window.from) reservationQuery = reservationQuery.gte('recorded_at', window.from);
+    if (window.to) reservationQuery = reservationQuery.lte('recorded_at', window.to);
+    payments = dedupeByPaymentId([
+      ...payments,
+      ...(((await readSearchRows(
+        reservationQuery.order('recorded_at', { ascending: false }),
+      )) ?? []) as Row[]),
+    ]).filter((row) => inReportWindow(row.recorded_at, window.from, window.to));
+  }
+  const reservationIdsSeen = [
+    ...new Set(payments.map((row) => String(row.reservation_id ?? ''))),
+  ].filter(Boolean);
+  const saleIdsSeen = [...new Set(payments.map((row) => String(row.sale_id ?? '')))].filter(Boolean);
   const customerIds = [...new Set(payments.map((row) => String(row.customer_id ?? '')))].filter(
     Boolean,
   );
@@ -486,7 +525,14 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
     Boolean,
   );
   const sales = await mapById(db, 'card_sales', saleIdsSeen, 'id,sale_number,customer_id');
+  const reservations = await mapById(
+    db,
+    'reservation_agreements',
+    reservationIdsSeen,
+    'id,reservation_number,customer_id',
+  );
   customerIds.push(...[...sales.values()].map((s) => String(s.customer_id)));
+  customerIds.push(...[...reservations.values()].map((r) => String(r.customer_id)));
   const [customers, staff] = await Promise.all([
     mapById(
       db,
@@ -497,22 +543,31 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
     mapById(db, 'staff_users', verifierIds, 'id,full_name'),
   ]);
   payments = payments.filter((row) => {
-    const sale = sales.get(String(row.sale_id));
-    const customer = customers.get(String(row.customer_id ?? sale?.customer_id ?? ''));
+    const sale = sales.get(String(row.sale_id ?? ''));
+    const reservation = reservations.get(String(row.reservation_id ?? ''));
+    const customer = customers.get(
+      String(row.customer_id ?? sale?.customer_id ?? reservation?.customer_id ?? ''),
+    );
     return matchesSearch(q.search, [
       customer && displayName(customer),
       customer?.customer_number,
       sale?.sale_number,
+      reservation?.reservation_number,
       row.reference,
       row.status,
     ]);
   });
   const rows = payments.map((row) => {
-    const sale = sales.get(String(row.sale_id));
-    const customer = customers.get(String(row.customer_id ?? sale?.customer_id ?? ''));
+    const sale = sales.get(String(row.sale_id ?? ''));
+    const reservation = reservations.get(String(row.reservation_id ?? ''));
+    const customer = customers.get(
+      String(row.customer_id ?? sale?.customer_id ?? reservation?.customer_id ?? ''),
+    );
     return {
       paymentDate: row.recorded_at,
-      saleNumber: sale?.sale_number ?? null,
+      // A pre-sale row has no sale number yet, so it reports the reservation it
+      // belongs to instead of a null the reader cannot follow.
+      saleNumber: sale?.sale_number ?? reservation?.reservation_number ?? null,
       customer: customer ? displayName(customer) : null,
       amount: row.amount ?? '0.00',
       type: row.payment_type ?? null,

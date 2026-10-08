@@ -60,6 +60,8 @@ const AGREEMENT_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
 const AGREEMENT_DRAFT_ID = 'bbbbbbbb-0000-4000-8000-000000000003';
 const SALE_ID = 'eeeeeeee-0000-4000-8000-000000000005';
 const PLAN_ID = 'dddddddd-0000-4000-8000-000000000004';
+const REQUEST_ID = '44444444-4444-4444-8444-444444444444';
+const PROPOSAL_HASH = 'a'.repeat(64);
 
 function install(
   tables: Record<string, unknown[]> = {},
@@ -192,11 +194,14 @@ describe('official form review lifecycle', () => {
           },
         ],
       },
-      { rpcs: [{ fn: 'submit_customer_application', result: APP_ID }] },
+      { rpcs: [{ fn: 'submit_purchase_application_once', result: APP_ID }] },
     );
     const response = await call(forms, {
       path: `customer-applications/${APP_ID}/submit`,
       method: 'POST',
+      // Submission is now strict: a request id plus the proposal hash the
+      // reviewer was shown. No browser figure can travel with it.
+      body: { requestId: REQUEST_ID, expectedProposalHash: PROPOSAL_HASH },
     });
     expect(response.status).toBe(200);
   });
@@ -272,18 +277,26 @@ describe('official form review lifecycle', () => {
   });
 
   it('reopens a submitted application back to draft and rejects invalid jumps', async () => {
+    const live = install();
+    live.rpcs = [{ fn: 'decide_purchase_application_once', result: APP_ID }];
     const reopened = await call(forms, {
       path: `customer-applications/${APP_ID}/reopen`,
       method: 'POST',
-      body: {},
+      body: { requestId: REQUEST_ID },
     });
     expect(reopened.status).toBe(200);
-    expect((reopened.body as { status: string }).status).toBe('draft');
 
+    // The transition itself is now one atomic RPC, so the refusal comes from it.
+    live.rpcErrors = {
+      decide_purchase_application_once: {
+        code: '55000',
+        message: 'INVALID_APPLICATION_TRANSITION',
+      },
+    };
     const invalid = await call(forms, {
       path: `customer-applications/${APP_ID}/decision`,
       method: 'POST',
-      body: { decision: 'approved' },
+      body: { requestId: REQUEST_ID, decision: 'approved' },
     });
     expect(invalid.status).toBe(409);
   });

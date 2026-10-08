@@ -101,6 +101,7 @@ type Op =
   | { t: 'update'; patch: FakeRow }
   | { t: 'delete' }
   | { t: 'eq'; col: string; val: unknown }
+  | { t: 'is'; col: string; val: unknown }
   | { t: 'neq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
   | { t: 'or'; filter: string }
@@ -184,6 +185,14 @@ function matches(row: FakeRow, ops: Op[]): boolean {
         return row[op.col] === op.val;
       case 'neq':
         return row[op.col] !== null && row[op.col] !== undefined && row[op.col] !== op.val;
+      // `is(col, null)` is PostgREST's IS NULL and is NOT the same as
+      // `eq(col, null)`: `eq` matches only the literal JS null, so a row whose
+      // column is absent (undefined) or an empty string would slip through. The
+      // distinction is load-bearing for "no final sale yet" queries.
+      case 'is':
+        return op.val === null
+          ? row[op.col] === null || row[op.col] === undefined
+          : row[op.col] === op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
       case 'ilike': {
@@ -475,6 +484,10 @@ export class FakeSupabase {
       },
       eq(col: string, val: unknown) {
         ops.push({ t: 'eq', col, val });
+        return this;
+      },
+      is(col: string, val: unknown) {
+        ops.push({ t: 'is', col, val });
         return this;
       },
       neq(col: string, val: unknown) {

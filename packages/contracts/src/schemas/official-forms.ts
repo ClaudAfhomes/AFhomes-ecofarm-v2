@@ -148,6 +148,15 @@ export const customerApplicationSchema = createCustomerApplicationSchema.extend(
   annualPointsTranches: z.number().int().positive(),
   holderLimit: z.number().int().min(1).max(2),
   status: customerApplicationStatusSchema,
+  /**
+   * The exact frozen terms this application points at, or null before any terms
+   * were captured.
+   *
+   * An IDENTIFIER, not a figure: it tells the UI which record a reservation would
+   * be built from, and the server revalidates it against the immutable row before
+   * writing anything. Null is the honest "Purchase Terms Review Required" state.
+   */
+  purchaseTermsId: z.string().uuid().nullable().optional(),
   createdBy: z.string().uuid().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -192,7 +201,13 @@ export const reservationHolderSchema = z.object({
 export const createReservationAgreementSchema = z
   .object({
     requestId: z.string().uuid().optional(),
-    saleId: requiredUuid,
+    /**
+     * Required for the LEGACY sale-origin form, absent for an application-origin
+     * reservation. `purchaseReservationCreateSchema` is the application-origin
+     * contract and carries no sale id at all, so the two shapes cannot be
+     * confused for one another.
+     */
+    saleId: optionalUuid,
     customerApplicationId: optionalUuid,
     /**
      * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
@@ -224,7 +239,14 @@ export const createReservationAgreementSchema = z
 export const reservationAgreementSchema = z.object({
   id: z.string().uuid(),
   reservationNumber: z.string(),
-  saleId: z.string().uuid(),
+  /**
+   * Null for an application-origin reservation.
+   *
+   * A first-time purchase has NO card sale until Finance finalizes it, and
+   * calling that reservation a sale before the money is verified is exactly the
+   * confusion this flow exists to remove.
+   */
+  saleId: optionalUuid,
   tier: vipTierSchema,
   totalPrice: exactDecimalStringSchema,
   reservationFee: exactDecimalStringSchema,
