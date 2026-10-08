@@ -1,5 +1,6 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  customerApplicationListItemSchema,
   createCommissionRuleSchema,
   createCustomerApplicationSchema,
   reservationAgreementListItemSchema,
@@ -60,6 +61,8 @@ const AGREEMENT_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
 const AGREEMENT_DRAFT_ID = 'bbbbbbbb-0000-4000-8000-000000000003';
 const SALE_ID = 'eeeeeeee-0000-4000-8000-000000000005';
 const PLAN_ID = 'dddddddd-0000-4000-8000-000000000004';
+const REQUEST_ID = '44444444-4444-4444-8444-444444444444';
+const PROPOSAL_HASH = 'a'.repeat(64);
 
 function install(
   tables: Record<string, unknown[]> = {},
@@ -192,11 +195,14 @@ describe('official form review lifecycle', () => {
           },
         ],
       },
-      { rpcs: [{ fn: 'submit_customer_application', result: APP_ID }] },
+      { rpcs: [{ fn: 'submit_purchase_application_once', result: APP_ID }] },
     );
     const response = await call(forms, {
       path: `customer-applications/${APP_ID}/submit`,
       method: 'POST',
+      // Submission is now strict: a request id plus the proposal hash the
+      // reviewer was shown. No browser figure can travel with it.
+      body: { requestId: REQUEST_ID, expectedProposalHash: PROPOSAL_HASH },
     });
     expect(response.status).toBe(200);
   });
@@ -272,18 +278,26 @@ describe('official form review lifecycle', () => {
   });
 
   it('reopens a submitted application back to draft and rejects invalid jumps', async () => {
+    const live = install();
+    live.rpcs = [{ fn: 'decide_purchase_application_once', result: APP_ID }];
     const reopened = await call(forms, {
       path: `customer-applications/${APP_ID}/reopen`,
       method: 'POST',
-      body: {},
+      body: { requestId: REQUEST_ID },
     });
     expect(reopened.status).toBe(200);
-    expect((reopened.body as { status: string }).status).toBe('draft');
 
+    // The transition itself is now one atomic RPC, so the refusal comes from it.
+    live.rpcErrors = {
+      decide_purchase_application_once: {
+        code: '55000',
+        message: 'INVALID_APPLICATION_TRANSITION',
+      },
+    };
     const invalid = await call(forms, {
       path: `customer-applications/${APP_ID}/decision`,
       method: 'POST',
-      body: { decision: 'approved' },
+      body: { requestId: REQUEST_ID, decision: 'approved' },
     });
     expect(invalid.status).toBe(409);
   });
@@ -602,15 +616,22 @@ describe('IST agreement seller ownership (D2) and tier context (D3)', () => {
 });
 
 describe('IST list holder-aware summary', () => {
-  it.each([false, true])(
-    'returns strict commercial fields with secondary holder=%s',
-    async (hasSecondary) => {
+  it.each([
+    ['sale', SALE_ID, false],
+    ['sale', SALE_ID, true],
+    ['application', null, false],
+    ['application', null, true],
+    ['application', SALE_ID, false],
+  ] as const)(
+    'returns strict commercial fields for origin=%s sale=%s secondary=%s',
+    async (origin, saleId, hasSecondary) => {
       install({
         reservation_agreements: [
           {
             id: AGREEMENT_ID,
             reservation_number: 'RES-QA',
-            sale_id: SALE_ID,
+            origin,
+            sale_id: saleId,
             tier_snapshot: 'GOLD',
             payment_scheme_snapshot: 'spot_cash',
             total_price_snapshot: '312000.00',
@@ -634,6 +655,7 @@ describe('IST list holder-aware summary', () => {
       const rows = (result.body as { data: unknown[] }).data;
       expect(rows).toHaveLength(1);
       expect(reservationAgreementListItemSchema.parse(rows[0])).toMatchObject({
+        saleId,
         applicantName: 'QA Applicant',
         paymentScheme: 'spot_cash',
         totalPrice: '312000.00',
@@ -643,4 +665,366 @@ describe('IST list holder-aware summary', () => {
       });
     },
   );
+});
+
+describe('application list seller names', () => {
+  it.each([false, true])('resolves seller name with frozen terms=%s', async (frozen) => {
+    const creator = '11111111-1111-4111-8111-111111111111';
+    const seller = '33333333-3333-4333-8333-333333333333';
+    const terms = '55555555-5555-4555-8555-555555555555';
+    install({
+      customer_applications: [
+        {
+          id: APP_ID,
+          application_number: 'AF-APP-SELLER',
+          tier_snapshot: 'BRONZE',
+          status: 'approved',
+          created_by: creator,
+          purchase_terms_id: frozen ? terms : null,
+          created_at: '2026-10-08',
+          submitted_at: null,
+        },
+      ],
+      customer_application_purchase_terms: frozen ? [{ id: terms, seller_staff_id: seller }] : [],
+      staff_users: [
+        { id: creator, full_name: 'CREATOR NAME' },
+        { id: seller, full_name: 'SELLER NAME' },
+      ],
+    });
+    const result = await call(forms, { path: 'customer-applications' });
+    expect(result.status).toBe(200);
+    const rows = (result.body as { data: unknown[] }).data;
+    expect(customerApplicationListItemSchema.parse(rows[0])).toMatchObject({
+      createdBy: creator,
+      sellerName: frozen ? 'SELLER NAME' : 'CREATOR NAME',
+    });
+  });
+});
+
+/**
+ * Queue ownership: an application stops being application work once a live
+ * application-origin reservation exists, because the reservation/payment stage
+ * owns the customer from there.
+ */
+describe('application work queue ownership', () => {
+  const progressed = 'aaaaaaaa-0000-4000-8000-00000000b001';
+  const stillWork = 'aaaaaaaa-0000-4000-8000-00000000b002';
+  const cancelledReservationApp = 'aaaaaaaa-0000-4000-8000-00000000b003';
+
+  const application = (id: string) => ({
+    id,
+    application_number: `AF-APP-${id.slice(-3)}`,
+    tier_snapshot: 'BRONZE',
+    status: 'approved',
+    created_by: null,
+    purchase_terms_id: null,
+    created_at: '2026-10-08',
+    submitted_at: '2026-10-07',
+  });
+
+  const agreement = (
+    id: string,
+    customerApplicationId: string,
+    status: string,
+  ) => ({
+    id,
+    reservation_number: `AF-RES-${id.slice(-3)}`,
+    customer_application_id: customerApplicationId,
+    origin: 'application',
+    status,
+    sale_id: null,
+    created_at: '2026-10-08',
+  });
+
+  function installQueue(agreements: Record<string, unknown>[]) {
+    return install({
+      customer_applications: [
+        application(progressed),
+        application(stillWork),
+        application(cancelledReservationApp),
+      ],
+      reservation_agreements: agreements,
+    });
+  }
+
+  it('hides applications that have progressed to a live reservation', async () => {
+    installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c001', progressed, 'executed')]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    expect(result.status).toBe(200);
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).not.toContain(progressed);
+    // Both records that still need application work remain.
+    expect(ids).toContain(stillWork);
+    expect(ids).toContain(cancelledReservationApp);
+  });
+
+  it('hides an application whose reservation is merely submitted or executed', async () => {
+    for (const status of ['draft', 'submitted', 'executed']) {
+      installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c002', progressed, status)]);
+      const result = await call(forms, {
+        path: 'customer-applications',
+        query: { queue: 'application_work' },
+      });
+      const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+      expect(ids, `status ${status}`).not.toContain(progressed);
+    }
+  });
+
+  it('returns a CANCELLED reservation to application work', async () => {
+    installQueue([
+      agreement('bbbbbbbb-0000-4000-8000-00000000c003', cancelledReservationApp, 'cancelled'),
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).toContain(cancelledReservationApp);
+  });
+
+  it('never counts a sale-origin reservation as application progress', async () => {
+    installQueue([
+      { ...agreement('bbbbbbbb-0000-4000-8000-00000000c004', progressed, 'executed'), origin: 'sale' },
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).toContain(progressed);
+  });
+
+  it('keeps the exclusion honest for meta.total, not just the page', async () => {
+    installQueue([
+      agreement('bbbbbbbb-0000-4000-8000-00000000c005', progressed, 'executed'),
+      agreement('bbbbbbbb-0000-4000-8000-00000000c006', cancelledReservationApp, 'executed'),
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const body = result.body as { data: unknown[]; meta: { total: number } };
+    // Two of the three applications were excluded, so the total must agree with
+    // the rows. Filtering after .range() would leave total at 3.
+    expect(body.meta.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+  });
+
+  it('excludes SEVERAL progressed applications in one parenthesised list', async () => {
+    // PostgREST takes an `in` list as a raw `(a,b,c)` string, so a multi-id
+    // exclusion only works if the list is serialised correctly.
+    const second = 'aaaaaaaa-0000-4000-8000-00000000b004';
+    const third = 'aaaaaaaa-0000-4000-8000-00000000b005';
+    install({
+      customer_applications: [
+        application(progressed),
+        application(second),
+        application(third),
+        application(stillWork),
+      ],
+      reservation_agreements: [
+        agreement('bbbbbbbb-0000-4000-8000-00000000c008', progressed, 'executed'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c009', second, 'submitted'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c010', third, 'draft'),
+      ],
+    });
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).not.toContain(progressed);
+    expect(ids).not.toContain(second);
+    expect(ids).not.toContain(third);
+    expect(ids).toContain(stillWork);
+  });
+
+  it('still returns progressed applications when no queue filter is sent', async () => {
+    installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c007', progressed, 'executed')]);
+    const result = await call(forms, { path: 'customer-applications' });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // History must stay reachable: omitting the filter changes nothing.
+    expect(ids).toContain(progressed);
+  });
+
+  it('rejects an unknown queue value before any database call', async () => {
+    installQueue([]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'not_a_queue' },
+    });
+    expect(result.status).toBe(400);
+  });
+});
+
+/**
+ * Queue ownership for IST reservations.
+ *
+ * Executing an agreement IS the handover to Finance: the contract is finalized
+ * and collection is owned by the payment queue. An executed agreement must
+ * therefore stop appearing as pending reservation work, exactly as a progressed
+ * application stops appearing as pending application work.
+ */
+describe('reservation work queue ownership', () => {
+  const draftId = 'bbbbbbbb-0000-4000-8000-0000000e0001';
+  const submittedId = 'bbbbbbbb-0000-4000-8000-0000000e0002';
+  const executedId = 'bbbbbbbb-0000-4000-8000-0000000e0003';
+  const finalizedId = 'bbbbbbbb-0000-4000-8000-0000000e0004';
+
+  const agreement = (id: string, status: string, saleId: string | null = null) => ({
+    id,
+    reservation_number: `AF-RES-${id.slice(-4)}`,
+    customer_application_id: null,
+    origin: 'application',
+    status,
+    sale_id: saleId,
+    tier_snapshot: 'GOLD',
+    payment_scheme_snapshot: 'spot_cash',
+    total_price_snapshot: '54000.00',
+    created_at: '2026-10-08',
+  });
+
+  function installReservations(rows: Record<string, unknown>[]) {
+    install({ reservation_agreements: rows });
+  }
+
+  const allRows = () => [
+    agreement(draftId, 'draft'),
+    agreement(submittedId, 'submitted'),
+    agreement(executedId, 'executed'),
+    agreement(finalizedId, 'executed', 'cccccccc-0000-4000-8000-0000000e0005'),
+  ];
+
+  it('hides EXECUTED agreements from the active reservation queue', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work' },
+    });
+    expect(result.status).toBe(200);
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // The handover to Finance happened, so both executed rows left the queue.
+    expect(ids).not.toContain(executedId);
+    expect(ids).not.toContain(finalizedId);
+    // Agreements still awaiting reservation work remain.
+    expect(ids).toContain(draftId);
+    expect(ids).toContain(submittedId);
+  });
+
+  it('keeps meta.total consistent with the filtered rows', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work' },
+    });
+    const body = result.body as { data: unknown[]; meta: { total: number } };
+    expect(body.data).toHaveLength(2);
+    expect(body.meta.total).toBe(2);
+  });
+
+  it('still returns executed agreements when no queue filter is sent', async () => {
+    installReservations(allRows());
+    const result = await call(forms, { path: 'reservations' });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // History must stay reachable: omitting the filter changes nothing.
+    expect(ids).toContain(executedId);
+    expect(ids).toContain(finalizedId);
+  });
+
+  it('returns the executed agreement when it is explicitly requested by status', async () => {
+    installReservations(allRows());
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { queue: 'reservation_work', status: 'executed' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // An operator asking for executed rows explicitly gets them.
+    expect(ids).toContain(executedId);
+  });
+
+  it('rejects an unknown queue value before any database call', async () => {
+    installReservations(allRows());
+    const result = await call(forms, { path: 'reservations', query: { queue: 'nope' } });
+    expect(result.status).toBe(400);
+  });
+});
+
+/**
+ * The fake must mirror the real client, never invent a friendlier API.
+ *
+ * `not(column, { in })` looks reasonable and passed every test, then 500'd in
+ * production because the real `@supabase/postgrest-js` signature is
+ * `not(column, operator, value)`. This guard is why that class of false pass is
+ * now loud instead of silent.
+ */
+describe('the Supabase fake refuses non-existent filter APIs', () => {
+  it('throws when not() is called with the wrong arity', () => {
+    const db = new FakeSupabase({ tables: { customer_applications: [] } as never });
+    expect(() =>
+      (db.from('customer_applications') as unknown as {
+        not: (col: string, filter: unknown) => unknown;
+      }).not('id', { in: ['a'] }),
+    ).toThrow(/unsupported not\(\) operator/);
+  });
+
+  it('accepts the real three-argument not(column, operator, value)', async () => {
+    const db = new FakeSupabase({
+      tables: {
+        customer_applications: [
+          { id: 'keep', application_number: 'A', status: 'approved' },
+          { id: 'drop', application_number: 'B', status: 'approved' },
+        ],
+      } as never,
+    });
+    const { data } = await db
+      .from('customer_applications')
+      .select('*')
+      .not('id', 'in', '(drop)');
+    expect((data as { id: string }[]).map((row) => row.id)).toEqual(['keep']);
+  });
+});
+
+describe('reservations filtered by their originating application', () => {
+  it('returns only the reservation created from that application', async () => {
+    const appA = 'aaaaaaaa-0000-4000-8000-00000000d001';
+    const appB = 'aaaaaaaa-0000-4000-8000-00000000d002';
+    install({
+      reservation_agreements: [
+        {
+          id: 'bbbbbbbb-0000-4000-8000-00000000d101',
+          reservation_number: 'AF-RES-A',
+          customer_application_id: appA,
+          origin: 'application',
+          status: 'executed',
+          sale_id: null,
+          tier_snapshot: 'GOLD',
+          payment_scheme_snapshot: 'spot_cash',
+          total_price_snapshot: '60000.00',
+          created_at: '2026-10-08',
+        },
+        {
+          id: 'bbbbbbbb-0000-4000-8000-00000000d102',
+          reservation_number: 'AF-RES-B',
+          customer_application_id: appB,
+          origin: 'application',
+          status: 'executed',
+          sale_id: null,
+          tier_snapshot: 'GOLD',
+          payment_scheme_snapshot: 'spot_cash',
+          total_price_snapshot: '40000.00',
+          created_at: '2026-10-08',
+        },
+      ],
+    });
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { application: appA },
+    });
+    expect(result.status).toBe(200);
+    const rows = (result.body as { data: { id: string }[] }).data;
+    expect(rows.map((row) => row.id)).toEqual(['bbbbbbbb-0000-4000-8000-00000000d101']);
+  });
 });

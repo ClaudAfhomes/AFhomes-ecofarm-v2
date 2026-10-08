@@ -1,5 +1,12 @@
+import { runPurchaseTierMatrixChecks } from './purchase-tier-matrix-integration.js';
 import { runIdempotencyChecks } from './idempotency-integration.js';
 import { runOstAccreditationChecks } from './ost-accreditation-integration.js';
+import { runPurchaseTermsChecks } from './purchase-terms-integration.js';
+import { runReservationPurchaseChecks, makePurchaseFixtures } from './reservation-purchase-integration.js';
+import { runReservationFinanceChecks } from './reservation-finance-integration.js';
+import { runPurchaseFinalizationChecks } from './purchase-finalization-integration.js';
+import { runActivationIntegrationChecks } from './activation-integration.js';
+import { runPurchaseConcurrencyChecks } from './purchase-concurrency-integration.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 /**
  * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
@@ -25,7 +32,7 @@ import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
  *  - Synthetic data only, prefixed per run, removed on exit.
  *  - Never prints a connection string, password, key or token value.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Client } from 'pg';
@@ -260,6 +267,8 @@ const RUN = `t${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)
 let db: Client;
 const createdCustomerIds: string[] = [];
 const createdStaffIds: string[] = [];
+/** Applications the purchase-flow sections created, for cleanup ordering. */
+const createdApplicationIds: string[] = [];
 /** Auth users created for the Phase 3 portal section (not staff). */
 const createdAuthIds: string[] = [];
 /**
@@ -420,6 +429,7 @@ const BASELINE_TABLES = [
   'reservation_agreement_holders',
   'reservation_agreement_schedule',
   'reservation_agreement_documents',
+  'customer_application_purchase_terms',
 ] as const;
 const baseline = new Map<string, number>();
 
@@ -8443,6 +8453,127 @@ async function main(): Promise<void> {
         run: RUN,
         check,
       });
+      section('58. Purchase terms: server offer, stale hash, versions and reviewed capture');
+      await runPurchaseTermsChecks({
+        db,
+        run: RUN,
+        check,
+        staff,
+        createdCustomers: createdCustomerIds,
+        createdStaffIds,
+      });
+      section('59. Application-origin reservation: AF-RES with no card sale');
+      await runReservationPurchaseChecks({
+        db,
+        run: RUN,
+        check,
+        staff,
+        createdCustomers: createdCustomerIds,
+        createdApplications: createdApplicationIds,
+      });
+      section('60. Finance collection and parent-first verification on an executed AF-RES');
+      /**
+       * One purchase world for sections 60 and 61: the same fixtures, the same
+       * ledger, the same actors. Two sections that built their own would be able
+       * to disagree about what an executed, fully paid reservation looks like.
+       */
+      const purchaseWorld = async () => ({
+        db,
+        url: target.url,
+        check,
+        actor: staff['sm']!,
+        finance: staff['finance']!,
+        superAdmin: staff['super-admin']!,
+        staff,
+        createdCustomers: createdCustomerIds,
+        createdApplications: createdApplicationIds,
+        executed: async () =>
+          (
+            await makePurchaseFixtures(db, {
+              actor: staff['sm']!,
+              createdCustomers: createdCustomerIds,
+              createdApplications: createdApplicationIds,
+            })
+          ).executed(),
+        reserved: async () =>
+          (
+            await makePurchaseFixtures(db, {
+              actor: staff['sm']!,
+              createdCustomers: createdCustomerIds,
+              createdApplications: createdApplicationIds,
+            })
+          ).reserved(),
+        record: async (reservationId: string, amount: string, extra: Record<string, unknown> = {}) => {
+          const { rows } = await db.query<{ id: string }>(
+            'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid) as id',
+            [
+              randomUUID(),
+              reservationId,
+              { method: 'cash', paymentType: 'installment', ...extra, amount },
+              staff['finance']!,
+            ],
+          );
+          return rows[0]!.id;
+        },
+        verify: async (paymentId: string, who?: string) => {
+          await db.query(
+            'select public.verify_purchase_payment_once($1::uuid,$2::uuid,$3::text,$4::text,$5::uuid)',
+            [randomUUID(), paymentId, 'verified', null, who ?? staff['finance']!],
+          );
+        },
+        sellerOf: async (reservationId: string) =>
+          (
+            await db.query<{ seller_staff_id: string }>(
+              'select seller_staff_id from public.reservation_agreements where id=$1',
+              [reservationId],
+            )
+          ).rows[0]!.seller_staff_id,
+      });
+      await runReservationFinanceChecks(await purchaseWorld());
+      section('61. Atomic sale finalization: exactly one AF-CSALE from a paid AF-RES');
+      await runPurchaseFinalizationChecks(await purchaseWorld());
+      section('62. Activation integration: the existing path, gated in SQL with evidence');
+      await runActivationIntegrationChecks({
+        ...(await purchaseWorld()),
+        activator: staff['finance']!,
+        seller: staff['sm']!,
+        // A fully paid, finalized purchase: the only input activation accepts.
+        finalized: async () => {
+          const purchase = await (await purchaseWorld()).executed();
+          await db.query(
+            'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)',
+            [randomUUID(), purchase.reservationId, { amount: purchase.total, method: 'cash', paymentType: 'full', reference: 'ACT-1' }, staff['finance']!],
+          );
+          const payment = (
+            await db.query<{ id: string }>(
+              `select id from public.payments where reservation_id=$1 order by recorded_at desc limit 1`,
+              [purchase.reservationId],
+            )
+          ).rows[0]!.id;
+          await db.query(
+            'select public.verify_purchase_payment_once($1::uuid,$2::uuid,$3::text,$4::text,$5::uuid)',
+            [randomUUID(), payment, 'verified', null, staff['finance']!],
+          );
+          const saleId = (
+            await db.query<{ id: string }>(
+              'select public.finalize_reservation_purchase_once($1::uuid,$2::uuid,$3::uuid) as id',
+              [randomUUID(), purchase.reservationId, staff['finance']!],
+            )
+          ).rows[0]!.id;
+          return { ...purchase, saleId };
+        },
+      });
+      section('63. Document evidence reads and twelve two-session races');
+      await runPurchaseConcurrencyChecks({
+        ...(await purchaseWorld()),
+        activator: staff['finance']!,
+        seller: staff['sm']!,
+      });
+      section('64. Tier and installment purchase chains');
+      await runPurchaseTierMatrixChecks({
+        db, check, actor: staff['sm']!, finance: staff['finance']!,
+        createdCustomers: createdCustomerIds, createdApplications: createdApplicationIds,
+      });
       section('53. AF business IDs: random allocation, backfill, legacy compatibility');
       {
         const AF5 = '[A-HJ-NP-Z2-9]{5}';
@@ -10069,6 +10200,9 @@ async function main(): Promise<void> {
                                where m.customer_id = any($1::uuid[]))`,
           [custSet],
         );
+        // Reservation-origin payments are protected history, so the owner-only cleanup
+        // escape is armed before this delete, not just before the evidence one.
+        await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
         await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
           custSet,
         ]);
@@ -10113,7 +10247,20 @@ async function main(): Promise<void> {
         );
         // Official-form transaction rows first: reservation agreements reference
         // synthetic sales with ON DELETE RESTRICT, so the sale delete below would
-        // fail while they exist. Details go before headers.
+        // fail while they exist. Immutable purchase evidence RESTRICTs the
+        // agreement it describes, so it is removed with the same owner-only
+        // escape, before the agreement headers.
+        // Set BEFORE the first evidence delete: the flag is transaction-local, and
+        // the immutable-evidence trigger refuses the delete otherwise.
+        await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+        await db?.query(
+          `delete from private.purchase_document_evidence where reservation_id in
+           (select id from public.reservation_agreements where sale_id in
+             (select id from public.card_sales where customer_id = any($1::uuid[]))
+             or customer_application_id in
+             (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
         await db?.query(
           `delete from public.reservation_agreement_schedule where agreement_id in
            (select id from public.reservation_agreements where sale_id in
@@ -10153,6 +10300,24 @@ async function main(): Promise<void> {
         // before the customer row itself. Documents were removed with payments.
         await db?.query(
           `delete from public.customer_application_holders where application_id in
+           (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        // Frozen purchase terms are append-only and are RESTRICTed by the
+        // application that points at them, so the pointer is cleared first and the
+        // rows go next - both before the application delete. The owner-only
+        // cleanup escape was already set above, before the first evidence delete.
+        await db?.query(
+          `delete from private.purchase_document_evidence where actor_id = any($1::uuid[])`,
+          [staffSet],
+        );
+        await db?.query(
+          `update public.customer_applications set purchase_terms_id=null
+            where customer_id = any($1::uuid[])`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.customer_application_purchase_terms where application_id in
            (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
           [custSet],
         );

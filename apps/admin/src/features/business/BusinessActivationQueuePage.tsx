@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
 import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';
-import { activateSale, getActivationQueue, getCommissions, qualifyCommission } from './services';
+import { activateSale, getActivationQueue } from './services';
 
 /**
  * Activation queue.
@@ -37,6 +37,9 @@ export function BusinessActivationQueuePage() {
     await client.invalidateQueries({ queryKey: ['member-lookup'] });
     await client.invalidateQueries({ queryKey: ['memberships'] });
     await client.invalidateQueries({ queryKey: ['reports'] });
+    // The activated sale is no longer pending activation, and its commission
+    // moves on to qualification in Commissions.
+    await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
   };
 
   return (
@@ -129,12 +132,17 @@ export function BusinessActivationQueuePage() {
           onDone={async (activation) => {
             setResult(activation);
             await refresh();
+            notifySuccess({
+              title: activation.alreadyActive ? 'Already Activated' : 'Membership Activated',
+              message: activation.alreadyActive
+                ? 'This sale was already active, so nothing new was created.'
+                : 'The activation queue and membership records are now up to date.',
+              detail: `Membership: ${activation.membershipNumber}\nPoints allocated: ${activation.pointsAllocated}`,
+            });
           }}
         />
       ) : null}
       {result ? <IdentifiersDialog result={result} onClose={() => setResult(null)} /> : null}
-
-      <CommissionReview />
     </section>
   );
 }
@@ -337,130 +345,5 @@ export function IdentifiersDialog({
         ) : null}
       </div>
     </Dialog>
-  );
-}
-
-/**
- * Commission qualification.
- *
- * A commission is never earned automatically. Reaching `earned` is an explicit,
- * audited decision that only applies to a commission already awaiting final
- * qualification, and it requires written notes. The rule that permits
- * qualification is a business decision that is not yet defined, which is why
- * this action is manual and gated.
- */
-function CommissionReview() {
-  const client = useQueryClient();
-  const query = useQuery({
-    queryKey: ['business', 'commissions'],
-    queryFn: () => getCommissions(),
-  });
-  const [deciding, setDeciding] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
-  const [decision, setDecision] = useState<'earned' | 'cancelled'>('earned');
-
-  const decide = useMutation({
-    mutationFn: () => qualifyCommission(deciding!, { decision, notes }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
-      setDeciding(null);
-      setNotes('');
-    },
-  });
-
-  const awaiting = query.data?.filter((c) => c.status === 'final_qualification_pending') ?? [];
-
-  return (
-    <div style={{ marginTop: 32 }}>
-      <h2>Commissions awaiting final qualification</h2>
-      {query.isError ? (
-        <ErrorState error={query.error} onRetry={query.refetch} />
-      ) : awaiting.length === 0 ? (
-        <p>No commission is awaiting a qualification decision.</p>
-      ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Sale</th>
-                <th>Beneficiary</th>
-                <th>Basis</th>
-                <th>Rate</th>
-                <th>Commission</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {awaiting.map((commission) => (
-                <tr key={commission.id}>
-                  <td>{commission.saleNumber}</td>
-                  <td>{commission.beneficiaryName}</td>
-                  <td>{formatMoney(commission.basisAmount)}</td>
-                  <td>{commission.rate}</td>
-                  <td>{formatMoney(commission.amount)}</td>
-                  <td>
-                    <StatusChip label="Awaiting qualification" tone="warning" />
-                  </td>
-                  <td>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setDeciding(commission.id);
-                        setDecision('earned');
-                      }}
-                    >
-                      Decide
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <Dialog
-        open={deciding !== null}
-        onClose={() => setDeciding(null)}
-        title="Final qualification decision"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setDeciding(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={notes.trim().length < 5 || decide.isPending}
-              onClick={() => decide.mutate()}
-            >
-              Record decision
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p>
-            This decision is the only way a commission becomes earned. It is recorded in the audit
-            trail with your notes and your identity.
-          </p>
-          <label>
-            Decision
-            <select
-              value={decision}
-              onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
-            >
-              <option value="earned">Qualify — commission earned</option>
-              <option value="cancelled">Cancel — commission cancelled</option>
-            </select>
-          </label>
-          <label>
-            Notes (required)
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </label>
-          {decide.error ? <p role="alert">{decide.error.message}</p> : null}
-        </div>
-      </Dialog>
-    </div>
   );
 }

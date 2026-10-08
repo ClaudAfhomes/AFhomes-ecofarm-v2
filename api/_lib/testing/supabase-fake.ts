@@ -101,8 +101,10 @@ type Op =
   | { t: 'update'; patch: FakeRow }
   | { t: 'delete' }
   | { t: 'eq'; col: string; val: unknown }
+  | { t: 'is'; col: string; val: unknown }
   | { t: 'neq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
+  | { t: 'not'; col: string; neg: Op }
   | { t: 'or'; filter: string }
   | { t: 'ilike'; col: string; pattern: string }
   | { t: 'gte'; col: string; val: unknown }
@@ -184,8 +186,29 @@ function matches(row: FakeRow, ops: Op[]): boolean {
         return row[op.col] === op.val;
       case 'neq':
         return row[op.col] !== null && row[op.col] !== undefined && row[op.col] !== op.val;
+      // `is(col, null)` is PostgREST's IS NULL and is NOT the same as
+      // `eq(col, null)`: `eq` matches only the literal JS null, so a row whose
+      // column is absent (undefined) or an empty string would slip through. The
+      // distinction is load-bearing for "no final sale yet" queries.
+      case 'is':
+        return op.val === null
+          ? row[op.col] === null || row[op.col] === undefined
+          : row[op.col] === op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
+      // `not(col, 'in', ids)` is the anti-join used to hide records another
+      // workflow stage now owns. PostgREST expresses it as
+      // `id=not.in.(a,b)`, and SQL `NOT IN` is UNKNOWN - so excluded - for a
+      // NULL column. Mirroring that matters: an anti-join that silently kept
+      // NULL-keyed rows would under-exclude and the queue test would pass while
+      // filtering nothing.
+      case 'not':
+        if (op.neg.t === 'in') {
+          const value = row[op.col];
+          if (value === null || value === undefined) return false;
+          return !op.neg.vals.includes(value);
+        }
+        return !matches(row, [op.neg]);
       case 'ilike': {
         // `%` is any run, `_` any single character. The only patterns the
         // handlers build are `%term%`, so a case-insensitive `includes` of the
@@ -477,12 +500,40 @@ export class FakeSupabase {
         ops.push({ t: 'eq', col, val });
         return this;
       },
+      is(col: string, val: unknown) {
+        ops.push({ t: 'is', col, val });
+        return this;
+      },
       neq(col: string, val: unknown) {
         ops.push({ t: 'neq', col, val });
         return this;
       },
       in(col: string, vals: unknown[]) {
         ops.push({ t: 'in', col, vals });
+        return this;
+      },
+      /**
+       * Mirrors `@supabase/postgrest-js` exactly:
+       * `not(column, operator, value)`, three arguments, where `operator` is a
+       * string and `value` uses raw PostgREST syntax.
+       *
+       * This previously accepted a two-argument shape that the real client does
+       * not have, so a handler calling the wrong arity stayed green here and
+       * failed on the deployed API. An unknown operator now THROWS for the same
+       * reason the real request would fail closed.
+       */
+      not(col: string, operator: string, value: unknown) {
+        if (operator === 'in') {
+          // PostgREST writes a list as `(a,b,c)`.
+          const list = String(value).replace(/^\(|\)$/g, '');
+          ops.push({ t: 'not', col, neg: { t: 'in', col, vals: list.split(',') } });
+        } else if (operator === 'eq') {
+          ops.push({ t: 'not', col, neg: { t: 'eq', col, val: value } });
+        } else if (operator === 'is') {
+          ops.push({ t: 'not', col, neg: { t: 'is', col, val: value } });
+        } else {
+          throw new Error(`unsupported not() operator: ${operator}`);
+        }
         return this;
       },
       or(filter: string) {

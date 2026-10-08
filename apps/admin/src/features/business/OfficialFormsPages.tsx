@@ -4,7 +4,14 @@ import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { ApplicationHolder } from '@afhomes/contracts';
+import type {
+  ActivationResult,
+  ApplicationHolder,
+  CustomerApplication,
+  PurchaseDocumentKind,
+  PurchaseReservation,
+  ReservationFinanceSummary,
+} from '@afhomes/contracts';
 import {
   createCustomerApplicationSchema,
   canTransitionCustomerApplication,
@@ -19,8 +26,12 @@ import {
 import { formatDateTime } from '../../lib/format';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
+import { useSession } from '../../lib/session';
+import { downloadFile } from '../../lib/download';
 import { formatMoney } from './format';
 import {
+  notifySuccess,
+  notifyWarning,
   Alert,
   Button,
   IdCapturePicker,
@@ -59,6 +70,12 @@ import {
   getCustomerApplications,
   getCustomers,
   getOfficialFormTemplate,
+  getPurchaseTermsProposal,
+  getReservationPayments,
+  getReservationFinance,
+  activateSale,
+  exportPurchaseDocument,
+  finalizeReservationPurchase,
   getReservationAgreement,
   getReservationAgreements,
   getSaleSummary,
@@ -66,11 +83,14 @@ import {
   previewOfficialFormImport,
   reopenCustomerApplication,
   reopenReservationAgreement,
+  reviewApplicationPurchaseTerms,
   submitCustomerApplication,
   submitReservationAgreement,
   updateCustomerApplication,
   updateReservationAgreement,
+  updateApplicationReservation,
 } from './services';
+import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHolder => ({
@@ -363,9 +383,20 @@ export function CustomerApplicationsPage() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Default: only applications that still need APPLICATION work. Turning this
+  // off reveals the progressed history, which is never deleted or archived.
+  const [applicationWorkOnly, setApplicationWorkOnly] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['customer-applications', status, tier, debouncedSearch, from, to],
+    queryKey: [
+      'customer-applications',
+      status,
+      tier,
+      debouncedSearch,
+      from,
+      to,
+      applicationWorkOnly,
+    ],
     queryFn: () =>
       getCustomerApplications({
         ...(status ? { status } : {}),
@@ -373,6 +404,7 @@ export function CustomerApplicationsPage() {
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
+        ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
       }),
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
@@ -381,7 +413,7 @@ export function CustomerApplicationsPage() {
     <section>
       <PageHeader
         title="Customer Applications"
-        description="Official application transactions. Submitted snapshots remain independent of later customer master-data edits."
+        description="Official application transactions still awaiting application work. Applications that have progressed to a reservation are owned by the reservation and Finance queues, and stay reachable here with 'Include progressed'."
         actions={<Link to="/admin/customers/applications/new">New application</Link>}
       />
       <FilterBar
@@ -396,6 +428,16 @@ export function CustomerApplicationsPage() {
         }
         filters={
           <>
+            <label>
+              Queue
+              <select
+                value={applicationWorkOnly ? 'application_work' : 'all'}
+                onChange={(e) => setApplicationWorkOnly(e.target.value === 'application_work')}
+              >
+                <option value="application_work">Needs application work</option>
+                <option value="all">Include progressed</option>
+              </select>
+            </label>
             <label>
               Status
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -457,7 +499,7 @@ export function CustomerApplicationsPage() {
                   </td>
                   <td>{app.applicantName ?? '—'}</td>
                   <td>{app.tier}</td>
-                  <td>{app.createdBy ?? '—'}</td>
+                  <td>{app.sellerName ?? '—'}</td>
                   <td>
                     <StatusChip label={app.status} />
                   </td>
@@ -498,6 +540,110 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
     .join(' ');
 }
 
+/**
+ * Purchase workflow progress and the ONE next action.
+ *
+ * Every state below is read from the server's own rows: the application's
+ * lifecycle status, and the application-origin reservation linked to it by
+ * `reservation_agreements.customer_application_id`. Nothing is invented in local
+ * state, and a button only ever NAVIGATES - the action itself still goes
+ * through the existing handlers and RPCs, so an illegal step is still refused
+ * server-side rather than merely hidden here.
+ */
+function PurchaseWorkflowPanel({ application }: { application: CustomerApplication }) {
+  const reservations = useQuery({
+    queryKey: ['customer-application-reservations', application.id],
+    queryFn: () => getReservationAgreements({ application: application.id }),
+    retry: false,
+  });
+  // A cancelled agreement hands the customer back to the application stage, so
+  // it is not progress.
+  const reservation =
+    reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
+  const status = application.status;
+  const approved = status === 'approved' || Boolean(reservation);
+  const hasReservation = Boolean(reservation);
+  const executed = reservation?.status === 'executed';
+  const finalized = Boolean(reservation?.saleId);
+
+  const steps = [
+    { label: 'Application submitted', done: status !== 'draft', current: status === 'draft' },
+    { label: 'Application approved', done: approved, current: status === 'submitted' },
+    {
+      label: 'Reservation agreement created',
+      done: hasReservation,
+      current: status === 'approved' && !hasReservation,
+    },
+    { label: 'Payment processing', done: finalized, current: hasReservation && !finalized },
+    { label: 'Activation', done: false, current: finalized },
+    { label: 'Commission qualification', done: false, current: false },
+  ];
+
+  const next = !hasReservation
+    ? status === 'approved'
+      ? {
+          label: 'Create Reservation Agreement',
+          detail: 'This application is approved and has no reservation yet.',
+          to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+        }
+      : status === 'submitted'
+        ? {
+            label: 'Review Purchase Terms',
+            detail: 'Review the server proposal below, then approve or reject.',
+            to: null,
+          }
+        : {
+            label: 'Continue Application',
+            detail: 'Complete the draft and submit it for review.',
+            to: null,
+          }
+    : finalized
+      ? {
+          label: 'Continue to Activation',
+          detail: `Purchase finalized as sale ${reservation!.saleId}.`,
+          to: '/admin/finance/activation',
+        }
+      : executed
+        ? {
+            label: 'Continue Payment',
+            detail: 'The executed agreement is collectable in the Finance queue.',
+            to: '/admin/finance/payments',
+          }
+        : {
+            label: 'Open Reservation',
+            detail: 'The agreement still needs review and execution.',
+            to: `/admin/sales/reservations/${reservation!.id}`,
+          };
+
+  return (
+    <section aria-label="Purchase workflow">
+      <h2>Purchase workflow</h2>
+      <ol>
+        {steps.map((step) => (
+          <li key={step.label}>
+            {step.done ? '✓' : step.current ? '→' : '○'} {step.label}
+            {step.current ? ' (current)' : ''}
+          </li>
+        ))}
+      </ol>
+      <h3>Next step</h3>
+      <p>{next.detail}</p>
+      {next.to ? (
+        <p>
+          <Link to={next.to}>{next.label}</Link>
+        </p>
+      ) : (
+        <p>{next.label}</p>
+      )}
+      {finalized ? (
+        <p>
+          <Link to="/admin/finance/commissions">Open Commissions</Link> for qualification decisions.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 export function CustomerApplicationEditorPage() {
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
@@ -515,6 +661,15 @@ export function CustomerApplicationEditorPage() {
   });
   const customers = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers() });
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
+  // The server-authoritative offer. Nothing on this screen computes a price: the
+  // proposal below is what the operator sees AND what the submit/review calls
+  // echo back as `expectedProposalHash`.
+  const proposal = useQuery({
+    queryKey: ['purchase-terms-proposal', id],
+    queryFn: () => getPurchaseTermsProposal(id!),
+    enabled: Boolean(id),
+    retry: false,
+  });
   const [applicationSearch] = useSearchParams();
   const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
   const [planId, setPlanId] = useState('');
@@ -536,7 +691,7 @@ export function CustomerApplicationEditorPage() {
   const [consent, setConsent] = useState(false);
   const [validId, setValidId] = useState(false);
   const [paymentProof, setPaymentProof] = useState(false);
-  const [message, setMessage] = useState('');
+  const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   const [ocrFile, setOcrFile] = useState<File | null>(null);
   const [idType, setIdType] = useState('');
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
@@ -716,7 +871,7 @@ export function CustomerApplicationEditorPage() {
             });
       }),
     onSuccess: (app) => {
-      setMessage('Application saved as draft.');
+      notifySuccess({ title: 'Success', message: 'Application saved as draft.' });
       applicationRequest.complete();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
@@ -727,16 +882,30 @@ export function CustomerApplicationEditorPage() {
     mutationFn: async () => {
       const checked = createCustomerApplicationSchema.safeParse(payload());
       if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
-      if (!checked.data.consentAcknowledged) throw new Error('Certification and consent are required.');
+      if (!checked.data.consentAcknowledged)
+        throw new Error('Certification and consent are required.');
       // A lost Submit response must retry the transition, not edit a submitted record.
       const latest = await getCustomerApplication(id!);
-      if (latest.status === 'submitted') return submitCustomerApplication(id!);
+      // The hash is fetched with the submit so it is always the offer the server
+      // holds at this instant. A stale displayed offer is refused by the server.
+      const offer = proposal.data;
+      if (!offer) throw new Error('Load the purchase terms offer before confirming.');
+      const confirmation = {
+        requestId: applicationRequest.forPayload({
+          applicationId: id,
+          expectedProposalHash: offer.expectedProposalHash,
+        }),
+        expectedProposalHash: offer.expectedProposalHash,
+      };
+      if (latest.status === 'submitted') return submitCustomerApplication(id!, confirmation);
       await updateCustomerApplication(id!, checked.data);
-      return submitCustomerApplication(id!);
+      return submitCustomerApplication(id!, confirmation);
     },
     onSuccess: () => {
-      setMessage('Customer application submitted successfully.');
+      notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
+      applicationRequest.complete();
       void existing.refetch();
+      void proposal.refetch();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Submit failed.'),
@@ -829,21 +998,76 @@ export function CustomerApplicationEditorPage() {
       setMessage('ID type recorded on the identity document. The application can be submitted.'),
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Could not record the ID type.'),
   });
+  // One stable request identity per logical action, so a timeout-after-commit
+  // retry replays the original decision instead of attempting a second one.
+  const decisionRequest = useMutationRequest();
   const decide = useMutation({
-    mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') =>
-      decideCustomerApplication(id!, decision, 'Reviewed by authorized staff.'),
+    mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') => {
+      if (decision === 'approved' && !existing.data?.purchaseTermsId) {
+        throw new Error(
+          'Reopen to review purchase terms, check the offer and identity document, then submit again before approving.',
+        );
+      }
+      return decideCustomerApplication(
+        id!,
+        decision,
+        decisionRequest.forPayload({ applicationId: id, decision }),
+        'Reviewed by authorized staff.',
+      );
+    },
     onSuccess: () => {
-      setMessage('Decision recorded.');
+      notifySuccess({ title: 'Success', message: 'Decision recorded.' });
+      decisionRequest.complete();
       void existing.refetch();
+      void proposal.refetch();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
   });
-  const reopen = useMutation({
-    mutationFn: () => reopenCustomerApplication(id!),
+  // Old approved applications have no stored commercial evidence. Reviewing is an
+  // explicit confirmation of the offer currently shown, never an override price.
+  const [reviewReason, setReviewReason] = useState('');
+  const reviewRequest = useMutationRequest();
+  const review = useMutation({
+    mutationFn: async () => {
+      const offer = proposal.data;
+      if (!offer) throw new Error('Load the purchase terms offer before confirming.');
+      return reviewApplicationPurchaseTerms(id!, {
+        requestId: reviewRequest.forPayload({
+          applicationId: id,
+          expectedProposalHash: offer.expectedProposalHash,
+          reason: reviewReason.trim(),
+        }),
+        expectedProposalHash: offer.expectedProposalHash,
+        reason: reviewReason.trim(),
+      });
+    },
     onSuccess: () => {
-      setMessage('Application reopened as draft.');
+      notifySuccess({
+        title: 'Success',
+        message: 'Purchase terms confirmed and frozen for this application.',
+      });
+      setReviewReason('');
+      reviewRequest.complete();
       void existing.refetch();
+      void proposal.refetch();
+      void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      navigate(`/admin/sales/reservations/new?application=${encodeURIComponent(id!)}`);
+    },
+    onError: (e) => setMessage(e instanceof Error ? e.message : 'Review failed.'),
+  });
+  const reopenRequest = useMutationRequest();
+  const reopen = useMutation({
+    mutationFn: () =>
+      reopenCustomerApplication(
+        id!,
+        reopenRequest.forPayload({ applicationId: id, decision: 'draft' }),
+      ),
+    onSuccess: () => {
+      notifySuccess({ title: 'Success', message: 'Application reopened as draft.' });
+      reopenRequest.complete();
+      void existing.refetch();
+      void proposal.refetch();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Reopen failed.'),
@@ -851,6 +1075,20 @@ export function CustomerApplicationEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = customers.data?.find((c) => c.id === customerId);
+  if (id && existing.isPending) {
+    return <p role="status">Loading application…</p>;
+  }
+  if (id && (existing.isError || !existing.data)) {
+    return (
+      <section>
+        <Link to="/admin/customers/applications">Back to applications</Link>
+        <ErrorState
+          title="Application could not be loaded"
+          onRetry={() => void existing.refetch()}
+        />
+      </section>
+    );
+  }
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section>
@@ -861,7 +1099,6 @@ export function CustomerApplicationEditorPage() {
         <p>
           <Link to="/admin/customers/applications">Back to applications</Link>
         </p>
-        {message ? <Alert variant="info">{message}</Alert> : null}
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -870,6 +1107,58 @@ export function CustomerApplicationEditorPage() {
             {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
             {existing.data.saleId ?? '—'}
           </p>
+        ) : null}
+        {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
+        {proposal.data ? (
+          <section aria-label="Purchase terms offer">
+            <h2>
+              {proposal.data.offerKind === 'newly_confirmed_offer'
+                ? 'Newly confirmed offer'
+                : 'Purchase terms offer'}
+            </h2>
+            {/* Read-only by construction: there is no price input on this screen. */}
+            <dl className="form-grid">
+              <dt>Tier</dt>
+              <dd>{proposal.data.terms.tier}</dd>
+              <dt>Payment scheme</dt>
+              <dd>{proposal.data.terms.paymentScheme}</dd>
+              <dt>Total purchase amount</dt>
+              <dd>₱{proposal.data.terms.totalPrice}</dd>
+              <dt>Included reservation amount</dt>
+              <dd>₱{proposal.data.terms.reservationFee}</dd>
+              <dt>Required initial</dt>
+              <dd>₱{proposal.data.terms.requiredInitial}</dd>
+              {proposal.data.terms.monthlyAmount ? (
+                <>
+                  <dt>Installments</dt>
+                  <dd>
+                    ₱{proposal.data.terms.monthlyAmount} × {proposal.data.terms.installmentMonths}{' '}
+                    months
+                  </dd>
+                </>
+              ) : null}
+              <dt>Spot-cash window</dt>
+              <dd>{proposal.data.terms.spotCashDays} days from the first verified payment</dd>
+              <dt>Yearly points</dt>
+              <dd>{proposal.data.terms.yearlyPoints}</dd>
+              <dt>Validity</dt>
+              <dd>{proposal.data.terms.validityMonths} months</dd>
+              <dt>Commission</dt>
+              <dd>
+                {proposal.data.terms.commissionRate} on ₱{proposal.data.terms.commissionBase} = ₱
+                {proposal.data.terms.expectedCommission}
+              </dd>
+              <dt>Offer as of</dt>
+              <dd>{new Date(proposal.data.asOf).toLocaleString()}</dd>
+            </dl>
+            {proposal.data.offerKind === 'newly_confirmed_offer' ? (
+              <p>
+                This application predates stored purchase evidence. Confirming the offer above
+                records a new review record with your name, the time and your reason; today&apos;s
+                figures are never presented as the historical terms.
+              </p>
+            ) : null}
+          </section>
         ) : null}
         {selectedPlan ? (
           <p>
@@ -914,6 +1203,8 @@ export function CustomerApplicationEditorPage() {
                   const plan = plans.data?.find((p) => p.id === e.target.value);
                   setPlanId(e.target.value);
                   if (plan) setTier(plan.code as typeof tier);
+                  else setTier('BRONZE');
+                  if (plan?.code !== 'GOLD') setSecondary(null);
                 }}
               >
                 <option value="">Select plan</option>
@@ -1011,8 +1302,8 @@ export function CustomerApplicationEditorPage() {
             />
             {ocrFile ? (
               <p role="status">
-                Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and
-                read the OCR suggestions.
+                Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
+                the OCR suggestions.
               </p>
             ) : null}
             <Button
@@ -1256,7 +1547,9 @@ export function CustomerApplicationEditorPage() {
                 Reject
               </Button>{' '}
               <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-                Reopen to draft
+                {existing.data.purchaseTermsId
+                  ? 'Reopen to draft'
+                  : 'Reopen to review purchase terms'}
               </Button>{' '}
             </>
           ) : null}{' '}
@@ -1264,6 +1557,34 @@ export function CustomerApplicationEditorPage() {
             <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
               Reopen to draft
             </Button>
+          ) : null}{' '}
+          {id && existing.data?.status === 'approved' && !proposal.data ? (
+            <Button
+              onClick={() => void proposal.refetch()}
+              disabled={proposal.isFetching}
+              type="button"
+            >
+              {proposal.isFetching ? 'Loading offer…' : 'Load purchase terms offer'}
+            </Button>
+          ) : null}{' '}
+          {id && existing.data?.status === 'approved' && proposal.data ? (
+            <>
+              <label>
+                Review reason
+                <textarea
+                  aria-label="Review reason"
+                  rows={2}
+                  value={reviewReason}
+                  onChange={(e) => setReviewReason(e.target.value)}
+                />
+              </label>{' '}
+              <Button
+                onClick={() => review.mutate()}
+                disabled={review.isPending || reviewReason.trim().length < 5}
+              >
+                {review.isPending ? 'Confirming…' : 'Confirm purchase terms'}
+              </Button>
+            </>
           ) : null}{' '}
           {id &&
           existing.data &&
@@ -1313,14 +1634,19 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  // Default: only agreements that still need IST RESERVATION work. Executing
+  // one hands collection to Finance, so it leaves this queue. Nothing is
+  // deleted - 'Include progressed' brings the executed history back.
+  const [reservationWorkOnly, setReservationWorkOnly] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['reservation-agreements', status, tier, debouncedSearch],
+    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly],
     queryFn: () =>
       getReservationAgreements({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
       }),
     // Agreement decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
@@ -1329,7 +1655,7 @@ export function ReservationAgreementsPage() {
     <section>
       <PageHeader
         title="IST Reservation Agreements"
-        description="Contract snapshots remain separate from actual verified payment transactions."
+        description="Agreements still awaiting reservation work. Once an agreement is executed, Finance owns collection and it moves to the payment queue; it stays readable and printable here with 'Include progressed'."
         actions={<Link to="/admin/sales/reservations/new">New agreement</Link>}
       />
       <FilterBar
@@ -1344,6 +1670,16 @@ export function ReservationAgreementsPage() {
         }
         filters={
           <>
+            <label>
+              Queue
+              <select
+                value={reservationWorkOnly ? 'reservation_work' : 'all'}
+                onChange={(e) => setReservationWorkOnly(e.target.value === 'reservation_work')}
+              >
+                <option value="reservation_work">Needs reservation work</option>
+                <option value="all">Include progressed</option>
+              </select>
+            </label>
             <label>
               Status
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -1400,7 +1736,7 @@ export function ReservationAgreementsPage() {
                   </td>
                   <td>{item.applicantName ?? '—'}</td>
                   <td>{item.tier}</td>
-                  <td>{item.saleId}</td>
+                  <td>{item.saleId ?? 'Not finalized'}</td>
                   <td>{paymentSchemeLabel(item.paymentScheme)}</td>
                   <td>{formatMoney(item.totalPrice)}</td>
                   <td>
@@ -1467,6 +1803,31 @@ export function ReservationAgreementEditorPage() {
     queryFn: () => getCustomerApplication(customerApplicationId),
     enabled: Boolean(customerApplicationId) && !id,
   });
+  /**
+   * Application-origin mode.
+   *
+   * Opening from an approved application means there is NO card sale to choose:
+   * the reservation IS the first commercial document, and the sale arrives only
+   * when Finance finalizes fully paid. The sale selector is therefore hidden
+   * rather than disabled, so a first-time purchase can never be mistaken for one
+   * that needs an existing sale.
+   */
+  const applicationOrigin =
+    existing.data?.origin === 'application' || (!id && Boolean(customerApplicationId));
+  // The frozen offer is the ONLY source of the economics shown here. It is
+  // server-derived, and a stale copy is refreshed rather than reused.
+  const proposal = useQuery({
+    queryKey: ['purchase-terms-proposal', 'reservation-source', customerApplicationId],
+    queryFn: () => getPurchaseTermsProposal(customerApplicationId),
+    enabled: applicationOrigin && !id,
+    retry: false,
+  });
+  const reviewRequired =
+    applicationOrigin &&
+    proposal.isError &&
+    /PURCHASE_TERMS_REVIEW_REQUIRED/i.test(
+      (proposal.error as { message?: string } | null)?.message ?? '',
+    );
   // Imported tier context (IST XLSX `vip_tier`). Display/validation only:
   // the server always derives the authoritative tier from the selected sale
   // and rejects a mismatch.
@@ -1502,10 +1863,13 @@ export function ReservationAgreementEditorPage() {
     paymentDate: '',
     remarks: '',
   });
-  const [message, setMessage] = useState('');
+  const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   useEffect(() => {
     const app = sourceApplication.data;
     if (!app || id || !['submitted', 'approved'].includes(app.status)) return;
+    // No primary holder means nothing safe to prefill. The server still refuses
+    // the save, but the PAGE must not crash on a thin payload.
+    if (!app.primary) return;
     const holder = (value: ApplicationHolder) => ({
       holderType: value.holderType,
       name: [value.firstName, value.middleName, value.lastName, value.suffix]
@@ -1536,7 +1900,7 @@ export function ReservationAgreementEditorPage() {
     const agreement = existing.data;
     if (!agreement) return;
     const timer = window.setTimeout(() => {
-      setSaleId(agreement.saleId);
+      setSaleId(agreement.saleId ?? '');
       setCustomerApplicationId(agreement.customerApplicationId ?? '');
       setVipTier(agreement.tier);
       setDates({
@@ -1568,6 +1932,29 @@ export function ReservationAgreementEditorPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [existing.data]);
+  /**
+   * The ONLY fields an application-origin agreement can set.
+   *
+   * Deliberately absent: price, scheme, seller, commission, status, source ids and
+   * every total. Those come from the immutable purchase-terms row, and a body
+   * field for any of them would be a field the browser could lie in.
+   */
+  const agreedFields = () => ({
+    agreementDate: dates.agreementDate,
+    revisionNumber: dates.revisionNumber || undefined,
+    monthlyAmortizationStart: dates.monthlyAmortizationStart || undefined,
+    monthlyAmortizationEnd: dates.monthlyAmortizationEnd || undefined,
+    paymentDueDay: dates.paymentDueDay ? Number(dates.paymentDueDay) : undefined,
+    primarySignatureStatus: 'received' as const,
+    secondarySignatureStatus: secondary ? ('received' as const) : undefined,
+    scheduleNotes: [
+      {
+        ...schedule,
+        paymentDate: schedule.paymentDate || undefined,
+        remarks: schedule.remarks || undefined,
+      },
+    ],
+  });
   const payload = () => ({
     // An unchosen sale stays absent: never send "" as a UUID.
     saleId: saleId || undefined,
@@ -1595,9 +1982,36 @@ export function ReservationAgreementEditorPage() {
   const save = useMutation({
     mutationFn: () =>
       runReservationSave(() => {
-        if (!saleId) throw new Error('Select a sale for this reservation.');
         if (!id && !customerApplicationId)
           throw new Error('Choose an eligible Customer Application before creating a reservation.');
+        if (applicationOrigin) {
+          if (id) {
+            const fields = agreedFields();
+            return updateApplicationReservation(id, {
+              requestId: reservationRequest.forPayload({ id, ...fields }),
+              ...fields,
+            });
+          }
+          // The exact frozen terms reference comes from the APPLICATION, not from
+          // the offer body: it is an identifier, and the server revalidates it
+          // against the immutable row before writing anything.
+          const termsId = sourceApplication.data?.purchaseTermsId;
+          if (!termsId)
+            throw new Error(
+              'This application has no captured purchase terms. An authorized review is required first.',
+            );
+          if (!proposal.data)
+            throw new Error('Load the current offer before creating the agreement.');
+          return createReservationAgreement({
+            origin: 'application',
+            requestId: reservationRequest.forPayload({ application: customerApplicationId }),
+            customerApplicationId,
+            purchaseTermsId: termsId,
+            reservationDate: dates.reservationDate,
+            ...agreedFields(),
+          });
+        }
+        if (!saleId) throw new Error('Select a sale for this reservation.');
         const checked = createReservationAgreementSchema.safeParse(payload());
         if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
         const body = checked.data;
@@ -1609,9 +2023,16 @@ export function ReservationAgreementEditorPage() {
             });
       }),
     onSuccess: (agreement) => {
-      setMessage('Reservation saved.');
+      notifySuccess({ title: 'Success', message: 'Reservation saved.' });
       reservationRequest.complete();
+      void client.invalidateQueries({ queryKey: ['reservation-agreement', agreement.id] });
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
+      // Creating the reservation hands this customer to the reservation/payment
+      // stage, so the application must leave the active application queue now -
+      // not at the next poll. A cancelled agreement returns it.
+      if (agreement.customerApplicationId)
+        void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      void client.invalidateQueries({ queryKey: ['customer-application-reservations'] });
       if (!id) navigate(`/admin/sales/reservations/${agreement.id}`, { replace: true });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
@@ -1619,7 +2040,7 @@ export function ReservationAgreementEditorPage() {
   const submit = useMutation({
     mutationFn: () => submitReservationAgreement(id!),
     onSuccess: () => {
-      setMessage('Agreement submitted.');
+      notifySuccess({ title: 'Success', message: 'Agreement submitted.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
     },
@@ -1629,16 +2050,22 @@ export function ReservationAgreementEditorPage() {
     mutationFn: (decision: 'executed' | 'cancelled') =>
       decideReservationAgreement(id!, decision, 'Reviewed by authorized seller.'),
     onSuccess: () => {
-      setMessage('Decision recorded.');
+      notifySuccess({ title: 'Success', message: 'Decision recorded.' });
       void existing.refetch();
+      void client.invalidateQueries({ queryKey: ['reservation-agreement', id] });
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
+      // Executing makes the agreement collectable (Finance queue) and
+      // cancelling it returns the customer to application work.
+      void client.invalidateQueries({ queryKey: ['business', 'queue'] });
+      void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      void client.invalidateQueries({ queryKey: ['customer-application-reservations'] });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
   });
   const reopen = useMutation({
     mutationFn: () => reopenReservationAgreement(id!),
     onSuccess: () => {
-      setMessage('Agreement reopened as draft.');
+      notifySuccess({ title: 'Success', message: 'Agreement reopened as draft.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
     },
@@ -1713,13 +2140,19 @@ export function ReservationAgreementEditorPage() {
       <p>
         <Link to="/admin/sales/reservations">Back to agreements</Link>
       </p>
-      {message ? <Alert variant="info">{message}</Alert> : null}
       {existing.data ? (
         <p>
           Status: {existing.data.status} · Tier: {existing.data.tier} · Total:{' '}
-          {existing.data.totalPrice} · Verified received: {existing.data.totalPaymentReceived} ·
-          Balance: {existing.data.balance} · Submitted: {existing.data.submittedAt ?? '—'} ·
-          Executed: {existing.data.executedAt ?? '—'}
+          {existing.data.totalPrice}
+          {!applicationOrigin ? (
+            <>
+              {' '}
+              · Verified received: {existing.data.totalPaymentReceived} · Balance:{' '}
+              {existing.data.balance}
+            </>
+          ) : null}{' '}
+          · Submitted: {existing.data.submittedAt ?? '—'} · Executed:{' '}
+          {existing.data.executedAt ?? '—'}
         </p>
       ) : null}
       {summary.data ? (
@@ -1735,19 +2168,69 @@ export function ReservationAgreementEditorPage() {
           snapshot at creation.
         </p>
       ) : null}
+      {reviewRequired ? (
+        <Alert variant="warning">
+          <strong>Purchase Terms Review Required.</strong> This application has no captured purchase
+          terms, so no agreement can be created from it yet. An authorized reviewer must confirm the
+          current server offer and record a reason first.{' '}
+          <Link to={`/admin/sales/applications/${customerApplicationId}`}>
+            Open the application review
+          </Link>
+          .
+        </Alert>
+      ) : null}
+      {applicationOrigin && proposal.data ? (
+        <section aria-label="Frozen purchase terms">
+          <h2>Server-authoritative offer</h2>
+          <p>
+            These figures are read-only. They are frozen purchase terms, not an editable quote, and
+            the server revalidates them at save.
+          </p>
+          <dl>
+            <dt>Card tier</dt>
+            <dd>{proposal.data.terms.tier}</dd>
+            <dt>Payment scheme</dt>
+            <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
+            <dt>Total purchase</dt>
+            <dd>{formatMoney(proposal.data.terms.totalPrice)}</dd>
+            <dt>Included reservation amount</dt>
+            <dd>{formatMoney(proposal.data.terms.reservationFee)}</dd>
+            <dt>Required initial</dt>
+            <dd>{formatMoney(proposal.data.terms.requiredInitial)}</dd>
+            <dt>Monthly amount</dt>
+            <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
+            <dt>Installment months</dt>
+            <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
+            <dt>Seller</dt>
+            <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
+            <dt>Benefits</dt>
+            <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
+            <dt>Purchase terms reference</dt>
+            <dd>{sourceApplication.data?.purchaseTermsId ?? 'Not captured'}</dd>
+            <dt>Offer as of</dt>
+            <dd>{formatDateTime(proposal.data.asOf)}</dd>
+          </dl>
+        </section>
+      ) : null}
       <fieldset disabled={!editable}>
-        <label>
-          Card sale
-          <select value={saleId} onChange={(e) => setSaleId(e.target.value)}>
-            <option value="">Select sale</option>
-            {sales.data?.map((sale) => (
-              <option key={sale.id} value={sale.id}>
-                {sale.saleNumber} — {sale.customerName}
-              </option>
-            ))}
-          </select>
-        </label>{' '}
-        <Button onClick={autoFill}>Auto-fill from sale</Button>
+        {/* Application-origin reservations have NO sale: the agreement comes
+            first and the sale arrives at finalization. */}
+        {applicationOrigin ? null : (
+          <>
+            <label>
+              Card sale
+              <select value={saleId} onChange={(e) => setSaleId(e.target.value)}>
+                <option value="">Select sale</option>
+                {sales.data?.map((sale) => (
+                  <option key={sale.id} value={sale.id}>
+                    {sale.saleNumber} — {sale.customerName}
+                  </option>
+                ))}
+              </select>
+            </label>{' '}
+            <Button onClick={autoFill}>Auto-fill from sale</Button>
+          </>
+        )}
         <label>
           Source Customer Application
           <select
@@ -1770,8 +2253,10 @@ export function ReservationAgreementEditorPage() {
             Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
             {sourceApplication.data.tier} ·{' '}
             {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
-            {formatMoney(sourceApplication.data.vipAmount)}. Select the matching existing card sale
-            if the application has not yet been linked.
+            {formatMoney(sourceApplication.data.vipAmount)}.
+            {applicationOrigin
+              ? ' No card sale is needed: this reservation is the first commercial record.'
+              : ' Select the matching existing card sale if the application has not yet been linked.'}
           </p>
         )}
         <label>
@@ -1880,7 +2365,11 @@ export function ReservationAgreementEditorPage() {
       </fieldset>
       <p>
         <Button onClick={() => save.mutate()} disabled={!editable || save.isPending}>
-          {save.isPending ? 'Saving…' : 'Save draft'}
+          {save.isPending
+            ? 'Saving…'
+            : applicationOrigin && !id
+              ? 'Create Reservation Agreement'
+              : 'Save draft'}
         </Button>{' '}
         {id && editable ? (
           <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
@@ -1929,6 +2418,320 @@ export function ReservationAgreementEditorPage() {
           </>
         ) : null}
       </p>
+      {id && existing.data?.origin === 'application' ? (
+        <ApplicationOriginAgreementPanel id={id} agreement={existing.data} />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * The application-origin agreement after creation: lifecycle state, money, the
+ * one payment ledger, and the historical prints.
+ *
+ * Nothing here recalculates money. Every figure is the server's, and the Finalize
+ * button follows the server's own eligibility rather than a browser total.
+ */
+function ApplicationOriginAgreementPanel({
+  id,
+  agreement,
+}: {
+  id: string;
+  agreement: Extract<PurchaseReservation, { origin: 'application' }>;
+}) {
+  const client = useQueryClient();
+  const { user } = useSession();
+  const canHandlePayments =
+    user?.afHomesPermissions.some(
+      (permission) =>
+        permission.moduleKey === 'finance.payment_verification' && permission.canUpdate,
+    ) ?? false;
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const finance = useQuery({
+    queryKey: ['reservation-finance', id],
+    queryFn: () => getReservationFinance(id),
+    retry: false,
+  });
+  const payments = useQuery({
+    queryKey: ['reservation-payments', id],
+    queryFn: () => getReservationPayments(id),
+    retry: false,
+  });
+  const afterMutation = async () => {
+    await client.invalidateQueries({ queryKey: ['reservation-agreements'] });
+    await client.invalidateQueries({ queryKey: ['reservation-agreement', id] });
+    await client.invalidateQueries({ queryKey: ['reservation-finance', id] });
+    await client.invalidateQueries({ queryKey: ['reservation-payments', id] });
+    // Execution makes the agreement collectable, so Finance readiness must move
+    // in the same breath. A stale queue is how a customer is told "nothing to pay".
+    await client.invalidateQueries({ queryKey: ['business', 'queue'] });
+    await client.invalidateQueries({ queryKey: ['business', 'sales'] });
+    await client.invalidateQueries({ queryKey: ['business', 'activation-queue'] });
+    await client.invalidateQueries({ queryKey: ['reports'] });
+  };
+  const print = async (kind: PurchaseDocumentKind, label: string, sourceId = id) => {
+    setBusy(true);
+    setError(null);
+    try {
+      downloadFile(await exportPurchaseDocument(sourceId, kind));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `${label} failed.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const finalize = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await finalizeReservationPurchase(id, crypto.randomUUID());
+      await afterMutation();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Finalization failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const money = finance.data;
+  const lifecycle = agreement.status;
+  return (
+    <section aria-label="Reservation lifecycle">
+      <h2>Purchase state</h2>
+      {error ? <Alert variant="warning">{error}</Alert> : null}
+      <dl>
+        <dt>Agreement state</dt>
+        <dd>{lifecycle}</dd>
+        <dt>Card Sale (AF-CSALE)</dt>
+        <dd>
+          {money?.saleNumber ??
+            agreement.saleId ??
+            'Not created — created when the purchase is finalized'}
+        </dd>
+        <dt>Total purchase</dt>
+        <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
+        <dt>Included reservation amount</dt>
+        <dd>{formatMoney(money?.reservationFee ?? agreement.reservationFee)}</dd>
+        <dt>Verified paid</dt>
+        <dd>{formatMoney(money?.verifiedTotal ?? '0.00')}</dd>
+        <dt>Remaining</dt>
+        <dd>{formatMoney(money?.remainingBalance ?? agreement.balance)}</dd>
+        {money?.overpaidAmount && money.overpaidAmount !== '0.00' ? (
+          <>
+            <dt>Overpaid</dt>
+            <dd>{formatMoney(money.overpaidAmount)}</dd>
+          </>
+        ) : null}
+      </dl>
+      <p>
+        <Button onClick={() => void print('reservation', 'Reservation')} disabled={busy}>
+          Print Reservation Agreement
+        </Button>{' '}
+        {money?.fullyPaid ? (
+          <Button
+            onClick={() => void finalize()}
+            disabled={!canHandlePayments || busy}
+            title={
+              canHandlePayments
+                ? 'Creates exactly one card sale from the verified payments.'
+                : 'Requires the finance payment verification grant.'
+            }
+          >
+            Finalize Purchase
+          </Button>
+        ) : null}
+      </p>
+      {lifecycle === 'executed' && !agreement.saleId ? (
+        <Alert variant="info">
+          Executed. This agreement is now in the Finance queue for collection. No card sale exists
+          yet — one is created only when the whole price is verified.
+        </Alert>
+      ) : null}
+      {lifecycle === 'executed' && !money?.fullyPaid ? (
+        <p>
+          <Button onClick={() => setRecording(true)} disabled={busy || !canHandlePayments}>
+            Record Payment
+          </Button>
+        </p>
+      ) : null}
+      {lifecycle === 'executed' && !money?.fullyPaid && money ? (
+        <p>
+          PAYMENT PROCESSING — verified {formatMoney(money.verifiedTotal)}, remaining{' '}
+          {formatMoney(money.remainingBalance)}.
+        </p>
+      ) : null}
+      {lifecycle === 'executed' && money?.fullyPaid ? (
+        <p>
+          <strong>FULLY PAID</strong>
+        </p>
+      ) : null}
+      {recording ? (
+        <RecordPaymentDialog
+          saleId={id}
+          origin="reservation"
+          onDone={afterMutation}
+          onClose={() => setRecording(false)}
+        />
+      ) : null}
+      <h3>Payments</h3>
+      {payments.data && payments.data.length > 0 ? (
+        <table>
+          <caption>Every AF-PAY recorded against this agreement</caption>
+          <thead>
+            <tr>
+              <th scope="col">AF-PAY</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Method</th>
+              <th scope="col">Recorded</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {payments.data.map((payment) => (
+              <tr key={payment.id}>
+                <td>{payment.paymentNumber ?? payment.id}</td>
+                <td>{formatMoney(payment.amount)}</td>
+                <td>{payment.method}</td>
+                <td>{formatDateTime(payment.recordedAt)}</td>
+                <td>{payment.status}</td>
+                <td>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
+                  >
+                    Print Recorded Receipt
+                  </Button>{' '}
+                  {/* A rejected payment never gets a verified receipt: there is no
+                      verified evidence to render, and inventing one would be a lie
+                      in a customer's hand. */}
+                  {payment.status === 'verified' ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void print('payment_verified', 'Verified receipt', payment.id)}
+                    >
+                      Print Verified Receipt
+                    </Button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p>No payments recorded against this agreement yet.</p>
+      )}
+      {agreement.saleId ? (
+        <p>
+          Final purchase record:{' '}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void print('purchase_finalized', 'Final purchase', agreement.saleId!)}
+          >
+            Print Final Purchase Record
+          </Button>
+        </p>
+      ) : null}
+      <MembershipConfirmation saleId={agreement.saleId} persisted={money?.membership} />
+    </section>
+  );
+}
+
+/**
+ * The membership result after activation, with the confirmation print.
+ *
+ * Deliberately absent: the QR token, the fallback code, their hashes, any
+ * onboarding token and any storage URL. Those are returned once by the activation
+ * call and are never re-displayable, so this panel could not show them even if it
+ * wanted to.
+ */
+function MembershipConfirmation({
+  saleId,
+  persisted,
+}: {
+  saleId: string | null;
+  persisted?: ReservationFinanceSummary['membership'];
+}) {
+  const { user } = useSession();
+  const canActivate =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'finance.card_activation' && permission.canUpdate,
+    ) ?? false;
+  const [result, setResult] = useState<ActivationResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const activate = async () => {
+    if (!saleId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await activateSale(saleId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Activation failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!saleId) return null;
+  const membershipId = result?.membershipId ?? persisted?.id;
+  return (
+    <section aria-label="Membership activation">
+      <h3>Membership</h3>
+      {error ? <Alert variant="warning">{error}</Alert> : null}
+      {result || persisted ? (
+        <>
+          <dl>
+            <dt>Membership</dt>
+            <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
+            <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
+            <dd>{result?.pointsAllocated ?? persisted?.pointsBalance}</dd>
+            <dt>Card Sale</dt>
+            <dd>{saleId}</dd>
+          </dl>
+          <Alert variant="info">
+            Card credentials are shown once, by the authorized activation flow, and are never
+            re-displayed. Use Print Activation Confirmation for the historical record.
+          </Alert>
+          {membershipId ? <PrintActivationConfirmation membershipId={membershipId} /> : null}
+        </>
+      ) : (
+        <Button onClick={() => void activate()} disabled={!canActivate || busy}>
+          Activate membership
+        </Button>
+      )}
+    </section>
+  );
+}
+
+function PrintActivationConfirmation({ membershipId }: { membershipId: string }) {
+  const [error, setError] = useState<string | null>(null);
+  // The activation confirmation is addressed by the membership, which is the
+  // source the evidence builder reads.
+  return (
+    <p>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setError(null);
+          void exportPurchaseDocument(membershipId, 'membership_activated')
+            .then(downloadFile)
+            .catch((caught: unknown) =>
+              setError(caught instanceof Error ? caught.message : 'Print failed.'),
+            );
+        }}
+      >
+        Print Activation Confirmation
+      </Button>{' '}
+      <span>Membership {membershipId}</span>
+      {error ? <span role="alert"> {error}</span> : null}
+    </p>
   );
 }

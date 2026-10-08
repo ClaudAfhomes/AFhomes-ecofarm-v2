@@ -21,9 +21,23 @@ import {
   customerSchema,
   createCustomerSchema,
   financeQueueItemSchema,
+  financeCollectionQueueItemSchema,
+  purchasePaymentSchema,
+  purchaseReservationSchema,
+  reservationFinanceSummarySchema,
+  type PurchaseReservation,
+  type ReservationCreate,
+  type ReservationUpdate,
+  type FinanceCollectionQueueItem,
+  type PurchasePayment,
+  type PurchaseDocumentKind,
+  type RecordPurchasePaymentRequest,
+  type VerifyPurchasePaymentRequest,
+  type ReservationFinanceSummary,
   formImportPreviewSchema,
   customerApplicationSchema,
   customerApplicationListItemSchema,
+  purchaseTermsProposalSchema,
   reservationAgreementListItemSchema,
   reservationAgreementSchema,
   membershipSchema,
@@ -54,16 +68,18 @@ import {
   type CustomerApplicationListItem,
   type ReservationAgreementListItem,
   type CreateCustomerApplicationRequest,
-  type ReservationAgreement,
   type CreateReservationAgreementRequest,
   type MarkCommissionPaidRequest,
   type Membership,
   type Payment,
+  type PurchaseTermsProposal,
   type QualifyCommissionRequest,
   type RecordPaymentRequest,
   type ReferralRelationship,
+  type ReviewPurchaseTermsRequest,
   type Sale,
   type SaleFinancialSummary,
+  type SubmitPurchaseApplicationRequest,
   type UpdateCardCategoryRequest,
   type UpdateCardProductRequest,
   type VerifyPaymentRequest,
@@ -245,6 +261,8 @@ export const getCustomerApplications = (
     from?: string;
     to?: string;
     search?: string;
+    /** Omit to see every application, including progressed ones. */
+    queue?: 'application_work';
   } = {},
 ): Promise<CustomerApplicationListItem[]> => {
   const query = new URLSearchParams();
@@ -254,6 +272,7 @@ export const getCustomerApplications = (
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
+  if (params.queue) query.set('queue', params.queue);
   const suffix = query.toString();
   return requestList(
     `/official-forms/customer-applications${suffix ? `?${suffix}` : ''}`,
@@ -281,19 +300,55 @@ export const updateCustomerApplication = (id: string, input: CreateCustomerAppli
     customerApplicationSchema,
     normalizeCustomerApplicationRequest(input),
   );
-export const submitCustomerApplication = (id: string) =>
-  post(`/official-forms/customer-applications/${id}/submit`, customerApplicationSchema, {});
+/**
+ * The server-authoritative purchase offer for an application.
+ *
+ * The hash returned here is the ONLY thing the browser may echo back: prices,
+ * scheme economics and commission always come from this response, never from a
+ * form field.
+ */
+export const getPurchaseTermsProposal = (
+  id: string,
+  sellerCandidateId?: string,
+): Promise<PurchaseTermsProposal> =>
+  request(
+    `/official-forms/customer-applications/${id}/purchase-terms/proposal${
+      sellerCandidateId ? `?sellerCandidateId=${encodeURIComponent(sellerCandidateId)}` : ''
+    }`,
+    purchaseTermsProposalSchema,
+  );
+export const reviewApplicationPurchaseTerms = (id: string, input: ReviewPurchaseTermsRequest) =>
+  post(
+    `/official-forms/customer-applications/${id}/purchase-terms/review`,
+    customerApplicationSchema,
+    {
+      requestId: input.requestId,
+      expectedProposalHash: input.expectedProposalHash,
+      reason: input.reason,
+      ...(input.sellerCandidateId ? { sellerCandidateId: input.sellerCandidateId } : {}),
+    },
+  );
+export const submitCustomerApplication = (id: string, input: SubmitPurchaseApplicationRequest) =>
+  post(`/official-forms/customer-applications/${id}/submit`, customerApplicationSchema, {
+    requestId: input.requestId,
+    expectedProposalHash: input.expectedProposalHash,
+    ...(input.sellerCandidateId ? { sellerCandidateId: input.sellerCandidateId } : {}),
+  });
 export const decideCustomerApplication = (
   id: string,
   decision: 'approved' | 'rejected' | 'cancelled',
+  requestId: string,
   notes?: string,
 ) =>
   post(`/official-forms/customer-applications/${id}/decision`, customerApplicationSchema, {
+    requestId,
     decision,
     ...(notes ? { notes } : {}),
   });
-export const reopenCustomerApplication = (id: string) =>
-  post(`/official-forms/customer-applications/${id}/reopen`, customerApplicationSchema, {});
+export const reopenCustomerApplication = (id: string, requestId: string) =>
+  post(`/official-forms/customer-applications/${id}/reopen`, customerApplicationSchema, {
+    requestId,
+  });
 export const exportCustomerApplication = (id: string, format: 'xlsx' | 'pdf') =>
   request(`/official-forms/customer-applications/${id}/export/${format}`, generatedFormFileSchema);
 
@@ -305,6 +360,10 @@ export const getReservationAgreements = (
     from?: string;
     to?: string;
     search?: string;
+    /** Only reservations created from this customer application. */
+    application?: string;
+    /** Omit to see every agreement, including executed ones. */
+    queue?: 'reservation_work';
   } = {},
 ): Promise<ReservationAgreementListItem[]> => {
   const query = new URLSearchParams();
@@ -314,34 +373,51 @@ export const getReservationAgreements = (
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
+  if (params.application) query.set('application', params.application);
+  if (params.queue) query.set('queue', params.queue);
   const suffix = query.toString();
   return requestList(
     `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,
     reservationAgreementListItemSchema,
   );
 };
-export const getReservationAgreement = (id: string): Promise<ReservationAgreement> =>
-  request(`/official-forms/reservations/${id}`, reservationAgreementSchema);
-export const createReservationAgreement = (input: CreateReservationAgreementRequest) =>
+/**
+ * The agreement is read as a discriminated union, because that is what it is: a
+ * legacy sale-origin agreement has no purchase terms, and an application-origin
+ * agreement has no sale until Finance finalizes it. One widened shape would let
+ * the UI treat "no sale" as a missing value rather than as the designed state.
+ */
+export const getReservationAgreement = (id: string): Promise<PurchaseReservation> =>
+  request(`/official-forms/reservations/${id}`, purchaseReservationSchema);
+/**
+ * Two shapes, one route.
+ *
+ * An application-origin reservation carries no sale id and names its frozen terms
+ * reference; a legacy sale-origin reservation is the pre-existing form. Both go to
+ * the same endpoint and the server picks the path from `origin`.
+ */
+export const createReservationAgreement = (
+  input: ReservationCreate | CreateReservationAgreementRequest,
+) =>
   post(
     '/official-forms/reservations',
-    reservationAgreementSchema,
-    normalizeReservationAgreementRequest(input),
+    purchaseReservationSchema,
+    'origin' in input ? input : normalizeReservationAgreementRequest(input),
   );
 export const updateReservationAgreement = (id: string, input: CreateReservationAgreementRequest) =>
   patch(
     `/official-forms/reservations/${id}`,
-    reservationAgreementSchema,
+    purchaseReservationSchema,
     normalizeReservationAgreementRequest(input),
   );
 export const submitReservationAgreement = (id: string) =>
-  post(`/official-forms/reservations/${id}/submit`, reservationAgreementSchema, {});
+  post(`/official-forms/reservations/${id}/submit`, purchaseReservationSchema, {});
 export const decideReservationAgreement = (
   id: string,
   decision: 'executed' | 'cancelled',
   notes?: string,
 ) =>
-  post(`/official-forms/reservations/${id}/decision`, reservationAgreementSchema, {
+  post(`/official-forms/reservations/${id}/decision`, purchaseReservationSchema, {
     decision,
     ...(notes ? { notes } : {}),
   });
@@ -406,14 +482,81 @@ export const activateSale = (saleId: string, validityMonths = 12): Promise<Activ
 /* Queues                                                              */
 /* ------------------------------------------------------------------ */
 
-export const getFinanceQueue = (search = ''): Promise<FinanceQueueItem[]> =>
+/**
+ * The Finance queue is a discriminated union: a legacy sale-origin row, or an
+ * EXECUTED application-origin reservation that has no card sale yet. The union
+ * is what makes the UI honest - a reservation row has no sale id to act on, and
+ * acting on one anyway would be a second, invisible sale.
+ */
+export const getFinanceQueue = (search = ''): Promise<FinanceCollectionQueueItem[]> =>
   requestList(
     '/queues/finance' + (search ? '?search=' + encodeURIComponent(search) : ''),
-    financeQueueItemSchema,
+    financeCollectionQueueItemSchema,
   );
 
 export const getActivationQueue = (): Promise<FinanceQueueItem[]> =>
   requestList('/queues/activation', financeQueueItemSchema);
+
+/* ------------------------------------------------------------------ */
+/* Application-origin collection and finalization                      */
+/* ------------------------------------------------------------------ */
+
+/** The one ledger, read by reservation until finalization links it to a sale. */
+export const getReservationPayments = (id: string): Promise<PurchasePayment[]> =>
+  requestList(`/official-forms/reservations/${id}/payments`, purchasePaymentSchema);
+
+/** Server-authoritative money state for an application-origin purchase. */
+export const getReservationFinance = (id: string): Promise<ReservationFinanceSummary> =>
+  request(`/official-forms/reservations/${id}/finance`, reservationFinanceSummarySchema);
+
+/**
+ * Record one AF-PAY against an executed reservation.
+ *
+ * The body carries an amount and a method and nothing else. No total, no
+ * balance, no status: every figure is recomputed server-side from the frozen
+ * terms and the payment rows.
+ */
+export const recordReservationPayment = (
+  id: string,
+  input: RecordPurchasePaymentRequest,
+): Promise<ReservationFinanceSummary> =>
+  post(`/official-forms/reservations/${id}/payments`, reservationFinanceSummarySchema, input);
+
+/**
+ * Finalize the purchase into exactly one AF-CSALE.
+ *
+ * The response is the sale id the SERVER created. Nothing here constructs a
+ * sale locally, and activation remains a separate action.
+ */
+export const finalizeReservationPurchase = (
+  id: string,
+  requestId: string,
+): Promise<{ saleId: string; reservationId: string; activationRequired: true }> =>
+  post(
+    `/official-forms/reservations/${id}/finalize`,
+    z.strictObject({
+      saleId: z.string().uuid(),
+      reservationId: z.string().uuid(),
+      activationRequired: z.literal(true),
+    }),
+    { requestId },
+  );
+
+/**
+ * Reprint a historical record from its captured evidence.
+ *
+ * The bytes come from the immutable revision, never from today's price, seller,
+ * commission or balance, so the same source always renders the same document.
+ */
+export const exportPurchaseDocument = (
+  sourceId: string,
+  kind: PurchaseDocumentKind,
+  revision: number | 'latest' = 'latest',
+): Promise<GeneratedFormFile> =>
+  request(
+    `/official-forms/reservations/${sourceId}/documents/${kind}/${revision}`,
+    generatedFormFileSchema,
+  );
 
 /* ------------------------------------------------------------------ */
 /* Memberships and referrals                                           */
@@ -529,3 +672,16 @@ export const exportCustomers = (
     generatedImportFileSchema,
   );
 };
+
+export const verifyReservationPayment = (
+  reservationId: string,
+  paymentId: string,
+  input: VerifyPurchasePaymentRequest,
+): Promise<ReservationFinanceSummary> =>
+  post(
+    `/official-forms/reservations/${reservationId}/payments/${paymentId}/verify`,
+    reservationFinanceSummarySchema,
+    input,
+  );
+export const updateApplicationReservation = (id: string, input: ReservationUpdate) =>
+  patch(`/official-forms/reservations/${id}`, purchaseReservationSchema, input);

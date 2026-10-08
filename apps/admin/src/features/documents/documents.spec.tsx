@@ -420,3 +420,44 @@ describe('Phase 27 document review', () => {
     expect(screen.queryByText('Yes \u2014 current ID for this subject')).not.toBeInTheDocument();
   });
 });
+
+it('prefills a saved ID type when extraction has no suggestions and confirms a non-empty payload', async () => {
+  const existing = doc({ reviewedFields: { idType: 'drivers_license' } });
+  install({
+    ['GET /documents/' + DOC_ID]: { status: 200, body: existing },
+    ['GET /documents/' + DOC_ID + '/access-url']: {
+      status: 200,
+      body: { url: 'https://storage.test/preview', expiresAt: '2026-10-08T00:01:00Z' },
+    },
+    ['POST /documents/' + DOC_ID + '/confirm']: {
+      status: 200,
+      body: { ...existing, verificationStatus: 'confirmed' },
+    },
+  });
+  const user = userEvent.setup();
+  render('/admin/documents/' + DOC_ID);
+  await user.click(await screen.findByRole('button', { name: 'Review and edit' }));
+  expect(screen.getByLabelText(/idType \(editable copy/)).toHaveValue('drivers_license');
+  await user.click(screen.getByRole('button', { name: 'Confirm reviewed values' }));
+  await waitFor(() =>
+    expect(
+      requests.find((r) => r.method === 'POST' && r.path.endsWith('/confirm'))?.body,
+    ).toMatchObject({ decision: 'confirmed', fields: { idType: 'drivers_license' } }),
+  );
+});
+
+it('shows a modal and sends no confirmation request when the working copy is empty', async () => {
+  install({
+    ['GET /documents/' + DOC_ID]: { status: 200, body: doc() },
+    ['GET /documents/' + DOC_ID + '/access-url']: {
+      status: 200,
+      body: { url: 'https://storage.test/preview', expiresAt: '2026-10-08T00:01:00Z' },
+    },
+  });
+  const user = userEvent.setup();
+  render('/admin/documents/' + DOC_ID);
+  await user.click(await screen.findByRole('button', { name: 'Review and edit' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm reviewed values' }));
+  expect(await screen.findByRole('dialog')).toHaveTextContent('Add at least one reviewed field');
+  expect(requests.some((r) => r.method === 'POST' && r.path.endsWith('/confirm'))).toBe(false);
+});

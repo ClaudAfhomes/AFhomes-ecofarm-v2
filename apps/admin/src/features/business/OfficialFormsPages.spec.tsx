@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
@@ -70,13 +71,19 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.clearAllMocks());
+async function dismissNotice() {
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
+}
 
 const application = {
   id: 'app-1',
   applicationNumber: 'APP-000001',
   applicantName: 'MARIA SANTOS',
   tier: 'GOLD',
-  createdBy: 'Sam Seller',
+  createdBy: '11111111-1111-4111-8111-111111111111',
+  sellerName: 'Sam Seller',
   status: 'submitted',
   submittedAt: '2026-09-28T00:00:00.000Z',
   createdAt: '2026-09-28T00:00:00.000Z',
@@ -116,15 +123,74 @@ describe('CustomerApplicationsPage list states', () => {
     vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
     renderWithProviders(<CustomerApplicationsPage />);
     expect(await screen.findByText('APP-000001')).toBeInTheDocument();
+    expect(screen.getByText('Sam Seller')).toBeInTheDocument();
+    expect(screen.queryByText(application.createdBy)).not.toBeInTheDocument();
     // Shared FilterBar grammar: landmark search + clearable field.
     expect(screen.getByRole('search')).toBeInTheDocument();
     const search = screen.getByRole('searchbox', { name: 'Search applications' });
     fireEvent.change(search, { target: { value: 'APP-000001' } });
     expect(screen.getByRole('button', { name: 'Clear search applications' })).toBeInTheDocument();
   });
+
+  /**
+   * The default table is APPLICATION WORK. Progressed applications are owned by
+   * the reservation and Finance queues, but stay one filter away - never
+   * deleted, never archived.
+   */
+  it('asks the server for application work by default', async () => {
+    vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    expect(getCustomerApplications).toHaveBeenCalledWith(
+      expect.objectContaining({ queue: 'application_work' }),
+    );
+  });
+
+  it('drops the queue filter when Include progressed is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    vi.mocked(getCustomerApplications).mockClear();
+    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await waitFor(() =>
+      expect(getCustomerApplications).toHaveBeenCalledWith(
+        expect.not.objectContaining({ queue: expect.anything() }),
+      ),
+    );
+  });
 });
 
 describe('ReservationAgreementsPage list states', () => {
+  /**
+   * Executing an agreement hands collection to Finance, so the active IST
+   * reservation queue is asked for reservation work by default. The executed
+   * agreement stays reachable through "Include progressed" or an explicit status
+   * filter - it is never deleted, only handed over.
+   */
+  it('asks the server for reservation work by default', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([agreement] as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    expect(getReservationAgreements).toHaveBeenCalledWith(
+      expect.objectContaining({ queue: 'reservation_work' }),
+    );
+  });
+
+  it('drops the queue filter when Include progressed is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getReservationAgreements).mockResolvedValue([agreement] as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    vi.mocked(getReservationAgreements).mockClear();
+    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await waitFor(() =>
+      expect(getReservationAgreements).toHaveBeenCalledWith(
+        expect.not.objectContaining({ queue: expect.anything() }),
+      ),
+    );
+  });
+
   it('shows loading - never a phantom empty state - on first load', () => {
     vi.mocked(getReservationAgreements).mockReturnValue(new Promise(() => {}));
     renderWithProviders(<ReservationAgreementsPage />);
@@ -244,7 +310,10 @@ describe('application private ID intake and review', () => {
     expect(await screen.findByText(/Selected ID: capture\.jpg/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await waitFor(() => expect(putUploadBytes).toHaveBeenCalledTimes(1));
-    expect(putUploadBytes).toHaveBeenCalledWith('https://safe-test.example/signed-upload', captured);
+    expect(putUploadBytes).toHaveBeenCalledWith(
+      'https://safe-test.example/signed-upload',
+      captured,
+    );
     expect(requestUploadGrant).toHaveBeenCalledWith(
       expect.objectContaining({ mime: 'image/jpeg', originalFilename: 'capture.jpg' }),
     );
@@ -295,14 +364,13 @@ describe('application private ID intake and review', () => {
       decision: 'confirmed',
       fields: { idType: 'passport' },
     });
-    await waitFor(() =>
-      expect(screen.queryByText(/Submit needs the ID type recorded/)).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByText(/Submit needs the ID type recorded/)).toBeNull());
   });
   it('uploads to the selected customer, autofills confident suggestions, and preserves manual corrections', async () => {
     await setup();
     vi.mocked(runDocumentOcr).mockResolvedValue(document('completed'));
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await dismissNotice();
     await screen.findByText('Valid ID: Uploaded ✓');
     expect(requestUploadGrant).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -317,6 +385,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText(/OCR completed/);
+    await dismissNotice();
     expect(screen.getByLabelText('First name')).toHaveValue('Ana');
     expect(screen.getByLabelText('Last name')).toHaveValue('');
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'McDonald' } });
@@ -336,6 +405,7 @@ describe('application private ID intake and review', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
     await screen.findByText('OCR failed; continue with manual entry.');
+    await dismissNotice();
     expect(screen.getByText('Valid ID: Uploaded ✓')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Anne-Marie' } });
     expect(screen.getByLabelText('First name')).toHaveValue('Anne-Marie');
@@ -371,6 +441,7 @@ describe('application private ID intake and review', () => {
   const uploadCurrent = async () => {
     await setup();
     fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
+    await dismissNotice();
     await screen.findByText(/Current ID: qa\.png/);
   };
   it('keeps the current ID authoritative while replacement is pending and cancelled', async () => {
@@ -416,6 +487,7 @@ describe('application private ID intake and review', () => {
       else vi.mocked(putUploadBytes).mockRejectedValueOnce(new Error('Bytes failed'));
       fireEvent.click(screen.getByRole('button', { name: 'Detect fields' }));
       await screen.findByText(stage === 'grant' ? 'Grant failed' : 'Bytes failed');
+      await dismissNotice();
       expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
       expect(screen.queryByText('Current ID: replacement.png')).not.toBeInTheDocument();
       expect(screen.getByText(/Pending replacement/)).toBeInTheDocument();
@@ -441,6 +513,7 @@ describe('application private ID intake and review', () => {
     expect(screen.getByLabelText('Scan / Take Photo')).toBeDisabled();
     fail(new Error('OCR unavailable'));
     await screen.findByText('OCR unavailable');
+    await dismissNotice();
     expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(screen.getByLabelText('Upload ID')).toBeEnabled();
   });
@@ -715,4 +788,12 @@ describe('IST commercial summary rendering', () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     },
   );
+});
+
+it('renders application-origin reservations before a sale exists', async () => {
+  vi.mocked(getReservationAgreements).mockResolvedValue([{ ...agreement, saleId: null }] as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  expect(await screen.findByText('RES-000001')).toBeInTheDocument();
+  expect(screen.getByText('Not finalized')).toBeInTheDocument();
+  expect(screen.queryByText('Agreements could not be loaded')).not.toBeInTheDocument();
 });

@@ -11,15 +11,15 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
 });
 
 describe('AF Homes navigation', () => {
-  it('places Membership Lookup after Dashboard for employee without weakening route guards', () => {
+  it('places Customer Lookup after Dashboard for employee without weakening route guards', () => {
     const grants = [
       permission('dashboard.view'),
       permission('operations.redemption'),
       permission('sales.id_documents'),
     ];
     const items = navItemsForPermissions(grants, 'employee');
-    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'Membership Lookup']);
-    expect(items.map((item) => item.label)).not.toContain('Customer Lookup');
+    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'Customer Lookup']);
+    expect(items.map((item) => item.label)).not.toContain('Membership Lookup');
     expect(JSON.stringify(items)).not.toContain('/admin/documents');
     expect(canAccessNavTarget([], '/admin/documents')).toBe(false);
     expect(canAccessNavTarget([], '/admin/documents/test')).toBe(false);

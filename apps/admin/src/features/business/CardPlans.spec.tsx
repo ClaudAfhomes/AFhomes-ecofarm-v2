@@ -25,6 +25,11 @@ vi.mock('./services', () => ({
   createCardCategory: vi.fn(),
   updateCardCategory: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(async () => {
+    const { getCustomers } = await import('./services');
+    const data = await getCustomers();
+    return { data, total: data.length };
+  }),
   createCustomer: vi.fn(),
   createSale: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),

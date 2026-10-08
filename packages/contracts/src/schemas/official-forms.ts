@@ -49,7 +49,10 @@ export const applicationHolderSchema = z.object({
   lastName: personNameSchema,
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
-  suffix: z.string().trim().max(20).optional(),
+  suffix: z.preprocess(
+    (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
+    optionalPersonNameSchema.refine((value) => value === undefined || value.length <= 20),
+  ),
   birthDate: birthDateSchema,
   sex: z.string().trim().max(30).optional(),
   citizenship: z.string().trim().max(80).optional(),
@@ -148,6 +151,15 @@ export const customerApplicationSchema = createCustomerApplicationSchema.extend(
   annualPointsTranches: z.number().int().positive(),
   holderLimit: z.number().int().min(1).max(2),
   status: customerApplicationStatusSchema,
+  /**
+   * The exact frozen terms this application points at, or null before any terms
+   * were captured.
+   *
+   * An IDENTIFIER, not a figure: it tells the UI which record a reservation would
+   * be built from, and the server revalidates it against the immutable row before
+   * writing anything. Null is the honest "Purchase Terms Review Required" state.
+   */
+  purchaseTermsId: z.string().uuid().nullable().optional(),
   createdBy: z.string().uuid().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -171,13 +183,18 @@ export const agreementPaymentInputSchema = z.object({
 
 export const reservationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(180)
-    .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
-    .transform(normalizePersonName),
+  // Historical application suffixes used N/A for an absent suffix. Normalize
+  // only that exact trailing marker; all other name validation remains intact.
+  name: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim().replace(/\s+n\/a$/i, '') : value),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(180)
+      .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
+      .transform(normalizePersonName),
+  ),
   address: z
     .string()
     .trim()
@@ -192,7 +209,13 @@ export const reservationHolderSchema = z.object({
 export const createReservationAgreementSchema = z
   .object({
     requestId: z.string().uuid().optional(),
-    saleId: requiredUuid,
+    /**
+     * Required for the LEGACY sale-origin form, absent for an application-origin
+     * reservation. `purchaseReservationCreateSchema` is the application-origin
+     * contract and carries no sale id at all, so the two shapes cannot be
+     * confused for one another.
+     */
+    saleId: optionalUuid,
     customerApplicationId: optionalUuid,
     /**
      * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
@@ -224,7 +247,14 @@ export const createReservationAgreementSchema = z
 export const reservationAgreementSchema = z.object({
   id: z.string().uuid(),
   reservationNumber: z.string(),
-  saleId: z.string().uuid(),
+  /**
+   * Null for an application-origin reservation.
+   *
+   * A first-time purchase has NO card sale until Finance finalizes it, and
+   * calling that reservation a sale before the money is verified is exactly the
+   * confusion this flow exists to remove.
+   */
+  saleId: optionalUuid,
   tier: vipTierSchema,
   totalPrice: exactDecimalStringSchema,
   reservationFee: exactDecimalStringSchema,
@@ -276,6 +306,21 @@ export const officialFormListQuerySchema = z.object({
   from: dateSchema.optional(),
   to: dateSchema.optional(),
   search: z.string().trim().max(100).optional(),
+  /**
+   * Operational queue, not a data filter.
+   *
+   * `application_work` returns only applications that still require APPLICATION
+   * work: once a live reservation exists, the reservation/payment stage owns the
+   * customer. It is opt-in and omitted by default, so history stays reachable.
+   *
+   * `reservation_work` returns only agreements that still require IST RESERVATION
+   * work. An EXECUTED agreement is finalized: Finance owns collection from then
+   * on, so it leaves this queue exactly as an application leaves the application
+   * queue. Also opt-in, also never destructive.
+   */
+  queue: z.enum(['application_work', 'reservation_work']).optional(),
+  /** Reservations created from this application (application-origin link). */
+  application: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -293,11 +338,13 @@ export const customerApplicationListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     application_number: z.string(),
+    seller_name: z.string().nullable().optional(),
     status: customerApplicationStatusSchema,
   })
   .transform((row) => ({
     id: row.id,
     applicationNumber: row.application_number,
+    sellerName: row.seller_name ?? null,
     tier: row.tier_snapshot,
     applicantName: row.applicant_name,
     createdBy: row.created_by,
@@ -309,7 +356,7 @@ export const reservationAgreementListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     reservation_number: z.string(),
-    sale_id: z.string().uuid(),
+    sale_id: z.string().uuid().nullable(),
     payment_scheme_snapshot: paymentSchemeSchema,
     total_price_snapshot: exactDecimalStringSchema,
     primary_signature_status: signatureStatusSchema,

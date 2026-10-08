@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { Button, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import {
+  Button,
+  ErrorState,
+  PageHeader,
+  StatusChip,
+  notifySuccess,
+  notifyError,
+} from '@afhomes/ui';
+import { documentConfirmSchema } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { confirmDocument, getDocument, getDocumentAccessUrl, runDocumentOcr } from './services';
@@ -25,7 +33,6 @@ export function DocumentReviewPage() {
   const doc = useQuery({ queryKey: ['documents', id], queryFn: () => getDocument(id) });
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const [notes, setNotes] = useState('');
-  const [outcome, setOutcome] = useState<string | null>(null);
 
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['documents', id] });
@@ -36,10 +43,13 @@ export function DocumentReviewPage() {
     mutationFn: () => runDocumentOcr(id, true),
     onSuccess: (next) => {
       client.setQueryData(['documents', id], next);
-      setOutcome(null);
       refresh();
     },
-    onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'OCR failed.'),
+    onError: (cause) =>
+      notifyError({
+        title: 'Extraction failed',
+        message: cause instanceof Error ? cause.message : 'OCR failed.',
+      }),
   });
 
   const preview = useQuery({
@@ -50,8 +60,8 @@ export function DocumentReviewPage() {
   });
 
   const decide = useMutation({
-    mutationFn: (decision: 'confirmed' | 'rejected') =>
-      confirmDocument(id, {
+    mutationFn: (decision: 'confirmed' | 'rejected') => {
+      const payload = {
         decision,
         fields: Object.fromEntries(
           Object.entries(draft ?? {}).map(([key, value]) => [
@@ -60,18 +70,30 @@ export function DocumentReviewPage() {
           ]),
         ),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-      }),
+      };
+      if (!documentConfirmSchema.safeParse(payload).success)
+        throw new Error(
+          'Add at least one reviewed field, such as idType, and keep reviewer notes within 500 characters.',
+        );
+      return confirmDocument(id, payload);
+    },
     onSuccess: (next) => {
       client.setQueryData(['documents', id], next);
-      setOutcome(
-        next.verificationStatus === 'confirmed'
-          ? `Confirmed${next.possibleDuplicate ? ' — flagged as a possible duplicate, not rejected.' : '.'}`
-          : 'Rejected.',
-      );
+      notifySuccess({
+        title: 'Review saved',
+        message:
+          next.verificationStatus === 'confirmed'
+            ? `Confirmed${next.possibleDuplicate ? ' — flagged as a possible duplicate, not rejected.' : '.'}`
+            : 'Rejected.',
+      });
       setDraft(null);
       refresh();
     },
-    onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Review failed.'),
+    onError: (cause) =>
+      notifyError({
+        title: 'Review could not be saved',
+        message: cause instanceof Error ? cause.message : 'Review failed.',
+      }),
   });
 
   if (doc.isPending) return <p role="status">Loading document…</p>;
@@ -83,11 +105,11 @@ export function DocumentReviewPage() {
     Object.fromEntries(Object.entries(suggestions).map(([key, field]) => [key, field.value ?? '']));
 
   const startReview = () => {
-    setOutcome(null);
     setDraft(
-      Object.fromEntries(
-        Object.entries(suggestions).map(([key, field]) => [key, field.value ?? '']),
-      ),
+      Object.fromEntries([
+        ...Object.entries(suggestions).map(([key, field]) => [key, field.value ?? '']),
+        ...(data.reviewedFields?.idType ? [['idType', data.reviewedFields.idType]] : []),
+      ]),
     );
   };
 
@@ -238,7 +260,6 @@ export function DocumentReviewPage() {
           <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
             <Button
               onClick={() => {
-                setOutcome(null);
                 decide.mutate('confirmed');
               }}
               disabled={decide.isPending}
@@ -248,7 +269,6 @@ export function DocumentReviewPage() {
             <Button
               variant="danger"
               onClick={() => {
-                setOutcome(null);
                 decide.mutate('rejected');
               }}
               disabled={decide.isPending}
@@ -281,11 +301,6 @@ export function DocumentReviewPage() {
             </table>
           </div>
         </div>
-      ) : null}
-      {outcome ? (
-        <p role="status" style={{ marginTop: 16 }}>
-          {outcome}
-        </p>
       ) : null}
     </section>
   );

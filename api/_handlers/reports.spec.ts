@@ -852,6 +852,88 @@ describe('combined outstanding search filters', () => {
   });
 });
 
+describe('Payments report with reservation-origin rows', () => {
+  const RESERVATION = 'eeeeeeee-0000-4000-8000-0000000000e1';
+  const RES_PAYMENT = 'eeeeeeee-0000-4000-8000-0000000000e2';
+
+  function seedReservationPayment(overrides: FakeRow = {}) {
+    const db = holder.db as FakeSupabase;
+    db.rows('reservation_agreements').push({
+      id: RESERVATION,
+      reservation_number: 'AF-RES-ZZZZZ',
+      customer_id: CUSTOMER.active,
+      origin: 'application',
+      status: 'executed',
+      sale_id: null,
+      ...overrides,
+    });
+    db.rows('payments').push({
+      id: RES_PAYMENT,
+      origin: 'reservation',
+      sale_id: null,
+      reservation_id: RESERVATION,
+      customer_id: CUSTOMER.active,
+      amount: '10000.00',
+      payment_type: 'down_payment',
+      method: 'cash',
+      reference: 'RES-REF-1',
+      status: 'verified',
+      recorded_by: STAFF2.finance,
+      verified_by: STAFF2.finance,
+      recorded_at: new Date('2026-05-01T00:00:00.000Z').toISOString(),
+      verified_at: new Date('2026-05-01T00:00:00.000Z').toISOString(),
+    });
+  }
+
+  it('includes a pre-sale payment and reports the reservation it belongs to', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
+    const row = report.data.find((item) => item.saleNumber === 'AF-RES-ZZZZZ');
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ amount: '10000.00', status: 'verified', reference: 'RES-REF-1' });
+    // The money is in the totals, not only in the row list.
+    expect(report.meta.total).toBeGreaterThan(1);
+  });
+
+  it('finds a pre-sale payment by its reservation number', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse(
+      (await get('payments', TOKEN.superAdmin, { search: 'AF-RES-ZZZZZ' })).body,
+    );
+    expect(report.data).toHaveLength(1);
+    expect(report.data[0]!.saleNumber).toBe('AF-RES-ZZZZZ');
+  });
+
+  it('counts a finalization-linked row ONCE, not once per branch', async () => {
+    const db = holder.db as FakeSupabase;
+    seedReservationPayment();
+    // Finalization links the SAME row to the sale: it now matches both reads.
+    const payment = db.rows('payments').find((row) => row.id === RES_PAYMENT)!;
+    payment.sale_id = SALE.downPaid;
+    const report = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
+    expect(report.data.filter((item) => item.reference === 'RES-REF-1')).toHaveLength(1);
+  });
+
+  it('hides pre-sale rows from a scope-limited caller', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse((await get('payments', TOKEN2.salesManager)).body);
+    expect(report.data.some((item) => item.saleNumber === 'AF-RES-ZZZZZ')).toBe(false);
+  });
+
+  it('does not read pre-sale rows for a plan or seller filter', async () => {
+    seedReservationPayment();
+    (holder.db as FakeSupabase).errors.payments = {
+      code: '22P02',
+      message: 'must not query payments',
+    };
+    const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    for (const query of [{ planId: absent }, { seller: absent }] as Record<string, string>[]) {
+      const result = await get('payments', TOKEN.superAdmin, query);
+      expect(result.status).toBe(200);
+    }
+  });
+});
+
 describe('empty UUID-backed Payments filters', () => {
   const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
   it.each<Record<string, string>>([
