@@ -110,6 +110,10 @@ export function BusinessCustomersPage() {
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
+    ) === true;
 
   const [accountAction, setAccountAction] = useState<{
     kind: 'deactivate' | 'delete' | 'anonymize';
@@ -155,7 +159,20 @@ export function BusinessCustomersPage() {
 
   return (
     <section>
-      <PageHeader title="Customers" description="Customer directory and membership records." />
+      <PageHeader
+        title="Customers"
+        description="Customer directory and membership records."
+        actions={
+          canSeeImportExport ? (
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/admin/customers/import-export')}
+            >
+              Import/Export Data
+            </Button>
+          ) : undefined
+        }
+      />
 
       <FilterBar
         search={
