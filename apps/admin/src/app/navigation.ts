@@ -25,13 +25,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     // Codes to anyone who could see the nav. That screen still exists at
     // `/admin/member-lookup` and is reachable from Redemption, where a till belongs.
     to: '/admin/customer-lookup',
-<<<<<<< HEAD
     label: 'Customer Lookup',
     icon: 'search',
-=======
-    label: 'Membership Lookup',
-    icon: 'grid',
->>>>>>> claud/develop
     module: 'operations.redemption',
   },
   {
