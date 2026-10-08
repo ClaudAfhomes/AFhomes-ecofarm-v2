@@ -398,8 +398,53 @@ describe('Phase 26 commission management UI', () => {
   });
 });
 
+/**
+ * Commission qualification lives in Commissions ONLY.
+ *
+ * A commission awaiting final qualification is an explicit, audited, permission
+ * gated decision. Rendering it inside the Activation Queue duplicated the
+ * workflow and left staff unsure which screen owned it.
+ */
+describe('commission qualification ownership', () => {
+  const AWAITING = {
+    id: '99990000-0000-4000-8000-000000002699',
+    saleId: 'bbbbbbbb-0000-4000-8000-000000002699',
+    saleNumber: 'SALE-QUALIFY',
+    beneficiaryType: 'staff',
+    beneficiaryName: 'Sam Seller',
+    rate: '0.04',
+    basisAmount: '60000.00',
+    amount: '2400.00',
+    status: 'final_qualification_pending',
+    qualificationNotes: null,
+    qualifiedAt: null,
+    earnedAt: null,
+    paidAt: null,
+    createdAt: '2026-09-27T10:00:00.000Z',
+  };
+
+  it('keeps the awaiting-qualification commission OUT of the Activation Queue', async () => {
+    install({ 'GET /commissions': list([AWAITING]) });
+    render('/admin/finance/activation', ADMIN_USER);
+    await screen.findByText(ACTIVATION_ITEM.saleNumber);
+    expect(screen.queryByText('Commissions awaiting final qualification')).not.toBeInTheDocument();
+    expect(screen.queryByText('SALE-QUALIFY')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decide' })).not.toBeInTheDocument();
+  });
+
+  it('offers the qualification action on the Commissions page instead', async () => {
+    install({ 'GET /commissions': list([AWAITING]) });
+    render('/admin/finance/commissions', ADMIN_USER);
+    const row = (await screen.findByText('SALE-QUALIFY')).closest('tr')!;
+    expect(row.textContent).toMatch(/Awaiting final qualification/);
+    expect(within(row).getByRole('button', { name: 'Decide' })).toBeEnabled();
+  });
+});
+
 describe('payment exact-decimal input UX', () => {
-  it('explains the receipt reference, coalesces a double click, confirms success, and refreshes balances', async () => {
+  const RECORDED_PAYMENT_ID = 'cccccccc-0000-4000-8000-000000009901';
+
+  it('confirms before recording, then reports the server row in a success alert', async () => {
     const user = userEvent.setup();
     install({
       [`GET /sales/${QUEUE_ITEM.saleId}/summary`]: {
@@ -411,23 +456,113 @@ describe('payment exact-decimal input UX', () => {
           overpaidAmount: '0.00',
         },
       },
-      [`POST /sales/${QUEUE_ITEM.saleId}/payments`]: { body: { id: 'qa-payment' } },
+      [`POST /sales/${QUEUE_ITEM.saleId}/payments`]: {
+        body: { id: RECORDED_PAYMENT_ID },
+      },
+      // The alert must report what the server STORED, so the recorded row is
+      // re-read rather than echoed from the form.
+      [`GET /sales/${QUEUE_ITEM.saleId}/payments`]: {
+        body: {
+          data: [
+            {
+              id: RECORDED_PAYMENT_ID,
+              saleId: QUEUE_ITEM.saleId,
+              paymentNumber: 'AF-PAY-0001',
+              customerId: QUEUE_ITEM.customerId,
+              amount: '1000.00',
+              paymentType: 'installment',
+              method: 'bank_transfer',
+              reference: 'QA-REF',
+              notes: null,
+              status: 'recorded',
+              rejectionReason: null,
+              recordedBy: ADMIN_USER.id,
+              verifiedBy: null,
+              recordedAt: '2026-10-08T00:00:00.000Z',
+              verifiedAt: null,
+            },
+          ],
+          meta: { total: 1 },
+        },
+      },
     });
     render('/admin/finance/payments');
     await user.click(await screen.findByRole('button', { name: 'Record payment' }));
     expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Amount'), '1000.00');
     await user.type(screen.getByLabelText('Payment reference'), 'QA-REF');
-    await user.dblClick(screen.getByRole('button', { name: /^Record$/ }));
-    await screen.findByText('Payment recorded successfully.');
+
+    // Clicking Record must NOT write yet: a confirmation comes first.
+    await user.click(screen.getByRole('button', { name: /^Record$/ }));
+    const confirm = await screen.findByText('Record this payment?');
+    expect(confirm).toBeInTheDocument();
+    expect(requests.filter((request) => request.method === 'POST')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Record Payment' }));
+    const success = await screen.findByText('Payment Recorded Successfully');
+    expect(success).toBeInTheDocument();
+
     const writes = requests.filter((request) => request.method === 'POST');
     expect(writes).toHaveLength(1);
     expect(writes[0]?.body).toMatchObject({ reference: 'QA-REF' });
     expect(requests.filter((request) => request.path === '/queues/finance').length).toBeGreaterThan(
       1,
     );
-    expect(screen.getByText('Remaining balance')).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog')).getByText('₱40,000.00')).toBeInTheDocument();
+    // Figures come from the server's own row, not from the typed form. The detail
+// block is one <br>-joined element, so match on it as a whole.
+expect(screen.getByText(/Payment ID: AF-PAY-0001/)).toBeInTheDocument();
+expect(screen.getByText(/Current payment status: recorded/)).toBeInTheDocument();
+expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
+    expect(screen.getByText(/Customer: Ana R Reyes/)).toBeInTheDocument();
+    expect(screen.getByText(/Sale: SALE-260001/)).toBeInTheDocument();
+  });
+
+  it('cancelling the confirmation records nothing', async () => {
+    const user = userEvent.setup();
+    install({
+      [`GET /sales/${QUEUE_ITEM.saleId}/summary`]: {
+        body: {
+          ...QUEUE_ITEM,
+          minimumDownPayment: '20000.00',
+          recordedTotal: '0.00',
+          rejectedTotal: '0.00',
+          overpaidAmount: '0.00',
+        },
+      },
+    });
+    render('/admin/finance/payments');
+    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    await user.type(screen.getByLabelText('Amount'), '1000.00');
+    await user.click(screen.getByRole('button', { name: /^Record$/ }));
+    await screen.findByText('Record this payment?');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(requests.filter((request) => request.method === 'POST')).toHaveLength(0);
+  });
+
+  it('shows a safe domain error when the server refuses the payment', async () => {
+    const user = userEvent.setup();
+    install({
+      [`GET /sales/${QUEUE_ITEM.saleId}/summary`]: {
+        body: {
+          ...QUEUE_ITEM,
+          minimumDownPayment: '20000.00',
+          recordedTotal: '0.00',
+          rejectedTotal: '0.00',
+          overpaidAmount: '0.00',
+        },
+      },
+      [`POST /sales/${QUEUE_ITEM.saleId}/payments`]: {
+        status: 409,
+        body: { error: { code: 'CONFLICT', message: 'That reference already exists.' } },
+      },
+    });
+    render('/admin/finance/payments');
+    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    await user.type(screen.getByLabelText('Amount'), '1000.00');
+    await user.click(screen.getByRole('button', { name: /^Record$/ }));
+    await user.click(await screen.findByRole('button', { name: 'Record Payment' }));
+    await screen.findByText('Unable to Record Payment');
+    expect(screen.getByText('That reference already exists.')).toBeInTheDocument();
   });
   it.each(['1e3', '1E3', '1e+3', '1e-3', 'NaN', 'Infinity', 'ABC', '100ABC', '', '0', '0.00'])(
     'blocks invalid payment amount %s before any write',

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
@@ -129,6 +130,34 @@ describe('CustomerApplicationsPage list states', () => {
     const search = screen.getByRole('searchbox', { name: 'Search applications' });
     fireEvent.change(search, { target: { value: 'APP-000001' } });
     expect(screen.getByRole('button', { name: 'Clear search applications' })).toBeInTheDocument();
+  });
+
+  /**
+   * The default table is APPLICATION WORK. Progressed applications are owned by
+   * the reservation and Finance queues, but stay one filter away - never
+   * deleted, never archived.
+   */
+  it('asks the server for application work by default', async () => {
+    vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    expect(getCustomerApplications).toHaveBeenCalledWith(
+      expect.objectContaining({ queue: 'application_work' }),
+    );
+  });
+
+  it('drops the queue filter when Include progressed is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplications).mockResolvedValue([application] as never);
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    vi.mocked(getCustomerApplications).mockClear();
+    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await waitFor(() =>
+      expect(getCustomerApplications).toHaveBeenCalledWith(
+        expect.not.objectContaining({ queue: expect.anything() }),
+      ),
+    );
   });
 });
 

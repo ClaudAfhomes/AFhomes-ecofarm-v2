@@ -306,6 +306,16 @@ export const officialFormListQuerySchema = z.object({
   from: dateSchema.optional(),
   to: dateSchema.optional(),
   search: z.string().trim().max(100).optional(),
+  /**
+   * Operational queue, not a data filter.
+   *
+   * `application_work` returns only applications that still require APPLICATION
+   * work: once a live reservation exists, the reservation/payment stage owns the
+   * customer. It is opt-in and omitted by default, so history stays reachable.
+   */
+  queue: z.enum(['application_work']).optional(),
+  /** Reservations created from this application (application-origin link). */
+  application: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

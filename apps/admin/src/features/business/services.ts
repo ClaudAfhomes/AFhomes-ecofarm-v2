@@ -261,6 +261,8 @@ export const getCustomerApplications = (
     from?: string;
     to?: string;
     search?: string;
+    /** Omit to see every application, including progressed ones. */
+    queue?: 'application_work';
   } = {},
 ): Promise<CustomerApplicationListItem[]> => {
   const query = new URLSearchParams();
@@ -270,6 +272,7 @@ export const getCustomerApplications = (
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
+  if (params.queue) query.set('queue', params.queue);
   const suffix = query.toString();
   return requestList(
     `/official-forms/customer-applications${suffix ? `?${suffix}` : ''}`,
@@ -357,6 +360,8 @@ export const getReservationAgreements = (
     from?: string;
     to?: string;
     search?: string;
+    /** Only reservations created from this customer application. */
+    application?: string;
   } = {},
 ): Promise<ReservationAgreementListItem[]> => {
   const query = new URLSearchParams();
@@ -366,6 +371,7 @@ export const getReservationAgreements = (
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
+  if (params.application) query.set('application', params.application);
   const suffix = query.toString();
   return requestList(
     `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,

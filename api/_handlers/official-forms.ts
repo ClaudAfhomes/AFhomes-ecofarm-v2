@@ -350,6 +350,38 @@ async function getAgreement(db: Db, id: string) {
   };
 }
 
+/**
+ * Drop applications the reservation workflow already owns.
+ *
+ * An application stops being application work the moment a LIVE
+ * application-origin reservation exists: from there the reservation, the
+ * payment ledger and the finance queue own the customer. The record is never
+ * deleted or archived - it simply stops occupying the active queue, and stays
+ * reachable through the detail screen, the reservation link and reports.
+ *
+ * The exclusion is applied IN THE DATABASE (`not.in`), not by filtering the
+ * returned page in JS. Filtering after `.range()` would silently corrupt both
+ * `meta.total` and the page length, so the table would still look polluted.
+ *
+ * A CANCELLED reservation is deliberately not counted as progress: cancelling
+ * the agreement hands the customer back to the application stage.
+ */
+async function progressedApplicationIds(db: Db): Promise<string[]> {
+  const { data, error } = await db
+    .from('reservation_agreements')
+    .select('customer_application_id')
+    .eq('origin', 'application')
+    .neq('status', 'cancelled');
+  if (error) throw error;
+  return [
+    ...new Set(
+      ((data ?? []) as Record<string, unknown>[])
+        .map((row) => String(row.customer_application_id ?? ''))
+        .filter(Boolean),
+    ),
+  ];
+}
+
 async function listRows(
   req: VercelRequest,
   res: VercelResponse,
@@ -370,6 +402,16 @@ async function listRows(
       table === 'customer_applications' ? 'application_number' : 'reservation_number',
       `%${q.search.replace(/[%_,]/g, '')}%`,
     );
+  // The application-origin link is the ONLY way to ask "did this application
+  // become a reservation?", so this is the authoritative lookup for it.
+  if (table === 'reservation_agreements' && q.application)
+    query = query.eq('customer_application_id', q.application);
+  if (table === 'customer_applications' && q.queue === 'application_work') {
+    // The builder is thenable, so it must never cross an `await`: only the id
+    // list does.
+    const progressed = await progressedApplicationIds(db);
+    if (progressed.length) query = query.not('id', { in: progressed });
+  }
   const { data, error, count } = await query
     .order('created_at', { ascending: false })
     .range(q.offset, q.offset + q.limit - 1);

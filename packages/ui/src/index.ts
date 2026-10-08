@@ -44,7 +44,7 @@ export { Dialog } from './components/Dialog.js';
 export type { DialogProps } from './components/Dialog.js';
 export { ConfirmDialog } from './components/ConfirmDialog.js';
 export type { ConfirmDialogProps } from './components/ConfirmDialog.js';
-export { notifyError, notifySuccess, notifyWarning } from './notify.js';
+export { notifyConfirm, notifyError, notifySuccess, notifyWarning } from './notify.js';
 export type { NotifyInput } from './notify.js';
 export { Skeleton } from './components/Skeleton.js';
 export { Spinner } from './components/Spinner.js';

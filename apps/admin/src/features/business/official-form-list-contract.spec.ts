@@ -55,6 +55,9 @@ describe('real summary response contract regression', () => {
         createdBy: null,
         createdAt: base.created_at,
         submittedAt: null,
+        // The list summary also resolves the seller display name; a row without
+        // one normalizes to null rather than dropping the key.
+        sellerName: null,
         status: 'draft',
       },
     ]);

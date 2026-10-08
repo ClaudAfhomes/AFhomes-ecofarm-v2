@@ -104,6 +104,7 @@ type Op =
   | { t: 'is'; col: string; val: unknown }
   | { t: 'neq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
+  | { t: 'not'; col: string; neg: Op }
   | { t: 'or'; filter: string }
   | { t: 'ilike'; col: string; pattern: string }
   | { t: 'gte'; col: string; val: unknown }
@@ -195,6 +196,19 @@ function matches(row: FakeRow, ops: Op[]): boolean {
           : row[op.col] === op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
+      // `not(col, 'in', ids)` is the anti-join used to hide records another
+      // workflow stage now owns. PostgREST expresses it as
+      // `id=not.in.(a,b)`, and SQL `NOT IN` is UNKNOWN - so excluded - for a
+      // NULL column. Mirroring that matters: an anti-join that silently kept
+      // NULL-keyed rows would under-exclude and the queue test would pass while
+      // filtering nothing.
+      case 'not':
+        if (op.neg.t === 'in') {
+          const value = row[op.col];
+          if (value === null || value === undefined) return false;
+          return !op.neg.vals.includes(value);
+        }
+        return !matches(row, [op.neg]);
       case 'ilike': {
         // `%` is any run, `_` any single character. The only patterns the
         // handlers build are `%term%`, so a case-insensitive `includes` of the
@@ -496,6 +510,12 @@ export class FakeSupabase {
       },
       in(col: string, vals: unknown[]) {
         ops.push({ t: 'in', col, vals });
+        return this;
+      },
+      not(col: string, neg: { in?: unknown[]; eq?: unknown; is?: unknown }) {
+        if (neg.in) ops.push({ t: 'not', col, neg: { t: 'in', col, vals: neg.in } });
+        else if ('eq' in neg) ops.push({ t: 'not', col, neg: { t: 'eq', col, val: neg.eq } });
+        else ops.push({ t: 'not', col, neg: { t: 'is', col, val: neg.is ?? null } });
         return this;
       },
       or(filter: string) {

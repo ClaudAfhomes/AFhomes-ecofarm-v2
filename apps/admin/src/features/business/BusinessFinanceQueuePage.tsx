@@ -21,12 +21,16 @@ import {
   SearchField,
   StatusChip,
   TextField,
+  notifyConfirm,
+  notifyError,
+  notifySuccess,
 } from '@afhomes/ui';
 import type {
   FinanceCollectionQueueItem,
   FinanceQueueItem,
   PaymentType,
   PurchaseDocumentKind,
+  ReservationFinanceSummary,
 } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
@@ -143,6 +147,8 @@ function ReservationActions({
         <RecordPaymentDialog
           saleId={item.reservationId}
           origin="reservation"
+          customerName={item.customerName}
+          recordLabel={item.reservationNumber}
           onDone={refresh}
           onClose={() => setPaymentDialog(null)}
         />
@@ -191,7 +197,7 @@ export function BusinessFinanceQueuePage() {
     FinanceCollectionQueueItem,
     { origin: 'sale' }
   > | null>(null);
-  const [paying, setPaying] = useState<string | null>(null);
+  const [paying, setPaying] = useState<FinanceQueueItem | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const currentDetail = detail
     ? (query.data?.find((item) => item.origin === 'sale' && item.saleId === detail.saleId) ??
@@ -285,7 +291,7 @@ export function BusinessFinanceQueuePage() {
                           size="sm"
                           variant="secondary"
                           disabled={!canHandlePayments}
-                          onClick={() => setPaying(item.saleId)}
+                          onClick={() => setPaying(item)}
                         >
                           Record payment
                         </Button>{' '}
@@ -312,8 +318,8 @@ export function BusinessFinanceQueuePage() {
           canHandlePayments={canHandlePayments}
           item={currentDetail}
           onClose={() => setDetail(null)}
-          onRecord={() => {
-            setPaying(currentDetail.saleId);
+          onRecord={(item) => {
+            setPaying(item);
             setDetail(null);
           }}
           onVerify={() => {
@@ -323,7 +329,13 @@ export function BusinessFinanceQueuePage() {
         />
       ) : null}
       {paying ? (
-        <RecordPaymentDialog saleId={paying} onDone={refresh} onClose={() => setPaying(null)} />
+        <RecordPaymentDialog
+          saleId={paying.saleId}
+          customerName={paying.customerName}
+          recordLabel={paying.saleNumber}
+          onDone={refresh}
+          onClose={() => setPaying(null)}
+        />
       ) : null}
       {reviewing ? (
         <VerifyDialog saleId={reviewing} onDone={refresh} onClose={() => setReviewing(null)} />
@@ -332,14 +344,32 @@ export function BusinessFinanceQueuePage() {
   );
 }
 
+/**
+ * The two record-payment endpoints answer with different shapes: the reservation
+ * one returns the recomputed finance summary (which carries the payment rows),
+ * the sale one returns only the new id. This guard tells them apart by shape, so
+ * the success alert can read the SERVER's stored row in both cases.
+ */
+function isReservationFinanceSummary(
+  value: ReservationFinanceSummary | { id: string },
+): value is ReservationFinanceSummary {
+  return 'payments' in value;
+}
+
 export function RecordPaymentDialog({
   saleId,
   origin = 'sale',
+  customerName,
+  recordLabel,
   onDone,
   onClose,
 }: {
   saleId: string;
   origin?: 'sale' | 'reservation';
+  /** Shown in the confirmation so staff confirm the right customer. */
+  customerName?: string;
+  /** The sale or reservation number this payment belongs to. */
+  recordLabel?: string;
   onDone: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -348,6 +378,7 @@ export function RecordPaymentDialog({
   const [type, setType] = useState<PaymentType>('installment');
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
+  const [confirming, setConfirming] = useState(false);
   const runPayment = useSingleFlight<
     Awaited<ReturnType<typeof recordPayment>> | Awaited<ReturnType<typeof recordReservationPayment>>
   >();
@@ -370,20 +401,94 @@ export function RecordPaymentDialog({
   });
 
   const save = useMutation({
-    mutationFn: () =>
-      runPayment(() => {
-        const input = recordPaymentSchema.parse(paymentInput);
+    mutationFn: async (input: typeof paymentInput) => {
+      const confirmed = await notifyConfirm({
+        title: 'Record this payment?',
+        message:
+          'The payment is saved as recorded and does not count toward the price until it is verified.',
+        detail: [
+          customerName ? `Customer: ${customerName}` : null,
+          recordLabel ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}` : null,
+          `Amount: ₱${input.amount}`,
+          `Type: ${input.paymentType.replace(/_/g, ' ')}`,
+          `Method: ${input.method}`,
+          `Reference: ${input.reference ?? '—'}`,
+        ]
+          .filter((line): line is string => line !== null)
+          .join('\n'),
+        confirmButtonText: 'Record Payment',
+      });
+      if (!confirmed) return null;
+      setConfirming(true);
+      const result = await runPayment(() => {
+        const parsed = recordPaymentSchema.parse(input);
         const body = {
-          ...input,
-          requestId: paymentRequest.forPayload({ origin, saleId, ...input }),
+          ...parsed,
+          requestId: paymentRequest.forPayload({ origin, saleId, ...parsed }),
         };
         return origin === 'reservation'
           ? recordReservationPayment(saleId, body)
           : recordPayment(saleId, body);
-      }),
-    onSuccess: async () => {
+      });
+      return { input, result };
+    },
+    // The alert reports the SERVER's stored row, never the browser's optimism.
+    // An HTTP 201 alone proves nothing: the sale endpoint returns only the new
+    // id, and the reservation endpoint returns the recomputed summary.
+    onSuccess: async (recorded) => {
+      if (!recorded) return;
+      setConfirming(false);
       await onDone();
       paymentRequest.complete();
+      // Captured in a const so the narrowing survives into the filter callback.
+      const outcome = recorded.result;
+      // The re-read reports the SERVER's row. If it fails the payment is still
+      // recorded, so the confirmation must never be swallowed by it: the alert
+      // falls back to the submitted figures and says the status is unconfirmed.
+      let stored:
+        | {
+            amount: string;
+            reference: string | null;
+            // `paymentNumber` is nullish on the payment contract.
+            paymentNumber?: string | null;
+            id: string;
+            status: string;
+          }
+        | undefined;
+      try {
+        const rows = isReservationFinanceSummary(outcome)
+          ? outcome.payments
+          : (await getSalePayments(saleId)).filter((row) => row.id === outcome.id);
+        stored = [...rows].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
+      } catch {
+        // Left undefined on purpose: the payment IS recorded, so the alert falls
+        // back to the submitted figures rather than being swallowed.
+      }
+      notifySuccess({
+        title: 'Payment Recorded Successfully',
+        message: 'The payment has been recorded and the payment queue has been updated.',
+        detail: [
+          `Amount: ₱${stored?.amount ?? recorded.input.amount}`,
+          `Reference: ${stored?.reference ?? recorded.input.reference ?? '—'}`,
+          `Payment ID: ${stored?.paymentNumber ?? stored?.id ?? '—'}`,
+          customerName ? `Customer: ${customerName}` : null,
+          recordLabel
+            ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`
+            : null,
+          `Current payment status: ${stored?.status ?? 'recorded (confirmation unavailable)'}`,
+        ]
+          .filter((line): line is string => line !== null)
+          .join('\n'),
+      });
+    },
+    onError: (error) => {
+      setConfirming(false);
+      // `message` is the server's own domain envelope, already free of SQL,
+      // stack traces and RPC internals.
+      notifyError({
+        title: 'Unable to Record Payment',
+        message: error instanceof Error ? error.message : 'The payment was not recorded.',
+      });
     },
   });
 
@@ -398,10 +503,10 @@ export function RecordPaymentDialog({
             Cancel
           </Button>
           <Button
-            disabled={!paymentValid || save.isPending || save.isSuccess}
-            onClick={() => save.mutate()}
+            disabled={!paymentValid || save.isPending || save.isSuccess || confirming}
+            onClick={() => save.mutate(paymentInput)}
           >
-            {save.isPending ? 'Recording…' : 'Record'}
+            {confirming ? 'Recording…' : save.isPending ? 'Recording…' : 'Record'}
           </Button>
         </>
       }
@@ -498,8 +603,11 @@ export function RecordPaymentDialog({
           Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya
           transaction, deposit slip, or official receipt.
         </p>
-        {save.isSuccess ? <p role="status">Payment recorded successfully.</p> : null}
-        {save.error ? <p role="alert">{save.error.message}</p> : null}
+        {save.error ? (
+          <p role="alert">
+            The payment was not recorded. {save.error.message}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );
@@ -616,7 +724,7 @@ function PaymentDetails({
   canHandlePayments: boolean;
   item: FinanceQueueItem;
   onClose: () => void;
-  onRecord: () => void;
+  onRecord: (item: FinanceQueueItem) => void;
   onVerify: () => void;
 }) {
   const payments = useQuery({
@@ -708,7 +816,7 @@ function PaymentDetails({
         <p>Activation eligible: {item.activatable ? 'Yes' : 'No'}</p>
       </section>
       <div className={styles.actions}>
-        <Button disabled={!canHandlePayments} onClick={onRecord}>
+        <Button disabled={!canHandlePayments} onClick={() => onRecord(item)}>
           Record payment
         </Button>
         <Button disabled={!canHandlePayments} variant="secondary" onClick={onVerify}>

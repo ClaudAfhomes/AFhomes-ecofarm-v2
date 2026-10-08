@@ -700,3 +700,175 @@ describe('application list seller names', () => {
     });
   });
 });
+
+/**
+ * Queue ownership: an application stops being application work once a live
+ * application-origin reservation exists, because the reservation/payment stage
+ * owns the customer from there.
+ */
+describe('application work queue ownership', () => {
+  const progressed = 'aaaaaaaa-0000-4000-8000-00000000b001';
+  const stillWork = 'aaaaaaaa-0000-4000-8000-00000000b002';
+  const cancelledReservationApp = 'aaaaaaaa-0000-4000-8000-00000000b003';
+
+  const application = (id: string) => ({
+    id,
+    application_number: `AF-APP-${id.slice(-3)}`,
+    tier_snapshot: 'BRONZE',
+    status: 'approved',
+    created_by: null,
+    purchase_terms_id: null,
+    created_at: '2026-10-08',
+    submitted_at: '2026-10-07',
+  });
+
+  const agreement = (
+    id: string,
+    customerApplicationId: string,
+    status: string,
+  ) => ({
+    id,
+    reservation_number: `AF-RES-${id.slice(-3)}`,
+    customer_application_id: customerApplicationId,
+    origin: 'application',
+    status,
+    sale_id: null,
+    created_at: '2026-10-08',
+  });
+
+  function installQueue(agreements: Record<string, unknown>[]) {
+    return install({
+      customer_applications: [
+        application(progressed),
+        application(stillWork),
+        application(cancelledReservationApp),
+      ],
+      reservation_agreements: agreements,
+    });
+  }
+
+  it('hides applications that have progressed to a live reservation', async () => {
+    installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c001', progressed, 'executed')]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    expect(result.status).toBe(200);
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).not.toContain(progressed);
+    // Both records that still need application work remain.
+    expect(ids).toContain(stillWork);
+    expect(ids).toContain(cancelledReservationApp);
+  });
+
+  it('hides an application whose reservation is merely submitted or executed', async () => {
+    for (const status of ['draft', 'submitted', 'executed']) {
+      installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c002', progressed, status)]);
+      const result = await call(forms, {
+        path: 'customer-applications',
+        query: { queue: 'application_work' },
+      });
+      const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+      expect(ids, `status ${status}`).not.toContain(progressed);
+    }
+  });
+
+  it('returns a CANCELLED reservation to application work', async () => {
+    installQueue([
+      agreement('bbbbbbbb-0000-4000-8000-00000000c003', cancelledReservationApp, 'cancelled'),
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).toContain(cancelledReservationApp);
+  });
+
+  it('never counts a sale-origin reservation as application progress', async () => {
+    installQueue([
+      { ...agreement('bbbbbbbb-0000-4000-8000-00000000c004', progressed, 'executed'), origin: 'sale' },
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    expect(ids).toContain(progressed);
+  });
+
+  it('keeps the exclusion honest for meta.total, not just the page', async () => {
+    installQueue([
+      agreement('bbbbbbbb-0000-4000-8000-00000000c005', progressed, 'executed'),
+      agreement('bbbbbbbb-0000-4000-8000-00000000c006', cancelledReservationApp, 'executed'),
+    ]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'application_work' },
+    });
+    const body = result.body as { data: unknown[]; meta: { total: number } };
+    // Two of the three applications were excluded, so the total must agree with
+    // the rows. Filtering after .range() would leave total at 3.
+    expect(body.meta.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+  });
+
+  it('still returns progressed applications when no queue filter is sent', async () => {
+    installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c007', progressed, 'executed')]);
+    const result = await call(forms, { path: 'customer-applications' });
+    const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
+    // History must stay reachable: omitting the filter changes nothing.
+    expect(ids).toContain(progressed);
+  });
+
+  it('rejects an unknown queue value before any database call', async () => {
+    installQueue([]);
+    const result = await call(forms, {
+      path: 'customer-applications',
+      query: { queue: 'not_a_queue' },
+    });
+    expect(result.status).toBe(400);
+  });
+});
+
+describe('reservations filtered by their originating application', () => {
+  it('returns only the reservation created from that application', async () => {
+    const appA = 'aaaaaaaa-0000-4000-8000-00000000d001';
+    const appB = 'aaaaaaaa-0000-4000-8000-00000000d002';
+    install({
+      reservation_agreements: [
+        {
+          id: 'bbbbbbbb-0000-4000-8000-00000000d101',
+          reservation_number: 'AF-RES-A',
+          customer_application_id: appA,
+          origin: 'application',
+          status: 'executed',
+          sale_id: null,
+          tier_snapshot: 'GOLD',
+          payment_scheme_snapshot: 'spot_cash',
+          total_price_snapshot: '60000.00',
+          created_at: '2026-10-08',
+        },
+        {
+          id: 'bbbbbbbb-0000-4000-8000-00000000d102',
+          reservation_number: 'AF-RES-B',
+          customer_application_id: appB,
+          origin: 'application',
+          status: 'executed',
+          sale_id: null,
+          tier_snapshot: 'GOLD',
+          payment_scheme_snapshot: 'spot_cash',
+          total_price_snapshot: '40000.00',
+          created_at: '2026-10-08',
+        },
+      ],
+    });
+    const result = await call(forms, {
+      path: 'reservations',
+      query: { application: appA },
+    });
+    expect(result.status).toBe(200);
+    const rows = (result.body as { data: { id: string }[] }).data;
+    expect(rows.map((row) => row.id)).toEqual(['bbbbbbbb-0000-4000-8000-00000000d101']);
+  });
+});

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { Route, Routes } from 'react-router';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { customerApplicationSchema, type CustomerApplicationStatus } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { CustomerApplicationEditorPage } from './OfficialFormsPages';
@@ -8,6 +8,7 @@ import {
   decideCustomerApplication,
   exportCustomerApplication,
   getCustomerApplication,
+  getReservationAgreements,
   reopenCustomerApplication,
 } from './services';
 import { purchaseTermsProposalSchema } from '@afhomes/contracts';
@@ -58,6 +59,9 @@ vi.mock('./services', async (original) => ({
   decideCustomerApplication: vi.fn(),
   reopenCustomerApplication: vi.fn(),
   exportCustomerApplication: vi.fn(),
+  // The workflow panel reads the reservation this application produced, so the
+  // next action is derived from real server state rather than local guesswork.
+  getReservationAgreements: vi.fn(async () => []),
 }));
 vi.mock('../documents/services', async (original) => ({
   ...(await original()),
@@ -154,6 +158,95 @@ it.each(['draft', 'submitted', 'approved', 'rejected', 'cancelled'] as const)(
     else expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
   },
 );
+
+/**
+ * The next action is a NAVIGATION derived from server state. It never replaces
+ * the lifecycle calls, so an illegal step stays illegal - the panel just shows
+ * where the customer actually is.
+ */
+describe('purchase workflow next step', () => {
+  const reservation = (status: string, saleId: string | null = null) => ({
+    id: 'bbbbbbbb-0000-4000-8000-000000000009',
+    reservationNumber: 'AF-RES-Y7USC',
+    saleId,
+    paymentScheme: 'spot_cash' as const,
+    totalPrice: '60000.00',
+    primarySignatureStatus: 'received' as const,
+    secondarySignatureStatus: null,
+    hasSecondaryHolder: false,
+    tier: 'BRONZE' as const,
+    applicantName: 'ANA SANTOS',
+    createdBy: null,
+    createdAt: '2026-10-08',
+    submittedAt: null,
+    status: status as 'draft' | 'submitted' | 'executed' | 'cancelled',
+  });
+
+  it('offers Create Reservation Agreement for an approved application with no reservation', async () => {
+    await show('approved');
+    const link = await screen.findByRole('link', { name: 'Create Reservation Agreement' });
+    expect(link).toHaveAttribute(
+      'href',
+      `/admin/sales/reservations/new?application=${encodeURIComponent(id)}`,
+    );
+  });
+
+  it('offers Continue Payment once the reservation is executed', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([reservation('executed')]);
+    await show('approved');
+    expect(await screen.findByRole('link', { name: 'Continue Payment' })).toHaveAttribute(
+      'href',
+      '/admin/finance/payments',
+    );
+  });
+
+  it('offers Open Reservation before the agreement is executed', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([reservation('submitted')]);
+    await show('approved');
+    expect(await screen.findByRole('link', { name: 'Open Reservation' })).toHaveAttribute(
+      'href',
+      '/admin/sales/reservations/bbbbbbbb-0000-4000-8000-000000000009',
+    );
+  });
+
+  it('hands a finalized purchase to the activation queue and commissions', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([
+      reservation('executed', 'cccccccc-0000-4000-8000-000000000010'),
+    ]);
+    await show('approved');
+    expect(await screen.findByRole('link', { name: 'Continue to Activation' })).toHaveAttribute(
+      'href',
+      '/admin/finance/activation',
+    );
+    expect(screen.getByRole('link', { name: /Open Commissions/ })).toBeInTheDocument();
+  });
+
+  it('ignores a cancelled reservation, which returns the customer to application work', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([reservation('cancelled')]);
+    await show('approved');
+    expect(await screen.findByRole('link', { name: 'Create Reservation Agreement' })).toBeInTheDocument();
+  });
+
+  it('asks a submitted application to review purchase terms instead of linking out', async () => {
+    await show('submitted');
+    expect(await screen.findByText('Review Purchase Terms')).toBeInTheDocument();
+  });
+
+  it('keeps a draft inside the application form', async () => {
+    await show('draft');
+    expect(await screen.findByText('Continue Application')).toBeInTheDocument();
+  });
+
+  it('marks only reached steps as done', async () => {
+    vi.mocked(getReservationAgreements).mockResolvedValue([reservation('executed')]);
+    await show('approved');
+    const panel = (await screen.findByLabelText('Purchase workflow')).textContent ?? '';
+    expect(panel).toContain('✓ Application submitted');
+    expect(panel).toContain('✓ Reservation agreement created');
+    expect(panel).toContain('→ Payment processing');
+    expect(panel).toContain('○ Commission qualification');
+  });
+});
 it('dispatches submitted decisions and reopen', async () => {
   await show('submitted');
   vi.mocked(decideCustomerApplication).mockResolvedValue(detail('submitted'));

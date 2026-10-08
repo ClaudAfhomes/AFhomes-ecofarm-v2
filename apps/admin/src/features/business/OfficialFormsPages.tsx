@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type {
   ActivationResult,
   ApplicationHolder,
+  CustomerApplication,
   PurchaseDocumentKind,
   PurchaseReservation,
   ReservationFinanceSummary,
@@ -89,6 +90,7 @@ import {
   updateReservationAgreement,
   updateApplicationReservation,
 } from './services';
+import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHolder => ({
@@ -381,9 +383,20 @@ export function CustomerApplicationsPage() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Default: only applications that still need APPLICATION work. Turning this
+  // off reveals the progressed history, which is never deleted or archived.
+  const [applicationWorkOnly, setApplicationWorkOnly] = useState(true);
   const debouncedSearch = useDebouncedValue(search);
   const query = useQuery({
-    queryKey: ['customer-applications', status, tier, debouncedSearch, from, to],
+    queryKey: [
+      'customer-applications',
+      status,
+      tier,
+      debouncedSearch,
+      from,
+      to,
+      applicationWorkOnly,
+    ],
     queryFn: () =>
       getCustomerApplications({
         ...(status ? { status } : {}),
@@ -391,6 +404,7 @@ export function CustomerApplicationsPage() {
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
+        ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
       }),
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
@@ -399,7 +413,7 @@ export function CustomerApplicationsPage() {
     <section>
       <PageHeader
         title="Customer Applications"
-        description="Official application transactions. Submitted snapshots remain independent of later customer master-data edits."
+        description="Official application transactions still awaiting application work. Applications that have progressed to a reservation are owned by the reservation and Finance queues, and stay reachable here with 'Include progressed'."
         actions={<Link to="/admin/customers/applications/new">New application</Link>}
       />
       <FilterBar
@@ -414,6 +428,16 @@ export function CustomerApplicationsPage() {
         }
         filters={
           <>
+            <label>
+              Queue
+              <select
+                value={applicationWorkOnly ? 'application_work' : 'all'}
+                onChange={(e) => setApplicationWorkOnly(e.target.value === 'application_work')}
+              >
+                <option value="application_work">Needs application work</option>
+                <option value="all">Include progressed</option>
+              </select>
+            </label>
             <label>
               Status
               <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -514,6 +538,110 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
       return tail ? `${tail}: ${issue.message}` : issue.message;
     })
     .join(' ');
+}
+
+/**
+ * Purchase workflow progress and the ONE next action.
+ *
+ * Every state below is read from the server's own rows: the application's
+ * lifecycle status, and the application-origin reservation linked to it by
+ * `reservation_agreements.customer_application_id`. Nothing is invented in local
+ * state, and a button only ever NAVIGATES - the action itself still goes
+ * through the existing handlers and RPCs, so an illegal step is still refused
+ * server-side rather than merely hidden here.
+ */
+function PurchaseWorkflowPanel({ application }: { application: CustomerApplication }) {
+  const reservations = useQuery({
+    queryKey: ['customer-application-reservations', application.id],
+    queryFn: () => getReservationAgreements({ application: application.id }),
+    retry: false,
+  });
+  // A cancelled agreement hands the customer back to the application stage, so
+  // it is not progress.
+  const reservation =
+    reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
+  const status = application.status;
+  const approved = status === 'approved' || Boolean(reservation);
+  const hasReservation = Boolean(reservation);
+  const executed = reservation?.status === 'executed';
+  const finalized = Boolean(reservation?.saleId);
+
+  const steps = [
+    { label: 'Application submitted', done: status !== 'draft', current: status === 'draft' },
+    { label: 'Application approved', done: approved, current: status === 'submitted' },
+    {
+      label: 'Reservation agreement created',
+      done: hasReservation,
+      current: status === 'approved' && !hasReservation,
+    },
+    { label: 'Payment processing', done: finalized, current: hasReservation && !finalized },
+    { label: 'Activation', done: false, current: finalized },
+    { label: 'Commission qualification', done: false, current: false },
+  ];
+
+  const next = !hasReservation
+    ? status === 'approved'
+      ? {
+          label: 'Create Reservation Agreement',
+          detail: 'This application is approved and has no reservation yet.',
+          to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+        }
+      : status === 'submitted'
+        ? {
+            label: 'Review Purchase Terms',
+            detail: 'Review the server proposal below, then approve or reject.',
+            to: null,
+          }
+        : {
+            label: 'Continue Application',
+            detail: 'Complete the draft and submit it for review.',
+            to: null,
+          }
+    : finalized
+      ? {
+          label: 'Continue to Activation',
+          detail: `Purchase finalized as sale ${reservation!.saleId}.`,
+          to: '/admin/finance/activation',
+        }
+      : executed
+        ? {
+            label: 'Continue Payment',
+            detail: 'The executed agreement is collectable in the Finance queue.',
+            to: '/admin/finance/payments',
+          }
+        : {
+            label: 'Open Reservation',
+            detail: 'The agreement still needs review and execution.',
+            to: `/admin/sales/reservations/${reservation!.id}`,
+          };
+
+  return (
+    <section aria-label="Purchase workflow">
+      <h2>Purchase workflow</h2>
+      <ol>
+        {steps.map((step) => (
+          <li key={step.label}>
+            {step.done ? '✓' : step.current ? '→' : '○'} {step.label}
+            {step.current ? ' (current)' : ''}
+          </li>
+        ))}
+      </ol>
+      <h3>Next step</h3>
+      <p>{next.detail}</p>
+      {next.to ? (
+        <p>
+          <Link to={next.to}>{next.label}</Link>
+        </p>
+      ) : (
+        <p>{next.label}</p>
+      )}
+      {finalized ? (
+        <p>
+          <Link to="/admin/finance/commissions">Open Commissions</Link> for qualification decisions.
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export function CustomerApplicationEditorPage() {
@@ -924,6 +1052,7 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      navigate(`/admin/sales/reservations/new?application=${encodeURIComponent(id!)}`);
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Review failed.'),
   });
@@ -979,6 +1108,7 @@ export function CustomerApplicationEditorPage() {
             {existing.data.saleId ?? '—'}
           </p>
         ) : null}
+        {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
         {proposal.data ? (
           <section aria-label="Purchase terms offer">
             <h2>
@@ -1880,7 +2010,14 @@ export function ReservationAgreementEditorPage() {
     onSuccess: (agreement) => {
       notifySuccess({ title: 'Success', message: 'Reservation saved.' });
       reservationRequest.complete();
+      void client.invalidateQueries({ queryKey: ['reservation-agreement', agreement.id] });
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
+      // Creating the reservation hands this customer to the reservation/payment
+      // stage, so the application must leave the active application queue now -
+      // not at the next poll. A cancelled agreement returns it.
+      if (agreement.customerApplicationId)
+        void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      void client.invalidateQueries({ queryKey: ['customer-application-reservations'] });
       if (!id) navigate(`/admin/sales/reservations/${agreement.id}`, { replace: true });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
@@ -1900,7 +2037,13 @@ export function ReservationAgreementEditorPage() {
     onSuccess: () => {
       notifySuccess({ title: 'Success', message: 'Decision recorded.' });
       void existing.refetch();
+      void client.invalidateQueries({ queryKey: ['reservation-agreement', id] });
       void client.invalidateQueries({ queryKey: ['reservation-agreements'] });
+      // Executing makes the agreement collectable (Finance queue) and
+      // cancelling it returns the customer to application work.
+      void client.invalidateQueries({ queryKey: ['business', 'queue'] });
+      void client.invalidateQueries({ queryKey: ['customer-applications'] });
+      void client.invalidateQueries({ queryKey: ['customer-application-reservations'] });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
   });
@@ -2290,6 +2433,7 @@ function ApplicationOriginAgreementPanel({
     ) ?? false;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
   const finance = useQuery({
     queryKey: ['reservation-finance', id],
     queryFn: () => getReservationFinance(id),
@@ -2388,6 +2532,32 @@ function ApplicationOriginAgreementPanel({
           Executed. This agreement is now in the Finance queue for collection. No card sale exists
           yet — one is created only when the whole price is verified.
         </Alert>
+      ) : null}
+      {lifecycle === 'executed' && !money?.fullyPaid ? (
+        <p>
+          <Button onClick={() => setRecording(true)} disabled={busy || !canHandlePayments}>
+            Record Payment
+          </Button>
+        </p>
+      ) : null}
+      {lifecycle === 'executed' && !money?.fullyPaid && money ? (
+        <p>
+          PAYMENT PROCESSING — verified {formatMoney(money.verifiedTotal)}, remaining{' '}
+          {formatMoney(money.remainingBalance)}.
+        </p>
+      ) : null}
+      {lifecycle === 'executed' && money?.fullyPaid ? (
+        <p>
+          <strong>FULLY PAID</strong>
+        </p>
+      ) : null}
+      {recording ? (
+        <RecordPaymentDialog
+          saleId={id}
+          origin="reservation"
+          onDone={afterMutation}
+          onClose={() => setRecording(false)}
+        />
       ) : null}
       <h3>Payments</h3>
       {payments.data && payments.data.length > 0 ? (
