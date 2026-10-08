@@ -62,6 +62,20 @@ vi.mock('./services', async (original) => ({
       isActive: true,
       categoryIsActive: true,
     },
+    {
+      id: '00000000-0000-4000-8000-000000000006',
+      code: 'SILVER',
+      name: 'Silver',
+      isActive: true,
+      categoryIsActive: true,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000007',
+      code: 'BRONZE',
+      name: 'Bronze',
+      isActive: true,
+      categoryIsActive: true,
+    },
   ],
   createCustomerApplication: calls.application,
   createReservationAgreement: calls.reservation,
@@ -267,3 +281,24 @@ it('recommender contact gets its own frontend error and valid formatting is allo
   expect(input).not.toHaveAttribute('aria-invalid');
   expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
 });
+
+it.each(['Silver', 'Bronze', 'Select plan'])(
+  'clears Gold secondary holder when changing to %s',
+  async (label) => {
+    const { user } = mount(true);
+    await screen.findByRole('option', { name: 'Gold' });
+    await user.selectOptions(
+      screen.getByLabelText('VIP plan'),
+      screen.getByRole('option', { name: 'Gold' }),
+    );
+    await user.click(screen.getByLabelText(/Add optional Gold secondary/));
+    expect(screen.getByRole('group', { name: /SECONDARY CARDHOLDER/ })).toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByLabelText('VIP plan'),
+      screen.getByRole('option', { name: label }),
+    );
+    expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    expect(screen.queryByRole('group', { name: /SECONDARY CARDHOLDER/ })).not.toBeInTheDocument();
+  },
+);

@@ -1063,6 +1063,8 @@ export function CustomerApplicationEditorPage() {
                   const plan = plans.data?.find((p) => p.id === e.target.value);
                   setPlanId(e.target.value);
                   if (plan) setTier(plan.code as typeof tier);
+                  else setTier('BRONZE');
+                  if (plan?.code !== 'GOLD') setSecondary(null);
                 }}
               >
                 <option value="">Select plan</option>

@@ -7,6 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import type { PaymentScheme } from '../packages/contracts/src/schemas/lifecycle.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -22,13 +23,18 @@ export async function makePurchaseFixtures(
   db: Client,
   options: {
     actor: string;
+    tier?: 'BRONZE' | 'SILVER' | 'GOLD';
+    scheme?: PaymentScheme;
     createdCustomers: string[];
     createdApplications: string[];
   },
 ) {
   const { actor, createdCustomers, createdApplications } = options;
   const plan = (
-    await db.query<PlanRow>(`select id, code, cash_price from public.card_plans where code='BRONZE'`)
+    await db.query<PlanRow>(
+      'select id, code, cash_price from public.card_plans where code=$1',
+      [options.tier ?? 'BRONZE'],
+    )
   ).rows[0]!;
 
   let seq = 0;
@@ -60,7 +66,7 @@ export async function makePurchaseFixtures(
         JSON.stringify({
           customerId,
           planId: plan.id,
-          paymentScheme: 'spot_cash',
+          paymentScheme: options.scheme ?? 'spot_cash',
           acquisitionChannels: [],
           consentAcknowledged: true,
           acknowledgedAt: '2026-10-07',

@@ -1,3 +1,4 @@
+import { runPurchaseTierMatrixChecks } from './purchase-tier-matrix-integration.js';
 import { runIdempotencyChecks } from './idempotency-integration.js';
 import { runOstAccreditationChecks } from './ost-accreditation-integration.js';
 import { runPurchaseTermsChecks } from './purchase-terms-integration.js';
@@ -8567,6 +8568,11 @@ async function main(): Promise<void> {
         ...(await purchaseWorld()),
         activator: staff['finance']!,
         seller: staff['sm']!,
+      });
+      section('64. Tier and installment purchase chains');
+      await runPurchaseTierMatrixChecks({
+        db, check, actor: staff['sm']!, finance: staff['finance']!,
+        createdCustomers: createdCustomerIds, createdApplications: createdApplicationIds,
       });
       section('53. AF business IDs: random allocation, backfill, legacy compatibility');
       {
