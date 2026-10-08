@@ -1,5 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 
@@ -8,7 +9,7 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import {
   getCardProducts,
-  getCustomers,
+  getCustomersPage,
   issueCustomerAccountActivation,
 } from './services';
 
@@ -19,6 +20,8 @@ vi.mock('./services', () => ({
   deleteCustomer: vi.fn(),
   getCardProducts: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(),
+  getCustomerById: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   getOfficialFormTemplate: vi.fn(),
   previewOfficialFormImport: vi.fn(),
@@ -69,8 +72,10 @@ const row = (extra: Record<string, unknown> = {}) =>
     ...extra,
   }) as unknown as Customer;
 
+const pageOf = (rows: Customer[], total: number) => ({ data: rows, total });
+
 beforeEach(() => {
-  vi.mocked(getCustomers).mockReset();
+  vi.mocked(getCustomersPage).mockReset();
   vi.mocked(getCardProducts).mockResolvedValue([]);
   vi.mocked(issueCustomerAccountActivation).mockResolvedValue({
     activationUrl: 'https://example.test/activate',
@@ -78,22 +83,31 @@ beforeEach(() => {
 });
 
 describe('BusinessCustomersPage row actions', () => {
-  it('keeps the primary action visible and secondary actions behind the overflow', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+  it('keeps row actions behind the overflow so the table stays narrow', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New application' })).toBeInTheDocument();
-    // Secondary workflow actions are not loose buttons anymore.
+    // No loose per-row buttons anymore - everything lives in the menu.
+    expect(
+      screen.queryByRole('button', { name: 'New application' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Deactivate account' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /activation link/i }),
     ).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
+    );
+    expect(
+      screen.getByRole('menuitem', { name: 'New application' }),
+    ).toBeInTheDocument();
   });
 
   it('opens the overflow with authorized actions and keeps danger distinct', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
@@ -116,7 +130,7 @@ describe('BusinessCustomersPage row actions', () => {
   });
 
   it('hides super-admin actions from ordinary staff', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
@@ -130,7 +144,7 @@ describe('BusinessCustomersPage row actions', () => {
   });
 
   it('offers separated destructive actions to the super admin', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: SUPER });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
@@ -146,7 +160,7 @@ describe('BusinessCustomersPage row actions', () => {
   });
 
   it('disables deactivation for suspended customers inside the menu', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row({ status: 'suspended' })]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
@@ -157,8 +171,118 @@ describe('BusinessCustomersPage row actions', () => {
   });
 
   it('reports an empty directory with the canonical copy', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([], 0));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     expect(await screen.findByText('No customers found.')).toBeInTheDocument();
+  });
+});
+
+describe('BusinessCustomersPage directory table', () => {
+  it('shows only the requested columns: id, name, phone, status, actions', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf([row({ customerCode: 'AF-CC-1A2B3C4D' })], 1),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    for (const header of ['Customer ID', 'Name', 'Phone', 'Status', 'Actions']) {
+      expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
+    }
+    for (const gone of ['Email', 'Government ID', 'Category']) {
+      expect(screen.queryByRole('columnheader', { name: gone })).not.toBeInTheDocument();
+    }
+    // Email, masked ID and code leave the table; the ID cell is the number only.
+    expect(screen.queryByText('maria@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText('••••1234')).not.toBeInTheDocument();
+    expect(screen.queryByText('AF-CC-1A2B3C4D')).not.toBeInTheDocument();
+    expect(screen.getByText('CUS-000001')).toBeInTheDocument();
+  });
+
+  it('fetches 10-row pages and walks them with Previous/Next', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 25));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(vi.mocked(getCustomersPage).mock.calls[0]![0]).toMatchObject({
+      limit: 10,
+      offset: 0,
+    });
+    // The range renders across several text nodes, so assert on textContent.
+    const range = () => screen.getByRole('status', { name: 'Customer record range' });
+    expect(range()).toHaveTextContent('Showing 1–10 of 25');
+    expect(screen.getByRole('button', { name: 'Previous customers page' })).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next customers page' }));
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls[1]![0]).toMatchObject({
+        limit: 10,
+        offset: 10,
+      }),
+    );
+    await waitFor(() => expect(range()).toHaveTextContent('Showing 11–20 of 25'));
+  });
+
+  it('filters by status and payment without category or sort controls', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.queryByLabelText('Customer category')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sort customers')).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Customer status'), 'active');
+    await user.selectOptions(screen.getByLabelText('Payment status'), 'fully_paid');
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
+        status: 'active',
+        payment: 'fully_paid',
+        offset: 0,
+      }),
+    );
+  });
+
+  it('searches live without a Search button', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Search customers'), 'maria');
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
+        search: 'maria',
+      }),
+    );
+  });
+
+  it('navigates to the detail view when a row is activated', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customers" element={<BusinessCustomersPage />} />
+        <Route path="/admin/customers/:id" element={<p>detail view</p>} />
+      </Routes>,
+      { user: STAFF, route: '/admin/customers' },
+    );
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('link', { name: 'View customer CUS-000001' }));
+    expect(await screen.findByText('detail view')).toBeInTheDocument();
+  });
+
+  it('keeps row-menu actions off the detail route', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customers" element={<BusinessCustomersPage />} />
+        <Route path="/admin/customers/:id" element={<p>detail view</p>} />
+      </Routes>,
+      { user: STAFF, route: '/admin/customers' },
+    );
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Deactivate account' }));
+    expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
+    expect(screen.queryByText('detail view')).not.toBeInTheDocument();
   });
 });

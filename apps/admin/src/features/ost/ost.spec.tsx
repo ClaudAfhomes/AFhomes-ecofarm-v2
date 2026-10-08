@@ -175,20 +175,81 @@ afterEach(() => {
 });
 
 describe('SM referral codes', () => {
-  it('Admin queries and issues against the selected Sales Manager',async()=>{
-    const sponsor='22222222-2222-4222-8222-222222222222';
-    vi.mocked(getOstSponsors).mockResolvedValue([{id:sponsor,name:'Juan QA Manager'}]);
+  it.each(['expired', 'revoked', 'exhausted'])(
+    'shows %s credentials as unusable and offers ordinary issuance',
+    async (state) => {
+      mockedGetCodes.mockResolvedValue([
+        {
+          ...CODE,
+          isActive: state !== 'revoked',
+          expiresAt: state === 'expired' ? '2020-01-01T00:00:00Z' : '2099-01-01T00:00:00Z',
+          useCount: state === 'exhausted' ? CODE.maxUses : 0,
+        },
+      ]);
+      renderWithProviders(<OstReferralCodesPage />, { user: STAFF });
+      await screen.findByText(state);
+      expect(screen.getByRole('button', { name: 'Issue new code' })).toBeEnabled();
+    },
+  );
+  it('refreshes code state after an issuance error instead of repeating the mutation', async () => {
+    mockedCreateCode.mockRejectedValueOnce(new Error('An active referral code already exists.'));
     mockedGetCodes.mockResolvedValue([]);
-    mockedCreateCode.mockResolvedValue({code:'OST-QA-ONCE',codeHint:'QA hint',expiresAt:'2027-10-01T00:00:00Z',maxUses:10});
-    renderWithProviders(<OstReferralCodesPage />,{user:{...STAFF,roleSlug:'super_admin'}});
-    expect(screen.getByRole('button',{name:'Issue new code'})).toBeDisabled();
+    renderWithProviders(<OstReferralCodesPage />, { user: STAFF });
+    await screen.findByText('No referral codes');
+    fireEvent.click(screen.getByRole('button', { name: 'Issue new code' }));
+    await screen.findByRole('alert');
+    mockedGetCodes.mockResolvedValue([CODE]);
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    await screen.findByText(CODE.codeHint);
+    expect(mockedCreateCode).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Rotate and revoke previous codes' })).toBeEnabled();
+  });
+  it('allows dismissing the plaintext and does not recover it on remount', async () => {
+    mockedCreateCode.mockResolvedValue({
+      code: 'OST-ABCDEF-123456',
+      codeHint: 'OST-?-3456',
+      expiresAt: CODE.expiresAt,
+      maxUses: 10,
+    });
+    const view = renderWithProviders(<OstReferralCodesPage />, { user: STAFF });
+    await screen.findByText(CODE.codeHint);
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate and revoke previous codes' }));
+    await screen.findByText('New code issued (shown once)');
+    expect(screen.getByText('Save this code now. It cannot be viewed again.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss code' }));
+    expect(screen.queryByText('OST-ABCDEF-123456')).not.toBeInTheDocument();
+    view.unmount();
+    renderWithProviders(<OstReferralCodesPage />, { user: STAFF });
+    await screen.findByText(CODE.codeHint);
+    expect(screen.queryByText('OST-ABCDEF-123456')).not.toBeInTheDocument();
+    expect(mockedCreateCode).toHaveBeenCalledTimes(1);
+  });
+  it('Admin queries and issues against the selected Sales Manager', async () => {
+    const sponsor = '22222222-2222-4222-8222-222222222222';
+    vi.mocked(getOstSponsors).mockResolvedValue([{ id: sponsor, name: 'Juan QA Manager' }]);
+    mockedGetCodes.mockResolvedValue([]);
+    mockedCreateCode.mockResolvedValue({
+      code: 'OST-QA-ONCE',
+      codeHint: 'QA hint',
+      expiresAt: '2027-10-01T00:00:00Z',
+      maxUses: 10,
+    });
+    renderWithProviders(<OstReferralCodesPage />, { user: { ...STAFF, roleSlug: 'super_admin' } });
+    expect(screen.getByRole('button', { name: 'Issue new code' })).toBeDisabled();
     await screen.findByText('Juan QA Manager');
-    fireEvent.change(screen.getByRole('combobox'),{target:{value:sponsor}});
-    await waitFor(()=>expect(mockedGetCodes).toHaveBeenCalledWith(sponsor));
-    await waitFor(()=>expect(screen.getByRole('button',{name:'Issue new code'})).toBeEnabled());
-    fireEvent.click(screen.getByRole('button',{name:'Issue new code'}));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: sponsor } });
+    await waitFor(() => expect(mockedGetCodes).toHaveBeenCalledWith(sponsor));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Issue new code' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Issue new code' }));
     await screen.findByText('OST-QA-ONCE');
-    expect(mockedCreateCode).toHaveBeenCalledWith({maxUses:10,expiresInHours:168,sponsorStaffId:sponsor,rotate:false});
+    expect(mockedCreateCode).toHaveBeenCalledWith({
+      maxUses: 10,
+      expiresInHours: 168,
+      sponsorStaffId: sponsor,
+      rotate: false,
+    });
   });
   beforeEach(() => {
     mockedGetCodes.mockResolvedValue([CODE]);
@@ -222,7 +283,11 @@ describe('SM referral codes', () => {
     ).toBeInTheDocument();
     expect(screen.getByAltText('OST registration QR for OST-ABCDEF-123456')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy code and link' })).toBeInTheDocument();
-    expect(mockedCreateCode).toHaveBeenCalledWith({ maxUses: 10, expiresInHours: 168, rotate: true });
+    expect(mockedCreateCode).toHaveBeenCalledWith({
+      maxUses: 10,
+      expiresInHours: 168,
+      rotate: true,
+    });
   });
 
   it('shows empty states for codes and applications', async () => {

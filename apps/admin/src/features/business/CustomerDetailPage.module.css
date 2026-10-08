@@ -1,0 +1,4 @@
+/* Customer detail: breathing room between the back link and the card grid. */
+.back {
+  margin: 0 0 var(--space-4);
+}

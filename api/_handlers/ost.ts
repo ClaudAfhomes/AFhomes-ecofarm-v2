@@ -820,10 +820,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'referral-codes/me' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
-      const selected = typeof req.query.sponsorStaffId === 'string' ? req.query.sponsorStaffId : auth.userId;
+      const selected =
+        typeof req.query.sponsorStaffId === 'string' ? req.query.sponsorStaffId : auth.userId;
       if (!createOstReferralCodeSchema.shape.sponsorStaffId.safeParse(selected).success)
         return fail(res, 'VALIDATION_ERROR', 'Select a valid Sales Manager.', 400);
-      const sponsorCheck = await validateReferralCodeIssuer(db, { userId: auth.userId, roleSlug: auth.roleSlug }, selected);
+      const sponsorCheck = await validateReferralCodeIssuer(
+        db,
+        { userId: auth.userId, roleSlug: auth.roleSlug },
+        selected,
+      );
       if (!sponsorCheck.ok) return fail(res, 'FORBIDDEN', sponsorCheck.message, 403);
       const data = await readSearchRows(
         db
@@ -833,7 +838,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order('created_at', { ascending: false })
           .order('id'),
       );
-      const webBase = process.env.AFHOMES_WEB_URL ?? '';
       return list(
         res,
         ((data ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -895,11 +899,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const raw = newReferralCode();
       const expiresAt = new Date(Date.now() + parsed.data.expiresInHours * 3600000).toISOString();
       const { error } = await db.rpc('manage_ost_referral_code', {
-        p_actor: auth.userId, p_sponsor: sponsor.id, p_rotate: parsed.data.rotate,
-        p_hash: hashIdentifier(raw), p_hint: 'OST-?-' + raw.slice(-4),
-        p_expires: expiresAt, p_max_uses: parsed.data.maxUses,
+        p_actor: auth.userId,
+        p_sponsor: sponsor.id,
+        p_rotate: parsed.data.rotate,
+        p_hash: hashIdentifier(raw),
+        p_hint: 'OST-?-' + raw.slice(-4),
+        p_expires: expiresAt,
+        p_max_uses: parsed.data.maxUses,
       });
-      if (error) throw error;
+      if (error) {
+        if (error.message.startsWith('CONFLICT:'))
+          return fail(
+            res,
+            'CONFLICT',
+            'An active referral code already exists. Rotate it to generate a replacement.',
+            409,
+          );
+        if (error.message.startsWith('FORBIDDEN:'))
+          return fail(
+            res,
+            'FORBIDDEN',
+            'Only authorized administrators or the active sponsoring Sales Manager may issue this code.',
+            403,
+          );
+        if (error.message.startsWith('VALIDATION_ERROR:'))
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Check the referral code expiry and usage limit.',
+            400,
+          );
+        throw error;
+      }
       return res.status(201).json({
         code: raw,
         codeHint: 'OST-?-' + raw.slice(-4),

@@ -16,6 +16,7 @@ import { BusinessActivationQueuePage } from '../features/business/BusinessActiva
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
 import { CommissionSettingsPage } from '../features/business/CommissionSettingsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
+import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
 import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
@@ -114,6 +115,10 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+              <Route
+                path="/admin/customers/:id"
+                element={protectedPage(<CustomerDetailPage />)}
+              />
               <Route
                 path="/admin/customers/import-export"
                 element={protectedPage(<CustomerImportExportPage />)}

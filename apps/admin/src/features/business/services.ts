@@ -72,6 +72,7 @@ import { z } from 'zod';
 import {
   protectedRequest as request,
   protectedRequestList as requestList,
+  protectedRequestListEnvelope as requestListEnvelope,
 } from '../../lib/api/client';
 import {
   normalizeCustomerApplicationRequest,
@@ -161,6 +162,47 @@ export const getCustomers = (
 
 export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> =>
   post('/customers', customerSchema, createCustomerSchema.parse(normalizeCustomerRequest(input)));
+
+export const getCustomerById = (id: string): Promise<Customer> =>
+  request(`/customers/${id}`, customerSchema);
+
+/**
+ * One server-paginated customer page. The list endpoint already accepts
+ * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
+ * (plain `getCustomers` drops it) so the directory can page at 10 rows.
+ */
+export const getCustomersPage = (
+  params: {
+    search?: string;
+    status?: string;
+    payment?: string;
+    category?: string;
+    tier?: string;
+    seller?: string;
+    from?: string;
+    to?: string;
+    sort?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{ data: Customer[]; total: number }> => {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.status) query.set('status', params.status);
+  if (params.payment) query.set('payment', params.payment);
+  for (const key of ['category', 'tier', 'seller', 'from', 'to', 'sort'] as const)
+    if (params[key]) query.set(key, params[key]);
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  const suffix = query.toString();
+  return requestListEnvelope(
+    `/customers${suffix ? `?${suffix}` : ''}`,
+    customerSchema,
+  ).then(({ data, meta }) => ({
+    data,
+    total: typeof meta.total === 'number' ? meta.total : data.length,
+  }));
+};
 
 export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnboardingRecovery> =>
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});

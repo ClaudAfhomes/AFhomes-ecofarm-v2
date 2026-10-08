@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
@@ -11,24 +11,22 @@ import {
   OverflowMenu,
   PageHeader,
   SearchField,
+  Select,
   StatusChip,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
-import {
-  CUSTOMER_CATEGORY_LABELS,
-  resolveCustomerCategory,
-  customerSellerOptionSchema,
-} from '@afhomes/contracts';
+import { customerSellerOptionSchema } from '@afhomes/contracts';
 
 import { requestList } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import styles from './BusinessCustomersPage.module.css';
 import {
   anonymizeCustomer,
   deactivateCustomer,
   deleteCustomer,
-  getCustomers,
+  getCustomersPage,
   issueCustomerAccountActivation,
 } from './services';
 
@@ -40,32 +38,68 @@ import {
  * product and frozen server-side. The form therefore has no financial inputs
  * at all, by design - only selections whose economics the server owns.
  */
+/** Fixed directory page size. The server also enforces its own max (200). */
+const PAGE_SIZE = 10;
+
 export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
-  // Live search: the list follows the settled term automatically; the Search
-  // button remains as an instant-apply accessibility fallback.
-  void useDebouncedValue(search, 300, (term) => setApplied(term.trim()));
-  const [category, setCategory] = useState('');
+  const [page, setPage] = useState(0);
+  // Realtime search: the list follows the settled term automatically (~300ms
+  // after the user stops typing). Pagination resets only when the term
+  // actually changes - the settle timer also fires after mount and must not
+  // clobber a page the user has already turned to.
+  const settledSearch = useRef('');
+  void useDebouncedValue(search, 300, (term) => {
+    const next = term.trim();
+    if (next === settledSearch.current) return;
+    settledSearch.current = next;
+    setApplied(next);
+    setPage(0);
+  });
   const [filters, setFilters] = useState({
+    status: '',
+    payment: '',
     tier: '',
     seller: '',
     from: '',
     to: '',
-    sort: 'created',
   });
+  // Every filter change restarts at the first page.
+  const patchFilters = (patch: Partial<typeof filters>) => {
+    setFilters((prev) => ({ ...prev, ...patch }));
+    setPage(0);
+  };
   const customers = useQuery({
-    queryKey: ['business', 'customers', applied, category, filters],
+    queryKey: ['business', 'customers', applied, filters, page],
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
-      getCustomers({
+      getCustomersPage({
         search: applied || undefined,
-        category: category || undefined,
         ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
       }),
   });
+  const rows = customers.data?.data ?? [];
+  const total = customers.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // A shrunken result (e.g. a deletion elsewhere) can leave the page past
+  // the last one. Correct during render on a total change (the documented
+  // previous-value pattern, not an effect); display clamps meanwhile.
+  const [prevTotal, setPrevTotal] = useState(total);
+  if (prevTotal !== total) {
+    setPrevTotal(total);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const sellers = useQuery({
     queryKey: ['customer-seller-options'],
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
@@ -133,188 +167,165 @@ export function BusinessCustomersPage() {
         }
       />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setApplied(search.trim());
-        }}
-      >
-        <FilterBar
-          search={
-            <SearchField
-              label="Search customers"
-              placeholder="Name, email, customer or membership number"
-              value={search}
-              onChange={setSearch}
-            />
-          }
-          actions={
-            <>
-              <label>
-                Customer category{' '}
-                <select
-                  aria-label="Customer category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="">All categories</option>
-                  {Object.entries(CUSTOMER_CATEGORY_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                VIP Tier
-                <select
-                  aria-label="VIP Tier"
-                  value={filters.tier}
-                  onChange={(e) => setFilters({ ...filters, tier: e.target.value })}
-                >
-                  <option value="">All tiers</option>
-                  {['GOLD', 'SILVER', 'BRONZE'].map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Seller
-                <select
+      <FilterBar
+        search={
+          <SearchField
+            label="Search customers"
+            placeholder="Name, email, customer or membership number"
+            value={search}
+            onChange={setSearch}
+          />
+        }
+        filters={
+          <>
+            <label className={styles.filterLabel}>
+              Status
+              <Select
+                aria-label="Customer status"
+                value={filters.status}
+                onChange={(e) => patchFilters({ status: e.target.value })}
+                options={[
+                  { value: '', label: 'All statuses' },
+                  ...['prospect', 'active', 'suspended', 'cancelled'].map((s) => ({
+                    value: s,
+                    label: s[0]!.toUpperCase() + s.slice(1),
+                  })),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              Payment
+              <Select
+                aria-label="Payment status"
+                value={filters.payment}
+                onChange={(e) => patchFilters({ payment: e.target.value })}
+                options={[
+                  { value: '', label: 'All payments' },
+                  { value: 'no_payment', label: 'No payment' },
+                  { value: 'partially_paid', label: 'Partial payment' },
+                  { value: 'fully_paid', label: 'Fully paid' },
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              VIP Tier
+              <Select
+                aria-label="VIP Tier"
+                value={filters.tier}
+                onChange={(e) => patchFilters({ tier: e.target.value })}
+                options={[
+                  { value: '', label: 'All tiers' },
+                  ...['GOLD', 'SILVER', 'BRONZE'].map((t) => ({ value: t, label: t })),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              Seller
+                <Select
                   aria-label="Seller"
                   value={filters.seller}
-                  onChange={(e) => setFilters({ ...filters, seller: e.target.value })}
-                >
-                  <option value="">All sellers</option>
-                  {sellers.data?.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(e) => patchFilters({ seller: e.target.value })}
+                  options={[
+                    { value: '', label: 'All sellers' },
+                    ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+                  ]}
+                />
               </label>
-              <label>
+              <label className={styles.filterLabel}>
                 From
                 <input
                   aria-label="From date"
                   type="date"
                   value={filters.from}
-                  onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+                  onChange={(e) => patchFilters({ from: e.target.value })}
                 />
               </label>
-              <label>
+              <label className={styles.filterLabel}>
                 To
                 <input
                   aria-label="To date"
                   type="date"
                   value={filters.to}
-                  onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+                  onChange={(e) => patchFilters({ to: e.target.value })}
                 />
               </label>
-              <label>
-                Sort
-                <select
-                  aria-label="Sort customers"
-                  value={filters.sort}
-                  onChange={(e) => setFilters({ ...filters, sort: e.target.value })}
-                >
-                  {Object.entries({
-                    name: 'Customer Name',
-                    tier: 'VIP Tier',
-                    category: 'Category',
-                    payment_status: 'Payment Status',
-                    membership_status: 'Membership Status',
-                    verified_paid: 'Verified Paid',
-                    created: 'Created Date',
-                  }).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button type="submit" variant="secondary">
-                Search
-              </Button>
             </>
           }
         />
-      </form>
 
       {customers.isPending ? (
         <p role="status">Loading customers…</p>
       ) : customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
-      ) : customers.data?.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           title="No customers found."
           description="Register the first customer to get started."
         />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
-                <th>Customer ID / Code</th>
+                <th>Customer ID</th>
                 <th>Name</th>
-                <th>Email</th>
                 <th>Phone</th>
-                <th>Government ID</th>
                 <th>Status</th>
-                <th>Category</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {customers.data?.map((customer) => (
-                <tr key={customer.id}>
-                  <td>
-                    {customer.customerNumber}
-                    {/* The customer's own Customer Code, so staff can match what
-                        the member quotes at a desk. It is a second line, never
-                        the primary identifier, and it is never an export column. */}
-                    {customer.customerCode ? (
-                      <>
-                        <br />
-                        <small>{customer.customerCode}</small>
-                      </>
-                    ) : null}
-                  </td>
+              {rows.map((customer) => (
+                <tr
+                  key={customer.id}
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`View customer ${customer.customerNumber}`}
+                  onClick={() => navigate(`/admin/customers/${customer.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ')
+                      navigate(`/admin/customers/${customer.id}`);
+                  }}
+                  className={styles.clickable}
+                >
+                  <td className={styles.idCell}>{customer.customerNumber}</td>
                   <td>{customer.fullName}</td>
-                  <td>{customer.email}</td>
-                  <td>{customer.phone}</td>
-                  {/* Only ever the masked form; the API never returns the number. */}
-                  <td>{customer.governmentIdMasked ?? '—'}</td>
+                  <td className={styles.phoneCell}>{customer.phone}</td>
                   <td>
                     <StatusChip label={customer.status} />
                   </td>
-                  <td>
-                    {
-                      CUSTOMER_CATEGORY_LABELS[
-                        customer.derivedCategory ??
-                          resolveCustomerCategory({
-                            customerStatus: customer.status,
-                            membershipStatus: customer.hasActiveMembership ? 'active' : null,
-                            verifiedTotal: '0.00',
-                            priceTotal: '0.00',
-                          })
-                      ]
-                    }
-                  </td>
-                  <td>
-                    {canCreate && <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={customer.status === 'cancelled'}
-                      onClick={() => {
-                        navigate('/admin/customers/applications/new?customerId='+encodeURIComponent(customer.id));
-                      }}
-                    >
-                      New application
-                    </Button>}{' '}
+                  <td
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      // Only swallow the keys the row itself acts on. Escape
+                      // (and Tab) must keep bubbling so the overflow menu's
+                      // document-level dialog shell can close on Escape.
+                      if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+                    }}
+                  >
                     <OverflowMenu
                       label={`More actions for ${customer.customerNumber}`}
                       items={[
+                        ...(canCreate
+                          ? [
+                              {
+                                label: 'New application',
+                                icon: 'file-text' as const,
+                                disabled: customer.status === 'cancelled',
+                                onClick: () => {
+                                  navigate(
+                                    '/admin/customers/applications/new?customerId=' +
+                                      encodeURIComponent(customer.id),
+                                  );
+                                },
+                              },
+                            ]
+                          : []),
                         ...(canIssueActivation &&
                         customer.hasActiveMembership &&
                         !customer.portalAccountActivated
@@ -364,6 +375,36 @@ export function BusinessCustomersPage() {
           </table>
         </div>
       )}
+
+      {total > 0 ? (
+        <nav aria-label="Customers pagination" className={styles.pagination}>
+          <span
+            role="status"
+            aria-label="Customer record range"
+            className={styles.paginationRange}
+          >
+            Showing {rangeFrom}–{rangeTo} of {total}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={safePage === 0}
+            onClick={() => setPage(Math.max(0, safePage - 1))}
+            aria-label="Previous customers page"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={safePage >= pageCount - 1}
+            onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
+            aria-label="Next customers page"
+          >
+            Next
+          </Button>
+        </nav>
+      ) : null}
 
       <Dialog
         open={activationResult !== null}

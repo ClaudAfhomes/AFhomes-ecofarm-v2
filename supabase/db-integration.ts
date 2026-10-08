@@ -8291,6 +8291,36 @@ async function main(): Promise<void> {
               !r.rows.some((x) => x.record.id === active.id),
             );
           }
+          // Since 20261030000001 the directory addresses one row by id for the
+          // customer detail view. The filter narrows without disturbing any
+          // other predicate (proven above and below this block).
+          const byId = await query({ id: active.id, limit: 5000 });
+          check(
+            'service directory id filter returns exactly that customer',
+            byId.rows.length === 1 && byId.rows[0]?.record.id === active.id,
+          );
+          const byUnknownId = await query({
+            id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+            limit: 5000,
+          });
+          check('service directory unknown id returns no rows', byUnknownId.rows.length === 0);
+          // Since 20261031000001 the directory filters by derived payment
+          // state. Every row carries exactly one of the three states, so the
+          // three filtered sets partition the unfiltered set.
+          const unfiltered = await query({ limit: 5000 });
+          let partitioned = 0;
+          for (const payment of ['no_payment', 'partially_paid', 'fully_paid'] as const) {
+            const r = await query({ payment, limit: 5000 });
+            check(
+              `service directory payment filter ${payment} matches only that state`,
+              r.rows.every((x) => (x.record.payment_status as string) === payment),
+            );
+            partitioned += r.rows.length;
+          }
+          check(
+            'service directory payment states partition the directory',
+            partitioned === unfiltered.rows.length,
+          );
           const sellerRecord = (await query({ limit: 5000 })).rows.find(
             (row) => typeof row.record.seller_id === 'string',
           );

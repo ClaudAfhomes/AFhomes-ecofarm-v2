@@ -34,6 +34,13 @@ type StaffUsersResult = { data: SponsorCandidate[] | null; error: { message: str
 
 function rpcFailure(res: VercelResponse, error: { message: string; code?: string }) {
   const text = error.message;
+  if (text === 'INVALID_REFERRAL_CODE')
+    return fail(
+      res,
+      'VALIDATION_ERROR',
+      'This referral code is expired, revoked, exhausted, or unavailable. Ask your Sales Manager for a valid code.',
+      400,
+    );
   if (error.code === '42501')
     return fail(res, 'FORBIDDEN', 'You cannot perform this accreditation action.', 403);
   if (/NOT_FOUND/.test(text)) return fail(res, 'NOT_FOUND', 'Accreditation record not found.', 404);

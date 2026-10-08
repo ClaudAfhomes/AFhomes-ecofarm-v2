@@ -1,0 +1,41 @@
+/* Customers directory table: page-scoped width contract so the columns scroll
+   horizontally with intact cells instead of squeezing. Applied alongside the
+   global `table-scroll` class; other tables are unaffected. */
+.tableWrap {
+  margin-top: var(--space-4);
+}
+
+.tableWrap > table {
+  min-width: 720px;
+}
+
+.tableWrap td.idCell,
+.tableWrap td.phoneCell {
+  white-space: nowrap;
+}
+
+.tableWrap tbody tr.clickable {
+  cursor: pointer;
+}
+
+/* Filter labels match the shared Sales-page pattern (grid label + control). */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Pagination footer: record range plus Previous/Next. */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.paginationRange {
+  margin-right: auto;
+}

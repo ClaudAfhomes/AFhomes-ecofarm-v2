@@ -90,6 +90,7 @@ const toCustomer = (row: Record<string, unknown>) => ({
 const listQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   status: z.string().trim().max(30).optional(),
+  payment: z.enum(['no_payment', 'partially_paid', 'fully_paid']).optional(),
   category: customerCategorySchema.optional(),
   tier: z.enum(['GOLD', 'SILVER', 'BRONZE']).optional(),
   seller: z.string().uuid().optional(),
@@ -283,14 +284,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (detail) {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
-      const { data, error } = await db
-        .from('customers')
-        .select('*, memberships(id,status)')
-        .eq('id', detail[1]!)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      return res.status(200).json(toCustomer(data as Record<string, unknown>));
+      // Same RPC as the list, narrowed to one row, so the detail view can
+      // never disagree with the directory about derived category, membership
+      // state, or the masked government ID (the only form ever returned).
+      const directory = await customerDirectory(db, { id: detail[1] });
+      const row = directory[0];
+      if (!row) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+      return res.status(200).json(toCustomer(row.record));
     }
 
     const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);

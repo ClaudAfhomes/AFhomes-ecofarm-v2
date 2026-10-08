@@ -960,7 +960,9 @@ export class FakeSupabase {
         })
         .filter(
           (r) =>
+            (!filters.id || r.id === filters.id) &&
             (!filters.status || r.status === filters.status) &&
+            (!filters.payment || r.payment_status === filters.payment) &&
             (!filters.category || r.derivedCategory === filters.category) &&
             (!filters.tier || r.tier === filters.tier) &&
             (!filters.membersOnly || r.membership_id) &&

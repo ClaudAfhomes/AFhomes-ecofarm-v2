@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder } from '@afhomes/contracts';
 import {
   createCustomerApplicationSchema,
+  canTransitionCustomerApplication,
   registerCustomerApplicationSchema,
   createReservationAgreementSchema,
   optionalContactNumberSchema,
@@ -1201,90 +1202,108 @@ export function CustomerApplicationEditorPage() {
               />{' '}
               Valid government ID with specimen signatures received
             </label>
-
           </fieldset>
-          <p>
-            <Button
-              onClick={() => save.mutate()}
-              disabled={
-                save.isPending ||
-                uploadId.isPending ||
-                ocr.isPending ||
-                !optionalPhonesValid ||
-                Object.values(invalidFields).some(Boolean)
-              }
-            >
-              {save.isPending ? 'Saving…' : 'Save draft'}
-            </Button>{' '}
-            {id && editable ? (
-              <>
-                {submitBlockers.length > 0 ? (
-                  <Alert variant="warning" title="Cannot submit yet:">
-                    <ul>
-                      {submitBlockers.map((blocker) => (
-                        <li key={blocker}>{blocker}</li>
-                      ))}
-                    </ul>
-                  </Alert>
-                ) : null}{' '}
-                <Button
-                  onClick={() => submit.mutate()}
-                  disabled={
-                    submitBlockers.length > 0 ||
-                    save.isPending ||
-                    uploadId.isPending ||
-                    ocr.isPending ||
-                    submit.isPending
-                  }
-                >
-                  {submit.isPending ? 'Submitting...' : 'Submit'}
-                </Button>
-              </>
-            ) : null}{' '}
-            {id && existing.data?.status === 'submitted' ? (
-              <>
-                <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
-                  Approve
-                </Button>{' '}
-                <Button
-                  variant="danger"
-                  onClick={() => decide.mutate('rejected')}
-                  disabled={decide.isPending}
-                >
-                  Reject
-                </Button>{' '}
-                <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-                  Reopen to draft
-                </Button>{' '}
-              </>
-            ) : null}{' '}
-            {id && existing.data?.status === 'rejected' ? (
+        </fieldset>
+        <p>
+          <Button
+            onClick={() => save.mutate()}
+            disabled={
+              !editable ||
+              save.isPending ||
+              uploadId.isPending ||
+              ocr.isPending ||
+              !optionalPhonesValid ||
+              Object.values(invalidFields).some(Boolean)
+            }
+          >
+            {save.isPending ? 'Saving…' : 'Save draft'}
+          </Button>{' '}
+          {id && editable ? (
+            <>
+              {submitBlockers.length > 0 ? (
+                <Alert variant="warning" title="Cannot submit yet:">
+                  <ul>
+                    {submitBlockers.map((blocker) => (
+                      <li key={blocker}>{blocker}</li>
+                    ))}
+                  </ul>
+                </Alert>
+              ) : null}{' '}
+              <Button
+                onClick={() => submit.mutate()}
+                disabled={
+                  submitBlockers.length > 0 ||
+                  save.isPending ||
+                  uploadId.isPending ||
+                  ocr.isPending ||
+                  submit.isPending
+                }
+              >
+                {submit.isPending ? 'Submitting...' : 'Submit'}
+              </Button>
+            </>
+          ) : null}{' '}
+          {id && existing.data?.status === 'submitted' ? (
+            <>
+              <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
+                Approve
+              </Button>{' '}
+              <Button
+                variant="danger"
+                onClick={() => decide.mutate('rejected')}
+                disabled={decide.isPending}
+              >
+                Reject
+              </Button>{' '}
               <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
                 Reopen to draft
+              </Button>{' '}
+            </>
+          ) : null}{' '}
+          {id && existing.data?.status === 'rejected' ? (
+            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+              Reopen to draft
+            </Button>
+          ) : null}{' '}
+          {id &&
+          existing.data &&
+          canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
+            <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+              Cancel
+            </Button>
+          ) : null}{' '}
+          {id ? (
+            <>
+              {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
+                <Link to={`/admin/sales/reservations/new?application=${id}`}>
+                  Create reservation from application
+                </Link>
+              )}
+              <Button
+                onClick={() =>
+                  void exportCustomerApplication(id, 'xlsx')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export XLSX
               </Button>
-            ) : null}{' '}
-            {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-              <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
-                Cancel
+              <Button
+                onClick={() =>
+                  void exportCustomerApplication(id, 'pdf')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export PDF
               </Button>
-            ) : null}{' '}
-            {id ? (
-              <>
-                {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
-                  <Link to={`/admin/sales/reservations/new?application=${id}`}>
-                    Create reservation from application
-                  </Link>
-                )}
-                <Button onClick={() => void exportCustomerApplication(id, 'xlsx').then(saveFile)}>
-                  Export XLSX
-                </Button>
-                <Button onClick={() => void exportCustomerApplication(id, 'pdf').then(saveFile)}>
-                  Export PDF
-                </Button>
-              </>
-            ) : null}
-          </p>
-        </fieldset>
+            </>
+          ) : null}
+        </p>
       </section>
     </HumanInputValidity.Provider>
   );
@@ -1858,42 +1877,58 @@ export function ReservationAgreementEditorPage() {
             />
           </label>
         </p>
-        <p>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save draft'}
-          </Button>{' '}
-          {id && editable ? (
-            <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
-              Submit
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'submitted' ? (
-            <>
-              <Button onClick={() => decide.mutate('executed')} disabled={decide.isPending}>
-                Execute
-              </Button>{' '}
-              <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-                Reopen to draft
-              </Button>{' '}
-            </>
-          ) : null}{' '}
-          {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-            <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
-              Cancel
-            </Button>
-          ) : null}{' '}
-          {id ? (
-            <>
-              <Button onClick={() => void exportReservationAgreement(id, 'xlsx').then(saveFile)}>
-                Export XLSX
-              </Button>
-              <Button onClick={() => void exportReservationAgreement(id, 'pdf').then(saveFile)}>
-                Export PDF
-              </Button>
-            </>
-          ) : null}
-        </p>
       </fieldset>
+      <p>
+        <Button onClick={() => save.mutate()} disabled={!editable || save.isPending}>
+          {save.isPending ? 'Saving…' : 'Save draft'}
+        </Button>{' '}
+        {id && editable ? (
+          <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
+            Submit
+          </Button>
+        ) : null}{' '}
+        {id && existing.data?.status === 'submitted' ? (
+          <>
+            <Button onClick={() => decide.mutate('executed')} disabled={decide.isPending}>
+              Execute
+            </Button>{' '}
+            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+              Reopen to draft
+            </Button>{' '}
+          </>
+        ) : null}{' '}
+        {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
+          <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+            Cancel
+          </Button>
+        ) : null}{' '}
+        {id ? (
+          <>
+            <Button
+              onClick={() =>
+                void exportReservationAgreement(id, 'xlsx')
+                  .then(saveFile)
+                  .catch((e: unknown) =>
+                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                  )
+              }
+            >
+              Export XLSX
+            </Button>
+            <Button
+              onClick={() =>
+                void exportReservationAgreement(id, 'pdf')
+                  .then(saveFile)
+                  .catch((e: unknown) =>
+                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                  )
+              }
+            >
+              Export PDF
+            </Button>
+          </>
+        ) : null}
+      </p>
     </section>
   );
 }

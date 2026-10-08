@@ -56,6 +56,8 @@ vi.mock('./features/business/services', () => ({
   getActivationQueue: vi.fn(),
   getCommissions: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(async () => ({ data: [], total: 0 })),
+  getCustomerById: vi.fn(),
   getCardProducts: vi.fn(),
   getCardCategories: vi.fn(),
 }));

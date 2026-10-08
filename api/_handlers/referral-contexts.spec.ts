@@ -445,6 +445,20 @@ async function callPortal(path: string): Promise<State> {
 /* ================================================================== */
 
 describe('OST sponsorship keeps the Sales Manager rule', () => {
+  it('maps authoritative registration rejection into a safe referral-specific message', async () => {
+    const db = install();
+    db.rpcErrors.submit_ost_accreditation = { message: 'INVALID_REFERRAL_CODE' };
+    const result = await callOst({
+      method: 'POST',
+      familyPath: 'applications',
+      token: null,
+      body: officialApplicant,
+    });
+    expect(result.status).toBe(400);
+    expect(messageOf(result)).toMatch(
+      /referral code is expired, revoked, exhausted, or unavailable/i,
+    );
+  });
   it('public resolution of a non-SM-sponsored code keeps the SM-only refusal', async () => {
     install();
     const s = await callOst({ familyPath: `referrals/${NON_SM_CODE}`, token: null });
@@ -532,6 +546,156 @@ describe('OST approval sponsor re-validation', () => {
 /* ================================================================== */
 
 describe('referral-code issuance validates the issuer', () => {
+  it.each(['inactive_role', 'missing_assignment'])(
+    'rejects sponsor eligibility after %s',
+    async (state) => {
+      const db = install();
+      if (state === 'inactive_role')
+        db.rows('roles').find((r) => r.id === 'r-sm')!.is_active = false;
+      else
+        db.tables.staff_role_assignments = db
+          .rows('staff_role_assignments')
+          .filter((r) => r.staff_id !== SM_ID);
+      const result = await callOst({
+        method: 'POST',
+        familyPath: 'referral-codes',
+        token: ADMIN_TOKEN,
+        body: { sponsorStaffId: SM_ID, rotate: true },
+      });
+      expect(result.status).toBe(409);
+    },
+  );
+  it.each(['admin', 'super_admin'])(
+    '%s records the actor separately from the selected SM',
+    async (slug) => {
+      const db = install();
+      db.rows('roles').find((r) => r.id === 'r-admin')!.slug = slug;
+      const result = await callOst({
+        method: 'POST',
+        familyPath: 'referral-codes',
+        token: ADMIN_TOKEN,
+        body: { sponsorStaffId: SM_ID, rotate: true },
+      });
+      expect(result.status).toBe(201);
+      expect(db.rows('referral_codes').at(-1)).toMatchObject({
+        sponsor_staff_id: SM_ID,
+        created_by: ADMIN_ID,
+      });
+      const list = await callOst({
+        familyPath: 'referral-codes/me',
+        token: ADMIN_TOKEN,
+        query: { sponsorStaffId: SM_ID },
+      });
+      expect(list.status).toBe(200);
+      expect(JSON.stringify(list.body)).not.toContain(db.rows('referral_codes').at(-1)?.code_hash);
+      expect(JSON.stringify(db.rows('audit_events'))).not.toContain(
+        (result.body as { code: string }).code,
+      );
+      expect(JSON.stringify(db.rows('audit_events'))).not.toContain(
+        db.rows('referral_codes').at(-1)?.code_hash,
+      );
+    },
+  );
+  it('rotation immediately invalidates the old code and the replacement resolves to the same sponsor', async () => {
+    install();
+    const issued = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: ADMIN_TOKEN,
+      body: { sponsorStaffId: SM_ID, rotate: true },
+    });
+    expect(issued.status).toBe(201);
+    expect((await callOst({ familyPath: `referrals/${RAW_CODE}`, token: null })).status).toBe(409);
+    const code = (issued.body as { code: string }).code;
+    const resolved = await callOst({ familyPath: `referrals/${code.toLowerCase()}`, token: null });
+    expect(resolved.status).toBe(200);
+    expect(resolved.body).toMatchObject({ sponsorName: 'Sam Manager' });
+  });
+  it.each(['expired', 'revoked', 'exhausted'])(
+    'rejects %s codes on public resolution',
+    async (state) => {
+      const db = install();
+      const row = db.rows('referral_codes').find((r) => r.id === CODE_ID)!;
+      if (state === 'expired') row.expires_at = ago(1);
+      if (state === 'revoked') row.is_active = false;
+      if (state === 'exhausted') row.use_count = row.max_uses;
+      expect((await callOst({ familyPath: `referrals/${RAW_CODE}`, token: null })).status).toBe(
+        409,
+      );
+    },
+  );
+  it('rejects a nonexistent sponsor without issuing', async () => {
+    const db = install();
+    const before = db.rows('referral_codes').length;
+    const result = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: ADMIN_TOKEN,
+      body: { sponsorStaffId: '00000000-0000-4000-8000-000000000001' },
+    });
+    expect(result.status).toBe(404);
+    expect(db.rows('referral_codes')).toHaveLength(before);
+  });
+  it.each([EMP_TOKEN, FIN_TOKEN, CUSTOMER_TOKEN])(
+    'denies unauthorized issuer %s',
+    async (token) => {
+      const db = install();
+      const before = db.rows('referral_codes').length;
+      expect(
+        (
+          await callOst({
+            method: 'POST',
+            familyPath: 'referral-codes',
+            token,
+            body: { sponsorStaffId: SM_ID, rotate: true },
+          })
+        ).status,
+      ).toBe(403);
+      expect(db.rows('referral_codes')).toHaveLength(before);
+    },
+  );
+  it('denies OST issuance even with a referral view grant', async () => {
+    const db = install();
+    db.rows('roles').find((r) => r.id === 'r-vd')!.slug = 'ost';
+    expect(
+      (
+        await callOst({
+          method: 'POST',
+          familyPath: 'referral-codes',
+          token: VD_TOKEN,
+          body: { sponsorStaffId: SM_ID, rotate: true },
+        })
+      ).status,
+    ).toBe(403);
+  });
+  it.each(['FORBIDDEN:', 'VALIDATION_ERROR:'])(
+    'maps RPC %s without leaking SQL details',
+    async (prefix) => {
+      const db = install();
+      db.rpcErrors.manage_ost_referral_code = { message: prefix + ' SQL PRIVATE DETAIL' };
+      const result = await callOst({
+        method: 'POST',
+        familyPath: 'referral-codes',
+        token: SM_TOKEN,
+        body: { rotate: true },
+      });
+      expect(result.status).toBe(prefix === 'FORBIDDEN:' ? 403 : 400);
+      expect(JSON.stringify(result.body)).not.toContain('SQL PRIVATE DETAIL');
+    },
+  );
+  it('returns a readable 409 for a second ordinary issue without changing credentials', async () => {
+    const db = install();
+    const before = JSON.stringify(db.rows('referral_codes'));
+    const result = await callOst({
+      method: 'POST',
+      familyPath: 'referral-codes',
+      token: SM_TOKEN,
+      body: { maxUses: 5, expiresInHours: 72 },
+    });
+    expect(result.status).toBe(409);
+    expect(messageOf(result)).toMatch(/active referral code already exists/i);
+    expect(JSON.stringify(db.rows('referral_codes'))).toBe(before);
+  });
   it('a non-SM issuing for themselves gets an issuance-specific refusal and no code row', async () => {
     const db = install();
     const before = db.rows('referral_codes').length;
@@ -622,9 +786,9 @@ describe('referral-code issuance validates the issuer', () => {
   it('refuses an inactive Sales Manager as sponsor and writes no row', async () => {
     const db = install();
     // Same active sales_manager role, but the staff member is suspended.
-    db.tables.staff_users = db.rows('staff_users').map((s) =>
-      s.id === SM_ID ? { ...s, status: 'suspended' } : s,
-    );
+    db.tables.staff_users = db
+      .rows('staff_users')
+      .map((s) => (s.id === SM_ID ? { ...s, status: 'suspended' } : s));
     const before = db.rows('referral_codes').length;
     const s = await callOst({
       method: 'POST',
@@ -690,7 +854,10 @@ describe('referral-code issuance validates the issuer', () => {
       body: { maxUses: 5, expiresInHours: 72 },
     });
     expect(
-      db.rows('audit_events').slice(before).map((e) => String(e.action)),
+      db
+        .rows('audit_events')
+        .slice(before)
+        .map((e) => String(e.action)),
     ).toContain('REFERRAL_CODE_ISSUED');
 
     // Second issuance over an existing live code, with rotate: ROTATED.
@@ -702,7 +869,10 @@ describe('referral-code issuance validates the issuer', () => {
       body: { maxUses: 5, expiresInHours: 72, rotate: true },
     });
     expect(
-      db.rows('audit_events').slice(before).map((e) => String(e.action)),
+      db
+        .rows('audit_events')
+        .slice(before)
+        .map((e) => String(e.action)),
     ).toContain('REFERRAL_CODE_ROTATED');
   });
 });
