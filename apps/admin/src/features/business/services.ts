@@ -286,6 +286,43 @@ export const getCustomerApplications = (
     customerApplicationListItemSchema,
   );
 };
+
+/**
+ * One server-paginated application page. The list endpoint already accepts
+ * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
+ * (plain `getCustomerApplications` drops it) so the queue can page at 10 rows.
+ */
+export const getCustomerApplicationsPage = (
+  params: {
+    status?: string;
+    tier?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+    /** Omit to see every application, including progressed ones. */
+    queue?: 'application_work';
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{ data: CustomerApplicationListItem[]; total: number }> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.tier) query.set('tier', params.tier);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.search) query.set('search', params.search);
+  if (params.queue) query.set('queue', params.queue);
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  const suffix = query.toString();
+  return requestListEnvelope(
+    `/official-forms/customer-applications${suffix ? `?${suffix}` : ''}`,
+    customerApplicationListItemSchema,
+  ).then(({ data, meta }) => ({
+    data,
+    total: typeof meta.total === 'number' ? meta.total : data.length,
+  }));
+};
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
   request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
 export const registerCustomerApplication = (
@@ -387,6 +424,43 @@ export const getReservationAgreements = (
     `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,
     reservationAgreementListItemSchema,
   );
+};
+
+/**
+ * One server-paginated reservation page. The list endpoint already accepts
+ * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
+ * (plain `getReservationAgreements` drops it) so the queue can page at 10 rows.
+ */
+export const getReservationAgreementsPage = (
+  params: {
+    status?: string;
+    tier?: string;
+    from?: string;
+    to?: string;
+    search?: string;
+    /** Omit to see every agreement, including executed ones. */
+    queue?: 'reservation_work';
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{ data: ReservationAgreementListItem[]; total: number }> => {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.tier) query.set('tier', params.tier);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.search) query.set('search', params.search);
+  if (params.queue) query.set('queue', params.queue);
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  const suffix = query.toString();
+  return requestListEnvelope(
+    `/official-forms/reservations${suffix ? `?${suffix}` : ''}`,
+    reservationAgreementListItemSchema,
+  ).then(({ data, meta }) => ({
+    data,
+    total: typeof meta.total === 'number' ? meta.total : data.length,
+  }));
 };
 /**
  * The agreement is read as a discriminated union, because that is what it is: a

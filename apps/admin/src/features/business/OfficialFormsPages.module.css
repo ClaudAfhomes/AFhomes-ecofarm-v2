@@ -33,3 +33,162 @@
   font-size: 14px;
   font-weight: 600;
 }
+
+/* Editor top-level section: breathing room between the header, the guidance
+   alert, and the first panel. */
+.editorSection {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* Editor form root: the disabling wrapper stays a fieldset for behavior, but
+   renders borderless so the panels below carry the visual structure. */
+.formRoot {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-5);
+}
+
+/* Numbered editor panels, same card pattern as the redemption and
+   import/export workflows. Works on <section> and <fieldset> alike. */
+.panel {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  font-size: var(--text-h3);
+}
+
+/* Inner grouping inside a panel: borderless, semibold legend. */
+.subGroup {
+  border: 0;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  min-width: 0;
+}
+
+.subGroupTitle {
+  padding: 0;
+  font-weight: 600;
+}
+
+.hint {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Real editor grid replacing the undefined `form-grid` class: responsive
+   columns on desktop, one column on narrow screens. */
+.editorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4);
+}
+
+.editorGrid > * {
+  min-width: 0;
+}
+
+.editorGrid input:not([type='checkbox']):not([type='file']),
+.editorGrid select,
+.editorGrid textarea {
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* Sticky save bar: the primary action stays reachable on long forms. */
+.stickyFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: var(--space-2);
+  padding: var(--space-3) 0;
+  background-color: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.stickyFooterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@media (max-width: 639px) {
+  .editorGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stickyFooterActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .stickyFooterActions > * {
+    width: 100%;
+  }
+}
+
+/* Inline action rows inside panels. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.fileName {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Searchable customer picker: search field, name-only dropdown, and the
+   selection line beneath it. */
+.pickerWrap {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.pickedLine {
+  margin: 0;
+  font-size: var(--text-body-s);
+}
+
+/* Checkbox rows with full touch targets. */
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+/* Pagination footer: page controls with the record range below them. */
+.pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.paginationRange {
+  margin: 0;
+}

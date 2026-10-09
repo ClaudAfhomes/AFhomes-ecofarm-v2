@@ -141,8 +141,7 @@ type LocationRefusal = { status: number; message: string };
  * would let a refusal fall through as a holder and vice versa.
  */
 type LocationResult =
-  | { ok: true; holder: Record<string, unknown> }
-  | { ok: false; refusal: LocationRefusal };
+  { ok: true; holder: Record<string, unknown> } | { ok: false; refusal: LocationRefusal };
 
 /**
  * Re-resolve a submitted location against the official hierarchy and RETURN THE
@@ -1059,7 +1058,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...header
         } = newRegistration.data;
         const locations = await resolveHolderLocations(primary, secondary);
-        if ('status' in locations) return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
+        if ('status' in locations)
+          return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
         const { data, error } = await db.rpc('register_customer_application_once', {
           p_request_id: requestId,
           p_actor_id: auth.userId,
@@ -1082,7 +1082,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
       const { primary, secondary, requestId, ...header } = parsed.data;
       const locations = await resolveHolderLocations(primary, secondary);
-      if ('status' in locations) return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
+      if ('status' in locations)
+        return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
       const { data, error } = await db.rpc('create_customer_application_once', {
         p_request_id: requestId,
         p_actor_id: auth.userId,
@@ -1100,11 +1101,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Creation and audit are atomic in the idempotent RPC.
       return res.status(201).json(await getApplication(db, id));
     }
-    const appGet = route(req, 'GET', /^customer-applications\/([0-9a-f-]+)$/);
+    // Accept uppercase hex too (hand-typed or copied links): ids are
+    // canonicalized to lowercase before the lookup so casing never 404s.
+    const appGet = route(req, 'GET', /^customer-applications\/([0-9a-fA-F-]+)$/);
     if (appGet) {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
-      const found = await getApplication(db, appGet[1]!);
+      const found = await getApplication(db, appGet[1]!.toLowerCase());
       return found
         ? res.status(200).json(found)
         : fail(res, 'NOT_FOUND', 'Customer application not found', 404);

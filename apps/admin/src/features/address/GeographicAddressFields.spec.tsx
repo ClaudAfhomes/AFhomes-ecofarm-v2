@@ -121,9 +121,12 @@ describe('GeographicAddressFields structure', () => {
     expect(barangay()).toBeDisabled();
   });
 
-  it('says why a level is unavailable', () => {
+  it('keeps locked levels hint-free instead of narrating their parent', () => {
     setup();
-    expect(screen.getAllByText('Select a province first').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Select a province first')).not.toBeInTheDocument();
+    expect(screen.queryByText('Select a city or municipality first')).not.toBeInTheDocument();
+    expect(locality()).toBeDisabled();
+    expect(barangay()).toBeDisabled();
   });
 
   it('keeps a city visibly distinct from a municipality', async () => {

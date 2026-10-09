@@ -50,7 +50,7 @@ export function IdCapturePicker({
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <input
         key={`upload-${resetVersion}`}
         ref={upload}

@@ -253,11 +253,15 @@ it('primary landline shows a field error and prevents save; empty clears the err
   await user.type(input, '09ABC123456');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  // Save lives in the header and the sticky footer alike; both share state.
+  expect(screen.getAllByRole('button', { name: 'Save draft' })).toHaveLength(2);
+  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+    expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
   expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+    expect(save).toBeEnabled();
 });
 it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);
@@ -270,7 +274,8 @@ it('supplementary landline gets its own frontend error', async () => {
   const input = screen.getAllByLabelText('Landline')[1]!;
   await user.type(input, 'PHONE123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+    expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
 it('recommender contact gets its own frontend error and valid formatting is allowed', async () => {
@@ -278,11 +283,13 @@ it('recommender contact gets its own frontend error and valid formatting is allo
   const input = screen.getByLabelText('Recommender Contact');
   await user.type(input, '0917TEST');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+    expect(save).toBeDisabled();
   await user.clear(input);
   await user.type(input, '0917-123-4567');
   expect(input).not.toHaveAttribute('aria-invalid');
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+    expect(save).toBeEnabled();
 });
 
 it.each(['Silver', 'Bronze', 'Select plan'])(
@@ -295,13 +302,13 @@ it.each(['Silver', 'Bronze', 'Select plan'])(
       screen.getByRole('option', { name: 'Gold' }),
     );
     await user.click(screen.getByLabelText(/Add optional Gold secondary/));
-    expect(screen.getByRole('group', { name: /SECONDARY CARDHOLDER/ })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /Secondary holder/ })).toBeInTheDocument();
     await user.selectOptions(
       screen.getByLabelText('VIP plan'),
       screen.getByRole('option', { name: label }),
     );
     expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
     expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
-    expect(screen.queryByRole('group', { name: /SECONDARY CARDHOLDER/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /Secondary holder/ })).not.toBeInTheDocument();
   },
 );

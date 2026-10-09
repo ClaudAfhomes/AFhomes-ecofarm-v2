@@ -1,7 +1,7 @@
 import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { HumanInputValidity } from '../../lib/human-input-validity';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type {
@@ -24,6 +24,7 @@ import {
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { formatDateTime } from '../../lib/format';
+import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
@@ -39,6 +40,7 @@ import {
   ErrorState,
   FilterBar,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
   Skeleton,
@@ -71,7 +73,9 @@ import {
   getCardProducts,
   getCustomerApplication,
   getCustomerApplications,
-  getCustomers,
+  getCustomerApplicationsPage,
+  getCustomerById,
+  getCustomersPage,
   getOfficialFormTemplate,
   getPurchaseTermsProposal,
   getReservationPayments,
@@ -81,6 +85,7 @@ import {
   finalizeReservationPurchase,
   getReservationAgreement,
   getReservationAgreements,
+  getReservationAgreementsPage,
   getSaleSummary,
   getSales,
   previewOfficialFormImport,
@@ -147,9 +152,10 @@ function Field({
     Boolean(validator && !validator.safeParse(value).success && (required || value !== ''));
   const errorMessage = 'Enter a valid past birth date.';
   return (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span id={`${id}-label`}>{label}</span>
+    <label className={styles.filterLabel} htmlFor={id}>
+      <span>{label}</span>
       <NormalizedInput
+        id={id}
         landline={/landline/i.test(label)}
         normalize={normalize}
         suggestName={isName}
@@ -157,7 +163,6 @@ function Field({
         inputMode={isPhone ? 'tel' : undefined}
         value={value}
         required={required}
-        aria-labelledby={`${id}-label`}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
@@ -191,11 +196,11 @@ function DateField({
   const todayValue = new Date().toISOString().slice(0, 10);
   const error = touched && (required || value !== '') && !birthDateSchema.safeParse(value).success;
   return (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span id={`${id}-label`}>{label}</span>
+    <label className={styles.filterLabel} htmlFor={id}>
+      <span>{label}</span>
       <input
+        id={id}
         type="date"
-        aria-labelledby={`${id}-label`}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         value={value}
@@ -227,9 +232,9 @@ function HolderFields({
 }) {
   const set = (key: keyof ApplicationHolder, next: string) => onChange({ ...value, [key]: next });
   return (
-    <fieldset>
-      <legend>{title}</legend>
-      <div className="form-grid">
+    <fieldset className={styles.panel}>
+      <legend className={styles.panelTitle}>{title}</legend>
+      <div className={styles.editorGrid}>
         <Field
           label="Last name"
           value={value.lastName}
@@ -380,6 +385,52 @@ function HolderFields({
   );
 }
 
+/** Fixed queue page size. The server also enforces its own max (200). */
+const QUEUE_PAGE_SIZE = 10;
+
+/**
+ * Recommender fields with explicit human labels (never generated from keys),
+ * so renaming a label cannot silently rename the payload field.
+ */
+function RecommenderFields({
+  meta,
+  onChange,
+}: {
+  meta: {
+    salesManagerName: string;
+    vipRecommenderName: string;
+    recommenderContact: string;
+    recommenderEmail: string;
+    vipReferrer: string;
+    acknowledgedAt: string;
+  };
+  onChange: (key: keyof typeof meta, value: string) => void;
+}) {
+  const fields = [
+    { key: 'salesManagerName', label: 'Sales Manager Name', optionalPhone: false },
+    { key: 'vipRecommenderName', label: 'VIP Recommender Name', optionalPhone: false },
+    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
+    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
+    { key: 'vipReferrer', label: 'VIP Referrer', optionalPhone: false },
+    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
+  ] as const;
+  return (
+    <>
+      {fields.map(({ key, label, optionalPhone }) => (
+        <Field
+          key={key}
+          label={label}
+          value={meta[key]}
+          type={key === 'acknowledgedAt' ? 'date' : 'text'}
+          normalize={(v) => normalizeLiveHumanField(key, v)}
+          optionalPhone={optionalPhone}
+          onChange={(v) => onChange(key, v)}
+        />
+      ))}
+    </>
+  );
+}
+
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
@@ -387,10 +438,18 @@ export function CustomerApplicationsPage() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [page, setPage] = useState(0);
   // Default: only applications that still need APPLICATION work. Turning this
   // off reveals the progressed history, which is never deleted or archived.
   const [applicationWorkOnly, setApplicationWorkOnly] = useState(true);
-  const debouncedSearch = useDebouncedValue(search);
+  // Realtime search: pagination resets only when the settled term changes.
+  const settledSearch = useRef('');
+  const debouncedSearch = useDebouncedValue(search, 300, (term) => {
+    const next = term.trim();
+    if (next === settledSearch.current) return;
+    settledSearch.current = next;
+    setPage(0);
+  });
   const query = useQuery({
     queryKey: [
       'customer-applications',
@@ -400,19 +459,39 @@ export function CustomerApplicationsPage() {
       from,
       to,
       applicationWorkOnly,
+      page,
     ],
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
-      getCustomerApplications({
+      getCustomerApplicationsPage({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
         ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
+        limit: QUEUE_PAGE_SIZE,
+        offset: page * QUEUE_PAGE_SIZE,
       }),
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
+  const rows = query.data?.data ?? [];
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  // A shrunken result can leave the page past the last one. Correct during
+  // render on a total change (the documented previous-value pattern, not an
+  // effect); display clamps meanwhile.
+  const [prevTotal, setPrevTotal] = useState(total);
+  if (prevTotal !== total) {
+    setPrevTotal(total);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
   // First load skeletonizes the whole page - header, filters, and table - so
   // no static content flashes before the data it describes. Refetches keep the
   // previous list visible and never reach this branch.
@@ -472,7 +551,10 @@ export function CustomerApplicationsPage() {
               <Select
                 aria-label="Queue"
                 value={applicationWorkOnly ? 'application_work' : 'all'}
-                onChange={(e) => setApplicationWorkOnly(e.target.value === 'application_work')}
+                onChange={(e) => {
+                  setApplicationWorkOnly(e.target.value === 'application_work');
+                  setPage(0);
+                }}
                 options={[
                   { value: 'application_work', label: 'Needs application work' },
                   { value: 'all', label: 'Include progressed' },
@@ -484,7 +566,10 @@ export function CustomerApplicationsPage() {
               <Select
                 aria-label="Status"
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(0);
+                }}
                 options={[
                   { value: '', label: 'All' },
                   ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
@@ -499,7 +584,10 @@ export function CustomerApplicationsPage() {
               <Select
                 aria-label="Tier"
                 value={tier}
-                onChange={(e) => setTier(e.target.value)}
+                onChange={(e) => {
+                  setTier(e.target.value);
+                  setPage(0);
+                }}
                 options={[
                   { value: '', label: 'All' },
                   ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
@@ -512,7 +600,10 @@ export function CustomerApplicationsPage() {
                 aria-label="From date"
                 type="date"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setPage(0);
+                }}
               />
             </label>
             <label className={styles.filterLabel}>
@@ -521,7 +612,10 @@ export function CustomerApplicationsPage() {
                 aria-label="To date"
                 type="date"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setPage(0);
+                }}
               />
             </label>
           </>
@@ -533,7 +627,7 @@ export function CustomerApplicationsPage() {
           title="Applications could not be loaded"
           onRetry={() => void query.refetch()}
         />
-      ) : query.data?.length ? (
+      ) : rows.length ? (
         <div
           role="region"
           aria-label="Customer application records"
@@ -551,7 +645,7 @@ export function CustomerApplicationsPage() {
               </tr>
             </thead>
             <tbody>
-              {query.data.map((app) => (
+              {rows.map((app) => (
                 <tr
                   key={app.id}
                   tabIndex={0}
@@ -582,6 +676,24 @@ export function CustomerApplicationsPage() {
           description="Create the first official application draft."
         />
       )}
+
+      {total > 0 ? (
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Customer applications pagination"
+          />
+          <span
+            role="status"
+            aria-label="Application record range"
+            className={styles.paginationRange}
+          >
+            Showing {rangeFrom}–{rangeTo} of {total}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -604,6 +716,26 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
       return tail ? `${tail}: ${issue.message}` : issue.message;
     })
     .join(' ');
+}
+
+/**
+ * Actionable detail-load guidance per failure cause. Raw server internals and
+ * stored values are never rendered (see `ErrorState`); each branch names the
+ * next step instead. Returns `undefined` for unknown errors so the shared
+ * generic message applies.
+ */
+function describeApplicationLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot open applications right now (role, password, or MFA). Contact an administrator.';
+  if (error instanceof ApiError && error.status === 404)
+    return 'No application exists at this link. Check the address, or open the record from the applications list.';
+  if (error instanceof ApiParseError)
+    return 'The saved record contains values this form cannot display. Note the application number and ask an administrator to review the record.';
+  return undefined;
 }
 
 /**
@@ -724,7 +856,6 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerApplication(id!),
     enabled: Boolean(id),
   });
-  const customers = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers() });
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
   // The server-authoritative offer. Nothing on this screen computes a price: the
   // proposal below is what the operator sees AND what the submit/review calls
@@ -763,6 +894,36 @@ export function CustomerApplicationEditorPage() {
   const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
   const [idPreview, setIdPreview] = useState<string | null>(null);
+  const xlsxInput = useRef<HTMLInputElement>(null);
+  const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
+  // Searchable customer picker: the directory is paged server-side, so the
+  // full customer list is never loaded into a native select. The chosen
+  // record resolves to a display name through the same single-customer query
+  // the detail page uses (shared cache key).
+  const [customerSearch, setCustomerSearch] = useState('');
+  const debouncedCustomerSearch = useDebouncedValue(customerSearch);
+  const customerOptions = useQuery({
+    queryKey: ['customer-picker', debouncedCustomerSearch],
+    queryFn: () =>
+      getCustomersPage({
+        ...(debouncedCustomerSearch ? { search: debouncedCustomerSearch } : {}),
+        limit: 10,
+        offset: 0,
+      }),
+  });
+  const linkedCustomer = useQuery({
+    queryKey: ['business', 'customer', customerId],
+    queryFn: () => getCustomerById(customerId),
+    enabled: Boolean(customerId),
+  });
+  const pickCustomer = (next: string) => {
+    setCustomerId(next);
+    setCustomerSearch('');
+    setOcrFile(null);
+    setPickerVersion((version) => version + 1);
+    setIdPreview(null);
+    setValidId(false);
+  };
   const documents = useQuery({
     queryKey: ['documents', 'customer', customerId],
     queryFn: () => getDocuments({ subjectType: 'customer', subjectId: customerId }),
@@ -844,6 +1005,14 @@ export function CustomerApplicationEditorPage() {
   // Same conditions, one derived list, rendered next to the button. Blocking is
   // unchanged; only the silence is removed. Transient states (a mutation in
   // flight) are deliberately NOT blockers - they are not something to fix.
+  //
+  // Save mirrors the submit pattern: the same contact/field checks that used
+  // to grey the button silently now read as an inline list in both modes.
+  const saveBlockers: string[] = [];
+  if (!optionalPhonesValid)
+    saveBlockers.push('Correct the recommender contact or landline number.');
+  if (Object.values(invalidFields).some(Boolean))
+    saveBlockers.push('Correct the highlighted fields.');
   const submitBlockers: string[] = [];
   if (!consent) submitBlockers.push('Certification and consent must be ticked.');
   if (!serverCurrentDocument?.reviewedFields?.idType)
@@ -900,11 +1069,7 @@ export function CustomerApplicationEditorPage() {
     mutationFn: () =>
       runSave(async () => {
         if (!planId) {
-          document
-            .querySelector<HTMLSelectElement>(
-              'select[aria-label="Customer"], select[name="customer"]',
-            )
-            ?.focus();
+          document.querySelector<HTMLInputElement>('input[aria-label="Customer"]')?.focus();
           throw new Error('Select a VIP plan before saving the registration application.');
         }
         if (!id && !customerId) {
@@ -1010,7 +1175,7 @@ export function CustomerApplicationEditorPage() {
     setTier((f.card_tier?.toUpperCase() || 'BRONZE') as typeof tier);
     setPaymentScheme((f.payment_scheme || 'spot_cash') as typeof paymentScheme);
     setChannels((f.acquisition_channels ?? '').split('|').filter(Boolean));
-    setMessage('Imported candidates — please verify every field before saving.');
+    setMessage('Imported candidates: please verify every field before saving.');
   };
   const ocr = useMutation({
     mutationFn: async () => {
@@ -1040,8 +1205,8 @@ export function CustomerApplicationEditorPage() {
       if (suggestedType.success) setIdType((current) => current || suggestedType.data);
       setMessage(
         doc.ocrStatus === 'completed'
-          ? 'OCR completed — review and correct suggestions before saving.'
-          : 'OCR failed — Enter details manually. Your private upload is retained.',
+          ? 'OCR completed: review and correct suggestions before saving.'
+          : 'OCR failed: enter details manually. Your private upload is retained.',
       );
     },
     onError: (e) =>
@@ -1139,7 +1304,7 @@ export function CustomerApplicationEditorPage() {
   });
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
-  const relatedCustomer = customers.data?.find((c) => c.id === customerId);
+  const relatedCustomer = linkedCustomer.data ?? null;
   if (id && existing.isPending) {
     return (
       <section>
@@ -1175,23 +1340,47 @@ export function CustomerApplicationEditorPage() {
         <ErrorState
           error={id && existing.isError ? existing.error : undefined}
           title="Application could not be loaded"
+          message={
+            id && existing.isError ? describeApplicationLoadError(existing.error) : undefined
+          }
           onRetry={() => void existing.refetch()}
         />
       </section>
     );
   }
+  // The primary action lives in the header and the sticky footer alike, so a
+  // long form never buries it. One element, rendered twice. Blocking matches
+  // the submit pattern: disabled with a visible inline list, never silent.
+  const saveAction = (
+    <Button
+      onClick={() => save.mutate()}
+      disabled={!editable || uploadId.isPending || ocr.isPending || saveBlockers.length > 0}
+      loading={save.isPending}
+      loadingLabel="Saving…"
+    >
+      Save draft
+    </Button>
+  );
   return (
     <HumanInputValidity.Provider value={reportValidity}>
-      <section>
+      <section className={styles.editorSection}>
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
           description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
           actions={
-            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
-              Back to applications
-            </Button>
+            <>
+              {saveAction}
+              <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+                Back to applications
+              </Button>
+            </>
           }
         />
+        <Alert variant="info" title="How this form works">
+          Saving creates a draft: choose a customer (or register one here), pick a plan, complete
+          the required holder fields, and tick certification. Submit, approval, and purchase terms
+          happen after the draft exists.
+        </Alert>
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1262,251 +1451,307 @@ export function CustomerApplicationEditorPage() {
             value. Snapshots freeze at submit; later plan edits never rewrite this application.
           </p>
         ) : null}
-        <fieldset disabled={!editable}>
-          <div className="form-grid">
-            <label>
-              Customer
-              <select
-                aria-label="Customer"
-                value={customerId}
-                required={Boolean(id)}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(e) => {
-                  setCustomerId(e.target.value);
-                  setOcrFile(null);
-                  setPickerVersion((version) => version + 1);
-                  setIdPreview(null);
-                  setValidId(false);
-                }}
+        <fieldset disabled={!editable} className={styles.formRoot}>
+          <section className={styles.panel} aria-labelledby="application-panel-heading">
+            <h2 id="application-panel-heading" className={styles.panelTitle}>
+              1. Application
+            </h2>
+            <p className={styles.hint}>
+              Who is applying, on which plan, and how they will pay. Start from a template or a
+              filled XLSX to skip manual entry.
+            </p>
+            <div className={styles.editorGrid}>
+              <div className={styles.pickerWrap}>
+                <SearchField
+                  label="Search customers"
+                  placeholder="Name, number, or email"
+                  value={customerSearch}
+                  onChange={setCustomerSearch}
+                  disabled={uploadId.isPending || ocr.isPending}
+                />
+                <label className={styles.filterLabel}>
+                  Customer
+                  <Select
+                    aria-label="Customer"
+                    value={customerId}
+                    disabled={uploadId.isPending || ocr.isPending}
+                    onChange={(e) => pickCustomer(e.target.value)}
+                    options={[
+                      { value: '', label: 'New customer: register with this application' },
+                      ...(customerOptions.data?.data.map((c) => ({
+                        value: c.id,
+                        label: c.fullName,
+                      })) ?? []),
+                    ]}
+                  />
+                </label>
+                {customerOptions.isPending ? (
+                  <div role="status" aria-label="Searching customers">
+                    <Skeleton style={{ height: 40 }} />
+                  </div>
+                ) : null}
+                {customerId ? (
+                  <p className={styles.pickedLine}>
+                    Selected: {linkedCustomer.data?.fullName ?? 'Loading customer…'}
+                  </p>
+                ) : (
+                  <p className={styles.hint}>
+                    No customer selected: a new customer will be registered with this application.
+                  </p>
+                )}
+              </div>
+              <label className={styles.filterLabel}>
+                VIP plan
+                <Select
+                  aria-label="VIP plan"
+                  value={planId}
+                  onChange={(e) => {
+                    const plan = plans.data?.find((p) => p.id === e.target.value);
+                    setPlanId(e.target.value);
+                    if (plan) setTier(plan.code as typeof tier);
+                    else setTier('BRONZE');
+                    if (plan?.code !== 'GOLD') setSecondary(null);
+                  }}
+                  options={[
+                    { value: '', label: 'Select plan' },
+                    ...(plans.data
+                      ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
+                      .map((p) => ({ value: p.id, label: p.name })) ?? []),
+                  ]}
+                />
+              </label>
+              <label className={styles.filterLabel}>
+                Payment scheme
+                <Select
+                  aria-label="Payment scheme"
+                  value={paymentScheme}
+                  onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
+                  options={[
+                    'spot_cash',
+                    'move_a',
+                    'installment_4_month',
+                    'move_b1_40_12',
+                    'move_b2_25_12',
+                  ].map((scheme) => ({
+                    value: scheme,
+                    label: paymentSchemeLabel(scheme as typeof paymentScheme),
+                  }))}
+                />
+              </label>
+            </div>
+            <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}
               >
-                <option value="">New customer — register with this application</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              VIP plan
-              <select
-                aria-label="VIP plan"
-                value={planId}
-                onChange={(e) => {
-                  const plan = plans.data?.find((p) => p.id === e.target.value);
-                  setPlanId(e.target.value);
-                  if (plan) setTier(plan.code as typeof tier);
-                  else setTier('BRONZE');
-                  if (plan?.code !== 'GOLD') setSecondary(null);
-                }}
-              >
-                <option value="">Select plan</option>
-                {plans.data
-                  ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Payment scheme
-              <select
-                value={paymentScheme}
-                onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
-              >
-                {[
-                  'spot_cash',
-                  'move_a',
-                  'installment_4_month',
-                  'move_b1_40_12',
-                  'move_b2_25_12',
-                ].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <p>
-            <Button onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}>
-              Download template
-            </Button>{' '}
-            <label>
-              Import XLSX{' '}
+                Download template
+              </Button>
               <input
+                ref={xlsxInput}
+                hidden
+                aria-label="Import XLSX file"
                 type="file"
                 accept=".xlsx"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) void importFile(file);
+                  if (file) {
+                    setChosenXlsx(file.name);
+                    void importFile(file);
+                  }
+                  e.target.value = '';
                 }}
               />
-            </label>
-          </p>
-          <fieldset>
-            <legend>VALID ID</legend>
-            <p>Valid ID: {validId ? 'Uploaded ✓' : 'Required / Missing'}</p>
-            {serverCurrentDocument ? (
-              <>
-                <p>Current ID: {serverCurrentDocument.originalFilename}</p>
-                <p>
-                  ID type:{' '}
-                  {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                    'Missing — review the identity document'}
-                </p>
-              </>
-            ) : null}
-            {ocrFile ? (
-              <div role="status">
-                <p>Replacement selected: {ocrFile.name} — Pending replacement. Not saved yet.</p>
-                <Button
-                  variant="secondary"
-                  disabled={uploadId.isPending || ocr.isPending}
-                  onClick={() => {
-                    setOcrFile(null);
-                    setPickerVersion((version) => version + 1);
-                  }}
-                >
-                  Cancel replacement
-                </Button>
-              </div>
-            ) : null}
-            <label>
-              ID Type *
-              <select
-                aria-label="ID Type"
-                value={idType}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(event) => setIdType(event.target.value)}
-              >
-                <option value="">Select ID type</option>
-                {governmentIdTypeSchema.options.map((value) => (
-                  <option key={value} value={value}>
-                    {value.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <IdCapturePicker
-              onFile={setOcrFile}
-              disabled={uploadId.isPending || ocr.isPending}
-              resetVersion={pickerVersion}
-            />
-            {ocrFile ? (
-              <p role="status">
-                Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
-                the OCR suggestions.
+              <Button variant="secondary" onClick={() => xlsxInput.current?.click()}>
+                Choose XLSX file
+              </Button>
+              {chosenXlsx ? (
+                <span role="status" className={styles.fileName}>
+                  Selected: {chosenXlsx}
+                </span>
+              ) : null}
+            </div>
+          </section>
+          <section className={styles.panel} aria-labelledby="identity-panel-heading">
+            <h2 id="identity-panel-heading" className={styles.panelTitle}>
+              2. Identity
+            </h2>
+            <p className={styles.hint}>
+              Prove who the primary holder is: capture the ID, detect its fields, then record the ID
+              type on the document. Nothing here stores an ID number.
+            </p>
+            <fieldset className={styles.subGroup}>
+              <legend className={styles.subGroupTitle}>Valid ID</legend>
+              <p>
+                <StatusChip
+                  label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
+                  tone={validId ? 'success' : 'warning'}
+                />
               </p>
-            ) : null}
-            <Button
-              onClick={() => ocr.mutate()}
-              disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
-              loading={ocr.isPending || uploadId.isPending}
-              loadingLabel="Processing…"
-            >
-              Detect fields
-            </Button>
-            {/* Submit requires an ID type recorded on the identity document, and
+              {serverCurrentDocument ? (
+                <>
+                  <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                  <p>
+                    ID type:{' '}
+                    {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
+                      'Missing: review the identity document'}
+                  </p>
+                </>
+              ) : null}
+              {ocrFile ? (
+                <div role="status">
+                  <p>
+                    Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).
+                  </p>
+                  <Button
+                    variant="secondary"
+                    disabled={uploadId.isPending || ocr.isPending}
+                    onClick={() => {
+                      setOcrFile(null);
+                      setPickerVersion((version) => version + 1);
+                    }}
+                  >
+                    Cancel replacement
+                  </Button>
+                </div>
+              ) : null}
+              <label className={styles.filterLabel}>
+                ID Type *
+                <Select
+                  aria-label="ID Type"
+                  value={idType}
+                  disabled={uploadId.isPending || ocr.isPending}
+                  onChange={(event) => setIdType(event.target.value)}
+                  options={[
+                    { value: '', label: 'Select ID type' },
+                    ...governmentIdTypeSchema.options.map((value) => ({
+                      value,
+                      label: value.replace(/_/g, ' '),
+                    })),
+                  ]}
+                />
+              </label>
+              <IdCapturePicker
+                onFile={setOcrFile}
+                disabled={uploadId.isPending || ocr.isPending}
+                resetVersion={pickerVersion}
+              />
+              {ocrFile ? (
+                <p role="status">
+                  Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
+                  the OCR suggestions.
+                </p>
+              ) : null}
+              <Button
+                onClick={() => ocr.mutate()}
+                disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
+                loading={ocr.isPending || uploadId.isPending}
+                loadingLabel="Processing…"
+              >
+                Detect fields
+              </Button>
+              {/* Submit requires an ID type recorded on the identity document, and
                 that field is only ever written by the document-confirm endpoint.
                 Without this the requirement is unreachable from this screen and
                 Submit stays disabled after a successful upload, so the reviewer
                 records the ID type here through the same secure document
                 pipeline. The gate itself is unchanged. */}
-            {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
-              <p role="status">
-                Submit needs the ID type recorded against this identity document.{' '}
-                <Button
-                  variant="secondary"
-                  disabled={!idType || uploadId.isPending}
-                  loading={confirmIdType.isPending}
-                  loadingLabel="Recording…"
-                  onClick={() => confirmIdType.mutate()}
-                >
-                  Record ID type on this ID
-                </Button>
-              </p>
-            ) : null}
-            {serverCurrentDocument ? (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => previewId.mutate(serverCurrentDocument.id)}
-                >
-                  Preview uploaded ID
-                </Button>
-                <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
-                  Review identity document
-                </Link>
-              </>
-            ) : null}
-            {serverCurrentDocument ? (
-              <div>
-                <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
-                {Object.entries(serverCurrentDocument.extractedFields).length ? (
-                  <>
-                    <p>
-                      Detected suggestions — verify against the ID and correct the form manually. ID
-                      numbers remain masked; use document review to confirm them.
-                    </p>
-                    <dl>
-                      {Object.entries(serverCurrentDocument.extractedFields).map(([key, field]) => (
-                        <div key={key}>
-                          <dt>{key}</dt>
-                          <dd>
-                            {field.value ?? 'Not detected'}
-                            {field.confidence !== null
-                              ? ` (${Math.round(field.confidence * 100)}% confidence)`
-                              : ''}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-            {idPreview ? (
-              <a href={idPreview} target="_blank" rel="noreferrer">
-                Open short-lived private ID preview
-              </a>
-            ) : null}
-            {documents.data
-              ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
-              .map((doc) => (
-                <p key={doc.id}>
-                  Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
-                  <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
-                    Preview
-                  </Button>
-                </p>
-              ))}
-            {documents.data
-              ?.filter((doc) => !doc.hasFile)
-              .map((doc) => (
-                <p key={doc.id}>
-                  Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
+              {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
+                <p role="status">
+                  Submit needs the ID type recorded against this identity document.{' '}
                   <Button
-                    size="sm"
                     variant="secondary"
-                    disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
-                    onClick={() => uploadId.mutate(doc.id)}
+                    disabled={!idType || uploadId.isPending}
+                    loading={confirmIdType.isPending}
+                    loadingLabel="Recording…"
+                    onClick={() => confirmIdType.mutate()}
                   >
-                    Verify saved upload
+                    Record ID type on this ID
                   </Button>
                 </p>
-              ))}
-            {currentDocument.isError ? (
-              <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
-            ) : null}
-            {documents.isError ? (
-              <p role="status">
-                Existing ID documents could not be loaded. Document permissions still apply.
-              </p>
-            ) : null}
-          </fieldset>
-          <HolderFields title="PRIMARY CARDHOLDER" value={primary} onChange={setPrimary} />
-          <label>
+              ) : null}
+              {serverCurrentDocument ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => previewId.mutate(serverCurrentDocument.id)}
+                  >
+                    Preview uploaded ID
+                  </Button>
+                  <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
+                    Review identity document
+                  </Link>
+                </>
+              ) : null}
+              {serverCurrentDocument ? (
+                <div>
+                  <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
+                  {Object.entries(serverCurrentDocument.extractedFields).length ? (
+                    <>
+                      <p>
+                        Detected suggestions: verify against the ID and correct the form manually.
+                        ID numbers remain masked; use document review to confirm them.
+                      </p>
+                      <dl>
+                        {Object.entries(serverCurrentDocument.extractedFields).map(
+                          ([key, field]) => (
+                            <div key={key}>
+                              <dt>{key}</dt>
+                              <dd>
+                                {field.value ?? 'Not detected'}
+                                {field.confidence !== null
+                                  ? ` (${Math.round(field.confidence * 100)}% confidence)`
+                                  : ''}
+                              </dd>
+                            </div>
+                          ),
+                        )}
+                      </dl>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {idPreview ? (
+                <a href={idPreview} target="_blank" rel="noreferrer">
+                  Open short-lived private ID preview
+                </a>
+              ) : null}
+              {documents.data
+                ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
+                .map((doc) => (
+                  <p key={doc.id}>
+                    Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
+                    <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
+                      Preview
+                    </Button>
+                  </p>
+                ))}
+              {documents.data
+                ?.filter((doc) => !doc.hasFile)
+                .map((doc) => (
+                  <p key={doc.id}>
+                    Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
+                      onClick={() => uploadId.mutate(doc.id)}
+                    >
+                      Verify saved upload
+                    </Button>
+                  </p>
+                ))}
+              {currentDocument.isError ? (
+                <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
+              ) : null}
+              {documents.isError ? (
+                <p role="status">
+                  Existing ID documents could not be loaded. Document permissions still apply.
+                </p>
+              ) : null}
+            </fieldset>
+          </section>
+          <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+          <label className={styles.checkRow}>
             <input
               type="checkbox"
               checked={Boolean(secondary)}
@@ -1517,31 +1762,22 @@ export function CustomerApplicationEditorPage() {
           </label>
           {secondary ? (
             <HolderFields
-              title="SECONDARY CARDHOLDER — GOLD OPTIONAL"
+              title="4. Secondary holder (gold optional)"
               value={secondary}
               onChange={setSecondary}
             />
           ) : null}
-          <fieldset>
-            <legend>VIP RECOMMENDER'S DETAILS</legend>
-            <div className="form-grid">
-              {Object.entries(meta).map(([key, value]) => (
-                <Field
-                  key={key}
-                  label={key
-                    .replace(/[A-Z]/g, (c) => ` ${c}`)
-                    .replace(/^./, (c) => c.toUpperCase())}
-                  value={value}
-                  type={key === 'acknowledgedAt' ? 'date' : 'text'}
-                  normalize={(v) => normalizeLiveHumanField(key, v)}
-                  optionalPhone={key === 'recommenderContact'}
-                  onChange={(v) => setMeta({ ...meta, [key]: v })}
-                />
-              ))}
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>5. Recommender details</legend>
+            <div className={styles.editorGrid}>
+              <RecommenderFields
+                meta={meta}
+                onChange={(key, value) => setMeta({ ...meta, [key]: value })}
+              />
             </div>
           </fieldset>
-          <fieldset>
-            <legend>CLIENT ACQUISITION CHANNEL</legend>
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>6. Acquisition channel</legend>
             {[
               'CMP',
               'DRP',
@@ -1551,7 +1787,7 @@ export function CustomerApplicationEditorPage() {
               'Referral',
               'FB Ads',
             ].map((channel) => (
-              <label key={channel}>
+              <label key={channel} className={styles.checkRow}>
                 <input
                   type="checkbox"
                   checked={channels.includes(channel)}
@@ -1567,9 +1803,9 @@ export function CustomerApplicationEditorPage() {
               </label>
             ))}
           </fieldset>
-          <fieldset>
-            <legend>APPLICATION CERTIFICATION</legend>
-            <label>
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>7. Certification</legend>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={consent}
@@ -1577,7 +1813,7 @@ export function CustomerApplicationEditorPage() {
               />{' '}
               I certify the information and consent to verification and processing under RA 10173.
             </label>
-            <label>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={validId}
@@ -1587,21 +1823,19 @@ export function CustomerApplicationEditorPage() {
             </label>
           </fieldset>
         </fieldset>
+        {saveBlockers.length > 0 ? (
+          <Alert variant="warning" title="Cannot save yet:">
+            <ul>
+              {saveBlockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+        <div className={styles.stickyFooter}>
+          <div className={styles.stickyFooterActions}>{saveAction}</div>
+        </div>
         <p>
-          <Button
-            onClick={() => save.mutate()}
-            disabled={
-              !editable ||
-              uploadId.isPending ||
-              ocr.isPending ||
-              !optionalPhonesValid ||
-              Object.values(invalidFields).some(Boolean)
-            }
-            loading={save.isPending}
-            loadingLabel="Saving…"
-          >
-            Save draft
-          </Button>{' '}
           {id && editable ? (
             <>
               {submitBlockers.length > 0 ? (
@@ -1742,32 +1976,93 @@ export function CustomerApplicationEditorPage() {
 }
 
 export function ReservationAgreementsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
   // deleted - 'Include progressed' brings the executed history back.
   const [reservationWorkOnly, setReservationWorkOnly] = useState(true);
-  const debouncedSearch = useDebouncedValue(search);
+  // Realtime search: pagination resets only when the settled term changes.
+  const settledSearch = useRef('');
+  const debouncedSearch = useDebouncedValue(search, 300, (term) => {
+    const next = term.trim();
+    if (next === settledSearch.current) return;
+    settledSearch.current = next;
+    setPage(0);
+  });
   const query = useQuery({
-    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly],
+    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly, page],
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
-      getReservationAgreements({
+      getReservationAgreementsPage({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
+        limit: QUEUE_PAGE_SIZE,
+        offset: page * QUEUE_PAGE_SIZE,
       }),
     // Agreement decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
+  const rows = query.data?.data ?? [];
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  // A shrunken result can leave the page past the last one. Correct during
+  // render on a total change (the documented previous-value pattern, not an
+  // effect); display clamps meanwhile.
+  const [prevTotal, setPrevTotal] = useState(total);
+  if (prevTotal !== total) {
+    setPrevTotal(total);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous list visible and never reach this branch.
+  if (query.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading reservations"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
   return (
     <section>
       <PageHeader
         title="IST Reservation Agreements"
         description="Agreements still awaiting reservation work. Once an agreement is executed, Finance owns collection and it moves to the payment queue; it stays readable and printable here with 'Include progressed'."
-        actions={<Link to="/admin/sales/reservations/new">New agreement</Link>}
+        actions={
+          <Button onClick={() => navigate('/admin/sales/reservations/new')}>New agreement</Button>
+        }
       />
       <FilterBar
         search={
@@ -1781,47 +2076,70 @@ export function ReservationAgreementsPage() {
         }
         filters={
           <>
-            <label>
+            <label className={styles.filterLabel}>
               Queue
-              <select
+              <Select
+                aria-label="Queue"
                 value={reservationWorkOnly ? 'reservation_work' : 'all'}
-                onChange={(e) => setReservationWorkOnly(e.target.value === 'reservation_work')}
-              >
-                <option value="reservation_work">Needs reservation work</option>
-                <option value="all">Include progressed</option>
-              </select>
+                onChange={(e) => {
+                  setReservationWorkOnly(e.target.value === 'reservation_work');
+                  setPage(0);
+                }}
+                options={[
+                  { value: 'reservation_work', label: 'Needs reservation work' },
+                  { value: 'all', label: 'Include progressed' },
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Status
-              <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All</option>
-                {['draft', 'submitted', 'executed', 'cancelled'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Status"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['draft', 'submitted', 'executed', 'cancelled'].map((s) => ({
+                    value: s,
+                    label: s[0]!.toUpperCase() + s.slice(1),
+                  })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Tier
-              <select value={tier} onChange={(e) => setTier(e.target.value)}>
-                <option value="">All</option>
-                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Tier"
+                value={tier}
+                onChange={(e) => {
+                  setTier(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                ]}
+              />
             </label>
           </>
         }
       />
-      {query.isPending ? (
-        <p role="status">Loading reservation agreements…</p>
-      ) : query.isError ? (
-        <ErrorState title="Agreements could not be loaded" onRetry={() => void query.refetch()} />
-      ) : query.data?.length ? (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+      {query.isError ? (
+        <ErrorState
+          error={query.error}
+          title="Agreements could not be loaded"
+          onRetry={() => void query.refetch()}
+        />
+      ) : rows.length ? (
+        <div
+          role="region"
+          aria-label="Reservation agreement records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -1833,18 +2151,23 @@ export function ReservationAgreementsPage() {
                 <th>Amount</th>
                 <th>Signatures</th>
                 <th>Status</th>
-                <th>Submitted</th>
-                <th>Created</th>
               </tr>
             </thead>
             <tbody>
-              {query.data.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <Link to={`/admin/sales/reservations/${item.id}`}>
-                      {item.reservationNumber}
-                    </Link>
-                  </td>
+              {rows.map((item) => (
+                <tr
+                  key={item.id}
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Review reservation ${item.reservationNumber}`}
+                  onClick={() => navigate(`/admin/sales/reservations/${item.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ')
+                      navigate(`/admin/sales/reservations/${item.id}`);
+                  }}
+                  className={styles.clickable}
+                >
+                  <td>{item.reservationNumber}</td>
                   <td>{item.applicantName ?? '—'}</td>
                   <td>{item.tier}</td>
                   <td>{item.saleId ?? 'Not finalized'}</td>
@@ -1857,20 +2180,10 @@ export function ReservationAgreementsPage() {
                       : 'Pending signature'}
                   </td>
                   <td>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        whiteSpace: 'nowrap',
-                        minWidth: 'max-content',
-                      }}
-                    >
-                      <StatusChip
-                        label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-                      />
-                    </span>
+                    <StatusChip
+                      label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                    />
                   </td>
-                  <td>{item.submittedAt ? formatDateTime(item.submittedAt) : '—'}</td>
-                  <td>{formatDateTime(item.createdAt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1882,6 +2195,24 @@ export function ReservationAgreementsPage() {
           description="Create an agreement from an existing card sale."
         />
       )}
+
+      {total > 0 ? (
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Reservation agreements pagination"
+          />
+          <span
+            role="status"
+            aria-label="Reservation record range"
+            className={styles.paginationRange}
+          >
+            Showing {rangeFrom}–{rangeTo} of {total}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2479,30 +2810,47 @@ export function ReservationAgreementEditorPage() {
         </p>
       </fieldset>
       <p>
-        <Button onClick={() => save.mutate()} disabled={!editable || save.isPending}>
-          {save.isPending
-            ? 'Saving…'
-            : applicationOrigin && !id
-              ? 'Create Reservation Agreement'
-              : 'Save draft'}
+        <Button
+          onClick={() => save.mutate()}
+          disabled={!editable}
+          loading={save.isPending}
+          loadingLabel="Saving…"
+        >
+          {applicationOrigin && !id ? 'Create Reservation Agreement' : 'Save draft'}
         </Button>{' '}
         {id && editable ? (
-          <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
+          <Button
+            onClick={() => submit.mutate()}
+            loading={submit.isPending}
+            loadingLabel="Submitting…"
+          >
             Submit
           </Button>
         ) : null}{' '}
         {id && existing.data?.status === 'submitted' ? (
           <>
-            <Button onClick={() => decide.mutate('executed')} disabled={decide.isPending}>
+            <Button
+              onClick={() => decide.mutate('executed')}
+              loading={decide.isPending}
+              loadingLabel="Executing…"
+            >
               Execute
             </Button>{' '}
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+            <Button
+              onClick={() => reopen.mutate()}
+              loading={reopen.isPending}
+              loadingLabel="Reopening…"
+            >
               Reopen to draft
             </Button>{' '}
           </>
         ) : null}{' '}
         {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-          <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+          <Button
+            onClick={() => decide.mutate('cancelled')}
+            loading={decide.isPending}
+            loadingLabel="Cancelling…"
+          >
             Cancel
           </Button>
         ) : null}{' '}
