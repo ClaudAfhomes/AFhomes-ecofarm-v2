@@ -174,9 +174,12 @@ export async function runActivationIntegrationChecks(world: World) {
     typeof row.fallback_code === 'string' && row.fallback_code.length > 0 &&
       typeof row.qr_token === 'string' && row.qr_token.length > 0 && row.already_active === false,
   );
+  // REBUILD: activation awards ZERO. The yearly points term is still frozen on
+  // the sale as contract metadata, but it is not credited to the member; points
+  // come only from an eligible completed purchase.
   check(
-    'the frozen yearly points were allocated',
-    Number(row.points_allocated) > 0,
+    'activation awards ZERO points (rebuild rule)',
+    Number(row.points_allocated) === 0,
     String(row.points_allocated),
   );
   check(
@@ -196,9 +199,33 @@ export async function runActivationIntegrationChecks(world: World) {
       [row.membership_id],
     )) === 1,
   );
+  // REBUILD: activation writes NO points ledger entry at all. The count must be
+  // unchanged, and the new account must reconcile at zero.
   check(
-    'the points ledger gained exactly one allocation entry',
-    (await count('select count(*)::int n from public.points_ledger')) === beforePoints + 1,
+    'activation wrote NO points ledger entry',
+    (await count('select count(*)::int n from public.points_ledger')) === beforePoints,
+  );
+  check(
+    'the new points account reconciles at zero against its ledger',
+    (await count(
+      `select count(*)::int n from public.points_accounts pa
+        where pa.membership_id = $1
+          and pa.balance <> 0
+          and pa.balance - pa.reversal_debt <> coalesce(
+                (select sum(l.amount) from public.points_ledger l where l.account_id = pa.id), 0)`,
+      [row.membership_id],
+    )) === 0,
+  );
+  check(
+    'activation stored the points-year anchor and opened the first period',
+    (await count(
+      `select count(*)::int n
+         from public.memberships m
+         join public.points_periods pp
+           on pp.account_id = (select id from public.points_accounts where membership_id = m.id)
+        where m.id = $1 and m.points_anniversary is not null`,
+      [row.membership_id],
+    )) === 1,
   );
   check(
     'the commission advanced to final_qualification_pending, never earned',
@@ -433,6 +460,15 @@ export async function runActivationIntegrationChecks(world: World) {
       `delete from public.points_ledger where account_id in
          (select pa.id from public.points_accounts pa join public.memberships m on m.id=pa.membership_id
            where m.sale_id = any($1::uuid[]))`,
+      [ownedSales],
+    );
+    // Activation now opens a points period for every membership, and
+    // points_periods.account_id is a RESTRICT foreign key, so the periods go
+    // before the accounts they belong to.
+    await db.query(
+      `delete from public.points_periods where account_id in
+         (select pa.id from public.points_accounts pa join public.memberships m on m.id=pa.membership_id
+          where m.sale_id = any($1::uuid[]))`,
       [ownedSales],
     );
     await db.query(

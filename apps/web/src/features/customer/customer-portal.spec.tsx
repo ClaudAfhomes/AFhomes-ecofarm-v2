@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+import { getCustomerPoints, getCustomerPointsPosition } from './services';
 import { CustomerSessionProvider } from '../../lib/customer-session';
 import { resetSupabaseClientForTest } from '../../lib/supabase';
 import { ApiError } from '../../lib/api/errors';
@@ -61,12 +62,35 @@ const MEMBERSHIP = {
   qrPayload: 'AFHOMES:MBS-000777',
 };
 
+/**
+ * The LEGACY summary. Its shape is FROZEN - a deployed client validates against
+ * exactly these five fields, so removing one, or changing what `balance` means,
+ * is a breaking change. `balance` here is the RAW account balance, not spendable.
+ */
 const POINTS = {
   membershipId: MEMBERSHIP.id,
   balance: 60000,
   lifetimeAllocated: 60000,
   lifetimeRedeemed: 0,
   updatedAt: '2026-01-05T02:00:00.000Z',
+};
+
+/**
+ * The NEW position endpoint, separately named so the richer shape is ADDITIVE
+ * rather than a silent replacement of the legacy summary above.
+ */
+const POSITION = {
+  membershipId: MEMBERSHIP.id,
+  balance: 60000,
+  annualCap: 100000,
+  remainingEarningCapacity: 40000,
+  spendable: 60000,
+  reversalDebt: 0,
+  periodStart: '2026-01-01T00:00:00.000Z',
+  periodEnd: '2027-01-01T00:00:00.000Z',
+  tier: 'GOLD' as const,
+  earnedThisPeriod: 60000,
+  redeemedThisPeriod: 20000,
 };
 
 const LEDGER = {
@@ -146,6 +170,7 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.set('/customer', ok(CUSTOMER));
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
+  routes.set('/customer/points/position', ok(POSITION));
   routes.set('/customer/points/ledger', list(LEDGER.data));
   for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
 }
@@ -446,18 +471,97 @@ describe('membership screen', () => {
 /* Points                                                               */
 /* ================================================================== */
 
-describe('points screen', () => {
-  it('shows the balance, lifetime totals and history', async () => {
+describe('points position vs legacy summary', () => {
+  /**
+   * The two endpoints are separate on purpose, and this is what proves it.
+   * `getCustomerPoints` keeps the deployed contract; `getCustomerPointsPosition`
+   * adds the three figures. If either were folded into the other, a deployed
+   * client would start failing validation the moment this branch deploys.
+   */
+  it('the new page reads the position endpoint, not the legacy summary', async () => {
     render('/customer/points');
-    const balanceCard = (await screen.findByRole('heading', { name: 'Balance' })).closest(
+    await screen.findByRole('heading', { name: 'Your points' });
+    const paths = (globalThis.fetch as unknown as { mock: { calls: [unknown][] } }).mock.calls.map(
+      (call) => String(call[0]).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0],
+    );
+    // The screen that needs the three figures uses the endpoint that has them.
+    expect(paths).toContain('/customer/points/position');
+  });
+
+  it('the legacy summary keeps every deployed field, with balance unchanged', async () => {
+    // Called directly so the assertion is about the CLIENT CONTRACT, not about
+    // which screen happens to render it.
+    const summary = await getCustomerPoints();
+    // Exactly the frozen shape. `balance` is still the raw account balance.
+    expect(Object.keys(summary).sort()).toEqual([
+      'balance',
+      'lifetimeAllocated',
+      'lifetimeRedeemed',
+      'membershipId',
+      'updatedAt',
+    ]);
+    expect(summary.balance).toBe(60000);
+    expect(summary.lifetimeAllocated).toBe(60000);
+    expect(summary.lifetimeRedeemed).toBe(0);
+  });
+
+  it('the position endpoint exposes spendable, capacity and debt separately', async () => {
+    const position = await getCustomerPointsPosition();
+    expect(position.balance).toBe(60000);
+    expect(position.spendable).toBe(60000);
+    expect(position.remainingEarningCapacity).toBe(40000);
+    expect(position.annualCap).toBe(100000);
+    expect(position.reversalDebt).toBe(0);
+    expect(position.tier).toBe('GOLD');
+  });
+
+  it('a member in debt sees a spendable figure LOWER than the balance', async () => {
+    installRoutes({
+      '/customer/points/position': ok({
+        ...POSITION,
+        balance: 60000,
+        reversalDebt: 15000,
+        spendable: 45000,
+      }),
+    });
+    render('/customer/points');
+    // The headline is spendable, so a member in debt is not told they hold the
+    // full balance as usable.
+    expect(await screen.findByText(/15,000 points are held/i)).toBeTruthy();
+  });
+
+  it('a member at their earning cap still sees a healthy spendable balance', async () => {
+    installRoutes({
+      '/customer/points/position': ok({
+        ...POSITION,
+        remainingEarningCapacity: 0,
+        earnedThisPeriod: 100000,
+      }),
+    });
+    render('/customer/points');
+    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
+    // Capacity 0 must not read as "no points": the balance is untouched.
+    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
+    expect(within(card).getByText('points available to spend right now')).toBeInTheDocument();
+  });
+});
+
+describe('points screen', () => {
+  it('separates spendable points from what may still be earned', async () => {
+    render('/customer/points');
+    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest(
       'section',
     )!;
-    // "60,000" legitimately appears as both the current balance and the lifetime
-    // allocation, so assert the presence and the labelled totals rather than
-    // counting occurrences.
-    expect(within(balanceCard).getAllByText('60,000').length).toBeGreaterThanOrEqual(1);
-    expect(within(balanceCard).getByText('All time allocated')).toBeInTheDocument();
-    expect(within(balanceCard).getByText('All time redeemed')).toBeInTheDocument();
+    // The headline is SPENDABLE, not balance: it is what a member can actually
+    // use today.
+    expect(within(card).getByText('points available to spend right now')).toBeInTheDocument();
+    // The three figures are labelled separately so none can be read as another.
+    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
+    expect(within(card).getByText('Annual limit')).toBeInTheDocument();
+    // 40,000 of capacity is NOT spendable and must not be presented as money.
+    expect(within(card).getByText('40,000')).toBeInTheDocument();
     const history = screen.getByRole('heading', { name: 'Points activity' }).closest('section')!;
     expect(within(history).getByText('Goodwill adjustment')).toBeInTheDocument();
     expect(within(history).getByText('Annual points allocation on activation')).toBeInTheDocument();
@@ -465,7 +569,7 @@ describe('points screen', () => {
 
   it('offers no redemption control and mutates nothing', async () => {
     render('/customer/points');
-    await screen.findByRole('heading', { name: 'Balance' });
+    await screen.findByRole('heading', { name: 'Your points' });
     expect(screen.queryByRole('button', { name: /redeem|convert|spend|use points/i })).toBeNull();
     // Every request the screen made was a read.
     const calls = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit?][] } })

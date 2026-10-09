@@ -298,10 +298,12 @@ function baseTables(): Record<string, Row[]> {
         renewal_due_at: ahead(24 * 300),
         issued_at: ago(100),
         created_at: ago(100),
-        customers: { status: 'active' },
-        card_plans: { name: 'Gold', code: 'GOLD' },
       },
     ],
+    // A REAL relation. The membership row used to carry
+    // `card_plans: { name: 'Gold' }` inline, so the `card_plans!inner(name)`
+    // embed resolved nothing and productName assertions passed without the join.
+    card_plans: [{ id: PLAN_ID, code: 'GOLD', name: 'Gold' }],
     points_accounts: [
       {
         id: ACCOUNT_ID,

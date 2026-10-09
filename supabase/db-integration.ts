@@ -168,6 +168,52 @@ const throws = async (name: string, fn: () => Promise<unknown>) => {
 };
 
 /**
+ * An expected-error probe on the SHARED connection.
+ *
+ * The suite holds one long transaction, and a denied statement aborts it. A
+ * bare `throws` therefore poisons every later statement with "current
+ * transaction is aborted", which is both a false failure and — because the
+ * connection is left mid-abort when the process winds down — a way for a run
+ * to hang instead of failing. Each probe gets its own SAVEPOINT and is rolled
+ * back to on the error path, exactly as the RLS denial probes do.
+ *
+ * This never suppresses a failure: the probe still FAILS the check when the
+ * statement unexpectedly succeeds.
+ */
+let isolatedProbeSeq = 0;
+const throwsIsolated = async (name: string, fn: () => Promise<unknown>) => {
+  // The suite opens and closes transactions in several places, so a probe must
+  // work either way. Inside a transaction a denied statement aborts it, so the
+  // probe needs its own SAVEPOINT. Outside one, statements autocommit and a
+  // savepoint is simply illegal; attempting it is harmless because there is no
+  // transaction to abort, so the fallback is safe rather than a suppression.
+  const savepoint = `points_probe_${isolatedProbeSeq++}`;
+  let inTransaction = true;
+  try {
+    await db.query(`savepoint ${savepoint}`);
+  } catch {
+    inTransaction = false;
+  }
+
+  let message = '';
+  try {
+    await fn();
+    check(name, false, 'expected an error, but the call succeeded');
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+    check(name, true, message.split('\n')[0]!.slice(0, 90));
+  }
+
+  // On both paths, so an unexpected success cannot leave a doomed transaction
+  // behind for everything that follows.
+  if (inTransaction) {
+    await db.query(`rollback to savepoint ${savepoint}`);
+    await db.query(`release savepoint ${savepoint}`);
+  }
+  return message;
+};
+
+/**
  * A bounded, single-line, secret-free description of an unexpected error.
  *
  * This suite connects with a real connection string, and a driver-level failure
@@ -463,6 +509,15 @@ async function main(): Promise<void> {
     db = new Client({ connectionString: target.url });
     db.on('error', () => {});
     await db.connect();
+    // Bound every statement on this connection. Without these a lock wait is
+    // unbounded, so a single mis-ordered fixture turns a failing run into a
+    // HANGING one that never reports a result. statement_timeout caps query
+    // execution; lock_timeout caps time spent waiting for another transaction.
+    // Both surface as an ordinary error the harness records, so a run always
+    // terminates with a verdict instead of stalling.
+    await db.query(`set statement_timeout = '120s'`);
+    await db.query(`set lock_timeout = '15s'`);
+    await db.query(`set idle_in_transaction_session_timeout = '60s'`);
     await captureBaseline();
 
     /* ---------------------------------------------------------------- */
@@ -1591,9 +1646,16 @@ async function main(): Promise<void> {
     );
     check('  QR token was generated', !!activation.qr_token);
     check('  fallback code was generated', !!activation.fallback_code);
-    eq(
-      '  annual points allocated from the snapshot',
-      String(activation.points_allocated),
+    // REBUILD: activation awards ZERO. This assertion previously required the
+    // yearly_points snapshot to be credited at activation. That behaviour is
+    // exactly what the rebuild removes, so the test is INVERTED rather than
+    // deleted: it now pins the new core rule, which is that a newly activated
+    // member starts at zero and earns points only from an eligible completed
+    // purchase. The snapshot is still frozen on the sale as contract metadata.
+    eq('  activation awards ZERO points (rebuild rule)', String(activation.points_allocated), '0');
+    check(
+      '  the yearly_points snapshot is still frozen on the sale, unread by activation',
+      String(gold.yearly_points) !== '0',
       String(gold.yearly_points),
     );
     check('  not flagged as already active', activation.already_active === false);
@@ -1635,16 +1697,10 @@ async function main(): Promise<void> {
       'select balance::text, lifetime_allocated::text from public.points_accounts where membership_id = $1',
       [membershipId],
     );
-    eq(
-      'points account balance = official Gold yearly points',
-      pointsAccount.balance,
-      String(gold.yearly_points),
-    );
-    eq(
-      '  lifetime allocated = official Gold yearly points',
-      pointsAccount.lifetime_allocated,
-      String(gold.yearly_points),
-    );
+    // REBUILD: the account exists (a membership must have one) but starts at
+    // zero, and the ledger records NO activation award at all.
+    eq('a newly activated member starts at ZERO points', pointsAccount.balance, '0');
+    eq('  lifetime allocated is zero at activation', pointsAccount.lifetime_allocated, '0');
 
     const ledger = await db.query<{
       entry_type: string;
@@ -1657,12 +1713,41 @@ async function main(): Promise<void> {
        from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $1)`,
       [membershipId],
     );
-    eq('exactly one allocation ledger entry', ledger.rows.length, 1);
-    eq('  entry type', ledger.rows[0]!.entry_type, 'annual_allocation');
-    eq('  amount', ledger.rows[0]!.amount, String(gold.yearly_points));
-    eq('  balance_after', ledger.rows[0]!.balance_after, String(gold.yearly_points));
-    eq('  reference type', ledger.rows[0]!.reference_type, 'membership');
-    eq('  reference id is the membership', ledger.rows[0]!.reference_id, membershipId);
+    eq('activation writes NO points ledger entry', ledger.rows.length, 0);
+
+    // The account must still exist, and must be reconciled against its ledger.
+    eq(
+      'the points ledger reconciles the new account',
+      (
+        await one<{ n: number }>(
+          `select count(*)::int n from public.points_accounts pa
+            where pa.membership_id = $1
+              and pa.balance - pa.reversal_debt <> coalesce(
+                    (select sum(l.amount) from public.points_ledger l where l.account_id = pa.id), 0)`,
+          [membershipId],
+        )
+      ).n,
+      0,
+    );
+    // The period is opened at activation, from the stored Manila anchor.
+    const period = await one<{ period_start: string; annual_points_cap: string }>(
+      `select period_start::text, annual_points_cap::text
+         from public.points_periods
+        where account_id = (select id from public.points_accounts where membership_id = $1)`,
+      [membershipId],
+    );
+    check(
+      'activation opens the first points period',
+      !!period && period.annual_points_cap === '60000',
+      JSON.stringify(period),
+    );
+    check(
+      'the points-year anchor is stored as a Manila date',
+      !!(await one<{ a: string | null }>(
+        `select points_anniversary::text a from public.memberships where id = $1`,
+        [membershipId],
+      )).a,
+    );
 
     const saleAfter = await one<{ status: string }>(
       'select status from public.card_sales where id = $1',
@@ -1712,7 +1797,9 @@ async function main(): Promise<void> {
     );
     eq('  exactly one membership', counts.m, 1);
     eq('  exactly one points account', counts.a, 1);
-    eq('  exactly one allocation entry', counts.l, 1);
+    // REBUILD: idempotent re-entry must still create NO ledger entry. The
+    // account exists once and stays at zero; a second activation awards nothing.
+    eq('  repeated activation writes NO allocation entry', counts.l, 0);
     eq('  exactly one commission', counts.c, 1);
 
     /* ---------------------------------------------------------------- */
@@ -1770,26 +1857,32 @@ async function main(): Promise<void> {
             (select status from public.card_sales where id = $1) as s`,
       [rollSale],
     );
-    // Force a deterministic downstream failure: a trigger that rejects the points
-    // ledger insert. Everything the function does BEFORE that insert must roll
-    // back with it, leaving no partial state.
+    // Force a deterministic downstream failure with a trigger.
+    //
+    // REBUILD: this used to reject the points_ledger insert. Activation no
+    // longer writes a ledger row at all, so that fault could never fire and the
+    // atomicity proof was vacuous - the call simply succeeded. The points ACCOUNT
+    // insert is used instead: activation still performs it (at zero), it still
+    // sits after the membership insert and the verified-payment re-check, and
+    // failing it must roll all of that back. The property under test is
+    // unchanged: a failure anywhere in the function leaves no partial state.
     await db.query(
-      `create or replace function public.__test_force_ledger_failure() returns trigger
-       language plpgsql as $$ begin raise exception 'forced ledger failure'; end $$`,
+      `create or replace function public.__test_force_points_failure() returns trigger
+       language plpgsql as $$ begin raise exception 'forced points failure'; end $$`,
     );
     await db.query(
-      `create trigger __test_block_ledger before insert on public.points_ledger
-       for each row execute function public.__test_force_ledger_failure()`,
+      `create trigger __test_block_points_account before insert on public.points_accounts
+       for each row execute function public.__test_force_points_failure()`,
     );
 
-    const rollErr = await throws('activation fails when the ledger insert fails', () =>
+    const rollErr = await throws('activation fails when the points account insert fails', () =>
       db.query('select * from public.activate_card_sale($1,$2,$3)', [
         rollSale,
         staff['finance']!,
         12,
       ]),
     );
-    check('  the forced failure propagated', /forced ledger failure/.test(rollErr), rollErr);
+    check('  the forced failure propagated', /forced points failure/.test(rollErr), rollErr);
 
     const rollAfter = await one<{ m: number; a: number; c: string; s: string }>(
       `select (select count(*)::int from public.memberships where sale_id = $1) as m,
@@ -1808,8 +1901,8 @@ async function main(): Promise<void> {
     );
     eq('  ROLLBACK: customer did not become active', rollCustStatus.status, 'prospect');
 
-    await db.query('drop trigger if exists __test_block_ledger on public.points_ledger');
-    await db.query('drop function if exists public.__test_force_ledger_failure()');
+    await db.query('drop trigger if exists __test_block_points_account on public.points_accounts');
+    await db.query('drop function if exists public.__test_force_points_failure()');
     console.log('  (fault-injection trigger removed)');
 
     /* ---------------------------------------------------------------- */
@@ -2383,6 +2476,36 @@ async function main(): Promise<void> {
 
     const memA = await mkPortalMembership(custA, 'a');
     const memB = await mkPortalMembership(custB, 'b');
+
+    // REBUILD: activation awards zero, so a portal member that must HAVE ledger
+    // rows to read is funded explicitly. The credit is a real adjustment ledger
+    // row written with the balance, so the reconciliation invariant holds for
+    // this fixture too. Without it the RLS assertions below would pass vacuously
+    // against an empty ledger.
+    const fundPortalMember = async (membershipId: string, points: number) => {
+      const accountId = (
+        await one<{ id: string }>(
+          'select id from public.points_accounts where membership_id = $1',
+          [membershipId],
+        )
+      ).id;
+      await db.query(
+        `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'adjustment', $2, 0, $2, 'test fixture: portal member funded')`,
+        [accountId, points],
+      );
+      await db.query('update public.points_accounts set balance = $2 where id = $1', [
+        accountId,
+        points,
+      ]);
+      await db.query('update public.memberships set points_balance = $2 where id = $1', [
+        membershipId,
+        points,
+      ]);
+    };
+    await fundPortalMember(memA.membershipId, 5000);
+    await fundPortalMember(memB.membershipId, 5000);
 
     /* --- self read --- */
     const ownCustomer = await asA(async (c) => {
@@ -3238,12 +3361,30 @@ async function main(): Promise<void> {
         'select * from public.activate_card_sale($1,$2,$3)',
         [saleId, staff['finance'], 12],
       );
-      // The activated member holds the plan's annual allocation. Override it when
-      // a test needs a specific balance, so the fixture stays explicit about the
-      // figure every assertion depends on.
-      if (points !== plan.yearly_points) {
-        await db.query('update public.points_accounts set balance = $2 where membership_id = $1', [
-          membership.membership_id,
+      // REBUILD: activation now awards ZERO, so a redemption fixture has to fund
+      // the member explicitly. The figure is written as a real ADJUSTMENT ledger
+      // row in the same transaction as the balance, never as a bare balance
+      // update: the reconciliation invariant
+      // (balance - reversal_debt = sum(ledger.amount)) must hold for every
+      // fixture too, or these tests would be asserting against an impossible
+      // state. The adjustment is a manual points credit, which is exactly the
+      // mechanism the product provides for it.
+      if (points !== 0) {
+        const accountId = (
+          await one<{ id: string }>(
+            'select id from public.points_accounts where membership_id = $1',
+            [membership.membership_id],
+          )
+        ).id;
+        await db.query(
+          `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, reason)
+           values ($1, 'adjustment', $2, 0, $2,
+                   'test fixture: seeded balance for redemption coverage')`,
+          [accountId, points],
+        );
+        await db.query('update public.points_accounts set balance = $2 where id = $1', [
+          accountId,
           points,
         ]);
         await db.query('update public.memberships set points_balance = $2 where id = $1', [
@@ -3408,7 +3549,14 @@ async function main(): Promise<void> {
 
     const accountA = await accountIdOf(memberA.membershipId);
     const ledgerA = await ledgerRowsOf(accountA);
-    eq('the ledger has exactly two rows: allocation and this redemption', ledgerA.rowCount, 2);
+    // Two rows: the seeded adjustment that funded the member, and this
+    // redemption. Activation itself writes none, which is the rebuild rule.
+    eq(
+      'the ledger has exactly two rows: the seeded adjustment and this redemption',
+      ledgerA.rowCount,
+      2,
+    );
+    eq('  the first row is the seeding adjustment', ledgerA.rows[0]!.entry_type, 'adjustment');
     const debit = ledgerA.rows[1]!;
     eq('the redemption entry is typed `redemption`', debit.entry_type, 'redemption');
     eq('the amount is negative', Number(debit.amount), -2000);
@@ -3494,9 +3642,9 @@ async function main(): Promise<void> {
     const poorLedger = await ledgerRowsOf(await accountIdOf(poor.membershipId));
     eq('no ledger debit was written', poorLedger.rowCount, 1);
     eq(
-      '  only the original allocation remains',
+      '  only the original seeding row remains',
       poorLedger.rows[0]!.entry_type,
-      'annual_allocation',
+      'adjustment',
     );
     const poorAudit = await one<{ n: number }>(
       `select count(*)::int as n from public.audit_events
@@ -3712,7 +3860,7 @@ async function main(): Promise<void> {
     eq('no redemption row survives', rollbackRedemptions.n, 0);
     const rollbackLedger = await ledgerRowsOf(await accountIdOf(rollback.membershipId));
     eq('no ledger debit survives', rollbackLedger.rowCount, 1);
-    eq('  only the allocation remains', rollbackLedger.rows[0]!.entry_type, 'annual_allocation');
+    eq('  only the seeding adjustment remains', rollbackLedger.rows[0]!.entry_type, 'adjustment');
     const rollbackCache = await one<{ points_balance: number }>(
       'select points_balance from public.memberships where id = $1',
       [rollback.membershipId],
@@ -4311,7 +4459,7 @@ async function main(): Promise<void> {
     check(
       '  the new row is a fresh debit, not a rewrite of an old one',
       afterRows.rows.at(-1)!.entry_type === 'redemption' &&
-        afterRows.rows[0]!.entry_type === 'annual_allocation',
+        afterRows.rows[0]!.entry_type === 'adjustment',
     );
 
     // The only injection point, and it sits at the end of the last section that
@@ -5533,9 +5681,16 @@ async function main(): Promise<void> {
         'fallback code issued exactly once',
         typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0,
       );
+      // REBUILD: activation awards ZERO. The Gold yearly points term is still
+      // frozen on the sale as contract metadata, but it is not credited.
       eq(
-        'yearly allocation is the official Gold yearly points',
+        'activation awards ZERO points, not the Gold yearly points',
         String(activated.points_allocated),
+        '0',
+      );
+      check(
+        'the Gold yearly points term is still frozen on the sale',
+        Number(gold.yearly_points) > 0,
         String(gold.yearly_points),
       );
       check('not already active on first activation', activated.already_active === false);
@@ -5557,26 +5712,17 @@ async function main(): Promise<void> {
         'select balance::text as balance, lifetime_allocated::text as lifetime from public.points_accounts where membership_id = $1',
         [membershipId],
       );
-      eq(
-        'points account balance is the official allocation',
-        acct.balance,
-        String(gold.yearly_points),
-      );
-      eq(
-        'lifetime allocated is the official allocation',
-        acct.lifetime,
-        String(gold.yearly_points),
-      );
+      eq('a newly activated member starts at ZERO points', acct.balance, '0');
+      eq('lifetime allocated is zero at activation', acct.lifetime, '0');
       const ledgerAfterActivate = await db.query(
         `select entry_type, amount from public.points_ledger
           where account_id = (select id from public.points_accounts where membership_id = $1)`,
         [membershipId],
       );
-      eq('exactly one allocation ledger row', ledgerAfterActivate.rows.length, 1);
       eq(
-        'allocation amount',
-        String(ledgerAfterActivate.rows[0]!.amount),
-        String(gold.yearly_points),
+        'activation wrote NO allocation ledger row',
+        ledgerAfterActivate.rows.length,
+        0,
       );
       const commActivated = await one<{ status: string; earned: string | null; amount: string }>(
         'select status, earned_at::text as earned, amount::text as amount from public.commissions where sale_id = $1',
@@ -5605,7 +5751,9 @@ async function main(): Promise<void> {
       );
       eq('still one membership', dupCounts.m, 1);
       eq('still one points account', dupCounts.a, 1);
-      eq('still one ledger entry', dupCounts.l, 1);
+      // REBUILD: activation writes no ledger entry, and a repeated activation
+      // writes none either, so the count stays at zero.
+      eq('still no ledger entry after repeated activation', dupCounts.l, 0);
       eq('still one commission', dupCounts.c, 1);
 
       // -- Flow E: onboarding token issue, claim, and portal isolation.
@@ -5637,6 +5785,33 @@ async function main(): Promise<void> {
       );
       eq('customer Auth identity linked', linked.auth, authA);
       check('token consumed, single-use', linked.consumed === true);
+      // REBUILD: activation awards zero, so the e2e customer is funded with a
+      // real adjustment ledger row before any step that spends points. The
+      // amount matches the Gold yearly-points term the rest of this flow's
+      // arithmetic was written against, so the redemption assertions below keep
+      // their original figures.
+      {
+        const acct = (
+          await one<{ id: string }>(
+            'select id from public.points_accounts where membership_id = $1',
+            [membershipId],
+          )
+        ).id;
+        await db.query(
+          `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, reason)
+           values ($1, 'adjustment', $2, 0, $2, 'e2e fixture: customer funded')`,
+          [acct, gold.yearly_points],
+        );
+        await db.query('update public.points_accounts set balance = $2 where id = $1', [
+          acct,
+          gold.yearly_points,
+        ]);
+        await db.query('update public.memberships set points_balance = $2 where id = $1', [
+          membershipId,
+          gold.yearly_points,
+        ]);
+      }
       const relink = await one<Record<string, string>>(
         'select * from public.claim_customer_onboarding_token($1,$2,$3)',
         [tokenHash, authA, 'account_activation'],
@@ -5784,7 +5959,7 @@ async function main(): Promise<void> {
         [membershipId],
       );
       eq(
-        'authoritative balance is the official allocation before rotation',
+        'the seeded balance is in place before rotation',
         Number(pointsBeforeRotate.account),
         Number(gold.yearly_points),
       );
@@ -5826,7 +6001,7 @@ async function main(): Promise<void> {
         [membershipId],
       );
       eq(
-        'authoritative balance still the official allocation',
+        'rotation leaves the seeded balance unchanged',
         Number(pointsAfterRotate.account),
         Number(gold.yearly_points),
       );
@@ -10124,6 +10299,1208 @@ async function main(): Promise<void> {
       ]);
     }
 
+    section('65. points rebuild foundation');
+    // 20261104000001 is the single forward-only migration the whole points rebuild
+    // appends to.
+    //
+    // The version is NOT asserted here. The disposable local runner applies
+    // migration files directly with client.query() and never runs
+    // supabase/apply-migrations.ts, so supabase_migrations.schema_migrations
+    // does not exist in this database at all. Asserting it would fail for a
+    // reason that has nothing to do with the SQL under test. The production
+    // runner's recording behaviour is covered by its own checks.
+    //
+    // What IS asserted is that the objects the rebuild has delivered so far all
+    // exist, and that no object exists whose table it depends on is missing.
+    // A partial append - a function whose table is missing, or a table with no
+    // function - is the half-created state that makes a later failure ambiguous.
+    {
+      // Objects delivered by tasks 2, 3, 4, 6, 7, 8 and 9. Extended in place as
+      // each later task lands its own objects.
+      const deliveredTables = [
+        'tier_points_config',
+        'points_periods',
+        'service_catalog',
+        'point_earning_rules',
+        'purchases',
+        'purchase_lines',
+        'purchase_payments',
+        'earning_claims',
+      ];
+      // to_regprocedure needs the ARGUMENT TYPES, not the bare name, so every
+      // signature below is written out in full. A bare name resolves to NULL
+      // and reads as "the function is missing" even when it exists.
+      const deliveredFunctions = [
+        'private.ensure_points_period(uuid)',
+        'private.points_capacity(uuid,uuid)',
+        'private.purchase_verified_total(uuid)',
+        'public.create_earning_claim(uuid,uuid)',
+        'public.create_purchase(uuid,text,jsonb,uuid)',
+        'public.complete_purchase(uuid,uuid)',
+        'public.adjust_membership_points(uuid,bigint,text,uuid)',
+        'public.claim_earning_points(text,uuid)',
+      ];
+
+      // eq() compares with Object.is, so a list is compared as one joined
+      // string. Comparing arrays of objects by identity could never pass.
+      const missingTables = (
+        await one<{ names: string | null }>(
+          `select string_agg(t, ', ' order by t) names
+             from unnest($1::text[]) t
+            where to_regclass('public.' || t) is null`,
+          [deliveredTables],
+        )
+      ).names;
+      eq('every delivered table exists', missingTables ?? '', '');
+
+      const missingFunctions = (
+        await one<{ names: string | null }>(
+          `select string_agg(t, ', ' order by t) names
+             from unnest($1::text[]) t
+            where to_regprocedure(t) is null`,
+          [deliveredFunctions],
+        )
+      ).names;
+      eq('every delivered function exists', missingFunctions ?? '', '');
+
+      // RLS is enabled on every new table, and the browser roles hold no
+      // privilege at all, so a direct PostgREST call has nothing to abuse.
+      const unenabled = (
+        await one<{ names: string | null }>(
+          `select string_agg(c.relname, ', ') names
+             from unnest($1::text[]) t
+             join pg_namespace n on n.nspname = 'public'
+             join pg_class c on c.relname = t and c.relnamespace = n.oid
+            where not c.relrowsecurity`,
+          [deliveredTables],
+        )
+      ).names;
+      eq('every new table has row level security enabled', unenabled ?? '', '');
+
+      const browserGrants = await one<{ n: number }>(
+        `select count(*)::int n
+           from information_schema.role_table_grants g
+          where g.table_schema = 'public'
+            and g.table_name = any($1::text[])
+            and g.grantee in ('anon','authenticated')`,
+        [deliveredTables],
+      );
+      eq('browser roles hold no privilege on the new tables', browserGrants.n, 0);
+
+      // The seeded caps are the business-approved annual maxima.
+      const caps = await one<{ caps: string | null }>(
+        `select string_agg(tier || '=' || annual_points_cap, ', ' order by tier) caps
+           from public.tier_points_config`,
+      );
+      eq('the three tier caps are seeded', caps.caps, 'BRONZE=25000, GOLD=60000, SILVER=40000');
+
+      // A cap is the ONLY authority: the plan's no-rollover and no-cap-exemption
+      // rules depend on there being exactly one source of the figure.
+      eq(
+        'exactly one cap table exists',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n from information_schema.tables
+              where table_schema='public' and table_name like '%points_config%'`,
+          )
+        ).n,
+        1,
+      );
+    }
+
+    {
+      // Behaviour, not structure. Everything above proves the DDL applies; this
+      // block is the first thing that proves the BUSINESS RULES work.
+      //
+      // Each scenario builds its own throwaway customer/membership/purchase so
+      // it cannot perturb any other section, and every scenario ends by
+      // asserting the reconciliation invariant directly.
+
+      // One synthetic GOLD member with a settled purchase, used by the scenarios
+      // below. points_anniversary is pinned to 2025-10-09 so the period
+      // boundaries are deterministic.
+      const stamp = `p65_${Date.now().toString(36)}`;
+      // staff_users.id references auth.users(id) and that FK is enforced, so the
+      // auth principal is created first and its id reused. createdStaffIds is
+      // what section 21 cleanup reads, so the row is registered or it survives.
+      const principal = uuidFor('points:principal');
+      const staffEmail = `${RUN}-points@example.invalid`;
+      await db.query('insert into auth.users (id, email) values ($1, $2)', [principal, staffEmail]);
+      await db.query(
+        `insert into public.staff_users (id, email, full_name, status)
+         values ($1, $2, 'Points Section Actor', 'active')`,
+        [principal, staffEmail],
+      );
+      createdStaffIds.push(principal);
+      const actor = principal;
+      // The card sale's SELLER is an existing synthetic from section 4, which
+      // already carries a complete upline chain up to a vice_director. A trigger
+      // walks that chain on every sale insert, so minting a fresh seller here
+      // would fail with SALE_COMPLETE_HIERARCHY_REQUIRED. The points actor does
+      // not need a hierarchy, only staff_users.status = 'active'.
+      const seller = staff['sm']!;
+      const customer = uuidFor('points:customer');
+      await db.query(
+        `insert into public.customers
+           (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1, $2, 'Points', 'Probe', $3, '+639000000001', 'active')`,
+        [customer, `AF-CUS-PTS${stamp.replace(/[^a-z0-9]/gi, '').toUpperCase().padEnd(5, 'X').slice(0, 5)}`, staffEmail],
+      );
+      createdCustomerIds.push(customer);
+      const plan = (
+        await one<{ id: string }>(
+          `select id from public.card_plans where code = 'GOLD' limit 1`,
+        )
+      ).id;
+      // A membership requires a card sale, so a minimal sale chain is built
+      // first. This row exists ONLY to satisfy the membership foreign key; the
+      // points rebuild never reads or writes card_sales. It is deliberately
+      // left in 'draft': a status of 'active' asserts a verified payment and a
+      // completed activation hierarchy, which this fixture never performs and
+      // which is already proven by sections 11-14 and 62.
+      const sale = uuidFor('points:sale');
+      await db.query(
+        `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1, $2, $3, $4, 'staff', $5, '100000.00', now() + interval '30 days', 'draft')`,
+        [sale, `AF-CSALE-PTS${stamp.replace(/[^a-z0-9]/gi, '').toUpperCase().padEnd(5, 'X').slice(0, 5)}`, customer, plan, seller],
+      );
+      const membership = (
+        await one<{ id: string }>(
+          `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash, qr_token_hash,
+              status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           values ($1, $2, $3, $4, $5, $6, 'active', 0, 0, $7, now(), now(), now() + interval '5 years')
+           returning id`,
+          [customer, sale, plan, `MBS-PTS${stamp}`, `fb_${stamp}`, `qr_${stamp}`, actor],
+        )
+      ).id;
+      await db.query(
+        `update public.memberships set points_anniversary = date '2025-10-09' where id = $1`,
+        [membership],
+      );
+      const account = (
+        await one<{ id: string }>(
+          `insert into public.points_accounts (membership_id) values ($1) returning id`,
+          [membership],
+        )
+      ).id;
+      // Declared here, beside the other fixtures, so the cleanup list further down
+      // can see the Task 10 services. Assigning to it inside the block below would
+      // be block-scoped and invisible to cleanup.
+      let promoServices: string[] = [];
+      // Shared by the Task 10 blocks below: one staycation service and a helper that
+      // opens a DRAFT purchase with given lines. Declared out here so the receipt
+      // block can reuse them instead of inventing a second set of fixtures.
+      let stayService = '';
+      let draftWithLines: (
+        lines: { service: string; total: string }[],
+      ) => Promise<string> = async () => '';
+
+      const service = (
+        await one<{ id: string }>(
+          `insert into public.service_catalog (code, name, base_price)
+           values ($1, 'Teppanyaki Session', '10000.00') returning id`,
+          [`TEP_${stamp}`],
+        )
+      ).id;
+      await db.query(
+        `insert into public.point_earning_rules
+           (service_id, points_amount, eligible_tiers, effective_start, effective_end, created_by)
+         values ($1, 1000, array['BRONZE','SILVER','GOLD'], date '2026-01-01', date '2026-12-31', $2)`,
+        [service, actor],
+      );
+
+      // A purchase that is fully settled, so it is claim-eligible.
+      const settledPurchase = async (gross: string) => {
+        const p = (
+          await one<{ id: string }>(
+            `insert into public.purchases
+               (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, completed_at, created_by)
+             values ($1, $2, $3, 'completed', $4, $4, now(), $5) returning id`,
+            [`AF-TXN-${stamp}-${Math.random().toString(36).slice(2, 8)}`, customer, membership, gross, actor],
+          )
+        ).id;
+        await db.query(`insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+                        values ($1, $2, 1, $3, $3)`, [p, service, gross]);
+        await db.query(
+          `insert into public.purchase_payments (purchase_id, amount, method, status, recorded_by, verified_by, verified_at)
+           values ($1, $2, 'cash', 'verified', $3, $3, now())`,
+          [p, gross, actor],
+        );
+        return p;
+      };
+
+      // The customer is owned by the same auth principal, so claim_earning_points
+      // resolves auth.uid() to them. The JWT claim is set at SESSION scope
+      // (is_local = false): a transaction-local setting is discarded at the end
+      // of the statement under autocommit, and auth.uid() would then read NULL.
+      await db.query(`update public.customers set auth_user_id = $1 where id = $2`, [principal, customer]);
+      await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [principal]);
+
+      // Scoped to THIS account. The suite's own earlier sections create synthetic
+      // accounts whose balances are set directly by those fixtures without a
+      // matching ledger row, so a global invariant would measure the fixtures,
+      // not the cutover.
+      const invariant = async (id: string) =>
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n
+               from public.points_accounts a
+              where a.id = $1
+                and a.balance - a.reversal_debt <> coalesce(
+                      (select sum(l.amount) from public.points_ledger l where l.account_id = a.id), 0)`,
+            [id],
+          )
+        ).n;
+
+      // Collected outside the try so the finally can reach them even when the
+      // block fails part way through.
+      const claimIds: string[] = [];
+      try {
+      // --- 1. the cutover left the account at zero, and the ledger agrees ---
+      eq('the account starts at zero with a reconciling ledger', await invariant(account), 0);
+      eq(
+        'the membership cache agrees with the authoritative balance',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n
+               from public.memberships m
+               join public.points_accounts a on a.membership_id = m.id
+              where m.id = $1 and m.points_balance <> a.balance`,
+            [membership],
+          )
+        ).n,
+        0,
+      );
+
+      // --- 2. a settled purchase produces a claim, and an unsettled one does not ---
+      const purchaseA = await settledPurchase('50000.00');
+      // create_earning_claim RETURNS TABLE whose first column is claim_id, not id.
+      const claimA = await one<{
+        claim_id: string;
+        points_reserved: string;
+        expires_at: string;
+        qr_token: string;
+        fallback_code: string;
+      }>(`select * from public.create_earning_claim($1, $2)`, [purchaseA, actor]);
+      eq('a completed settled purchase creates a claim reserving the rule amount', claimA.points_reserved, '1000');
+      check(
+        'the plaintext tokens are returned exactly once, at creation',
+        (claimA.qr_token ?? '').length > 0 && (claimA.fallback_code ?? '').length > 0,
+      );
+      check(
+        'the claim expires at 24h or period end, whichever is first',
+        new Date(claimA.expires_at).getTime() - Date.now() <= 24 * 3600 * 1000 + 60_000,
+      );
+      const storedToken = (
+        await one<{ qr_token_hash: string }>(
+          `select qr_token_hash from public.earning_claims where id = $1`,
+          [claimA.claim_id],
+        )
+      ).qr_token_hash;
+      check('the stored credential is a hash, not the token', storedToken.length === 64, `len ${storedToken.length}`);
+
+      // An unsettled purchase is refused: the receipts do not cover the net.
+      const purchaseUnsettled = (
+        await one<{ id: string }>(
+          `insert into public.purchases (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, completed_at, created_by)
+           values ($1, $2, $3, 'completed', '50000.00', '50000.00', now(), $4) returning id`,
+          [`AF-TXN-${stamp}-u`, customer, membership, actor],
+        )
+      ).id;
+      await db.query(`insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+                      values ($1, $2, 1, '50000.00', '50000.00')`, [purchaseUnsettled, service]);
+      await throwsIsolated('an unsettled purchase cannot create a claim', () =>
+        db.query(`select * from public.create_earning_claim($1, $2)`, [purchaseUnsettled, actor]),
+      );
+
+      // --- 3. the reservation is real: capacity is held before the claim ---
+      eq(
+        'a pending claim holds its reservation against the cap',
+        (
+          await one<{ v: string }>(
+            `select private.points_capacity($1, (select period_id from public.earning_claims where id = $2))::text v`,
+            [account, claimA.claim_id],
+          )
+        ).v,
+        '59000',
+      );
+
+      // --- 4. claiming awards exactly once, and the wrong customer gets nothing ---
+      // The stored credential is a hash, so a plaintext is only ever obtainable
+      // from create_earning_claim or a reissue. Re-mint one to claim with.
+      const claimState = await one<{ status: string; expires_at: string; points_awarded: string }>(
+        `select status, expires_at::text, points_awarded::text
+           from public.earning_claims where id = $1`,
+        [claimA.claim_id],
+      );
+      const reissued = await one<{ qr_token: string; expires_at: string }>(
+        `select * from public.reissue_earning_claim($1, $2)`,
+        [claimA.claim_id, actor],
+      ).catch(() => null);
+      check(
+        'a reissue returns a fresh plaintext token',
+        (reissued?.qr_token ?? '').length > 0,
+        `claim state ${JSON.stringify(claimState)}`,
+      );
+      if (!reissued?.qr_token) throw new Error('reissue produced no token; cannot continue');
+      eq(
+        'a reissue of an unexpired claim preserves its expiry',
+        new Date(reissued.expires_at).toISOString().slice(0, 10),
+        new Date(claimA.expires_at).toISOString().slice(0, 10),
+      );
+
+      const award = await one<{ points_awarded: string; balance_after: string }>(
+        `select * from public.claim_earning_points($1, $2)`,
+        [reissued.qr_token, customer],
+      );
+      eq('the rightful owner is awarded the full amount', award.points_awarded, '1000');
+      eq('the balance reflects the award', award.balance_after, '1000');
+      eq('the ledger still reconciles after an award', (await invariant(account)), 0);
+
+      await throwsIsolated('a second claim of the same claim is refused', () =>
+        db.query(`select * from public.claim_earning_points($1, $2)`, [reissued.qr_token, customer]),
+      );
+      eq('the second claim changed nothing', (await invariant(account)), 0);
+      eq(
+        'exactly one earned row exists for the claim',
+        (
+          await one<{ n: number }>(
+            `select count(*)::int n from public.points_ledger
+              where entry_type='earned' and reference_id = $1`,
+            [claimA.claim_id],
+          )
+        ).n,
+        1,
+      );
+
+      // --- 5. reversal after spending creates debt, and the balance never goes negative ---
+      const purchaseB = await settledPurchase('10000.00');
+      // Called directly rather than joined: create_earning_claim is a
+      // RETURNS TABLE function, and a set-returning function in a FROM join
+      // returned no row here.
+      const claimB = await one<{ claim_id: string; qr_token: string }>(
+        `select * from public.create_earning_claim($1, $2)`,
+        [purchaseB, actor],
+      );
+      claimIds.push(claimB.claim_id);
+      // Spend 800 of the 1000 balance so the reversal cannot be fully absorbed.
+      await db.query(
+        `insert into public.points_ledger (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'redemption', -800, 1000, 200, 'synthetic spend for the debt scenario')`,
+        [account],
+      );
+      await db.query(`update public.points_accounts set balance = 200 where id = $1`, [account]);
+      await db.query(`update public.memberships set points_balance = 200 where id = $1`, [membership]);
+      await db.query(`select * from public.claim_earning_points($1, $2)`, [claimB.qr_token, customer]);
+      eq('the second award landed', (await one<{ balance: string }>(`select balance::text from public.points_accounts where id = $1`, [account])).balance, '1200');
+
+      const currentBalance = (
+        await one<{ b: string }>(`select balance::text b from public.points_accounts where id = $1`, [account])
+      ).b;
+      // Spend the whole balance so the reversal cannot be fully absorbed. The
+      // debit MUST be written as a ledger row: adjusting the balance directly
+      // would break the invariant this section is here to prove, and would make
+      // a later assertion fail for a reason that has nothing to do with the
+      // reversal under test.
+      await db.query(
+        `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'redemption', -$2::bigint, $3::bigint, 0,
+                 'synthetic spend so the reversal exceeds the available balance')`,
+        [account, currentBalance, currentBalance],
+      );
+      await db.query(`update public.points_accounts set balance = 0 where id = $1`, [account]);
+      await db.query(`update public.memberships set points_balance = 0 where id = $1`, [membership]);
+      const reversal = await one<{ reversed_points: string; reversal_debt: string; balance_after: string }>(
+        `select * from public.reverse_purchase_points($1, $2, 'customer reversed the session')`,
+        [purchaseB, actor],
+      );
+      claimIds.push(claimB.claim_id);
+      eq('the reversal is recorded in full, not truncated to the balance', reversal.reversed_points, '1000');
+      eq('the shortfall becomes non-monetary debt', reversal.reversal_debt, '1000');
+      eq('the balance floors at zero and never goes negative', reversal.balance_after, '0');
+      eq('the ledger still reconciles through a debt reversal', (await invariant(account)), 0);
+
+      // Earning repays debt first and is never blocked by it.
+      const purchaseC = await settledPurchase('10000.00');
+      const claimC = await one<{ claim_id: string; qr_token: string }>(
+        `select * from public.create_earning_claim($1, $2)`,
+        [purchaseC, actor],
+      );
+      claimIds.push(claimC.claim_id);
+      await db.query(`select * from public.claim_earning_points($1, $2)`, [claimC.qr_token, customer]);
+      const afterDebt = await one<{ balance: string; reversal_debt: string }>(
+        `select balance::text, reversal_debt::text from public.points_accounts where id = $1`,
+        [account],
+      );
+      eq('earning is never blocked by outstanding debt', afterDebt.balance, '0');
+      eq('the full award repaid the debt first', afterDebt.reversal_debt, '0');
+      eq('the ledger reconciles after debt repayment', (await invariant(account)), 0);
+
+      // --- 6. the annual reset zeroes the balance, keeps the ledger, keeps debt ---
+      // Target state: balance 5000, debt 300, so the invariant requires a ledger
+      // total of 4700. One synthetic adjustment row carries it there, which keeps
+      // the fixture honest instead of setting fields behind the ledger's back.
+      await db.query(
+        `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'adjustment', 4700, 0, 4700,
+                 'synthetic pre-reset position: 5000 balance against 300 reversal debt')`,
+        [account],
+      );
+      await db.query(
+        `update public.points_accounts set balance = 5000, reversal_debt = 300 where id = $1`,
+        [account],
+      );
+      const beforeReset = await invariant(account);
+      eq('the synthetic pre-reset state reconciles', beforeReset, 0);
+      // Force an ELAPSED period so the reset path is genuinely exercised. The
+      // existing period already contains today, so ensure_points_period would
+      // return it unchanged; the scenario needs a period whose end is in the
+      // past. A stale row states that directly, without pretending the calendar
+      // moved. The anchor is set to 2020-12-25 so the period containing today
+      // is [2025-12-25, 2026-12-25) and the stale row is unambiguously behind it.
+      // Detach every reference to the period first. points_ledger.origin_period_id
+      // is a RESTRICT foreign key, and earning_claims.period_id is NOT NULL, so
+      // the claims are removed outright and the ledger reference is nulled. Every
+      // one of these rows is synthetic and is removed again in the finally block,
+      // which is idempotent.
+      await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+      await db.query(
+        `update public.points_ledger set origin_period_id = null where account_id = $1`,
+        [account],
+      );
+      await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+      await db.query(
+        `update public.memberships set points_anniversary = date '2020-12-25' where id = $1`,
+        [membership],
+      );
+      await db.query(
+        `insert into public.points_periods
+           (account_id, period_start, period_end, tier, annual_points_cap, opening_balance, status)
+         values ($1, date '2024-12-25', date '2025-12-25', 'GOLD', 60000, 0, 'open')`,
+        [account],
+      );
+      const newPeriod = await one<{ id: string }>(`select private.ensure_points_period($1) id`, [account]);
+      const closed = await one<{ closing_balance: string; status: string; reset_source: string }>(
+        `select closing_balance::text, status, reset_source
+           from public.points_periods where id <> $1 and account_id = $2
+           order by period_start desc limit 1`,
+        [newPeriod.id, account],
+      );
+      eq('the elapsed period closed', closed?.status, 'reset');
+      eq('closing_balance is the balance BEFORE the reset', closed?.closing_balance, '5000');
+      eq('an automatic catch-up is recorded as automatic', closed?.reset_source, 'automatic');
+      eq(
+        'the balance is zero after the reset',
+        (await one<{ balance: string }>(`select balance::text from public.points_accounts where id = $1`, [account])).balance,
+        '0',
+      );
+      eq(
+        'the reset does not erase outstanding debt',
+        (await one<{ reversal_debt: string }>(`select reversal_debt::text from public.points_accounts where id = $1`, [account])).reversal_debt,
+        '300',
+      );
+      eq('the ledger still reconciles after a reset', (await invariant(account)), 0);
+      check(
+        'no rollover: the new period opened at zero',
+        (await one<{ opening_balance: string | null }>(
+          `select opening_balance::text from public.points_periods where id = $1`,
+          [newPeriod.id],
+        )).opening_balance === '0',
+      );
+      check(
+        'the historical ledger rows survive the reset',
+        (await one<{ n: number }>(`select count(*)::int n from public.points_ledger where account_id = $1`, [account])).n > 0,
+      );
+
+      // --- 7. ensure_points_period is idempotent and leap-day safe ---
+      const again = await one<{ id: string }>(`select private.ensure_points_period($1) id`, [account]);
+      eq('ensure_points_period is idempotent', again.id, newPeriod.id);
+
+      // --- 8. THE RACES. Two real sessions, not one connection twice. ---
+      // A compare-and-set proves nothing on a single connection, because the
+      // two "concurrent" calls are simply serial. These use a second client so
+      // the two statements genuinely overlap in the database.
+      const secondSession = async () => {
+        const client = new Client({ connectionString: target.url });
+        await client.connect();
+        // Both sessions fail fast rather than hanging: a lock_timeout is a
+        // defined outcome to assert on, not a stuck suite.
+        await client.query(`set lock_timeout = '5s'`);
+        await client.query(`set statement_timeout = '20s'`);
+        return client;
+      };
+
+      // Race A: two simultaneous claims on the SAME claim. Exactly one may win.
+      {
+        const purchaseR = await settledPurchase('10000.00');
+        const claimR = await one<{ claim_id: string; qr_token: string }>(
+          `select * from public.create_earning_claim($1, $2)`,
+          [purchaseR, actor],
+        );
+        const other = await secondSession();
+        try {
+          await other.query(`select set_config('request.jwt.claim.sub', $1, false)`, [principal]);
+          const results = await Promise.allSettled([
+            db.query(`select * from public.claim_earning_points($1, $2)`, [claimR.qr_token, customer]),
+            other.query(`select * from public.claim_earning_points($1, $2)`, [claimR.qr_token, customer]),
+          ]);
+          const won = results.filter((r) => r.status === 'fulfilled').length;
+          eq('race: exactly one of two simultaneous claims succeeds', won, 1);
+          const lost = results.find((r) => r.status === 'rejected');
+          check(
+            'race: the loser is told the claim is already used, not that it is broken',
+            !!lost && /ALREADY_CLAIMED|ALREADY CLAIMED/i.test(
+              lost.reason instanceof Error ? lost.reason.message : String(lost.reason),
+            ),
+            lost && String((lost.reason as Error)?.message ?? '').split('\n')[0],
+          );
+          eq(
+            'race: exactly one earned row exists for the claim',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from public.points_ledger
+                  where entry_type='earned' and reference_id = $1`,
+                [claimR.claim_id],
+              )
+            ).n,
+            1,
+          );
+        } finally {
+          await other.end();
+        }
+      }
+
+      // Race B: two claims created for DIFFERENT purchases in the same period
+      // must not each draw on the full remaining capacity.
+      {
+        const fresh = (
+          await one<{ id: string }>(`select private.ensure_points_period($1) id`, [account])
+        ).id;
+        const cap = (
+          await one<{ v: string }>(`select private.points_capacity($1,$2)::text v`, [account, fresh])
+        ).v;
+        const other = await secondSession();
+        try {
+          const p1 = await settledPurchase('10000.00');
+          const p2 = await settledPurchase('10000.00');
+          const results = await Promise.allSettled([
+            db.query(`select * from public.create_earning_claim($1,$2)`, [p1, actor]),
+            other.query(`select * from public.create_earning_claim($1,$2)`, [p2, actor]),
+          ]);
+          const reserved = results.reduce((sum, r) => {
+            if (r.status !== 'fulfilled') return sum;
+            const row = (r.value as { rows: { points_reserved: string }[] }).rows[0];
+            return sum + Number(row?.points_reserved ?? 0);
+          }, 0);
+          check(
+            'race: two concurrent claims never reserve more than the free capacity',
+            reserved <= Number(cap),
+            `reserved ${reserved} of ${cap}`,
+          );
+          check(
+            'race: both concurrent claims were still created',
+            results.every((r) => r.status === 'fulfilled'),
+            `${results.filter((r) => r.status === 'fulfilled').length}/2`,
+          );
+        } finally {
+          await other.end();
+        }
+      }
+
+
+      // --- Task 10: spending is restricted to staycation, unless promoted ---
+      //
+      // Earning is NOT restricted (the rule above still earns on any purchase).
+      // SPENDING is. These are two independent questions, so each is proven
+      // separately rather than assumed from the other.
+      {
+        // Two services: one accommodation, one not. The classification is the ONLY
+        // one, and it lives on the catalog row - no booking table was invented.
+        const stay = stayService = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Resort Stay', '4000.00', true) returning id`,
+            [`STAY-${stamp}`],
+          )
+        ).id;
+        const other = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Teppanyaki', '2000.00', false) returning id`,
+            [`OTHER-${stamp}`],
+          )
+        ).id;
+
+        const draftWith = draftWithLines = async (lines: { service: string; total: string }[]) => {
+          const gross = lines.reduce((sum, l) => sum + Number(l.total), 0).toFixed(2);
+          const p = (
+            await one<{ id: string }>(
+              `insert into public.purchases
+                 (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, created_by)
+               values ($1, $2, $3, 'draft', $4, $4, $5) returning id`,
+              [
+                `AF-TXN-${stamp}-${Math.random().toString(36).slice(2, 8)}`,
+                customer,
+                membership,
+                gross,
+                actor,
+              ],
+            )
+          ).id;
+          for (const line of lines) {
+            await db.query(
+              `insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+               values ($1, $2, 1, $3, $3)`,
+              [p, line.service, line.total],
+            );
+          }
+          return p;
+        };
+
+        const quote = (purchase: string, points: number) =>
+          one<{ quote_id: string; peso_value: string; eligible_line_total: string }>(
+            `select * from public.quote_point_discount($1,$2,$3)`,
+            [purchase, points, actor],
+          );
+
+        const committed = async (points: number) =>
+          one<{ quote_id: string; peso_value: string }>(
+            `select * from public.quote_point_discount($1,$2,$3)`,
+            [await draftWith([{ service: stay, total: '4000.00' }]), points, actor],
+          );
+
+        // Fund the member so spending is testable at all. The ledger row is
+        // written ALONGSIDE the balance: a bare balance update would break
+        // `balance - reversal_debt = SUM(ledger.amount)` and the suite would then
+        // blame unrelated code.
+        await db.query(
+          `update public.points_accounts set balance = balance + 10000 where id = $1`,
+          [account],
+        );
+        await db.query(
+          `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, counts_toward_cap, reason)
+           select id, 'adjustment', 10000, balance - 10000, balance, false, 'test funding'
+             from public.points_accounts where id = $1`,
+          [account],
+        );
+
+        // 1. Staycation is discountable with NO promotion at all.
+        const stayQuote = await committed(1000);
+        eq('a staycation line is discountable with no promotion', stayQuote.peso_value, '1000.00');
+
+        // 2. A non-staycation service is NOT, with no promotion.
+        const noPromo = await draftWith([{ service: other, total: '2000.00' }]);
+        await throwsIsolated('a non-staycation purchase cannot be discounted', () =>
+          quote(noPromo, 1000),
+        );
+
+        // 3. An ACTIVE, IN-DATE promotion makes it discountable. Half-open dates.
+        const promo = (
+          await one<{ id: string }>(
+            `insert into public.point_redemption_rules
+               (service_id, peso_value_per_point, eligible_tiers, effective_start, effective_end,
+                promotion_reference, created_by)
+             values ($1, 1, array['BRONZE','SILVER','GOLD'], date '2026-01-01', date '2027-01-01',
+                     'Grand opening promo', $2) returning id`,
+            [other, actor],
+          )
+        ).id;
+        const promoted = await draftWith([{ service: other, total: '2000.00' }]);
+        const otherQuote = await quote(promoted, 500);
+        eq('a promoted non-staycation service becomes discountable', otherQuote.peso_value, '500.00');
+
+        // 4. The window is half-open: an EXPIRED promotion grants nothing.
+        await db.query(
+          `update public.point_redemption_rules set effective_end = date '2026-01-02' where id = $1`,
+          [promo],
+        );
+        const expiredPromo = await draftWith([{ service: other, total: '2000.00' }]);
+        await throwsIsolated('an expired promotion grants no discount', () =>
+          quote(expiredPromo, 500),
+        );
+        await db.query(
+          `update public.point_redemption_rules set effective_end = date '2027-01-01' where id = $1`,
+          [promo],
+        );
+
+        // 5. No INDEFINITE promotions. Both ends are NOT NULL, so this is
+        // unrepresentable rather than merely discouraged.
+        const notNulls = await one<{ s: string; e: string }>(
+          `select is_nullable s, is_nullable e from information_schema.columns
+            where table_schema = 'public' and table_name = 'point_redemption_rules'
+              and column_name in ('effective_start','effective_end') order by column_name`,
+        );
+        eq(
+          'a redemption promotion cannot be created without an end date',
+          `${notNulls.s}|${notNulls.e}`,
+          'NO|NO',
+        );
+        await throwsIsolated('an open-ended promotion is refused by the table', () =>
+          db.query(
+            `insert into public.point_redemption_rules
+               (service_id, peso_value_per_point, eligible_tiers, effective_start, effective_end,
+                promotion_reference, created_by)
+             values ($1, 1, array['GOLD'], date '2026-01-01', null, 'Never ends', $2)`,
+            [other, actor],
+          ),
+        );
+
+        // 6. MIXED purchase: the discount is capped at the ELIGIBLE lines only,
+        //    never at the gross. This is the whole point of ruling 1.
+        //    `plain` is a THIRD service that is never promoted, so the ineligible
+        //    half of this purchase stays ineligible no matter what the promotion
+        //    above does to `other`.
+        const plain = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Retail Product', '900.00', false) returning id`,
+            [`PLAIN-${stamp}`],
+          )
+        ).id;
+        promoServices = [stay, other, plain];
+        const mixed = await draftWith([
+          { service: stay, total: '1000.00' },
+          { service: plain, total: '9000.00' },
+        ]);
+        const mixedQuote = await quote(mixed, 4000);
+        eq('the mixed eligible base excludes the unpromoted line', mixedQuote.eligible_line_total, '1000.00');
+        eq('a mixed purchase is capped at its eligible lines, not its gross', mixedQuote.peso_value, '1000.00');
+
+        // 7. QUOTING SPENDS NOTHING.
+        const balanceBeforeQuote = (
+          await one<{ balance: string }>(
+            `select balance::text from public.points_accounts where id = $1`,
+            [account],
+          )
+        ).balance;
+        await quote(await draftWith([{ service: stay, total: '4000.00' }]), 100);
+        eq(
+          'quoting moves no points',
+          (
+            await one<{ balance: string }>(
+              `select balance::text from public.points_accounts where id = $1`,
+              [account],
+            )
+          ).balance,
+          balanceBeforeQuote,
+        );
+
+        // 8. COMMIT spends the points and settles the accounting triple.
+        const toCommit = await quote(await draftWith([{ service: stay, total: '4000.00' }]), 1500);
+        await db.query(`update public.redemption_quotes set expires_at = now() + interval '10 minutes' where id = $1`, [toCommit.quote_id]);
+        const result = await one<{ points_spent: string; discount_applied: string; net_amount: string }>(
+          `select * from public.commit_point_discount($1,$2)`,
+          [toCommit.quote_id, actor],
+        );
+        eq('committing spends exactly the quoted points', result.points_spent, '1500');
+        eq('committing applies the quoted peso discount', result.discount_applied, '1500.00');
+        eq('committing reduces net by the discount', result.net_amount, '2500.00');
+        eq(
+          'the ledger still reconciles after a discount',
+          await invariant(account),
+          0,
+        );
+        eq(
+          'the membership cache follows the discount',
+          (
+            await one<{ v: string }>(
+              `select points_balance::text v from public.memberships where id = $1`,
+              [membership],
+            )
+          ).v,
+          (
+            await one<{ v: string }>(
+              `select balance::text v from public.points_accounts where id = $1`,
+              [account],
+            )
+          ).v,
+        );
+
+        // 9. A quote is single-use. The second commit is refused by the CAS.
+        await throwsIsolated('a quote cannot be committed twice', () =>
+          db.query(`select * from public.commit_point_discount($1,$2)`, [toCommit.quote_id, actor]),
+        );
+        eq('the refused second commit moved nothing', await invariant(account), 0);
+
+        // 10. An ineligible line can never carry a discount, even by direct write.
+        const mixedId = (
+          await one<{ id: string }>(
+            `select id from public.purchases where id = $1`,
+            [mixed],
+          )
+        ).id;
+        await throwsIsolated('a line cannot be discounted beyond its own total', () =>
+          db.query(
+            `update public.purchase_lines set points_discount_amount = '99999.00' where purchase_id = $1`,
+            [mixedId],
+          ),
+        );
+
+        // 11. Finance keeps the four figures apart. A discount is NOT a receipt.
+        const summary = await one<{
+          gross_amount: string;
+          points_discount_amount: string;
+          net_amount: string;
+          verified_total: string;
+          fully_paid: boolean;
+        }>(`select * from public.purchase_financial_summary_purchases($1)`, [mixed]);
+        eq('finance reports the gross separately', summary.gross_amount, '10000.00');
+        eq('finance reports the discount separately', summary.points_discount_amount, '0.00');
+        eq('finance reports the net separately', summary.net_amount, '10000.00');
+        eq(
+          'a points discount is never counted as a cash receipt',
+          summary.verified_total,
+          '0.00',
+        );
+        eq('an unreceipted purchase is not fully paid', summary.fully_paid, false);
+
+        // 12. Outstanding debt blocks SPENDING, exactly as it blocks nothing else.
+        await db.query(
+          `update public.points_accounts set reversal_debt = 500 where id = $1`,
+          [account],
+        );
+        const whileInDebt = await draftWith([{ service: stay, total: '4000.00' }]);
+        await throwsIsolated('outstanding reversal debt refuses a quote', () =>
+          quote(whileInDebt, 100),
+        );
+        await db.query(
+          `update public.points_accounts set reversal_debt = 0 where id = $1`,
+          [account],
+        );
+      }
+
+      // --- cash receipts: the write path that was missing entirely ---
+      //
+      // purchase_payments existed, was read by private.purchase_verified_total and
+      // gated complete_purchase, but NOTHING could insert into it. A purchase
+      // could therefore never be settled, so the whole record -> settle -> claim
+      // chain was unreachable. These prove the path exists and is fail-closed.
+      {
+        const paid = await draftWithLines([{ service: stayService, total: '4000.00' }]);
+        // A DISTINCT reference per receipt: purchase_payments_purchase_reference_uidx
+        // refuses a duplicate, which is what stops one bank reference being entered
+        // twice as two separate payments.
+        let refSeq = 0;
+        const pay = async (amount: string) =>
+          one<{ payment_id: string; payment_number: string; status: string }>(
+            `select * from public.record_purchase_payment($1,$2,'cash',$3,$4)`,
+            [paid, amount, `REF-${++refSeq}`, actor],
+          );
+
+        const recorded = await pay('4000.00');
+        eq('a recorded receipt is recorded, not verified', recorded.status, 'recorded');
+        eq(
+          'a RECORDED receipt is not money yet',
+          (
+            await one<{ v: string }>(
+              `select private.purchase_verified_total($1)::text v`,
+              [paid],
+            )
+          ).v,
+          '0',
+        );
+        await throwsIsolated('an unsettled purchase cannot be completed', () =>
+          db.query(`select * from public.complete_purchase($1,$2)`, [paid, actor]),
+        );
+
+        // Verifying is a separate, attributed act.
+        const verified = await one<{ status: string; verified_total: string }>(
+          `select * from public.verify_purchase_payment($1,'verified',null,$2)`,
+          [recorded.payment_id, actor],
+        );
+        eq('verifying makes the money real', verified.status, 'verified');
+        eq('the verified total now covers the net amount', verified.verified_total, '4000.00');
+
+        await db.query(
+          `select * from public.complete_purchase($1,$2)`,
+          [paid, actor],
+        );
+        eq(
+          'a settled purchase is completed',
+          (
+            await one<{ v: string }>(`select status v from public.purchases where id = $1`, [paid])
+          ).v,
+          'completed',
+        );
+
+        // A receipt moves out of 'recorded' exactly once.
+        await throwsIsolated('a receipt cannot be verified twice', () =>
+          db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+            recorded.payment_id,
+            actor,
+          ]),
+        );
+
+        // A rejection with no reason is unreviewable, so it is refused.
+        const rejected = await pay('100.00');
+        await throwsIsolated('a rejection with no reason is refused', () =>
+          db.query(`select * from public.verify_purchase_payment($1,'rejected','   ',$2)`, [
+            rejected.payment_id,
+            actor,
+          ]),
+        );
+
+        // Zero and negative receipts are both refused.
+        await throwsIsolated('a zero receipt is refused', () => pay('0'));
+        await throwsIsolated('a negative receipt is refused', () => pay('-500.00'));
+
+        // Finance keeps the four figures apart, and a discount is never a receipt.
+        const fin = await one<{
+          gross_amount: string;
+          points_discount_amount: string;
+          net_amount: string;
+          verified_total: string;
+          fully_paid: boolean;
+        }>(`select * from public.purchase_financial_summary_purchases($1)`, [paid]);
+        eq('finance reports gross separately', fin.gross_amount, '4000.00');
+        eq('finance reports the points discount separately', fin.points_discount_amount, '0.00');
+        eq('finance reports net separately', fin.net_amount, '4000.00');
+        eq('finance reports verified CASH separately', fin.verified_total, '4000.00');
+        eq('a fully receipted purchase is marked paid', fin.fully_paid, true);
+      }
+
+      // --- the manual adjustment, executed ---
+      //
+      // Three writes that must land together, so this is where the invariant
+      // `balance - reversal_debt = SUM(points_ledger.amount)` is actually proven
+      // rather than assumed. Reading it from a handler test would prove nothing:
+      // PostgREST cannot span these three statements.
+      {
+        await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+        await db.query(
+          `update public.points_ledger set origin_period_id = null where account_id = $1`,
+          [account],
+        );
+        await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+
+        const before = (
+          await one<{ balance: string; debt: string }>(
+            `select balance::text, reversal_debt::text from public.points_accounts where id = $1`,
+            [account],
+          )
+        );
+        const credited = await one<{ balance_after: string }>(
+          `select * from public.adjust_membership_points($1,$2,$3,$4)`,
+          [membership, 750, 'Goodwill credit for a missed service', actor],
+        );
+        eq('an adjustment credits the account', credited.balance_after, String(Number(before.balance) + 750));
+
+        eq(
+          'the adjustment writes exactly one permanent ledger row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger
+                where entry_type = 'adjustment' and amount = 750 and reason = 'Goodwill credit for a missed service'`,
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'an adjustment never counts toward the annual earning cap',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger
+                where entry_type = 'adjustment' and reason = 'Goodwill credit for a missed service'
+                  and counts_toward_cap is false`,
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'the membership cache follows the account, so the two cannot drift',
+          (
+            await one<{ v: string }>(
+              `select points_balance::text v from public.memberships where id = $1`,
+              [membership],
+            )
+          ).v,
+          credited.balance_after,
+        );
+        eq('the adjustment leaves the ledger reconcilable', await invariant(account), 0);
+
+        // A negative adjustment is the same mechanism in the other direction.
+        const debited = await one<{ balance_after: string }>(
+          `select * from public.adjust_membership_points($1,$2,$3,$4)`,
+          [membership, -250, 'Reversal of the goodwill credit', actor],
+        );
+        eq(
+          'a negative adjustment debits the account',
+          debited.balance_after,
+          String(Number(credited.balance_after) - 250),
+        );
+        eq('the ledger still reconciles after a debit', await invariant(account), 0);
+
+        // The refusals. Each is a distinct, named reason a caller can act on.
+        await throwsIsolated('a zero adjustment is refused', () =>
+          db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+            membership,
+            0,
+            'Nothing to change',
+            actor,
+          ]),
+        );
+        await throwsIsolated('an adjustment with no reason is refused', () =>
+          db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+            membership,
+            100,
+            '   ',
+            actor,
+          ]),
+        );
+        await throwsIsolated('an adjustment that would go negative is refused', () =>
+          db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+            membership,
+            -999999999,
+            'More than the member holds',
+            actor,
+          ]),
+        );
+        await throwsIsolated('an adjustment by an inactive staff member is refused', () =>
+          db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+            membership,
+            100,
+            'A reason that is long enough',
+            uuidFor('cc:inactive-actor'),
+          ]),
+        );
+        eq('none of the refused adjustments changed the balance', await invariant(account), 0);
+        eq(
+          'a refused adjustment writes no ledger row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger
+                where account_id = $1 and reason in ('Nothing to change','   ','More than the member holds','A reason that is long enough')`,
+              [account],
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'the adjustment is audited with its reason',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events
+                where action = 'POINTS_ADJUSTED' and entity_id = $1`,
+              [membership],
+            )
+          ).n >= 2,
+          true,
+        );
+      }
+
+      // The leap-day scenario needs a clean slate for the same reason the reset
+      // scenario did: ensure_points_period returns any existing period that
+      // contains today, so a stale row would mask the new anchor entirely.
+      await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+      await db.query(
+        `update public.points_ledger set origin_period_id = null where account_id = $1`,
+        [account],
+      );
+      await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+      await db.query(`update public.memberships set points_anniversary = date '2024-02-29' where id = $1`, [membership]);
+      const leap = await one<{ id: string }>(`select private.ensure_points_period($1) id`, [account]);
+      const leapPeriod = await one<{ period_start: string; period_end: string }>(
+        `select period_start::text, period_end::text from public.points_periods where id = $1`,
+        [leap.id],
+      );
+      // The period containing today (2026) clamps to 28 February, which is the
+      // APPROVED policy, not a defect: a leap-day member gets a one-day-shorter
+      // period in a non-leap year. What must never happen is a permanent drift
+      // to the 28th, so the next leap year is asserted explicitly.
+      eq(
+        'a 2026 period from a 29 February anchor clamps to 28 February, never 1 March',
+        leapPeriod.period_start,
+        '2026-02-28',
+      );
+      eq('the 2026 period ends on the clamped anniversary', leapPeriod.period_end, '2027-02-28');
+      const leapArithmetic = await one<{ non_leap: string; leap: string }>(
+        `select (date '2024-02-29' + make_interval(years => 2))::date::text non_leap,
+                (date '2024-02-29' + make_interval(years => 4))::date::text leap`,
+      );
+      eq('a non-leap period clamps to 28 February', leapArithmetic.non_leap, '2026-02-28');
+      eq(
+        'the anchor does NOT drift: 29 February returns in the next leap year',
+        leapArithmetic.leap,
+        '2028-02-29',
+      );
+      } finally {
+      // The hierarchy-snapshot delete needs the maintenance flag the same way
+      // the suite's rollback fixture sets it.
+      await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+      // This block's own rows, deleted in reverse foreign-key order so section
+      // 21's pre-run row-count proof still holds. Registering them with the
+      // suite's cleanup registry would require touching shared state; removing
+      // them here keeps the section self-contained. It runs in a finally so a
+      // mid-block failure can never leak rows into the next section.
+      const cleanupSql = [
+        [
+          `delete from public.audit_events
+            where action = 'EARNING_CLAIM_REISSUED'
+              and (entity_id = any($1::text[]) or after_data->>'actorId' = $2)`,
+          [claimIds, actor],
+        ],
+        [`delete from public.earning_claims where account_id = $1`, [account]],
+        [
+          `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id = $1)`,
+          [membership],
+        ],
+        [
+          `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id = $1)`,
+          [membership],
+        ],
+        // redemption_quotes RESTRICTS a delete of the ledger row it spent, so the
+        // quotes MUST go first or the ledger delete below fails. The RESTRICT is
+        // deliberate: a committed quote is permanent history.
+        [
+          `delete from public.redemption_quotes where membership_id = $1 or purchase_id in (select id from public.purchases where membership_id = $1)`,
+          [membership],
+        ],
+        [`delete from public.points_ledger where account_id = $1`, [account]],
+        [`delete from public.purchases where membership_id = $1`, [membership]],
+        // points_periods references points_accounts, so the account goes LAST.
+        [`delete from public.points_periods where account_id = $1`, [account]],
+        [`delete from public.points_accounts where id = $1`, [account]],
+        // The Task 10 services and the promotion that names them. The promotion
+        // RESTRICTS the service, so it goes first.
+        [`delete from public.point_redemption_rules where service_id = any($1::uuid[])`, [promoServices]],
+        [
+          `delete from public.point_earning_rules where service_id = any($1::uuid[])`,
+          [[...promoServices, service]],
+        ],
+        [`delete from public.service_catalog where id = any($1::uuid[])`, [[...promoServices, service]]],
+        [`delete from public.memberships where id = $1`, [membership]],
+        // The sale-hierarchy trigger writes an immutable snapshot per sale. The
+        // suite's own sanctioned escape hatch is the allow_snapshot_maintenance
+        // flag, used the same way by the rollback fixture; without it the
+        // snapshot can never be removed and the synthetic sale would leak.
+        [`delete from public.card_sale_hierarchy_snapshots where sale_id = $1`, [sale]],
+        [`delete from public.card_sales where id = $1`, [sale]],
+      ] as const;
+      // Removal failures are REPORTED, not swallowed: a silently skipped delete
+      // is exactly how a row leaks into section 21 and turns a section-65 bug
+      // into an unrelated-looking cleanup failure. Deleting rows that are already
+      // gone is not an error, so only genuine failures are reported.
+      for (const [sql, params] of cleanupSql) {
+        try {
+          await db.query(sql, params as unknown as unknown[]);
+        } catch (error) {
+          check(
+            `points cleanup: ${sql.slice(0, 60)}`,
+            false,
+            error instanceof Error ? error.message.split('\n')[0]! : String(error),
+          );
+        }
+      }
+      }
+    }
+
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -10230,6 +11607,27 @@ async function main(): Promise<void> {
         await db?.query(
           `delete from public.final_qualifications
           where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        // points_periods now exist for every activated membership, and both
+        // points_ledger.origin_period_id and points_periods.account_id are
+        // RESTRICT foreign keys, so the references are cleared and the periods
+        // removed before the account itself.
+        await db?.query(
+          `update public.points_ledger l
+              set origin_period_id = null
+            where l.account_id in (
+              select pa.id from public.points_accounts pa
+               where pa.membership_id in (
+                 select id from public.memberships where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.points_periods
+            where account_id in (
+              select pa.id from public.points_accounts pa
+               where pa.membership_id in (
+                 select id from public.memberships where customer_id = any($1::uuid[])))`,
           [custSet],
         );
         await db?.query(

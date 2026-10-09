@@ -112,6 +112,62 @@ export {
   customerRedemptionSchema,
   customerRedemptionListSchema,
 } from './schemas/redemption.js';
+
+/* Points (transaction-based earning, caps, anniversary periods, cash discount) */
+/* `pointsAmountSchema`, `customerPointsSummarySchema` and
+   `customerPointsEntrySchema` are deliberately NOT re-exported here: they
+   already come from customer.js / redemption.js, and a second definition under
+   the same name would be a silent contract fork. */
+export {
+  tierSchema,
+  pointsPeriodSchema,
+  pointsBalanceSummarySchema,
+  type PointsBalanceSummary,
+  earningClaimSchema,
+  claimEarningPointsRequestSchema,
+  claimEarningPointsResultSchema,
+  createEarningClaimRequestSchema,
+  serviceCatalogItemSchema,
+  serviceCatalogItemInputSchema,
+  quotePointDiscountSchema,
+  purchaseReceiptInputSchema,
+  purchaseReceiptDecisionSchema,
+  purchaseReceiptSchema,
+  pointDiscountQuoteSchema,
+  committedPointDiscountSchema,
+  pointEarningRuleSchema,
+  pointEarningRuleInputSchema,
+  pointRedemptionRuleInputSchema,
+  pointRedemptionRulePatchSchema,
+  pointRedemptionRuleSchema,
+  createDiscountQuoteSchema,
+  redemptionQuoteSchema,
+  purchaseLineSchema,
+  purchaseSchema,
+  purchaseFinancialSummarySchema,
+  createPurchaseInputSchema,
+  adjustPointsInputSchema,
+  reversePurchaseInputSchema,
+  resolvedMemberSchema,
+  recordedPurchaseSchema,
+  completedPurchaseSchema,
+  issuedEarningClaimSchema,
+  reissuedEarningClaimSchema,
+  reversedPurchasePointsSchema,
+  adjustedPointsSchema,
+} from './schemas/points.js';
+export type {
+  ClaimEarningPointsRequest,
+  ClaimEarningPointsResult,
+  CreateEarningClaimRequest,
+  CreatePurchaseInput,
+  AdjustPointsInput,
+  ReversePurchaseInput,
+  PointEarningRuleInput,
+  PointRedemptionRuleInput,
+  PurchaseReceiptInput,
+  PurchaseReceiptDecision,
+} from './schemas/points.js';
 export type {
   RedemptionItem,
   CreateRedemptionItemRequest,

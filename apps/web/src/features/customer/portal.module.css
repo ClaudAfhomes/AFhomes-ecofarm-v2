@@ -55,6 +55,27 @@
   letter-spacing: 0.04em;
 }
 
+/* A claim code is typed or pasted and read back by a member, so it gets a
+   monospace face and generous letter spacing to make transposed characters
+   visible. `input` is used rather than a styled div so the field is keyboard-,
+   paste- and mobile-native with no picker or custom key handling. */
+.claimInput {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.claimInput:disabled {
+  opacity: 0.6;
+}
+
 .notice {
   margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);

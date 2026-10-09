@@ -9,8 +9,12 @@ import {
   customerMembershipSchema,
   customerPaymentSchema,
   customerPointsEntrySchema,
+  pointsBalanceSummarySchema,
   customerPointsSummarySchema,
   customerProfileSchema,
+  claimEarningPointsResultSchema,
+  type ClaimEarningPointsRequest,
+  type ClaimEarningPointsResult,
   type CustomerActivationRequest,
   type CustomerActivationResult,
   type CustomerCredentials,
@@ -18,6 +22,7 @@ import {
   type CustomerPayment,
   type CustomerPointsEntry,
   type CustomerPointsSummary,
+  type PointsBalanceSummary,
   type CustomerProfile,
 } from '@afhomes/contracts';
 
@@ -44,8 +49,22 @@ export const getCustomerProfile = (): Promise<CustomerProfile> =>
 export const getCustomerMembership = (): Promise<CustomerMembership> =>
   request('/customer/membership', customerMembershipSchema);
 
+/**
+ * The LEGACY points summary. Its shape is frozen because deployed clients already
+ * validate against it; nothing here may be removed or re-interpreted.
+ */
 export const getCustomerPoints = (): Promise<CustomerPointsSummary> =>
   request('/customer/points', customerPointsSummarySchema);
+
+/**
+ * The member's points POSITION: balance, spendable, and remaining annual earning
+ * capacity, with reversal debt separate.
+ *
+ * A separate endpoint from `getCustomerPoints` on purpose - see the API notes.
+ * Every figure is computed in SQL; the browser does no points arithmetic.
+ */
+export const getCustomerPointsPosition = (): Promise<PointsBalanceSummary> =>
+  request('/customer/points/position', pointsBalanceSummarySchema);
 
 export const getCustomerPointsLedger = (): Promise<CustomerPointsEntry[]> =>
   requestList('/customer/points/ledger', customerPointsEntrySchema);
@@ -61,4 +80,26 @@ export const getCustomerPayments = (): Promise<CustomerPayment[]> =>
 export const reissueCardCredentials = (): Promise<CustomerCredentials> =>
   request('/customer/membership/credentials', customerCredentialsSchema, { method: 'POST' });
 
-export type { CustomerProfile, CustomerMembership, CustomerPointsSummary, CustomerPointsEntry, CustomerPayment, CustomerCredentials };
+/**
+ * Redeem an earning claim the member was given - the QR scan, or the typed
+ * fallback code.
+ *
+ * The body carries ONLY the credential. The member's identity comes from the
+ * session, and the server refuses a claim belonging to anyone else. So this
+ * cannot award points to a different account no matter what the caller sends.
+ *
+ * NOT auto-retried: a claim is single-use, and a retried request would turn a
+ * success whose response was lost into a confusing "already used" error.
+ */
+export const claimEarningPoints = (
+  body: ClaimEarningPointsRequest,
+): Promise<ClaimEarningPointsResult> =>
+  request('/earning/claim', claimEarningPointsResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export type {
+  CustomerProfile,
+  CustomerMembership,
+  CustomerPointsSummary, CustomerPointsEntry, CustomerPayment, CustomerCredentials };

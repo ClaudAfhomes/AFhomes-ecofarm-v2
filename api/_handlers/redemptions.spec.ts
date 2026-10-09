@@ -153,9 +153,6 @@ function baseTables(): Record<string, Row[]> {
         renewal_due_at: ahead(24 * 300),
         issued_at: ago(100),
         created_at: ago(100),
-        customers: { status: 'active' },
-        card_plans: { name: 'Gold' },
-        points_accounts: { balance: 60000 },
       },
       {
         id: OTHER_MEMBERSHIP_ID,
@@ -173,10 +170,15 @@ function baseTables(): Record<string, Row[]> {
         renewal_due_at: ahead(24 * 200),
         issued_at: ago(200),
         created_at: ago(200),
-        customers: { status: 'active' },
-        card_plans: { name: 'Bronze' },
-        points_accounts: { balance: 25000 },
       },
+    ],
+    // A REAL relation, not a pre-baked property on the membership row. These
+    // rows used to carry `card_plans: { name: 'Gold' }` inline, which meant the
+    // `card_plans!inner(name)` embed in SELECT_MEMBERSHIP resolved NOTHING and
+    // the handler read the fixture's own copy instead. Every assertion about
+    // productName was therefore green without the join ever running.
+    card_plans: [
+      { id: '77777777-7777-4777-8777-777777777777', code: 'GOLD', name: 'Gold', tier: 'GOLD' },
     ],
     points_accounts: [
       { id: ACCOUNT_ID, membership_id: MEMBERSHIP_ID, balance: 60000, lifetime_allocated: 60000, lifetime_redeemed: 0 },

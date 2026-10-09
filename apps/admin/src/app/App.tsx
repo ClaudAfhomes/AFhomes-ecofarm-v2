@@ -19,6 +19,10 @@ import { BusinessCustomersPage } from '../features/business/BusinessCustomersPag
 import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
 import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
+import { BusinessPointsPage } from '../features/business/BusinessPointsPage';
+import { PointsRulesPage } from '../features/business/PointsRulesPage';
+import { PointsDiscountPage } from '../features/business/PointsDiscountPage';
+import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
@@ -160,6 +164,16 @@ export default function App() {
                 path="/admin/finance/commissions"
                 element={protectedPage(<BusinessCommissionsPage />)}
               />
+              {/* Order is irrelevant to React Router (static segments outrank the
+                  bare prefix), but the deeper path is listed first so it reads as
+                  a child of Earn Points. */}
+              <Route path="/admin/points/rules" element={protectedPage(<PointsRulesPage />)} />
+              <Route path="/admin/points/discount" element={protectedPage(<PointsDiscountPage />)} />
+              <Route
+                path="/admin/points/payments"
+                element={protectedPage(<PurchasePaymentsPage />)}
+              />
+              <Route path="/admin/points" element={protectedPage(<BusinessPointsPage />)} />
               <Route
                 path="/admin/finance/commissions/settings"
                 element={protectedPage(<CommissionSettingsPage />)}

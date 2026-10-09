@@ -1,6 +1,74 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveRequestUrl, selectHandler } from './router.js';
+import { BUSINESS_FAMILIES, resolveRequestUrl, selectHandler } from './router.js';
+
+describe('business family prefixes', () => {
+  /**
+   * `selectHandler` returns the FIRST family whose prefix matches, so a duplicate
+   * prefix silently shadows every later family. That is not hypothetical: a second
+   * `points` family was added for points earning while `/points` already belonged
+   * to memberships.ts, so every earning route went to the wrong handler and all
+   * 39 of its unit tests still passed, because they call the handler directly and
+   * never go through the router. This is the tripwire.
+   *
+   * Two families MAY share a prefix only when each one declares its own exact
+   * `path` (`auth/customer/activate` and `auth/portals` legitimately do, and
+   * neither can shadow the other). A family WITHOUT a `path` matches the whole
+   * prefix, so it must be the only one - otherwise it swallows a sibling.
+   */
+  it('has no prefix-wide family shadowed by, or shadowing, a sibling', () => {
+    const byPrefix = new Map<string, { path?: string; i: number }[]>();
+    BUSINESS_FAMILIES.forEach((family, i) => {
+      const prefix = 'prefix' in family ? family.prefix : '';
+      const bucket = byPrefix.get(prefix) ?? [];
+      bucket.push({ path: 'path' in family ? family.path : undefined, i });
+      byPrefix.set(prefix, bucket);
+    });
+
+    for (const [prefix, bucket] of byPrefix) {
+      const wide = bucket.filter((f) => f.path === undefined);
+      if (wide.length === 0) {
+        // All path-scoped: each must own a distinct exact path, or two of them
+        // claim the same route and the first silently wins.
+        const paths = bucket.map((f) => f.path);
+        expect(
+          new Set(paths).size,
+          `prefix "${prefix}" declares duplicate exact paths`,
+        ).toBe(paths.length);
+        continue;
+      }
+      expect(
+        wide.length,
+        `prefix "${prefix}" has ${wide.length} prefix-wide families; only the first can ever be reached`,
+      ).toBe(1);
+    }
+  });
+
+  it('dispatches every points-earning route to the points handler', () => {
+    // The bare prefix and each sub-path must all reach points.js. A shadow would
+    // show up here as a different routeKey.
+    for (const path of [
+      '/api/v1/earning',
+      '/api/v1/earning/claim',
+      '/api/v1/earning/purchases',
+      '/api/v1/earning/purchases/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/complete',
+      '/api/v1/earning/claims',
+      '/api/v1/earning/claims/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/reissue',
+      '/api/v1/earning/adjust',
+      '/api/v1/earning/services',
+      '/api/v1/earning/rules',
+    ]) {
+      const q: Record<string, string | undefined> = {};
+      expect(selectHandler(path, q)?.routeKey, path).toMatch(/^operations\.redemption\//);
+    }
+  });
+
+  it('leaves the pre-existing /points family with memberships', () => {
+    const q: Record<string, string | undefined> = {};
+    expect(selectHandler('/api/v1/points', q)?.routeKey).toBe('memberships/points');
+    expect(selectHandler('/api/v1/points/accounts/abc', q)?.routeKey).toBe('memberships/accounts/abc');
+  });
+});
 
 describe('selectHandler', () => {
   it('routes the health probe on both the bare and versioned paths', () => {

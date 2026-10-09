@@ -106,6 +106,25 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // because the next action is a redemption. Moved out of the global nav and into
       // Redemption so it is no longer presented as a system-wide general lookup.
       { to: '/admin/member-lookup', label: 'Member Lookup', module: 'operations.redemption' },
+      // Earning is the OTHER direction of the same points ledger: a staff member
+      // records a purchase and issues the member a claim code. Same module keys as
+      // redemption, because it is the same job - operating a member's points.
+      { to: '/admin/points', label: 'Earn Points', module: 'operations.redemption' },
+      {
+        to: '/admin/points/rules',
+        label: 'Points Rules',
+        module: 'operations.catalog',
+      },
+      {
+        to: '/admin/points/discount',
+        label: 'Use Points',
+        module: 'operations.redemption',
+      },
+      {
+        to: '/admin/points/payments',
+        label: 'Purchase Payments',
+        module: 'sales.customers',
+      },
     ],
   },
   {

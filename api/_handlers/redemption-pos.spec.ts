@@ -74,7 +74,6 @@ function baseTables(): Record<string, Row[]> {
         auth_user_id: null,
         created_at: ago(500),
         updated_at: ago(100),
-        card_plans: { name: 'Gold' },
         memberships: [{ id: MEMBERSHIP_ID, status: 'active' }],
       },
     ],
@@ -95,10 +94,14 @@ function baseTables(): Record<string, Row[]> {
         renewal_due_at: ahead(24 * 300),
         issued_at: ago(100),
         created_at: ago(100),
-        customers: { status: 'active' },
-        card_plans: { name: 'Gold' },
-        points_accounts: { balance: 60000 },
       },
+    ],
+    // A REAL relation. The membership and customer rows used to carry
+    // `card_plans: { name: 'Gold' }` inline, so the `card_plans!inner(name)`
+    // embed resolved nothing and every productName assertion passed without the
+    // join running.
+    card_plans: [
+      { id: '77777777-7777-4777-8777-777777777777', code: 'GOLD', name: 'Gold' },
     ],
     points_accounts: [
       { id: ACCOUNT_ID, membership_id: MEMBERSHIP_ID, balance: 60000, lifetime_allocated: 60000, lifetime_redeemed: 0 },
