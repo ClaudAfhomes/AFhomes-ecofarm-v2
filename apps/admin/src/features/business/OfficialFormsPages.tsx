@@ -1,7 +1,7 @@
 import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { HumanInputValidity } from '../../lib/human-input-validity';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type {
@@ -36,6 +36,11 @@ import {
   Alert,
   Button,
   IdCapturePicker,
+  DetailCard,
+  DetailCardTitle,
+  DetailField,
+  DetailFieldGrid,
+  Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -146,11 +151,17 @@ function Field({
   const isName =
     suggestName || /^(?:first|last|middle|printed|primary|secondary) name$/i.test(label);
   // HumanInput owns contact/name errors; only date validation belongs here.
+  // A required field left empty always explains itself, whatever its kind.
   const validator = /birth date/i.test(label) ? birthDateSchema : null;
+  const empty = touched && required && value === '';
   const error =
-    touched &&
-    Boolean(validator && !validator.safeParse(value).success && (required || value !== ''));
-  const errorMessage = 'Enter a valid past birth date.';
+    empty ||
+    Boolean(
+      touched && validator && !validator.safeParse(value).success && (required || value !== ''),
+    );
+  const errorMessage = empty
+    ? 'This field cannot be left empty.'
+    : 'Enter a valid past birth date.';
   return (
     <label className={styles.filterLabel} htmlFor={id}>
       <span>{label}</span>
@@ -194,7 +205,9 @@ function DateField({
   const id = useId();
   const [touched, setTouched] = useState(false);
   const todayValue = new Date().toISOString().slice(0, 10);
-  const error = touched && (required || value !== '') && !birthDateSchema.safeParse(value).success;
+  const empty = touched && required && value === '';
+  const error =
+    empty || (touched && (required || value !== '') && !birthDateSchema.safeParse(value).success);
   return (
     <label className={styles.filterLabel} htmlFor={id}>
       <span>{label}</span>
@@ -214,7 +227,9 @@ function DateField({
       />
       {error ? (
         <small id={`${id}-error`} role="alert">
-          Enter a valid past birth date in YYYY-MM-DD format.
+          {empty
+            ? 'This field cannot be left empty.'
+            : 'Enter a valid past birth date in YYYY-MM-DD format.'}
         </small>
       ) : null}
     </label>
@@ -905,11 +920,35 @@ export function CustomerApplicationEditorPage() {
   const [paymentProof, setPaymentProof] = useState(false);
   const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   const [ocrFile, setOcrFile] = useState<File | null>(null);
+  // Local thumbnail for the not-yet-uploaded selection. Object URLs never hit
+  // the network. Derived during render (no setState-in-effect); a cleanup-only
+  // effect revokes the URL the moment the selection changes or the component
+  // unmounts. Runtimes without createObjectURL simply get no thumbnail.
+  const ocrPreviewUrl = useMemo(() => {
+    if (!ocrFile || !ocrFile.type.startsWith('image/')) return null;
+    try {
+      return URL.createObjectURL(ocrFile);
+    } catch {
+      return null;
+    }
+  }, [ocrFile]);
+  useEffect(() => {
+    return () => {
+      if (ocrPreviewUrl) {
+        try {
+          URL.revokeObjectURL(ocrPreviewUrl);
+        } catch {
+          // Test environments without object URLs have nothing to revoke.
+        }
+      }
+    };
+  }, [ocrPreviewUrl]);
   const [idType, setIdType] = useState('');
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
   const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
   const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const xlsxInput = useRef<HTMLInputElement>(null);
   const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
   // Customer dropdown: one bounded page (the server max), so every option is
@@ -1449,13 +1488,25 @@ export function CustomerApplicationEditorPage() {
           </section>
         ) : null}
         {selectedPlan ? (
-          <p>
-            Official {selectedPlan.code} benefits: {selectedPlan.discountPercent}% discount;{' '}
-            {selectedPlan.cardholderLimit} holder(s) max; {selectedPlan.yearlyPoints}/year ×{' '}
-            {selectedPlan.annualPointsTranches}; {selectedPlan.baseValidityYears}+
-            {selectedPlan.validityExtensionYears} years; ₱{selectedPlan.totalLoyaltyValue} total
-            value. Snapshots freeze at submit; later plan edits never rewrite this application.
-          </p>
+          <DetailCard>
+            <DetailCardTitle>Official {selectedPlan.code} plan benefits</DetailCardTitle>
+            <DetailFieldGrid>
+              <DetailField label="Discount">{selectedPlan.discountPercent}%</DetailField>
+              <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
+              <DetailField label="Yearly points">
+                {selectedPlan.yearlyPoints.toLocaleString()} × {selectedPlan.annualPointsTranches}
+              </DetailField>
+              <DetailField label="Validity">
+                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} years
+              </DetailField>
+              <DetailField label="Total value">
+                {formatMoney(selectedPlan.totalLoyaltyValue)}
+              </DetailField>
+            </DetailFieldGrid>
+            <p className={styles.hint}>
+              Snapshots freeze at submit; later plan edits never rewrite this application.
+            </p>
+          </DetailCard>
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
           <section className={styles.panel} aria-labelledby="application-panel-heading">
@@ -1486,13 +1537,11 @@ export function CustomerApplicationEditorPage() {
                     <Skeleton style={{ height: 40 }} />
                   </div>
                 ) : null}
-                {customerId ? (
-                  <p className={styles.pickedLine}>
-                    Selected: {linkedCustomer.data?.fullName ?? 'Loading customer…'}
+                {customerId && !linkedCustomer.data ? (
+                  <p role="status" className={styles.pickedLine}>
+                    Loading customer…
                   </p>
-                ) : (
-                  <p className={styles.hint}>No customer selected; registering anew.</p>
-                )}
+                ) : null}
               </div>
               <label className={styles.filterLabel}>
                 VIP plan
@@ -1591,6 +1640,15 @@ export function CustomerApplicationEditorPage() {
               {ocrFile ? (
                 <div role="status">
                   <p>Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).</p>
+                  {ocrPreviewUrl ? (
+                    <p>
+                      <img
+                        src={ocrPreviewUrl}
+                        alt={`Selected ID preview: ${ocrFile.name}`}
+                        className={styles.thumbnail}
+                      />
+                    </p>
+                  ) : null}
                   <Button
                     variant="secondary"
                     disabled={uploadId.isPending || ocr.isPending}
@@ -1700,9 +1758,36 @@ export function CustomerApplicationEditorPage() {
                 </div>
               ) : null}
               {idPreview ? (
-                <a href={idPreview} target="_blank" rel="noreferrer">
-                  Open short-lived private ID preview
-                </a>
+                <>
+                  <button
+                    type="button"
+                    className={styles.thumbnailButton}
+                    onClick={() => setPreviewOpen(true)}
+                    aria-label="View identity document preview fullscreen"
+                  >
+                    <img
+                      src={idPreview}
+                      alt="Identity document preview thumbnail"
+                      className={styles.thumbnail}
+                    />
+                  </button>
+                  <Dialog
+                    open={previewOpen}
+                    onClose={() => setPreviewOpen(false)}
+                    title="Identity document preview"
+                    footer={
+                      <Button variant="secondary" onClick={() => setPreviewOpen(false)}>
+                        Close
+                      </Button>
+                    }
+                  >
+                    <img
+                      src={idPreview}
+                      alt="Identity document preview"
+                      className={styles.previewImage}
+                    />
+                  </Dialog>
+                </>
               ) : null}
               {documents.data
                 ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)

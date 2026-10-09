@@ -412,6 +412,14 @@ describe('application private ID intake and review', () => {
     expect(screen.getByRole('button', { name: 'Upload an ID' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
   });
+  it('shows a local thumbnail of the selected ID image before upload', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:mock-id');
+    URL.revokeObjectURL = vi.fn();
+    await setup();
+    const thumbnail = await screen.findByAltText('Selected ID preview: qa.png');
+    expect(thumbnail).toHaveAttribute('src', 'blob:mock-id');
+    expect(vi.mocked(URL.createObjectURL)).toHaveBeenCalledTimes(1);
+  });
   it('routes Take a photo to the camera-capture input, never the ordinary picker', async () => {
     await setup();
     const picker = screen.getByLabelText('Upload ID');

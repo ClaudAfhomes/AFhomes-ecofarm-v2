@@ -11,10 +11,6 @@
   box-sizing: border-box;
 }
 
-:where(input, textarea, select)[aria-invalid='true'] {
-  border-color: var(--color-danger);
-  box-shadow: 0 0 0 1px var(--color-danger);
-}
 small[role='alert'] {
   color: var(--color-danger);
 }
@@ -64,6 +60,14 @@ small[role='alert'] {
 :where(input, select, textarea):disabled {
   background: var(--color-state-disabled-bg);
   color: var(--color-state-disabled-text);
+}
+
+/* Invalid fields turn red automatically. This rule must stay AFTER the base
+   control rules above: all of them are zero-specificity `:where()`, so source
+   order decides and the base border would otherwise win. */
+:where(input, textarea, select)[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
 }
 .table-scroll > table:not([class]) {
   width: 100%;
