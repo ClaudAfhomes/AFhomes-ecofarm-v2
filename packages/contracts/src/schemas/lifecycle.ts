@@ -20,12 +20,7 @@ import { z } from 'zod';
 /* States                                                              */
 /* ------------------------------------------------------------------ */
 
-export const customerStatusSchema = z.enum([
-  'prospect',
-  'active',
-  'suspended',
-  'cancelled',
-]);
+export const customerStatusSchema = z.enum(['prospect', 'active', 'suspended', 'cancelled']);
 export type CustomerStatus = z.infer<typeof customerStatusSchema>;
 
 export const saleStatusSchema = z.enum([
@@ -47,12 +42,7 @@ export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 export const paymentTypeSchema = z.enum(['down_payment', 'installment', 'full']);
 export type PaymentType = z.infer<typeof paymentTypeSchema>;
 
-export const membershipStatusSchema = z.enum([
-  'active',
-  'expired',
-  'suspended',
-  'cancelled',
-]);
+export const membershipStatusSchema = z.enum(['active', 'expired', 'suspended', 'cancelled']);
 export type MembershipStatus = z.infer<typeof membershipStatusSchema>;
 
 export const commissionStatusSchema = z.enum([
@@ -161,18 +151,16 @@ export const PAYMENT_SCHEMES: readonly PaymentScheme[] = [
 /** User-facing labels. The client sends codes; labels are display only. */
 export const PAYMENT_SCHEME_LABELS: Record<PaymentScheme, string> = {
   spot_cash: 'Spot Cash',
-  move_a: 'Move A — Pay Over 4 Months',
+  move_a: 'Move A: Pay Over 4 Months',
   installment_4_month: '4-Month Installment',
-  move_b1_40_12: 'Move B1 — 40% DP + 12 Months',
-  move_b2_25_12: 'Move B2 — 25% DP + 12 Months',
+  move_b1_40_12: 'Move B1: 40% DP + 12 Months',
+  move_b2_25_12: 'Move B2: 25% DP + 12 Months',
 };
 
 export function paymentSchemeLabel(scheme: string): string {
-  return (
-    (PAYMENT_SCHEMES as readonly string[]).includes(scheme)
-      ? PAYMENT_SCHEME_LABELS[scheme as PaymentScheme]
-      : scheme
-  );
+  return (PAYMENT_SCHEMES as readonly string[]).includes(scheme)
+    ? PAYMENT_SCHEME_LABELS[scheme as PaymentScheme]
+    : scheme;
 }
 
 /**
@@ -274,11 +262,7 @@ const RESERVATION_AGREEMENT_TRANSITIONS: Record<
   cancelled: [],
 };
 
-function canTransition<T extends string>(
-  table: Record<T, readonly T[]>,
-  from: T,
-  to: T,
-): boolean {
+function canTransition<T extends string>(table: Record<T, readonly T[]>, from: T, to: T): boolean {
   return (table[from] ?? []).includes(to);
 }
 
@@ -322,10 +306,7 @@ export const SALE_AWAITING_FULL_PAYMENT: readonly SaleStatus[] = [
 export const SALE_ACTIVATABLE: readonly SaleStatus[] = ['payment_verified', 'activation_pending'];
 
 /** True when the hierarchy level may legitimately sit under `upline`. */
-export function hierarchyAllowsUpline(
-  subject: HierarchyRole,
-  upline: HierarchyRole,
-): boolean {
+export function hierarchyAllowsUpline(subject: HierarchyRole, upline: HierarchyRole): boolean {
   const s = HIERARCHY_ORDER.indexOf(subject);
   const u = HIERARCHY_ORDER.indexOf(upline);
   return s >= 0 && u >= 0 && u === s - 1;

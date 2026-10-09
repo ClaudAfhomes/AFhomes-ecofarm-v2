@@ -72,12 +72,7 @@ export function IdCapturePicker({
         disabled={disabled}
         onChange={(e) => onFile(e.target.files?.[0] ?? null)}
       />
-      <Button
-        type="button"
-        variant="secondary"
-        disabled={disabled}
-        onClick={() => upload.current?.click()}
-      >
+      <Button type="button" disabled={disabled} onClick={() => upload.current?.click()}>
         Upload an ID
       </Button>
       <Button

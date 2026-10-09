@@ -1604,9 +1604,7 @@ export function CustomerApplicationEditorPage() {
                   e.target.value = '';
                 }}
               />
-              <Button variant="secondary" onClick={() => xlsxInput.current?.click()}>
-                Choose XLSX file
-              </Button>
+              <Button onClick={() => xlsxInput.current?.click()}>Choose XLSX file</Button>
               {chosenXlsx ? (
                 <span role="status" className={styles.fileName}>
                   Selected: {chosenXlsx}
@@ -1672,7 +1670,9 @@ export function CustomerApplicationEditorPage() {
                     { value: '', label: 'Select ID type' },
                     ...governmentIdTypeSchema.options.map((value) => ({
                       value,
-                      label: value.replace(/_/g, ' '),
+                      label: value
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
                     })),
                   ]}
                 />

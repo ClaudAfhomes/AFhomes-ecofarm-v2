@@ -783,7 +783,7 @@ export function BusinessProductsPage() {
                 checked={planForm.moveA}
                 onChange={(e) => setPlanForm({ ...planForm, moveA: e.target.checked })}
               />{' '}
-              Move A — pay over 4 months
+              Move A: pay over 4 months
             </label>
             <label>
               <input
@@ -791,7 +791,7 @@ export function BusinessProductsPage() {
                 checked={planForm.moveB1}
                 onChange={(e) => setPlanForm({ ...planForm, moveB1: e.target.checked })}
               />{' '}
-              Move B1 — 40% DP + 12 months
+              Move B1: 40% DP + 12 months
             </label>
             <label>
               <input
@@ -799,7 +799,7 @@ export function BusinessProductsPage() {
                 checked={planForm.moveB2}
                 onChange={(e) => setPlanForm({ ...planForm, moveB2: e.target.checked })}
               />{' '}
-              Move B2 — 25% DP + 12 months
+              Move B2: 25% DP + 12 months
             </label>
           </fieldset>
           <label>
