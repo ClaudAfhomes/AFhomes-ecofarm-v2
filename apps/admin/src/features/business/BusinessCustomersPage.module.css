@@ -11,6 +11,19 @@
 
 .tableWrap tbody tr.clickable {
   cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr.clickable:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.tableWrap tbody tr.clickable:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
 }
 
 /* Filter labels match the shared Sales-page pattern (grid label + control). */

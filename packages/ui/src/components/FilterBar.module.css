@@ -1,6 +1,10 @@
 .bar {
   display: flex;
-  align-items: center;
+  /* Bottom-align: filter labels add a text row above their controls, so a
+     bare search input centers against the whole label+control stack and sits
+     visibly higher than the controls. Aligning to the end keeps every input
+     on the same baseline; equal-height rows are unaffected. */
+  align-items: end;
   gap: var(--space-3);
   flex-wrap: wrap;
   min-height: var(--control-md);
