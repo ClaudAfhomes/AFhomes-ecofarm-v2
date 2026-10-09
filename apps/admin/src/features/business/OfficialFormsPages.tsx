@@ -389,6 +389,19 @@ function HolderFields({
 const QUEUE_PAGE_SIZE = 10;
 
 /**
+ * Application status badge tones. Stated explicitly per status instead of
+ * relying on the shared fallback: cancelled and rejected read danger,
+ * submitted reads in progress, approved reads success, drafts stay neutral.
+ */
+const APPLICATION_STATUS_TONES: Record<string, 'neutral' | 'info' | 'success' | 'danger'> = {
+  draft: 'neutral',
+  submitted: 'info',
+  approved: 'success',
+  rejected: 'danger',
+  cancelled: 'danger',
+};
+
+/**
  * Recommender fields with explicit human labels (never generated from keys),
  * so renaming a label cannot silently rename the payload field.
  */
@@ -527,7 +540,7 @@ export function CustomerApplicationsPage() {
     <section>
       <PageHeader
         title="Customer Applications"
-        description="Official application transactions still awaiting application work. Applications that have progressed to a reservation are owned by the reservation and Finance queues, and stay reachable here with 'Include progressed'."
+        description="Applications still needing application work."
         actions={
           <Button onClick={() => navigate('/admin/customers/applications/new')}>
             New application
@@ -663,7 +676,10 @@ export function CustomerApplicationsPage() {
                   <td>{app.tier}</td>
                   <td>{app.sellerName ?? '—'}</td>
                   <td>
-                    <StatusChip label={app.status} />
+                    <StatusChip
+                      label={app.status}
+                      tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
+                    />
                   </td>
                 </tr>
               ))}
@@ -896,20 +912,13 @@ export function CustomerApplicationEditorPage() {
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const xlsxInput = useRef<HTMLInputElement>(null);
   const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
-  // Searchable customer picker: the directory is paged server-side, so the
-  // full customer list is never loaded into a native select. The chosen
-  // record resolves to a display name through the same single-customer query
-  // the detail page uses (shared cache key).
-  const [customerSearch, setCustomerSearch] = useState('');
-  const debouncedCustomerSearch = useDebouncedValue(customerSearch);
+  // Customer dropdown: one bounded page (the server max), so every option is
+  // reachable without loading an unbounded directory into the control. The
+  // chosen record resolves to a display name through the same single-customer
+  // query the detail page uses (shared cache key).
   const customerOptions = useQuery({
-    queryKey: ['customer-picker', debouncedCustomerSearch],
-    queryFn: () =>
-      getCustomersPage({
-        ...(debouncedCustomerSearch ? { search: debouncedCustomerSearch } : {}),
-        limit: 10,
-        offset: 0,
-      }),
+    queryKey: ['customer-picker'],
+    queryFn: () => getCustomersPage({ limit: 200, offset: 0 }),
   });
   const linkedCustomer = useQuery({
     queryKey: ['business', 'customer', customerId],
@@ -918,7 +927,6 @@ export function CustomerApplicationEditorPage() {
   });
   const pickCustomer = (next: string) => {
     setCustomerId(next);
-    setCustomerSearch('');
     setOcrFile(null);
     setPickerVersion((version) => version + 1);
     setIdPreview(null);
@@ -1366,7 +1374,7 @@ export function CustomerApplicationEditorPage() {
       <section className={styles.editorSection}>
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
-          description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
+          description="Manual entry, file upload, or scan."
           actions={
             <>
               {saveAction}
@@ -1377,9 +1385,7 @@ export function CustomerApplicationEditorPage() {
           }
         />
         <Alert variant="info" title="How this form works">
-          Saving creates a draft: choose a customer (or register one here), pick a plan, complete
-          the required holder fields, and tick certification. Submit, approval, and purchase terms
-          happen after the draft exists.
+          Save a draft first; submit later.
         </Alert>
         {existing.data ? (
           <p>
@@ -1456,19 +1462,9 @@ export function CustomerApplicationEditorPage() {
             <h2 id="application-panel-heading" className={styles.panelTitle}>
               1. Application
             </h2>
-            <p className={styles.hint}>
-              Who is applying, on which plan, and how they will pay. Start from a template or a
-              filled XLSX to skip manual entry.
-            </p>
+            <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
             <div className={styles.editorGrid}>
               <div className={styles.pickerWrap}>
-                <SearchField
-                  label="Search customers"
-                  placeholder="Name, number, or email"
-                  value={customerSearch}
-                  onChange={setCustomerSearch}
-                  disabled={uploadId.isPending || ocr.isPending}
-                />
                 <label className={styles.filterLabel}>
                   Customer
                   <Select
@@ -1495,9 +1491,7 @@ export function CustomerApplicationEditorPage() {
                     Selected: {linkedCustomer.data?.fullName ?? 'Loading customer…'}
                   </p>
                 ) : (
-                  <p className={styles.hint}>
-                    No customer selected: a new customer will be registered with this application.
-                  </p>
+                  <p className={styles.hint}>No customer selected; registering anew.</p>
                 )}
               </div>
               <label className={styles.filterLabel}>
@@ -1575,10 +1569,7 @@ export function CustomerApplicationEditorPage() {
             <h2 id="identity-panel-heading" className={styles.panelTitle}>
               2. Identity
             </h2>
-            <p className={styles.hint}>
-              Prove who the primary holder is: capture the ID, detect its fields, then record the ID
-              type on the document. Nothing here stores an ID number.
-            </p>
+            <p className={styles.hint}>Capture ID, detect fields, record type.</p>
             <fieldset className={styles.subGroup}>
               <legend className={styles.subGroupTitle}>Valid ID</legend>
               <p>
@@ -1599,9 +1590,7 @@ export function CustomerApplicationEditorPage() {
               ) : null}
               {ocrFile ? (
                 <div role="status">
-                  <p>
-                    Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).
-                  </p>
+                  <p>Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).</p>
                   <Button
                     variant="secondary"
                     disabled={uploadId.isPending || ocr.isPending}
