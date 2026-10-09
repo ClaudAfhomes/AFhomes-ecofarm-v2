@@ -12,6 +12,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts';
@@ -56,7 +57,32 @@ export function CustomerDetailPage() {
   });
   const salesHidden = sales.error instanceof ApiError && sales.error.status === 403;
 
-  if (customer.isPending) return <p role="status">Loading customer…</p>;
+  if (customer.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading customer"
+        >
+          <Skeleton style={{ height: 40 }} />
+          <DetailGrid className={styles.topGrid}>
+            {['Customer', 'Contact', 'Verification', 'Membership'].map((title) => (
+              <DetailCard key={title}>
+                <DetailCardTitle>{title}</DetailCardTitle>
+                <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+                  <Skeleton style={{ height: 16 }} />
+                  <Skeleton style={{ height: 16 }} />
+                  <Skeleton style={{ height: 16 }} />
+                </div>
+              </DetailCard>
+            ))}
+            <Skeleton style={{ height: 120 }} />
+            <Skeleton style={{ height: 120 }} />
+          </DetailGrid>
+        </div>
+      </section>
+    );
   if (customer.isError) return <ErrorState error={customer.error} onRetry={customer.refetch} />;
   if (!customer.data)
     return <EmptyState title="Customer not found." description="It may have been deleted." />;
@@ -140,19 +166,31 @@ export function CustomerDetailPage() {
         ))}
         {salesHidden ? null : (
           <section aria-label="Card Sales" className={styles.salesSection}>
-            <h2 className={styles.sectionTitle}>Card Sales</h2>
             {sales.isPending ? (
-              <p role="status">Loading card sales…</p>
-            ) : sales.isError ? (
-              <ErrorState error={sales.error} onRetry={sales.refetch} />
-            ) : sales.data.length === 0 ? (
-              <p className={styles.muted}>No card sales yet.</p>
-            ) : (
-              <div className={styles.saleStack}>
-                {sales.data.map((sale) => (
-                  <CustomerSaleCard key={sale.id} sale={sale} />
-                ))}
+              <div
+                style={{ display: 'grid', gap: 'var(--space-3)' }}
+                role="status"
+                aria-label="Loading card sales"
+              >
+                <Skeleton style={{ height: 24, maxWidth: 160 }} />
+                <Skeleton style={{ height: 96 }} />
+                <Skeleton style={{ height: 96 }} />
               </div>
+            ) : (
+              <>
+                <h2 className={styles.sectionTitle}>Card Sales</h2>
+                {sales.isError ? (
+                  <ErrorState error={sales.error} onRetry={sales.refetch} />
+                ) : sales.data.length === 0 ? (
+                  <p className={styles.muted}>No card sales yet.</p>
+                ) : (
+                  <div className={styles.saleStack}>
+                    {sales.data.map((sale) => (
+                      <CustomerSaleCard key={sale.id} sale={sale} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}
@@ -206,7 +244,15 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
           View Payment History
         </summary>
         {payments.isPending ? (
-          <p role="status">Loading payments…</p>
+          <div
+            style={{ display: 'grid', gap: 'var(--space-3)' }}
+            role="status"
+            aria-label="Loading payments"
+          >
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
         ) : payments.isError ? (
           <ErrorState error={payments.error} onRetry={payments.refetch} />
         ) : (

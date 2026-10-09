@@ -41,6 +41,7 @@ import {
   PageHeader,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
@@ -412,6 +413,37 @@ export function CustomerApplicationsPage() {
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous list visible and never reach this branch.
+  if (query.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading applications"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
   return (
     <section>
       <PageHeader
@@ -495,9 +527,7 @@ export function CustomerApplicationsPage() {
           </>
         }
       />
-      {query.isPending ? (
-        <p role="status">Loading applications…</p>
-      ) : query.isError ? (
+      {query.isError ? (
         <ErrorState
           error={query.error}
           title="Applications could not be loaded"
@@ -1111,13 +1141,39 @@ export function CustomerApplicationEditorPage() {
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = customers.data?.find((c) => c.id === customerId);
   if (id && existing.isPending) {
-    return <p role="status">Loading application…</p>;
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading application"
+        >
+          <Skeleton style={{ height: 40, maxWidth: 320 }} />
+          <Skeleton style={{ height: 16, maxWidth: 480 }} />
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
   }
   if (id && (existing.isError || !existing.data)) {
     return (
       <section>
-        <Link to="/admin/customers/applications">Back to applications</Link>
+        <PageHeader
+          title="Application"
+          description="The requested application could not be opened."
+          actions={
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+              Back to applications
+            </Button>
+          }
+        />
         <ErrorState
+          error={id && existing.isError ? existing.error : undefined}
           title="Application could not be loaded"
           onRetry={() => void existing.refetch()}
         />
@@ -1130,10 +1186,12 @@ export function CustomerApplicationEditorPage() {
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
           description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
+          actions={
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+              Back to applications
+            </Button>
+          }
         />
-        <p>
-          <Link to="/admin/customers/applications">Back to applications</Link>
-        </p>
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1343,14 +1401,11 @@ export function CustomerApplicationEditorPage() {
             ) : null}
             <Button
               onClick={() => ocr.mutate()}
-              disabled={
-                (!ocrFile && !serverCurrentDocument) ||
-                !customerId ||
-                ocr.isPending ||
-                uploadId.isPending
-              }
+              disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
+              loading={ocr.isPending || uploadId.isPending}
+              loadingLabel="Processing…"
             >
-              {ocr.isPending || uploadId.isPending ? 'Processing…' : 'Detect fields'}
+              Detect fields
             </Button>
             {/* Submit requires an ID type recorded on the identity document, and
                 that field is only ever written by the document-confirm endpoint.
@@ -1363,10 +1418,12 @@ export function CustomerApplicationEditorPage() {
                 Submit needs the ID type recorded against this identity document.{' '}
                 <Button
                   variant="secondary"
-                  disabled={!idType || confirmIdType.isPending || uploadId.isPending}
+                  disabled={!idType || uploadId.isPending}
+                  loading={confirmIdType.isPending}
+                  loadingLabel="Recording…"
                   onClick={() => confirmIdType.mutate()}
                 >
-                  {confirmIdType.isPending ? 'Recording…' : 'Record ID type on this ID'}
+                  Record ID type on this ID
                 </Button>
               </p>
             ) : null}
@@ -1535,14 +1592,15 @@ export function CustomerApplicationEditorPage() {
             onClick={() => save.mutate()}
             disabled={
               !editable ||
-              save.isPending ||
               uploadId.isPending ||
               ocr.isPending ||
               !optionalPhonesValid ||
               Object.values(invalidFields).some(Boolean)
             }
+            loading={save.isPending}
+            loadingLabel="Saving…"
           >
-            {save.isPending ? 'Saving…' : 'Save draft'}
+            Save draft
           </Button>{' '}
           {id && editable ? (
             <>
@@ -1558,30 +1616,37 @@ export function CustomerApplicationEditorPage() {
               <Button
                 onClick={() => submit.mutate()}
                 disabled={
-                  submitBlockers.length > 0 ||
-                  save.isPending ||
-                  uploadId.isPending ||
-                  ocr.isPending ||
-                  submit.isPending
+                  submitBlockers.length > 0 || save.isPending || uploadId.isPending || ocr.isPending
                 }
+                loading={submit.isPending}
+                loadingLabel="Submitting…"
               >
-                {submit.isPending ? 'Submitting...' : 'Submit'}
+                Submit
               </Button>
             </>
           ) : null}{' '}
           {id && existing.data?.status === 'submitted' ? (
             <>
-              <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
+              <Button
+                onClick={() => decide.mutate('approved')}
+                loading={decide.isPending}
+                loadingLabel="Approving…"
+              >
                 Approve
               </Button>{' '}
               <Button
                 variant="danger"
                 onClick={() => decide.mutate('rejected')}
-                disabled={decide.isPending}
+                loading={decide.isPending}
+                loadingLabel="Rejecting…"
               >
                 Reject
               </Button>{' '}
-              <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+              <Button
+                onClick={() => reopen.mutate()}
+                loading={reopen.isPending}
+                loadingLabel="Reopening…"
+              >
                 {existing.data.purchaseTermsId
                   ? 'Reopen to draft'
                   : 'Reopen to review purchase terms'}
@@ -1589,17 +1654,22 @@ export function CustomerApplicationEditorPage() {
             </>
           ) : null}{' '}
           {id && existing.data?.status === 'rejected' ? (
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+            <Button
+              onClick={() => reopen.mutate()}
+              loading={reopen.isPending}
+              loadingLabel="Reopening…"
+            >
               Reopen to draft
             </Button>
           ) : null}{' '}
           {id && existing.data?.status === 'approved' && !proposal.data ? (
             <Button
               onClick={() => void proposal.refetch()}
-              disabled={proposal.isFetching}
+              loading={proposal.isFetching}
+              loadingLabel="Loading offer…"
               type="button"
             >
-              {proposal.isFetching ? 'Loading offer…' : 'Load purchase terms offer'}
+              Load purchase terms offer
             </Button>
           ) : null}{' '}
           {id && existing.data?.status === 'approved' && proposal.data ? (
@@ -1615,16 +1685,22 @@ export function CustomerApplicationEditorPage() {
               </label>{' '}
               <Button
                 onClick={() => review.mutate()}
-                disabled={review.isPending || reviewReason.trim().length < 5}
+                disabled={reviewReason.trim().length < 5}
+                loading={review.isPending}
+                loadingLabel="Confirming…"
               >
-                {review.isPending ? 'Confirming…' : 'Confirm purchase terms'}
+                Confirm purchase terms
               </Button>
             </>
           ) : null}{' '}
           {id &&
           existing.data &&
           canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
-            <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+            <Button
+              onClick={() => decide.mutate('cancelled')}
+              loading={decide.isPending}
+              loadingLabel="Cancelling…"
+            >
               Cancel
             </Button>
           ) : null}{' '}

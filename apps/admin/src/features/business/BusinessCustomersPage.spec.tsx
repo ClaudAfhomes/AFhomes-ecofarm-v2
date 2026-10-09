@@ -192,7 +192,7 @@ describe('BusinessCustomersPage directory table', () => {
     expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
   });
 
-  it('fetches 10-row pages and walks them with Previous/Next', async () => {
+  it('fetches 10-row pages and walks them with the shared pagination', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 25));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
@@ -203,9 +203,11 @@ describe('BusinessCustomersPage directory table', () => {
     // The range renders across several text nodes, so assert on textContent.
     const range = () => screen.getByRole('status', { name: 'Customer record range' });
     expect(range()).toHaveTextContent('Showing 1–10 of 25');
-    expect(screen.getByRole('button', { name: 'Previous customers page' })).toBeDisabled();
+    expect(screen.getByRole('navigation', { name: 'Customers pagination' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Page 1' })).toBeDisabled();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Next customers page' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
     await waitFor(() =>
       expect(vi.mocked(getCustomersPage).mock.calls[1]![0]).toMatchObject({
         limit: 10,

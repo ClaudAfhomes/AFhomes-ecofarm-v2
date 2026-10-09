@@ -39,6 +39,28 @@
   margin-bottom: var(--space-2);
 }
 
+/* Status select pending state: the spinner docks inside the control's right
+   edge (over the chevron spot) instead of sitting beside it, so the busy
+   indicator reads as part of the control that triggered the update. */
+.statusWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.statusSpinner {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px 2px 10px;
+  background-color: var(--color-state-disabled-bg);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
 /* The action buttons stay on one row and scroll horizontally on narrow
    cards instead of wrapping onto a second row. */
 .actionButtons {

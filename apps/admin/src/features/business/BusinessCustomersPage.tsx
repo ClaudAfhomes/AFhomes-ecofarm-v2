@@ -7,10 +7,13 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  Icon,
   OverflowMenu,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
@@ -157,6 +160,39 @@ export function BusinessCustomersPage() {
     issueActivation.reset();
   };
 
+  // First load skeletonizes the whole page - header, filters, and table -
+  // so no static content flashes before the data it describes. Refetches keep
+  // the previous page visible via placeholderData and never reach this branch.
+  if (customers.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading customers"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
     <section>
       <PageHeader
@@ -164,10 +200,8 @@ export function BusinessCustomersPage() {
         description="Customer directory and membership records."
         actions={
           canSeeImportExport ? (
-            <Button
-              variant="secondary"
-              onClick={() => navigate('/admin/customers/import-export')}
-            >
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/import-export')}>
+              <Icon name="download" size={16} aria-hidden="true" />
               Import/Export Data
             </Button>
           ) : undefined
@@ -260,9 +294,7 @@ export function BusinessCustomersPage() {
         }
       />
 
-      {customers.isPending ? (
-        <p role="status">Loading customers…</p>
-      ) : customers.isError ? (
+      {customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : rows.length === 0 ? (
         <EmptyState
@@ -373,29 +405,17 @@ export function BusinessCustomersPage() {
       )}
 
       {total > 0 ? (
-        <nav aria-label="Customers pagination" className={styles.pagination}>
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Customers pagination"
+          />
           <span role="status" aria-label="Customer record range" className={styles.paginationRange}>
             Showing {rangeFrom}–{rangeTo} of {total}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={safePage === 0}
-            onClick={() => setPage(Math.max(0, safePage - 1))}
-            aria-label="Previous customers page"
-          >
-            Previous
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={safePage >= pageCount - 1}
-            onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
-            aria-label="Next customers page"
-          >
-            Next
-          </Button>
-        </nav>
+        </div>
       ) : null}
 
       <Dialog

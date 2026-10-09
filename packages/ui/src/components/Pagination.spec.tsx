@@ -36,4 +36,12 @@ describe('Pagination', () => {
     expect(screen.getAllByText('…').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Page 20' })).toBeInTheDocument();
   });
+
+  it('wraps both step controls in the same bordered container', () => {
+    setup({ page: 2, pageCount: 5 });
+    const next = screen.getByRole('button', { name: 'Next page' });
+    const previous = screen.getByRole('button', { name: 'Previous page' });
+    expect(next.parentElement?.className).toMatch(/stepWrap/);
+    expect(previous.parentElement?.className).toMatch(/stepWrap/);
+  });
 });

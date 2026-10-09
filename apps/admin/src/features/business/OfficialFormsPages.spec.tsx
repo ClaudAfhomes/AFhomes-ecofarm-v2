@@ -109,7 +109,7 @@ describe('CustomerApplicationsPage list states', () => {
   it('shows loading - never a phantom empty state - on first load', () => {
     vi.mocked(getCustomerApplications).mockReturnValue(new Promise(() => {}));
     renderWithProviders(<CustomerApplicationsPage />);
-    expect(screen.getByText('Loading applications…')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading applications' })).toBeInTheDocument();
     expect(screen.queryByText('No customer applications')).not.toBeInTheDocument();
   });
 

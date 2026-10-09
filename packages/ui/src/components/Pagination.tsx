@@ -45,12 +45,14 @@ export function Pagination({
 
   return (
     <nav className={styles.pagination} aria-label={label}>
-      <IconButton
-        icon="chevron-left"
-        label="Previous page"
-        disabled={disabled || atFirst}
-        onClick={() => onChange(page - 1)}
-      />
+      <span className={styles.stepWrap}>
+        <IconButton
+          icon="chevron-left"
+          label="Previous page"
+          disabled={disabled || atFirst}
+          onClick={() => onChange(page - 1)}
+        />
+      </span>
       <ol className={styles.pages}>
         {pages.map((p, index) =>
           p === 'ellipsis' ? (
@@ -74,12 +76,14 @@ export function Pagination({
           ),
         )}
       </ol>
-      <IconButton
-        icon="chevron-right"
-        label="Next page"
-        disabled={disabled || atLast}
-        onClick={() => onChange(page + 1)}
-      />
+      <span className={styles.stepWrap}>
+        <IconButton
+          icon="chevron-right"
+          label="Next page"
+          disabled={disabled || atLast}
+          onClick={() => onChange(page + 1)}
+        />
+      </span>
     </nav>
   );
 }

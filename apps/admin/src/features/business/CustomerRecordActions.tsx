@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Customer, CustomerOnboardingRecovery, Sale } from '@afhomes/contracts';
-import { Button, ConfirmDialog, DetailCard, DetailCardTitle, Dialog, Select } from '@afhomes/ui';
+import {
+  Button,
+  ConfirmDialog,
+  DetailCard,
+  DetailCardTitle,
+  Dialog,
+  Select,
+  Spinner,
+} from '@afhomes/ui';
 import { useNavigate } from 'react-router';
 
 import { useSession } from '../../lib/session';
@@ -134,8 +142,13 @@ export function CustomerRecordActions({
         ) : null}
         <div className={styles.actionButtons}>
           {showActivation ? (
-            <Button variant="secondary" disabled={issuing} onClick={() => issueActivation.mutate()}>
-              {issuing ? 'Issuing activation link…' : 'Issue / Reissue activation link'}
+            <Button
+              variant="secondary"
+              loading={issuing}
+              loadingLabel="Issuing activation link…"
+              onClick={() => issueActivation.mutate()}
+            >
+              Issue / Reissue activation link
             </Button>
           ) : null}
           {isSuperAdmin ? (
@@ -198,23 +211,32 @@ export function CustomerRecordActions({
             </>
           ) : null}
           {canUpdateCustomer ? (
-            <Select
-              aria-label="Membership status"
-              value={
-                ['prospect', 'active', 'suspended'].includes(customer.status) ? customer.status : ''
-              }
-              disabled={statusMutation.isPending}
-              onChange={(e) => {
-                const next = e.target.value as 'prospect' | 'active' | 'suspended' | '';
-                if (next && next !== customer.status) statusMutation.mutate(next);
-              }}
-              options={[
-                { value: '', label: 'Select Status' },
-                { value: 'prospect', label: 'Prospect' },
-                { value: 'active', label: 'Active' },
-                { value: 'suspended', label: 'Suspended' },
-              ]}
-            />
+            <span className={styles.statusWrap}>
+              <Select
+                aria-label="Membership status"
+                value={
+                  ['prospect', 'active', 'suspended'].includes(customer.status)
+                    ? customer.status
+                    : ''
+                }
+                disabled={statusMutation.isPending}
+                onChange={(e) => {
+                  const next = e.target.value as 'prospect' | 'active' | 'suspended' | '';
+                  if (next && next !== customer.status) statusMutation.mutate(next);
+                }}
+                options={[
+                  { value: '', label: 'Select Status' },
+                  { value: 'prospect', label: 'Prospect' },
+                  { value: 'active', label: 'Active' },
+                  { value: 'suspended', label: 'Suspended' },
+                ]}
+              />
+              {statusMutation.isPending ? (
+                <span className={styles.statusSpinner}>
+                  <Spinner size="sm" label="Updating status" />
+                </span>
+              ) : null}
+            </span>
           ) : null}
         </div>
         {statusMutation.error ? <p role="alert">{statusMutation.error.message}</p> : null}
