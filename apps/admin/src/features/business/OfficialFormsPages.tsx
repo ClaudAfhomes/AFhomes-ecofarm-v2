@@ -40,8 +40,10 @@ import {
   FilterBar,
   PageHeader,
   SearchField,
+  Select,
   StatusChip,
 } from '@afhomes/ui';
+import styles from './OfficialFormsPages.module.css';
 
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
@@ -378,6 +380,7 @@ function HolderFields({
 }
 
 export function CustomerApplicationsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
@@ -414,7 +417,11 @@ export function CustomerApplicationsPage() {
       <PageHeader
         title="Customer Applications"
         description="Official application transactions still awaiting application work. Applications that have progressed to a reservation are owned by the reservation and Finance queues, and stay reachable here with 'Include progressed'."
-        actions={<Link to="/admin/customers/applications/new">New application</Link>}
+        actions={
+          <Button onClick={() => navigate('/admin/customers/applications/new')}>
+            New application
+          </Button>
+        }
       />
       <FilterBar
         search={
@@ -428,45 +435,62 @@ export function CustomerApplicationsPage() {
         }
         filters={
           <>
-            <label>
+            <label className={styles.filterLabel}>
               Queue
-              <select
+              <Select
+                aria-label="Queue"
                 value={applicationWorkOnly ? 'application_work' : 'all'}
                 onChange={(e) => setApplicationWorkOnly(e.target.value === 'application_work')}
-              >
-                <option value="application_work">Needs application work</option>
-                <option value="all">Include progressed</option>
-              </select>
+                options={[
+                  { value: 'application_work', label: 'Needs application work' },
+                  { value: 'all', label: 'Include progressed' },
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Status
-              <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All</option>
-                {['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
+                    value: s,
+                    label: s[0]!.toUpperCase() + s.slice(1),
+                  })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Tier
-              <select value={tier} onChange={(e) => setTier(e.target.value)}>
-                <option value="">All</option>
-                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Tier"
+                value={tier}
+                onChange={(e) => setTier(e.target.value)}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               From
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              <input
+                aria-label="From date"
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               To
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              <input
+                aria-label="To date"
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
             </label>
           </>
         }
@@ -474,9 +498,18 @@ export function CustomerApplicationsPage() {
       {query.isPending ? (
         <p role="status">Loading applications…</p>
       ) : query.isError ? (
-        <ErrorState title="Applications could not be loaded" onRetry={() => void query.refetch()} />
+        <ErrorState
+          error={query.error}
+          title="Applications could not be loaded"
+          onRetry={() => void query.refetch()}
+        />
       ) : query.data?.length ? (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Customer application records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -485,26 +518,29 @@ export function CustomerApplicationsPage() {
                 <th>Tier</th>
                 <th>Seller</th>
                 <th>Status</th>
-                <th>Submitted</th>
-                <th>Created</th>
               </tr>
             </thead>
             <tbody>
               {query.data.map((app) => (
-                <tr key={app.id}>
-                  <td>
-                    <Link to={`/admin/customers/applications/${app.id}`}>
-                      {app.applicationNumber}
-                    </Link>
-                  </td>
+                <tr
+                  key={app.id}
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Review application ${app.applicationNumber}`}
+                  onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ')
+                      navigate(`/admin/customers/applications/${app.id}`);
+                  }}
+                  className={styles.clickable}
+                >
+                  <td>{app.applicationNumber}</td>
                   <td>{app.applicantName ?? '—'}</td>
                   <td>{app.tier}</td>
                   <td>{app.sellerName ?? '—'}</td>
                   <td>
                     <StatusChip label={app.status} />
                   </td>
-                  <td>{app.submittedAt ?? '—'}</td>
-                  <td>{app.createdAt}</td>
                 </tr>
               ))}
             </tbody>
@@ -558,8 +594,7 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
   });
   // A cancelled agreement hands the customer back to the application stage, so
   // it is not progress.
-  const reservation =
-    reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
+  const reservation = reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
   const status = application.status;
   const approved = status === 'approved' || Boolean(reservation);
   const hasReservation = Boolean(reservation);

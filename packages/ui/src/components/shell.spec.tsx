@@ -24,6 +24,39 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
   });
+
+  // A parent page prefixes its nested sibling (`/admin/customers` prefixes
+  // `/admin/customers/applications`), so prefix matching alone lights up BOTH
+  // links. The longest match wins: a nested page highlights exactly its own
+  // link, while a drill-down (`/admin/customers/:id`) still highlights the
+  // parent it belongs to.
+  it.each([
+    ['/admin/customers/applications', 'Customer Applications', 'Customers'],
+    ['/admin/customers/abc-123', 'Customers', 'Customer Applications'],
+  ])('highlights only %s on %s', (path, active, inactive) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <Sidebar
+          items={[
+            {
+              to: '/admin/sales',
+              label: 'Sales',
+              dropdown: [
+                { to: '/admin/customers', label: 'Customers' },
+                { to: '/admin/customers/applications', label: 'Customer Applications' },
+              ],
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    const activeLink = screen.getByRole('link', { name: active });
+    const inactiveLink = screen.getByRole('link', { name: inactive });
+    expect(activeLink.className).toMatch(/activeSubLink/);
+    expect(activeLink).toHaveAttribute('aria-current', 'page');
+    expect(inactiveLink.className).not.toMatch(/activeSubLink/);
+    expect(inactiveLink).not.toHaveAttribute('aria-current');
+  });
 });
 
 describe('BottomNav', () => {

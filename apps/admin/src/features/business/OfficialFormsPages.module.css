@@ -1,0 +1,35 @@
+/* Official paper-form list pages: page-scoped table and filter contracts so the
+   columns scroll horizontally with intact cells instead of squeezing. Applied
+   alongside the global `table-scroll` class; other tables are unaffected. */
+.tableWrap {
+  margin-top: var(--space-4);
+}
+
+.tableWrap > table {
+  min-width: 880px;
+}
+
+.tableWrap tbody tr.clickable {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr.clickable:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.tableWrap tbody tr.clickable:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+/* Filter labels match the shared Customers-page pattern (grid label + control). */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}

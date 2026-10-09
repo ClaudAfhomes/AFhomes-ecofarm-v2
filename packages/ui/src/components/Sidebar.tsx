@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router';
+import { Link, NavLink, useLocation } from 'react-router';
 import type { ReactNode } from 'react';
 
 import { Icon, type IconName } from './Icon';
@@ -10,7 +10,18 @@ export interface SidebarDivider {
   divider: true;
 }
 
-export type SidebarDropdownItem = { to: string; label: string; end?: boolean } | SidebarDivider;
+export type SidebarDropdownItem =
+  | {
+      to: string;
+      label: string;
+      /**
+       * Accepted for shape compatibility with top-level items but not
+       * consulted: dropdown highlighting is longest-match (see
+       * `longestActiveSubTo`), so nested pages highlight exactly one link.
+       */
+      end?: boolean;
+    }
+  | SidebarDivider;
 
 export interface SidebarItem {
   to: string;
@@ -99,6 +110,28 @@ export function Sidebar({ brand, items, footer, ariaLabel = 'Primary', collapsed
   );
 }
 
+/**
+ * The longest matching sub-link wins. Prefix matching alone is wrong once a
+ * dropdown holds both a parent page and a nested child: `/admin/customers`
+ * prefixes `/admin/customers/applications`, so plain NavLink matching lights
+ * up BOTH links. Choosing the most specific match keeps a nested page
+ * highlighted on its OWN link while drill-downs (`/admin/customers/:id`)
+ * still highlight their parent. Plain `Link` carries the highlight (with
+ * `aria-current`) instead of NavLink, whose own prefix match cannot be
+ * narrowed per link.
+ */
+function longestActiveSubTo(
+  dropdown: SidebarItem['dropdown'],
+  pathname: string,
+): string | undefined {
+  return (dropdown ?? [])
+    .filter(
+      (sub): sub is Extract<SidebarDropdownItem, { to: string }> =>
+        !('divider' in sub) && (pathname === sub.to || pathname.startsWith(`${sub.to}/`)),
+    )
+    .sort((a, b) => b.to.length - a.to.length)[0]?.to;
+}
+
 /** A category header with expandable sub-items. Controlled by parent Sidebar
  *  to enforce accordion behavior (opening one closes the other). */
 function CategoryItem({
@@ -112,6 +145,8 @@ function CategoryItem({
   open: boolean;
   onToggle: () => void;
 }) {
+  const location = useLocation();
+  const activeSubTo = longestActiveSubTo(item.dropdown, location.pathname);
   return (
     <li className={styles.category}>
       <button
@@ -146,17 +181,16 @@ function CategoryItem({
                 </li>
               );
             }
+            const isActive = sub.to === activeSubTo;
             return (
               <li key={sub.to}>
-                <NavLink
+                <Link
                   to={sub.to}
-                  end={sub.end}
-                  className={({ isActive }) =>
-                    `${styles.subLink} ${isActive ? styles.activeSubLink : ''}`
-                  }
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`${styles.subLink} ${isActive ? styles.activeSubLink : ''}`}
                 >
                   <span className={styles.subLabel}>{sub.label}</span>
-                </NavLink>
+                </Link>
               </li>
             );
           })}
