@@ -19,6 +19,9 @@ import {
   pointRedemptionRuleSchema,
   purchaseReceiptSchema,
   reissuedEarningClaimSchema,
+  serviceTierDiscountSchema,
+  operationalSettlementSchema,
+  appliedPointsDiscountSchema,
   resolvedMemberSchema,
   recordedPurchaseSchema,
   reversedPurchasePointsSchema,
@@ -53,11 +56,42 @@ export const recordPurchase = (input: CreatePurchaseInput) =>
   post('/earning/purchases', recordedPurchaseSchema, input);
 
 /**
+ * What the SERVER priced for a recorded sale.
+ *
+ * `tierDiscountAmount` comes back down from the database, which resolved the
+ * member's VIP tier and the active service rate. The request carries a quantity
+ * and a unit price and nothing else: there is no rate field to send, so this
+ * screen cannot express a discount it was not given.
+ */
+export type PricedPurchase = z.infer<typeof recordedPurchaseSchema> & {
+  tierDiscountAmount?: string;
+};
+
+/**
  * Settle a purchase. This is the gate on earning: verified receipts must cover
  * the NET amount, and only a completed purchase can ever produce a claim.
  */
 export const completePurchase = (purchaseId: string) =>
   post(`/earning/purchases/${purchaseId}/complete`, completedPurchaseSchema, undefined);
+
+/**
+ * Record a cash receipt against a purchase.
+ *
+ * A receipt is RECORDED, not money: it stays unverified until Finance accepts
+ * it, and only verified receipts count toward settling the sale. The GSD who
+ * records it can never be the one who verifies it.
+ */
+export const recordPurchaseReceipt = (input: {
+  purchaseId: string;
+  amount: string;
+  method: string;
+  reference?: string;
+}) =>
+  post(`/earning/purchases/${input.purchaseId}/payments`, purchaseReceiptSchema, {
+    amount: input.amount,
+    method: input.method,
+    ...(input.reference ? { reference: input.reference } : {}),
+  });
 
 /** A purchase row as the staff list reports it. */
 export const purchaseRowSchema = z.object({
@@ -228,6 +262,52 @@ export const createService = (input: {
 }) => post('/earning/services', serviceCatalogItemSchema, input);
 
 export const listEarningRules = () => requestList('/earning/rules', pointEarningRuleSchema);
+
+/**
+ * Operational Services VIP tier discounts: an admin-configured percentage per
+ * service per tier.
+ *
+ * These are separate from `card_plans.discount_percent`, which discounts a CARD
+ * purchase and is never applied to a service. The two never stack, and a tier
+ * discount is not a points spend: the purchase carries them as two distinct
+ * figures so a report can tell "the Gold rate took 25,000 off" from "the member
+ * spent points worth 25,000".
+ */
+export const listTierDiscounts = () =>
+  requestList('/earning/tier-discounts', serviceTierDiscountSchema);
+
+/**
+ * The one settlement answer for a purchase, from the database.
+ *
+ * Both the GSD screen and the Finance screen render THIS, so neither can drift
+ * from the server's own view of what has been received and what is claimable.
+ * It is a plain read: refreshing it never advances the transaction.
+ */
+export const getSettlement = (purchaseId: string) =>
+  request(`/earning/purchases/${purchaseId}/settlement`, operationalSettlementSchema);
+
+/**
+ * Spend a member's points at the till, in one authorized step.
+ *
+ * Only a points figure and a POS reference are sent. The peso value comes from
+ * the configured rule, so nothing here can influence what the member pays.
+ * `reference` is the idempotency key: a retry returns the original figures
+ * instead of spending the points twice.
+ */
+export const applyPointsDiscount = (purchaseId: string, pointsRequested: number, reference: string) =>
+  post(
+    `/earning/purchases/${purchaseId}/points-discount`,
+    appliedPointsDiscountSchema,
+    { pointsRequested, reference },
+  );
+
+export const createTierDiscount = (input: {
+  serviceId: string;
+  tier: 'BRONZE' | 'SILVER' | 'GOLD';
+  discountRate: number;
+  effectiveStart: string;
+  effectiveEnd: string;
+}) => post('/earning/tier-discounts', serviceTierDiscountSchema, input);
 
 /**
  * Promotions: what makes a NON-staycation service discountable by points.

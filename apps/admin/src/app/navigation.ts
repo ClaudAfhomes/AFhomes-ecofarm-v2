@@ -106,24 +106,37 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // because the next action is a redemption. Moved out of the global nav and into
       // Redemption so it is no longer presented as a system-wide general lookup.
       { to: '/admin/member-lookup', label: 'Member Lookup', module: 'operations.redemption' },
-      // Earning is the OTHER direction of the same points ledger: a staff member
-      // records a purchase and issues the member a claim code. Same module keys as
-      // redemption, because it is the same job - operating a member's points.
-      { to: '/admin/points', label: 'Earn Points', module: 'operations.redemption' },
-      {
-        to: '/admin/points/rules',
-        label: 'Points Rules',
-        module: 'operations.catalog',
-      },
       {
         to: '/admin/points/discount',
         label: 'Use Points',
         module: 'operations.redemption',
       },
+    ],
+  },
+  // Operational Services is SELLING, which is a different job from redeeming, so
+  // it gets its own group rather than another entry under Redemption. The pages
+  // are the ones that already exist and already work; this only groups them and
+  // re-keys them to the permission each one actually needs.
+  {
+    to: '/admin/points',
+    label: 'AFhomes Operational Services',
+    icon: 'dollar-sign',
+    module: 'operations.sales',
+    dropdown: [
+      // The GSD screen. `operations.sales` view+create is what a seller holds;
+      // it grants no catalog, customer or verification authority.
+      { to: '/admin/points', label: 'New Service Sale', module: 'operations.sales' },
+      // Admin only: products, tier discounts and earning rules.
+      { to: '/admin/points/rules', label: 'Products & Services', module: 'operations.catalog' },
+      // Finance/Admin only: operational receipt verification AND the sales
+      // ledger. Keyed to `operations.payments`, which `employee` does not
+      // hold, so the seller cannot reach the screen that verifies their own
+      // receipt - and which is deliberately NOT the VIP-card
+      // `finance.payment_verification`.
       {
         to: '/admin/points/payments',
-        label: 'Purchase Payments',
-        module: 'sales.customers',
+        label: 'Sales Records & Verification',
+        module: 'operations.payments',
       },
     ],
   },

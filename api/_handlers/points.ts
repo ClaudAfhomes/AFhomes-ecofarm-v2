@@ -3,8 +3,18 @@
  *
  * Authorization, and it is the EXISTING vocabulary - no new module keys:
  *
- *   sales.customers        view    -> see a customer's purchases
- *   sales.customers        create  -> record a purchase
+ *   sales.customers        view    -> the Sales Records list. Deliberately NOT
+ *                                       operations.sales: recording a sale must
+ *                                       not hand a GSD everyone's sales history.
+ *   operations.sales       create  -> record an operational service sale and a
+ *                                       cash receipt for it. Does NOT verify, and
+ *                                       grants no catalog, rule or customer access.
+ *   operations.payments       update  -> verify or reject an OPERATIONAL receipt.
+ *                                       Its own key, deliberately NOT the VIP-card
+ *                                       finance.payment_verification, so the two
+ *                                       payment workflows authorise each other for
+ *                                       nothing. Finance/Admin only: a GSD can
+ *                                       never make their own recorded money real.
  *   operations.redemption  view    -> see claims and history
  *   operations.redemption  create  -> create / reissue / reverse a claim, and for
  *                                     a CUSTOMER to redeem their own claim
@@ -34,11 +44,16 @@ import {
   reversePurchaseInputSchema,
   purchaseReceiptDecisionSchema,
   serviceCatalogItemInputSchema,
+  serviceTierDiscountInputSchema,
+  applyPointsDiscountInputSchema,
+  appliedPointsDiscountSchema,
+  operationalSettlementSchema,
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
   audit,
+  audit as handlerKitAudit,
   deny,
   fail,
   type Db,
@@ -274,15 +289,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
     if ('error' in auth) return deny(res, auth);
 
-    /* ---------------- GET /points/purchases ---------------- */
+    /* ---------------- GET /points/purchases ----------------
+     *
+     * The Sales Records list, so it is gated on `sales.customers` VIEW rather
+     * than on `operations.sales`. That is the deliberate separation: being able
+     * to RECORD a sale must not hand a GSD the whole company's sales history.
+     * `employee` holds no `sales.customers` row at all, so the operational
+     * screen can read back its own sale through the per-purchase summary below
+     * without ever seeing the ledger of everyone else's. */
     if (path === 'purchases' && verb === 'GET') {
+      const records = await authorizeAfHomes(req, 'sales.customers', 'view');
+      if ('error' in records) return deny(res, records);
       const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : null;
       return res.status(200).json({ data: await listPurchases(db, customerId) });
     }
 
     /* ---------------- POST /points/purchases ---------------- */
     if (path === 'purchases' && verb === 'POST') {
-      const write = await authorizeAfHomes(req, 'sales.customers', 'create');
+      const write = await authorizeAfHomes(req, 'operations.sales', 'create');
       if ('error' in write) return deny(res, write);
 
       const parsed = createPurchaseInputSchema.safeParse(jsonBody(req));
@@ -303,6 +327,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           quantity: l.quantity,
           unitAmount: l.unitAmount,
         })),
+        // The idempotency key. Without it a retried request creates a SECOND
+        // real purchase that could earn points.
+        p_reference: parsed.data.reference,
         p_actor_id: auth.userId,
       });
       if (error) return mapRpcError(res, error);
@@ -311,6 +338,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         purchaseId: row?.purchase_id ?? row?.id,
         purchaseNumber: String(row?.purchase_number ?? ''),
         grossAmount: String(row?.gross_amount ?? gross.toFixed(2)),
+        // The SERVER resolved and applied this. The browser may display it and
+        // may not influence it: a rate is never sent up, only read back down.
+        tierDiscountAmount: String(row?.tier_discount_amount ?? '0.00'),
         netAmount: String(row?.net_amount ?? gross.toFixed(2)),
       });
     }
@@ -327,7 +357,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * -------------------------------------------------------------- */
     const payRoute = route(req, 'POST', /^purchases\/([^/]+)\/payments$/);
     if (payRoute) {
-      const write = await authorizeAfHomes(req, 'sales.customers', 'update');
+      // Recording a receipt is part of MAKING the Operational Services sale, so
+      // it rides on the same narrowly scoped key. It is not verification: the
+      // receipt stays unverified until Finance acts, and a GSD can never be the
+      // person who makes their own money real (see the verify route below).
+      const write = await authorizeAfHomes(req, 'operations.sales', 'create');
       if ('error' in write) return deny(res, write);
 
       const parsed = purchaseReceiptInputSchema.safeParse(jsonBody(req));
@@ -359,7 +393,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * -------------------------------------------------------------- */
     const verifyRoute = route(req, 'POST', /^payments\/([^/]+)\/verify$/);
     if (verifyRoute) {
-      const write = await authorizeAfHomes(req, 'sales.customers', 'update');
+      // OPERATIONAL SERVICES FINANCE ONLY, on its OWN key. Not the VIP-card
+      // `finance.payment_verification`, and not `operations.sales` either:
+      // `employee` holds neither, so the person who records a receipt can never
+      // be the person who makes it money. Keeping the two verification keys
+      // separate is what makes these two payment workflows independent rather
+      // than merely adjacent.
+      const write = await authorizeAfHomes(req, 'operations.payments', 'update');
       if ('error' in write) return deny(res, write);
 
       const parsed = purchaseReceiptDecisionSchema.safeParse(jsonBody(req));
@@ -594,6 +634,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           updatedAt: isoOrNull(row.updated_at),
         })),
       );
+    }
+
+    /* ---------------- GET /earning/tier-discounts ----------------
+     *
+     * The Operational Services VIP rate table. Readable by anyone who may sell,
+     * because the sale screen has to SHOW the member what rate applies; only
+     * `operations.catalog` may change one, so a GSD can read the price and
+     * never write it.
+     * -------------------------------------------------------------- */
+    if (path === 'tier-discounts' && verb === 'GET') {
+      const { data, error } = await db
+        .from('service_tier_discounts')
+        .select('id, service_id, tier, discount_rate, effective_start, effective_end, is_active')
+        .order('service_id')
+        .order('tier');
+      if (error) throw error;
+      return list(
+        res,
+        ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+          id: row.id,
+          serviceId: row.service_id,
+          tier: row.tier,
+          discountRate: Number(row.discount_rate),
+          effectiveStart: String(row.effective_start).slice(0, 10),
+          effectiveEnd: String(row.effective_end).slice(0, 10),
+          isActive: row.is_active === true,
+        })),
+      );
+    }
+
+    /* ---------------- POST /earning/tier-discounts ---------------- */
+    if (path === 'tier-discounts' && verb === 'POST') {
+      // Catalog ADMIN, never operations.sales: configuring a rate is a
+      // commercial change, and the whole point of the narrow GSD capability is
+      // that selling cannot reach it.
+      const write = await authorizeAfHomes(req, 'operations.catalog', 'create');
+      if ('error' in write) return deny(res, write);
+      const parsed = serviceTierDiscountInputSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Check the discount details and try again.', 400);
+      }
+      if (parsed.data.effectiveStart >= parsed.data.effectiveEnd) {
+        return fail(res, 'VALIDATION_ERROR', 'The end date must be after the start date.', 400);
+      }
+      // The overlap trigger refuses two simultaneously-active rules for one
+      // service and tier. That is a DATABASE refusal on purpose: a handler bug
+      // must not be able to create an ambiguous rate.
+      const { data, error } = await db
+        .from('service_tier_discounts')
+        .insert({
+          service_id: parsed.data.serviceId,
+          tier: parsed.data.tier,
+          discount_rate: parsed.data.discountRate,
+          effective_start: parsed.data.effectiveStart,
+          effective_end: parsed.data.effectiveEnd,
+          is_active: true,
+          created_by: auth.userId,
+        })
+        .select('id, service_id, tier, discount_rate, effective_start, effective_end, is_active')
+        .single();
+      if (error) return mapRpcError(res, error);
+      const row = data as Record<string, unknown>;
+      await handlerKitAudit(
+        db,
+        auth.userId,
+        'SERVICE_TIER_DISCOUNT_CREATED',
+        'service_tier_discount',
+        String(row.id),
+        undefined,
+        {
+          serviceId: row.service_id,
+          tier: row.tier,
+          discountRate: Number(row.discount_rate),
+        },
+        { reason: `Operational Services tier rate ${String(row.discount_rate)}% for ${String(row.tier)}` },
+      );
+      return res.status(201).json({
+        id: row.id,
+        serviceId: row.service_id,
+        tier: row.tier,
+        discountRate: Number(row.discount_rate),
+        effectiveStart: String(row.effective_start).slice(0, 10),
+        effectiveEnd: String(row.effective_end).slice(0, 10),
+        isActive: true,
+      });
     }
 
     if (path === 'services' && verb === 'POST') {
@@ -879,10 +1004,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    /* ---------------- POST /points/purchases/:id/points-discount ----------------
+     *
+     * THE TILL. A GSD spends a member's points as part of the sale, in one step.
+     *
+     * The body carries a points figure and a POS reference and NOTHING else: no
+     * peso value, no rate, no balance, no resulting net. The server resolves the
+     * CONFIGURED conversion rate from point_redemption_rules and prices it, so a
+     * tampered body cannot change what the member pays.
+     *
+     * The reference is the idempotency key. A retried request returns the
+     * original figures instead of spending the points twice, and the database
+     * enforces that as well.
+     * -------------------------------------------------------------- */
+    const applyDiscount = route(req, 'POST', /^purchases\/([^/]+)\/points-discount$/);
+    if (applyDiscount) {
+      const write = await authorizeAfHomes(req, 'operations.sales', 'create');
+      if ('error' in write) return deny(res, write);
+      const parsed = applyPointsDiscountInputSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
+      }
+      const { data, error } = await db.rpc('apply_purchase_points_discount', {
+        p_purchase_id: applyDiscount[1],
+        p_points_requested: parsed.data.pointsRequested,
+        p_reference: parsed.data.reference,
+        p_actor_id: auth.userId,
+      });
+      if (error) return refuse(res, error);
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      const result = appliedPointsDiscountSchema.parse({
+        purchaseId: row?.purchase_id ?? applyDiscount[1],
+        pointsSpent: Number(row?.points_spent ?? 0),
+        discountApplied: String(row?.discount_applied ?? '0.00'),
+        netAmount: String(row?.net_amount ?? '0.00'),
+        balanceAfter: Number(row?.balance_after ?? 0),
+        alreadyApplied: row?.already_applied === true,
+      });
+      return res.status(200).json(result);
+    }
+
+    /* ---------------- GET /points/purchases/:id/settlement ----------------
+     *
+     * The ONE settlement answer, for both the GSD screen and the Finance screen.
+     * Read only: it never completes a purchase, verifies a receipt or creates a
+     * claim, so refreshing it cannot advance the transaction by itself.
+     * -------------------------------------------------------------- */
+    const settlementRoute = route(req, 'GET', /^purchases\/([^/]+)\/settlement$/);
+    if (settlementRoute) {
+      const read = await authorizeAfHomes(req, 'operations.sales', 'view');
+      if ('error' in read) return deny(res, read);
+      const { data, error } = await db.rpc('operational_purchase_settlement', {
+        p_purchase_id: settlementRoute[1],
+      });
+      if (error) return mapRpcError(res, error);
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      if (!row) return fail(res, 'NOT_FOUND', 'Purchase not found', 404);
+      return res.status(200).json(
+        operationalSettlementSchema.parse({
+          purchaseId: row.purchase_id,
+          purchaseNumber: row.purchase_number,
+          status: row.status,
+          grossAmount: row.gross_amount,
+          tierDiscountAmount: row.tier_discount_amount,
+          pointsDiscountAmount: row.points_discount_amount,
+          netAmount: row.net_amount,
+          recordedTotal: row.recorded_total,
+          verifiedTotal: row.verified_total,
+          rejectedTotal: row.rejected_total,
+          remainingAmount: row.remaining_amount,
+          verifiedReceipts: Number(row.verified_receipts ?? 0),
+          rejectedReceipts: Number(row.rejected_receipts ?? 0),
+          pendingReceipts: Number(row.pending_receipts ?? 0),
+          fullyPaid: row.fully_paid === true,
+          claimable: row.claimable === true,
+          claimId: (row.claim_id as string | null) ?? null,
+          claimStatus: (row.claim_status as string | null) ?? null,
+        }),
+      );
+    }
+
     /* ---------------- POST /points/purchases/:id/complete ---------------- */
     const complete = route(req, 'POST', /^purchases\/([^/]+)\/complete$/);
     if (complete) {
-      const write = await authorizeAfHomes(req, 'sales.customers', 'update');
+      // Completing is safe for the seller to call, because the DATABASE refuses
+      // it unless verified receipts already cover the net: this verb cannot
+      // manufacture settlement. What it must not do is verify, and it does not.
+      const write = await authorizeAfHomes(req, 'operations.sales', 'create');
       if ('error' in write) return deny(res, write);
       const { data, error } = await db.rpc('complete_purchase', {
         p_purchase_id: complete[1],

@@ -65,6 +65,20 @@ const ALL: Grant[] = [
   },
   { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: true, canDelete: true },
   { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+  // The Operational Services seller capability and the Finance verification key
+  // that stays deliberately separate from it.
+  { moduleKey: 'operations.sales', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+  // Operational Services receipt verification. A SEPARATE key from the VIP-card
+  // `finance.payment_verification` below: the two payment workflows must not
+  // authorise each other, and the GSD (`employee`) holds neither.
+  { moduleKey: 'operations.payments', canView: true, canCreate: false, canUpdate: true, canDelete: false },
+  {
+    moduleKey: 'finance.payment_verification',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
 ];
 
 /** View only: may read purchases and claims, but may not create or change anything. */
@@ -90,6 +104,9 @@ function baseTables(): Record<string, Row[]> {
       { id: 'm1', key: 'operations.redemption', is_active: true },
       { id: 'm2', key: 'sales.customers', is_active: true },
       { id: 'm3', key: 'operations.catalog', is_active: true },
+      { id: 'm4', key: 'operations.sales', is_active: true },
+      { id: 'm5', key: 'finance.payment_verification', is_active: true },
+      { id: 'm6', key: 'operations.payments', is_active: true },
     ],
     roles: [{ id: 'r1', slug: 'finance', name: 'Finance', is_active: true }],
     role_permissions: [],
@@ -340,6 +357,9 @@ const PURCHASE_RPC = (args: Record<string, unknown>) => [
 
 const VALID_PURCHASE = {
   membershipId: MEMBERSHIP_ID,
+  // The idempotency key for the sale. Required: without it a retried request
+  // creates a SECOND real purchase that could earn points.
+  reference: 'pos-fixture-1',
   lines: [{ serviceId: SERVICE_ID, quantity: 2, unitAmount: '2500.00' }],
 };
 
@@ -515,16 +535,357 @@ describe('points: recording a purchase', () => {
     expect(db.calls.some((c) => c.table === 'create_purchase')).toBe(false);
   });
 
-  it('requires sales.customers create, not merely view', async () => {
+  it('requires operations.sales create, not merely view', async () => {
     install({ permissions: VIEW_ONLY, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
     const s = await call({ familyPath: 'purchases', method: 'POST', body: VALID_PURCHASE });
     expect(s.status).toBe(403);
   });
 
-  it('requires sales.customers update to complete a purchase', async () => {
+  it('requires operations.sales create to complete a purchase', async () => {
     install({ permissions: VIEW_ONLY });
     const s = await call({ familyPath: `purchases/${PURCHASE_ID}/complete`, method: 'POST' });
     expect(s.status).toBe(403);
+  });
+
+  /* ------------------------------------------------------------------
+   * The GSD split.
+   *
+   * `employee` is the GSD role. It holds `operations.sales` view+create and
+   * NOTHING else that matters here: no `sales.customers` (which would also
+   * mean customer creation and the whole customer record), no
+   * `operations.catalog` (product and rule administration), and no
+   * `finance.payment_verification` (the person who records a receipt must not
+   * be the person who makes it money).
+   *
+   * These assert the SERVER's answer, not the interface, because a hidden
+   * button is not an authorization control.
+   * ---------------------------------------------------------------- */
+  describe('GSD operations.sales scope', () => {
+    const GSD: Grant[] = [
+      { moduleKey: 'operations.sales', canView: true, canCreate: true, canUpdate: false, canDelete: false },
+      // Present so the test proves the GSD is refused DESPITE holding the broad
+      // customer and catalog keys' siblings it legitimately has, not merely
+      // because the fake has no rows at all.
+      { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: false, canDelete: false },
+      { moduleKey: 'operations.catalog', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    ];
+
+    const GSD_FORBIDDEN: Grant[] = [
+      { moduleKey: 'sales.customers', canView: false, canCreate: false, canUpdate: false, canDelete: false },
+      { moduleKey: 'operations.catalog', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      { moduleKey: 'finance.payment_verification', canView: false, canCreate: false, canUpdate: false, canDelete: false },
+      { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    ];
+
+    it('lets a GSD record an operational sale', async () => {
+      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      const s = await call({ familyPath: 'purchases', method: 'POST', body: VALID_PURCHASE });
+      expect(s.status).toBe(201);
+      expect(db.calls.some((c) => c.table === 'create_purchase')).toBe(true);
+    });
+
+    it('returns the SERVER-resolved tier discount, never one the client chose', async () => {
+      install({
+        permissions: GSD,
+        rpcs: [
+          {
+            fn: 'create_purchase',
+            result: () => [
+              {
+                purchase_id: PURCHASE_ID,
+                purchase_number: 'AF-TXN-1',
+                gross_amount: '100000.00',
+                tier_discount_amount: '25000.00',
+                net_amount: '75000.00',
+              },
+            ],
+          },
+        ],
+      });
+      const s = await call({ familyPath: 'purchases', method: 'POST', body: VALID_PURCHASE });
+      expect(s.status).toBe(201);
+      // The body sent up carries no rate and no total; both figures come back
+      // down priced by the server.
+      expect(body(s).tierDiscountAmount).toBe('25000.00');
+      expect(body(s).netAmount).toBe('75000.00');
+      expect((body(s).grossAmount as string)).toBe('100000.00');
+    });
+
+    it('lets a GSD record a receipt', async () => {
+      const db = install({
+        permissions: GSD,
+        rpcs: [{ fn: 'record_purchase_payment', result: () => [{ payment_id: 'p1', payment_number: 'AF-PAY-1', amount: '75000.00', status: 'recorded' }] }],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/payments`,
+        method: 'POST',
+        body: { amount: '75000.00', method: 'cash', reference: 'r1' },
+      });
+      expect(s.status).toBe(201);
+      expect(db.calls.some((c) => c.table === 'record_purchase_payment')).toBe(true);
+    });
+
+    it('REFUSES a GSD who tries to verify their own receipt', async () => {
+      const db = install({ permissions: GSD_FORBIDDEN });
+      const s = await call({
+        familyPath: `payments/${PURCHASE_ID}/verify`,
+        method: 'POST',
+        body: { decision: 'verified' },
+      });
+      expect(s.status).toBe(403);
+      expect(db.calls.some((c) => c.table === 'verify_purchase_payment')).toBe(false);
+    });
+
+    /* ------------------------------------------------------------------
+     * Operational Services receipts are verified on their OWN key,
+     * `operations.payments`, which is deliberately NOT the VIP-card
+     * `finance.payment_verification`. These prove the two workflows stay
+     * independent: neither key authorises the other, and the GSD holds
+     * neither.
+     * ---------------------------------------------------------------- */
+    const FINANCE: Grant[] = [
+      { moduleKey: 'operations.payments', canView: true, canCreate: false, canUpdate: true, canDelete: false },
+      // Present so the test proves Finance acts on its OWN key, not by
+      // Every staff route under /earning passes this family gate first, so a
+      // Finance fixture without it 403s before reaching the route under test.
+      { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      // accident of also holding the VIP-card one.
+      {
+        moduleKey: 'finance.payment_verification',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+    ];
+
+    it('lets Finance verify an operational receipt on the operational key alone', async () => {
+      const db = install({
+        permissions: FINANCE,
+        rpcs: [
+          {
+            fn: 'verify_purchase_payment',
+            result: () => [{ payment_id: 'p1', status: 'verified', verified_total: '75000.00' }],
+          },
+        ],
+      });
+      const s = await call({
+        familyPath: `payments/p1/verify`,
+        method: 'POST',
+        body: { decision: 'verified' },
+      });
+      expect(s.status).toBe(200);
+      expect(body(s).status).toBe('verified');
+      expect(db.calls.some((c) => c.table === 'verify_purchase_payment')).toBe(true);
+    });
+
+    it('REFUSES a VIP-card-only verifier on an operational receipt', async () => {
+      // `finance.payment_verification` UPDATE is the CARD key. Holding it must
+      // not verify an operational receipt: that is what independence means.
+      const db = install({
+        permissions: [
+          {
+            moduleKey: 'finance.payment_verification',
+            canView: true,
+            canCreate: false,
+            canUpdate: true,
+            canDelete: false,
+          },
+        ],
+      });
+      const s = await call({
+        familyPath: `payments/p1/verify`,
+        method: 'POST',
+        body: { decision: 'verified' },
+      });
+      expect(s.status).toBe(403);
+      expect(db.calls.some((c) => c.table === 'verify_purchase_payment')).toBe(false);
+    });
+
+    it('spends points at the till with a reference and nothing else', async () => {
+      const db = install({
+        permissions: GSD,
+        rpcs: [
+          {
+            fn: 'apply_purchase_points_discount',
+            result: () => [
+              {
+                purchase_id: PURCHASE_ID,
+                points_spent: 25000,
+                discount_applied: '25000.00',
+                net_amount: '75000.00',
+                balance_after: 25000,
+                already_applied: false,
+              },
+            ],
+          },
+        ],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/points-discount`,
+        method: 'POST',
+        body: { pointsRequested: 25000, reference: 'pos-abc' },
+      });
+      expect(s.status).toBe(200);
+      // Only two fields are sent. There is no peso value, no rate and no net in
+      // the body, so a tampered request cannot change what the member pays.
+      const sent = db.calls.find((c) => c.table === 'apply_purchase_points_discount')?.arg as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(sent).sort()).toEqual(
+        ['p_actor_id', 'p_points_requested', 'p_purchase_id', 'p_reference'].sort(),
+      );
+      expect(body(s).netAmount).toBe('75000.00');
+    });
+
+    it('REFUSES a points spend with no idempotency reference', async () => {
+      const db = install({ permissions: GSD });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/points-discount`,
+        method: 'POST',
+        body: { pointsRequested: 25000 },
+      });
+      expect(s.status).toBe(400);
+      expect(db.calls.some((c) => c.table === 'apply_purchase_points_discount')).toBe(false);
+    });
+
+    it('REFUSES a duplicate sale reference LOUDLY rather than pricing a second purchase', async () => {
+      // A retried "record the sale" would otherwise create a SECOND real
+      // purchase with real lines that could earn points. The reference is the
+      // idempotency key, so it is required on the request.
+      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      // The reference deliberately omitted.
+      const { reference: _omitted, ...withoutReference } = VALID_PURCHASE;
+      const s = await call({ familyPath: 'purchases', method: 'POST', body: withoutReference });
+      expect(s.status).toBe(400);
+      expect(db.calls.some((c) => c.table === 'create_purchase')).toBe(false);
+    });
+
+    it('carries the sale reference through to SQL so a retry cannot double-record', async () => {
+      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      const s = await call({
+        familyPath: 'purchases',
+        method: 'POST',
+        body: { ...VALID_PURCHASE, reference: 'pos-abc' },
+      });
+      expect(s.status).toBe(201);
+      const sent = db.calls.find((c) => c.table === 'create_purchase')?.arg as Record<string, unknown>;
+      expect(sent.p_reference).toBe('pos-abc');
+    });
+
+    it('requires a receipt reference so a retried receipt cannot double-count cash', async () => {
+      const db = install({
+        permissions: GSD,
+        rpcs: [
+          {
+            fn: 'record_purchase_payment',
+            result: () => [{ payment_id: 'p1', payment_number: 'AF-PAY-1', amount: '75000.00', status: 'recorded' }],
+          },
+        ],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/payments`,
+        method: 'POST',
+        // No reference: without one the unique index cannot dedupe, and a retry
+        // after a lost response would record the SAME cash twice.
+        body: { amount: '75000.00', method: 'cash' },
+      });
+      expect(s.status).toBe(400);
+      expect(db.calls.some((c) => c.table === 'record_purchase_payment')).toBe(false);
+    });
+
+    it('reports settlement from the server rather than trusting the screen', async () => {
+      install({
+        permissions: GSD,
+        rpcs: [
+          {
+            fn: 'operational_purchase_settlement',
+            result: () => [
+              {
+                purchase_id: PURCHASE_ID,
+                purchase_number: 'AF-TXN-1',
+                status: 'draft',
+                gross_amount: '100000.00',
+                tier_discount_amount: '0.00',
+                points_discount_amount: '25000.00',
+                net_amount: '75000.00',
+                recorded_total: '75000.00',
+                verified_total: '0.00',
+                rejected_total: '0.00',
+                remaining_amount: '75000.00',
+                verified_receipts: 0,
+                rejected_receipts: 0,
+                pending_receipts: 1,
+                fully_paid: false,
+                claimable: false,
+                claim_id: null,
+                claim_status: null,
+              },
+            ],
+          },
+        ],
+      });
+      const s = await call({ familyPath: `purchases/${PURCHASE_ID}/settlement`, method: 'GET' });
+      expect(s.status).toBe(200);
+      // A RECORDED receipt is not money received: the screen must be able to see
+      // that distinction rather than infer it.
+      expect(body(s).verifiedTotal).toBe('0.00');
+      expect(body(s).remainingAmount).toBe('75000.00');
+      expect(body(s).fullyPaid).toBe(false);
+      expect(body(s).claimable).toBe(false);
+    });
+
+    it('REFUSES a GSD who tries to configure a tier discount', async () => {
+      const db = install({ permissions: GSD });
+      const s = await call({
+        familyPath: 'tier-discounts',
+        method: 'POST',
+        body: {
+          serviceId: SERVICE_ID,
+          tier: 'GOLD',
+          discountRate: 25,
+          effectiveStart: '2026-01-01',
+          effectiveEnd: '2027-01-01',
+        },
+      });
+      expect(s.status).toBe(403);
+      expect(db.rows('service_tier_discounts')).toHaveLength(0);
+    });
+
+    it('REFUSES a GSD who tries to add a product or an earning rule', async () => {
+      install({ permissions: GSD });
+      const product = await call({
+        familyPath: 'services',
+        method: 'POST',
+        body: { code: 'TEP', name: 'Teppanyaki', basePrice: '2000.00' },
+      });
+      const rule = await call({
+        familyPath: 'rules',
+        method: 'POST',
+        body: {
+          serviceId: SERVICE_ID,
+          pointsAmount: 100,
+          eligibleTiers: ['GOLD'],
+          effectiveStart: '2026-01-01',
+          effectiveEnd: '2027-01-01',
+        },
+      });
+      expect(product.status).toBe(403);
+      expect(rule.status).toBe(403);
+    });
+
+    it('REFUSES a GSD the company-wide sales records list', async () => {
+      // Recording a sale must not hand a GSD everyone's sales history. The list
+      // is gated on `sales.customers` view, which `employee` does not hold.
+      const db = install({ permissions: GSD });
+      const s = await call({ familyPath: 'purchases', method: 'GET' });
+      expect(s.status).toBe(403);
+      // Refused BEFORE any read: a 403 that still queried the table would leak
+      // nothing, but it would prove the check runs after the work rather than
+      // instead of it.
+      expect(db.calls.some((c) => c.table === 'purchases')).toBe(false);
+    });
   });
 
   it('refuses an unsettled purchase with a conflict, never a completion', async () => {

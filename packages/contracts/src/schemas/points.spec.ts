@@ -8,6 +8,7 @@ import {
   pointEarningRuleInputSchema,
   pointsAmountSchema,
   purchaseSchema,
+  resolvedMemberSchema,
 } from './points.js';
 
 const summary = {
@@ -133,6 +134,36 @@ describe('points contracts', () => {
     expect(parsed.netAmount).toBe('25000.00');
     expect(Number(parsed.grossAmount) - Number(parsed.pointsDiscountAmount)).toBe(
       Number(parsed.netAmount),
+    );
+  });
+
+  it('accepts every identifier kind the membership resolver can return', () => {
+    // The SAME defect the 20261028000001 membership-code upgrade caused in
+    // `redemptionPreviewSchema` (see redemption.spec.ts) is still live here:
+    // `api/_lib/identifier.ts` returns four `IdentifierKind` values, and this
+    // enum listed two of them under different names. The server answers 200 with
+    // a good member and the admin client discards it in `safeParse` - so a GSD
+    // who types a membership number or a pre-upgrade legacy code gets "That card
+    // is not recognised" for a card that is perfectly valid.
+    //
+    // Pinned here so the next identifier kind cannot be added to the resolver
+    // without being declared here too.
+    const base = {
+      membershipId: '11111111-1111-4111-8111-111111111111',
+      membershipNumber: 'MBS-A1B2C3D4',
+      customerDisplayName: 'SAMPLE MEMBER',
+      productName: 'Gold',
+      membershipStatus: 'active',
+      expired: false,
+      redeemable: true,
+      blockedReason: null,
+      pointsBalance: 60000,
+    };
+    for (const kind of ['qr', 'fallback_code', 'card_number', 'legacy_alias']) {
+      expect(resolvedMemberSchema.safeParse({ ...base, matchedBy: kind }).success).toBe(true);
+    }
+    expect(resolvedMemberSchema.safeParse({ ...base, matchedBy: 'something_else' }).success).toBe(
+      false,
     );
   });
 

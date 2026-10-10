@@ -82,8 +82,8 @@ describe('exact decimal money', () => {
 });
 
 describe('afHomesModuleKeySchema', () => {
-  it('exposes the 24 existing keys plus four narrowly scoped Phase 6 CMS keys plus bulk import', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(29);
+  it('exposes the base keys plus CMS, bulk import, and the two Operational Services keys', () => {
+    expect(afHomesModuleKeySchema.options).toHaveLength(31);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
@@ -96,6 +96,15 @@ describe('afHomesModuleKeySchema', () => {
     ]);
     // Bulk customer import is an Admin-only migration-seeded workflow.
     expect(keys).toContain('governance.customer_import');
+    // Operational Services selling. It exists so a GSD can record a sale
+    // WITHOUT `sales.customers` create/update, which would also mean customer
+    // creation. If this key is ever removed the GSD sale flow is unreachable,
+    // so its presence is asserted rather than left implied by a count.
+    expect(keys).toContain('operations.sales');
+    // Operational Services RECEIPTS. It exists so verifying an operational
+    // receipt does NOT ride on the VIP-card `finance.payment_verification` key:
+    // the two payment workflows must not authorise each other.
+    expect(keys).toContain('operations.payments');
   });
 
   it('covers every seeded module group', () => {

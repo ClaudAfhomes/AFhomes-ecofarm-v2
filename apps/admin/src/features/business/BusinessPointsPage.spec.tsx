@@ -174,8 +174,30 @@ describe('earn points: identify', () => {
 
     expect(await screen.findByLabelText(/^service$/i)).toBeTruthy();
     // Not yet: a service must be chosen before anything can be recorded.
-    expect((await screen.findByRole('button', { name: /record, settle/i })).hasAttribute('disabled')).toBe(
+    expect((await screen.findByRole('button', { name: /record the sale/i })).hasAttribute('disabled')).toBe(
       true,
     );
+  });
+
+  /**
+   * The OLD screen ran record -> complete -> claim in one click and implied the
+   * sale was finished. It never could be for a real amount: `complete_purchase`
+   * refuses unless VERIFIED receipts cover the net, and the seller may not
+   * verify. These pin the corrected behaviour so the one-click fiction cannot
+   * come back.
+   */
+  it('offers no single click that records, settles and issues at once', async () => {
+    render();
+    await screen.findByRole('button', { name: /scan the member/i });
+    expect(screen.queryByRole('button', { name: /settle and issue/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /record, settle/i })).toBeNull();
+  });
+
+  it('never offers a claim control before a sale exists', async () => {
+    render();
+    await screen.findByRole('button', { name: /scan the member/i });
+    // Points are claimed by the CUSTOMER through their own account. No screen
+    // state may present a control that claims on their behalf.
+    expect(screen.queryByRole('button', { name: /issue the member/i })).toBeNull();
   });
 });

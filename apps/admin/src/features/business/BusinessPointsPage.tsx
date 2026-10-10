@@ -14,7 +14,8 @@ import { formatMoney } from './format';
 import styles from './points.module.css';
 import { useQrScanner } from '../redemption/useQrScanner';
 import { ClaimQr, type IssuedClaim } from './ClaimQr';
-import { resolveMemberIdentifier } from './points-services';
+import { resolveMemberIdentifier, type PricedPurchase, getSettlement, applyPointsDiscount, recordPurchaseReceipt } from './points-services';
+import { newTransactionReference } from '../redemption/services';
 
 /** Narrow, so a bad resolve response cannot flow into the purchase payload. */
 type ResolvedMember = {
@@ -103,6 +104,9 @@ export function BusinessPointsPage() {
   const recordPurchaseFor = () =>
     recordPurchase({
       membershipId: member?.membershipId ?? '',
+      // The idempotency key for the whole sale. Stable for this screen, so a
+      // retried request is the SAME sale rather than a second purchase.
+      reference,
       lines: [
         {
           serviceId,
@@ -112,18 +116,23 @@ export function BusinessPointsPage() {
       ],
     });
 
-  const record = useMutation({ mutationFn: recordPurchaseFor });
+  const record = useMutation({
+    mutationFn: recordPurchaseFor,
+  });
   const complete = useMutation({
     mutationFn: (purchaseId: string) => completePurchase(purchaseId),
     onSuccess: () => client.invalidateQueries({ queryKey: ['earning'] }),
   });
+  /** Re-reads settlement from the server after a state change. */
+  const refresh = () => client.invalidateQueries({ queryKey: ['earning'] });
 
   const claim = useMutation({
     mutationFn: (purchaseId: string) => issueEarningClaim(purchaseId),
     onSuccess: (result) => {
       // The whole issued claim, so the dialog can render the QR. Component state
       // only: never cached, never a query key, gone with the dialog - because the
-      // server keeps only a hash of the credential.
+      // server keeps only a hash of the credential. It is only reachable once
+      // the server has reported the sale claimable.
       setIssued({
         claimNumber: result.claimNumber,
         qrToken: result.qrToken ?? '',
@@ -137,6 +146,75 @@ export function BusinessPointsPage() {
   });
 
   const [lastPurchase, setLastPurchase] = useState<string | null>(null);
+  /**
+   * What the SERVER priced. Held so the GSD can show the member the gross, the
+   * VIP discount and the net they are actually paying.
+   *
+   * This is a PREVIEW of the figures the database computed, never an input to
+   * them: nothing here is sent back, and the receipt the GSD records is the net
+   * this screen displays, not one it computed.
+   */
+  const [priced, setPriced] = useState<PricedPurchase | null>(null);
+
+  /**
+   * Settlement is POLLED, not asserted locally.
+   *
+   * Finance verifies in another screen and another session, so the state this
+   * screen shows has to come from the server rather than from what this browser
+   * last did. Polling is the cross-session channel here: browser roles hold no
+   * table privileges to subscribe with.
+   */
+  const settlement = useQuery({
+    queryKey: ['earning', 'settlement', lastPurchase],
+    queryFn: () => getSettlement(lastPurchase as string),
+    enabled: Boolean(lastPurchase),
+    refetchInterval: 15_000,
+  });
+
+  /**
+   * The POS reference for THIS sale, generated once per intended transaction.
+   *
+   * It is the idempotency key for the points spend: a retried request carrying
+   * the same reference is recognised as the same operation server-side instead
+   * of spending the member's points twice. Generating a new one per click would
+   * turn every double-click into a second, real discount.
+   */
+  const [reference] = useState(() => newTransactionReference());
+  const [pointsToSpend, setPointsToSpend] = useState('');
+  /**
+   * The RECEIPT reference, derived from the sale reference.
+   *
+   * It is stable for the life of this screen so a retried "record the receipt"
+   * is the same receipt rather than a second row of cash. Derived rather than
+   * freshly generated, because a reference generated per click would make every
+   * double-click a second, real receipt.
+   */
+  const receiptReference = `${reference}-rcpt`;
+
+  const spend = useMutation({
+    mutationFn: (args: { purchaseId: string; points: number }) =>
+      applyPointsDiscount(args.purchaseId, args.points, reference),
+    onSuccess: () => {
+      setPointsToSpend('');
+      // The net just changed, so the priced figures on screen are stale.
+      client.invalidateQueries({ queryKey: ['earning'] });
+    },
+  });
+
+  const receipt = useMutation({
+    mutationFn: (args: { purchaseId: string; amount: string }) =>
+      recordPurchaseReceipt({
+        purchaseId: args.purchaseId,
+        amount: args.amount,
+        method: 'cash',
+        reference: receiptReference,
+      }),
+    onSuccess: () => {
+      notifySuccess({ title: 'Receipt recorded, pending Finance verification' });
+      client.invalidateQueries({ queryKey: ['earning'] });
+    },
+  });
+
   const reverse = useMutation({
     mutationFn: (reason: string) =>
       reversePurchasePoints({ purchaseId: lastPurchase ?? '', reason }),
@@ -147,24 +225,28 @@ export function BusinessPointsPage() {
     },
   });
   const [reverseOpen, setReverseOpen] = useState(false);
-  const busy = record.isPending || complete.isPending || claim.isPending;
+  const busy = record.isPending || spend.isPending || receipt.isPending;
 
   /**
-   * Record, settle, then issue - in that order, because the server enforces it.
+   * Record the sale, then STOP.
    *
-   * The `busy` guard is not cosmetic. Without it a second click would record the
-   * purchase TWICE, and the duplicate is a real second purchase with real lines
-   * that could earn points.
+   * The previous screen did record -> complete -> claim in one click. That could
+   * never work for a real sale: `complete_purchase` refuses unless VERIFIED
+   * receipts already cover the net, and the seller is deliberately forbidden
+   * from verifying. So the one-click flow either failed outright or, worse,
+   * taught staff that "complete" meant "money received" when it did not.
+   *
+   * Completion and the claim now happen only once Finance has verified the
+   * money, and the screen says so rather than implying otherwise.
    */
-  const run = async () => {
+  const recordSale = async () => {
     if (busy) return;
     setError(null);
     setIssued(null);
     try {
       const purchase = await record.mutateAsync();
-      await complete.mutateAsync(purchase.purchaseId);
+      setPriced(purchase);
       setLastPurchase(purchase.purchaseId);
-      await claim.mutateAsync(purchase.purchaseId);
     } catch (cause) {
       setError(message(cause));
     }
@@ -265,18 +347,159 @@ export function BusinessPointsPage() {
               />
 
               {/* aria-busy tells assistive tech the region is working; the disabled
-                button plus the `busy` guard in `run` stop a double submit, which
-                on this flow would mean recording the purchase twice. */}
+                button plus the `busy` guard in `recordSale` stop a double submit,
+                which on this flow would mean recording the purchase twice. */}
               <div aria-busy={busy}>
-                <Button onClick={run} disabled={busy || !serviceId}>
-                  {busy ? 'Working…' : '3. Record, settle and issue claim'}
+                <Button onClick={recordSale} disabled={busy || !serviceId}>
+                  {record.isPending ? 'Recording…' : '3. Record the sale'}
                 </Button>
               </div>
-              {busy && <Spinner label="Recording the purchase" />}
+              {busy && <Spinner label="Recording the sale" />}
             </>
           )}
 
           {error && <ErrorState title="Not recorded" message={error} />}
+        </section>
+      )}
+
+      {priced && (
+        /* ---------------------------------------------------------------
+         * The sale exists. What the member pays, and what happens next.
+         *
+         * Gross, each discount and the net are shown SEPARATELY: collapsing
+         * them into one "total" would hide the discount the member's tier
+         * earned them, and would hide that a points spend and a tier discount
+         * are different things.
+         * ------------------------------------------------------------ */
+        <section aria-label="Sale recorded" aria-live="polite">
+          <h2>4. What the member pays</h2>
+          <dl>
+            <dt>Gross</dt>
+            <dd>{formatMoney(priced.grossAmount)}</dd>
+            <dt>VIP tier discount</dt>
+            <dd>
+              {priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
+                ? `- ${formatMoney(priced.tierDiscountAmount)}`
+                : 'No tier discount applies'}
+            </dd>
+            <dt>Amount due</dt>
+            <dd>{formatMoney(priced.netAmount)}</dd>
+          </dl>
+
+          {/* The member can spend their own points here, in one step. Only a
+              figure and this sale's reference are sent: the peso value comes
+              from the configured rule, so the browser cannot influence it. */}
+          <label htmlFor="points-to-spend">Points this member wants to use</label>
+          <input
+            id="points-to-spend"
+            type="number"
+            min={1}
+            step={1}
+            value={pointsToSpend}
+            disabled={spend.isPending}
+            onChange={(event) => setPointsToSpend(event.target.value)}
+          />
+          <Button
+            variant="secondary"
+            disabled={spend.isPending || !pointsToSpend || Number(pointsToSpend) <= 0}
+            onClick={() =>
+              spend.mutate({ purchaseId: priced.purchaseId, points: Number(pointsToSpend) })
+            }
+          >
+            {spend.isPending ? 'Applying…' : 'Apply points to this bill'}
+          </Button>
+          {spend.isError && <ErrorState title="Points not applied" message={message(spend.error)} />}
+          {spend.isSuccess && (
+            <p role="status">
+              {spend.data.alreadyApplied
+                ? 'Those points were already applied to this sale - nothing was taken again.'
+                : `Applied ${spend.data.pointsSpent.toLocaleString('en-PH')} points. The member now owes ${formatMoney(spend.data.netAmount)}.`}
+            </p>
+          )}
+
+          <div aria-busy={receipt.isPending}>
+            <Button
+              onClick={() =>
+                receipt.mutate({ purchaseId: priced.purchaseId, amount: priced.netAmount })
+              }
+              disabled={receipt.isPending}
+            >
+              {receipt.isPending ? 'Recording…' : '5. Record the receipt'}
+            </Button>
+          </div>
+          {receipt.isPending && <Spinner label="Recording the receipt" />}
+          {receipt.isError && (
+            <ErrorState title="Receipt not recorded" message={message(receipt.error)} />
+          )}
+
+          {/* The truth about settlement. This panel exists because the OLD
+              screen implied a sale was finished the moment it was recorded. It
+              was not, and could not be: completion requires VERIFIED money and
+              the seller may not verify. */}
+          <h3>Settlement</h3>
+          <p role="status">Pending Finance verification.</p>
+          <p>
+            A recorded receipt is not money received. Finance verifies it on the Operational Services
+            Payments screen, and only then can this sale complete and the member&apos;s claim code be
+            issued. You cannot verify your own receipt.
+          </p>
+          <Button
+            variant="secondary"
+            onClick={() => client.invalidateQueries({ queryKey: ['earning', 'settlement'] })}
+            disabled={settlement.isFetching}
+          >
+            {settlement.isFetching ? 'Refreshing…' : 'Refresh status'}
+          </Button>
+
+          {/* Completion and the claim are separate, later acts. Both are refused
+              by the SERVER unless verified money already covers the net, so
+              these buttons cannot manufacture a settlement - they can only
+              confirm one that Finance has already made possible. */}
+          {settlement.data?.status === 'draft' && settlement.data.fullyPaid && (
+            <Button
+              onClick={() => complete.mutate(lastPurchase as string, { onSuccess: refresh })}
+              disabled={complete.isPending}
+            >
+              {complete.isPending ? 'Completing…' : 'Complete the sale'}
+            </Button>
+          )}
+          {complete.isError && <ErrorState title="Not completed" message={message(complete.error)} />}
+
+          {settlement.data?.claimable && (
+            <Button
+              onClick={() => claim.mutate(lastPurchase as string, { onSuccess: refresh })}
+              disabled={claim.isPending}
+            >
+              {claim.isPending ? 'Issuing…' : 'Issue the member’s claim code'}
+            </Button>
+          )}
+          {claim.isError && <ErrorState title="Claim not issued" message={message(claim.error)} />}
+        </section>
+      )}
+
+      {settlement.data && (
+        <section aria-label="Settlement status" aria-live="polite">
+          <h2>Settlement status</h2>
+          <dl>
+            <dt>Status</dt>
+            <dd>{settlement.data.status}</dd>
+            <dt>Recorded</dt>
+            <dd>{formatMoney(settlement.data.recordedTotal)}</dd>
+            <dt>Verified (money received)</dt>
+            <dd>{formatMoney(settlement.data.verifiedTotal)}</dd>
+            <dt>Outstanding</dt>
+            <dd>{formatMoney(settlement.data.remainingAmount)}</dd>
+            <dt>Claim</dt>
+            <dd>
+              {settlement.data.claimable
+                ? 'Claimable - issue the member their code below'
+                : settlement.data.claimStatus === 'claimed'
+                  ? 'Already claimed by the member'
+                  : settlement.data.claimStatus === 'rejected'
+                    ? 'Receipt rejected'
+                    : 'Not available yet'}
+            </dd>
+          </dl>
         </section>
       )}
 

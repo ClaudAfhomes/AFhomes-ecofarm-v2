@@ -374,15 +374,32 @@ export const purchaseLineSchema = z.object({
   quantity: z.number().int().positive(),
   unitAmount: exactDecimalStringSchema,
   lineTotal: exactDecimalStringSchema,
+  /**
+   * The Operational Services VIP discount ACTUALLY applied to this line, frozen
+   * at sale time. Absent on a line whose service had no active rule for the
+   * member's tier, which is why `tierDiscountRate` is nullable alongside it
+   * rather than defaulting to zero and implying a 0% rule was configured.
+   */
+  tierDiscountAmount: exactDecimalStringSchema.optional(),
+  tierDiscountRate: z.number().positive().max(100).optional(),
+  tier: z.enum(['BRONZE', 'SILVER', 'GOLD']).optional(),
 });
 
 /**
  * A service purchase.
  *
- * The accounting triple is the point of this shape: `pointsDiscountAmount`
- * REDUCES `netAmount` and is never money received. Receipts live in
- * `purchase_payments`, and `points_discount_amount` is deliberately absent from
- * that model — a points discount is not a payment.
+ * The accounting identity is the point of this shape:
+ *
+ *     grossAmount - tierDiscountAmount - pointsDiscountAmount = netAmount
+ *
+ * `tierDiscountAmount` is the configured VIP tier rate, applied in pesos at
+ * checkout. `pointsDiscountAmount` is a POINTS conversion, spent under the
+ * separately approved redemption rules. They are different discounts with
+ * different rules and are deliberately two columns: collapsing them would make
+ * "the Gold rate took 25,000 off" indistinguishable from "the member spent
+ * points worth 25,000".
+ *
+ * Neither is money received. Receipts live only in `purchase_payments`.
  */
 export const purchaseSchema = z.object({
   id: z.string().uuid(),
@@ -391,16 +408,18 @@ export const purchaseSchema = z.object({
   membershipId: z.string().uuid(),
   status: z.enum(['draft', 'completed', 'reversed']),
   grossAmount: exactDecimalStringSchema,
+  tierDiscountAmount: exactDecimalStringSchema.optional(),
   pointsDiscountAmount: exactDecimalStringSchema,
   netAmount: exactDecimalStringSchema,
   completedAt: z.string().nullable(),
   lines: z.array(purchaseLineSchema),
 });
 
-/** Gross, discount, net, and what has actually been received — kept distinct. */
+/** Gross, each discount separately, net, and what has actually been received. */
 export const purchaseFinancialSummarySchema = z.object({
   purchaseId: z.string().uuid(),
   grossAmount: exactDecimalStringSchema,
+  tierDiscountAmount: exactDecimalStringSchema.optional(),
   pointsDiscountAmount: exactDecimalStringSchema,
   netAmount: exactDecimalStringSchema,
   recordedTotal: exactDecimalStringSchema,
@@ -412,6 +431,96 @@ export const purchaseFinancialSummarySchema = z.object({
   fullyPaid: z.boolean(),
 });
 
+/**
+ * An admin-configured Operational Services VIP discount: one rate per service,
+ * per tier, for a half-open date window.
+ *
+ * `discountRate` is a PERCENTAGE, not a peso value: 25 means 25%. It is never
+ * derived from `card_plans.discount_percent`, which discounts CARD purchases
+ * only, and the two never stack in the Operational Services checkout.
+ */
+export const serviceTierDiscountSchema = z.object({
+  id: z.string().uuid(),
+  serviceId: z.string().uuid(),
+  tier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
+  discountRate: z.number().positive().max(100),
+  effectiveStart: z.string(),
+  effectiveEnd: z.string(),
+  isActive: z.boolean(),
+});
+
+/**
+ * Configuring a tier discount. Both dates are required, so an indefinite
+ * promotion is unrepresentable rather than merely discouraged.
+ */
+export const serviceTierDiscountInputSchema = z
+  .object({
+    serviceId: z.string().uuid(),
+    tier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
+    discountRate: z.number().positive().max(100),
+    effectiveStart: z.string().min(1),
+    effectiveEnd: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Spending a member's points at the till, in one step.
+ *
+ * `pointsRequested` and a POS `reference` are the ONLY inputs. There is no peso
+ * value, no rate, no balance and no resulting net: all four are decided by the
+ * server from the CONFIGURED conversion rate, so a tampered body cannot change
+ * what a member pays.
+ *
+ * `reference` is the idempotency key. A retried request carrying the same
+ * reference is the SAME operation and returns the original figures instead of
+ * spending the member's points a second time.
+ */
+export const applyPointsDiscountInputSchema = z
+  .object({
+    pointsRequested: z.number().int().positive(),
+    reference: z.string().trim().min(1).max(120),
+  })
+  .strict();
+
+/** What the server priced and spent. `alreadyApplied` means "this was a retry". */
+export const appliedPointsDiscountSchema = z.object({
+  purchaseId: z.string().uuid(),
+  pointsSpent: z.number().int().nonnegative(),
+  discountApplied: exactDecimalStringSchema,
+  netAmount: exactDecimalStringSchema,
+  balanceAfter: z.number().int().nonnegative(),
+  alreadyApplied: z.boolean(),
+});
+
+/**
+ * The single settlement answer for one operational purchase.
+ *
+ * This is what both the GSD screen and the Finance screen render, so neither can
+ * disagree with the other or with the database about whether money was received
+ * and whether points are claimable. `claimable` is the conjunction: completed AND
+ * verified receipts covering the net AND an available claim.
+ */
+export const operationalSettlementSchema = z.object({
+  purchaseId: z.string().uuid(),
+  purchaseNumber: z.string(),
+  status: z.enum(['draft', 'completed', 'reversed']),
+  grossAmount: exactDecimalStringSchema,
+  tierDiscountAmount: exactDecimalStringSchema,
+  pointsDiscountAmount: exactDecimalStringSchema,
+  netAmount: exactDecimalStringSchema,
+  recordedTotal: exactDecimalStringSchema,
+  verifiedTotal: exactDecimalStringSchema,
+  rejectedTotal: exactDecimalStringSchema,
+  remainingAmount: exactDecimalStringSchema,
+  verifiedReceipts: z.number().int().nonnegative(),
+  rejectedReceipts: z.number().int().nonnegative(),
+  pendingReceipts: z.number().int().nonnegative(),
+  fullyPaid: z.boolean(),
+  claimable: z.boolean(),
+  claimId: z.string().uuid().nullable(),
+  claimStatus: z.string().nullable(),
+});
+
 export const createPurchaseInputSchema = z
   .object({
     /**
@@ -420,6 +529,17 @@ export const createPurchaseInputSchema = z
      * against another member's card.
      */
     membershipId: z.string().uuid(),
+    /**
+     * REQUIRED, and the idempotency key for the whole sale.
+     *
+     * A till that retries after a lost response - or a seller who double-clicks -
+     * would otherwise create a SECOND real purchase with real lines that could
+     * earn points. The database treats a repeated reference as the SAME sale and
+     * returns the original, so the duplicate is impossible rather than merely
+     * discouraged. It is deliberately required: making it optional would make
+     * "no reference" the unprotected default.
+     */
+    reference: z.string().trim().min(1).max(120),
     lines: z
       .array(
         z.object({
@@ -449,14 +569,27 @@ export const resolvedMemberSchema = z.object({
   redeemable: z.boolean(),
   blockedReason: z.string().nullable(),
   pointsBalance: z.number().int(),
-  matchedBy: z.enum(['qr', 'fallback']),
+  // The four values `api/_lib/identifier.ts` can actually return, spelled
+  // exactly as `IdentifierKind` spells them. This enum previously declared
+  // `['qr','fallback']` - two of the four, under names the resolver never emits
+  // - so every membership-number and legacy-code resolve was silently dropped by
+  // the client. Same defect, same fix, as `redemptionPreviewSchema`.
+  matchedBy: z.enum(['qr', 'fallback_code', 'card_number', 'legacy_alias']),
 });
 
-/** A staff-recorded purchase, as the API returns it. */
+/**
+ * A staff-recorded purchase, as the API returns it.
+ *
+ * `tierDiscountAmount` is the Operational Services VIP discount the SERVER
+ * resolved from the member's tier and the active service rate. It is optional so
+ * a row recorded before the tier-discount migration still validates; when it is
+ * absent the discount was zero.
+ */
 export const recordedPurchaseSchema = z.object({
   purchaseId: z.string().uuid(),
   purchaseNumber: z.string(),
   grossAmount: exactDecimalStringSchema,
+  tierDiscountAmount: exactDecimalStringSchema.optional(),
   netAmount: exactDecimalStringSchema,
 });
 
@@ -536,7 +669,16 @@ export const purchaseReceiptInputSchema = z
   .object({
     amount: z.string().regex(/^[1-9][0-9]*(\.[0-9]{1,2})?$/),
     method: z.string().trim().min(1).max(60),
-    reference: z.string().trim().max(120).nullable().default(null),
+    /**
+     * REQUIRED on the Operational Services till.
+     *
+     * It is the idempotency key for the receipt: `purchase_payments` carries a
+     * unique (purchase_id, reference) index, so a retried request after a lost
+     * response records the SAME cash once. With a null reference that index is
+     * simply not consulted, and a double-click would double the recorded money
+     * for one real payment.
+     */
+    reference: z.string().trim().min(1).max(120),
   })
   .strict();
 

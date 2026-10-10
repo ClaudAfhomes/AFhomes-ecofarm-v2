@@ -16,14 +16,22 @@
  * Rejection requires a reason, and a rejection removes the money from the
  * received figure rather than merely flagging it.
  *
- * Authorisation reuses the existing Finance controls: recording and verifying
- * both require `sales.customers` UPDATE, the same permission the payment queue
- * and the discount screen already use. No new module key and no new verb were
- * invented for this.
+ * Authorisation: this is the Operational Services Finance screen, and it is
+ * deliberately NOT the VIP-card payment queue. Verifying an operational receipt
+ * requires `operations.payments` UPDATE - its own key, not
+ * `finance.payment_verification` - so the two payment workflows neither share a
+ * permission nor can verify each other's money. `employee` (the GSD) holds no
+ * row on this key at all, which is why the seller who records a receipt can
+ * never be the person who accepts it.
+ *
+ * This screen is EXTENDED rather than duplicated: it already listed operational
+ * purchases and their receipts, so the settlement figures and claim status were
+ * added to it instead of building a second receipt-management page.
  *
  * Purchase receipts stay separate from the card-sale `public.payments` workflow:
- * this screen never touches a card sale, and a purchase receipt can never appear
- * on one.
+ * this screen never touches a card sale, and `payments_purchase_origin_check`
+ * admits only 'sale' and 'reservation', so an operational receipt cannot appear
+ * on one even by accident.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -45,6 +53,7 @@ import styles from './points.module.css';
 import {
   decideReceipt,
   getPurchaseSummary,
+  getSettlement,
   listPurchases,
   listReceipts,
   recordReceipt,
@@ -120,12 +129,55 @@ function PurchasePaymentRow({
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['earning', 'purchase', purchaseId] });
     void client.invalidateQueries({ queryKey: ['earning', 'purchases'] });
+    void client.invalidateQueries({ queryKey: ['earning', 'settlement'] });
   };
+
+  /**
+   * The authoritative settlement state, read from the database rather than
+   * inferred from the receipt list on screen.
+   *
+   * Finance and the seller must see the SAME numbers: a screen that derived
+   * "is this settled?" from its own rows could disagree with the gate that
+   * actually decides it, and the disagreement would always favour settling.
+   */
+  const settlement = useQuery({
+    queryKey: ['earning', 'settlement', purchaseId],
+    queryFn: () => getSettlement(purchaseId),
+  });
 
   return (
     <section aria-label={`Receipts for ${purchaseNumber}`}>
       <h2>{purchaseNumber}</h2>
       <p className={styles.hint}>Amount due {formatMoney(netAmount)}</p>
+
+      {/* The single settlement answer, so Finance and the seller are never
+          looking at different versions of the truth. */}
+      {settlement.data && (
+        <div aria-live="polite">
+          <p>
+            <StatusChip
+              tone={settlement.data.status === 'completed' ? 'success' : 'warning'}
+              label={settlement.data.status}
+            />{' '}
+            Outstanding {formatMoney(settlement.data.remainingAmount)}
+            {settlement.data.pendingReceipts > 0 &&
+              ` - ${settlement.data.pendingReceipts} receipt(s) awaiting verification`}
+            {settlement.data.rejectedReceipts > 0 &&
+              ` - ${settlement.data.rejectedReceipts} rejected`}
+          </p>
+          <p className={styles.hint}>
+            Claim:{' '}
+            {settlement.data.claimable
+              ? 'claimable'
+              : settlement.data.claimStatus ?? 'not issued yet'}
+            . Verified receipts {formatMoney(settlement.data.verifiedTotal)} of{' '}
+            {formatMoney(settlement.data.netAmount)} due.
+          </p>
+          <Button variant="secondary" onClick={refresh} disabled={settlement.isFetching}>
+            {settlement.isFetching ? 'Refreshing…' : 'Refresh settlement'}
+          </Button>
+        </div>
+      )}
 
       {summary.isLoading && <Skeleton />}
       {summary.isError && (

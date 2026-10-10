@@ -32,6 +32,7 @@ export const MODULE_KEYS = [
   'network.withdrawals',
   'operations.redemption',
   'operations.catalog',
+  'operations.sales',
   'governance.audit',
   'governance.config',
 ] as const satisfies readonly AfHomesPermission['moduleKey'][];

@@ -12,11 +12,14 @@ import {
 } from '@afhomes/ui';
 
 import styles from './points.module.css';
+import { useSession } from '../../lib/session';
 import {
   createEarningRule,
   createRedemptionRule,
   createService,
   listEarningRules,
+  listTierDiscounts,
+  createTierDiscount,
   listRedemptionRules,
   listServices,
   updateRedemptionRule,
@@ -46,12 +49,30 @@ const TIERS: Tier[] = ['BRONZE', 'SILVER', 'GOLD'];
  */
 export function PointsRulesPage() {
   const client = useQueryClient();
+
+  /**
+   * Whether this viewer may CHANGE anything here.
+   *
+   * `employee` (the GSD) holds `operations.catalog` VIEW, because it needs the
+   * catalog to sell from and to redeem against. View is enough to explain a
+   * sale. It is not enough to set a price, a tier rate or an earning rule, so
+   * every write control is withheld from a viewer without it.
+   *
+   * This is UX only. The server independently refuses every one of these writes
+   * without `operations.catalog` create/update, so hiding the form is a courtesy
+   * rather than the control.
+   */
+  const mayAdminister =
+    useSession().user?.afHomesPermissions?.find((p) => p.moduleKey === 'operations.catalog')
+      ?.canCreate === true;
+
   const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
   const rules = useQuery({ queryKey: ['earning', 'rules'], queryFn: listEarningRules });
   const promotions = useQuery({
     queryKey: ['earning', 'redemption-rules'],
     queryFn: listRedemptionRules,
   });
+  const tierDiscounts = useQuery({ queryKey: ['earning', 'tier-discounts'], queryFn: listTierDiscounts });
 
   const invalidate = () => client.invalidateQueries({ queryKey: ['earning'] });
 
@@ -108,7 +129,70 @@ export function PointsRulesPage() {
             </tbody>
           </table>
         )}
-        <NewServiceForm onSaved={invalidate} disabled={services.isPending} />
+        {mayAdminister && <NewServiceForm onSaved={invalidate} disabled={services.isPending} />}
+        {!mayAdminister && (
+          <p>
+            You can read the catalog and the configured rates, but only an administrator can change
+            them.
+          </p>
+        )}
+      </section>
+
+      <section aria-label="VIP tier discounts">
+        <h2>VIP tier discounts</h2>
+        <p>
+          The Operational Services discount a member receives at checkout, as a percentage of the
+          service price. This is separate from a card purchase discount and separate from points
+          spending: the two are applied as distinct figures and never counted as one. A rate is
+          snapshotted onto each sale when it is made, so changing a rate here never alters a
+          transaction that has already been recorded.
+        </p>
+        {tierDiscounts.isLoading && <Skeleton />}
+        {tierDiscounts.isError && (
+          <ErrorState
+            title="Tier discounts unavailable"
+            message="The configured rates could not be loaded."
+          />
+        )}
+        {tierDiscounts.data?.length === 0 && (
+          <EmptyState
+            title="No tier discounts configured"
+            description="Every service sells at full price until a rate is configured for it."
+          />
+        )}
+        {tierDiscounts.data && tierDiscounts.data.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Service</th>
+                <th scope="col">Tier</th>
+                <th scope="col">Discount</th>
+                <th scope="col">Window</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tierDiscounts.data.map((rule) => (
+                <tr key={rule.id}>
+                  <td>{serviceName(rule.serviceId)}</td>
+                  <td>{rule.tier}</td>
+                  <td>{rule.discountRate}%</td>
+                  <td>
+                    {rule.effectiveStart} to {rule.effectiveEnd}
+                  </td>
+                  <td>{rule.isActive ? 'Active' : 'Inactive'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {mayAdminister && (
+          <NewTierDiscountForm
+            services={services.data ?? []}
+            onSaved={invalidate}
+            disabled={services.isPending || tierDiscounts.isPending}
+          />
+        )}
       </section>
 
       <section aria-label="Promotions">
@@ -273,6 +357,116 @@ function TogglePromotion({
     >
       {rule.isActive ? 'Turn off' : 'Turn on'}
     </Button>
+  );
+}
+
+/**
+ * Configure one Operational Services VIP rate.
+ *
+ * Every field is explicit and none of them is optional: there is no "applies to
+ * every service" and no "forever", because a rate that silently covered
+ * everything, or never expired, would be a commercial change nobody could
+ * review. Both dates are required for exactly that reason, which is also what
+ * makes an indefinite rate unrepresentable rather than merely discouraged.
+ *
+ * A failed save keeps the typed values, so a rejected rate does not cost the
+ * administrator everything they entered.
+ */
+function NewTierDiscountForm({
+  services,
+  onSaved,
+  disabled,
+}: {
+  services: { id: string; name: string }[];
+  onSaved: () => void;
+  disabled: boolean;
+}) {
+  const [serviceId, setServiceId] = useState('');
+  const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('GOLD');
+  const [rate, setRate] = useState('25');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () =>
+      createTierDiscount({
+        serviceId,
+        tier,
+        discountRate: Number(rate),
+        effectiveStart: start,
+        effectiveEnd: end,
+      }),
+    onSuccess: () => {
+      setRate('25');
+      setStart('');
+      setEnd('');
+      setError(null);
+      notifySuccess({ title: 'Tier discount added' });
+      onSaved();
+    },
+    onError: (cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : 'Could not add the rate.'),
+  });
+
+  const rateNumber = Number(rate);
+  const rateValid = rateNumber > 0 && rateNumber <= 100;
+  const datesOrdered = Boolean(start && end) && start < end;
+
+  return (
+    <div aria-busy={save.isPending}>
+      <h3>Add a tier discount</h3>
+      <label htmlFor="tier-service">Service</label>
+      <select
+        id="tier-service"
+        value={serviceId}
+        onChange={(e) => setServiceId(e.target.value)}
+      >
+        <option value="">Choose a service</option>
+        {services.map((service) => (
+          <option key={service.id} value={service.id}>
+            {service.name}
+          </option>
+        ))}
+      </select>
+
+      <label htmlFor="tier-tier">VIP tier</label>
+      <select
+        id="tier-tier"
+        value={tier}
+        onChange={(e) => setTier(e.target.value as 'BRONZE' | 'SILVER' | 'GOLD')}
+      >
+        <option value="BRONZE">Bronze</option>
+        <option value="SILVER">Silver</option>
+        <option value="GOLD">Gold</option>
+      </select>
+
+      <label htmlFor="tier-rate">Discount percent</label>
+      <input
+        id="tier-rate"
+        type="number"
+        min={1}
+        max={100}
+        step="0.0001"
+        value={rate}
+        onChange={(e) => setRate(e.target.value)}
+      />
+
+      <label htmlFor="tier-start">Effective from</label>
+      <input id="tier-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+
+      <label htmlFor="tier-end">Effective to</label>
+      <input id="tier-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+
+      <Button
+        disabled={disabled || save.isPending || !serviceId || !rateValid || !datesOrdered}
+        onClick={() => save.mutate()}
+      >
+        {save.isPending ? 'Saving.' : 'Add tier discount'}
+      </Button>
+      {save.isPending && <Spinner label="Saving the tier discount" />}
+      {error && <ErrorState title="Not saved" message={error} />}
+    </div>
   );
 }
 
