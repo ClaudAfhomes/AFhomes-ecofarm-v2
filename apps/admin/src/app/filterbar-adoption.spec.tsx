@@ -24,8 +24,7 @@ import { DocumentsPage } from '../features/documents/DocumentsPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { MembershipsPage } from '../features/memberships/MembershipsPage';
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
-import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
+import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
 import { AuditPage } from '../features/reports/AuditPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
 
@@ -70,8 +69,6 @@ vi.mock('../features/business/services', () => ({
 vi.mock('../features/redemption/services', () => ({
   getRedemptionItems: vi.fn(async () => []),
   getRedemptions: vi.fn(async () => []),
-  createRedemptionItem: vi.fn(),
-  updateRedemptionItem: vi.fn(),
 }));
 vi.mock('../features/ost/services', () => ({
   getOstApplications: vi.fn(async () => []),
@@ -133,20 +130,104 @@ const STAFF: SessionUser = {
   roleName: 'Super Admin',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_sales', canView: true, canCreate: true, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_plans', canView: true, canCreate: true, canUpdate: true, canDelete: false },
-    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.genealogy', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'network.ost_registrations', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'governance.audit', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.id_documents', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'organization.staff', canView: true, canCreate: true, canUpdate: true, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_sales',
+      canView: true,
+      canCreate: true,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.customers',
+      canView: true,
+      canCreate: true,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_plans',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.payment_verification',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.card_activation',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'operations.redemption',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'operations.catalog',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.genealogy',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.ost_registrations',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'governance.audit',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.id_documents',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'organization.staff',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
   ],
 };
 
@@ -183,13 +264,8 @@ describe('FilterBar adoption', () => {
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
   });
 
-  it('catalog renders search + status in one toolbar', async () => {
-    await showsFilterBar(<RedemptionCatalogPage />);
-    expect(screen.getByLabelText('Search catalog items')).toBeInTheDocument();
-  });
-
   it('history renders membership, item, and date filters in one toolbar', async () => {
-    await showsFilterBar(<RedemptionHistoryPage />);
+    await showsFilterBar(<LegacyRedemptionHistoryPage />);
     expect(screen.getByLabelText('Membership number')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });

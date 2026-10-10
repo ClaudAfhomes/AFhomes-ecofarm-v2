@@ -482,7 +482,11 @@ describe('points position vs legacy summary', () => {
     render('/customer/points');
     await screen.findByRole('heading', { name: 'Your points' });
     const paths = (globalThis.fetch as unknown as { mock: { calls: [unknown][] } }).mock.calls.map(
-      (call) => String(call[0]).replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '').split('?')[0],
+      (call) =>
+        String(call[0])
+          .replace(/^https?:\/\/[^/]+/, '')
+          .replace(/^\/api\/v1/, '')
+          .split('?')[0],
     );
     // The screen that needs the three figures uses the endpoint that has them.
     expect(paths).toContain('/customer/points/position');
@@ -543,19 +547,17 @@ describe('points position vs legacy summary', () => {
     // Capacity 0 must not read as "no points": the balance is untouched.
     expect(within(card).getByText('Points on your card')).toBeInTheDocument();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
-    expect(within(card).getByText('points available to spend right now')).toBeInTheDocument();
+    expect(within(card).getByText('points accumulated on your card')).toBeInTheDocument();
   });
 });
 
 describe('points screen', () => {
   it('separates spendable points from what may still be earned', async () => {
     render('/customer/points');
-    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest(
-      'section',
-    )!;
+    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
     // The headline is SPENDABLE, not balance: it is what a member can actually
     // use today.
-    expect(within(card).getByText('points available to spend right now')).toBeInTheDocument();
+    expect(within(card).getByText('points accumulated on your card')).toBeInTheDocument();
     // The three figures are labelled separately so none can be read as another.
     expect(within(card).getByText('Points on your card')).toBeInTheDocument();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();

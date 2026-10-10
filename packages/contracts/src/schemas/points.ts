@@ -145,6 +145,37 @@ export const claimEarningPointsResultSchema = z.object({
   balanceAfter: pointsAmountSchema,
 });
 
+export const claimRowSchema = z.object({
+  id: z.string().uuid(),
+  claimNumber: z.string(),
+  customerId: z.string().uuid(),
+  purchaseId: z.string().uuid(),
+  customerNumber: z.string().nullable(),
+  customerName: z.string().nullable(),
+  membershipNumber: z.string().nullable(),
+  purchaseNumber: z.string().nullable(),
+  serviceName: z.string().nullable(),
+  status: z.enum(['available', 'claimed', 'expired', 'reversed']),
+  pointsRequested: pointsAmountSchema,
+  pointsReserved: pointsAmountSchema,
+  pointsAwarded: pointsAmountSchema,
+  pointsCapped: pointsAmountSchema,
+  expiresAt: z.string().nullable(),
+  claimedAt: z.string().nullable(),
+  createdAt: z.string().nullable(),
+});
+export type ClaimRow = z.infer<typeof claimRowSchema>;
+
+export const earningClaimPreviewSchema = z.object({
+  claimNumber: z.string(),
+  purchaseNumber: z.string().nullable(),
+  serviceName: z.string().nullable(),
+  pointsRequested: pointsAmountSchema,
+  pointsReserved: pointsAmountSchema,
+  pointsCapped: pointsAmountSchema,
+  expiresAt: z.string(),
+});
+
 export const createEarningClaimRequestSchema = z
   .object({
     purchaseId: z.string().uuid(),
@@ -166,12 +197,23 @@ export type PointEarningRuleInput = z.infer<typeof pointEarningRuleInputSchema>;
 export type PointsBalanceSummary = z.infer<typeof pointsBalanceSummarySchema>;
 
 export const serviceCatalogItemSchema = z.object({
+  summary: z.string().trim().max(300).nullable().default(null),
+  category: z.string().trim().max(80).nullable().default(null),
+  location: z.string().trim().max(160).nullable().default(null),
+  pricingUnit: z.enum(['unit', 'person', 'session', 'night', 'booking']).default('unit'),
+  highlights: z.array(z.string().trim().min(1).max(160)).max(12).default([]),
+
   id: z.string().uuid(),
   code: z.string(),
   name: z.string(),
   description: z.string().nullable(),
   basePrice: exactDecimalStringSchema,
   isActive: z.boolean(),
+  published: z.boolean().default(false),
+  availability: z.enum(['available', 'unavailable', 'coming_soon']).default('available'),
+  photos: z
+    .array(z.object({ id: z.string().optional(), url: z.string().url(), alt: z.string() }))
+    .default([]),
 });
 
 /**
@@ -203,13 +245,38 @@ export const committedPointDiscountSchema = z.object({
 
 export const serviceCatalogItemInputSchema = z
   .object({
-    code: z.string().trim().min(1).max(50),
+    summary: z.string().trim().max(300).nullable().default(null),
+    category: z.string().trim().max(80).nullable().default(null),
+    location: z.string().trim().max(160).nullable().default(null),
+    pricingUnit: z.enum(['unit', 'person', 'session', 'night', 'booking']).default('unit'),
+    highlights: z.array(z.string().trim().min(1).max(160)).max(12).default([]),
+
+    code: z.string().trim().min(1).max(50).optional(),
     name: z.string().trim().min(1).max(120),
-    description: z.string().trim().max(500).nullable().default(null),
+    description: z.string().trim().max(5000).nullable().default(null),
     basePrice: exactDecimalStringSchema,
     isActive: z.boolean().default(true),
+    published: z.boolean().default(false),
+    availability: z.enum(['available', 'unavailable', 'coming_soon']).default('available'),
   })
   .strict();
+
+export const serviceCatalogPatchSchema = serviceCatalogItemInputSchema
+  .omit({ code: true })
+  .partial()
+  .strict();
+export const servicePhotoInputSchema = z
+  .object({
+    replacePhotoId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    dataBase64: z.string().min(1).max(4_200_000),
+    alt: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export const servicePolicyStatusSchema = z.object({ isActive: z.boolean() }).strict();
 
 /**
  * A configurable earning rule.
@@ -294,8 +361,14 @@ export const pointRedemptionRulePatchSchema = z
     minPoints: z.number().int().positive().optional(),
     maxPoints: z.number().int().positive().nullable().optional(),
     minPurchaseAmount: exactDecimalStringSchema.nullable().optional(),
-    effectiveStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    effectiveEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    effectiveStart: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    effectiveEnd: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
     isActive: z.boolean().optional(),
     promotionReference: z.string().trim().min(3).max(200).optional(),
   })
@@ -371,6 +444,8 @@ export const redemptionQuoteSchema = z.object({
 export const purchaseLineSchema = z.object({
   id: z.string().uuid(),
   serviceId: z.string().uuid(),
+  serviceName: z.string().nullable().optional(),
+  pricingUnit: z.string().nullable().optional(),
   quantity: z.number().int().positive(),
   unitAmount: exactDecimalStringSchema,
   lineTotal: exactDecimalStringSchema,
@@ -545,10 +620,11 @@ export const createPurchaseInputSchema = z
         z.object({
           serviceId: z.string().uuid(),
           quantity: z.number().int().positive().max(99),
-          unitAmount: exactDecimalStringSchema,
+          unitAmount: exactDecimalStringSchema.optional(),
         }),
       )
-      .min(1),
+      // Claims freeze one service rule; each service gets its own sale.
+      .length(1),
   })
   .strict();
 
@@ -718,7 +794,10 @@ export const purchaseReceiptSchema = z.object({
 export const adjustPointsInputSchema = z
   .object({
     membershipId: z.string().uuid(),
-    amount: z.number().int().refine((v) => v !== 0, 'amount must not be zero'),
+    amount: z
+      .number()
+      .int()
+      .refine((v) => v !== 0, 'amount must not be zero'),
     reason: z.string().trim().min(5).max(500),
   })
   .strict();
@@ -730,3 +809,48 @@ export const reversePurchaseInputSchema = z
     reason: z.string().trim().min(5).max(500),
   })
   .strict();
+
+export const purchaseRowSchema = z.object({
+  id: z.string().uuid(),
+  purchaseNumber: z.string(),
+  customerId: z.string().uuid(),
+  membershipId: z.string().uuid(),
+  status: z.enum(['draft', 'completed', 'reversed']),
+  grossAmount: exactDecimalStringSchema,
+  /**
+   * The VIP service-tier discount actually applied, and the TIER that earned
+   * it. A sales record must answer "what discount was used and why" without
+   * anyone re-deriving it.
+   */
+  tierDiscountAmount: exactDecimalStringSchema,
+  tierSnapshot: z.enum(['BRONZE', 'SILVER', 'GOLD']).nullable(),
+  pointsDiscountAmount: exactDecimalStringSchema,
+  netAmount: exactDecimalStringSchema,
+  /** Cash recorded vs cash VERIFIED. Recorded is not money received. */
+  recordedTotal: exactDecimalStringSchema,
+  verifiedTotal: exactDecimalStringSchema,
+  /** Who raised the sale, and who it was for. */
+  createdByName: z.string().nullable(),
+  customerName: z.string().nullable(),
+  /** The earning claim's state, so "was it paid out?" needs no second click. */
+  claimStatus: z.string().nullable(),
+  claimable: z.boolean(),
+  completedAt: z.string().nullable(),
+  reversedAt: z.string().nullable(),
+  reversalReason: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  lines: z.array(
+    z.object({
+      id: z.string().uuid(),
+      serviceId: z.string().uuid(),
+      serviceName: z.string().nullable().optional(),
+      quantity: z.number().int(),
+      unitAmount: exactDecimalStringSchema,
+      lineTotal: exactDecimalStringSchema,
+      /** The SNAPSHOT of the rate applied, so history cannot drift. */
+      tierDiscountAmount: exactDecimalStringSchema,
+      tierDiscountRate: z.number().positive().max(100).optional(),
+      tier: z.enum(['BRONZE', 'SILVER', 'GOLD']).optional(),
+    }),
+  ),
+});

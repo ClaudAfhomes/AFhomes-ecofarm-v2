@@ -21,7 +21,7 @@ import { CustomerImportExportPage } from '../features/business/CustomerImportExp
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessPointsPage } from '../features/business/BusinessPointsPage';
 import { PointsRulesPage } from '../features/business/PointsRulesPage';
-import { PointsDiscountPage } from '../features/business/PointsDiscountPage';
+import { SalesRecordsPage } from '../features/business/SalesRecordsPage';
 import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
@@ -32,7 +32,7 @@ import {
   ReservationAgreementEditorPage,
   ReservationAgreementsPage,
 } from '../features/business/OfficialFormsPages';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
+import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import {
@@ -105,10 +105,13 @@ export default function App() {
               {/* GSD / Employee customer desk. Read-only, and gated on the same
           `operations.redemption` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
-      <Route path="/admin/customer-lookup" element={protectedPage(<CustomerLookupPage />)} />
-      {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
+              <Route
+                path="/admin/customer-lookup"
+                element={protectedPage(<CustomerLookupPage />)}
+              />
+              {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
           Redemption rather than from the global nav. */}
-      <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
+              <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
               <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
               <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
@@ -119,10 +122,7 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
-              <Route
-                path="/admin/customers/:id"
-                element={protectedPage(<CustomerDetailPage />)}
-              />
+              <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
               <Route
                 path="/admin/customers/import-export"
                 element={protectedPage(<CustomerImportExportPage />)}
@@ -167,8 +167,12 @@ export default function App() {
               {/* Order is irrelevant to React Router (static segments outrank the
                   bare prefix), but the deeper path is listed first so it reads as
                   a child of Earn Points. */}
+              <Route path="/admin/points/records" element={protectedPage(<SalesRecordsPage />)} />
               <Route path="/admin/points/rules" element={protectedPage(<PointsRulesPage />)} />
-              <Route path="/admin/points/discount" element={protectedPage(<PointsDiscountPage />)} />
+              <Route
+                path="/admin/points/discount"
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
               <Route
                 path="/admin/points/payments"
                 element={protectedPage(<PurchasePaymentsPage />)}
@@ -194,7 +198,11 @@ export default function App() {
               />
               <Route
                 path="/admin/redemption/items"
-                element={protectedPage(<RedemptionCatalogPage />)}
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
+              <Route
+                path="/admin/redemption/legacy-history"
+                element={protectedPage(<LegacyRedemptionHistoryPage />)}
               />
               <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
               <Route path="/admin/genealogy" element={protectedPage(<GenealogyPage />)} />

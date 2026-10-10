@@ -51,8 +51,22 @@ function baseTables(): Record<string, Row[]> {
     ],
     roles: [{ id: 'r1', slug: 'finance', name: 'Finance', is_active: true }],
     role_permissions: [
-      { role_id: 'r1', module_id: 'm1', can_view: true, can_create: true, can_update: true, can_delete: true },
-      { role_id: 'r1', module_id: 'm2', can_view: true, can_create: true, can_update: true, can_delete: true },
+      {
+        role_id: 'r1',
+        module_id: 'm1',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: true,
+      },
+      {
+        role_id: 'r1',
+        module_id: 'm2',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: true,
+      },
     ],
     staff_users: [
       { id: STAFF_ID, email: 'finance@afhomes.test', full_name: 'Fin Staffer', status: 'active' },
@@ -100,11 +114,15 @@ function baseTables(): Record<string, Row[]> {
     // `card_plans: { name: 'Gold' }` inline, so the `card_plans!inner(name)`
     // embed resolved nothing and every productName assertion passed without the
     // join running.
-    card_plans: [
-      { id: '77777777-7777-4777-8777-777777777777', code: 'GOLD', name: 'Gold' },
-    ],
+    card_plans: [{ id: '77777777-7777-4777-8777-777777777777', code: 'GOLD', name: 'Gold' }],
     points_accounts: [
-      { id: ACCOUNT_ID, membership_id: MEMBERSHIP_ID, balance: 60000, lifetime_allocated: 60000, lifetime_redeemed: 0 },
+      {
+        id: ACCOUNT_ID,
+        membership_id: MEMBERSHIP_ID,
+        balance: 60000,
+        lifetime_allocated: 60000,
+        lifetime_redeemed: 0,
+      },
     ],
     points_ledger: [
       {
@@ -341,197 +359,35 @@ describe('POS till flow: identify, review, confirm, receipt', () => {
     });
   });
 
-  it('completes a redemption with exact figures and a full receipt', async () => {
+  it('refuses repeated spending requests and preserves account, ledger and membership cache', async () => {
     const db = holder.db as FakeSupabase;
-    const state = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-terminal-7-000001',
-      },
-    });
-    expect(state.status).toBe(201);
-    expect(body(state)).toMatchObject({
-      membershipId: MEMBERSHIP_ID,
-      membershipNumber: 'MBS-000777',
-      customerDisplayName: 'Ana R Buyer',
-      itemCode: 'TEPPANYAKI',
-      itemName: 'Japanese Teppanyaki',
-      unitPoints: 2000,
-      quantity: 1,
-      totalPoints: 2000,
-      balanceBefore: 60000,
-      balanceAfter: 58000,
-      redeemedByName: 'Fin Staffer',
-      replayed: false,
-    });
-    expect(body(state).redemptionNumber).toMatch(/^RDM-/);
-    // Exactly one negative ledger entry and an in-step balance cache.
-    const debits = db
-      .rows('points_ledger')
-      .filter((r) => r.entry_type === 'redemption' && Number(r.amount) < 0);
-    expect(debits).toHaveLength(1);
-    expect(debits[0]).toMatchObject({ amount: -2000, balance_after: 58000 });
-    expect(db.rows('points_accounts')[0]).toMatchObject({ balance: 58000, lifetime_redeemed: 2000 });
-    expect(db.rows('memberships')[0]).toMatchObject({ points_balance: 58000 });
-  });
-
-  it('redeems an exact balance down to zero, then refuses the next peso', async () => {
-    const db = holder.db as FakeSupabase;
-    db.rows('points_accounts')[0]!.balance = 2000;
-    db.rows('memberships')[0]!.points_balance = 2000;
-    const exact = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-exact-000001',
-      },
-    });
-    expect(exact.status).toBe(201);
-    expect(body(exact)).toMatchObject({ balanceBefore: 2000, balanceAfter: 0 });
-    const next = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-exact-000002',
-      },
-    });
-    expect(next.status).toBe(409);
-    expect(db.rows('points_accounts')[0]!.balance).toBe(0);
-  });
-
-  it('cannot overspend across sequential confirmations: first wins, second is refused', async () => {
-    const db = holder.db as FakeSupabase;
-    db.rows('points_accounts')[0]!.balance = 3000;
-    db.rows('memberships')[0]!.points_balance = 3000;
-    const first = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-race-000001',
-      },
-    });
-    expect(first.status).toBe(201);
-    const second = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-race-000002',
-      },
-    });
-    expect(second.status).toBe(409);
-    expect(db.rows('points_accounts')[0]!.balance).toBe(1000);
-    expect(db.rows('redemptions')).toHaveLength(1);
-  });
-
-  it('a retry with the same reference returns the original receipt without a second debit', async () => {
-    const db = holder.db as FakeSupabase;
-    const first = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-retry-000001',
-      },
-    });
-    const retry = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-retry-000001',
-      },
-    });
-    expect(retry.status).toBe(201);
-    expect(body(retry)).toMatchObject({
-      redemptionId: body(first).redemptionId,
-      balanceBefore: 60000,
-      balanceAfter: 58000,
-      replayed: true,
-    });
-    expect(db.rows('redemptions')).toHaveLength(1);
-    expect(db.rows('points_accounts')[0]!.balance).toBe(58000);
-  });
-
-  it('refuses an expired membership at confirmation with a business-safe message', async () => {
-    const db = holder.db as FakeSupabase;
-    db.rows('memberships')[0]!.expires_at = ago(1);
-    const preview = await call({ familyPath: 'resolve', query: { identifier: QR_TOKEN } });
-    expect(body(preview)).toMatchObject({ expired: true, redeemable: false });
-    const state = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 1,
-        clientTransactionId: 'pos-expired-000001',
-      },
-    });
-    expect(state.status).toBe(409);
-    expect(db.rows('redemptions')).toHaveLength(0);
-    expect(db.rows('points_accounts')[0]!.balance).toBe(60000);
-  });
-
-  it('refuses suspended memberships and cancelled customers at confirmation', async () => {
-    const db = holder.db as FakeSupabase;
-    db.rows('memberships')[0]!.status = 'suspended';
+    const snapshot = JSON.stringify([
+      db.rows('points_accounts'),
+      db.rows('points_ledger'),
+      db.rows('memberships'),
+    ]);
+    for (let retry = 0; retry < 2; retry++) {
+      expect(
+        (
+          await call({
+            method: 'POST',
+            body: {
+              membershipId: MEMBERSHIP_ID,
+              redemptionItemId: ITEM_ID,
+              quantity: 1,
+              clientTransactionId: 'retired-till-reference',
+            },
+          })
+        ).status,
+      ).toBe(404);
+    }
     expect(
-      (
-        await call({
-          method: 'POST',
-          body: {
-            membershipId: MEMBERSHIP_ID,
-            redemptionItemId: ITEM_ID,
-            quantity: 1,
-            clientTransactionId: 'pos-susp-000001',
-          },
-        })
-      ).status,
-    ).toBe(409);
-    db.rows('memberships')[0]!.status = 'active';
-    db.rows('customers')[0]!.status = 'cancelled';
-    expect(
-      (
-        await call({
-          method: 'POST',
-          body: {
-            membershipId: MEMBERSHIP_ID,
-            redemptionItemId: ITEM_ID,
-            quantity: 1,
-            clientTransactionId: 'pos-canc-000001',
-          },
-        })
-      ).status,
-    ).toBe(409);
-    expect(db.rows('redemptions')).toHaveLength(0);
-  });
-
-  it('ignores a client-tampered price: the catalog cost always wins', async () => {
-    const state = await call({
-      method: 'POST',
-      body: {
-        membershipId: MEMBERSHIP_ID,
-        redemptionItemId: ITEM_ID,
-        quantity: 2,
-        clientTransactionId: 'pos-tamper-000001',
-        pointsCost: 1,
-        balance: 999999,
-      },
-    });
-    expect(state.status).toBe(201);
-    expect(body(state)).toMatchObject({ unitPoints: 2000, quantity: 2, totalPoints: 4000 });
+      JSON.stringify([
+        db.rows('points_accounts'),
+        db.rows('points_ledger'),
+        db.rows('memberships'),
+      ]),
+    ).toBe(snapshot);
   });
 });
 
@@ -546,9 +402,7 @@ describe('POS reissue compatibility: rotated codes fail, fresh codes flow', () =
     member.fallback_code_hash = hash(NEW_FB);
 
     for (const dead of [QR_TOKEN, FALLBACK_CODE]) {
-      expect((await call({ familyPath: 'resolve', query: { identifier: dead } })).status).toBe(
-        404,
-      );
+      expect((await call({ familyPath: 'resolve', query: { identifier: dead } })).status).toBe(404);
     }
     for (const live of [NEW_QR, NEW_FB]) {
       const found = await call({ familyPath: 'resolve', query: { identifier: live } });
@@ -568,7 +422,7 @@ describe('POS reissue compatibility: rotated codes fail, fresh codes flow', () =
         clientTransactionId: 'pos-rotated-000001',
       },
     });
-    expect(state.status).toBe(201);
-    expect(body(state)).toMatchObject({ totalPoints: 2000, balanceAfter: 58000 });
+    expect(state.status).toBe(404);
+    expect(db.rows('points_accounts')[0]!.balance).toBe(60000);
   });
 });

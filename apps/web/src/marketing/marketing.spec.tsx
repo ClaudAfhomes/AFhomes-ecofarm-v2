@@ -4,8 +4,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../test/utils';
 import App from '../app/App';
+import { requestList } from '../lib/api/client';
+vi.mock('../lib/api/client', async (original) => ({ ...(await original()), requestList: vi.fn() }));
+// A real response has already been through serviceCatalogItemSchema, so every
+// defaulted field is present. The mock replaces requestList wholesale, which
+// skips that parse: a fixture missing them would test nothing real.
+const PUBLISHED_SERVICE = {
+  id: 'abaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  code: 'AF-SVC-ONE',
+  name: 'Published wellness visit',
+  description: 'A persisted service description',
+  summary: 'A short summary',
+  category: 'Wellness',
+  location: 'Laguna',
+  pricingUnit: 'person',
+  highlights: ['Guided therapy'],
+  basePrice: '1500.00',
+  isActive: true,
+  published: true,
+  availability: 'available',
+  photos: [],
+};
 
 beforeEach(() => {
+  vi.mocked(requestList).mockResolvedValue([PUBLISHED_SERVICE]);
   // motion's whileInView needs IntersectionObserver; jsdom has none.
   vi.stubGlobal(
     'IntersectionObserver',
@@ -190,22 +212,26 @@ describe('homepage critical sections', () => {
     expect(screen.getByText('Important Notice')).toBeInTheDocument();
   });
 
-  it('lists the three experiences with their actions', async () => {
+  it('lists published services from the catalog with their detail action', async () => {
     renderWithProviders(<App />, { route: '/experiences' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByRole('link', { name: /Discover the Hotel/ })).toHaveAttribute(
+    expect(await scope.findByRole('link', { name: /View service/ })).toHaveAttribute(
       'href',
-      '/experiences/smart-wellness-hotel',
+      '/experiences/' + PUBLISHED_SERVICE.id,
     );
-    expect(scope.getByRole('link', { name: /Discover ALM/ })).toHaveAttribute(
-      'href',
-      '/experiences/alm-japanese-restaurant',
-    );
-    expect(scope.getByRole('link', { name: /Discover the Resort/ })).toHaveAttribute(
-      'href',
-      '/experiences/hotspring-ecofarm-resort',
-    );
+    expect(scope.getByRole('heading', { name: PUBLISHED_SERVICE.name })).toBeInTheDocument();
+    expect(requestList).toHaveBeenCalledWith('/earning/public/services', expect.anything());
+  });
+  it('shows an honest empty state when no service is published', async () => {
+    vi.mocked(requestList).mockResolvedValue([]);
+    renderWithProviders(<App />, { route: '/experiences' });
+    expect(await screen.findByText('Experiences coming soon')).toBeInTheDocument();
+  });
+  it('offers retry when published services cannot be loaded', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences' });
+    expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
 

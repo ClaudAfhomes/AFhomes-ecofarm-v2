@@ -43,7 +43,7 @@ describe('AF Homes navigation', () => {
     const redemptionTargets = (redemption?.dropdown ?? []).flatMap((child) =>
       'to' in child ? [child.to] : [],
     );
-    expect(redemptionTargets).toContain('/admin/member-lookup');
+    expect(redemptionTargets).not.toContain('/admin/member-lookup');
   });
 
   it('reserves Customer Lookup to the operations.redemption grant', () => {

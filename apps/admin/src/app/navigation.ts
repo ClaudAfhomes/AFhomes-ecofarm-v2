@@ -101,16 +101,6 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         label: 'Redemption History',
         module: 'operations.redemption',
       },
-      { to: '/admin/redemption/items', label: 'Redemption Catalog', module: 'operations.catalog' },
-      // The member-TRANSACTION lookup, where a Membership Code is legitimately shown
-      // because the next action is a redemption. Moved out of the global nav and into
-      // Redemption so it is no longer presented as a system-wide general lookup.
-      { to: '/admin/member-lookup', label: 'Member Lookup', module: 'operations.redemption' },
-      {
-        to: '/admin/points/discount',
-        label: 'Use Points',
-        module: 'operations.redemption',
-      },
     ],
   },
   // Operational Services is SELLING, which is a different job from redeeming, so
@@ -128,6 +118,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/points', label: 'New Service Sale', module: 'operations.sales' },
       // Admin only: products, tier discounts and earning rules.
       { to: '/admin/points/rules', label: 'Products & Services', module: 'operations.catalog' },
+      { to: '/admin/points/records', label: 'Sales Records', module: 'sales.customers' },
       // Finance/Admin only: operational receipt verification AND the sales
       // ledger. Keyed to `operations.payments`, which `employee` does not
       // hold, so the seller cannot reach the screen that verifies their own
@@ -135,7 +126,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // `finance.payment_verification`.
       {
         to: '/admin/points/payments',
-        label: 'Sales Records & Verification',
+        label: 'Operational Payment Verification',
         module: 'operations.payments',
       },
     ],
@@ -246,6 +237,8 @@ export function canAccessNavTarget(
   permissions: readonly AfHomesPermission[] | undefined,
   pathname: string,
 ): boolean {
+  if (pathname === '/admin/member-lookup')
+    return canViewModule(permissions, 'operations.redemption');
   if (pathname === '/admin/reports') return canViewReports(permissions);
   if (pathname === '/admin/customer-lookup')
     return canViewModule(permissions, 'operations.redemption');

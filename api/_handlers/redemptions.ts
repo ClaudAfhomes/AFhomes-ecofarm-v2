@@ -17,11 +17,6 @@
  * preview; only `POST /redemptions` moves points, inside one database
  * transaction.
  */
-import {
-  createRedemptionItemRequestSchema,
-  createRedemptionRequestSchema,
-  updateRedemptionItemRequestSchema,
-} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
@@ -29,7 +24,6 @@ import {
   fail,
   isoOrNull,
   type Db,
-  jsonBody,
   list,
   mapRpcError,
   method,
@@ -44,31 +38,6 @@ import {
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
-
-/** A database refusal -> a stable, safe client message. */
-const REFUSALS: Record<string, [string, string, number]> = {
-  ACTOR_REQUIRED: ['UNAUTHORIZED', 'Sign in to continue', 401],
-  ACTOR_NOT_STAFF: ['FORBIDDEN', 'This is not a staff account.', 403],
-  ACTOR_NOT_ACTIVE: ['FORBIDDEN', 'Your staff account is not active.', 403],
-  IDEMPOTENCY_KEY_REQUIRED: ['VALIDATION_ERROR', 'A transaction reference is required.', 400],
-  INVALID_QUANTITY: ['VALIDATION_ERROR', 'Check the quantity.', 400],
-  INVALID_TOTAL_POINTS: ['VALIDATION_ERROR', 'Check the quantity.', 400],
-  MEMBERSHIP_NOT_FOUND: ['NOT_FOUND', 'No membership matches that identifier', 404],
-  CUSTOMER_NOT_FOUND: ['NOT_FOUND', 'No membership matches that identifier', 404],
-  CUSTOMER_NOT_ACTIVE: ['CONFLICT', 'This customer account is not active.', 409],
-  MEMBERSHIP_NOT_ACTIVE: ['CONFLICT', 'This membership is not active.', 409],
-  MEMBERSHIP_EXPIRED: ['CONFLICT', 'This membership has expired.', 409],
-  REDEMPTION_ITEM_NOT_FOUND: ['NOT_FOUND', 'That redemption item does not exist', 404],
-  REDEMPTION_ITEM_INACTIVE: ['CONFLICT', 'That redemption item is no longer available', 409],
-  POINTS_ACCOUNT_NOT_FOUND: ['CONFLICT', 'This membership has no points account.', 409],
-  // The detail after the colon (how many points are needed) is deliberately NOT
-  // surfaced. It is a business-safe figure, but returning it lets a probing
-  // caller confirm a balance they were not entitled to be told about. The preview
-  // already shows the member their own balance to an authorized employee.
-  INSUFFICIENT_POINTS: ['CONFLICT', 'The customer does not have enough points for this item.', 409],
-};
-
-const splitCode = (message: string) => (message.split(':')[0] ?? '').trim();
 
 /** The name a member is greeted by. No government data, ever. */
 const displayNameOf = (row: Record<string, unknown>): string => {
@@ -135,6 +104,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const verb = method(req);
 
   try {
+    if ((path === 'items' && verb === 'POST') || (path.startsWith('items/') && verb === 'PATCH')) {
+      const auth = await authorizeAfHomes(
+        req,
+        'operations.catalog',
+        verb === 'POST' ? 'create' : 'update',
+      );
+      if ('error' in auth) return deny(res, auth);
+      return fail(res, 'NOT_FOUND', 'Catalog points spending has been retired.', 404);
+    }
     /* ================================================================
      * GET /redemptions/resolve?identifier=...
      *
@@ -199,22 +177,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // enough) may ask for the inactive or full set.
       const canSeeInactive = (auth.permissions ?? []).some(
         (p: { moduleKey?: string; canView?: boolean; canCreate?: boolean; canUpdate?: boolean }) =>
-          p.moduleKey === 'operations.catalog' &&
-          (p.canCreate === true || p.canUpdate === true),
+          p.moduleKey === 'operations.catalog' && (p.canCreate === true || p.canUpdate === true),
       );
       const query = (req.query ?? {}) as Record<string, unknown>;
       const activeParam = String(query.active ?? '').toLowerCase();
       const legacyAll = String(query.includeInactive ?? '') === 'true';
       const mode =
-        activeParam === 'all' || legacyAll ? 'all' : activeParam === 'false' ||
-          activeParam === 'inactive' ? 'inactive' : 'active';
+        activeParam === 'all' || legacyAll
+          ? 'all'
+          : activeParam === 'false' || activeParam === 'inactive'
+            ? 'inactive'
+            : 'active';
       const effective = mode === 'active' || !canSeeInactive ? 'active' : mode;
       let itemsQuery = db.from('redemption_items').select(ITEM_SELECT);
       if (effective === 'active') itemsQuery = itemsQuery.eq('is_active', true);
       if (effective === 'inactive') itemsQuery = itemsQuery.eq('is_active', false);
       const { data, error } = await itemsQuery.order('sort_order').order('name');
       if (error) throw error;
-      const needle = String(query.search ?? '').trim().toLowerCase();
+      const needle = String(query.search ?? '')
+        .trim()
+        .toLowerCase();
       const rows = ((data ?? []) as Record<string, unknown>[]).filter(
         (row) =>
           needle.length === 0 ||
@@ -250,8 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // (create or update) a retired item reads exactly like an unknown id.
       const canSeeInactive = (auth.permissions ?? []).some(
         (p: { moduleKey?: string; canCreate?: boolean; canUpdate?: boolean }) =>
-          p.moduleKey === 'operations.catalog' &&
-          (p.canCreate === true || p.canUpdate === true),
+          p.moduleKey === 'operations.catalog' && (p.canCreate === true || p.canUpdate === true),
       );
       if (row.is_active !== true && !canSeeInactive)
         return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
@@ -259,163 +240,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     /* ================================================================
-     * POST /redemptions/items  - create
+     * POST /redemptions  - RETIRED
+     *
+     * Points are EARNED on a purchase and CLAIMED by the customer in their own
+     * account. Spending an existing balance against a catalog item is no longer
+     * part of the product, so there is no route here at all.
+     *
+     * The rows a member redeemed before this change remain readable through the
+     * GET below; nothing was deleted. public.redeem_membership_points was also
+     * revoked in 20261108000001, so this cannot be reintroduced by adding a
+     * button back without an explicit database change.
+     *
+     * Deliberately no fallback branch: returning a refusal here would keep the
+     * endpoint alive and discoverable. A 404 is the honest answer.
      * ================================================================ */
-    if (path === 'items' && verb === 'POST') {
-      const auth = await authorizeAfHomes(req, 'operations.catalog', 'create');
-      if ('error' in auth) return deny(res, auth);
-      const parsed = createRedemptionItemRequestSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Check the item details.', 400);
-      const now = new Date().toISOString();
-
-      const { data, error } = await db
-        .from('redemption_items')
-        .insert({
-          code: parsed.data.code,
-          name: parsed.data.name,
-          description: parsed.data.description ?? null,
-          category: parsed.data.category,
-          points_cost: parsed.data.pointsCost,
-          sort_order: parsed.data.sortOrder,
-          is_active: true,
-          created_at: now,
-          updated_at: now,
-        })
-        .select(ITEM_SELECT)
-        .single();
-      if (error) {
-        if (/duplicate key|already exists/i.test(error.message ?? '')) {
-          return fail(res, 'CONFLICT', 'An item with that code already exists', 409);
-        }
-        throw error;
-      }
-      await audit(db, auth.userId, 'REDEMPTION_ITEM_CREATED', 'redemption_item', data.id, {
-        code: data.code,
-        pointsCost: Number(data.points_cost),
-      });
-      return res.status(201).json(toItem(data as Record<string, unknown>));
-    }
-
-    /* ================================================================ */
-    const itemRoute = route(req, 'PATCH', /^items\/([0-9a-f-]+)$/);
-    const itemPut = route(req, 'PUT', /^items\/([0-9a-f-]+)$/);
-    if (itemRoute || itemPut) {
-      const id = (itemRoute ?? itemPut)![1]!;
-      const auth = await authorizeAfHomes(req, 'operations.catalog', 'update');
-      if ('error' in auth) return deny(res, auth);
-      const parsed = updateRedemptionItemRequestSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Check the item details.', 400);
-
-      const { data: before, error: readError } = await db
-        .from('redemption_items')
-        .select('id,is_active')
-        .eq('id', id)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (!before) return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
-      // Snapshot pre-update state NOW: a row reference may be live (the
-      // in-memory double mutates it in place on update).
-      const wasActive = (before as Record<string, unknown>).is_active === true;
-
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (parsed.data.name !== undefined) patch.name = parsed.data.name;
-      if (parsed.data.description !== undefined) patch.description = parsed.data.description;
-      if (parsed.data.category !== undefined) patch.category = parsed.data.category;
-      if (parsed.data.pointsCost !== undefined) patch.points_cost = parsed.data.pointsCost;
-      if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
-      if (parsed.data.isActive !== undefined) patch.is_active = parsed.data.isActive;
-
-      const { data, error } = await db
-        .from('redemption_items')
-        .update(patch)
-        .eq('id', id)
-        .select(ITEM_SELECT)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return fail(res, 'NOT_FOUND', 'That redemption item does not exist', 404);
-
-      // Deactivation and reactivation are their own audited events:
-      // deactivation stops the item being usable without removing it from
-      // history, and reactivation returns it to the sellable set.
-      const deactivated = parsed.data.isActive === false;
-      const activated = parsed.data.isActive === true && !wasActive;
-      await audit(
-        db,
-        auth.userId,
-        deactivated
-          ? 'REDEMPTION_ITEM_DEACTIVATED'
-          : activated
-            ? 'REDEMPTION_ITEM_ACTIVATED'
-            : 'REDEMPTION_ITEM_UPDATED',
-        'redemption_item',
-        id,
-        { code: data.code, ...(deactivated ? {} : { pointsCost: Number(data.points_cost) }) },
-      );
-      return res.status(200).json(toItem(data as Record<string, unknown>));
-    }
-
-    /* ================================================================
-     * POST /redemptions  - the redemption transaction
-     * ================================================================ */
-    if ((path === '' || path === 'commit') && verb === 'POST') {
-      const auth = await authorizeAfHomes(req, 'operations.redemption', 'create');
-      if ('error' in auth) return deny(res, auth);
-      const parsed = createRedemptionRequestSchema.safeParse(jsonBody(req));
-      if (!parsed.success)
-        return fail(res, 'VALIDATION_ERROR', 'Check the redemption details.', 400);
-
-      const { membershipId, redemptionItemId, quantity, clientTransactionId } = parsed.data;
-
-      // Was this reference already used by this staff member BEFORE this call?
-      // Asking first is the only way to tell a genuine retry from a fresh
-      // redemption, because after the transaction both look identical: the row
-      // exists either way. It also lets the UI say "already recorded" instead of
-      // printing a second receipt for a double click.
-      const { data: priorRows } = await db
-        .from('redemptions')
-        .select('id')
-        .eq('redeemed_by', auth.userId)
-        .eq('idempotency_key', clientTransactionId)
-        .limit(1);
-      const replayed = (priorRows ?? []).length > 0;
-
-      // `auth.userId` is the ONLY actor. The body has no staff field to forge.
-      const { data, error } = await db.rpc('redeem_membership_points', {
-        p_membership_id: membershipId,
-        p_redemption_item_id: redemptionItemId,
-        p_quantity: quantity,
-        p_idempotency_key: clientTransactionId,
-        p_actor_id: auth.userId,
-      });
-      if (error) {
-        const mapped = REFUSALS[splitCode(error.message ?? '')];
-        if (mapped) return fail(res, mapped[0], mapped[1], mapped[2]);
-        return mapRpcError(res, error);
-      }
-
-      const row = (Array.isArray(data) ? data[0] : data) as
-        Record<string, string | number> | undefined;
-      if (!row) return fail(res, 'INTERNAL', 'The redemption could not be completed.', 500);
-
-      return res.status(201).json({
-        redemptionId: String(row.redemption_id),
-        redemptionNumber: String(row.redemption_number),
-        membershipId,
-        membershipNumber: String(row.membership_number ?? ''),
-        customerDisplayName: String(row.customer_name ?? ''),
-        itemCode: String(row.item_code ?? ''),
-        itemName: String(row.item_name ?? ''),
-        unitPoints: Number(row.unit_points ?? 0),
-        quantity: Number(row.quantity ?? quantity),
-        totalPoints: Number(row.total_points ?? 0),
-        balanceBefore: Number(row.balance_before ?? 0),
-        balanceAfter: Number(row.balance_after ?? 0),
-        redeemedByName: auth.fullName,
-        completedAt: new Date(String(row.completed_at ?? Date.now())).toISOString(),
-        replayed,
-      });
-    }
-
     /* ================================================================
      * GET /redemptions  - history
      *
@@ -515,26 +353,6 @@ const displayNameFor = async (db: Db, customerId: string): Promise<string | null
  * Catalog maintenance audit. The payload carries the code and the cost only -
  * never a QR token, a fallback code, a government ID or a credential.
  */
-const audit = async (
-  db: Db,
-  actorId: string,
-  action: string,
-  entityType: string,
-  entityId: string,
-  data: Record<string, unknown>,
-) => {
-  const { error } = await db.from('audit_events').insert({
-    actor_id: actorId,
-    action,
-    entity_type: entityType,
-    entity_id: entityId,
-    after_data: data,
-  });
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.error('[api] redemption audit write failed:', error.message);
-  }
-};
 
 const historyQuery = (req: VercelRequest) => {
   const iso = (v: unknown) =>

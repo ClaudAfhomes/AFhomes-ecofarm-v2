@@ -1,0 +1,38 @@
+.links,
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.filters label {
+  display: grid;
+  gap: var(--space-2);
+}
+.filters input,
+.filters select {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+/* The scroll wrapper is the shared global `.table-scroll`, so it is keyboard
+ * focusable and announced. Nothing page-local is needed for it. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-s);
+}
+.table th,
+.table td {
+  padding: var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+.table small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+}

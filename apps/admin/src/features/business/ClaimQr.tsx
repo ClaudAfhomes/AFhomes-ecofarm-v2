@@ -57,8 +57,8 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
     <div className={styles.claimQr}>
       <QrCode value={url} alt={`Claim QR for ${claim.claimNumber}`} size={200} />
       <p className={styles.claimQrHint}>
-        The member can scan this with their phone camera, or a member of staff can enter the code
-        below at the desk. Both use the same claim.
+        The member can scan this with their phone camera, or enter the code below in their own
+        customer account. Both use the same claim.
       </p>
 
       <dl className={styles.claimQrFacts}>
@@ -77,9 +77,7 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() =>
-            void downloadQrImage(url, `afhomes-claim-${claim.claimNumber}.png`)
-          }
+          onClick={() => void downloadQrImage(url, `afhomes-claim-${claim.claimNumber}.png`)}
         >
           Download QR
         </Button>

@@ -18,6 +18,7 @@
  * The SQL itself is executed by the database integration suite, not here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { hashIdentifier } from '../_lib/identifier.js';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
@@ -63,15 +64,39 @@ const ALL: Grant[] = [
     canUpdate: true,
     canDelete: true,
   },
-  { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: true, canDelete: true },
-  { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+  {
+    moduleKey: 'sales.customers',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
+  {
+    moduleKey: 'operations.catalog',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
   // The Operational Services seller capability and the Finance verification key
   // that stays deliberately separate from it.
-  { moduleKey: 'operations.sales', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+  {
+    moduleKey: 'operations.sales',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
   // Operational Services receipt verification. A SEPARATE key from the VIP-card
   // `finance.payment_verification` below: the two payment workflows must not
   // authorise each other, and the GSD (`employee`) holds neither.
-  { moduleKey: 'operations.payments', canView: true, canCreate: false, canUpdate: true, canDelete: false },
+  {
+    moduleKey: 'operations.payments',
+    canView: true,
+    canCreate: false,
+    canUpdate: true,
+    canDelete: false,
+  },
   {
     moduleKey: 'finance.payment_verification',
     canView: true,
@@ -82,7 +107,12 @@ const ALL: Grant[] = [
 ];
 
 /** View only: may read purchases and claims, but may not create or change anything. */
-const VIEW_ONLY: Grant[] = ALL.map((g) => ({ ...g, canCreate: false, canUpdate: false, canDelete: false }));
+const VIEW_ONLY: Grant[] = ALL.map((g) => ({
+  ...g,
+  canCreate: false,
+  canUpdate: false,
+  canDelete: false,
+}));
 
 /** No points permission at all. */
 const NONE: Grant[] = [];
@@ -345,13 +375,22 @@ const CLAIM_RPC = (args: Record<string, unknown>) => [
   },
 ];
 
+const ADJUST_RPC = (args: Record<string, unknown>) => [
+  {
+    membership_id: MEMBERSHIP_ID,
+    delta: Number(args.p_amount ?? 0),
+    balance_after: 5000,
+    reason: String(args.p_reason ?? ''),
+  },
+];
+
 const PURCHASE_RPC = (args: Record<string, unknown>) => [
   {
     purchase_id: PURCHASE_ID,
     purchase_number: 'PUR-000001',
     // Echo back the gross the SERVER computed from the lines, not the body.
-    gross_amount: args.p_gross_amount,
-    net_amount: args.p_gross_amount,
+    gross_amount: '5000.00',
+    net_amount: '5000.00',
   },
 ];
 
@@ -373,7 +412,19 @@ describe('points: the customer QR claim', () => {
   it('redeems the caller own claim and resolves the customer from the session', async () => {
     const db = install({
       permissions: NONE,
-      rpcs: [{ fn: 'claim_earning_points', result: () => [{ points_awarded: 500, points_capped: 0, balance_after: 500, claim_number: 'CLM-000001' }] }],
+      rpcs: [
+        {
+          fn: 'claim_earning_points',
+          result: () => [
+            {
+              points_awarded: 500,
+              points_capped: 0,
+              balance_after: 500,
+              claim_number: 'CLM-000001',
+            },
+          ],
+        },
+      ],
     });
     const s = await call({
       familyPath: 'claim',
@@ -382,7 +433,11 @@ describe('points: the customer QR claim', () => {
       body: { token: 'scanned-credential' },
     });
     expect(s.status).toBe(200);
-    expect(body(s)).toMatchObject({ claimNumber: 'CLM-000001', pointsAwarded: 500, balanceAfter: 500 });
+    expect(body(s)).toMatchObject({
+      claimNumber: 'CLM-000001',
+      pointsAwarded: 500,
+      balanceAfter: 500,
+    });
 
     // The identity sent to SQL is the SESSION customer. This is the single most
     // important assertion in the file.
@@ -398,7 +453,12 @@ describe('points: the customer QR claim', () => {
     // because redeeming your own claim is a CUSTOMER action, not a staff one.
     install({
       permissions: NONE,
-      rpcs: [{ fn: 'claim_earning_points', result: () => [{ points_awarded: 1, balance_after: 1, claim_number: 'C' }] }],
+      rpcs: [
+        {
+          fn: 'claim_earning_points',
+          result: () => [{ points_awarded: 1, balance_after: 1, claim_number: 'C' }],
+        },
+      ],
     });
     const s = await call({
       familyPath: 'claim',
@@ -433,7 +493,9 @@ describe('points: the customer QR claim', () => {
 
   it('rejects a forged customerId in the body LOUDLY, before it reaches SQL', async () => {
     const db = install({
-      rpcs: [{ fn: 'claim_earning_points', result: () => [{ points_awarded: 1, balance_after: 1 }] }],
+      rpcs: [
+        { fn: 'claim_earning_points', result: () => [{ points_awarded: 1, balance_after: 1 }] },
+      ],
     });
     const s = await call({
       familyPath: 'claim',
@@ -488,13 +550,16 @@ describe('points: the customer QR claim', () => {
 describe('points: recording a purchase', () => {
   beforeEach(() => install({ rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] }));
 
-  it('computes the gross from the lines and sends it to SQL', async () => {
+  it('sends service selections to SQL without trusting client unit prices', async () => {
     const db = install({ rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
     const s = await call({ familyPath: 'purchases', method: 'POST', body: VALID_PURCHASE });
     expect(s.status).toBe(201);
     const call_ = db.calls.find((c) => c.table === 'create_purchase');
     // 2 x 2500.00, computed, not supplied.
-    expect(call_?.arg).toMatchObject({ p_gross_amount: '5000.00' });
+    expect(call_?.arg).toMatchObject({ p_gross_amount: '0.00' });
+    expect((call_?.arg as { p_lines: unknown[] }).p_lines).toEqual([
+      { serviceId: SERVICE_ID, quantity: 2 },
+    ]);
     // The actor is the session staff member, never a body field.
     expect(call_?.arg).toMatchObject({ p_actor_id: STAFF_ID });
     expect(body(s)).toMatchObject({ grossAmount: '5000.00' });
@@ -561,24 +626,101 @@ describe('points: recording a purchase', () => {
    * button is not an authorization control.
    * ---------------------------------------------------------------- */
   describe('GSD operations.sales scope', () => {
+    // Points are EARNED and CLAIMED now. Spending an existing balance is
+    // retired, and these assert the endpoints are GONE rather than merely
+    // unlinked: a spend route that still answers behind a removed button is
+    // exactly the hidden endpoint the requirement forbids.
+    const SPENDER: Grant[] = [
+      {
+        moduleKey: 'operations.redemption',
+        canView: true,
+        canCreate: true,
+        canUpdate: true,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'operations.sales',
+        canView: true,
+        canCreate: true,
+        canUpdate: false,
+        canDelete: false,
+      },
+    ];
+
+    it.each([
+      ['the till points spend', 'purchases/abc/points-discount'],
+      ['a points-discount quote', 'purchases/abc/quote'],
+      ['a points-discount commit', 'quotes/abc/commit'],
+      ['a points-discount promotion', 'redemption-rules'],
+    ])('does not serve %s', async (_label: string, path: string) => {
+      const db = install({ permissions: SPENDER });
+      const s = await call({ familyPath: path, method: 'POST', body: { pointsRequested: 1000 } });
+      expect(s.status).toBe(404);
+    });
+
     const GSD: Grant[] = [
-      { moduleKey: 'operations.sales', canView: true, canCreate: true, canUpdate: false, canDelete: false },
+      {
+        moduleKey: 'operations.sales',
+        canView: true,
+        canCreate: true,
+        canUpdate: false,
+        canDelete: false,
+      },
       // Present so the test proves the GSD is refused DESPITE holding the broad
       // customer and catalog keys' siblings it legitimately has, not merely
       // because the fake has no rows at all.
-      { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: false, canDelete: false },
-      { moduleKey: 'operations.catalog', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      {
+        moduleKey: 'operations.redemption',
+        canView: true,
+        canCreate: true,
+        canUpdate: false,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'operations.catalog',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
     ];
 
     const GSD_FORBIDDEN: Grant[] = [
-      { moduleKey: 'sales.customers', canView: false, canCreate: false, canUpdate: false, canDelete: false },
-      { moduleKey: 'operations.catalog', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-      { moduleKey: 'finance.payment_verification', canView: false, canCreate: false, canUpdate: false, canDelete: false },
-      { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      {
+        moduleKey: 'sales.customers',
+        canView: false,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'operations.catalog',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'finance.payment_verification',
+        canView: false,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'operations.redemption',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
     ];
 
     it('lets a GSD record an operational sale', async () => {
-      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      const db = install({
+        permissions: GSD,
+        rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }],
+      });
       const s = await call({ familyPath: 'purchases', method: 'POST', body: VALID_PURCHASE });
       expect(s.status).toBe(201);
       expect(db.calls.some((c) => c.table === 'create_purchase')).toBe(true);
@@ -608,13 +750,25 @@ describe('points: recording a purchase', () => {
       // down priced by the server.
       expect(body(s).tierDiscountAmount).toBe('25000.00');
       expect(body(s).netAmount).toBe('75000.00');
-      expect((body(s).grossAmount as string)).toBe('100000.00');
+      expect(body(s).grossAmount as string).toBe('100000.00');
     });
 
     it('lets a GSD record a receipt', async () => {
       const db = install({
         permissions: GSD,
-        rpcs: [{ fn: 'record_purchase_payment', result: () => [{ payment_id: 'p1', payment_number: 'AF-PAY-1', amount: '75000.00', status: 'recorded' }] }],
+        rpcs: [
+          {
+            fn: 'record_purchase_payment',
+            result: () => [
+              {
+                payment_id: 'p1',
+                payment_number: 'AF-PAY-1',
+                amount: '75000.00',
+                status: 'recorded',
+              },
+            ],
+          },
+        ],
       });
       const s = await call({
         familyPath: `purchases/${PURCHASE_ID}/payments`,
@@ -644,11 +798,23 @@ describe('points: recording a purchase', () => {
      * neither.
      * ---------------------------------------------------------------- */
     const FINANCE: Grant[] = [
-      { moduleKey: 'operations.payments', canView: true, canCreate: false, canUpdate: true, canDelete: false },
+      {
+        moduleKey: 'operations.payments',
+        canView: true,
+        canCreate: false,
+        canUpdate: true,
+        canDelete: false,
+      },
       // Present so the test proves Finance acts on its OWN key, not by
       // Every staff route under /earning passes this family gate first, so a
       // Finance fixture without it 403s before reaching the route under test.
-      { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+      {
+        moduleKey: 'operations.redemption',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
       // accident of also holding the VIP-card one.
       {
         moduleKey: 'finance.payment_verification',
@@ -701,60 +867,14 @@ describe('points: recording a purchase', () => {
       expect(s.status).toBe(403);
       expect(db.calls.some((c) => c.table === 'verify_purchase_payment')).toBe(false);
     });
-
-    it('spends points at the till with a reference and nothing else', async () => {
-      const db = install({
-        permissions: GSD,
-        rpcs: [
-          {
-            fn: 'apply_purchase_points_discount',
-            result: () => [
-              {
-                purchase_id: PURCHASE_ID,
-                points_spent: 25000,
-                discount_applied: '25000.00',
-                net_amount: '75000.00',
-                balance_after: 25000,
-                already_applied: false,
-              },
-            ],
-          },
-        ],
-      });
-      const s = await call({
-        familyPath: `purchases/${PURCHASE_ID}/points-discount`,
-        method: 'POST',
-        body: { pointsRequested: 25000, reference: 'pos-abc' },
-      });
-      expect(s.status).toBe(200);
-      // Only two fields are sent. There is no peso value, no rate and no net in
-      // the body, so a tampered request cannot change what the member pays.
-      const sent = db.calls.find((c) => c.table === 'apply_purchase_points_discount')?.arg as Record<
-        string,
-        unknown
-      >;
-      expect(Object.keys(sent).sort()).toEqual(
-        ['p_actor_id', 'p_points_requested', 'p_purchase_id', 'p_reference'].sort(),
-      );
-      expect(body(s).netAmount).toBe('75000.00');
-    });
-
-    it('REFUSES a points spend with no idempotency reference', async () => {
-      const db = install({ permissions: GSD });
-      const s = await call({
-        familyPath: `purchases/${PURCHASE_ID}/points-discount`,
-        method: 'POST',
-        body: { pointsRequested: 25000 },
-      });
-      expect(s.status).toBe(400);
-      expect(db.calls.some((c) => c.table === 'apply_purchase_points_discount')).toBe(false);
-    });
-
     it('REFUSES a duplicate sale reference LOUDLY rather than pricing a second purchase', async () => {
       // A retried "record the sale" would otherwise create a SECOND real
       // purchase with real lines that could earn points. The reference is the
       // idempotency key, so it is required on the request.
-      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      const db = install({
+        permissions: GSD,
+        rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }],
+      });
       // The reference deliberately omitted.
       const { reference: _omitted, ...withoutReference } = VALID_PURCHASE;
       const s = await call({ familyPath: 'purchases', method: 'POST', body: withoutReference });
@@ -763,14 +883,20 @@ describe('points: recording a purchase', () => {
     });
 
     it('carries the sale reference through to SQL so a retry cannot double-record', async () => {
-      const db = install({ permissions: GSD, rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }] });
+      const db = install({
+        permissions: GSD,
+        rpcs: [{ fn: 'create_purchase', result: PURCHASE_RPC }],
+      });
       const s = await call({
         familyPath: 'purchases',
         method: 'POST',
         body: { ...VALID_PURCHASE, reference: 'pos-abc' },
       });
       expect(s.status).toBe(201);
-      const sent = db.calls.find((c) => c.table === 'create_purchase')?.arg as Record<string, unknown>;
+      const sent = db.calls.find((c) => c.table === 'create_purchase')?.arg as Record<
+        string,
+        unknown
+      >;
       expect(sent.p_reference).toBe('pos-abc');
     });
 
@@ -780,7 +906,14 @@ describe('points: recording a purchase', () => {
         rpcs: [
           {
             fn: 'record_purchase_payment',
-            result: () => [{ payment_id: 'p1', payment_number: 'AF-PAY-1', amount: '75000.00', status: 'recorded' }],
+            result: () => [
+              {
+                payment_id: 'p1',
+                payment_number: 'AF-PAY-1',
+                amount: '75000.00',
+                status: 'recorded',
+              },
+            ],
           },
         ],
       });
@@ -890,7 +1023,9 @@ describe('points: recording a purchase', () => {
 
   it('refuses an unsettled purchase with a conflict, never a completion', async () => {
     const db = install({
-      rpcErrors: { complete_purchase: { message: 'PURCHASE_NOT_SETTLED:verified=0.00 net=5000.00' } },
+      rpcErrors: {
+        complete_purchase: { message: 'PURCHASE_NOT_SETTLED:verified=0.00 net=5000.00' },
+      },
     });
     const s = await call({ familyPath: `purchases/${PURCHASE_ID}/complete`, method: 'POST' });
     expect(s.status).toBe(409);
@@ -900,15 +1035,29 @@ describe('points: recording a purchase', () => {
 
   it('refuses a reversal with no reason, and never names the actor', async () => {
     install({
-      rpcs: [{ fn: 'reverse_purchase_points', result: () => [{ reversed_points: 500, reversal_debt: 500, balance_after: 0 }] }],
+      rpcs: [
+        {
+          fn: 'reverse_purchase_points',
+          result: () => [{ reversed_points: 500, reversal_debt: 500, balance_after: 0 }],
+        },
+      ],
     });
-    const s = await call({ familyPath: `purchases/${PURCHASE_ID}/reverse`, method: 'POST', body: {} });
+    const s = await call({
+      familyPath: `purchases/${PURCHASE_ID}/reverse`,
+      method: 'POST',
+      body: {},
+    });
     expect(s.status).toBe(400);
   });
 
   it('records the reversal reason and the session actor', async () => {
     const db = install({
-      rpcs: [{ fn: 'reverse_purchase_points', result: () => [{ reversed_points: 500, reversal_debt: 500, balance_after: 0 }] }],
+      rpcs: [
+        {
+          fn: 'reverse_purchase_points',
+          result: () => [{ reversed_points: 500, reversal_debt: 500, balance_after: 0 }],
+        },
+      ],
     });
     const s = await call({
       familyPath: `purchases/${PURCHASE_ID}/reverse`,
@@ -934,7 +1083,11 @@ describe('points: earning claims', () => {
 
   it('creates a claim from a purchase reference alone', async () => {
     const db = install({ rpcs: [{ fn: 'create_earning_claim', result: CLAIM_RPC }] });
-    const s = await call({ familyPath: 'claims', method: 'POST', body: { purchaseId: PURCHASE_ID } });
+    const s = await call({
+      familyPath: 'claims',
+      method: 'POST',
+      body: { purchaseId: PURCHASE_ID },
+    });
     expect(s.status).toBe(201);
     // The ONLY time the plaintext exists.
     expect(body(s)).toMatchObject({
@@ -965,7 +1118,19 @@ describe('points: earning claims', () => {
 
   it('rotates a reissued credential without an actor from the body', async () => {
     const db = install({
-      rpcs: [{ fn: 'reissue_earning_claim', result: () => [{ claim_number: 'CLM-000001', qr_token: 'rotated', fallback_code: 'NEW-1', expires_at: ago(-20) }] }],
+      rpcs: [
+        {
+          fn: 'reissue_earning_claim',
+          result: () => [
+            {
+              claim_number: 'CLM-000001',
+              qr_token: 'rotated',
+              fallback_code: 'NEW-1',
+              expires_at: ago(-20),
+            },
+          ],
+        },
+      ],
     });
     const s = await call({ familyPath: `claims/${CLAIM_ID}/reissue`, method: 'POST' });
     expect(s.status).toBe(200);
@@ -978,7 +1143,11 @@ describe('points: earning claims', () => {
 
   it('requires create permission, not merely view', async () => {
     install({ permissions: VIEW_ONLY, rpcs: [{ fn: 'create_earning_claim', result: CLAIM_RPC }] });
-    const s = await call({ familyPath: 'claims', method: 'POST', body: { purchaseId: PURCHASE_ID } });
+    const s = await call({
+      familyPath: 'claims',
+      method: 'POST',
+      body: { purchaseId: PURCHASE_ID },
+    });
     expect(s.status).toBe(403);
   });
 });
@@ -996,7 +1165,12 @@ describe('points: cash receipts', () => {
         {
           fn: 'record_purchase_payment',
           result: () => [
-            { payment_id: PAYMENT_ID, payment_number: 'AF-PAY-000001', amount: '4000.00', status: 'recorded' },
+            {
+              payment_id: PAYMENT_ID,
+              payment_number: 'AF-PAY-000001',
+              amount: '4000.00',
+              status: 'recorded',
+            },
           ],
         },
       ],
@@ -1164,362 +1338,6 @@ const QUOTE_RPC = () => [
   },
 ];
 
-describe('points: spending is restricted', () => {
-  it('quotes from a point COUNT alone', async () => {
-    const db = install({ rpcs: [{ fn: 'quote_point_discount', result: QUOTE_RPC }] });
-    const s = await call({
-      familyPath: `purchases/${PURCHASE_ID}/quote`,
-      method: 'POST',
-      body: { pointsRequested: 500 },
-    });
-    expect(s.status).toBe(200);
-    expect(db.calls.find((c) => c.table === 'quote_point_discount')?.arg).toMatchObject({
-      p_purchase_id: PURCHASE_ID,
-      p_points_requested: 500,
-      p_actor_id: STAFF_ID,
-    });
-    // The eligible base is returned so a capped quote is explicable, not arbitrary.
-    expect(body(s)).toMatchObject({ pesoValue: '500.00', eligibleLineTotal: '1000.00' });
-  });
-
-  it('rejects a client-stated peso value LOUDLY', async () => {
-    const db = install({ rpcs: [{ fn: 'quote_point_discount', result: QUOTE_RPC }] });
-    for (const forge of [
-      { pointsRequested: 500, pesoValue: '99999.00' },
-      { pointsRequested: 500, rate: 100 },
-      { pointsRequested: 500, netAmount: '1.00' },
-      { pointsRequested: 500, eligibleLineTotal: '99999.00' },
-    ]) {
-      const s = await call({
-        familyPath: `purchases/${PURCHASE_ID}/quote`,
-        method: 'POST',
-        body: forge,
-      });
-      expect(s.status, JSON.stringify(forge)).toBe(400);
-    }
-    expect(db.calls.some((c) => c.table === 'quote_point_discount')).toBe(false);
-  });
-
-  it('rejects a zero or negative point count', async () => {
-    install({ rpcs: [{ fn: 'quote_point_discount', result: QUOTE_RPC }] });
-    for (const pointsRequested of [0, -500]) {
-      const s = await call({
-        familyPath: `purchases/${PURCHASE_ID}/quote`,
-        method: 'POST',
-        body: { pointsRequested },
-      });
-      expect(s.status).toBe(400);
-    }
-  });
-
-  it('explains the staycation restriction without naming a promotion', async () => {
-    install({
-      rpcErrors: { quote_point_discount: { message: 'NO_DISCOUNT_ELIGIBLE_LINES' } },
-    });
-    const s = await call({
-      familyPath: `purchases/${PURCHASE_ID}/quote`,
-      method: 'POST',
-      body: { pointsRequested: 500 },
-    });
-    expect(s.status).toBe(409);
-    expect(errMsg(s)).toMatch(/accommodation and staycation/i);
-  });
-
-  it('says outstanding debt blocks SPENDING, and not earning', async () => {
-    install({
-      rpcErrors: { quote_point_discount: { message: 'REVERSAL_DEBT_OUTSTANDING' } },
-    });
-    const s = await call({
-      familyPath: `purchases/${PURCHASE_ID}/quote`,
-      method: 'POST',
-      body: { pointsRequested: 500 },
-    });
-    expect(s.status).toBe(409);
-    expect(errMsg(s)).toMatch(/earning is not affected/i);
-  });
-
-  it('commits a quote with no body and no actor from the client', async () => {
-    const db = install({
-      rpcs: [
-        {
-          fn: 'commit_point_discount',
-          result: () => [
-            {
-              purchase_id: PURCHASE_ID,
-              points_spent: 500,
-              discount_applied: '500.00',
-              net_amount: '3500.00',
-              balance_after: 5500,
-            },
-          ],
-        },
-      ],
-    });
-    const s = await call({
-      familyPath: 'quotes/qqqqqqqq-qqqq-4qqq-8qqq-qqqqqqqqqqqqq/commit',
-      method: 'POST',
-    });
-    expect(s.status).toBe(200);
-    expect(body(s)).toMatchObject({ discountApplied: '500.00', netAmount: '3500.00' });
-    expect(db.calls.find((c) => c.table === 'commit_point_discount')?.arg).toEqual({
-      p_quote_id: 'qqqqqqqq-qqqq-4qqq-8qqq-qqqqqqqqqqqqq',
-      p_actor_id: STAFF_ID,
-    });
-  });
-
-  it('refuses a reused quote as a conflict, not a silent second spend', async () => {
-    install({ rpcErrors: { commit_point_discount: { message: 'QUOTE_NOT_OPEN' } } });
-    const s = await call({
-      familyPath: 'quotes/qqqqqqqq-qqqq-4qqq-8qqq-qqqqqqqqqqqqq/commit',
-      method: 'POST',
-    });
-    expect(s.status).toBe(409);
-  });
-
-  it('needs create permission to quote or commit', async () => {
-    install({ permissions: VIEW_ONLY });
-    expect(
-      (
-        await call({
-          familyPath: `purchases/${PURCHASE_ID}/quote`,
-          method: 'POST',
-          body: { pointsRequested: 500 },
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (await call({ familyPath: 'quotes/qqqqqqqq-qqqq-4qqq-8qqq-qqqqqqqqqqqqq/commit', method: 'POST' }))
-        .status,
-    ).toBe(403);
-  });
-
-  it('reports gross, discount, net and verified receipts as SEPARATE figures', async () => {
-    install({
-      rpcs: [
-        {
-          fn: 'purchase_financial_summary_purchases',
-          result: () => [
-            {
-              purchase_id: PURCHASE_ID,
-              gross_amount: '5000.00',
-              points_discount_amount: '500.00',
-              net_amount: '4500.00',
-              recorded_total: '4500.00',
-              verified_total: '2000.00',
-              rejected_total: '100.00',
-              remaining_balance: '2500.00',
-              overpaid_amount: '0.00',
-              fully_paid: false,
-            },
-          ],
-        },
-      ],
-    });
-    const s = await call({ familyPath: `purchases/${PURCHASE_ID}/summary` });
-    expect(s.status).toBe(200);
-    expect(body(s)).toMatchObject({
-      grossAmount: '5000.00',
-      pointsDiscountAmount: '500.00',
-      netAmount: '4500.00',
-      verifiedTotal: '2000.00',
-      remainingBalance: '2500.00',
-      fullyPaid: false,
-    });
-  });
-});
-
-/* ================================================================== */
-/* Promotion management                                                */
-/* ================================================================== */
-
-const VALID_PROMO = {
-  serviceId: SERVICE_ID,
-  pesoValuePerPoint: '1.50',
-  eligibleTiers: ['GOLD'],
-  minPoints: 100,
-  maxPoints: 5000,
-  minPurchaseAmount: null,
-  effectiveStart: '2026-01-01',
-  effectiveEnd: '2026-12-31',
-  isActive: true,
-  promotionReference: 'Grand opening promo',
-};
-
-describe('points: redemption promotions', () => {
-  beforeEach(() =>
-    install({
-      tables: (() => {
-        const t = baseTables();
-        // A non-staycation service: a promotion for one is the whole point.
-        t.service_catalog![0]!.is_staycation_eligible = false;
-        return t;
-      })(),
-    }),
-  );
-
-  it('creates a promotion and records the actor', async () => {
-    const db = install();
-    const s = await call({ familyPath: 'redemption-rules', method: 'POST', body: VALID_PROMO });
-    expect(s.status).toBe(201);
-    const audit_ = db.calls.find((c) => c.table === 'audit_events');
-    expect(audit_, 'the promotion must be audited').toBeTruthy();
-    expect(JSON.stringify(audit_?.arg)).toContain('Grand opening promo');
-  });
-
-  it('refuses a promotion with NO end date: an indefinite one is unrepresentable', async () => {
-    const db = install();
-    const { effectiveEnd, ...noEnd } = VALID_PROMO;
-    const s = await call({ familyPath: 'redemption-rules', method: 'POST', body: noEnd });
-    expect(s.status).toBe(400);
-    expect(db.calls.some((c) => c.table === 'point_redemption_rules')).toBe(false);
-  });
-
-  it('refuses a window that runs backwards', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, effectiveStart: '2026-12-31', effectiveEnd: '2026-01-01' },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses a blank reference: an unnamed offer is not reviewable', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, promotionReference: '  ' },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses an empty tier list', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, eligibleTiers: [] },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses an unknown tier', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, eligibleTiers: ['PLATINUM'] },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses a zero conversion rate', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, pesoValuePerPoint: '0' },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses minPoints above maxPoints', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, minPoints: 9000, maxPoints: 100 },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('refuses a promotion for a service that does not exist', async () => {
-    install();
-    const s = await call({
-      familyPath: 'redemption-rules',
-      method: 'POST',
-      body: { ...VALID_PROMO, serviceId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
-    });
-    expect(s.status).toBe(404);
-  });
-
-  it('refuses a promotion for a DEACTIVATED service', async () => {
-    const tables = baseTables();
-    tables.service_catalog![0]!.is_active = false;
-    install({ tables });
-    const s = await call({ familyPath: 'redemption-rules', method: 'POST', body: VALID_PROMO });
-    expect(s.status).toBe(409);
-  });
-
-  it('has NO cap-exemption and NO all-services switch to forge', async () => {
-    const db = install();
-    for (const forge of [
-      { ...VALID_PROMO, exemptFromCap: true },
-      { ...VALID_PROMO, countsTowardCap: false },
-      { ...VALID_PROMO, allServices: true },
-      { ...VALID_PROMO, serviceId: null },
-      { ...VALID_PROMO, indefinite: true },
-    ]) {
-      const s = await call({ familyPath: 'redemption-rules', method: 'POST', body: forge });
-      expect(s.status, JSON.stringify(forge)).toBe(400);
-    }
-    expect(db.calls.some((c) => c.table === 'point_redemption_rules')).toBe(false);
-  });
-
-  it('needs catalog CREATE, not merely view', async () => {
-    install({ permissions: VIEW_ONLY });
-    const s = await call({ familyPath: 'redemption-rules', method: 'POST', body: VALID_PROMO });
-    expect(s.status).toBe(403);
-  });
-
-  it('needs catalog UPDATE to change a promotion', async () => {
-    const db = install({ permissions: VIEW_ONLY });
-    const s = await call({
-      familyPath: `redemption-rules/${RULE_ID}`,
-      method: 'PATCH',
-      body: { isActive: false },
-    });
-    expect(s.status).toBe(403);
-    expect(db.calls.some((c) => c.op === 'update')).toBe(false);
-  });
-
-  it('lets a permitted maintainer toggle a promotion, with the actor recorded', async () => {
-    const db = install();
-    const s = await call({
-      familyPath: `redemption-rules/${RULE_ID}`,
-      method: 'PATCH',
-      body: { isActive: false },
-    });
-    expect(s.status).toBe(200);
-    expect(db.calls.some((c) => c.table === 'audit_events')).toBe(true);
-  });
-
-  it('refuses a patch that would clear the end date', async () => {
-    install();
-    const s = await call({
-      familyPath: `redemption-rules/${RULE_ID}`,
-      method: 'PATCH',
-      body: { effectiveEnd: null },
-    });
-    expect(s.status).toBe(400);
-  });
-
-  it('reads promotions with view alone', async () => {
-    install({ permissions: VIEW_ONLY });
-    const s = await call({ familyPath: 'redemption-rules' });
-    expect(s.status).toBe(200);
-  });
-});
-
-/* ================================================================== */
-/* Manual adjustment                                                   */
-/* ================================================================== */
-
-const ADJUST_RPC = (args: Record<string, unknown>) => [
-  { ledger_id: 'led-1', balance_after: Number(args.p_amount), reversal_debt: 0 },
-];
-
 describe('points: manual adjustment', () => {
   beforeEach(() => install({ rpcs: [{ fn: 'adjust_membership_points', result: ADJUST_RPC }] }));
 
@@ -1528,7 +1346,11 @@ describe('points: manual adjustment', () => {
     const s = await call({
       familyPath: 'adjust',
       method: 'POST',
-      body: { membershipId: MEMBERSHIP_ID, amount: -500, reason: 'Goodwill correction for a missed service' },
+      body: {
+        membershipId: MEMBERSHIP_ID,
+        amount: -500,
+        reason: 'Goodwill correction for a missed service',
+      },
     });
     expect(s.status).toBe(200);
     expect(db.calls.find((c) => c.table === 'adjust_membership_points')?.arg).toMatchObject({
@@ -1541,7 +1363,12 @@ describe('points: manual adjustment', () => {
   it('refuses a client-supplied resulting balance LOUDLY', async () => {
     const db = install({ rpcs: [{ fn: 'adjust_membership_points', result: ADJUST_RPC }] });
     for (const forge of [
-      { membershipId: MEMBERSHIP_ID, amount: 500, reason: 'Because I said so', balanceAfter: 999999 },
+      {
+        membershipId: MEMBERSHIP_ID,
+        amount: 500,
+        reason: 'Because I said so',
+        balanceAfter: 999999,
+      },
       { membershipId: MEMBERSHIP_ID, amount: 500, reason: 'Because I said so', reversalDebt: 0 },
       { membershipId: MEMBERSHIP_ID, amount: 500, reason: 'Because I said so', lifetimeEarned: 5 },
     ]) {
@@ -1572,7 +1399,10 @@ describe('points: manual adjustment', () => {
   });
 
   it('needs create permission, not view', async () => {
-    install({ permissions: VIEW_ONLY, rpcs: [{ fn: 'adjust_membership_points', result: ADJUST_RPC }] });
+    install({
+      permissions: VIEW_ONLY,
+      rpcs: [{ fn: 'adjust_membership_points', result: ADJUST_RPC }],
+    });
     const s = await call({
       familyPath: 'adjust',
       method: 'POST',
@@ -1583,7 +1413,11 @@ describe('points: manual adjustment', () => {
 
   it('turns an over-deduction into a conflict without leaking the balance', async () => {
     install({
-      rpcErrors: { adjust_membership_points: { message: 'ADJUSTMENT_EXCEEDS_BALANCE:balance=100 requested=-500' } },
+      rpcErrors: {
+        adjust_membership_points: {
+          message: 'ADJUSTMENT_EXCEEDS_BALANCE:balance=100 requested=-500',
+        },
+      },
     });
     const s = await call({
       familyPath: 'adjust',
@@ -1635,14 +1469,37 @@ describe('points: service catalog and earning rules', () => {
   });
 
   it('creates a service and audits it, because the catalog is a commercial event', async () => {
-    const db = install();
+    const db = install({
+      rpcs: [
+        {
+          fn: 'save_service_catalog',
+          result: () => [
+            {
+              id: SERVICE_ID,
+              code: 'AF-SVC-GENERATED',
+              name: 'Cut',
+              base_price: '1500.00',
+              is_active: true,
+              published: false,
+              availability: 'available',
+              photos: [],
+            },
+          ],
+        },
+      ],
+    });
     const s = await call({
       familyPath: 'services',
       method: 'POST',
-      body: { code: 'SVC-2', name: 'Cut', basePrice: '1500.00' },
+      body: { name: 'Cut', basePrice: '1500.00' },
     });
     expect(s.status).toBe(201);
-    expect(db.calls.some((c) => c.table === 'audit_events' && c.op === 'insert')).toBe(true);
+    expect(db.calls.find((c) => c.table === 'save_service_catalog')?.arg).toMatchObject({
+      p_service_id: null,
+      p_actor_id: STAFF_ID,
+      p_input: { name: 'Cut', basePrice: '1500.00' },
+    });
+    expect(db.calls.some((c) => c.table === 'service_catalog' && c.op === 'insert')).toBe(false);
   });
 
   it('creates an earning rule for an active service', async () => {
@@ -1676,7 +1533,11 @@ describe('points: service catalog and earning rules', () => {
     const s = await call({
       familyPath: 'rules',
       method: 'POST',
-      body: { ...ADULT_RULE, effectiveStart: '2027-01-01T00:00:00.000Z', effectiveEnd: '2026-01-01T00:00:00.000Z' },
+      body: {
+        ...ADULT_RULE,
+        effectiveStart: '2027-01-01T00:00:00.000Z',
+        effectiveEnd: '2026-01-01T00:00:00.000Z',
+      },
     });
     expect(s.status).toBe(400);
   });
@@ -1698,6 +1559,132 @@ describe('points: service catalog and earning rules', () => {
 /* ================================================================== */
 
 describe('points: reads', () => {
+  it('does not call an unclaimed reversed reservation an award', async () => {
+    const tables = baseTables();
+    Object.assign(tables.earning_claims![0]!, {
+      status: 'reversed',
+      points_awarded: 500,
+      claimed_at: null,
+    });
+    const db = install({ tables });
+    const response = await call({ familyPath: 'claims' });
+    expect(response.status).toBe(200);
+    expect((body(response).data as Row[])[0]).toMatchObject({
+      pointsAwarded: 0,
+      pointsReserved: 0,
+    });
+    expect(JSON.stringify(db.calls)).not.toContain('display_name');
+  });
+  it('lets a catalog-only viewer read rules without an unrelated claim permission', async () => {
+    install({ permissions: ALL.filter((p) => p.moduleKey === 'operations.catalog') });
+    expect((await call({ familyPath: 'rules' })).status).toBe(200);
+    expect((await call({ familyPath: 'claims' })).status).toBe(403);
+  });
+  it('scopes payment rows to the requested purchase with Finance permission', async () => {
+    const tables = baseTables();
+    tables.purchase_payments = [
+      { id: PAYMENT_ID, purchase_id: PURCHASE_ID, amount: '100.00', status: 'recorded' },
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab',
+        purchase_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        amount: '900.00',
+        status: 'recorded',
+      },
+    ];
+    install({ tables, permissions: ALL.filter((p) => p.moduleKey === 'operations.payments') });
+    const result = await call({ familyPath: `purchases/${PURCHASE_ID}/payments` });
+    expect(result.status).toBe(200);
+    expect(body(result).data).toHaveLength(1);
+    expect((body(result).data as Row[])[0]!.amount).toBe('100.00');
+    expect((await call({ familyPath: 'purchases' })).status).toBe(403);
+    expect((await call({ familyPath: 'finance/purchases' })).status).toBe(200);
+  });
+  it('uses the atomic policy RPC and refuses a GSD catalog change', async () => {
+    const db = install({ rpcs: [{ fn: 'set_service_policy_active', result: () => false }] });
+    expect(
+      (await call({ familyPath: `rules/${RULE_ID}`, method: 'PATCH', body: { isActive: false } }))
+        .status,
+    ).toBe(200);
+    expect(db.calls.find((c) => c.table === 'set_service_policy_active')?.arg).toMatchObject({
+      p_kind: 'earning_rule',
+      p_id: RULE_ID,
+      p_active: false,
+      p_actor_id: STAFF_ID,
+    });
+    install({ permissions: VIEW_ONLY });
+    expect(
+      (await call({ familyPath: `rules/${RULE_ID}`, method: 'PATCH', body: { isActive: false } }))
+        .status,
+    ).toBe(403);
+  });
+  it('previews only the session owner claim and never credits points', async () => {
+    const tables = baseTables();
+    tables.earning_claims![0]!.qr_token_hash = hashIdentifier('Opaque+/ClaimToken==');
+    tables.earning_claims![0]!.points_awarded = 500;
+    const db = install({ tables });
+    const result = await call({
+      familyPath: 'claim/preview',
+      method: 'POST',
+      token: CUSTOMER_TOKEN,
+      body: { token: 'https://afhomes.test/customer/points?c=Opaque%2B%2FClaimToken%3D%3D' },
+    });
+    expect(result.status).toBe(200);
+    expect(body(result)).toMatchObject({ claimNumber: 'CLM-000001', pointsReserved: 500 });
+    expect(JSON.stringify(body(result))).not.toMatch(/hash|Opaque/);
+    expect(db.calls.some((c) => c.table === 'claim_earning_points')).toBe(false);
+    tables.earning_claims![0]!.customer_id = OTHER_CUSTOMER_ID;
+    install({ tables });
+    const wrong = await call({
+      familyPath: 'claim/preview',
+      method: 'POST',
+      token: CUSTOMER_TOKEN,
+      body: { token: 'Opaque+/ClaimToken==' },
+    });
+    const unknown = await call({
+      familyPath: 'claim/preview',
+      method: 'POST',
+      token: CUSTOMER_TOKEN,
+      body: { token: 'UnknownClaim' },
+    });
+    expect(wrong.status).toBe(404);
+    expect(wrong.body).toMatchObject({
+      error: { code: 'NOT_FOUND', message: 'That claim code cannot be used.' },
+    });
+    expect(unknown.body).toMatchObject({
+      error: { code: 'NOT_FOUND', message: 'That claim code cannot be used.' },
+    });
+  });
+
+  it('refuses GSD point corrections despite allowing claim issuance', async () => {
+    const permissions = ALL.map((p) =>
+      p.moduleKey === 'operations.redemption' ? { ...p, canUpdate: false } : p,
+    );
+    const db = install({ permissions });
+    expect(
+      (
+        await call({
+          familyPath: 'adjust',
+          method: 'POST',
+          body: { membershipId: MEMBERSHIP_ID, amount: 100000, reason: 'Forged credit attempt' },
+        })
+      ).status,
+    ).toBe(403);
+    expect(db.calls.some((c) => c.table === 'adjust_membership_points')).toBe(false);
+  });
+
+  it('publishes only explicitly published active services', async () => {
+    const tables = baseTables();
+    tables.service_catalog![0]!.published = false;
+    const db = install({ tables });
+    const hidden = await call({ familyPath: 'public/services', token: null });
+    expect(body(hidden).data).toEqual([]);
+    db.rows('service_catalog')[0]!.published = true;
+    expect(
+      body(await call({ familyPath: 'public/services', token: null })).data as Row[],
+    ).toHaveLength(1);
+    db.rows('service_catalog')[0]!.is_active = false;
+    expect(body(await call({ familyPath: 'public/services', token: null })).data).toEqual([]);
+  });
   it('never selects a stored token hash', async () => {
     const db = install();
     const s = await call({ familyPath: 'claims' });
@@ -1708,9 +1695,10 @@ describe('points: reads', () => {
     // fields the handler picked - so neither a bad select nor a spread row can
     // put a hash in the response.
     const cols = String(
-      (db.calls.find((c) => c.op === 'select' && c.table === 'earning_claims')?.arg as
-        | { cols?: string }
-        | undefined)?.cols ?? '',
+      (
+        db.calls.find((c) => c.op === 'select' && c.table === 'earning_claims')?.arg as
+          { cols?: string } | undefined
+      )?.cols ?? '',
     );
     expect(cols).not.toMatch(/hash/i);
 

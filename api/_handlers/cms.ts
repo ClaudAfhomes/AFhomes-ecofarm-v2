@@ -76,33 +76,7 @@ const toMedia = (row: Record<string, unknown>) => ({
   createdAt: row.created_at,
 });
 
-const extensionFor = (mime: string) =>
-  ({
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif',
-    'video/mp4': 'mp4',
-  })[mime];
-
-function signatureMatches(mime: string, bytes: Uint8Array): boolean {
-  if (mime === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (mime === 'image/png')
-    return bytes.slice(0, 8).every((v, i) => v === [137, 80, 78, 71, 13, 10, 26, 10][i]);
-  if (mime === 'image/gif')
-    return (
-      Buffer.from(bytes.slice(0, 6))
-        .toString('ascii')
-        .match(/^GIF8[79]a$/) !== null
-    );
-  if (mime === 'image/webp')
-    return (
-      Buffer.from(bytes.slice(0, 4)).toString('ascii') === 'RIFF' &&
-      Buffer.from(bytes.slice(8, 12)).toString('ascii') === 'WEBP'
-    );
-  if (mime === 'video/mp4') return Buffer.from(bytes.slice(4, 8)).toString('ascii') === 'ftyp';
-  return false;
-}
+import { extensionFor, signatureMatches } from '../_lib/media-signature.js';
 
 async function savePageSections(db: Db, pageId: string, sections: Array<Record<string, unknown>>) {
   const { error: deleteError } = await db.from('cms_page_sections').delete().eq('page_id', pageId);
@@ -229,16 +203,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .select(DOCUMENT_SELECT)
           .single();
         if (error) throw error;
-        const versionWrite = await db
-          .from('cms_document_versions')
-          .insert({
-            document_key: key.data,
-            value: parsed.data.value,
-            version: 1,
-            action: 'created',
-            change_summary: parsed.data.changeSummary,
-            created_by: auth.userId,
-          });
+        const versionWrite = await db.from('cms_document_versions').insert({
+          document_key: key.data,
+          value: parsed.data.value,
+          version: 1,
+          action: 'created',
+          change_summary: parsed.data.changeSummary,
+          created_by: auth.userId,
+        });
         if (versionWrite.error) throw versionWrite.error;
         await audit(db, auth.userId, 'CMS_DOCUMENT_CREATED', 'cms_document', key.data, undefined, {
           version: 1,
@@ -261,16 +233,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select(DOCUMENT_SELECT)
         .single();
       if (error) throw error;
-      const versionWrite = await db
-        .from('cms_document_versions')
-        .insert({
-          document_key: key.data,
-          value: parsed.data.value,
-          version: nextVersion,
-          action: 'updated',
-          change_summary: parsed.data.changeSummary,
-          created_by: auth.userId,
-        });
+      const versionWrite = await db.from('cms_document_versions').insert({
+        document_key: key.data,
+        value: parsed.data.value,
+        version: nextVersion,
+        action: 'updated',
+        change_summary: parsed.data.changeSummary,
+        created_by: auth.userId,
+      });
       if (versionWrite.error) throw versionWrite.error;
       await audit(
         db,
@@ -317,16 +287,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select(DOCUMENT_SELECT)
         .single();
       if (error) throw error;
-      const versionWrite = await db
-        .from('cms_document_versions')
-        .insert({
-          document_key: key.data,
-          value: current.data.draft_value,
-          version: nextVersion,
-          action: publishing ? 'published' : 'unpublished',
-          change_summary: publishing ? 'Published document.' : 'Unpublished document.',
-          created_by: auth.userId,
-        });
+      const versionWrite = await db.from('cms_document_versions').insert({
+        document_key: key.data,
+        value: current.data.draft_value,
+        version: nextVersion,
+        action: publishing ? 'published' : 'unpublished',
+        change_summary: publishing ? 'Published document.' : 'Unpublished document.',
+        created_by: auth.userId,
+      });
       if (versionWrite.error) throw versionWrite.error;
       await audit(
         db,

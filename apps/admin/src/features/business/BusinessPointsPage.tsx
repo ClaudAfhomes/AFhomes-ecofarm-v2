@@ -7,14 +7,19 @@ import {
   ErrorState,
   PageHeader,
   Skeleton,
-  Spinner,
   notifySuccess,
 } from '@afhomes/ui';
 import { formatMoney } from './format';
+import { useSession } from '../../lib/session';
 import styles from './points.module.css';
 import { useQrScanner } from '../redemption/useQrScanner';
 import { ClaimQr, type IssuedClaim } from './ClaimQr';
-import { resolveMemberIdentifier, type PricedPurchase, getSettlement, applyPointsDiscount, recordPurchaseReceipt } from './points-services';
+import {
+  resolveMemberIdentifier,
+  type PricedPurchase,
+  getSettlement,
+  recordPurchaseReceipt,
+} from './points-services';
 import { newTransactionReference } from '../redemption/services';
 
 /** Narrow, so a bad resolve response cannot flow into the purchase payload. */
@@ -53,6 +58,10 @@ import {
  */
 export function BusinessPointsPage() {
   const client = useQueryClient();
+  const mayCorrect =
+    useSession().user?.afHomesPermissions?.some(
+      (p) => p.moduleKey === 'operations.redemption' && p.canUpdate,
+    ) === true;
   const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
 
   const [member, setMember] = useState<ResolvedMember | null>(null);
@@ -94,9 +103,11 @@ export function BusinessPointsPage() {
   // Destructured, exactly as RedemptionWorkflowPage does: the react-compiler lint
   // cannot prove the returned callback ref is stable while it is reached through
   // an object.
-  const { message: scanMessage, videoRef, start: startScan } = useQrScanner((value) =>
-    identify.mutate(value),
-  );
+  const {
+    message: scanMessage,
+    videoRef,
+    start: startScan,
+  } = useQrScanner((value) => identify.mutate(value));
 
   // The gross is never sent from here: the server recomputes it from the lines, so
   // the only figure this screen contributes is the per-line unit price from the
@@ -174,13 +185,12 @@ export function BusinessPointsPage() {
   /**
    * The POS reference for THIS sale, generated once per intended transaction.
    *
-   * It is the idempotency key for the points spend: a retried request carrying
-   * the same reference is recognised as the same operation server-side instead
-   * of spending the member's points twice. Generating a new one per click would
-   * turn every double-click into a second, real discount.
+   * It is the idempotency key for the whole sale: a retried request carrying the
+   * same reference is recognised as the same purchase server-side instead of
+   * recording a second one. Generating a new one per click would turn every
+   * double-click into two real sales.
    */
   const [reference] = useState(() => newTransactionReference());
-  const [pointsToSpend, setPointsToSpend] = useState('');
   /**
    * The RECEIPT reference, derived from the sale reference.
    *
@@ -190,16 +200,6 @@ export function BusinessPointsPage() {
    * double-click a second, real receipt.
    */
   const receiptReference = `${reference}-rcpt`;
-
-  const spend = useMutation({
-    mutationFn: (args: { purchaseId: string; points: number }) =>
-      applyPointsDiscount(args.purchaseId, args.points, reference),
-    onSuccess: () => {
-      setPointsToSpend('');
-      // The net just changed, so the priced figures on screen are stale.
-      client.invalidateQueries({ queryKey: ['earning'] });
-    },
-  });
 
   const receipt = useMutation({
     mutationFn: (args: { purchaseId: string; amount: string }) =>
@@ -225,7 +225,7 @@ export function BusinessPointsPage() {
     },
   });
   const [reverseOpen, setReverseOpen] = useState(false);
-  const busy = record.isPending || spend.isPending || receipt.isPending;
+  const busy = record.isPending || receipt.isPending;
 
   /**
    * Record the sale, then STOP.
@@ -254,12 +254,15 @@ export function BusinessPointsPage() {
 
   return (
     <>
-      <PageHeader title="Earn Points" description="Scan the member's card, record the purchase, and issue their claim code." />
+      <PageHeader
+        title="Earn Points"
+        description="Scan the member's card, record the purchase, and issue their claim code."
+      />
 
       <section aria-label="Identify the member">
         <h2>1. Identify the member</h2>
 
-        <Button variant="secondary" onClick={startScan}>
+        <Button variant="secondary" onClick={() => startScan()}>
           Scan the member&apos;s card
         </Button>
         <video ref={videoRef} className={styles.scanVideo} aria-label="Card scanner" />
@@ -274,10 +277,12 @@ export function BusinessPointsPage() {
         />
         <Button
           variant="secondary"
-          disabled={!manualCode.trim() || identify.isPending}
+          disabled={!manualCode.trim()}
+          loading={identify.isPending}
+          loadingLabel="Checking…"
           onClick={() => identify.mutate(manualCode.trim())}
         >
-          {identify.isPending ? 'Checking…' : 'Find member'}
+          Find member
         </Button>
 
         {resolveError && <ErrorState title="Not recognised" message={resolveError} />}
@@ -304,7 +309,16 @@ export function BusinessPointsPage() {
         <section aria-label="Record a purchase">
           <h2>2. Record the purchase</h2>
 
-          {services.isLoading && <Skeleton />}
+          {/* A Skeleton is aria-hidden, so the ANNOUNCEMENT lives on the region.
+              This waits on `isLoading`, not `isPending`: the catalog query is not
+              disabled, but a skeleton gated on `isPending` is one refactor away
+              from hanging forever on a query that never runs. */}
+          {services.isLoading && (
+            <div role="status" aria-label="Loading services" aria-busy="true">
+              <Skeleton />
+              <Skeleton />
+            </div>
+          )}
           {services.isError && (
             <ErrorState
               title="Services unavailable"
@@ -329,7 +343,7 @@ export function BusinessPointsPage() {
               >
                 <option value="">Choose a service</option>
                 {services.data
-                  .filter((service) => service.isActive)
+                  .filter((service) => service.isActive && service.availability === 'available')
                   .map((service) => (
                     <option key={service.id} value={service.id}>
                       {service.name} ({formatMoney(service.basePrice)})
@@ -337,6 +351,13 @@ export function BusinessPointsPage() {
                   ))}
               </select>
 
+              {services.data.find((service) => service.id === serviceId) && (
+                <p>
+                  Price and points apply per{' '}
+                  {services.data.find((service) => service.id === serviceId)?.pricingUnit ?? 'unit'}
+                  . Enter the number of those units.
+                </p>
+              )}
               <label htmlFor="earning-quantity">Quantity</label>
               <input
                 id="earning-quantity"
@@ -346,15 +367,21 @@ export function BusinessPointsPage() {
                 onChange={(event) => setQuantity(event.target.value)}
               />
 
-              {/* aria-busy tells assistive tech the region is working; the disabled
-                button plus the `busy` guard in `recordSale` stop a double submit,
-                which on this flow would mean recording the purchase twice. */}
+              {/* `aria-busy` on the region, and the Button's own `loading` supplies
+                the spinner, the `aria-busy` and the `role="status"` label. The
+                `busy` guard in `recordSale` is what actually stops a double submit:
+                a disabled button alone is not idempotency, and the server-side POS
+                reference is the real protection against a recorded twice. */}
               <div aria-busy={busy}>
-                <Button onClick={recordSale} disabled={busy || !serviceId}>
-                  {record.isPending ? 'Recording…' : '3. Record the sale'}
+                <Button
+                  onClick={recordSale}
+                  disabled={!serviceId}
+                  loading={record.isPending}
+                  loadingLabel="Recording…"
+                >
+                  3. Record the sale
                 </Button>
               </div>
-              {busy && <Spinner label="Recording the sale" />}
             </>
           )}
 
@@ -386,48 +413,17 @@ export function BusinessPointsPage() {
             <dd>{formatMoney(priced.netAmount)}</dd>
           </dl>
 
-          {/* The member can spend their own points here, in one step. Only a
-              figure and this sale's reference are sent: the peso value comes
-              from the configured rule, so the browser cannot influence it. */}
-          <label htmlFor="points-to-spend">Points this member wants to use</label>
-          <input
-            id="points-to-spend"
-            type="number"
-            min={1}
-            step={1}
-            value={pointsToSpend}
-            disabled={spend.isPending}
-            onChange={(event) => setPointsToSpend(event.target.value)}
-          />
-          <Button
-            variant="secondary"
-            disabled={spend.isPending || !pointsToSpend || Number(pointsToSpend) <= 0}
-            onClick={() =>
-              spend.mutate({ purchaseId: priced.purchaseId, points: Number(pointsToSpend) })
-            }
-          >
-            {spend.isPending ? 'Applying…' : 'Apply points to this bill'}
-          </Button>
-          {spend.isError && <ErrorState title="Points not applied" message={message(spend.error)} />}
-          {spend.isSuccess && (
-            <p role="status">
-              {spend.data.alreadyApplied
-                ? 'Those points were already applied to this sale - nothing was taken again.'
-                : `Applied ${spend.data.pointsSpent.toLocaleString('en-PH')} points. The member now owes ${formatMoney(spend.data.netAmount)}.`}
-            </p>
-          )}
-
           <div aria-busy={receipt.isPending}>
             <Button
               onClick={() =>
                 receipt.mutate({ purchaseId: priced.purchaseId, amount: priced.netAmount })
               }
-              disabled={receipt.isPending}
+              loading={receipt.isPending}
+              loadingLabel="Recording…"
             >
-              {receipt.isPending ? 'Recording…' : '5. Record the receipt'}
+              5. Record the receipt
             </Button>
           </div>
-          {receipt.isPending && <Spinner label="Recording the receipt" />}
           {receipt.isError && (
             <ErrorState title="Receipt not recorded" message={message(receipt.error)} />
           )}
@@ -439,16 +435,17 @@ export function BusinessPointsPage() {
           <h3>Settlement</h3>
           <p role="status">Pending Finance verification.</p>
           <p>
-            A recorded receipt is not money received. Finance verifies it on the Operational Services
-            Payments screen, and only then can this sale complete and the member&apos;s claim code be
-            issued. You cannot verify your own receipt.
+            A recorded receipt is not money received. Finance verifies it on the Operational
+            Services Payments screen, and only then can this sale complete and the member&apos;s
+            claim code be issued. You cannot verify your own receipt.
           </p>
           <Button
             variant="secondary"
             onClick={() => client.invalidateQueries({ queryKey: ['earning', 'settlement'] })}
-            disabled={settlement.isFetching}
+            loading={settlement.isFetching}
+            loadingLabel="Refreshing…"
           >
-            {settlement.isFetching ? 'Refreshing…' : 'Refresh status'}
+            Refresh status
           </Button>
 
           {/* Completion and the claim are separate, later acts. Both are refused
@@ -458,19 +455,23 @@ export function BusinessPointsPage() {
           {settlement.data?.status === 'draft' && settlement.data.fullyPaid && (
             <Button
               onClick={() => complete.mutate(lastPurchase as string, { onSuccess: refresh })}
-              disabled={complete.isPending}
+              loading={complete.isPending}
+              loadingLabel="Completing…"
             >
-              {complete.isPending ? 'Completing…' : 'Complete the sale'}
+              Complete the sale
             </Button>
           )}
-          {complete.isError && <ErrorState title="Not completed" message={message(complete.error)} />}
+          {complete.isError && (
+            <ErrorState title="Not completed" message={message(complete.error)} />
+          )}
 
           {settlement.data?.claimable && (
             <Button
               onClick={() => claim.mutate(lastPurchase as string, { onSuccess: refresh })}
-              disabled={claim.isPending}
+              loading={claim.isPending}
+              loadingLabel="Issuing…"
             >
-              {claim.isPending ? 'Issuing…' : 'Issue the member’s claim code'}
+              Issue the member’s claim code
             </Button>
           )}
           {claim.isError && <ErrorState title="Claim not issued" message={message(claim.error)} />}
@@ -518,7 +519,7 @@ export function BusinessPointsPage() {
         </Dialog>
       )}
 
-      {member && (
+      {mayCorrect && member && (
         <section aria-label="Adjustments">
           <h2>Manual adjustment</h2>
           <p>
@@ -531,7 +532,7 @@ export function BusinessPointsPage() {
         </section>
       )}
 
-      {adjustOpen && member && (
+      {mayCorrect && adjustOpen && member && (
         <AdjustDialog
           membershipId={member.membershipId}
           onClose={() => setAdjustOpen(false)}
@@ -543,7 +544,7 @@ export function BusinessPointsPage() {
         />
       )}
 
-      {lastPurchase && (
+      {mayCorrect && lastPurchase && (
         <section aria-label="Reverse a purchase">
           <h2>Reverse the last purchase</h2>
           <Button variant="danger" onClick={() => setReverseOpen(true)}>
@@ -553,7 +554,7 @@ export function BusinessPointsPage() {
         </section>
       )}
 
-      {reverseOpen && (
+      {mayCorrect && reverseOpen && (
         <ReverseDialog
           pending={reverse.isPending}
           error={reverse.isError ? message(reverse.error) : null}
@@ -584,8 +585,7 @@ function AdjustDialog({
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const adjust = useMutation({
-    mutationFn: () =>
-      adjustPoints({ membershipId, amount: Number(amount), reason }),
+    mutationFn: () => adjustPoints({ membershipId, amount: Number(amount), reason }),
     onSuccess: onSaved,
   });
 
@@ -600,10 +600,12 @@ function AdjustDialog({
             Cancel
           </Button>
           <Button
-            disabled={adjust.isPending || !amount || !reason}
+            disabled={!amount || !reason}
+            loading={adjust.isPending}
+            loadingLabel="Saving…"
             onClick={() => adjust.mutate()}
           >
-            {adjust.isPending ? 'Saving…' : 'Save adjustment'}
+            Save adjustment
           </Button>
         </>
       }
@@ -623,7 +625,6 @@ function AdjustDialog({
           onChange={(event) => setReason(event.target.value)}
         />
         {adjust.isError && <ErrorState title="Not saved" message={message(adjust.error)} />}
-        {adjust.isPending && <Spinner label="Saving the adjustment" />}
       </div>
     </Dialog>
   );
@@ -667,8 +668,8 @@ function ReverseDialog({
           onChange={(event) => setReason(event.target.value)}
         />
         <p>
-          If the points were already spent, the shortfall becomes reversal debt rather than a negative
-          balance. Earning is never blocked by debt; spending is.
+          If the member had already moved the points, the shortfall becomes reversal debt rather
+          than a negative balance. Earning is never blocked by debt.
         </p>
         {error && <ErrorState title="Not reversed" message={error} />}
       </div>

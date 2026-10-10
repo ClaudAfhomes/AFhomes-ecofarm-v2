@@ -24,7 +24,13 @@ const EMPLOYEE: SessionUser = {
   roleName: 'Employee',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
     {
       moduleKey: 'operations.redemption',
       canView: true,
@@ -148,81 +154,6 @@ describe('employee reports live search', () => {
 });
 
 describe('redemption refreshes reports without reload', () => {
-  it('invalidates the reports cache when a redemption completes', async () => {
-    const user = userEvent.setup();
-    const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
-    try {
-      const member = {
-        membershipId: '22222222-2222-4222-8222-222222222222',
-        membershipNumber: 'MBS-000777',
-        customerDisplayName: 'Ana R Buyer',
-        productName: 'Gold',
-        membershipStatus: 'active',
-        expired: false,
-        redeemable: true,
-        blockedReason: null,
-        pointsBalance: 60000,
-        matchedBy: 'fallback_code',
-      };
-      const item = {
-        id: '55555555-5555-4555-8555-555555555555',
-        code: 'TEPPANYAKI',
-        name: 'Japanese Teppanyaki',
-        description: 'Dinner for two',
-        category: 'dining',
-        pointsCost: 2000,
-        isActive: true,
-        sortOrder: 10,
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-      };
-      const receipt = {
-        redemptionId: '88888888-8888-4888-8888-888888888888',
-        redemptionNumber: 'RDM-000001',
-        membershipId: member.membershipId,
-        membershipNumber: 'MBS-000777',
-        customerDisplayName: 'Ana R Buyer',
-        itemCode: 'TEPPANYAKI',
-        itemName: 'Japanese Teppanyaki',
-        unitPoints: 2000,
-        quantity: 1,
-        totalPoints: 2000,
-        balanceBefore: 60000,
-        balanceAfter: 58000,
-        redeemedByName: 'HR Officer',
-        completedAt: '2026-03-01T02:00:00.000Z',
-        replayed: false,
-      };
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-          const url = String(input).replace(/^https?:\/\/[^/]+/, '');
-          const method = init?.method ?? 'GET';
-          if (url.startsWith('/api/v1/redemptions/resolve'))
-            return new Response(JSON.stringify(member), { status: 200 });
-          if (url.startsWith('/api/v1/redemptions/items'))
-            return new Response(JSON.stringify({ data: [item], meta: {} }), { status: 200 });
-          if (url.startsWith('/api/v1/redemptions') && method === 'POST')
-            return new Response(JSON.stringify(receipt), { status: 201 });
-          return new Response(JSON.stringify(envelope()), { status: 200 });
-        }),
-      );
-      renderWithProviders(<App />, { route: '/admin/redemption', user: EMPLOYEE });
-      await user.type(screen.getByLabelText('Member code'), 'AFH-1A2B-3C4D');
-      await user.click(screen.getByRole('button', { name: 'Look up' }));
-      await screen.findByText('Ana R Buyer');
-      await user.click(screen.getByRole('radio', { name: /Japanese Teppanyaki/ }));
-      await user.click(await screen.findByRole('button', { name: /Confirm redemption/ }));
-      await screen.findByText('RDM-000001');
-      await waitFor(() => {
-        expect(invalidate).toHaveBeenCalledWith({ queryKey: ['redemption', 'history'] });
-        expect(invalidate).toHaveBeenCalledWith({ queryKey: ['reports'] });
-      });
-    } finally {
-      invalidate.mockRestore();
-    }
-  });
-
   it('polls while mounted and stops polling once the screen unmounts', async () => {
     vi.useFakeTimers();
     try {

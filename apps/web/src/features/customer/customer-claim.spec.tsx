@@ -5,12 +5,35 @@
  * not be able to double-claim, a failure must leave the card untouched, and a
  * capped award must be shown as capped rather than silently reduced.
  */
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+
+/**
+ * The scanner is replaced with a controllable stub so a decoded frame can be
+ * delivered deterministically. jsdom has no camera and no video decoding, and a
+ * test that faked a MediaStream would prove nothing about decoding.
+ */
+let deliverScan: ((value: string) => void) | null = null;
+vi.mock('@afhomes/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@afhomes/ui')>()),
+  notifyConfirm: vi.fn(async () => true),
+  notifySuccess: vi.fn(),
+  useQrScanner: (onDecoded: (value: string) => void) => {
+    deliverScan = onDecoded;
+    return {
+      status: 'idle',
+      message: null,
+      start: () => {},
+      stop: () => {},
+      videoRef: () => {},
+    };
+  },
+}));
 import { CustomerPointsPage } from './CustomerPointsPage';
+import { notifyConfirm } from '@afhomes/ui';
 
 const CUSTOMER = {
   id: 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -67,6 +90,18 @@ const err =
 
 function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.clear();
+  routes.set(
+    '/earning/claim/preview',
+    ok({
+      claimNumber: 'CLM-000001',
+      purchaseNumber: 'AF-TXN-1',
+      serviceName: 'Saved service',
+      pointsRequested: 500,
+      pointsReserved: 500,
+      pointsCapped: 0,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    }),
+  );
   routes.set('/customer', ok(CUSTOMER));
   routes.set('/customer/points', ok(LEGACY_SUMMARY));
   routes.set('/customer/points/position', ok(SUMMARY));
@@ -102,7 +137,9 @@ function mockFetch() {
 const render = () => renderWithProviders(<CustomerPointsPage />);
 
 beforeEach(() => {
+  vi.mocked(notifyConfirm).mockResolvedValue(true);
   bodies.length = 0;
+  deliverScan = null;
   vi.stubGlobal('fetch', mockFetch());
   installRoutes();
 });
@@ -121,9 +158,9 @@ describe('customer points position', () => {
 
     expect(await screen.findByText(/15,000 points are held against a reversed/i)).toBeTruthy();
     // 45,000 spendable, not 60,000: the warning must state the real figure.
-    expect(screen.getByText(/45,000 of your balance can be spent/i)).toBeTruthy();
+    expect(screen.getByText(/45,000 points remain/i)).toBeTruthy();
     // Earning is explicitly NOT blocked, which is the whole point of separating them.
-    expect(screen.getByText(/earning is not affected/i)).toBeTruthy();
+    expect(screen.getByText(/Future earnings repay/i)).toBeTruthy();
   });
 
   it('shows no debt warning when there is no debt', async () => {
@@ -137,11 +174,64 @@ describe('customer points position', () => {
     expect(await screen.findByText('Can still earn this year')).toBeTruthy();
     expect(screen.getByText('40,000')).toBeTruthy();
     // The headline figure is the spendable one.
-    expect(screen.getByText('points available to spend right now')).toBeTruthy();
+    expect(screen.getByText('points accumulated on your card')).toBeTruthy();
   });
 });
 
 describe('customer points claim', () => {
+  it('routes a scanned claim QR through the SAME claim as a typed code', async () => {
+    const user = userEvent.setup();
+    installRoutes({
+      '/earning/claim': ok({
+        claimNumber: 'CLM-000003',
+        pointsAwarded: 500,
+        pointsCapped: 0,
+        balanceAfter: 60500,
+      }),
+    });
+    render();
+
+    // The QR carries the claim URL. The camera decodes it, the page treats it as
+    // the typed credential, and only the SERVER extracts `c` from it.
+    act(() => deliverScan?.('https://www.afhomes.com.ph/customer/points?c=SCANNED'));
+    expect(await screen.findByLabelText(/claim code/i)).toHaveValue(
+      'https://www.afhomes.com.ph/customer/points?c=SCANNED',
+    );
+
+    await screen.findByRole('button', { name: /claim my points/i });
+    await user.click(screen.getByRole('button', { name: /claim my points/i }));
+    await waitFor(() => expect(bodies).toHaveLength(2));
+
+    // Both calls carry the credential and nothing else: no balance, no figure,
+    // and above all no customer id, which would let a caller claim another's award.
+    for (const body of bodies) {
+      expect(Object.keys(JSON.parse(body)!)).toEqual(['token']);
+    }
+    expect(await screen.findByText(/500 points added/i)).toBeTruthy();
+  });
+
+  it('reviews without crediting and cancels confirmation without a claim POST', async () => {
+    vi.mocked(notifyConfirm).mockResolvedValue(false);
+    const user = userEvent.setup();
+    render();
+    await user.type(await screen.findByLabelText(/claim code/i), 'CLM-000001');
+    await user.click(screen.getByRole('button', { name: /review claim/i }));
+    await user.click(await screen.findByRole('button', { name: /claim my points/i }));
+    await waitFor(() => expect(notifyConfirm).toHaveBeenCalled());
+    expect(bodies).toHaveLength(1);
+    expect(screen.getByLabelText(/claim code/i)).toHaveValue('CLM-000001');
+  });
+  it('invalidates a reviewed claim when the typed credential changes', async () => {
+    const user = userEvent.setup();
+    render();
+    const input = await screen.findByLabelText(/claim code/i);
+    await user.type(input, 'CLM-000001');
+    await user.click(screen.getByRole('button', { name: /review claim/i }));
+    await screen.findByRole('button', { name: /claim my points/i });
+    await user.type(input, 'CHANGED');
+    expect(screen.queryByRole('button', { name: /claim my points/i })).toBeNull();
+    expect(bodies).toHaveLength(1);
+  });
   it('posts only the credential - never a balance, a figure or an account id', async () => {
     const user = userEvent.setup();
     installRoutes({
@@ -155,9 +245,10 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-000001');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
 
-    await waitFor(() => expect(bodies).toHaveLength(1));
+    await waitFor(() => expect(bodies).toHaveLength(2));
     expect(JSON.parse(bodies[0]!)).toEqual({ token: 'CLM-000001' });
   });
 
@@ -174,12 +265,13 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-000001');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
 
     expect(await screen.findByText(/500 points added/i)).toBeTruthy();
     expect(screen.getByText(/60,500/)).toBeTruthy();
     // The field is cleared, so the same code cannot be resubmitted by reflex.
-    expect((await screen.findByLabelText(/claim code/i) as HTMLInputElement).value).toBe('');
+    expect(((await screen.findByLabelText(/claim code/i)) as HTMLInputElement).value).toBe('');
   });
 
   it('says plainly that points were capped, instead of quietly reducing them', async () => {
@@ -195,6 +287,7 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-000002');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
 
     expect(await screen.findByText(/20,000 points were not added/i)).toBeTruthy();
@@ -213,13 +306,19 @@ describe('customer points claim', () => {
         calls += 1;
         return {
           status: 200,
-          body: { claimNumber: 'CLM-000001', pointsAwarded: 500, pointsCapped: 0, balanceAfter: 60500 },
+          body: {
+            claimNumber: 'CLM-000001',
+            pointsAwarded: 500,
+            pointsCapped: 0,
+            balanceAfter: 60500,
+          },
         };
       },
     });
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-000001');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     const button = await screen.findByRole('button', { name: /claim my points/i });
 
     await user.click(button);
@@ -236,7 +335,9 @@ describe('customer points claim', () => {
   it('does not submit an empty code', async () => {
     const user = userEvent.setup();
     render();
-    const button = await screen.findByRole('button', { name: /claim my points/i }) as HTMLButtonElement;
+    const button = (await screen.findByRole('button', {
+      name: /review claim/i,
+    })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     await user.click(button);
     expect(bodies).toHaveLength(0);
@@ -248,12 +349,15 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-OLD');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
 
     expect(await screen.findByText(/cannot be used any more/i)).toBeTruthy();
     expect(screen.getByText(/reissue/i)).toBeTruthy();
     // The typed code is kept so a retry is one keystroke away.
-    expect((await screen.findByLabelText(/claim code/i) as HTMLInputElement).value).toBe('CLM-OLD');
+    expect(((await screen.findByLabelText(/claim code/i)) as HTMLInputElement).value).toBe(
+      'CLM-OLD',
+    );
   });
 
   it('gives an unknown claim and someone else claim the SAME advice', async () => {
@@ -264,6 +368,7 @@ describe('customer points claim', () => {
       const user = userEvent.setup();
       render();
       await user.type(await screen.findByLabelText(/claim code/i), token);
+      await user.click(await screen.findByRole('button', { name: /review claim/i }));
       await user.click(await screen.findByRole('button', { name: /claim my points/i }));
       const text = (await screen.findByText(/cannot be used/i)).textContent ?? '';
       cleanup();
@@ -281,9 +386,10 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-1');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
 
-    expect(await screen.findByText(/nothing was taken from your card/i)).toBeTruthy();
+    expect(await screen.findByText(/check your points activity before retrying/i)).toBeTruthy();
   });
 
   it('never retries a claim, because a claim is single-use', async () => {
@@ -298,8 +404,9 @@ describe('customer points claim', () => {
     render();
 
     await user.type(await screen.findByLabelText(/claim code/i), 'CLM-1');
+    await user.click(await screen.findByRole('button', { name: /review claim/i }));
     await user.click(await screen.findByRole('button', { name: /claim my points/i }));
-    await screen.findByText(/nothing was taken from your card/i);
+    await screen.findByText(/check your points activity before retrying/i);
 
     // An automatic retry here would convert a LOST RESPONSE for a claim that
     // actually succeeded into a misleading "already used" error.

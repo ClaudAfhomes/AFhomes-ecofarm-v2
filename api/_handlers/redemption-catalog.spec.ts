@@ -51,10 +51,38 @@ function install() {
         { id: 'r3', slug: 'finance', name: 'Finance', is_active: true },
       ],
       role_permissions: [
-        { role_id: 'r1', module_id: 'm2', can_view: true, can_create: true, can_update: true, can_delete: false },
-        { role_id: 'r1', module_id: 'm1', can_view: true, can_create: false, can_update: false, can_delete: false },
-        { role_id: 'r2', module_id: 'm1', can_view: true, can_create: true, can_update: false, can_delete: false },
-        { role_id: 'r2', module_id: 'm2', can_view: true, can_create: false, can_update: false, can_delete: false },
+        {
+          role_id: 'r1',
+          module_id: 'm2',
+          can_view: true,
+          can_create: true,
+          can_update: true,
+          can_delete: false,
+        },
+        {
+          role_id: 'r1',
+          module_id: 'm1',
+          can_view: true,
+          can_create: false,
+          can_update: false,
+          can_delete: false,
+        },
+        {
+          role_id: 'r2',
+          module_id: 'm1',
+          can_view: true,
+          can_create: true,
+          can_update: false,
+          can_delete: false,
+        },
+        {
+          role_id: 'r2',
+          module_id: 'm2',
+          can_view: true,
+          can_create: false,
+          can_update: false,
+          can_delete: false,
+        },
       ],
       staff_users: [
         { id: 's0', email: 'super@afhomes.test', full_name: 'Super Admin', status: 'active' },
@@ -145,11 +173,31 @@ function install() {
       audit_events: [],
     },
     tokens: {
-      [TOK.superAdmin]: { id: 's0', email: 'super@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [TOK.admin]: { id: 's1', email: 'admin@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [TOK.employee]: { id: 's2', email: 'emp@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [TOK.finance]: { id: 's3', email: 'fin@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      [TOK.customer]: { id: 'auth-customer-1', email: 'cust@example.com', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
+      [TOK.superAdmin]: {
+        id: 's0',
+        email: 'super@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [TOK.admin]: {
+        id: 's1',
+        email: 'admin@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [TOK.employee]: {
+        id: 's2',
+        email: 'emp@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [TOK.finance]: {
+        id: 's3',
+        email: 'fin@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      [TOK.customer]: {
+        id: 'auth-customer-1',
+        email: 'cust@example.com',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
     },
     unique: { redemption_items: [['code']] },
     links: [],
@@ -272,10 +320,11 @@ describe('catalog filters', () => {
   });
 
   it('never leaks inactive items to the employee, even when asked', async () => {
-    for (const query of [{ active: 'all' }, { includeInactive: 'true' }, { active: 'false' }] as Record<
-      string,
-      string
-    >[]) {
+    for (const query of [
+      { active: 'all' },
+      { includeInactive: 'true' },
+      { active: 'false' },
+    ] as Record<string, string>[]) {
       const state = await call({ path: 'items', token: TOK.employee, query });
       expect(state.status).toBe(200);
       expect(data(state.body).map((r) => r.code)).toEqual(['TEPPANYAKI']);
@@ -283,130 +332,40 @@ describe('catalog filters', () => {
   });
 
   it('keeps stable ordering by display order then name', async () => {
-    await call({ method: 'POST', path: 'items', token: TOK.superAdmin, body: { ...SPA, code: 'AAA', sortOrder: 1 } });
+    const db = holder.db as FakeSupabase;
+    db.rows('redemption_items').push({
+      ...db.rows('redemption_items')[0],
+      id: 'aaaa0000-0000-4000-8000-000000000001',
+      code: 'AAA',
+      name: 'First',
+      sort_order: 1,
+    });
     const state = await call({ path: 'items', token: TOK.superAdmin, query: { active: 'all' } });
     expect(data(state.body).map((r) => r.code)).toEqual(['AAA', 'TEPPANYAKI', 'RETIRED']);
   });
 });
 
-describe('catalog writes', () => {
-  beforeEach(() => {
-    install();
-  });
-
-  it('creates a valid item with a normalised code and audits it', async () => {
-    const db = holder.db as FakeSupabase;
-    const state = await call({ method: 'POST', path: 'items', token: TOK.superAdmin, body: SPA });
-    expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({
-      code: 'SPA-DAY',
-      name: 'Spa Day Pass',
-      pointsCost: 25000,
-      isActive: true,
-    });
-    const row = db.rows('redemption_items').find((r) => r.code === 'SPA-DAY');
-    expect(row).toBeDefined();
-    const audits = db.rows('audit_events').filter((e) => e.action === 'REDEMPTION_ITEM_CREATED');
-    expect(audits).toHaveLength(1);
-    expect(serialised(audits)).not.toMatch(/token|secret|password|hash/i);
-  });
-
-  it('lets an admin create under the matrix grant', async () => {
-    const state = await call({ method: 'POST', path: 'items', token: TOK.admin, body: SPA });
-    expect(state.status).toBe(201);
-  });
-
-  it('rejects a duplicate code with 409', async () => {
-    const state = await call({
-      method: 'POST',
-      path: 'items',
-      token: TOK.superAdmin,
-      body: { ...SPA, code: 'teppanyaki', name: 'Clone' },
-    });
-    expect(state.status).toBe(409);
-  });
-
-  it.each([
-    ['blank name', { ...SPA, code: 'OK-1', name: '  ' }],
-    ['blank code', { ...SPA, code: '   ', name: 'Ok' }],
-    ['zero points', { ...SPA, code: 'OK-1', pointsCost: 0 }],
-    ['negative points', { ...SPA, code: 'OK-1', pointsCost: -5 }],
-    ['fractional points', { ...SPA, code: 'OK-1', pointsCost: 1.5 }],
-    ['bad display order', { ...SPA, code: 'OK-1', sortOrder: 1.5 }],
-  ])('rejects %s with 400', async (_name, body) => {
+describe('retired catalog writes', () => {
+  beforeEach(() => install());
+  it.each(['POST', 'PATCH'])(
+    'refuses privileged %s without changing the catalog',
+    async (method) => {
+      const db = holder.db as FakeSupabase;
+      const before = JSON.stringify(db.rows('redemption_items'));
+      const result = await call({
+        method,
+        path: method === 'POST' ? 'items' : 'items/' + TEPPANYAKI,
+        token: TOK.superAdmin,
+        body: SPA,
+      });
+      expect(result.status).toBe(404);
+      expect(JSON.stringify(db.rows('redemption_items'))).toBe(before);
+    },
+  );
+  it('preserves permission denials for unprivileged writes', async () => {
     expect(
-      (await call({ method: 'POST', path: 'items', token: TOK.superAdmin, body })).status,
-    ).toBe(400);
-  });
-
-  it('denies creation to employee, finance and customers', async () => {
-    for (const token of [TOK.employee, TOK.finance, TOK.customer]) {
-      expect((await call({ method: 'POST', path: 'items', token, body: SPA })).status).toBe(403);
-    }
-  });
-
-  it('edits fields and audits the update', async () => {
-    const db = holder.db as FakeSupabase;
-    const state = await call({
-      method: 'PATCH',
-      path: `items/${TEPPANYAKI}`,
-      token: TOK.superAdmin,
-      body: { name: 'Teppanyaki Deluxe', pointsCost: 2500, sortOrder: 3 },
-    });
-    expect(state.status).toBe(200);
-    expect(state.body).toMatchObject({ name: 'Teppanyaki Deluxe', pointsCost: 2500, sortOrder: 3 });
-    expect(
-      db.rows('audit_events').some((e) => e.action === 'REDEMPTION_ITEM_UPDATED'),
-    ).toBe(true);
-  });
-
-  it('denies edits without the update grant', async () => {
-    for (const token of [TOK.employee, TOK.finance, TOK.customer]) {
-      expect(
-        (
-          await call({
-            method: 'PATCH',
-            path: `items/${TEPPANYAKI}`,
-            token,
-            body: { name: 'Hacked' },
-          })
-        ).status,
-      ).toBe(403);
-    }
-  });
-
-  it('deactivates and reactivates with distinct audits', async () => {
-    const db = holder.db as FakeSupabase;
-    const off = await call({
-      method: 'PATCH',
-      path: `items/${TEPPANYAKI}`,
-      token: TOK.superAdmin,
-      body: { isActive: false },
-    });
-    expect(off.status).toBe(200);
-    expect(
-      db.rows('audit_events').some((e) => e.action === 'REDEMPTION_ITEM_DEACTIVATED'),
-    ).toBe(true);
-    const on = await call({
-      method: 'PATCH',
-      path: `items/${TEPPANYAKI}`,
-      token: TOK.superAdmin,
-      body: { isActive: true },
-    });
-    expect(on.status).toBe(200);
-    expect(on.body).toMatchObject({ isActive: true });
-    expect(
-      db.rows('audit_events').some((e) => e.action === 'REDEMPTION_ITEM_ACTIVATED'),
-    ).toBe(true);
-    const list = await call({ path: 'items', token: TOK.employee });
-    expect(data(list.body).map((r) => r.code)).toContain('TEPPANYAKI');
-  });
-
-  it('exposes no DELETE route', async () => {
-    expect(
-      (await call({ method: 'DELETE', path: `items/${TEPPANYAKI}`, token: TOK.superAdmin })).status,
-    ).toBe(404);
-    expect((holder.db as FakeSupabase).rows('redemption_items')).toHaveLength(2);
+      (await call({ method: 'POST', path: 'items', token: TOK.employee, body: SPA })).status,
+    ).toBe(403);
   });
 });
 

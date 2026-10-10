@@ -43,18 +43,18 @@ import {
   ErrorState,
   PageHeader,
   Skeleton,
-  Spinner,
   StatusChip,
   notifySuccess,
 } from '@afhomes/ui';
 
 import { formatMoney } from './format';
+import { useSession } from '../../lib/session';
 import styles from './points.module.css';
 import {
   decideReceipt,
   getPurchaseSummary,
   getSettlement,
-  listPurchases,
+  listFinancePurchases,
   listReceipts,
   recordReceipt,
 } from './points-services';
@@ -67,37 +67,147 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
 };
 
 export function PurchasePaymentsPage() {
-  const purchases = useQuery({ queryKey: ['earning', 'purchases'], queryFn: listPurchases });
+  const purchases = useQuery({
+    queryKey: ['earning', 'finance', 'purchases'],
+    queryFn: listFinancePurchases,
+    refetchInterval: 15_000,
+  });
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'completed' | 'reversed'>(
+    'all',
+  );
+
+  const rows = (purchases.data ?? []).filter(
+    (p) => statusFilter === 'all' || p.status === statusFilter,
+  );
 
   return (
     <>
       <PageHeader
-        title="Purchase Payments"
-        description="Record cash received against a service purchase, then verify it. A recorded payment is not money until it is verified."
+        title="Operational Payment Verification"
+        description="What was sold, to whom, at what price and discount, how much is verified, and whether the member has claimed their points. A recorded receipt is not money until it is verified."
       />
 
-      {purchases.isLoading && <Skeleton />}
+      {purchases.isLoading && (
+        <div role="status" aria-label="Loading sales" aria-busy="true">
+          <Skeleton />
+          <Skeleton />
+          <Skeleton />
+        </div>
+      )}
       {purchases.isError && (
         <ErrorState
-          title="Purchases unavailable"
-          message="The purchase list could not be loaded, so a receipt cannot be recorded."
+          title="Payments unavailable"
+          message="The purchase list could not be loaded. Try again."
+          onRetry={purchases.refetch}
         />
       )}
       {purchases.data && purchases.data.length === 0 && (
         <EmptyState
-          title="No purchases yet"
-          description="A receipt is recorded against a purchase, so there is nothing to collect against yet."
+          title="No sales yet"
+          description="A receipt is recorded against a purchase, so there is nothing to settle until a sale exists."
         />
       )}
 
-      {purchases.data?.map((purchase) => (
-        <PurchasePaymentRow
-          key={purchase.id}
-          purchaseId={purchase.id}
-          purchaseNumber={purchase.purchaseNumber}
-          netAmount={purchase.netAmount}
-        />
-      ))}
+      {purchases.data && purchases.data.length > 0 && (
+        <section aria-label="Sales records">
+          <label htmlFor="sales-status-filter">Status</label>
+          <select
+            id="sales-status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+          >
+            <option value="all">All</option>
+            <option value="draft">Pending</option>
+            <option value="completed">Completed</option>
+            <option value="reversed">Reversed</option>
+          </select>
+
+          {rows.length === 0 ? (
+            <EmptyState title="No sales with that status" />
+          ) : (
+            // The shared `.table-scroll` contract: overflow stays inside this
+            // region so the page never scrolls sideways, and `tabIndex` keeps the
+            // scroller reachable by keyboard.
+            <div
+              role="region"
+              aria-label="Scrollable sales records"
+              tabIndex={0}
+              className="table-scroll"
+            >
+              <table>
+                <caption className={styles.hint}>
+                  Gross, the VIP tier discount and any points discount are shown separately: neither
+                  discount is a receipt, and the amount due is what must be collected.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Transaction</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Service</th>
+                    <th scope="col">Customer</th>
+                    <th scope="col">GSD</th>
+                    <th scope="col">Tier</th>
+                    <th scope="col">Gross</th>
+                    <th scope="col">Tier discount</th>
+                    <th scope="col">Net due</th>
+                    <th scope="col">Verified</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Claim</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((purchase) => (
+                    <tr key={purchase.id}>
+                      <th scope="row">{purchase.purchaseNumber}</th>
+                      <td>{purchase.createdAt ? purchase.createdAt.slice(0, 10) : '-'}</td>
+                      <td>
+                        {purchase.lines
+                          .map((l) => `${l.quantity} x ${formatMoney(l.unitAmount)}`)
+                          .join(', ') || '-'}
+                      </td>
+                      <td>{purchase.customerName ?? '-'}</td>
+                      <td>{purchase.createdByName ?? '-'}</td>
+                      <td>{purchase.tierSnapshot ?? '-'}</td>
+                      <td>{formatMoney(purchase.grossAmount)}</td>
+                      <td>
+                        {purchase.tierDiscountAmount !== '0.00'
+                          ? `- ${formatMoney(purchase.tierDiscountAmount)}`
+                          : '-'}
+                      </td>
+                      <td>{formatMoney(purchase.netAmount)}</td>
+                      <td>{formatMoney(purchase.verifiedTotal)}</td>
+                      <td>
+                        <StatusChip
+                          tone={
+                            purchase.status === 'completed'
+                              ? 'success'
+                              : purchase.status === 'reversed'
+                                ? 'danger'
+                                : 'warning'
+                          }
+                          label={purchase.status}
+                        />
+                      </td>
+                      <td>{purchase.claimStatus ?? 'not issued'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* One receipt panel per sale, so a reviewer can accept or reject a
+              specific receipt. */}
+          {rows.map((purchase) => (
+            <PurchasePaymentRow
+              key={purchase.id}
+              purchaseId={purchase.id}
+              purchaseNumber={purchase.purchaseNumber}
+              netAmount={purchase.netAmount}
+            />
+          ))}
+        </section>
+      )}
     </>
   );
 }
@@ -112,6 +222,9 @@ function PurchasePaymentRow({
   netAmount: string;
 }) {
   const client = useQueryClient();
+  const permissions = useSession().user?.afHomesPermissions ?? [];
+  const mayVerify = permissions.some((p) => p.moduleKey === 'operations.payments' && p.canUpdate);
+  const mayRecord = permissions.some((p) => p.moduleKey === 'operations.sales' && p.canCreate);
   const [recording, setRecording] = useState(false);
 
   // Both are refetched after every mutation: a receipt changes what has actually
@@ -129,6 +242,7 @@ function PurchasePaymentRow({
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['earning', 'purchase', purchaseId] });
     void client.invalidateQueries({ queryKey: ['earning', 'purchases'] });
+    void client.invalidateQueries({ queryKey: ['earning', 'finance', 'purchases'] });
     void client.invalidateQueries({ queryKey: ['earning', 'settlement'] });
   };
 
@@ -169,23 +283,61 @@ function PurchasePaymentRow({
             Claim:{' '}
             {settlement.data.claimable
               ? 'claimable'
-              : settlement.data.claimStatus ?? 'not issued yet'}
+              : (settlement.data.claimStatus ?? 'not issued yet')}
             . Verified receipts {formatMoney(settlement.data.verifiedTotal)} of{' '}
             {formatMoney(settlement.data.netAmount)} due.
           </p>
-          <Button variant="secondary" onClick={refresh} disabled={settlement.isFetching}>
-            {settlement.isFetching ? 'Refreshing…' : 'Refresh settlement'}
+          <Button
+            variant="secondary"
+            onClick={refresh}
+            loading={settlement.isFetching}
+            loadingLabel="Refreshing…"
+          >
+            Refresh settlement
           </Button>
         </div>
       )}
 
-      {summary.isLoading && <Skeleton />}
+      {summary.isLoading && (
+        <div role="status" aria-label="Loading the financial summary" aria-busy="true">
+          <Skeleton />
+        </div>
+      )}
       {summary.isError && (
-        <ErrorState title="Summary unavailable" message="The figures for this purchase could not be loaded." />
+        <ErrorState
+          title="Summary unavailable"
+          message="The figures for this purchase could not be loaded."
+        />
       )}
       {summary.data && (
         <table>
           <tbody>
+            {/* Gross, each discount, then the net. Shown separately and in that
+                order so the arithmetic is legible: a reviewer must be able to
+                see WHY the amount due is less than the gross, and must be able
+                to tell a VIP tier discount (a rate) from a points discount (a
+                conversion). Neither is a receipt, and collapsing them into one
+                figure is how a discount gets mistaken for cash. */}
+            <tr>
+              <th scope="row">Gross service value</th>
+              <td>{formatMoney(summary.data.grossAmount)}</td>
+            </tr>
+            <tr>
+              <th scope="row">VIP tier discount</th>
+              <td>
+                {summary.data.tierDiscountAmount && summary.data.tierDiscountAmount !== '0.00'
+                  ? `- ${formatMoney(summary.data.tierDiscountAmount)}`
+                  : 'None'}
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Points discount</th>
+              <td>
+                {summary.data.pointsDiscountAmount !== '0.00'
+                  ? `- ${formatMoney(summary.data.pointsDiscountAmount)}`
+                  : 'None'}
+              </td>
+            </tr>
             <tr>
               <th scope="row">Amount due</th>
               <td>{formatMoney(summary.data.netAmount)}</td>
@@ -208,60 +360,68 @@ function PurchasePaymentRow({
         </table>
       )}
 
-      {receipts.isLoading && <Skeleton />}
+      {receipts.isLoading && (
+        <div role="status" aria-label="Loading receipts" aria-busy="true">
+          <Skeleton />
+          <Skeleton />
+        </div>
+      )}
       {receipts.isError && (
-        <ErrorState title="Receipts unavailable" message="The receipts for this purchase could not be loaded." />
+        <ErrorState
+          title="Receipts unavailable"
+          message="The receipts for this purchase could not be loaded."
+        />
       )}
-      {receipts.data?.length === 0 && (
-        <p className={styles.hint}>No payment recorded yet.</p>
-      )}
+      {receipts.data?.length === 0 && <p className={styles.hint}>No payment recorded yet.</p>}
       {receipts.data && receipts.data.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Payment</th>
-              <th scope="col">Amount</th>
-              <th scope="col">Method</th>
-              <th scope="col">Status</th>
-              <th scope="col">Recorded by</th>
-              <th scope="col">Verified by</th>
-              <th scope="col">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {receipts.data.map((receipt) => (
-              <tr key={receipt.id}>
-                <td>{receipt.paymentNumber}</td>
-                <td>{formatMoney(receipt.amount)}</td>
-                <td>{receipt.method}</td>
-                <td>
-                  <StatusChip
-                    tone={STATUS_TONE[receipt.status] ?? 'neutral'}
-                    label={receipt.status}
-                  />
-                  {receipt.rejectionReason && (
-                    <span className={styles.hint}> {receipt.rejectionReason}</span>
-                  )}
-                </td>
-                {/* Two DIFFERENT attributed acts. Recording and verifying are never
+        <div role="region" aria-label="Scrollable receipts" tabIndex={0} className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Payment</th>
+                <th scope="col">Amount</th>
+                <th scope="col">Method</th>
+                <th scope="col">Status</th>
+                <th scope="col">Recorded by</th>
+                <th scope="col">Verified by</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {receipts.data.map((receipt) => (
+                <tr key={receipt.id}>
+                  <td>{receipt.paymentNumber}</td>
+                  <td>{formatMoney(receipt.amount)}</td>
+                  <td>{receipt.method}</td>
+                  <td>
+                    <StatusChip
+                      tone={STATUS_TONE[receipt.status] ?? 'neutral'}
+                      label={receipt.status}
+                    />
+                    {receipt.rejectionReason && (
+                      <span className={styles.hint}> {receipt.rejectionReason}</span>
+                    )}
+                  </td>
+                  {/* Two DIFFERENT attributed acts. Recording and verifying are never
                     collapsed into one column, because "who took the money" and
                     "who confirmed it" are separate questions. */}
-                <td>{receipt.recordedBy ?? '—'}</td>
-                <td>{receipt.verifiedBy ?? '—'}</td>
-                <td>
-                  {receipt.status === 'recorded' && (
-                    <VerifyActions paymentId={receipt.id} onDone={refresh} />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <td>{receipt.recordedBy ?? '—'}</td>
+                  <td>{receipt.verifiedBy ?? '—'}</td>
+                  <td>
+                    {receipt.status === 'recorded' && mayVerify && (
+                      <VerifyActions paymentId={receipt.id} onDone={refresh} />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      <Button variant="secondary" onClick={() => setRecording(true)}>
+      <Button variant="secondary" disabled={!mayRecord} onClick={() => setRecording(true)}>
         Record a payment
       </Button>
 
@@ -288,13 +448,7 @@ function PurchasePaymentRow({
  * twice, so a double click cannot accept the same money twice. The controls are
  * disabled while the decision is in flight for the same reason.
  */
-function VerifyActions({
-  paymentId,
-  onDone,
-}: {
-  paymentId: string;
-  onDone: () => void;
-}) {
+function VerifyActions({ paymentId, onDone }: { paymentId: string; onDone: () => void }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -337,12 +491,12 @@ function VerifyActions({
           size="sm"
           // A rejection with no reason is refused by the server; the button is
           // disabled first so the member is not shown an error for an empty box.
-          disabled={decide.isPending || !reason.trim()}
-          onClick={() =>
-            decide.mutate({ decision: 'rejected', rejectionReason: reason.trim() })
-          }
+          loading={decide.isPending}
+          loadingLabel="Rejecting…"
+          disabled={!reason.trim()}
+          onClick={() => decide.mutate({ decision: 'rejected', rejectionReason: reason.trim() })}
         >
-          {decide.isPending ? 'Rejecting…' : 'Confirm rejection'}
+          Confirm rejection
         </Button>
         <Button variant="secondary" size="sm" onClick={() => setRejecting(false)}>
           Cancel
@@ -360,10 +514,11 @@ function VerifyActions({
     <span className={styles.inlineActions}>
       <Button
         size="sm"
-        disabled={decide.isPending}
+        loading={decide.isPending}
+        loadingLabel="Verifying…"
         onClick={() => decide.mutate({ decision: 'verified', rejectionReason: null })}
       >
-        {decide.isPending ? 'Verifying…' : 'Verify'}
+        Verify
       </Button>
       <Button
         variant="secondary"
@@ -417,8 +572,7 @@ function RecordDialog({
     onSuccess: (receipt) => {
       notifySuccess({
         title: `Payment ${receipt.paymentNumber} recorded`,
-        message:
-          'It is not money received yet. Verify it to count it toward the amount due.',
+        message: 'It is not money received yet. Verify it to count it toward the amount due.',
       });
       onSaved();
     },
@@ -439,10 +593,12 @@ function RecordDialog({
             Cancel
           </Button>
           <Button
-            disabled={save.isPending || !amount || !method}
+            disabled={!amount || !method}
+            loading={save.isPending}
+            loadingLabel="Recording…"
             onClick={() => save.mutate()}
           >
-            {save.isPending ? 'Recording…' : 'Record payment'}
+            Record payment
           </Button>
         </>
       }
@@ -483,7 +639,6 @@ function RecordDialog({
           once it is verified.
         </p>
 
-        {save.isPending && <Spinner label="Recording the payment" />}
         {error && <ErrorState title="Not recorded" message={error} />}
       </div>
     </Dialog>

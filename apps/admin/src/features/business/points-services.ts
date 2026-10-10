@@ -10,27 +10,26 @@
  */
 import {
   adjustedPointsSchema,
-  committedPointDiscountSchema,
+  purchaseRowSchema,
+  servicePolicyStatusSchema,
   completedPurchaseSchema,
-  pointDiscountQuoteSchema,
   purchaseFinancialSummarySchema,
   issuedEarningClaimSchema,
   pointEarningRuleSchema,
-  pointRedemptionRuleSchema,
   purchaseReceiptSchema,
   reissuedEarningClaimSchema,
+  claimRowSchema,
   serviceTierDiscountSchema,
   operationalSettlementSchema,
-  appliedPointsDiscountSchema,
   resolvedMemberSchema,
   recordedPurchaseSchema,
   reversedPurchasePointsSchema,
   serviceCatalogItemSchema,
   exactDecimalStringSchema,
+  type ServiceCatalogItemInput,
   type AdjustPointsInput,
   type CreatePurchaseInput,
   type PointEarningRuleInput,
-  type PointRedemptionRuleInput,
   type ReversePurchaseInput,
 } from '@afhomes/contracts';
 
@@ -94,46 +93,8 @@ export const recordPurchaseReceipt = (input: {
   });
 
 /** A purchase row as the staff list reports it. */
-export const purchaseRowSchema = z.object({
-  id: z.string().uuid(),
-  purchaseNumber: z.string(),
-  customerId: z.string().uuid(),
-  membershipId: z.string().uuid(),
-  status: z.enum(['draft', 'completed', 'reversed']),
-  grossAmount: exactDecimalStringSchema,
-  pointsDiscountAmount: exactDecimalStringSchema,
-  netAmount: exactDecimalStringSchema,
-  completedAt: z.string().nullable(),
-  reversedAt: z.string().nullable(),
-  reversalReason: z.string().nullable(),
-  createdAt: z.string().nullable(),
-  lines: z.array(
-    z.object({
-      id: z.string().uuid(),
-      serviceId: z.string().uuid(),
-      quantity: z.number().int(),
-      unitAmount: exactDecimalStringSchema,
-      lineTotal: exactDecimalStringSchema,
-    }),
-  ),
-});
-
 /** The four figures finance must keep apart, as the server reports them. */
 /** A claim row, for history and investigation. */
-export const claimRowSchema = z.object({
-  id: z.string().uuid(),
-  claimNumber: z.string(),
-  customerId: z.string().uuid(),
-  purchaseId: z.string().uuid(),
-  status: z.enum(['available', 'claimed', 'expired', 'reversed']),
-  pointsRequested: z.number().int(),
-    pointsReserved: z.number().int(),
-  pointsAwarded: z.number().int(),
-  pointsCapped: z.number().int(),
-  expiresAt: z.string().nullable(),
-  claimedAt: z.string().nullable(),
-  createdAt: z.string().nullable(),
-});
 
 /** What recording a receipt returns. `recorded` is explicitly NOT settled. */
 export const purchaseReceiptWriteSchema = z.object({
@@ -151,6 +112,14 @@ export const purchaseReceiptDecisionResultSchema = z.object({
 });
 
 export const listPurchases = () => requestList('/earning/purchases', purchaseRowSchema);
+export const setServicePolicyActive = (
+  kind: 'rules' | 'tier-discounts',
+  id: string,
+  isActive: boolean,
+) => patch(`/earning/${kind}/${id}`, servicePolicyStatusSchema, { isActive });
+export const listFinancePurchases = () =>
+  requestList('/earning/finance/purchases', purchaseRowSchema);
+export { purchaseRowSchema };
 export type PurchaseRow = z.infer<typeof purchaseRowSchema>;
 
 /** Claims, for investigation. Read-only: there is no edit verb anywhere. */
@@ -194,25 +163,6 @@ export type PurchaseSummaryRow = {
 export const getPurchaseSummary = (purchaseId: string) =>
   request(`/earning/purchases/${purchaseId}/summary`, purchaseFinancialSummarySchema);
 
-/**
- * Price a discount WITHOUT spending anything.
- *
- * `retry: 0` and a preserved input: a quote is cheap and re-runnable, but the
- * typed amount must survive a failure so staff do not retype it.
- */
-export const quotePointDiscount = (purchaseId: string, pointsRequested: number) =>
-  post(`/earning/purchases/${purchaseId}/quote`, pointDiscountQuoteSchema, { pointsRequested });
-
-/**
- * Spend the quoted points.
- *
- * NOT retried automatically: a commit is a single-use quote and a money movement.
- * A retried commit would be refused as an already-used quote and would read like
- * a failure for an action that actually succeeded.
- */
-export const commitPointDiscount = (quoteId: string) =>
-  post(`/earning/quotes/${quoteId}/commit`, committedPointDiscountSchema, undefined);
-
 export const reversePurchasePoints = (input: ReversePurchaseInput) =>
   post(`/earning/purchases/${input.purchaseId}/reverse`, reversedPurchasePointsSchema, {
     reason: input.reason,
@@ -253,13 +203,19 @@ export const listServices = () => requestList('/earning/services', serviceCatalo
  * purchase derives its customer from the membership server-side.
  */
 export const resolveMemberIdentifier = (identifier: string) =>
-  request(`/redemptions/resolve?identifier=${encodeURIComponent(identifier)}`, resolvedMemberSchema);
+  request(
+    `/redemptions/resolve?identifier=${encodeURIComponent(identifier)}`,
+    resolvedMemberSchema,
+  );
 
-export const createService = (input: {
-  code: string;
-  name: string;
-  basePrice: string;
-}) => post('/earning/services', serviceCatalogItemSchema, input);
+export const createService = (input: ServiceCatalogItemInput) =>
+  post('/earning/services', serviceCatalogItemSchema, input);
+export const updateService = (id: string, input: Partial<ServiceCatalogItemInput>) =>
+  patch(`/earning/services/${id}`, serviceCatalogItemSchema, input);
+export const uploadServicePhoto = (
+  id: string,
+  input: { replacePhotoId?: string; mimeType: string; dataBase64: string; alt: string },
+) => post(`/earning/services/${id}/photos`, serviceCatalogItemSchema, input);
 
 export const listEarningRules = () => requestList('/earning/rules', pointEarningRuleSchema);
 
@@ -289,17 +245,17 @@ export const getSettlement = (purchaseId: string) =>
 /**
  * Spend a member's points at the till, in one authorized step.
  *
- * Only a points figure and a POS reference are sent. The peso value comes from
- * the configured rule, so nothing here can influence what the member pays.
- * `reference` is the idempotency key: a retry returns the original figures
- * instead of spending the points twice.
+ * REMOVED with the rest of points SPENDING. The routes are gone and the database
+ * has revoked EXECUTE on the functions behind them; this note exists so nobody
+ * re-adds the button and believes it works.
  */
-export const applyPointsDiscount = (purchaseId: string, pointsRequested: number, reference: string) =>
-  post(
-    `/earning/purchases/${purchaseId}/points-discount`,
-    appliedPointsDiscountSchema,
-    { pointsRequested, reference },
-  );
+
+/**
+ * Promotions: what makes a NON-staycation service discountable by points.
+ *
+ * RETIRED with points spending. `point_redemption_rules` rows stay readable for
+ * audit; nothing creates or activates one any more.
+ */
 
 export const createTierDiscount = (input: {
   serviceId: string;
@@ -309,24 +265,24 @@ export const createTierDiscount = (input: {
   effectiveEnd: string;
 }) => post('/earning/tier-discounts', serviceTierDiscountSchema, input);
 
-/**
- * Promotions: what makes a NON-staycation service discountable by points.
- *
- * Readable with the points-read permission, writable only through the authorized
- * catalog routes. There is no browser table privilege anywhere in this flow.
- */
-export const listRedemptionRules = () =>
-  requestList('/earning/redemption-rules', pointRedemptionRuleSchema);
-
-export const createRedemptionRule = (input: PointRedemptionRuleInput) =>
-  post('/earning/redemption-rules', pointRedemptionRuleSchema, input);
-
-/** A partial update. There is no field here that could remove an end date. */
-export const updateRedemptionRule = (input: { id: string; isActive: boolean }) =>
-  patch(`/earning/redemption-rules/${input.id}`, pointRedemptionRuleSchema, {
-    isActive: input.isActive,
-  });
-
 export const createEarningRule = (input: PointEarningRuleInput) =>
   post('/earning/rules', pointEarningRuleSchema, input);
 
+/**
+ * Reorder, feature or delete a stored photo.
+ *
+ * `photoId` is the SHA-256 of the storage path, never the path itself: the browser
+ * must not be able to name an object it does not own.
+ */
+export const manageServicePhoto = (
+  serviceId: string,
+  photoId: string,
+  operation: 'remove' | 'cover',
+) =>
+  request(
+    operation === 'cover'
+      ? `/earning/services/${serviceId}/photos/${photoId}/cover`
+      : `/earning/services/${serviceId}/photos/${photoId}`,
+    serviceCatalogItemSchema,
+    { method: operation === 'cover' ? 'PATCH' : 'DELETE' },
+  );

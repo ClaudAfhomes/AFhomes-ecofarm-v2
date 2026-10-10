@@ -15,7 +15,6 @@ import {
   redemptionPreviewSchema,
   redemptionReceiptSchema,
   redemptionSchema,
-  type CreateRedemptionItemRequest,
   type CreateRedemptionRequest,
   type CustomerPointsEntry,
   type Redemption,
@@ -32,9 +31,6 @@ import {
 
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });
-
-const patch = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
-  request(path, schema, { method: 'PATCH', body: JSON.stringify(body) });
 
 /* ------------------------------------------------------------------ */
 /* Membership identifier -> preview                                    */
@@ -74,15 +70,15 @@ export const getRedemptionItems = (
 export const getRedemptionItem = (id: string): Promise<RedemptionItem> =>
   request(`/redemptions/items/${id}`, redemptionItemSchema);
 
-export const createRedemptionItem = (
-  input: CreateRedemptionItemRequest,
-): Promise<RedemptionItem> => post('/redemptions/items', redemptionItemSchema, input);
-
-export const updateRedemptionItem = (
-  id: string,
-  input: Partial<CreateRedemptionItemRequest> & { isActive?: boolean },
-): Promise<RedemptionItem> =>
-  patch(`/redemptions/items/${id}`, redemptionItemSchema, input);
+/**
+ * There is deliberately NO create or update here.
+ *
+ * Catalog writes hit `POST /redemptions/items` and `PATCH /redemptions/items/:id`,
+ * and the server answers both with 404 "Catalog points spending has been retired"
+ * for every role, catalog administrator included. Exposing a client that calls
+ * them would only produce a screen that cannot work; the catalog is now a frozen
+ * historical record, read-only. `redemptions.spec.ts` pins the refusal.
+ */
 
 /* ------------------------------------------------------------------ */
 /* The redemption itself                                               */

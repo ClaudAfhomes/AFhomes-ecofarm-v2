@@ -126,9 +126,13 @@ export {
   earningClaimSchema,
   claimEarningPointsRequestSchema,
   claimEarningPointsResultSchema,
+  claimRowSchema,
+  earningClaimPreviewSchema,
   createEarningClaimRequestSchema,
   serviceCatalogItemSchema,
   serviceCatalogItemInputSchema,
+  serviceCatalogPatchSchema,
+  servicePhotoInputSchema,
   quotePointDiscountSchema,
   purchaseReceiptInputSchema,
   purchaseReceiptDecisionSchema,
@@ -172,6 +176,7 @@ export type {
   PointRedemptionRuleInput,
   PurchaseReceiptInput,
   PurchaseReceiptDecision,
+  ServiceCatalogItemInput,
 } from './schemas/points.js';
 export type {
   RedemptionItem,
@@ -301,11 +306,7 @@ export {
   customerCodeSchema,
   matchesBusinessId,
 } from './schemas/business-ids.js';
-export type {
-  AfIdPrefix,
-  AfCodePrefix,
-  AfBusinessPrefix,
-} from './schemas/business-ids.js';
+export type { AfIdPrefix, AfCodePrefix, AfBusinessPrefix } from './schemas/business-ids.js';
 
 export {
   paymentSchema,
@@ -647,3 +648,5 @@ export {
 } from './schemas/official-forms.js';
 
 export * from './schemas/purchase-flow.js';
+
+export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.js';

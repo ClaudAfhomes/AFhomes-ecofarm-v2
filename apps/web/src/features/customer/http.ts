@@ -37,5 +37,5 @@ export function claimErrorMessage(error: unknown): string {
   if (isNotFound(error)) {
     return 'That claim code cannot be used. Please check it with the branch, or ask for a new one.';
   }
-  return 'We could not claim those points. Nothing was taken from your card. Please try again in a moment.';
+  return 'We could not confirm the claim result. Check your points activity before retrying.';
 }

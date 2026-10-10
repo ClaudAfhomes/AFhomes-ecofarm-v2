@@ -106,3 +106,11 @@ export { NormalizedInput } from './components/NormalizedInput.js';
 export { OstOfficialFields } from './components/OstOfficialFields.js';
 export { IdCapturePicker } from './components/IdCapturePicker.js';
 export { TurnstileChallenge } from './components/TurnstileChallenge.js';
+
+export { useQrScanner, defaultDecoder } from './hooks/useQrScanner.js';
+export type {
+  ScannerStatus,
+  FrameDecoder,
+  QrScannerControls,
+  UseQrScannerResult,
+} from './hooks/useQrScanner.js';

@@ -13,6 +13,7 @@ import {
   customerPointsSummarySchema,
   customerProfileSchema,
   claimEarningPointsResultSchema,
+  earningClaimPreviewSchema,
   type ClaimEarningPointsRequest,
   type ClaimEarningPointsResult,
   type CustomerActivationRequest,
@@ -99,7 +100,17 @@ export const claimEarningPoints = (
     body: JSON.stringify(body),
   });
 
+export const previewEarningClaim = (body: ClaimEarningPointsRequest) =>
+  request('/earning/claim/preview', earningClaimPreviewSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
 export type {
   CustomerProfile,
   CustomerMembership,
-  CustomerPointsSummary, CustomerPointsEntry, CustomerPayment, CustomerCredentials };
+  CustomerPointsSummary,
+  CustomerPointsEntry,
+  CustomerPayment,
+  CustomerCredentials,
+};

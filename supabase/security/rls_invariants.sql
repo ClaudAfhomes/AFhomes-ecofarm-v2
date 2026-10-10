@@ -15,7 +15,7 @@ from pg_class c join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity;
 
 select id, public from storage.buckets
-where id in ('afhomes-customer-ids','afhomes-ost-ids','afhomes-payment-receipts') and public;
+where id in ('afhomes-customer-ids','afhomes-ost-ids','afhomes-payment-receipts','afhomes-service-images') and public;
 
 select policyname, cmd, roles from pg_policies
 where schemaname = 'storage' and tablename = 'objects'

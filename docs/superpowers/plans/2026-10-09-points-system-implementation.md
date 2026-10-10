@@ -10,6 +10,84 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-09-points-system-design.md` — the plan argues from the spec, so the spec travels with it; executors read both.
 
+## 2026-10-10 reconstruction checklist (current scope)
+
+The user-approved reconstruction supersedes the old spending and QR-link-only
+requirements below. Existing migrations stay immutable; all SQL changes are new
+forward-only files executed only against disposable loopback PostgreSQL. No
+commit, push, shared Supabase apply, legacy reset, or deployment is authorized.
+Target verified: claud-promote, claud/develop, HEAD 8ffdb35e8227c63a757f8cb084a53b42e7936a0c.
+Existing uncommitted changes are authorized continuation input; preserve them.
+UI reference: orly/develop commit d05a453 (page skeletons and action spinners),
+and the existing @afhomes/ui Button/loading, Skeleton, and SweetAlert notify APIs.
+
+| Issue | Actual source | Root cause / tests | Correction |
+|---|---|---|---|
+| Earning and spending errors | points.ts; points rebuild/tier discount/idempotency SQL | Browser EXECUTE trusts customer ID; service-role claim EXECUTE absent; sale uses client unitAmount. points.spec.ts and DB sections 65-68 miss authenticated spoof | Server-only claim ACL; server catalog pricing; real denial/pricing/ledger tests |
+| Customer scanning/manual claiming | CustomerPointsPage.tsx; customer-claim.spec.tsx | Typed claim exists; camera/review absent; UI still promises spending | Shared scanner, QR/code review and explicit confirmation; preserve session-derived customer |
+| Redemption lookup | RedemptionWorkflowPage.tsx; redemption.spec.tsx | Old identify/catalog/spend workflow still rendered | Replace with earning-claim queue; preserve sales member resolver |
+| Use Points | BusinessPointsPage.tsx; PointsDiscountPage.tsx; App.tsx | Active spend controls/routes remain despite new API retirement | Remove spend UI/routes; keep accounting/history reads |
+| Redemption Catalog | navigation.ts; App.tsx; RedemptionCatalogPage.tsx | Old spending catalog remains reachable | Retire navigation/write paths; preserve historical rows/read APIs |
+| Claim queue | points-services.ts; points.ts | List/reissue exists but only inside discount investigation screen; insufficient purchase/service/actor context | Available/claimed/expired/reversed tabs with authorized one-time rotation |
+| Earning history | RedemptionHistoryPage.tsx; claim SQL | Screen reads legacy spends; claimed row can retain reservation figure rather than actual award | Claim history + persist final awarded/capped figures; retain read-only legacy history |
+| Service creation | PointsRulesPage.tsx; points contracts; service_catalog; marketing/Experiences.tsx | Manual code, minimal fields, no edit/upload/public data binding; CMS storage upload already exists | Server identifiers, complete editor/photos/availability/publication, existing earning and tier rules |
+
+- [x] Security gate: `20261109000001_afhomes_claim_rpc_authorization.sql` revokes browser EXECUTE on `claim_earning_points`; DB section 68 asserts every browser role is false.
+- [x] Phase 1: `20261108000001_afhomes_retire_points_spending.sql` revokes the four spend functions; routes, nav and clients removed; `legacy-history` and `/redemptions/resolve` retained.
+- [x] Phase 2: `20261110000001_afhomes_claim_lifecycle_repair.sql` persists the real award, renews an expired reservation, and rotates safely; `RedemptionWorkflowPage` is the claim queue.
+- [x] Phase 3: `packages/ui` `useQrScanner` is the single camera lifecycle; `CustomerPointsPage` scans or types into the SAME `claim_earning_points` call.
+- [x] Phase 4: `save_service_catalog` / `append_service_photo` / `manage_service_photo`, `ServiceCatalogEditor`, private bucket, and published `/experiences` binding.
+- [x] Phase 5: `create_purchase` prices from the catalog and the tier discount table; `purchase_payments` verified by Finance; claim only after `PURCHASE_NOT_SETTLED` is impossible.
+- [x] Phase 6 gates: `pnpm test`, `typecheck`, `lint`, `build`, `check:env`, `test:db:local`, `test:db:harness`.
+
+### 2026-10-10 loading-state and UI/UX pass
+
+`orly/develop` (225dad5) is the read-only UI reference. Its `packages/ui` is
+**already present** on claud/develop: every named component (Button, Skeleton,
+Spinner, PageHeader, EmptyState, ErrorState, StatusChip, Table, Dialog,
+FilterBar) is byte-identical, and claud/develop is the newer side of the only
+differences (Sidebar, Pagination). So the component layer needed no work; the
+pages were using it only half-way.
+
+- [x] Removed every hand-written `<Spinner>` that duplicated a `Button` already
+      rendering one, in `BusinessPointsPage`, `PurchasePaymentsPage`, `PointsRulesPage`.
+- [x] Replaced `{isPending ? 'Verifying…' : 'Verify'}` text swaps with
+      `loading` + `loadingLabel`, which also restores `aria-busy` and the
+      `role="status"` announcement.
+- [x] Every initial-load `Skeleton` now sits inside a `role="status"` region with
+      `aria-busy`, because the Skeleton itself is `aria-hidden`.
+- [x] `isPending` replaced with `isLoading` wherever a skeleton is gated on it.
+      A DISABLED query keeps `isPending` true forever in TanStack Query v5, so a
+      skeleton gated on it is a permanent loading state; `SalesRecordsPage`
+      disables its claims query and was the real instance.
+- [x] Wide operational tables wrapped in the shared `.table-scroll` contract with
+      `role="region"`, `aria-label` and `tabIndex`, so 360px overflows inside the
+      region instead of scrolling the page, and stays keyboard-reachable.
+- [x] Public Experiences skeletons mirror the editorial row, and `isPending` →
+      `isLoading` so a background refetch cannot blank a visible page.
+- [x] Customer claim flow names every camera state (opening, ready, detected,
+      denied, unavailable, failed) and never credits on detection alone.
+- [x] Service photo upload previews the chosen file with a revoked blob URL and
+      reports a bad file at selection time, not only on submit.
+- [x] Regression tests: `loading-states.spec.tsx` (infinite skeleton, empty-state
+      flash, no premature success) and `responsive.spec.tsx` (scroll-region
+      contract on the three wide operational tables).
+
+### Open, deliberately not done
+
+- No browser UAT was run. There is no development/staging Supabase project, so
+  camera capture, Storage upload and cross-session Finance verification cannot be
+  exercised against a real Auth/Storage stack. Everything below is proven against
+  a disposable loopback PostgreSQL and jsdom only.
+- The claim queue filters by status through a `<select>`, not tabs. Functionally
+  identical; revisit only if the queue grows enough to need them.
+- `service_catalog.code` is server-generated but still stored. It is an internal
+  identifier, never a customer claim code, and nothing presents it to a customer.
+
+Persistent migration history is not available through the connected Supabase
+account (it exposes only an unrelated inactive project). Do not infer applied
+versions or modify any existing migration. Managed Auth/Storage/deployed exposure
+must be reported separately from local PostgreSQL proof.
 ## Global Constraints
 
 - Work only in `C:\Users\SSD-CLAUD\Documents\AFhomes-ecofarm-v2-claud-promote`, branch `claud/develop`, base commit `a42ce6b`. No new branch, worktree, or repository.

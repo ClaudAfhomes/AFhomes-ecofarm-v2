@@ -54,14 +54,38 @@ const QR_TOKEN = 'OpAqUeQrToKeN-vALue-aAaAaAaAaAaAa';
 const FALLBACK_CODE = 'AFH-1A2B-3C4D';
 
 const PERMISSIONS_ALL = [
-  { moduleKey: 'operations.redemption', canView: true, canCreate: true, canUpdate: true, canDelete: true },
-  { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: true },
+  {
+    moduleKey: 'operations.redemption',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
+  {
+    moduleKey: 'operations.catalog',
+    canView: true,
+    canCreate: true,
+    canUpdate: true,
+    canDelete: true,
+  },
 ];
 
 /** Holds view only: may open the screen and resolve, but may NOT redeem. */
 const PERMISSIONS_VIEW_ONLY = [
-  { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-  { moduleKey: 'operations.catalog', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+  {
+    moduleKey: 'operations.redemption',
+    canView: true,
+    canCreate: false,
+    canUpdate: false,
+    canDelete: false,
+  },
+  {
+    moduleKey: 'operations.catalog',
+    canView: true,
+    canCreate: false,
+    canUpdate: false,
+    canDelete: false,
+  },
 ];
 
 /** No redemption permission at all. */
@@ -84,15 +108,48 @@ function baseTables(): Record<string, Row[]> {
       { id: 'r2', slug: 'employee', name: 'Employee', is_active: true },
     ],
     role_permissions: [
-      { role_id: 'r1', module_id: 'm1', can_view: true, can_create: true, can_update: true, can_delete: true },
-      { role_id: 'r1', module_id: 'm2', can_view: true, can_create: true, can_update: true, can_delete: true },
-      { role_id: 'r2', module_id: 'm1', can_view: true, can_create: false, can_update: false, can_delete: false },
-      { role_id: 'r2', module_id: 'm2', can_view: true, can_create: false, can_update: false, can_delete: false },
+      {
+        role_id: 'r1',
+        module_id: 'm1',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: true,
+      },
+      {
+        role_id: 'r1',
+        module_id: 'm2',
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: true,
+      },
+      {
+        role_id: 'r2',
+        module_id: 'm1',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r2',
+        module_id: 'm2',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
     ],
     staff_users: [
       { id: STAFF_ID, email: 'finance@afhomes.test', full_name: 'Fin Staffer', status: 'active' },
       { id: OTHER_STAFF_ID, email: 'emp@afhomes.test', full_name: 'Em Ployee', status: 'active' },
-      { id: SUSPENDED_STAFF_ID, email: 'susp@afhomes.test', full_name: 'Sus Pended', status: 'suspended' },
+      {
+        id: SUSPENDED_STAFF_ID,
+        email: 'susp@afhomes.test',
+        full_name: 'Sus Pended',
+        status: 'suspended',
+      },
     ],
     staff_role_assignments: [
       { staff_id: STAFF_ID, role_id: 'r1' },
@@ -181,7 +238,13 @@ function baseTables(): Record<string, Row[]> {
       { id: '77777777-7777-4777-8777-777777777777', code: 'GOLD', name: 'Gold', tier: 'GOLD' },
     ],
     points_accounts: [
-      { id: ACCOUNT_ID, membership_id: MEMBERSHIP_ID, balance: 60000, lifetime_allocated: 60000, lifetime_redeemed: 0 },
+      {
+        id: ACCOUNT_ID,
+        membership_id: MEMBERSHIP_ID,
+        balance: 60000,
+        lifetime_allocated: 60000,
+        lifetime_redeemed: 0,
+      },
     ],
     points_ledger: [
       {
@@ -246,7 +309,11 @@ function install(options: Setup = {}) {
     tables: (options.tables ?? baseTables()) as never,
     tokens: {
       [TOKEN]: { id: STAFF_ID, email: 'finance@afhomes.test', email_confirmed_at: ago(200) },
-      [OTHER_TOKEN]: { id: OTHER_STAFF_ID, email: 'emp@afhomes.test', email_confirmed_at: ago(200) },
+      [OTHER_TOKEN]: {
+        id: OTHER_STAFF_ID,
+        email: 'emp@afhomes.test',
+        email_confirmed_at: ago(200),
+      },
       [SUSPENDED_TOKEN]: {
         id: SUSPENDED_STAFF_ID,
         email: 'susp@afhomes.test',
@@ -277,16 +344,22 @@ function install(options: Setup = {}) {
   // The resolver reads permissions from the tables, so scripting the role grants
   // is what actually varies. `permissions` is applied by rewriting role_permissions.
   if (options.permissions) {
-    const grants = (options.permissions as { moduleKey: string; canView: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }[]).map(
-      (p) => ({
-        role_id: roleId,
-        module_id: p.moduleKey === 'operations.redemption' ? 'm1' : 'm2',
-        can_view: p.canView,
-        can_create: p.canCreate,
-        can_update: p.canUpdate,
-        can_delete: p.canDelete,
-      }),
-    );
+    const grants = (
+      options.permissions as {
+        moduleKey: string;
+        canView: boolean;
+        canCreate: boolean;
+        canUpdate: boolean;
+        canDelete: boolean;
+      }[]
+    ).map((p) => ({
+      role_id: roleId,
+      module_id: p.moduleKey === 'operations.redemption' ? 'm1' : 'm2',
+      can_view: p.canView,
+      can_create: p.canCreate,
+      can_update: p.canUpdate,
+      can_delete: p.canDelete,
+    }));
     db.rows('role_permissions').splice(0, db.rows('role_permissions').length, ...grants);
   }
   if (options.noStaffRecord) {
@@ -457,7 +530,8 @@ async function call(
 }
 
 const body = (s: State) => s.body as Record<string, unknown>;
-const errCode = (s: State) => (s.body as { error?: { code?: string; message?: string } }).error?.code;
+const errCode = (s: State) =>
+  (s.body as { error?: { code?: string; message?: string } }).error?.code;
 const errMsg = (s: State) => (s.body as { error?: { message?: string } }).error?.message;
 
 const VALID_REQUEST = {
@@ -654,19 +728,9 @@ describe('redemption staff authorization', () => {
   });
 
   it('lets a permissioned employee resolve a member', async () => {
-    expect((await call({ familyPath: 'resolve', query: { identifier: QR_TOKEN } })).status).toBe(200);
-  });
-
-  it('refuses a redemption attempt by a staff member without the create permission', async () => {
-    install({ permissions: PERMISSIONS_VIEW_ONLY, roleSlug: 'employee' });
-    const s = await call({ method: 'POST', body: VALID_REQUEST, token: OTHER_TOKEN });
-    expect(s.status).toBe(403);
-    expect(errMsg(s)).toMatch(/insufficient permission/i);
-  });
-
-  it('refuses a redemption attempt with no redemption permission at all', async () => {
-    install({ permissions: PERMISSIONS_NONE, roleSlug: 'employee' });
-    expect((await call({ method: 'POST', body: VALID_REQUEST, token: OTHER_TOKEN })).status).toBe(403);
+    expect((await call({ familyPath: 'resolve', query: { identifier: QR_TOKEN } })).status).toBe(
+      200,
+    );
   });
 
   it('honours a deny-only restriction on an otherwise-permissioned employee', async () => {
@@ -682,8 +746,11 @@ describe('redemption staff authorization', () => {
     });
     const resolve = await call({ familyPath: 'resolve', query: { identifier: QR_TOKEN } });
     expect(resolve.status).toBe(403);
+    // The retired transaction is a 404 for every role, including this one, and
+    // writes nothing: the deny-only restriction is not what protects it.
     const redeem = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(redeem.status).toBe(403);
+    expect(redeem.status).toBe(404);
+    expect(db.rows('redemptions')).toHaveLength(0);
   });
 
   it('refuses catalog maintenance without the catalog permission', async () => {
@@ -696,191 +763,85 @@ describe('redemption staff authorization', () => {
     });
     expect(s.status).toBe(403);
   });
-
-  it('takes the acting staff identity from the session, never the body', async () => {
-    const db = install();
-    const s = await call({
-      method: 'POST',
-      body: {
-        ...VALID_REQUEST,
-        // Every one of these is ignored: the contract has no such field.
-        redeemedBy: OTHER_STAFF_ID,
-        redeemedById: OTHER_STAFF_ID,
-        staffId: OTHER_STAFF_ID,
-        actorId: OTHER_STAFF_ID,
-      },
-    });
-    expect(s.status).toBe(201);
-    const row = db.rows('redemptions')[0]!;
-    expect(row.redeemed_by).toBe(STAFF_ID);
-    const rpcCall = db.calls.find((c) => c.op === 'rpc')!;
-    expect((rpcCall.arg as Record<string, unknown>).p_actor_id).toBe(STAFF_ID);
-  });
 });
 
 /* ================================================================== */
-/* Creating a redemption                                                */
+/* Catalog redemption is RETIRED                                       */
 /* ================================================================== */
 
-describe('creating a redemption', () => {
-  beforeEach(() => install());
+// Points are earned on a purchase and claimed by the customer in their own
+// account. Spending an existing balance against a catalog item is no longer
+// part of the product, so there is no transaction route at all.
+//
+// These assert the route is GONE rather than merely unused. A spend endpoint
+// that still answers behind a removed button is exactly the hidden way to
+// spend that the requirement forbids, and public.redeem_membership_points was
+// revoked in 20261108000001, so it cannot be revived by re-adding a button.
 
-  it('succeeds and returns a receipt', async () => {
-    const s = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(s.status).toBe(201);
-    expect(body(s)).toMatchObject({
-      redemptionNumber: 'RDM-000001',
-      membershipNumber: 'MBS-000777',
-      customerDisplayName: 'Ana R Buyer',
-      itemCode: 'TEPPANYAKI',
-      itemName: 'Japanese Teppanyaki',
-      unitPoints: 2000,
-      quantity: 1,
-      totalPoints: 2000,
-      balanceBefore: 60000,
-      balanceAfter: 58000,
-      redeemedByName: 'Fin Staffer',
-      replayed: false,
-    });
+// One already-completed redemption, as it existed BEFORE the transaction was
+// retired. Seeding it directly is deliberate: there is no longer any API that
+// can create one, which is exactly what the retirement means. History has to
+// keep reading the rows that already exist.
+function seedRetiredRedemption(db: FakeSupabase, pointsCostSnapshot: number) {
+  db.rows('redemptions').push({
+    id: '77777777-7777-4777-8777-777777777777',
+    redemption_number: 'RDM-000001',
+    membership_id: MEMBERSHIP_ID,
+    customer_id: CUSTOMER_ID,
+    points_account_id: ACCOUNT_ID,
+    redemption_item_id: ITEM_ID,
+    item_code_snapshot: 'TEPPANYAKI',
+    item_name_snapshot: 'Japanese Teppanyaki',
+    points_cost_snapshot: pointsCostSnapshot,
+    quantity: 1,
+    total_points: pointsCostSnapshot,
+    balance_before_snapshot: 60000,
+    balance_after_snapshot: 60000 - pointsCostSnapshot,
+    redeemed_by: STAFF_ID,
+    redeemed_by_name: 'Fin Staffer',
+    status: 'completed',
+    created_at: ago(10),
+    completed_at: ago(10),
+    voided_at: null,
+    void_reason: null,
+    idempotency_key: 'retired-1',
+    customers: { first_name: 'Ana', middle_name: null, last_name: 'Buyer', suffix: null },
+    memberships: { membership_number: 'MBS-000777' },
   });
+}
 
-  it('sends the reference through as the de-duplication key', async () => {
+describe('catalog redemption is retired', () => {
+  it('does not serve the transaction, under any alias', async () => {
     const db = install();
-    await call({ method: 'POST', body: VALID_REQUEST });
-    const rpcCall = db.calls.find((c) => c.op === 'rpc')!;
-    expect((rpcCall.arg as Record<string, unknown>).p_idempotency_key).toBe(
-      'pos-terminal-7-000001',
-    );
-  });
-
-  it('never accepts a client-supplied price, balance, status or item name', async () => {
-    const db = install();
-    const s = await call({
-      method: 'POST',
-      body: {
-        ...VALID_REQUEST,
-        pointsCost: 1,
-        totalPoints: 1,
-        balance: 999999,
-        balanceAfter: 999999,
-        status: 'voided',
-        itemName: 'Free Lunch',
-        itemCode: 'FREE',
-        customerId: OTHER_CUSTOMER_ID,
-        productName: 'Platinum',
-      },
-    });
-    expect(s.status).toBe(201);
-    // The receipt reflects the DATABASE price, not the injected one.
-    expect(body(s).unitPoints).toBe(2000);
-    expect(body(s).totalPoints).toBe(2000);
-    expect(body(s).itemName).toBe('Japanese Teppanyaki');
-    expect(body(s).balanceAfter).toBe(58000);
-    const rpcCall = db.calls.find((c) => c.op === 'rpc')!;
-    const args = rpcCall.arg as Record<string, unknown>;
-    expect(Object.keys(args).sort()).toEqual([
-      'p_actor_id',
-      'p_idempotency_key',
-      'p_membership_id',
-      'p_quantity',
-      'p_redemption_item_id',
-    ]);
-  });
-
-  it('refuses an inactive catalog item', async () => {
-    const s = await call({
-      method: 'POST',
-      body: { ...VALID_REQUEST, redemptionItemId: RETIRED_ITEM_ID, clientTransactionId: 'ref-000001' },
-    });
-    expect(s.status).toBe(409);
-    expect(errMsg(s)).toMatch(/no longer available/i);
-  });
-
-  it('refuses an insufficient balance with a business-safe message', async () => {
-    const db = install();
-    db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance = 1500;
-    const s = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(s.status).toBe(409);
-    expect(errMsg(s)).toMatch(/does not have enough points/i);
-    expect(db.rows('redemptions')).toHaveLength(0);
-    expect(db.rows('points_ledger')).toHaveLength(1);
-  });
-
-  it('does not leak the balance in an insufficient-points refusal', async () => {
-    const db = install();
-    db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance = 1500;
-    const s = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(JSON.stringify(s.body)).not.toContain('1500');
-  });
-
-  it('writes exactly one negative ledger entry', async () => {
-    const db = install();
-    await call({ method: 'POST', body: VALID_REQUEST });
-    const debits = db.rows('points_ledger').filter((r) => r.entry_type === 'redemption');
-    expect(debits).toHaveLength(1);
-    expect(Number(debits[0]!.amount)).toBe(-2000);
-    expect(Number(debits[0]!.balance_after)).toBe(58000);
-    expect(debits[0]!.reference_type).toBe('redemption');
-  });
-
-  it('a retry with the same reference does not deduct twice', async () => {
-    const db = install();
-    const first = await call({ method: 'POST', body: VALID_REQUEST });
-    const second = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(second.status).toBe(201);
-    expect(body(second).redemptionNumber).toBe(body(first).redemptionNumber);
-    expect(db.rows('redemptions')).toHaveLength(1);
-    expect(db.rows('points_ledger').filter((r) => r.entry_type === 'redemption')).toHaveLength(1);
-    expect(Number(db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance)).toBe(58000);
-  });
-
-  it('marks an identical retry as replayed', async () => {
-    install();
-    await call({ method: 'POST', body: VALID_REQUEST });
-    const second = await call({ method: 'POST', body: VALID_REQUEST });
-    expect(body(second).replayed).toBe(true);
-  });
-
-  it('a different reference is a genuinely new redemption', async () => {
-    const db = install();
-    await call({ method: 'POST', body: VALID_REQUEST });
-    await call({ method: 'POST', body: { ...VALID_REQUEST, clientTransactionId: 'pos-7-000002' } });
-    expect(db.rows('redemptions')).toHaveLength(2);
-    expect(Number(db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance)).toBe(56000);
-  });
-
-  it('multiplies quantity by the catalog price and nothing else', async () => {
-    const s = await call({ method: 'POST', body: { ...VALID_REQUEST, quantity: 3 } });
-    expect(body(s).totalPoints).toBe(6000);
-    expect(body(s).balanceAfter).toBe(54000);
-  });
-
-  it.each([0, -1, 100, 1.5])('refuses quantity %s', async (quantity) => {
-    const s = await call({ method: 'POST', body: { ...VALID_REQUEST, quantity } });
-    expect(s.status).toBe(400);
-  });
-
-  it.each(['', 'short', 'has spaces', 'semi;colon'])(
-    'refuses a de-duplication reference of %s',
-    async (clientTransactionId) => {
-      const s = await call({ method: 'POST', body: { ...VALID_REQUEST, clientTransactionId } });
-      expect(s.status).toBe(400);
-    },
-  );
-
-  it('refuses a non-uuid membership or item', async () => {
-    expect(
-      (await call({ method: 'POST', body: { ...VALID_REQUEST, membershipId: 'nope' } })).status,
-    ).toBe(400);
-    expect(
-      (await call({ method: 'POST', body: { ...VALID_REQUEST, redemptionItemId: 'nope' } })).status,
-    ).toBe(400);
-  });
-
-  it('refuses any other verb on the collection', async () => {
-    for (const verb of ['PUT', 'PATCH', 'DELETE']) {
-      expect((await call({ method: verb, body: VALID_REQUEST })).status, verb).toBe(404);
+    const redemptionsBefore = db.rows('redemptions').length;
+    const ledgerBefore = db.rows('points_ledger').length;
+    for (const path of ['', 'commit']) {
+      for (const verb of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+        const s = await call({ familyPath: path, method: verb, body: VALID_REQUEST });
+        expect(s.status, `${verb} ${path || '(collection)'}`).toBe(404);
+      }
     }
+    expect(db.calls.some((c) => c.op === 'rpc')).toBe(false);
+    expect(db.rows('redemptions')).toHaveLength(redemptionsBefore);
+    expect(db.rows('points_ledger')).toHaveLength(ledgerBefore);
+  });
+
+  it('does not let a caller-supplied price smuggle a spend back in', async () => {
+    const s = await call({
+      method: 'POST',
+      body: { ...VALID_REQUEST, amount: 5000, cash: 5000, peso: 5000, php: 5000 },
+    });
+    expect(s.status).toBe(404);
+  });
+
+  it('still serves the history of redemptions made before it was retired', async () => {
+    const db = install();
+    seedRetiredRedemption(db, 2000);
+    const s = await call({ familyPath: 'history' });
+    expect(s.status).toBe(200);
+    const rows = (s.body as { data: Row[] }).data;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.itemNameSnapshot).toBe('Japanese Teppanyaki');
   });
 });
 
@@ -903,67 +864,6 @@ describe('redemption catalog management', () => {
     expect((s.body as { data: Row[] }).data).toHaveLength(2);
   });
 
-  it('creates an item and audits it', async () => {
-    const db = install();
-    const s = await call({
-      method: 'POST',
-      familyPath: 'items',
-      body: { code: 'spa-day', name: 'Spa Day Pass', pointsCost: 25000, category: 'wellness' },
-    });
-    expect(s.status).toBe(201);
-    expect(body(s)).toMatchObject({ code: 'SPA-DAY', name: 'Spa Day Pass', pointsCost: 25000 });
-    const actions = db.rows('audit_events').map((r) => r.action);
-    expect(actions).toContain('REDEMPTION_ITEM_CREATED');
-  });
-
-  it('rejects a duplicate code as a conflict', async () => {
-    install();
-    const s = await call({
-      method: 'POST',
-      familyPath: 'items',
-      body: { code: 'TEPPANYAKI', name: 'Clone', pointsCost: 10 },
-    });
-    expect(s.status).toBe(409);
-  });
-
-  it.each([
-    { code: '', name: 'X', pointsCost: 10 },
-    { code: 'OK-1', name: '', pointsCost: 10 },
-    { code: 'OK-1', name: 'X', pointsCost: 0 },
-    { code: 'OK-1', name: 'X', pointsCost: -5 },
-    { code: 'OK-1', name: 'X', pointsCost: 1.5 },
-    { code: 'has spaces', name: 'X', pointsCost: 10 },
-  ])('rejects an invalid create body %j', async (payload) => {
-    install();
-    expect((await call({ method: 'POST', familyPath: 'items', body: payload })).status).toBe(400);
-  });
-
-  it('updates the price and audits it', async () => {
-    const db = install();
-    const s = await call({
-      method: 'PATCH',
-      familyPath: `items/${ITEM_ID}`,
-      body: { pointsCost: 3500, name: 'Japanese Teppanyaki (2026)' },
-    });
-    expect(s.status).toBe(200);
-    expect(body(s)).toMatchObject({ pointsCost: 3500, name: 'Japanese Teppanyaki (2026)' });
-    expect(db.rows('audit_events').map((r) => r.action)).toContain('REDEMPTION_ITEM_UPDATED');
-  });
-
-  it('deactivates an item and audits that specifically', async () => {
-    const db = install();
-    const s = await call({
-      method: 'PATCH',
-      familyPath: `items/${ITEM_ID}`,
-      body: { isActive: false },
-    });
-    expect(s.status).toBe(200);
-    expect(body(s).isActive).toBe(false);
-    const actions = db.rows('audit_events').map((r) => r.action);
-    expect(actions).toContain('REDEMPTION_ITEM_DEACTIVATED');
-    expect(actions).not.toContain('REDEMPTION_ITEM_UPDATED');
-  });
-
   it('never DELETEs an item, because history must stay resolvable', async () => {
     install();
     for (const verb of ['DELETE']) {
@@ -971,21 +871,16 @@ describe('redemption catalog management', () => {
     }
   });
 
-  it('an updated price applies to new redemptions only', async () => {
+  it('an updated catalog price does not rewrite what history recorded', async () => {
     const db = install();
-    await call({ method: 'POST', body: VALID_REQUEST });
-    await call({
-      method: 'PATCH',
-      familyPath: `items/${ITEM_ID}`,
-      body: { pointsCost: 3500 },
-    });
-    const second = await call({
-      method: 'POST',
-      body: { ...VALID_REQUEST, clientTransactionId: 'pos-7-000009' },
-    });
-    expect(body(second).unitPoints).toBe(3500);
-    // The first redemption keeps its own snapshot.
-    expect(Number(db.rows('redemptions')[0]!.points_cost_snapshot)).toBe(2000);
+    seedRetiredRedemption(db, 2000);
+    // The catalog is re-priced after the fact. History must still show what
+    // the member was actually charged.
+    db.rows('redemption_items').find((r) => r.id === ITEM_ID)!.points_cost = 3500;
+    const s = await call({ familyPath: 'history' });
+    expect(s.status).toBe(200);
+    const rows = (s.body as { data: Row[] }).data;
+    expect(Number(rows[0]!.pointsCostSnapshot)).toBe(2000);
   });
 });
 
@@ -1153,7 +1048,9 @@ describe('what this phase deliberately cannot do', () => {
     const row = db.rows('redemptions').find((r) => r.id === id)!;
     expect(row.status).toBe('completed');
     expect(row.voided_at).toBeNull();
-    expect(Number(db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance)).toBe(60000);
+    expect(Number(db.rows('points_accounts').find((r) => r.id === ACCOUNT_ID)!.balance)).toBe(
+      60000,
+    );
   });
 
   it('has no NFC, tag or reader concept anywhere in the flow', async () => {
@@ -1164,13 +1061,20 @@ describe('what this phase deliberately cannot do', () => {
       expect(serialised, forbidden).not.toContain(forbidden);
     }
   });
+});
 
-  it('never accepts a cash or payment amount', async () => {
-    const s = await call({
-      method: 'POST',
-      body: { ...VALID_REQUEST, amount: 5000, cash: 5000, peso: 5000, php: 5000 },
+describe('retired catalog writes', () => {
+  beforeEach(() => install());
+  it.each([
+    ['POST', 'items'],
+    ['PATCH', `items/${ITEM_ID}`],
+  ])('refuses direct %s %s even to a catalog administrator', async (method, familyPath) => {
+    const state = await call({
+      method,
+      familyPath,
+      body: { code: 'FORGED', name: 'Forged', pointsCost: 1 },
     });
-    expect(s.status).toBe(201);
-    expect(body(s).totalPoints).toBe(2000);
+    expect(state.status).toBe(404);
+    expect(errCode(state)).toBe('NOT_FOUND');
   });
 });

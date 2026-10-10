@@ -14,27 +14,36 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+vi.mock('../../lib/session', async (original) => ({
+  ...(await original<typeof import('../../lib/session')>()),
+  useSession: () => ({
+    user: {
+      afHomesPermissions: [
+        { moduleKey: 'operations.payments', canView: true, canUpdate: true },
+        { moduleKey: 'operations.sales', canView: true, canCreate: true },
+      ],
+    },
+  }),
+}));
 import { PurchasePaymentsPage } from './PurchasePaymentsPage';
 import {
   decideReceipt,
   getPurchaseSummary,
-  listPurchases,
+  listFinancePurchases,
   listReceipts,
   recordReceipt,
 } from './points-services';
 
 vi.mock('./points-services', async () => ({
-  listPurchases: vi.fn(),
+  listFinancePurchases: vi.fn(),
   getPurchaseSummary: vi.fn(),
   listReceipts: vi.fn(),
   recordReceipt: vi.fn(),
   decideReceipt: vi.fn(),
-  commitPointDiscount: vi.fn(),
-  quotePointDiscount: vi.fn(),
   listClaims: vi.fn(),
 }));
 
-const mockedList = vi.mocked(listPurchases);
+const mockedList = vi.mocked(listFinancePurchases);
 const mockedSummary = vi.mocked(getPurchaseSummary);
 const mockedReceipts = vi.mocked(listReceipts);
 const mockedRecord = vi.mocked(recordReceipt);
@@ -110,9 +119,7 @@ describe('purchase receipts', () => {
     const section = await screen.findByRole('region', { name: /receipts for/i });
     // The summary loads after the section does, so await the figures themselves
     // rather than asserting on an empty skeleton.
-    expect(
-      await within(section).findByRole('rowheader', { name: 'Amount due' }),
-    ).toBeTruthy();
+    expect(await within(section).findByRole('rowheader', { name: 'Amount due' })).toBeTruthy();
     expect(within(section).getByRole('rowheader', { name: 'Verified received' })).toBeTruthy();
     expect(within(section).getByRole('rowheader', { name: 'Still due' })).toBeTruthy();
     expect(within(section).getByText('Outstanding')).toBeTruthy();
@@ -139,9 +146,7 @@ describe('purchase receipts', () => {
       reference: null,
     });
     // The wording is the guard: "recorded" is explicitly not yet money.
-    expect(
-      await screen.findByText(/not money received yet/i),
-    ).toBeTruthy();
+    expect(await screen.findByText(/not money received yet/i)).toBeTruthy();
   });
 
   it('has no points option when recording a payment', async () => {
@@ -164,7 +169,9 @@ describe('purchase receipts', () => {
     expect(await screen.findByText('recorded')).toBeTruthy();
     const section = screen.getByRole('region', { name: /receipts for/i });
     // Still outstanding, and nothing verified yet.
-    expect(await within(section).findByRole('rowheader', { name: 'Verified received' })).toBeTruthy();
+    expect(
+      await within(section).findByRole('rowheader', { name: 'Verified received' }),
+    ).toBeTruthy();
     expect(within(section).getByText('Outstanding')).toBeTruthy();
     expect(mockedDecide).not.toHaveBeenCalled();
   });
@@ -172,7 +179,12 @@ describe('purchase receipts', () => {
   it('a VERIFIED receipt updates the amount due', async () => {
     const user = userEvent.setup();
     mockedReceipts.mockResolvedValue([RECEIPT] as never);
-    mockedSummary.mockResolvedValue({ ...SUMMARY, verifiedTotal: '5000.00', remainingBalance: '0.00', fullyPaid: true } as never);
+    mockedSummary.mockResolvedValue({
+      ...SUMMARY,
+      verifiedTotal: '5000.00',
+      remainingBalance: '0.00',
+      fullyPaid: true,
+    } as never);
     renderWithProviders(<PurchasePaymentsPage />);
 
     await user.click(await screen.findByRole('button', { name: /^verify$/i }));
@@ -256,7 +268,12 @@ describe('purchase receipts', () => {
 
   it('a REJECTED receipt is shown as rejected, with its reason', async () => {
     mockedReceipts.mockResolvedValue([
-      { ...RECEIPT, status: 'rejected', verifiedBy: '22222222-2222-4222-8222-222222222222', rejectionReason: 'Cheque bounced' },
+      {
+        ...RECEIPT,
+        status: 'rejected',
+        verifiedBy: '22222222-2222-4222-8222-222222222222',
+        rejectionReason: 'Cheque bounced',
+      },
     ] as never);
     renderWithProviders(<PurchasePaymentsPage />);
     expect(await screen.findByText('rejected')).toBeTruthy();
