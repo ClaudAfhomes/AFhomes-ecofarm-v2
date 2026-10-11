@@ -158,30 +158,37 @@ function mount(application = false) {
   );
   return { ...view, user: userEvent.setup() };
 }
-async function tier(initial = '') {
+/**
+ * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
+ *
+ * This used to ride on "Imported Tier", which is now a closed dropdown and
+ * therefore cannot be typed into. `Address` is the right vehicle instead:
+ * `normalizeLiveHumanField` still uppercases it live on this very screen, so
+ * the caret/IME/Unicode contract stays covered by a field that still exists.
+ */
+async function typedField(initial = '') {
   const view = mount();
-  const input = screen.getByLabelText<HTMLInputElement>(/Imported tier context/);
-  await view.user.type(input, initial || 'silver');
-  if (!initial) await view.user.clear(input);
+  const input = screen.getByLabelText<HTMLInputElement>('Address');
+  if (initial) await view.user.type(input, initial);
   input.focus();
   return { ...view, input };
 }
-it('actual IST tier end typing uppercases', async () => {
-  const { input, user } = await tier();
+it('actual IST address end typing uppercases', async () => {
+  const { input, user } = await typedField();
   await user.type(input, 'silver');
   expect(input.value).toBe('SILVER');
   expect(input.selectionStart).toBe(6);
 });
-it('actual IST tier mid-string insertion restores both selection endpoints', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address mid-string insertion restores both selection endpoints', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(2, 2);
   await user.keyboard('x');
   expect(input.value).toBe('SIXLVER MEMBER');
   expect(input.selectionStart).toBe(3);
   expect(input.selectionEnd).toBe(3);
 });
-it('actual IST tier second insertion stays in place after rerender', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address second insertion stays in place after rerender', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(2, 2);
   await user.keyboard('x');
   expect(input.selectionStart).toBe(3);
@@ -190,43 +197,56 @@ it('actual IST tier second insertion stays in place after rerender', async () =>
   expect(input.selectionStart).toBe(4);
   expect(input.selectionEnd).toBe(4);
 });
-it('actual IST tier selection replacement', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address selection replacement', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(0, 6);
   await user.keyboard('gold');
   expect(input.value).toBe('GOLD MEMBER');
   expect(input.selectionStart).toBe(4);
 });
-it('actual IST tier backspace', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address backspace', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(3, 3);
   await user.keyboard('{Backspace}');
   expect(input.value).toBe('SIVER MEMBER');
   expect(input.selectionStart).toBe(2);
 });
-it('actual IST tier Delete', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address Delete', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(2, 2);
   await user.keyboard('{Delete}');
   expect(input.value).toBe('SIVER MEMBER');
   expect(input.selectionStart).toBe(2);
 });
-it('actual IST tier paste uppercases and retains middle caret', async () => {
-  const { input, user } = await tier('SILVER MEMBER');
+it('actual IST address paste uppercases and retains middle caret', async () => {
+  const { input, user } = await typedField('SILVER MEMBER');
   input.setSelectionRange(2, 2);
   await user.paste('xy');
   expect(input.value).toBe('SIXYLVER MEMBER');
   expect(input.selectionStart).toBe(4);
 });
-it('actual IST tier Unicode expansion uses the shared prefix mapping', async () => {
-  const { input, user } = await tier('SILVER');
+it('actual IST address Unicode expansion uses the shared prefix mapping', async () => {
+  const { input, user } = await typedField('SILVER');
   input.setSelectionRange(2, 2);
   await user.paste('ß');
   expect(input.value).toBe('SISSLVER');
   expect(input.selectionStart).toBe(4);
 });
+it('actual IST tier is a closed dropdown, not a free-text box', async () => {
+  const view = mount();
+  const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
+  expect(select.tagName).toBe('SELECT');
+  expect(
+    [...select.options].map((option) => option.value),
+  ).toEqual(['', 'BRONZE', 'SILVER', 'GOLD']);
+  await view.user.selectOptions(select, 'GOLD');
+  expect(select.value).toBe('GOLD');
+});
 it('actual IST tier retains the existing canonical enum payload behavior', async () => {
-  const { input, user } = await tier('gold');
+  const view = mount();
+  const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
+  await view.user.selectOptions(select, 'GOLD');
+  const { user } = view;
   // The save now validates the whole official form. A tier assertion needs a
   // valid holder fixture; an empty form must not reach a creation API.
   await user.selectOptions(
@@ -238,10 +258,10 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   // the selector is removed rather than merely ignored.
   expect(screen.queryByRole('combobox', { name: 'Card sale' })).not.toBeInTheDocument();
   expect(await screen.findByText('QA SELLER NAME')).toBeInTheDocument();
-  await user.type(screen.getByLabelText('name'), 'QA HOLDER');
-  await user.type(screen.getByLabelText('address'), '1 QA STREET');
-  await user.type(screen.getByLabelText('contactNumber'), '09171234567');
-  await user.type(screen.getByLabelText('email'), 'qa@example.com');
+  await user.type(screen.getByLabelText('Name'), 'QA HOLDER');
+  await user.type(screen.getByLabelText('Address'), '1 QA STREET');
+  await user.type(screen.getByLabelText('Contact Number'), '09171234567');
+  await user.type(screen.getByLabelText('Email'), 'qa@example.com');
   await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalled());
   // Application-origin carries the frozen terms reference and no sale id.
@@ -252,14 +272,16 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   ).toBeUndefined();
   await user.click(await screen.findByRole('button', { name: 'OK' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  await user.clear(input);
-  await user.type(input, 'silver member');
+  // An application-origin payload carries no vipTier by design, so this asserts
+  // the stronger, real property: a tier can only ever be a value the schema
+  // accepts, and clearing it never emits an empty or invented tier.
+  await user.selectOptions(select, '');
   await user.click(await screen.findByRole('button', { name: 'Create Reservation Agreement' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalledTimes(2));
   expect(calls.reservation.mock.calls[1]?.[0]).not.toHaveProperty('vipTier');
 });
-it('actual IST tier IME preserves the draft and commits once complete', async () => {
-  const { input } = await tier('AB');
+it('actual IST address IME preserves the draft and commits once complete', async () => {
+  const { input } = await typedField('AB');
   input.setSelectionRange(1, 1);
   fireEvent.compositionStart(input);
   fireEvent.change(input, { target: { value: 'AßB', selectionStart: 2, selectionEnd: 2 } });

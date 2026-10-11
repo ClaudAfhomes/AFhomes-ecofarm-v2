@@ -173,6 +173,7 @@ describe('purchase workflow next step', () => {
     id: 'bbbbbbbb-0000-4000-8000-000000000009',
     reservationNumber: 'AF-RES-Y7USC',
     saleId,
+    saleNumber: null,
     paymentScheme: 'spot_cash' as const,
     totalPrice: '60000.00',
     primarySignatureStatus: 'received' as const,

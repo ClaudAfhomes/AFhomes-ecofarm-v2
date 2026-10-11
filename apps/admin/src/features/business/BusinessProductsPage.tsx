@@ -1,8 +1,9 @@
-import styles from './WorkflowCards.module.css';
+import styles from './BusinessProductsPage.module.css';
 import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CardCategory, CardProduct } from '@afhomes/contracts';
 import {
   Button,
@@ -13,6 +14,7 @@ import {
   PageHeader,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 
@@ -114,6 +116,90 @@ const categoryFormFromCategory = (category: CardCategory): CategoryForm => ({
   isActive: category.isActive,
 });
 
+/**
+ * Results-region placeholder: the card grid or the table, shaped exactly like
+ * the real results so nothing jumps when they arrive.
+ */
+function CatalogResultsSkeleton({ variant }: { variant: 'cards' | 'table' }) {
+  if (variant === 'table') {
+    return (
+      <div className={styles.skeletonTable} aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => (
+          <div
+            key={index}
+            className={`${styles.skeletonRow} ${index === 0 ? styles.skeletonRowHead : ''}`}
+          >
+            {Array.from({ length: 6 }, (__, cell) => (
+              <Skeleton key={cell} style={{ height: 16 }} />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className={styles.skeletonGrid} aria-hidden="true">
+      {Array.from({ length: 3 }, (_, index) => (
+        <div key={index} className={styles.skeletonCard}>
+          <Skeleton style={{ height: 148, borderRadius: 0 }} />
+          <div className={styles.skeletonCardBody}>
+            <Skeleton style={{ height: 24, maxWidth: '60%' }} />
+            <Skeleton style={{ height: 20, maxWidth: '35%' }} />
+            <div className={styles.skeletonFacts}>
+              {Array.from({ length: 6 }, (__, fact) => (
+                <div key={fact} style={{ display: 'grid', gap: 6 }}>
+                  <Skeleton style={{ height: 10, maxWidth: '70%' }} />
+                  <Skeleton style={{ height: 16, maxWidth: '55%' }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: '0 var(--space-4) var(--space-4)' }}>
+            <Skeleton style={{ height: 40 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Full-screen skeleton for a tab's FIRST load.
+ *
+ * Mirrors the real layout (header, actions, switcher, toolbar, results) so
+ * nothing pops in and reflows when the data lands. It owns the single
+ * `role="status"` for the pending state and announces which tab is loading,
+ * because a screen of silent grey blocks gives no clue what is arriving.
+ */
+function CatalogSkeleton({
+  label,
+  variant,
+  switcher,
+}: {
+  label: string;
+  variant: 'cards' | 'table';
+  switcher: ReactNode;
+}) {
+  return (
+    <div className={styles.skeletonShell} role="status" aria-label={label}>
+      <div className={styles.skeletonHeader}>
+        <div className={styles.skeletonHeaderText}>
+          <Skeleton style={{ height: 30, maxWidth: 240 }} />
+          <Skeleton style={{ height: 16, maxWidth: 460 }} />
+        </div>
+        <Skeleton style={{ height: 40, width: 148 }} />
+      </div>
+      {switcher}
+      <div className={styles.skeletonToolbar} aria-hidden="true">
+        <Skeleton style={{ height: 40 }} />
+        <Skeleton style={{ height: 40 }} />
+      </div>
+      <CatalogResultsSkeleton variant={variant} />
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
 function validatePlanForm(form: PlanForm): string | null {
   if (!form.name.trim()) return 'Name is required';
   if (!form.code.trim()) return 'Code is required';
@@ -175,6 +261,20 @@ export function BusinessProductsPage() {
   const [editingCategory, setEditingCategory] = useState<CardCategory | null>(null);
   const [categoryForm, setCategoryForm] = useState<CategoryForm>(EMPTY_CATEGORY_FORM);
 
+  /**
+   * Why only the FIRST load may replace the screen with skeletons.
+   *
+   * Searching re-keys the query, so a brand-new key with no cached rows is
+   * `pending` again while the operator is still typing. Swapping the page for
+   * skeletons at that moment unmounts the search box itself, dropping focus and
+   * silently swallowing the next keystroke.
+   *
+   * `keepPreviousData` removes the ambiguity at the source: a refetch carries
+   * the previous rows forward, so the query stays successful and `isPending`
+   * only ever describes a genuine first load. The chrome therefore never
+   * disappears mid-interaction, the previous results stay on screen instead of
+   * blanking, and `busy` tells the operator the list is being updated.
+   */
   const plans = useQuery({
     queryKey: ['business', 'card-products', appliedSearch, visibility],
     queryFn: () =>
@@ -182,10 +282,12 @@ export function BusinessProductsPage() {
         search: appliedSearch || undefined,
         active: visibility === 'active' ? undefined : visibility,
       }),
+    placeholderData: keepPreviousData,
   });
   const categories = useQuery({
     queryKey: ['business', 'card-categories'],
     queryFn: () => getCardCategories({ active: 'all' }),
+    placeholderData: keepPreviousData,
   });
   const activeCategories = (categories.data ?? []).filter((c) => c.isActive);
 
@@ -337,35 +439,64 @@ export function BusinessProductsPage() {
   const categoryError = validateCategoryForm(categoryForm);
   const categoryDialogOpen = creatingCategory || editingCategory !== null;
 
-  return (
-    <section>
-      <PageHeader
-        title="Card Plans"
-        description="Catalogue economics and vocabulary. Existing sales keep the terms snapshotted when they were created."
-        actions={
-          tab === 'plans' ? (
-            <Button onClick={openCreatePlan}>Add Card Plan</Button>
-          ) : (
-            <Button onClick={openCreateCategory}>Add Category</Button>
-          )
-        }
-      />
+  // The skeleton follows the ACTIVE tab, so switching tabs re-skeletons that
+  // tab instead of leaving the previous tab's content on screen.
+  // With `keepPreviousData`, `isPending` only ever describes a genuine FIRST
+  // load: a refetch that carries previous rows is successful, not pending.
+  const firstLoad = tab === 'plans' ? plans.isPending : categories.isPending;
+  // Any fetch in flight, including a background refetch driven by the search box.
+  const refreshing = tab === 'plans' ? plans.isFetching : categories.isFetching;
+  const loadingLabel = tab === 'plans' ? 'Loading card plans…' : 'Loading categories…';
 
-      <div
-        role="tablist"
-        aria-label="Card catalogue"
-        style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}
+  /**
+   * Rendered in both states and in the same position, so it never shifts and
+   * never disappears behind a skeleton. The switcher is navigation, not data:
+   * an operator must be able to move between tabs while one of them is still
+   * loading, so it is deliberately excluded from the loading placeholder.
+   */
+  const tabSwitcher = (
+    <div role="tablist" aria-label="Card catalogue" className={styles.tabs}>
+      <Button
+        className={styles.tab}
+        variant={tab === 'plans' ? 'primary' : 'secondary'}
+        onClick={() => setTab('plans')}
       >
-        <Button variant={tab === 'plans' ? 'primary' : 'secondary'} onClick={() => setTab('plans')}>
-          Plans
-        </Button>
-        <Button
-          variant={tab === 'categories' ? 'primary' : 'secondary'}
-          onClick={() => setTab('categories')}
-        >
-          Categories
-        </Button>
-      </div>
+        Plans
+      </Button>
+      <Button
+        className={styles.tab}
+        variant={tab === 'categories' ? 'primary' : 'secondary'}
+        onClick={() => setTab('categories')}
+      >
+        Categories
+      </Button>
+    </div>
+  );
+
+  return (
+    <section className={styles.pageShell}>
+      {firstLoad ? (
+        <CatalogSkeleton
+          label={loadingLabel}
+          variant={tab === 'plans' ? 'cards' : 'table'}
+          switcher={tabSwitcher}
+        />
+      ) : (
+        <>
+          <PageHeader
+            title="Card Plans"
+            description="Catalogue economics and vocabulary. Existing sales keep the terms snapshotted when they were created."
+            actions={
+              tab === 'plans' ? (
+                <Button onClick={openCreatePlan}>Add Card Plan</Button>
+              ) : (
+                <Button onClick={openCreateCategory}>Add Category</Button>
+              )
+            }
+          />
+
+          {tabSwitcher}
+
 
       {detailPlan ? (
         <Dialog
@@ -373,13 +504,57 @@ export function BusinessProductsPage() {
           title={detailPlan.name}
           onClose={() => setDetailPlan(null)}
           footer={
-            <Button variant="secondary" onClick={() => setDetailPlan(null)}>
-              Close
-            </Button>
+            <div className={styles.dialogActions}>
+              <Button
+                onClick={() => {
+                  openEditPlan(detailPlan);
+                  setDetailPlan(null);
+                }}
+              >
+                Edit plan
+              </Button>
+              <Button
+                variant={detailPlan.isActive ? 'danger' : 'secondary'}
+                disabled={togglePlan.isPending}
+                onClick={() =>
+                  togglePlan.mutate(
+                    { id: detailPlan.id, isActive: !detailPlan.isActive },
+                    { onSuccess: () => setDetailPlan(null) },
+                  )
+                }
+              >
+                {detailPlan.isActive ? 'Deactivate' : 'Activate'}
+              </Button>
+              <span className={styles.dialogActionsSpacer} />
+              <Button variant="ghost" onClick={() => setDetailPlan(null)}>
+                Close
+              </Button>
+            </div>
           }
         >
-          <section>
-            <h2>Pricing</h2>
+          <div className={styles.dialogHero}>
+            {['GOLD', 'SILVER', 'BRONZE'].includes(detailPlan.code.trim().toUpperCase()) ? (
+              <div className={styles.dialogHeroArt}>
+                <img className={styles.dialogHeroImage} {...tierArtwork(detailPlan.code)} />
+              </div>
+            ) : null}
+            <div className={styles.dialogHeroBody}>
+              <div className={styles.chipRow}>
+                <span className={`${styles.chip} ${styles.chipStrong}`}>{detailPlan.code}</span>
+                <StatusChip
+                  label={detailPlan.isActive ? 'Active' : 'Inactive'}
+                  tone={detailPlan.isActive ? 'success' : 'neutral'}
+                />
+              </div>
+              <p className={styles.dialogHeroName}>{detailPlan.name}</p>
+              <p className={styles.detailNote}>
+                {detailPlan.categoryName || 'Uncategorised'}
+                {detailPlan.description ? ` · ${detailPlan.description}` : ''}
+              </p>
+            </div>
+          </div>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Pricing</h2>
             <dl className={styles.facts}>
               <div>
                 <dt>Spot Cash</dt>
@@ -395,8 +570,8 @@ export function BusinessProductsPage() {
               </div>
             </dl>
           </section>
-          <section>
-            <h2>Membership</h2>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Membership</h2>
             <dl className={styles.facts}>
               <div>
                 <dt>Validity</dt>
@@ -421,102 +596,83 @@ export function BusinessProductsPage() {
               </div>
             </dl>
           </section>
-          <section>
-            <h2>Benefits</h2>
-            <p>
-              {detailPlan.discountPercent}% discount ·{' '}
-              {detailPlan.priorityReservation ? 'Priority reservation' : 'Standard reservation'} ·{' '}
-              {detailPlan.noMonthlyAnnualDues ? 'No monthly/annual dues' : 'Dues apply'}
-            </p>
-            <p>{detailPlan.description}</p>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Benefits</h2>
+            <div className={styles.chipRow}>
+              <span className={styles.chip}>{detailPlan.discountPercent}% discount</span>
+              <span className={styles.chip}>
+                {detailPlan.priorityReservation ? 'Priority reservation' : 'Standard reservation'}
+              </span>
+              <span className={styles.chip}>
+                {detailPlan.noMonthlyAnnualDues ? 'No monthly/annual dues' : 'Dues apply'}
+              </span>
+            </div>
           </section>
-          <section>
-            <h2>Payment options</h2>
-            <p>
-              Spot Cash ({detailPlan.spotCashDays} days) · Standard (
-              {detailPlan.standardInstallmentMonths} months)
-              {detailPlan.moveAEnabled ? ' · Move A' : ''}
-              {detailPlan.moveB1Enabled ? ' · B1' : ''}
-              {detailPlan.moveB2Enabled ? ' · B2' : ''}
-            </p>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Payment options</h2>
+            <div className={styles.chipRow}>
+              <span className={styles.chip}>
+                Spot Cash · {detailPlan.spotCashDays} days
+              </span>
+              <span className={styles.chip}>
+                Standard · {detailPlan.standardInstallmentMonths} months
+              </span>
+              {detailPlan.moveAEnabled ? (
+                <span className={styles.chip}>Move A</span>
+              ) : null}
+              {detailPlan.moveB1Enabled ? (
+                <span className={styles.chip}>B1 · 40% DP</span>
+              ) : null}
+              {detailPlan.moveB2Enabled ? (
+                <span className={styles.chip}>B2 · 25% DP</span>
+              ) : null}
+            </div>
           </section>
-          <section>
-            <h2>Commission</h2>
-            <p>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Commission</h2>
+            <p className={styles.detailNote}>
               Plan default: {formatRate(detailPlan.commissionRate)}. Effective rules are resolved by
               the server when a sale is created.
             </p>
           </section>
-          <section>
-            <h2>Status / Display order</h2>
-            <StatusChip label={detailPlan.isActive ? 'Active' : 'Inactive'} />
-            <p>Display order: {detailPlan.sortOrder}</p>
+          <section className={styles.detailSection}>
+            <h2 className={styles.detailTitle}>Status / Display order</h2>
+            <div>
+              <StatusChip label={detailPlan.isActive ? 'Active' : 'Inactive'} />
+            </div>
+            <p className={styles.detailNote}>Display order: {detailPlan.sortOrder}</p>
           </section>
-          <div className={styles.actions}>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                openEditPlan(detailPlan);
-                setDetailPlan(null);
-              }}
-            >
-              Edit plan
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={togglePlan.isPending}
-              onClick={() =>
-                togglePlan.mutate(
-                  { id: detailPlan.id, isActive: !detailPlan.isActive },
-                  { onSuccess: () => setDetailPlan(null) },
-                )
-              }
-            >
-              {detailPlan.isActive ? 'Deactivate' : 'Activate'}
-            </Button>
-          </div>
         </Dialog>
       ) : null}
       {tab === 'plans' ? (
         <>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setAppliedSearch(search.trim());
-            }}
-          >
-            <FilterBar
-              search={
-                <SearchField
-                  label="Search card plans"
-                  placeholder="Name or code"
-                  value={search}
-                  onChange={setSearch}
-                />
-              }
-              filters={
-                <Select
-                  aria-label="Filter by status"
-                  value={visibility}
-                  onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
-                  options={[
-                    { value: 'active', label: 'Active' },
-                    { value: 'inactive', label: 'Inactive' },
-                    { value: 'all', label: 'All' },
-                  ]}
-                />
-              }
-              actions={
-                <Button type="submit" variant="secondary">
-                  Search
-                </Button>
-              }
-            />
-          </form>
+          {/* Live search: the debounced term drives the query directly, so there
+              is no submit button to press and the form wrapper has no job. */}
+          <FilterBar
+            search={
+              <SearchField
+                label="Search card plans"
+                placeholder="Name or code"
+                value={search}
+                onChange={setSearch}
+                busy={refreshing}
+              />
+            }
+            filters={
+              <Select
+                aria-label="Filter by status"
+                value={visibility}
+                onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'inactive', label: 'Inactive' },
+                  { value: 'all', label: 'All' },
+                ]}
+              />
+            }
+          />
 
-          {plans.isPending ? (
-            <p role="status">Loading card plans…</p>
-          ) : plans.isError ? (
+          {plans.isError ? (
             <ErrorState error={plans.error} onRetry={plans.refetch} />
           ) : plans.data?.length === 0 ? (
             <EmptyState
@@ -532,37 +688,43 @@ export function BusinessProductsPage() {
               {plans.data?.map((product) => (
                 <article key={product.id} className={styles.card}>
                   {['GOLD', 'SILVER', 'BRONZE'].includes(product.code.trim().toUpperCase()) ? (
-                    <img className={styles.artwork} {...tierArtwork(product.code)} />
+                    <div className={styles.cardArtworkWrap}>
+                      <img className={styles.artwork} {...tierArtwork(product.code)} />
+                    </div>
                   ) : null}
-                  <h2>{product.name}</h2>
-                  <StatusChip label={product.isActive ? 'Active' : 'Inactive'} />
-                  <dl className={styles.facts}>
-                    <div>
-                      <dt>Spot Cash</dt>
-                      <dd>{formatMoney(product.cashPrice)}</dd>
+                  <div className={styles.cardBody}>
+                    <div className={styles.cardHead}>
+                      <h2 className={styles.cardTitle}>{product.name}</h2>
+                      <StatusChip label={product.isActive ? 'Active' : 'Inactive'} />
                     </div>
-                    <div>
-                      <dt>Installment</dt>
-                      <dd>{formatMoney(product.installmentPrice)}</dd>
-                    </div>
-                    <div>
-                      <dt>Discount</dt>
-                      <dd>{product.discountPercent}%</dd>
-                    </div>
-                    <div>
-                      <dt>Points / Year</dt>
-                      <dd>{formatPoints(product.yearlyPoints)}</dd>
-                    </div>
-                    <div>
-                      <dt>Validity</dt>
-                      <dd>{product.validityYears} years</dd>
-                    </div>
-                    <div>
-                      <dt>Cardholders</dt>
-                      <dd>{product.cardholderLimit}</dd>
-                    </div>
-                  </dl>
-                  <div className={styles.actions}>
+                    <dl className={styles.facts}>
+                      <div>
+                        <dt>Spot Cash</dt>
+                        <dd>{formatMoney(product.cashPrice)}</dd>
+                      </div>
+                      <div>
+                        <dt>Installment</dt>
+                        <dd>{formatMoney(product.installmentPrice)}</dd>
+                      </div>
+                      <div>
+                        <dt>Discount</dt>
+                        <dd>{product.discountPercent}%</dd>
+                      </div>
+                      <div>
+                        <dt>Points / Year</dt>
+                        <dd>{formatPoints(product.yearlyPoints)}</dd>
+                      </div>
+                      <div>
+                        <dt>Validity</dt>
+                        <dd>{product.validityYears} years</dd>
+                      </div>
+                      <div>
+                        <dt>Cardholders</dt>
+                        <dd>{product.cardholderLimit}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <div className={styles.cardFooter}>
                     <Button variant="secondary" onClick={() => setDetailPlan(product)}>
                       View details
                     </Button>
@@ -575,9 +737,7 @@ export function BusinessProductsPage() {
         </>
       ) : (
         <>
-          {categories.isPending ? (
-            <p role="status">Loading categories…</p>
-          ) : categories.isError ? (
+          {categories.isError ? (
             <ErrorState error={categories.error} onRetry={categories.refetch} />
           ) : categories.data?.length === 0 ? (
             <EmptyState
@@ -648,6 +808,8 @@ export function BusinessProductsPage() {
           {toggleCategory.isError ? <p role="alert">{toggleCategory.error.message}</p> : null}
         </>
       )}
+        </>
+      )}
 
       <Dialog
         open={planDialogOpen}
@@ -667,29 +829,29 @@ export function BusinessProductsPage() {
           </>
         }
       >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p>
+        <div className={styles.formGrid}>
+          <p className={styles.formNote}>
             Changing these values affects only <strong>future</strong> sales. Existing sales retain
             their frozen pricing: scheme, total, reservation, schedule, validity and commission stay
             exactly as created. MASTER CONFIGURATION below never rewrites TRANSACTION SNAPSHOTS.
             Benefit edits require Admin/Super Admin, are audited before/after, and apply
             prospectively only.
           </p>
-          <label>
+          <label className={styles.field}>
             Name
             <input
               value={planForm.name}
               onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Code
             <input
               value={planForm.code}
               onChange={(e) => setPlanForm({ ...planForm, code: e.target.value })}
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Category
             <select
               value={planForm.categoryId}
@@ -709,19 +871,20 @@ export function BusinessProductsPage() {
             </select>
           </label>
           {planCategoryInactive ? (
-            <p role="note">
+            <p role="note" className={styles.formNote}>
               This plan sits under an inactive category. Reactivate the category first to move other
               plans into it.
             </p>
           ) : null}
-          <label>
+          <label className={`${styles.field} ${styles.fieldWide}`}>
             Description
-            <input
+            <textarea
+              rows={3}
               value={planForm.description}
               onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Spot cash price
             <input
               value={planForm.price}
@@ -729,7 +892,7 @@ export function BusinessProductsPage() {
               inputMode="decimal"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             4-month installment price
             <input
               value={planForm.installment}
@@ -737,7 +900,7 @@ export function BusinessProductsPage() {
               inputMode="decimal"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Reservation fee (included in every total)
             <input
               value={planForm.reservation}
@@ -745,7 +908,7 @@ export function BusinessProductsPage() {
               inputMode="decimal"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Spot cash days
             <input
               value={planForm.spotDays}
@@ -755,7 +918,7 @@ export function BusinessProductsPage() {
               inputMode="numeric"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Standard installment months
             <input
               value={planForm.installMonths}
@@ -765,7 +928,7 @@ export function BusinessProductsPage() {
               inputMode="numeric"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Validity years
             <input
               value={planForm.validityYears}
@@ -775,34 +938,34 @@ export function BusinessProductsPage() {
               inputMode="numeric"
             />
           </label>
-          <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+          <fieldset className={styles.formSection}>
             <legend>Allowed internal moves</legend>
-            <label>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={planForm.moveA}
                 onChange={(e) => setPlanForm({ ...planForm, moveA: e.target.checked })}
-              />{' '}
+              />
               Move A: pay over 4 months
             </label>
-            <label>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={planForm.moveB1}
                 onChange={(e) => setPlanForm({ ...planForm, moveB1: e.target.checked })}
-              />{' '}
+              />
               Move B1: 40% DP + 12 months
             </label>
-            <label>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={planForm.moveB2}
                 onChange={(e) => setPlanForm({ ...planForm, moveB2: e.target.checked })}
-              />{' '}
+              />
               Move B2: 25% DP + 12 months
             </label>
           </fieldset>
-          <label>
+          <label className={styles.field}>
             Yearly points
             <input
               value={planForm.points}
@@ -812,7 +975,7 @@ export function BusinessProductsPage() {
               inputMode="numeric"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Commission rate (0.04 = 4%)
             <input
               value={planForm.rate}
@@ -820,7 +983,7 @@ export function BusinessProductsPage() {
               inputMode="decimal"
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Display order
             <input
               value={planForm.sortOrder}
@@ -831,17 +994,25 @@ export function BusinessProductsPage() {
             />
           </label>
           {creatingPlan ? (
-            <label>
+            <label className={`${styles.checkRow} ${styles.fieldWide}`}>
               <input
                 type="checkbox"
                 checked={planForm.isActive}
                 onChange={(e) => setPlanForm({ ...planForm, isActive: e.target.checked })}
-              />{' '}
+              />
               Active (available for new applications)
             </label>
           ) : null}
-          {planError ? <p role="alert">{planError}</p> : null}
-          {planMutation.isError ? <p role="alert">{planMutation.error.message}</p> : null}
+          {planError ? (
+            <p role="alert" className={styles.formAlert}>
+              {planError}
+            </p>
+          ) : null}
+          {planMutation.isError ? (
+            <p role="alert" className={styles.formAlert}>
+              {planMutation.error.message}
+            </p>
+          ) : null}
         </div>
       </Dialog>
 
@@ -863,33 +1034,34 @@ export function BusinessProductsPage() {
           </>
         }
       >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p>
+        <div className={styles.formGrid}>
+          <p className={styles.formNote}>
             Categories organise plans. Deactivating a category removes its plans from new
             applications but never deletes plans, sales or history.
           </p>
-          <label>
+          <label className={styles.field}>
             Name
             <input
               value={categoryForm.name}
               onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Slug
             <input
               value={categoryForm.slug}
               onChange={(e) => setCategoryForm({ ...categoryForm, slug: e.target.value })}
             />
           </label>
-          <label>
+          <label className={`${styles.field} ${styles.fieldWide}`}>
             Description
-            <input
+            <textarea
+              rows={3}
               value={categoryForm.description}
               onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
             />
           </label>
-          <label>
+          <label className={styles.field}>
             Sort order
             <input
               value={categoryForm.sortOrder}
@@ -903,17 +1075,25 @@ export function BusinessProductsPage() {
             />
           </label>
           {creatingCategory ? (
-            <label>
+            <label className={`${styles.checkRow} ${styles.fieldWide}`}>
               <input
                 type="checkbox"
                 checked={categoryForm.isActive}
                 onChange={(e) => setCategoryForm({ ...categoryForm, isActive: e.target.checked })}
-              />{' '}
+              />
               Active
             </label>
           ) : null}
-          {categoryError ? <p role="alert">{categoryError}</p> : null}
-          {categoryMutation.isError ? <p role="alert">{categoryMutation.error.message}</p> : null}
+          {categoryError ? (
+            <p role="alert" className={styles.formAlert}>
+              {categoryError}
+            </p>
+          ) : null}
+          {categoryMutation.isError ? (
+            <p role="alert" className={styles.formAlert}>
+              {categoryMutation.error.message}
+            </p>
+          ) : null}
         </div>
       </Dialog>
     </section>

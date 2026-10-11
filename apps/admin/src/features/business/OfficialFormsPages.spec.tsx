@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -930,6 +930,54 @@ it('renders application-origin reservations before a sale exists', async () => {
   } as never);
   renderWithProviders(<ReservationAgreementsPage />);
   expect(await screen.findByText('RES-000001')).toBeInTheDocument();
-  expect(screen.getByText('Not finalized')).toBeInTheDocument();
+  expect(screen.getByText('QA IST Applicant')).toBeInTheDocument();
   expect(screen.queryByText('Agreements could not be loaded')).not.toBeInTheDocument();
+});
+
+it('never renders a raw sale id in the queue table', async () => {
+  vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+    data: [agreement],
+    total: 1,
+  } as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  await screen.findByText('RES-000001');
+  expect(screen.queryByRole('columnheader', { name: 'Sale' })).not.toBeInTheDocument();
+  expect(screen.queryByText('sale-1')).not.toBeInTheDocument();
+  expect(screen.queryByText(/f8585910-8cd5-43a2-a6d4-8f703667c8fa/)).not.toBeInTheDocument();
+});
+
+/**
+ * The status badge is a pipeline, not a flat chip: it must name the exact state,
+ * say how far through draft -> submitted -> executed the contract is, and carry
+ * an icon so the state survives color-blindness and a screen reader.
+ */
+it('labels the lifecycle state, its step, and an icon for every reservation status', async () => {
+  vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+    data: [
+      { ...agreement, id: 'res-d', reservationNumber: 'RES-D', status: 'draft' },
+      { ...agreement, id: 'res-s', reservationNumber: 'RES-S', status: 'submitted' },
+      { ...agreement, id: 'res-e', reservationNumber: 'RES-E', status: 'executed' },
+      { ...agreement, id: 'res-c', reservationNumber: 'RES-C', status: 'cancelled' },
+    ],
+    total: 4,
+  } as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  // Scoped to the table: the Status filter legitimately offers "Draft" too.
+  const table = await screen.findByRole('region', { name: 'Reservation agreement records' });
+  const row = (reservation: string) =>
+    within(table).getByRole('link', { name: `Review reservation ${reservation}` });
+  const rowText = (reservation: string) => row(reservation).textContent ?? '';
+  expect(rowText('RES-D')).toContain('Draft');
+  expect(rowText('RES-D')).toContain('Step 1 of 3.');
+  expect(rowText('RES-S')).toContain('Submitted');
+  expect(rowText('RES-S')).toContain('Step 2 of 3.');
+  expect(rowText('RES-E')).toContain('Executed');
+  expect(rowText('RES-E')).toContain('Step 3 of 3.');
+  // Cancelled leaves the track entirely, so it carries no step at all.
+  expect(rowText('RES-C')).toContain('Cancelled');
+  expect(rowText('RES-C')).not.toContain('Step');
+  // Every state carries a decorative icon, never color alone.
+  for (const reservation of ['RES-D', 'RES-S', 'RES-E', 'RES-C']) {
+    expect(row(reservation).querySelector('svg')).toBeTruthy();
+  }
 });

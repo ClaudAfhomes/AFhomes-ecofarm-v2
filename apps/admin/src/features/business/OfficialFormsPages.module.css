@@ -1,12 +1,92 @@
 /* Official paper-form list pages: page-scoped table and filter contracts so the
    columns scroll horizontally with intact cells instead of squeezing. Applied
    alongside the global `table-scroll` class; other tables are unaffected. */
+.listSection {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.queueSummary {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.queueSummary strong {
+  color: var(--color-text-primary);
+}
+
 .tableWrap {
-  margin-top: var(--space-4);
+  margin-top: var(--space-2);
 }
 
 .tableWrap > table {
-  min-width: 880px;
+  min-width: 920px;
+}
+
+/* Elevated card around the reservation queue table: the queue is the page's
+   working surface, so it reads as one panel rather than bare grid lines. */
+.queueCard {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+.queueTable {
+  width: 100%;
+  background-color: var(--color-bg-surface-raised);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Same header treatment as the customers and applications tables: a lightly
+   tinted band over white rows, so the body reads as data, not as chrome. */
+.queueTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-surface);
+  text-align: left;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.queueTable th,
+.queueTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.queueTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* White rows need an explicit base: `--color-state-hover` is a translucent
+   ink wash, which only composites correctly over an opaque white cell. */
+.queueTable tbody td {
+  background-color: var(--color-bg-surface-raised);
+}
+
+@media (hover: hover) {
+  .queueTable tbody tr.clickable:hover td {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.reservationNumber {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .tableWrap tbody tr.clickable {
@@ -152,6 +232,7 @@
 }
 
 .fileName {
+  margin: 0;
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
@@ -221,4 +302,291 @@
 
 .paginationRange {
   margin: 0;
+}
+
+/* Editor banner row: a back link and the live lifecycle state on one line. */
+.backRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.stateSummary {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.stateSummary strong {
+  color: var(--color-text-primary);
+}
+
+/* Read-only commercial snapshot: labelled values on a wrapping grid instead of
+   a flat definition list, so a wide agreement stays scannable. */
+.snapshotGrid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.snapshotField {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.snapshotField dt {
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.snapshotField dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.moneyNote {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Buttons grouped so primary, secondary, and destructive actions read as
+   separate tiers instead of one undifferentiated run of text. */
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.buttonRow > .spacer {
+  flex: 1 1 auto;
+}
+
+/* Payments ledger on the reservation detail screen. */
+.ledgerWrap {
+  margin-top: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.ledgerWrap > table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.ledgerWrap th,
+.ledgerWrap td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.ledgerWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ledgerWrap thead th {
+  text-align: left;
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.ledgerAmount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A toggle-style secondary-holder control with a full touch target. */
+.toggleCard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+}
+
+.toggleCard input {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--color-brand-primary);
+}
+
+.toggleText {
+  display: grid;
+  gap: 2px;
+}
+
+.toggleTitle {
+  font-weight: 600;
+}
+
+.toggleHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* File import control, styled as a button-ish target while keeping the real
+   input focusable for keyboard and assistive-technology use. */
+.fileInput {
+  display: inline-block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-control);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.fileInput:hover {
+  border-color: var(--color-brand-primary);
+  color: var(--color-text-primary);
+}
+
+.fileInput:focus-within {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+/* Bulk import card: the workbook picker is a task in its own right, so it gets
+   a labelled surface instead of sharing a row with the template download. */
+.importCard {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.importCard[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--color-success) 40%, white);
+  background-color: color-mix(in srgb, var(--color-success) 6%, white);
+}
+
+.importHead {
+  display: grid;
+  gap: 2px;
+}
+
+.importTitle {
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.01em;
+}
+
+.importHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.importControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The label wraps the real input, so the control keeps native keyboard and
+   screen-reader behaviour while the visible trigger is fully restyled. */
+.filePicker {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.filePicker .fileInput {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-text-secondary);
+  max-width: 100%;
+}
+
+.filePicker .fileInput::file-selector-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-brand-primary);
+  border-radius: var(--radius-control);
+  background-color: var(--color-brand-primary);
+  color: var(--color-text-on-brand);
+  font: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.filePicker .fileInput::file-selector-button:hover {
+  background-color: var(--color-brand-primary-hover);
+  border-color: var(--color-brand-primary-hover);
+}
+
+.filePicker .fileInput:focus-visible::file-selector-button {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.filePicker .fileInput:disabled::file-selector-button {
+  cursor: not-allowed;
+  background-color: var(--color-state-disabled-bg);
+  border-color: var(--color-border-default);
+  color: var(--color-state-disabled-text);
+}
+
+/* Section lede under a panel title. */
+.panelNote {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Small screen tweaks for the reservation editor. */
+@media (max-width: 639px) {
+  .buttonRow {
+    align-items: stretch;
+  }
+
+  .ledgerWrap > table {
+    min-width: 640px;
+  }
 }

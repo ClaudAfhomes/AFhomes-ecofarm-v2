@@ -1,0 +1,512 @@
+/* Card catalogue page (plans + categories).
+
+   A dedicated module rather than the shared WorkflowCards one, which two other
+   pages still use: every rule here is scoped to this screen so a change here can
+   never repaint the finance or membership surfaces. */
+
+/* Page shell: one consistent rhythm between header, tabs, toolbar, and results. */
+.pageShell {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* Tab switcher. Stays real, never a skeleton: it is navigation, not data, so it
+   must remain reachable while a tab is still loading. */
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface);
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.tab {
+  min-height: var(--control-sm);
+}
+
+/* Result grid of plan cards. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+}
+
+/* Plan card: raised surface, artwork banner, and a title row that keeps the
+   plan name and its status chip on one baseline. */
+.card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-width: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition:
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    border-color: var(--color-border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+}
+
+.card:focus-within {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.cardArtworkWrap {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent-soft) 70%, white),
+    var(--color-bg-surface)
+  );
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.artwork {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1.58;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 16px rgb(28 43 58 / 0.12));
+}
+
+.cardBody {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-4);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+  line-height: 1.2;
+}
+
+/* Fact grid: label above value, hairline separated, tabular figures. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.facts > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.facts dt {
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Card footer action, pinned to the bottom by the card's `1fr` facts row. */
+.cardFooter {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.cardFooter > * {
+  width: 100%;
+}
+
+/* Grouped detail sections inside the plan dialog. */
+
+/* Dialog hero: tier artwork beside the plan identity, so the operator recognises
+   the card at a glance before reading any figure. */
+.dialogHero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--color-accent-soft) 65%, white),
+    var(--color-bg-surface-raised) 70%
+  );
+}
+
+.dialogHeroArt {
+  flex: 0 0 auto;
+  width: 8.5rem;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.dialogHeroImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1.58;
+  object-fit: contain;
+}
+
+.dialogHeroBody {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dialogHeroName {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+/* Pill list for benefits and payment options: these are short, scannable facts,
+   not prose, so a run-on sentence hides them. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-surface-raised);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.chipStrong {
+  color: var(--color-accent-strong);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, white);
+  background-color: var(--color-accent-soft);
+  letter-spacing: 0.06em;
+}
+
+/* Dialog footer: primary action first, destructive beside it, dismiss pushed
+   to the far end so the layout reads left-to-right by intent. */
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.dialogActionsSpacer {
+  flex: 1 1 auto;
+}
+
+.detailSection {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+}
+
+.detailSection + .detailSection {
+  margin-top: var(--space-3);
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.detailNote {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Dialog form: labelled controls on a responsive grid instead of a flat stack
+   of bare inputs. The label still WRAPS its input, so every accessible name in
+   this form is unchanged. */
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 400;
+}
+
+.field textarea {
+  padding: var(--space-2) var(--space-3);
+  min-height: 4rem;
+  resize: vertical;
+}
+
+.field input:hover,
+.field select:hover,
+.field textarea:hover {
+  border-color: var(--color-brand-secondary);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
+  border-color: var(--color-brand-primary);
+}
+
+/* Money and rate inputs read as money, not as free text. */
+.field input[inputmode='decimal'] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Full-width control for long free text. */
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.formSection {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+}
+
+.formSection legend {
+  padding: 0 var(--space-2);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.checkRow:hover {
+  border-color: var(--color-border-strong);
+}
+
+.checkRow input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  accent-color: var(--color-brand-primary);
+}
+
+.formNote {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-brand-secondary);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background-color: var(--color-brand-soft);
+  font-size: var(--text-body-s);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.formAlert {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------- */
+/* Loading skeletons                                                */
+/* ---------------------------------------------------------------- */
+
+/* One skeleton surface for the whole screen: header, actions, toolbar and
+   results, so nothing pops in and reflows once the data lands. */
+.skeletonShell {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.skeletonHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.skeletonHeaderText {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.skeletonTabs {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.skeletonToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.skeletonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+}
+
+/* A skeleton card keeps the real card's rhythm (banner, title, facts, footer)
+   so the grid does not jump when the data replaces it. */
+.skeletonCard {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.skeletonCardBody {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.skeletonFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+/* Skeleton table rows mirror the categories table columns. */
+.skeletonTable {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 2fr 1fr 0.8fr 0.6fr;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.skeletonRow:last-child {
+  border-bottom: 0;
+}
+
+.skeletonRowHead {
+  background-color: var(--color-bg-surface);
+}
+
+@media (max-width: 639px) {
+  .skeletonToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .skeletonRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions > * {
+    flex: 1;
+  }
+}

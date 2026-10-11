@@ -29,7 +29,7 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
-import { formatMoney } from './format';
+import { formatMoney, formatPoints } from './format';
 import {
   notifySuccess,
   notifyWarning,
@@ -52,6 +52,8 @@ import {
   StatusChip,
 } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
+import { TierBadge } from './TierBadge';
+import { ReservationStatusBadge } from './ReservationStatusBadge';
 
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
@@ -126,6 +128,47 @@ const asBase64 = async (file: File) => {
   return btoa(binary);
 };
 
+/** Human file size for the import status line, so the chosen file is confirmable. */
+const formatFileSize = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/**
+ * Form labels for a raw state key: `contactNumber` -> `Contact Number`.
+ *
+ * These groups are iterated straight off their state objects, so the key IS the
+ * field identity. Displaying it raw leaks camelCase into the UI and reads as a
+ * variable, not a label; the keys with brand spellings get an explicit entry
+ * because a generic split cannot know them.
+ */
+const FIELD_LABEL_OVERRIDES: Record<string, string> = { tinNumber: 'TIN Number' };
+const fieldLabel = (key: string) =>
+  FIELD_LABEL_OVERRIDES[key] ??
+  key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join(' ');
+
+/**
+ * The VIP tiers the schema accepts, as a closed choice.
+ *
+ * A dropdown rather than a text box: the value is a closed enum, so free typing
+ * could only ever produce a value the server rejects. It also keeps the stored
+ * value and the displayed option in lockstep, which a raw `value` with no
+ * matching `<option>` silently breaks.
+ */
+const VIP_TIER_FIELD_OPTIONS = [
+  { value: '', label: 'Not specified' },
+  { value: 'BRONZE', label: 'BRONZE' },
+  { value: 'SILVER', label: 'SILVER' },
+  { value: 'GOLD', label: 'GOLD' },
+];
+const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' =>
+  value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
+
 function Field({
   normalize,
   suggestName = false,
@@ -135,6 +178,7 @@ function Field({
   onChange,
   type = 'text',
   required = false,
+  placeholder,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
@@ -144,6 +188,7 @@ function Field({
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  placeholder?: string;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -173,6 +218,7 @@ function Field({
         type={isPhone ? 'tel' : /email/i.test(label) ? 'email' : type}
         inputMode={isPhone ? 'tel' : undefined}
         value={value}
+        placeholder={placeholder}
         required={required}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
@@ -2129,15 +2175,31 @@ export function ReservationAgreementsPage() {
         </div>
       </section>
     );
+  const pendingSignatures = rows.filter(
+    (item) =>
+      item.primarySignatureStatus !== 'received' ||
+      (item.hasSecondaryHolder && item.secondarySignatureStatus !== 'received'),
+  ).length;
   return (
-    <section>
+    <section className={styles.listSection}>
       <PageHeader
         title="IST Reservation Agreements"
-        description="Agreements still awaiting reservation work. Once an agreement is executed, Finance owns collection and it moves to the payment queue; it stays readable and printable here with 'Include progressed'."
+        description="Only agreements needing reservation work."
         actions={
           <Button onClick={() => navigate('/admin/sales/reservations/new')}>New agreement</Button>
         }
       />
+      {total > 0 ? (
+        <p role="status" aria-label="Reservation queue summary" className={styles.queueSummary}>
+          <strong>{total}</strong> {total === 1 ? 'agreement' : 'agreements'}
+          {pendingSignatures > 0 ? (
+            <>
+              {' · '}
+              <strong>{pendingSignatures}</strong> awaiting signature
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <FilterBar
         search={
           <SearchField
@@ -2212,61 +2274,66 @@ export function ReservationAgreementsPage() {
           role="region"
           aria-label="Reservation agreement records"
           tabIndex={0}
-          className={`table-scroll ${styles.tableWrap}`}
+          className={`table-scroll ${styles.tableWrap} ${styles.queueCard}`}
         >
-          <table>
+          <table className={styles.queueTable}>
             <thead>
               <tr>
                 <th>Reservation</th>
                 <th>Applicant</th>
                 <th>Tier</th>
-                <th>Sale</th>
                 <th>Payment scheme</th>
-                <th>Amount</th>
+                <th className={styles.numeric}>Amount</th>
                 <th>Signatures</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((item) => (
-                <tr
-                  key={item.id}
-                  tabIndex={0}
-                  role="link"
-                  aria-label={`Review reservation ${item.reservationNumber}`}
-                  onClick={() => navigate(`/admin/sales/reservations/${item.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ')
-                      navigate(`/admin/sales/reservations/${item.id}`);
-                  }}
-                  className={styles.clickable}
-                >
-                  <td>{item.reservationNumber}</td>
-                  <td>{item.applicantName ?? '—'}</td>
-                  <td>{item.tier}</td>
-                  <td>{item.saleId ?? 'Not finalized'}</td>
-                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                  <td>{formatMoney(item.totalPrice)}</td>
-                  <td>
-                    {item.primarySignatureStatus === 'received' &&
-                    (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received')
-                      ? 'Complete'
-                      : 'Pending signature'}
-                  </td>
-                  <td>
-                    <StatusChip
-                      label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-                    />
-                  </td>
-                </tr>
-              ))}
+              {rows.map((item) => {
+                const signaturesComplete =
+                  item.primarySignatureStatus === 'received' &&
+                  (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received');
+                return (
+                  <tr
+                    key={item.id}
+                    tabIndex={0}
+                    role="link"
+                    aria-label={`Review reservation ${item.reservationNumber}`}
+                    onClick={() => navigate(`/admin/sales/reservations/${item.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ')
+                        navigate(`/admin/sales/reservations/${item.id}`);
+                    }}
+                    className={styles.clickable}
+                  >
+                    <td>
+                      <span className={styles.reservationNumber}>{item.reservationNumber}</span>
+                    </td>
+                    <td>{item.applicantName ?? '—'}</td>
+                    <td>
+                      <TierBadge tier={item.tier} />
+                    </td>
+                    <td>{paymentSchemeLabel(item.paymentScheme)}</td>
+                    <td className={styles.numeric}>{formatMoney(item.totalPrice)}</td>
+                    <td>
+                      <StatusChip
+                        label={signaturesComplete ? 'Complete' : 'Pending signature'}
+                        tone={signaturesComplete ? 'success' : 'warning'}
+                      />
+                    </td>
+                    <td>
+                      <ReservationStatusBadge status={item.status} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
         <EmptyState
           title="No reservation agreements"
-          description="Create an agreement from an existing card sale."
+          description="Create an agreement from an approved application."
         />
       )}
 
@@ -2373,6 +2440,10 @@ export function ReservationAgreementEditorPage() {
     tinNumber: string;
   };
   const [secondary, setSecondary] = useState<SecondaryState | null>(null);
+  /** Chosen workbook for the IST bulk import, and whether it is still being read. */
+  const [istFile, setIstFile] = useState<{ name: string; size: number } | null>(null);
+  const [istReading, setIstReading] = useState(false);
+  const istImportLabelId = useId();
   const [schedule, setSchedule] = useState({
     particular: 'Monthly amortization',
     amount: '0.00',
@@ -2617,7 +2688,11 @@ export function ReservationAgreementEditorPage() {
     const f = preview.fields;
     if (f.sale_id) setSaleId(f.sale_id);
     if (f.customer_application_id) setCustomerApplicationId(f.customer_application_id);
-    if (f.vip_tier) setVipTier(f.vip_tier.toUpperCase());
+    // A workbook cell can hold anything. Only a real tier may reach the closed
+    // dropdown: setting an unknown value would leave the state out of step with
+    // the displayed option, and the server would reject it anyway.
+    const importedTier = (f.vip_tier ?? '').toUpperCase();
+    if (isVipTier(importedTier)) setVipTier(importedTier);
     if (f.reservation_date)
       setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
     if (f.agreement_date)
@@ -2652,38 +2727,43 @@ export function ReservationAgreementEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const salePlan = plans.data?.find((p) => p.id === summary.data?.saleId);
   return (
-    <section>
+    <section className={styles.editorSection}>
       <PageHeader
         title={existing.data?.reservationNumber ?? 'New IST Reservation Agreement'}
-        description="Benefits and economics are server-derived snapshots; schedule rows are not received payments."
+        description="Server-derived snapshots. Schedule rows are obligations."
+        actions={
+          <Button variant="secondary" onClick={() => navigate('/admin/sales/reservations')}>
+            Back to agreements
+          </Button>
+        }
       />
-      <p>
-        <Link to="/admin/sales/reservations">Back to agreements</Link>
-      </p>
       {existing.data ? (
-        <p>
-          Status: {existing.data.status} · Tier: {existing.data.tier} · Total:{' '}
-          {existing.data.totalPrice}
+        <p className={styles.stateSummary}>
+          <strong>Status:</strong> {existing.data.status} · <strong>Tier:</strong>{' '}
+          {existing.data.tier} · <strong>Total:</strong> {existing.data.totalPrice}
           {!applicationOrigin ? (
             <>
               {' '}
-              · Verified received: {existing.data.totalPaymentReceived} · Balance:{' '}
-              {existing.data.balance}
+              · <strong>Verified received:</strong> {existing.data.totalPaymentReceived} ·{' '}
+              <strong>Balance:</strong> {existing.data.balance}
             </>
           ) : null}{' '}
-          · Submitted: {existing.data.submittedAt ?? '—'} · Executed:{' '}
-          {existing.data.executedAt ?? '—'}
+          · <strong>Submitted:</strong> {existing.data.submittedAt ?? '—'} ·{' '}
+          <strong>Executed:</strong> {existing.data.executedAt ?? '—'}
         </p>
       ) : null}
       {summary.data ? (
-        <p>
-          Linked sale {summary.data.saleId}: verified {summary.data.verifiedTotal}, balance{' '}
-          {summary.data.remainingBalance}. Schedule rows below are obligations only — actual cash
-          lives in the payments table.
+        <p className={styles.moneyNote}>
+          <span>
+            Linked sale <strong>{summary.data.saleId}</strong>: verified{' '}
+            {formatMoney(summary.data.verifiedTotal)}, balance{' '}
+            {formatMoney(summary.data.remainingBalance)}.
+          </span>
+          <span>Schedule rows below are obligations only — actual cash lives in the payments table.</span>
         </p>
       ) : null}
       {salePlan ? (
-        <p>
+        <p className={styles.note}>
           Official {salePlan.code} benefits apply prospectively; this agreement freezes its own
           snapshot at creation.
         </p>
@@ -2700,261 +2780,372 @@ export function ReservationAgreementEditorPage() {
         </Alert>
       ) : null}
       {applicationOrigin && proposal.data ? (
-        <section aria-label="Frozen purchase terms">
-          <h2>Server-authoritative offer</h2>
-          <p>
+        <section className={styles.panel} aria-label="Frozen purchase terms">
+          <h2 className={styles.panelTitle}>Server-authoritative offer</h2>
+          <p className={styles.panelNote}>
             These figures are read-only. They are frozen purchase terms, not an editable quote, and
             the server revalidates them at save.
           </p>
-          <dl>
-            <dt>Card tier</dt>
-            <dd>{proposal.data.terms.tier}</dd>
-            <dt>Payment scheme</dt>
-            <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
-            <dt>Total purchase</dt>
-            <dd>{formatMoney(proposal.data.terms.totalPrice)}</dd>
-            <dt>Included reservation amount</dt>
-            <dd>{formatMoney(proposal.data.terms.reservationFee)}</dd>
-            <dt>Required initial</dt>
-            <dd>{formatMoney(proposal.data.terms.requiredInitial)}</dd>
-            <dt>Monthly amount</dt>
-            <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
-            <dt>Installment months</dt>
-            <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
-            <dt>Seller</dt>
-            <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
-            <dt>Benefits</dt>
-            <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
-            <dt>Purchase terms reference</dt>
-            <dd>{sourceApplication.data?.purchaseTermsId ?? 'Not captured'}</dd>
-            <dt>Offer as of</dt>
-            <dd>{formatDateTime(proposal.data.asOf)}</dd>
+          <dl className={styles.snapshotGrid}>
+            <div className={styles.snapshotField}>
+              <dt>Card tier</dt>
+              <dd>{proposal.data.terms.tier}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Payment scheme</dt>
+              <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Total purchase</dt>
+              <dd>{formatMoney(proposal.data.terms.totalPrice)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Included reservation amount</dt>
+              <dd>{formatMoney(proposal.data.terms.reservationFee)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Required initial</dt>
+              <dd>{formatMoney(proposal.data.terms.requiredInitial)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Monthly amount</dt>
+              <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Installment months</dt>
+              <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Seller</dt>
+              <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Benefits</dt>
+              <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Purchase terms reference</dt>
+              <dd>{sourceApplication.data?.purchaseTermsId ?? 'Not captured'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Offer as of</dt>
+              <dd>{formatDateTime(proposal.data.asOf)}</dd>
+            </div>
           </dl>
         </section>
       ) : null}
-      <fieldset disabled={!editable}>
-        {/* Application-origin reservations have NO sale: the agreement comes
-            first and the sale arrives at finalization. */}
-        {applicationOrigin ? null : (
-          <>
-            <label>
-              Card sale
-              <select value={saleId} onChange={(e) => setSaleId(e.target.value)}>
-                <option value="">Select sale</option>
-                {sales.data?.map((sale) => (
-                  <option key={sale.id} value={sale.id}>
-                    {sale.saleNumber} — {sale.customerName}
-                  </option>
-                ))}
-              </select>
-            </label>{' '}
-            <Button onClick={autoFill}>Auto-fill from sale</Button>
-          </>
-        )}
-        <label>
-          Source Customer Application
-          <select
-            value={customerApplicationId}
-            aria-label="Source Customer Application"
-            onChange={(e) => setCustomerApplicationId(e.target.value)}
-          >
-            <option value="">Choose a submitted or approved application</option>
-            {applications.data
-              ?.filter((app) => ['submitted', 'approved'].includes(app.status))
-              .map((app) => (
-                <option key={app.id} value={app.id}>
-                  {app.applicationNumber} — {app.applicantName}
-                </option>
-              ))}
-          </select>
-        </label>
-        {sourceApplication.data && (
-          <p>
-            Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
-            {sourceApplication.data.tier} ·{' '}
-            {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
-            {formatMoney(sourceApplication.data.vipAmount)}.
-            {applicationOrigin
-              ? ' No card sale is needed: this reservation is the first commercial record.'
-              : ' Select the matching existing card sale if the application has not yet been linked.'}
+      <fieldset disabled={!editable} className={styles.formRoot}>
+        <section className={styles.panel} aria-labelledby="reservation-source-heading">
+          <h2 id="reservation-source-heading" className={styles.panelTitle}>
+            1. Source &amp; references
+          </h2>
+          <p className={styles.panelNote}>
+            Link the customer application or an existing card sale this reservation belongs to.
           </p>
-        )}
-        <label>
-          Imported tier context (validates secondary; sale tier stays authoritative)
-          <NormalizedInput
-            value={vipTier}
-            placeholder="BRONZE, SILVER, or GOLD"
-            normalize={(value) => value.toUpperCase()}
-            onChange={(e) => setVipTier(e.target.value)}
-          />
-        </label>
-        <div className="form-grid">
-          {Object.entries(dates).map(([key, value]) => (
-            <Field
-              key={key}
-              label={key.replace(/[A-Z]/g, (c) => ` ${c}`)}
-              value={value}
-              type={
-                key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
-                  ? 'date'
-                  : 'text'
-              }
-              onChange={(v) => setDates({ ...dates, [key]: v })}
-            />
-          ))}
-        </div>
-        <fieldset>
-          <legend>PRIMARY CARDHOLDER DETAILS</legend>
-          {Object.entries(primary)
-            .filter(([key]) => key !== 'holderType')
-            .map(([key, value]) => (
+          <div className={styles.editorGrid}>
+            {/* Application-origin reservations have NO sale: the agreement comes
+                first and the sale arrives at finalization. */}
+            {applicationOrigin ? null : (
+              <>
+                <label className={styles.filterLabel}>
+                  Card sale
+                  <Select
+                    aria-label="Card sale"
+                    value={saleId}
+                    onChange={(e) => setSaleId(e.target.value)}
+                    options={[
+                      { value: '', label: 'Select sale' },
+                      ...(sales.data?.map((sale) => ({
+                        value: sale.id,
+                        label: `${sale.saleNumber} — ${sale.customerName}`,
+                      })) ?? []),
+                    ]}
+                  />
+                </label>
+                <div className={styles.actions}>
+                  <Button variant="secondary" onClick={autoFill}>
+                    Auto-fill from sale
+                  </Button>
+                </div>
+              </>
+            )}
+            <label className={styles.filterLabel}>
+              Source Customer Application
+              <Select
+                aria-label="Source Customer Application"
+                value={customerApplicationId}
+                onChange={(e) => setCustomerApplicationId(e.target.value)}
+                options={[
+                  { value: '', label: 'Choose a submitted or approved application' },
+                  ...(applications.data
+                    ?.filter((app) => ['submitted', 'approved'].includes(app.status))
+                    .map((app) => ({
+                      value: app.id,
+                      label: `${app.applicationNumber} — ${app.applicantName}`,
+                    })) ?? []),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              Imported Tier
+              <Select
+                aria-label="Imported Tier"
+                value={vipTier}
+                onChange={(e) => setVipTier(e.target.value)}
+                options={VIP_TIER_FIELD_OPTIONS}
+              />
+            </label>
+          </div>
+          {sourceApplication.data ? (
+            <p className={styles.note}>
+              Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
+              {sourceApplication.data.tier} ·{' '}
+              {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
+              {formatMoney(sourceApplication.data.vipAmount)}.
+              {applicationOrigin
+                ? ' No card sale is needed: this reservation is the first commercial record.'
+                : ' Select the matching existing card sale if the application has not yet been linked.'}
+            </p>
+          ) : null}
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-dates-heading">
+          <h2 id="reservation-dates-heading" className={styles.panelTitle}>
+            2. Agreement dates
+          </h2>
+          <p className={styles.panelNote}>
+            Effective dates that bound this reservation agreement.
+          </p>
+          <div className={styles.editorGrid}>
+            {Object.entries(dates).map(([key, value]) => (
               <Field
                 key={key}
-                label={key}
+                label={fieldLabel(key)}
                 value={value}
-                normalize={(v) => normalizeLiveHumanField(key, v)}
-                onChange={(v) => setPrimary({ ...primary, [key]: v })}
+                type={
+                  key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
+                    ? 'date'
+                    : 'text'
+                }
+                onChange={(v) => setDates({ ...dates, [key]: v })}
               />
             ))}
-        </fieldset>
-        <label>
-          <input
-            type="checkbox"
-            checked={Boolean(secondary)}
-            onChange={(e) =>
-              setSecondary(
-                e.target.checked
-                  ? {
-                      holderType: 'SECONDARY' as const,
-                      name: '',
-                      address: '',
-                      contactNumber: '',
-                      email: '',
-                      tinNumber: '',
-                    }
-                  : null,
-              )
-            }
-          />{' '}
-          Add optional supplementary holder (Gold only; server rejects other tiers)
-        </label>
-        {secondary ? (
-          <fieldset>
-            <legend>SUPPLEMENTARY CARDHOLDER DETAILS</legend>
-            {Object.entries(secondary)
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-primary-heading">
+          <h2 id="reservation-primary-heading" className={styles.panelTitle}>
+            3. Primary cardholder
+          </h2>
+          <p className={styles.panelNote}>The cardholder who signs and owns this reservation.</p>
+          <div className={styles.editorGrid}>
+            {Object.entries(primary)
               .filter(([key]) => key !== 'holderType')
               .map(([key, value]) => (
                 <Field
                   key={key}
-                  label={key}
+                  label={fieldLabel(key)}
                   value={value}
                   normalize={(v) => normalizeLiveHumanField(key, v)}
-                  onChange={(v) => setSecondary({ ...secondary, [key]: v })}
+                  onChange={(v) => setPrimary({ ...primary, [key]: v })}
                 />
               ))}
-          </fieldset>
-        ) : null}
-        <fieldset>
-          <legend>PAYMENT PLAN SCHEDULE — NOT AN ACTUAL PAYMENT</legend>
-          {Object.entries(schedule).map(([key, value]) => (
-            <Field
-              key={key}
-              label={key}
-              value={value}
-              type={key === 'paymentDate' ? 'date' : 'text'}
-              onChange={(v) => setSchedule({ ...schedule, [key]: v })}
-            />
-          ))}
-        </fieldset>
-        <p>
-          <Button onClick={() => void getOfficialFormTemplate('ist').then(saveFile)}>
-            Download import template
-          </Button>{' '}
-          <label>
-            Import IST XLSX{' '}
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-secondary-heading">
+          <h2 id="reservation-secondary-heading" className={styles.panelTitle}>
+            4. Supplementary cardholder
+          </h2>
+          <label className={styles.toggleCard}>
             <input
-              type="file"
-              accept=".xlsx"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void importIstFile(file);
-              }}
+              type="checkbox"
+              checked={Boolean(secondary)}
+              onChange={(e) =>
+                setSecondary(
+                  e.target.checked
+                    ? {
+                        holderType: 'SECONDARY' as const,
+                        name: '',
+                        address: '',
+                        contactNumber: '',
+                        email: '',
+                        tinNumber: '',
+                      }
+                    : null,
+                )
+              }
             />
+            <span className={styles.toggleText}>
+              <span className={styles.toggleTitle}>
+                Add optional supplementary holder (Gold only)
+              </span>
+              <span className={styles.toggleHint}>The server rejects other tiers.</span>
+            </span>
           </label>
-        </p>
+          {secondary ? (
+            <div className={styles.editorGrid}>
+              {Object.entries(secondary)
+                .filter(([key]) => key !== 'holderType')
+                .map(([key, value]) => (
+                  <Field
+                    key={key}
+                    label={fieldLabel(key)}
+                    value={value}
+                    normalize={(v) => normalizeLiveHumanField(key, v)}
+                    onChange={(v) => setSecondary({ ...secondary, [key]: v })}
+                  />
+                ))}
+            </div>
+          ) : null}
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-schedule-heading">
+          <h2 id="reservation-schedule-heading" className={styles.panelTitle}>
+            5. Payment plan schedule
+          </h2>
+          <p className={styles.panelNote}>
+            An obligation plan — not an actual payment. Cash is recorded in the payments ledger.
+          </p>
+          <div className={styles.editorGrid}>
+            {Object.entries(schedule).map(([key, value]) => (
+              <Field
+                key={key}
+                label={fieldLabel(key)}
+                value={value}
+                type={key === 'paymentDate' ? 'date' : 'text'}
+                onChange={(v) => setSchedule({ ...schedule, [key]: v })}
+              />
+            ))}
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-import-heading">
+          <h2 id="reservation-import-heading" className={styles.panelTitle}>
+            6. Bulk import
+          </h2>
+          <p className={styles.panelNote}>
+            Pull candidates from an official IST workbook, then verify every field before saving.
+          </p>
+          <div className={styles.importCard} data-selected={istFile ? 'true' : 'false'}>
+            <div className={styles.importHead}>
+              <span className={styles.importTitle} id={istImportLabelId}>
+                Import IST XLSX
+              </span>
+              <span className={styles.importHint}>
+                Choose an official workbook. Imported values are suggestions only, never saved until
+                you verify them.
+              </span>
+            </div>
+            <div className={styles.importControls}>
+              <label className={styles.filePicker}>
+                <input
+                  className={styles.fileInput}
+                  type="file"
+                  accept=".xlsx"
+                  aria-labelledby={istImportLabelId}
+                  disabled={istReading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setIstFile({ name: file.name, size: file.size });
+                    setIstReading(true);
+                    void importIstFile(file).finally(() => setIstReading(false));
+                  }}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                onClick={() => void getOfficialFormTemplate('ist').then(saveFile)}
+              >
+                Download import template
+              </Button>
+            </div>
+            <p className={styles.fileName} role="status">
+              {istFile
+                ? `${istFile.name} · ${formatFileSize(istFile.size)}${
+                    istReading ? ' · reading…' : ''
+                  }`
+                : 'No workbook chosen yet.'}
+            </p>
+          </div>
+        </section>
       </fieldset>
-      <p>
-        <Button
-          onClick={() => save.mutate()}
-          disabled={!editable}
-          loading={save.isPending}
-          loadingLabel="Saving…"
-        >
-          {applicationOrigin && !id ? 'Create Reservation Agreement' : 'Save draft'}
-        </Button>{' '}
-        {id && editable ? (
+      <div className={styles.stickyFooter}>
+        <div className={styles.buttonRow}>
           <Button
-            onClick={() => submit.mutate()}
-            loading={submit.isPending}
-            loadingLabel="Submitting…"
+            onClick={() => save.mutate()}
+            disabled={!editable}
+            loading={save.isPending}
+            loadingLabel="Saving…"
           >
-            Submit
+            {applicationOrigin && !id ? 'Create Reservation Agreement' : 'Save draft'}
           </Button>
-        ) : null}{' '}
-        {id && existing.data?.status === 'submitted' ? (
-          <>
+          {id && editable ? (
+            <Button
+              variant="secondary"
+              onClick={() => submit.mutate()}
+              loading={submit.isPending}
+              loadingLabel="Submitting…"
+            >
+              Submit
+            </Button>
+          ) : null}
+          {id && existing.data?.status === 'submitted' ? (
             <Button
               onClick={() => decide.mutate('executed')}
               loading={decide.isPending}
               loadingLabel="Executing…"
             >
               Execute
-            </Button>{' '}
+            </Button>
+          ) : null}
+          {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
             <Button
+              variant="danger"
+              onClick={() => decide.mutate('cancelled')}
+              loading={decide.isPending}
+              loadingLabel="Cancelling…"
+            >
+              Cancel
+            </Button>
+          ) : null}
+          {id && existing.data?.status === 'submitted' ? (
+            <Button
+              variant="secondary"
               onClick={() => reopen.mutate()}
               loading={reopen.isPending}
               loadingLabel="Reopening…"
             >
               Reopen to draft
-            </Button>{' '}
-          </>
-        ) : null}{' '}
-        {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-          <Button
-            onClick={() => decide.mutate('cancelled')}
-            loading={decide.isPending}
-            loadingLabel="Cancelling…"
-          >
-            Cancel
-          </Button>
-        ) : null}{' '}
-        {id ? (
-          <>
-            <Button
-              onClick={() =>
-                void exportReservationAgreement(id, 'xlsx')
-                  .then(saveFile)
-                  .catch((e: unknown) =>
-                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                  )
-              }
-            >
-              Export XLSX
             </Button>
-            <Button
-              onClick={() =>
-                void exportReservationAgreement(id, 'pdf')
-                  .then(saveFile)
-                  .catch((e: unknown) =>
-                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                  )
-              }
-            >
-              Export PDF
-            </Button>
-          </>
-        ) : null}
-      </p>
+          ) : null}
+          <span className={styles.spacer} />
+          {id ? (
+            <>
+              <Button
+                variant="primary"
+                onClick={() =>
+                  void exportReservationAgreement(id, 'xlsx')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export XLSX
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  void exportReservationAgreement(id, 'pdf')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export PDF
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </div>
       {id && existing.data?.origin === 'application' ? (
         <ApplicationOriginAgreementPanel id={id} agreement={existing.data} />
       ) : null}
@@ -3034,37 +3225,55 @@ function ApplicationOriginAgreementPanel({
   const money = finance.data;
   const lifecycle = agreement.status;
   return (
-    <section aria-label="Reservation lifecycle">
-      <h2>Purchase state</h2>
+    <section className={styles.editorSection} aria-label="Reservation lifecycle">
+      <h2 className={styles.panelTitle}>Purchase state</h2>
       {error ? <Alert variant="warning">{error}</Alert> : null}
-      <dl>
-        <dt>Agreement state</dt>
-        <dd>{lifecycle}</dd>
-        <dt>Card Sale (AF-CSALE)</dt>
-        <dd>
-          {money?.saleNumber ??
-            agreement.saleId ??
-            'Not created — created when the purchase is finalized'}
-        </dd>
-        <dt>Total purchase</dt>
-        <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
-        <dt>Included reservation amount</dt>
-        <dd>{formatMoney(money?.reservationFee ?? agreement.reservationFee)}</dd>
-        <dt>Verified paid</dt>
-        <dd>{formatMoney(money?.verifiedTotal ?? '0.00')}</dd>
-        <dt>Remaining</dt>
-        <dd>{formatMoney(money?.remainingBalance ?? agreement.balance)}</dd>
+      <dl className={styles.snapshotGrid}>
+        <div className={styles.snapshotField}>
+          <dt>Agreement state</dt>
+          <dd>
+            <StatusChip label={lifecycle} />
+          </dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Card Sale (AF-CSALE)</dt>
+          <dd>
+            {money?.saleNumber ??
+              agreement.saleId ??
+              'Not created — created when the purchase is finalized'}
+          </dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Total purchase</dt>
+          <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Included reservation amount</dt>
+          <dd>{formatMoney(money?.reservationFee ?? agreement.reservationFee)}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Verified paid</dt>
+          <dd>{formatMoney(money?.verifiedTotal ?? '0.00')}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Remaining</dt>
+          <dd>{formatMoney(money?.remainingBalance ?? agreement.balance)}</dd>
+        </div>
         {money?.overpaidAmount && money.overpaidAmount !== '0.00' ? (
-          <>
+          <div className={styles.snapshotField}>
             <dt>Overpaid</dt>
             <dd>{formatMoney(money.overpaidAmount)}</dd>
-          </>
+          </div>
         ) : null}
       </dl>
-      <p>
-        <Button onClick={() => void print('reservation', 'Reservation')} disabled={busy}>
+      <div className={styles.actions}>
+        <Button
+          variant="secondary"
+          onClick={() => void print('reservation', 'Reservation')}
+          disabled={busy}
+        >
           Print Reservation Agreement
-        </Button>{' '}
+        </Button>
         {money?.fullyPaid ? (
           <Button
             onClick={() => void finalize()}
@@ -3078,29 +3287,38 @@ function ApplicationOriginAgreementPanel({
             Finalize Purchase
           </Button>
         ) : null}
-      </p>
+        {lifecycle === 'executed' && !money?.fullyPaid ? (
+          <Button
+            variant="secondary"
+            onClick={() => setRecording(true)}
+            disabled={busy || !canHandlePayments}
+          >
+            Record Payment
+          </Button>
+        ) : null}
+      </div>
       {lifecycle === 'executed' && !agreement.saleId ? (
         <Alert variant="info">
           Executed. This agreement is now in the Finance queue for collection. No card sale exists
           yet — one is created only when the whole price is verified.
         </Alert>
       ) : null}
-      {lifecycle === 'executed' && !money?.fullyPaid ? (
-        <p>
-          <Button onClick={() => setRecording(true)} disabled={busy || !canHandlePayments}>
-            Record Payment
-          </Button>
-        </p>
-      ) : null}
       {lifecycle === 'executed' && !money?.fullyPaid && money ? (
-        <p>
-          PAYMENT PROCESSING — verified {formatMoney(money.verifiedTotal)}, remaining{' '}
-          {formatMoney(money.remainingBalance)}.
+        <p className={styles.moneyNote}>
+          <StatusChip label="Payment processing" tone="warning" />
+          <span>
+            Verified {formatMoney(money.verifiedTotal)}, remaining{' '}
+            {formatMoney(money.remainingBalance)}.
+          </span>
         </p>
       ) : null}
       {lifecycle === 'executed' && money?.fullyPaid ? (
-        <p>
-          <strong>FULLY PAID</strong>
+        <p className={styles.moneyNote}>
+          <StatusChip label="Fully paid" tone="success" />
+          <span>
+            Verified {formatMoney(money.verifiedTotal)} against{' '}
+            {formatMoney(money.totalPrice)}. Ready to finalize.
+          </span>
         </p>
       ) : null}
       {recording ? (
@@ -3111,61 +3329,69 @@ function ApplicationOriginAgreementPanel({
           onClose={() => setRecording(false)}
         />
       ) : null}
-      <h3>Payments</h3>
+      <h3 className={styles.panelTitle}>Payments</h3>
       {payments.data && payments.data.length > 0 ? (
-        <table>
-          <caption>Every AF-PAY recorded against this agreement</caption>
-          <thead>
-            <tr>
-              <th scope="col">AF-PAY</th>
-              <th scope="col">Amount</th>
-              <th scope="col">Method</th>
-              <th scope="col">Recorded</th>
-              <th scope="col">Status</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.data.map((payment) => (
-              <tr key={payment.id}>
-                <td>{payment.paymentNumber ?? payment.id}</td>
-                <td>{formatMoney(payment.amount)}</td>
-                <td>{payment.method}</td>
-                <td>{formatDateTime(payment.recordedAt)}</td>
-                <td>{payment.status}</td>
-                <td>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
-                  >
-                    Print Recorded Receipt
-                  </Button>{' '}
-                  {/* A rejected payment never gets a verified receipt: there is no
-                      verified evidence to render, and inventing one would be a lie
-                      in a customer's hand. */}
-                  {payment.status === 'verified' ? (
+        <div className={`table-scroll ${styles.ledgerWrap}`}>
+          <table>
+            <caption>Every AF-PAY recorded against this agreement</caption>
+            <thead>
+              <tr>
+                <th scope="col">AF-PAY</th>
+                <th scope="col" className={styles.ledgerAmount}>
+                  Amount
+                </th>
+                <th scope="col">Method</th>
+                <th scope="col">Recorded</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.data.map((payment) => (
+                <tr key={payment.id}>
+                  <td>{payment.paymentNumber ?? payment.id}</td>
+                  <td className={styles.ledgerAmount}>{formatMoney(payment.amount)}</td>
+                  <td>{payment.method}</td>
+                  <td>{formatDateTime(payment.recordedAt)}</td>
+                  <td>
+                    <StatusChip label={payment.status} />
+                  </td>
+                  <td>
                     <Button
                       size="sm"
                       variant="ghost"
                       disabled={busy}
-                      onClick={() => void print('payment_verified', 'Verified receipt', payment.id)}
+                      onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
                     >
-                      Print Verified Receipt
-                    </Button>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      Print Recorded Receipt
+                    </Button>{' '}
+                    {/* A rejected payment never gets a verified receipt: there is no
+                        verified evidence to render, and inventing one would be a lie
+                        in a customer's hand. */}
+                    {payment.status === 'verified' ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void print('payment_verified', 'Verified receipt', payment.id)
+                        }
+                      >
+                        Print Verified Receipt
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <p>No payments recorded against this agreement yet.</p>
+        <p className={styles.note}>No payments recorded against this agreement yet.</p>
       )}
       {agreement.saleId ? (
-        <p>
-          Final purchase record:{' '}
+        <div className={styles.actions}>
+          <span className={styles.note}>Final purchase record:</span>
           <Button
             size="sm"
             variant="ghost"
@@ -3174,7 +3400,7 @@ function ApplicationOriginAgreementPanel({
           >
             Print Final Purchase Record
           </Button>
-        </p>
+        </div>
       ) : null}
       <MembershipConfirmation saleId={agreement.saleId} persisted={money?.membership} />
     </section>
@@ -3219,18 +3445,26 @@ function MembershipConfirmation({
   if (!saleId) return null;
   const membershipId = result?.membershipId ?? persisted?.id;
   return (
-    <section aria-label="Membership activation">
-      <h3>Membership</h3>
+    <section className={styles.editorSection} aria-label="Membership activation">
+      <h3 className={styles.panelTitle}>Membership</h3>
       {error ? <Alert variant="warning">{error}</Alert> : null}
       {result || persisted ? (
         <>
-          <dl>
-            <dt>Membership</dt>
-            <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
-            <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
-            <dd>{result?.pointsAllocated ?? persisted?.pointsBalance}</dd>
-            <dt>Card Sale</dt>
-            <dd>{saleId}</dd>
+          <dl className={styles.snapshotGrid}>
+            <div className={styles.snapshotField}>
+              <dt>Membership</dt>
+              <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
+              <dd>
+                {formatPoints(result?.pointsAllocated ?? persisted?.pointsBalance)}
+              </dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Card Sale</dt>
+              <dd>{saleId}</dd>
+            </div>
           </dl>
           <Alert variant="info">
             Card credentials are shown once, by the authorized activation flow, and are never
@@ -3239,9 +3473,11 @@ function MembershipConfirmation({
           {membershipId ? <PrintActivationConfirmation membershipId={membershipId} /> : null}
         </>
       ) : (
-        <Button onClick={() => void activate()} disabled={!canActivate || busy}>
-          Activate membership
-        </Button>
+        <div className={styles.actions}>
+          <Button onClick={() => void activate()} disabled={!canActivate || busy}>
+            Activate membership
+          </Button>
+        </div>
       )}
     </section>
   );
@@ -3252,10 +3488,10 @@ function PrintActivationConfirmation({ membershipId }: { membershipId: string })
   // The activation confirmation is addressed by the membership, which is the
   // source the evidence builder reads.
   return (
-    <p>
+    <div className={styles.actions}>
       <Button
         size="sm"
-        variant="ghost"
+        variant="secondary"
         onClick={() => {
           setError(null);
           void exportPurchaseDocument(membershipId, 'membership_activated')
@@ -3266,9 +3502,9 @@ function PrintActivationConfirmation({ membershipId }: { membershipId: string })
         }}
       >
         Print Activation Confirmation
-      </Button>{' '}
-      <span>Membership {membershipId}</span>
+      </Button>
+      <span className={styles.note}>Membership {membershipId}</span>
       {error ? <span role="alert"> {error}</span> : null}
-    </p>
+    </div>
   );
 }
