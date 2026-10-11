@@ -1,43 +1,344 @@
-.search {
-  display: flex;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
+/* Customer Lookup (GSD / Employee desk): live-search result cards with the
+   member's actual VIP card artwork. Each card is themed by tier through
+   `data-tier` — GOLD / SILVER / BRONZE / NONE — so the tier reads off color
+   as well as text. */
+
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
 }
-.member {
-  margin-bottom: var(--space-4);
-  padding: var(--space-5);
-  background: var(--color-bg-surface-raised);
+
+.search {
+  margin-bottom: var(--space-1);
+}
+
+/* Suggestion dropdown anchor: the list hangs off the search box. */
+.suggestWrap {
+  position: relative;
+}
+
+.suggestList {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + var(--space-1));
+  z-index: var(--z-topbar);
+  display: grid;
+  gap: 2px;
+  max-height: 19rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.suggestOption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.suggestOption[data-active='true'],
+.suggestOption:hover {
+  background-color: var(--color-brand-soft);
+}
+
+.suggestName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.suggestName .mark,
+.mark {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  font-weight: 800;
+  border-radius: 2px;
+  padding-inline: 1px;
+}
+
+.suggestMeta {
+  flex-shrink: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.suggestHint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+/* Visible loading line above the skeleton cards. */
+.loadingLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.results {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Result card: artwork rail beside the record. The wash, border, category
+   chip and icon tiles all key off the same tier color below. */
+.member {
+  --tier-strong: var(--color-text-secondary);
+  --tier-accent: var(--color-border-strong);
+  --tier-wash: var(--color-bg-subtle);
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  border: 1px solid var(--tier-accent);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, var(--tier-wash) 0%, var(--color-bg-surface-raised) 45%),
+    var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
-.member h2 {
+
+.member[data-tier='GOLD'] {
+  --tier-strong: var(--color-accent-strong);
+  --tier-accent: var(--color-accent);
+  --tier-wash: var(--color-accent-soft);
+}
+
+.member[data-tier='SILVER'] {
+  --tier-strong: var(--color-text-secondary);
+  --tier-accent: #9aa5b1;
+  --tier-wash: #edf1f5;
+}
+
+.member[data-tier='BRONZE'] {
+  --tier-strong: #7c4f21;
+  --tier-accent: #a06a32;
+  --tier-wash: #f7ece0;
+}
+
+.member[data-tier='NONE'] {
+  --tier-strong: var(--color-text-muted);
+  --tier-accent: var(--color-border-default);
+  --tier-wash: var(--color-bg-subtle);
+}
+
+.artWrap {
+  min-width: 0;
+  min-height: 100%;
+  background-color: var(--tier-wash);
+}
+
+/* Contain, never cover: the whole card face stays visible, letterboxed on
+   the tier wash. Nothing on the printed card is ever cropped away. */
+.art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 168px;
+  object-fit: contain;
+  object-position: center;
+}
+
+.artPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 168px;
+  padding: var(--space-4);
+  color: var(--tier-strong);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  text-align: center;
+}
+
+.cardBody {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.category {
+  margin: 0;
+  justify-self: start;
+  padding: 2px var(--space-3);
+  border: 1px solid var(--tier-accent);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--tier-strong);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cardBody h2 {
   margin: 0;
   font-size: var(--text-h3);
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
 }
+
+.identifiers {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
-  gap: var(--space-4);
-  margin-bottom: 0;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
 }
+
+.fact {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.factIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background-color: var(--tier-wash);
+  border: 1px solid var(--tier-accent);
+  color: var(--tier-strong);
+}
+
+.factText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .details dt {
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
+
 .details dd {
-  margin: var(--space-1) 0 0;
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
 }
+
 .points {
   font-size: var(--text-metric);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-@media (max-width: 639px) {
-  .search {
-    flex-direction: column;
+
+/* Skeleton mirrors the card shape so first paint already holds the layout. */
+.artSkeleton {
+  height: 100%;
+  min-height: 168px;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sunken) 25%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: lookup-shimmer 1.4s ease infinite;
+}
+
+.skeletonLine,
+.skeletonTitle {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sunken) 25%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: lookup-shimmer 1.4s ease infinite;
+}
+
+.skeletonLine {
+  height: 14px;
+}
+
+.skeletonTitle {
+  height: 22px;
+}
+
+@keyframes lookup-shimmer {
+  from {
+    background-position: 200% 0;
   }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artSkeleton,
+  .skeletonLine,
+  .skeletonTitle {
+    animation: none;
+  }
+}
+
+@media (max-width: 639px) {
   .member {
+    grid-template-columns: 1fr;
+  }
+
+  .art,
+  .artPlaceholder,
+  .artSkeleton {
+    min-height: 0;
+  }
+
+  .art {
+    aspect-ratio: 16 / 9;
+    max-height: 180px;
+  }
+
+  .cardBody {
     padding: var(--space-4);
   }
 }
