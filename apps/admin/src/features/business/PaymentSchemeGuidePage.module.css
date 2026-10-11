@@ -1,28 +1,288 @@
-.state {
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-s);
+/* Payment Scheme Guide (internal staff reference).
+
+   Structure: a page shell, repeated section cards, a tier "flow" stepper, and a
+   numbered rule list. Scoped to this page so no other screen inherits it. */
+
+/* Page shell: one consistent rhythm between header, banner, and sections. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* Section card: numbered-heading panel used for each major block. */
+.section {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Numbered marker: gives each section an explicit reading order. */
+.sectionIndex {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-caption);
+  font-weight: 700;
 }
 
 .sectionTitle {
-  margin: var(--space-6) 0 var(--space-3);
+  margin: 0;
   font-size: var(--text-body-l);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
-.note {
-  margin: var(--space-3) 0 0;
-  color: var(--color-text-secondary);
+.sectionHint {
+  margin: 0;
+  flex: 1 1 16rem;
   font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
 }
 
-.flow,
+/* Money and count columns: tabular figures so digits line up down the table. */
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+/* Tier name cell: the tier is the row's identity, so it carries the emphasis. */
+.tierCell {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Moves column: compact availability pills. */
+.moves {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.movePill {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-brand-secondary);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background-color: var(--color-brand-soft);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Flow stepper: a vertical ordered list with a connecting rail and node dots,
+   so the escalation reads as a sequence rather than a flat bullet list. */
+.flow {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-4);
+  counter-reset: flow;
+}
+
+.flowStep {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  counter-increment: flow;
+}
+
+/* The rail: a vertical line through the node dots, stopped at the last step. */
+.flowStep:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 26px;
+  bottom: calc(-1 * var(--space-4));
+  left: 13px;
+  width: 2px;
+  background-color: var(--color-border-default);
+}
+
+.flowNode {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--color-brand-secondary);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--color-brand-primary);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.flowNode::before {
+  content: counter(flow);
+}
+
+.flowBody {
+  min-width: 0;
+  padding-top: 2px;
+  font-size: var(--text-body-s);
+  line-height: 1.55;
+  color: var(--color-text-primary);
+}
+
+/* Golden rules: numbered checklist with a hairline between entries. */
 .rules {
-  margin: var(--space-2) 0 var(--space-4);
-  padding-left: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: rule;
+  display: grid;
+}
+
+.rules li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: var(--text-body-s);
+  line-height: 1.55;
+  counter-increment: rule;
+}
+
+.rules li:last-child {
+  border-bottom: 0;
+}
+
+.ruleNode {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.ruleNode::before {
+  content: counter(rule);
+}
+
+/* Loading skeleton mirroring the real page: header, banner, and two panels, so
+   nothing pops in or reflows when the tiers arrive. */
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.skeletonHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.skeletonHeaderText {
   display: grid;
   gap: var(--space-2);
-  color: var(--color-text-primary);
-  font-size: var(--text-body-s);
-  line-height: 1.5;
+  min-width: 0;
+}
+
+.skeletonSection {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+}
+
+.skeletonRows {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1.2fr 0.8fr 0.8fr;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.skeletonSteps {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.skeletonStep {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@media (max-width: 767px) {
+  .skeletonRow {
+    grid-template-columns: 1fr;
+  }
+
+  .section {
+    padding: var(--space-4);
+  }
+}
+
+/* Print: this is a reference sheet staff hand around, so the paper copy drops
+   the chrome and keeps only the content, without splitting rows mid-figure. */
+@media print {
+  .page {
+    gap: var(--space-3);
+  }
+
+  .section,
+  .skeletonSection {
+    box-shadow: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .flow,
+  .rules {
+    break-inside: avoid;
+  }
 }
