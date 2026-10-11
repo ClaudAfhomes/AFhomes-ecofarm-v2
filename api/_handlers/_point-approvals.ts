@@ -38,6 +38,13 @@ export async function handlePointApprovals(
           serviceName: lines
             .map((line) => String(line.service_name_snapshot ?? 'Service'))
             .join(', '),
+          lines: lines.map((line) => ({
+            serviceName: String(line.service_name_snapshot ?? 'Service'),
+            quantity: Number(line.quantity),
+            tierDiscountRate:
+              line.tier_discount_rate == null ? null : Number(line.tier_discount_rate),
+          })),
+          pesoValuePerPoint: String(snapshot.rate),
           pointsRequested: Number(row.points_requested),
           pesoValue: String(row.peso_value),
           grossAmount: String(purchase.gross_amount),
@@ -76,8 +83,14 @@ export async function handlePointApprovals(
     if (error) {
       if (error.message.includes('APPROVAL_NOT_FOUND'))
         return fail(res, 'NOT_FOUND', 'No approval matches that reference.', 404);
-      if (error.message.includes('INSUFFICIENT_POINTS')) return fail(res,'CONFLICT','Your available points changed. Ask staff for a new quote.',409);
-    if (error.message.includes('APPROVAL_'))
+      if (error.message.includes('INSUFFICIENT_POINTS'))
+        return fail(
+          res,
+          'CONFLICT',
+          'Your available points changed. Ask staff for a new quote.',
+          409,
+        );
+      if (error.message.includes('APPROVAL_'))
         return fail(
           res,
           'CONFLICT',

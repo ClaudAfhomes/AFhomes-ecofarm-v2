@@ -1,3 +1,4 @@
+import { handleServiceRefunds } from './_service-refunds.js';
 /**
  * AF Homes points: purchases, earning claims, and the customer's QR claim.
  *
@@ -392,6 +393,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return fail(res, 'VALIDATION_ERROR', 'Invalid history page.', 400);
 
   try {
+    const serviceRefundRoute = new RegExp(
+      '^purchases/([0-9a-f-]{36})/refunds(?:/([0-9a-f-]{36})/(decision|repayments|receipts|reconcile-receipt)(?:/([0-9a-f-]{36}))?)?$',
+    ).exec(path);
+    if (serviceRefundRoute)
+      return await handleServiceRefunds(
+        req,
+        res,
+        db,
+        serviceRefundRoute[1],
+        serviceRefundRoute[2],
+        serviceRefundRoute[3],
+        verb,
+        serviceRefundRoute[4],
+      );
     const pointRefundRoute =
       /^purchases\/([0-9a-f-]{36})\/(point-refunds|cancel-point-reservation)$/.exec(path);
     if (pointRefundRoute)

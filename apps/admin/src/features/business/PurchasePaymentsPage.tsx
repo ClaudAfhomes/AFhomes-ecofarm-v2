@@ -1,3 +1,4 @@
+import { ServiceRefundPanel } from './ServiceRefundPanel';
 /**
  * Finance: recording and verifying purchase receipts.
  *
@@ -197,7 +198,14 @@ export function PurchasePaymentsPage() {
             </div>
           )}
 
-          {rows.map(purchase => <PointRefundReview key={purchase.id} purchase={purchase}/>)}
+          {rows
+            .filter((purchase) => purchase.status === 'draft')
+            .map((purchase) => (
+              <PointRefundReview key={purchase.id} purchase={purchase} />
+            ))}
+          {rows.map((purchase) => (
+            <ServiceRefundPanel key={purchase.id} purchase={purchase} />
+          ))}
           {/* One receipt panel per sale, so a reviewer can accept or reject a
               specific receipt. */}
           {rows.map((purchase) => (

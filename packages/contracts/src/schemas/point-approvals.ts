@@ -1,10 +1,18 @@
 import { z } from 'zod';
-import { exactDecimalStringSchema } from './money.js';
+import { exactDecimalStringSchema, exactDecimalRateSchema } from './money.js';
 export const pointApprovalSchema = z.object({
   quoteId: z.string().uuid(),
   quoteNumber: z.string(),
   purchaseNumber: z.string(),
   serviceName: z.string(),
+  lines: z.array(
+    z.object({
+      serviceName: z.string(),
+      quantity: z.number().int().positive(),
+      tierDiscountRate: z.number().min(0).max(100).nullable(),
+    }),
+  ),
+  pesoValuePerPoint: exactDecimalRateSchema,
   pointsRequested: z.number().int().positive(),
   pesoValue: exactDecimalStringSchema,
   grossAmount: exactDecimalStringSchema,

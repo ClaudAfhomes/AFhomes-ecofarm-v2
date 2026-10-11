@@ -1,3 +1,11 @@
+import { serviceRefundReceiptSchema } from '@afhomes/contracts';
+import {
+  serviceRefundIdSchema,
+  serviceRefundReconciliationResultSchema,
+  serviceRefundRowSchema,
+  type ServiceRefundRequest,
+  type ServiceRefundRepayment,
+} from '@afhomes/contracts';
 /**
  * Staff points-earning API client.
  *
@@ -358,3 +366,50 @@ export const listPurchasesPage = (page: number) =>
   requestList('/earning/purchases?page=' + page, purchaseRowSchema);
 export const listClaimsPage = (page: number) =>
   requestList('/earning/claims?page=' + page, claimRowSchema);
+
+export const listServiceRefunds = (purchaseId: string) =>
+  requestList('/earning/purchases/' + purchaseId + '/refunds', serviceRefundRowSchema);
+export const requestServiceRefund = (purchaseId: string, body: ServiceRefundRequest) =>
+  post('/earning/purchases/' + purchaseId + '/refunds', serviceRefundIdSchema, body);
+export const decideServiceRefund = (
+  purchaseId: string,
+  refundId: string,
+  decision: 'approve' | 'reject' | 'cancel',
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/decision',
+    serviceRefundIdSchema,
+    { decision, serviceReviewConfirmed: true },
+  );
+export const recordServiceRefundRepayment = (
+  purchaseId: string,
+  refundId: string,
+  body: ServiceRefundRepayment,
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/repayments',
+    serviceRefundIdSchema,
+    body,
+  );
+
+export const getServiceRefundReceipt = (
+  purchaseId: string,
+  refundId: string,
+  repaymentId: string,
+) =>
+  request(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/receipts/' + repaymentId,
+    serviceRefundReceiptSchema,
+  );
+
+export const reconcileServiceRefundReceipt = (
+  purchaseId: string,
+  refundId: string,
+  uploadAuditId: string,
+  reason: string,
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/reconcile-receipt',
+    serviceRefundReconciliationResultSchema,
+    { uploadAuditId, reason },
+  );

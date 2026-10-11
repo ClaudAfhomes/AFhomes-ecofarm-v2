@@ -18,6 +18,7 @@
  * The SQL itself is executed by the database integration suite, not here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { pointApprovalSchema } from '@afhomes/contracts';
 import { hashIdentifier } from '../_lib/identifier.js';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
@@ -29,6 +30,16 @@ vi.mock('../_lib/rest.js', () => ({
   anonClient: () => holder.db,
 }));
 
+const receiptStore = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+vi.mock('../_lib/storage.js', () => ({
+  storageClient: () => ({
+    from: () => ({ upload: receiptStore.upload, remove: receiptStore.remove }),
+  }),
+  createDownloadGrant: async () => ({
+    url: 'https://storage.test/receipt',
+    expiresAt: '2026-10-11T00:00:00.000Z',
+  }),
+}));
 const points = (await import('./points.js')).default;
 
 /* ------------------------------------------------------------------ */
@@ -1802,6 +1813,42 @@ describe('points: reads', () => {
 });
 
 describe('customer-only point spending approvals and Finance refunds', () => {
+  it('returns only the owned frozen quote quantities, discounts and conversion', async () => {
+    const tables = baseTables();
+    tables.redemption_quotes = [
+      {
+        id: CLAIM_ID,
+        quote_number: 'Q-TEST',
+        approval_customer_id: CUSTOMER_ID,
+        points_requested: 1000,
+        peso_value: '500.00',
+        status: 'open',
+        approval_expires_at: '2099-01-01T00:00:00Z',
+        approval_snapshot: {
+          rate: '0.0001',
+          purchase: {
+            purchase_number: 'P-TEST',
+            gross_amount: '1000.00',
+            tier_discount_amount: '0.00',
+          },
+          lines: [{ service_name_snapshot: 'Hotel night', quantity: 2, tier_discount_rate: 0 }],
+        },
+      },
+    ];
+    install({ tables });
+    const result = await call({ familyPath: 'approvals', method: 'GET', token: CUSTOMER_TOKEN });
+    expect(result.status).toBe(200);
+    expect(pointApprovalSchema.array().parse(body(result).data)).toEqual([
+      expect.objectContaining({
+        pesoValuePerPoint: '0.0001',
+        lines: [{ serviceName: 'Hotel night', quantity: 2, tierDiscountRate: 0 }],
+        grossAmount: '1000.00',
+        tierDiscountAmount: '0.00',
+        finalAmountPayable: '500.00',
+      }),
+    ]);
+  });
+
   it('resolves approval ownership and Auth identity from the customer session', async () => {
     const db = install({ rpcs: [{ fn: 'decide_point_redemption_approval', result: 'approved' }] });
     const result = await call({
@@ -1906,5 +1953,312 @@ describe('customer-only point spending approvals and Finance refunds', () => {
     expect(
       db.calls.find((entry) => entry.table === 'refund_purchase_redeemed_points')?.arg,
     ).toMatchObject({ p_actor_id: STAFF_ID, p_service_value: '250.00' });
+  });
+});
+
+describe('Finance external service refund API', () => {
+  it('requires Finance update permission before invoking a refund mutation', async () => {
+    const db = install({
+      permissions: [
+        {
+          moduleKey: 'operations.payments',
+          canView: true,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
+      ],
+    });
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds',
+      method: 'POST',
+      body: {
+        serviceValue: '100.00',
+        cashAmount: '100.00',
+        reference: 'TEST-REFUND',
+        reason: 'Reviewed refund',
+        serviceReviewConfirmed: true,
+      },
+    });
+    expect(result.status).toBe(403);
+    expect(db.calls.some((c) => c.table === 'manage_service_refund')).toBe(false);
+  });
+  it('binds the Finance actor to the session and accepts no paid-status override', async () => {
+    const db = install({ rpcs: [{ fn: 'manage_service_refund', result: CLAIM_ID }] });
+    const payload = {
+      serviceValue: '100.00',
+      cashAmount: '100.00',
+      reference: 'TEST-REFUND',
+      reason: 'Reviewed refund',
+      serviceReviewConfirmed: true,
+    };
+    expect(
+      (
+        await call({
+          familyPath: 'purchases/' + PURCHASE_ID + '/refunds',
+          method: 'POST',
+          body: { ...payload, status: 'completed' },
+        })
+      ).status,
+    ).toBe(400);
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds',
+      method: 'POST',
+      body: payload,
+    });
+    expect(result).toMatchObject({ status: 201, body: { id: CLAIM_ID } });
+    expect(db.calls.find((c) => c.table === 'manage_service_refund')?.arg).toMatchObject({
+      p_actor_id: STAFF_ID,
+      p_operation: 'request',
+      p_refund_id: null,
+    });
+  });
+  it('records repayment as its own operation with external reference', async () => {
+    const db = install({ rpcs: [{ fn: 'manage_service_refund', result: CLAIM_ID }] });
+    const payload = {
+      amount: '50.00',
+      method: 'bank_transfer',
+      reference: 'EXTERNAL-BANK',
+      repaidAt: '2026-10-01T00:00:00.000Z',
+    };
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds/' + CLAIM_ID + '/repayments',
+      method: 'POST',
+      body: payload,
+    });
+    expect(result.status).toBe(200);
+    expect(db.calls.find((c) => c.table === 'manage_service_refund')?.arg).toMatchObject({
+      p_actor_id: STAFF_ID,
+      p_operation: 'repay',
+      p_input: payload,
+    });
+  });
+});
+
+describe('Refund receipt trust boundary', () => {
+  it('rejects a receipt with a forged MIME signature before any financial RPC', async () => {
+    const db = install();
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds/' + CLAIM_ID + '/repayments',
+      method: 'POST',
+      body: {
+        amount: '50.00',
+        method: 'cash',
+        reference: 'TEST-RECEIPT',
+        repaidAt: '2026-10-01T00:00:00.000Z',
+        receipt: {
+          mimeType: 'application/pdf',
+          dataBase64: Buffer.from('not a PDF').toString('base64'),
+        },
+      },
+    });
+    expect(result.status).toBe(400);
+    expect(db.calls.some((c) => c.table === 'manage_service_refund')).toBe(false);
+  });
+  it('does not accept writes on the receipt download route', async () => {
+    const db = install();
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds/' + CLAIM_ID + '/receipts/' + CLAIM_ID,
+      method: 'POST',
+      body: {
+        serviceValue: '100.00',
+        cashAmount: '100.00',
+        reference: 'WRONG-ROUTE',
+        reason: 'Reviewed refund',
+        serviceReviewConfirmed: true,
+      },
+    });
+    expect(result.status).toBe(404);
+    expect(db.calls.some((c) => c.table === 'manage_service_refund')).toBe(false);
+  });
+});
+
+describe('Refund receipt upload reconciliation', () => {
+  const payload = {
+    amount: '50.00',
+    method: 'cash',
+    reference: 'RECEIPT-EXTERNAL',
+    repaidAt: '2026-10-01T00:00:00.000Z',
+    receipt: {
+      mimeType: 'application/pdf',
+      dataBase64: Buffer.from('%PDF-1.4 synthetic receipt').toString('base64'),
+    },
+  };
+  beforeEach(() => {
+    receiptStore.upload.mockReset().mockResolvedValue({ error: null });
+    receiptStore.remove.mockReset().mockResolvedValue({ error: null });
+  });
+  const setup = (error?: { code?: string; message: string }) => {
+    const tables = baseTables();
+    tables.service_refunds = [
+      { id: CLAIM_ID, purchase_id: PURCHASE_ID, status: 'approved_pending_repayment' },
+    ];
+    tables.service_refund_repayments = [];
+    return install({
+      tables,
+      rpcs: [{ fn: 'manage_service_refund', result: CLAIM_ID }],
+      ...(error ? { rpcErrors: { manage_service_refund: error } } : {}),
+    });
+  };
+  const repay = () =>
+    call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds/' + CLAIM_ID + '/repayments',
+      method: 'POST',
+      body: payload,
+    });
+  it('removes only this attempt receipt after a definite SQL rejection', async () => {
+    setup({ code: '55000', message: 'REFUND_REPAYMENT_EXCEEDS_OUTSTANDING' });
+    expect((await repay()).status).toBe(409);
+    expect(receiptStore.remove).toHaveBeenCalledWith([receiptStore.upload.mock.calls[0][0]]);
+  });
+  it('records a durable pending upload before storage and preserves it on ambiguous RPC failure', async () => {
+    const db = setup({ message: 'fetch failed' });
+    expect((await repay()).status).toBe(500);
+    expect(receiptStore.remove).not.toHaveBeenCalled();
+    expect(
+      db.rows('audit_events').some((e) => e.action === 'SERVICE_REFUND_RECEIPT_PREPARED'),
+    ).toBe(true);
+  });
+  it('never removes a receipt used by a successful repayment', async () => {
+    setup();
+    expect((await repay()).status).toBe(200);
+    expect(receiptStore.remove).not.toHaveBeenCalled();
+  });
+  it('refuses an unrelated purchase before uploading', async () => {
+    const db = setup();
+    db.rows('service_refunds')[0].purchase_id = OTHER_CUSTOMER_ID;
+    expect((await repay()).status).toBe(404);
+    expect(receiptStore.upload).not.toHaveBeenCalled();
+  });
+  it('reuses a committed matching receipt without another upload or mutation', async () => {
+    const db = setup();
+    db.rows('service_refund_repayments').push({
+      refund_id: CLAIM_ID,
+      amount: '50.00',
+      method: 'cash',
+      reference: payload.reference,
+      repaid_at: payload.repaidAt,
+      recorded_by: STAFF_ID,
+      receipt_path:
+        'service-refunds/' +
+        CLAIM_ID +
+        '/' +
+        STAFF_ID +
+        '/attempt/' +
+        hashIdentifier('%PDF-1.4 synthetic receipt') +
+        '.pdf',
+    });
+    expect((await repay()).status).toBe(200);
+    expect(receiptStore.upload).not.toHaveBeenCalled();
+    expect(db.calls.some((c) => c.table === 'manage_service_refund')).toBe(false);
+  });
+  it('retains the prepared audit if storage cleanup fails', async () => {
+    const db = setup({ code: '55000', message: 'REFUND_STATE_CONFLICT' });
+    receiptStore.remove.mockResolvedValue({ error: { message: 'unavailable' } });
+    expect((await repay()).status).toBe(409);
+    expect(
+      db.rows('audit_events').some((e) => e.action === 'SERVICE_REFUND_RECEIPT_PREPARED'),
+    ).toBe(true);
+    expect(db.rows('audit_events').some((e) => e.action === 'SERVICE_REFUND_RECEIPT_REMOVED')).toBe(
+      false,
+    );
+  });
+  it('does not record a repayment when receipt upload fails', async () => {
+    const db = setup();
+    receiptStore.upload.mockResolvedValue({ error: { statusCode: '500' } });
+    expect((await repay()).status).toBe(500);
+    expect(db.calls.some((c) => c.table === 'manage_service_refund')).toBe(false);
+    expect(receiptStore.remove).not.toHaveBeenCalled();
+  });
+  it('cleans only the losing receipt when a concurrent matching repayment wins', async () => {
+    const db = setup({ code: '42501', message: 'REFUND_REPAYMENT_REFERENCE_CONFLICT' });
+    receiptStore.upload.mockImplementation(async () => {
+      db.rows('service_refund_repayments').push({
+        refund_id: CLAIM_ID,
+        amount: '50.00',
+        method: 'cash',
+        reference: payload.reference,
+        repaid_at: payload.repaidAt,
+        recorded_by: STAFF_ID,
+        receipt_path:
+          'service-refunds/' +
+          CLAIM_ID +
+          '/' +
+          STAFF_ID +
+          '/winner/' +
+          hashIdentifier('%PDF-1.4 synthetic receipt') +
+          '.pdf',
+      });
+      return { error: null };
+    });
+    expect((await repay()).status).toBe(200);
+    expect(receiptStore.remove).toHaveBeenCalledWith([receiptStore.upload.mock.calls[0][0]]);
+  });
+});
+
+describe('Finance targeted receipt reconciliation', () => {
+  const path = 'service-refunds/' + CLAIM_ID + '/' + STAFF_ID + '/attempt/synthetic.pdf';
+  const run = (body: unknown) =>
+    call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/refunds/' + CLAIM_ID + '/reconcile-receipt',
+      method: 'POST',
+      token: TOKEN,
+      body,
+    });
+  beforeEach(() => receiptStore.remove.mockReset().mockResolvedValue({ error: null }));
+  it('never deletes a receipt already referenced by a repayment', async () => {
+    install({
+      rpcs: [
+        {
+          fn: 'reconcile_service_refund_receipt',
+          result: { status: 'referenced', receiptPath: null },
+        },
+      ],
+    });
+    const result = await run({ uploadAuditId: '123', reason: 'Reviewed uncertain outcome' });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ status: 'referenced' });
+    expect(receiptStore.remove).not.toHaveBeenCalled();
+  });
+  it('deletes only the database-authorized abandoned attempt and audits removal', async () => {
+    const db = install({
+      rpcs: [
+        {
+          fn: 'reconcile_service_refund_receipt',
+          result: { status: 'abandoned', receiptPath: path },
+        },
+      ],
+    });
+    const result = await run({ uploadAuditId: '123', reason: 'Reviewed uncertain outcome' });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ status: 'removed' });
+    expect(receiptStore.remove).toHaveBeenCalledWith([path]);
+    expect(db.rows('audit_events').some((r) => r.action === 'SERVICE_REFUND_RECEIPT_REMOVED')).toBe(
+      true,
+    );
+  });
+  it('retains an auditable cleanup-pending outcome on Storage failure', async () => {
+    install({
+      rpcs: [
+        {
+          fn: 'reconcile_service_refund_receipt',
+          result: { status: 'abandoned', receiptPath: path },
+        },
+      ],
+    });
+    receiptStore.remove.mockResolvedValue({ error: { message: 'offline' } });
+    expect(
+      (await run({ uploadAuditId: '123', reason: 'Reviewed uncertain outcome' })).body,
+    ).toEqual({ status: 'cleanup_pending' });
+  });
+  it('does not accept a browser-supplied object path or an overflowing audit ID', async () => {
+    const db = install();
+    expect(
+      (await run({ uploadAuditId: '123', reason: 'Reviewed', receiptPath: path })).status,
+    ).toBe(400);
+    expect((await run({ uploadAuditId: '9223372036854775808', reason: 'Reviewed' })).status).toBe(
+      400,
+    );
+    expect(db.calls.some((r) => r.table === 'reconcile_service_refund_receipt')).toBe(false);
   });
 });

@@ -172,6 +172,7 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.set('/customer/points', ok(POINTS));
   routes.set('/customer/points/position', ok(POSITION));
   routes.set('/earning/approvals', list([]));
+  routes.set('/customer/refunds', list([]));
   routes.set('/customer/points/ledger', list(LEDGER.data));
   for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
 }
@@ -186,7 +187,8 @@ function mockFetch() {
       .replace(/^\/api\/v1/, '')
       .split('?')[0]!;
     requests.push(`${path}`);
-    const handler = routes.get(path);
+    const fullPath = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
+    const handler = routes.get(fullPath) ?? routes.get(path);
     if (!handler) {
       return new Response(
         JSON.stringify({ error: { code: 'NOT_FOUND', message: `unstubbed route ${path}` } }),
@@ -555,6 +557,18 @@ describe('points position vs legacy summary', () => {
 });
 
 describe('points screen', () => {
+  it('shows earning and refund references even without a redemption row', async () => {
+    installRoutes({
+      '/customer/points/ledger': list([
+        { ...LEDGER.data[0], entryType: 'earned', referenceNumber: 'CLM-LOCAL-001' },
+        { ...LEDGER.data[0], id: '3', referenceNumber: 'REFUND-LOCAL-001' },
+      ]),
+    });
+    render('/customer/points');
+    expect(await screen.findByText('CLM-LOCAL-001')).toBeInTheDocument();
+    expect(screen.getByText('REFUND-LOCAL-001')).toBeInTheDocument();
+  });
+
   it('separates spendable points from what may still be earned', async () => {
     render('/customer/points');
     const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
@@ -792,6 +806,20 @@ describe('customer payments screen', () => {
 /* ================================================================== */
 
 describe('customer redemptions screen', () => {
+  it('shows the operational spending reference from the customer ledger', async () => {
+    installRoutes({
+      '/customer/points/ledger': list([
+        {
+          ...REDEMPTION_LEDGER.data[0],
+          redemptionNumber: undefined,
+          referenceNumber: 'Q-LOCAL-001',
+        },
+      ]),
+    });
+    render('/customer/redemptions');
+    expect(await screen.findByText('Q-LOCAL-001')).toBeInTheDocument();
+  });
+
   it('renders only redemption entries with their frozen snapshots', async () => {
     installRoutes({ '/customer/points/ledger': list(REDEMPTION_LEDGER.data) });
     render('/customer/redemptions');
@@ -1020,5 +1048,24 @@ describe('membership status display', () => {
     render('/customer/membership');
     expect(await screen.findAllByText('MBS-000777')).not.toHaveLength(0);
     expect(screen.getByText('expired')).toBeInTheDocument();
+  });
+});
+
+
+describe('points history pagination', () => {
+  it('loads an older bounded page and returns to newer activity', async () => {
+    installRoutes({
+      '/customer/points/ledger': ok({data:[{id:'101',entryType:'earned',amount:100,balanceAfter:100,reason:'Newest synthetic award',occurredAt:'2026-10-01T00:00:00.000Z'}],meta:{nextCursor:'older-page'}}),
+      '/customer/points/ledger?cursor=older-page': ok({data:[{id:'1',entryType:'adjustment',amount:50,balanceAfter:50,reason:'Older synthetic correction',occurredAt:'2026-09-01T00:00:00.000Z'}],meta:{nextCursor:null}}),
+    });
+    render('/customer/points');
+    expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
+    const user=userEvent.setup();
+    await user.click(screen.getByRole('button',{name:'Older activity'}));
+    expect(await screen.findByText('Older synthetic correction')).toBeInTheDocument();
+    expect(screen.queryByText('Newest synthetic award')).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Older activity'})).toBeDisabled();
+    await user.click(screen.getByRole('button',{name:'Newer activity'}));
+    expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
   });
 });

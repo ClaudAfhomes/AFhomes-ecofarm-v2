@@ -44,7 +44,24 @@ export function PointRedemptionApprovals() {
           <p>
             {approval.purchaseNumber} · {approval.quoteNumber}
           </p>
+          <ul>
+            {approval.lines.map((line, index) => (
+              <li key={index}>
+                {line.quantity} x {line.serviceName} - VIP discount{' '}
+                {line.tierDiscountRate === null ? 'not recorded' : line.tierDiscountRate + '%'}
+              </li>
+            ))}
+          </ul>
           <dl>
+            <dt>Gross amount</dt>
+            <dd>{formatMoney(approval.grossAmount)}</dd>
+            <dt>VIP tier discount</dt>
+            <dd>{formatMoney(approval.tierDiscountAmount)}</dd>
+            <dt>Configured conversion</dt>
+            <dd>
+              {'\u20b1'}
+              {approval.pesoValuePerPoint} per point
+            </dd>
             <dt>Points to reserve</dt>
             <dd>{approval.pointsRequested.toLocaleString('en-PH')}</dd>
             <dt>Points discount</dt>

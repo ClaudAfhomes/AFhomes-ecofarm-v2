@@ -1,3 +1,4 @@
+import { customerLedgerCursorSchema } from '@afhomes/contracts';
 /**
  * Customer portal reads: `GET /customer/*`.
  *
@@ -333,6 +334,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    if (path === 'refunds' && method(req) === 'GET') {
+      if (!isActiveCustomer(principal))
+        return fail(res, 'FORBIDDEN', 'Your account is not active.', 403);
+      const result = await db.rpc('service_refund_history', {
+        p_purchase_id: null,
+        p_customer_id: principal.customerId,
+      });
+      if (result.error) return fail(res, 'INTERNAL', 'Refund history is unavailable.', 500);
+      return list(res, result.data ?? []);
+    }
     /* ---------------- points ledger ---------------- */
     if (path === 'points/ledger' && method(req) === 'GET') {
       if (!isActiveCustomer(principal)) {
@@ -353,21 +364,122 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (!account) return list(res, []);
 
-      const { data, error } = await db
-        .from('points_ledger')
-        // actor_id and metadata are deliberately not selected.
-        .select('id, entry_type, amount, balance_after, reason, reference_type, reference_id, created_at')
-        .eq('account_id', (account as { id: string }).id)
-        .order('id', { ascending: false })
-        .limit(100);
-      if (error) throw error;
-
-      const rows = (data ?? []) as Record<string, unknown>[];
+      if (req.query.entryType !== undefined && req.query.entryType !== 'redemption')
+        return fail(res, 'VALIDATION_ERROR', 'Invalid history filter.', 400);
+      let cursor: { occurredAt: string; id: string } | undefined;
+      if (req.query.cursor !== undefined) {
+        try {
+          if (
+            typeof req.query.cursor !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,512}$/.test(req.query.cursor)
+          )
+            throw new Error('Invalid cursor');
+          cursor = customerLedgerCursorSchema.parse(
+            JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString('utf8')),
+          );
+          if (BigInt(cursor.id) > 9223372036854775807n) throw new Error('Invalid id');
+        } catch {
+          return fail(res, 'VALIDATION_ERROR', 'Invalid history cursor.', 400);
+        }
+      }
+      const pageSize = 100;
+      const ledgerQuery = () => {
+        const query = db
+          .from('points_ledger')
+          .select(
+            'id, entry_type, amount, balance_after, reason, reference_type, reference_id, created_at',
+          )
+          .eq('account_id', (account as { id: string }).id);
+        return req.query.entryType === 'redemption' ? query.eq('entry_type', 'redemption') : query;
+      };
+      let candidates: Record<string, unknown>[];
+      if (cursor) {
+        // Read the remaining timestamp ties first, then fill with strictly older rows.
+        const tied = await ledgerQuery()
+          .eq('created_at', cursor.occurredAt)
+          .lte('id', (BigInt(cursor.id) - 1n).toString())
+          .order('id', { ascending: false })
+          .limit(pageSize + 1);
+        if (tied.error) throw tied.error;
+        candidates = tied.data ?? [];
+        if (candidates.length < pageSize + 1) {
+          const older = await ledgerQuery()
+            .lte('created_at', cursor.occurredAt)
+            .neq('created_at', cursor.occurredAt)
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .limit(pageSize + 1 - candidates.length);
+          if (older.error) throw older.error;
+          candidates = [...candidates, ...(older.data ?? [])];
+        }
+      } else {
+        const result = await ledgerQuery()
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(pageSize + 1);
+        if (result.error) throw result.error;
+        candidates = result.data ?? [];
+      }
+      const rows = candidates.slice(0, pageSize);
+      const last = rows.at(-1);
+      const nextCursor =
+        candidates.length > pageSize && last
+          ? Buffer.from(
+              JSON.stringify({ occurredAt: String(last.created_at), id: String(last.id) }),
+            ).toString('base64url')
+          : null;
 
       /* Redemption rows are joined in so the member sees WHAT they spent points
        * on, not just a number going down. The driving set is already this
        * customer's own ledger, and the redemption is additionally pinned to the
        * same customer id, so the join cannot widen anything. */
+      const referenceNumbers = new Map<string, string>();
+      const quoteRefs = rows
+        .filter(
+          (row) =>
+            row.reference_type === 'redemption_quote' && typeof row.reference_id === 'string',
+        )
+        .map((row) => String(row.reference_id));
+      if (quoteRefs.length > 0) {
+        const { data: quotes, error: quoteError } = await db
+          .from('redemption_quotes')
+          .select('id, quote_number')
+          .in('id', quoteRefs)
+          .eq('approval_customer_id', principal.customerId);
+        if (quoteError) throw quoteError;
+        for (const quote of quotes ?? [])
+          referenceNumbers.set('redemption_quote:' + quote.id, String(quote.quote_number));
+      }
+      const claimRefs = rows
+        .filter(
+          (row) => row.reference_type === 'earning_claim' && typeof row.reference_id === 'string',
+        )
+        .map((row) => String(row.reference_id));
+      if (claimRefs.length > 0) {
+        const { data: claims, error: claimError } = await db
+          .from('earning_claims')
+          .select('id, claim_number')
+          .in('id', claimRefs)
+          .eq('customer_id', principal.customerId);
+        if (claimError) throw claimError;
+        for (const claim of claims ?? [])
+          referenceNumbers.set('earning_claim:' + claim.id, String(claim.claim_number));
+      }
+
+      const purchaseRefs = rows
+        .filter((row) => row.reference_type === 'purchase' && typeof row.reference_id === 'string')
+        .map((row) => String(row.reference_id));
+      if (purchaseRefs.length > 0) {
+        const { data: purchases, error: purchaseError } = await db
+          .from('purchases')
+          .select('id, purchase_number')
+          .in('id', purchaseRefs)
+          .eq('customer_id', principal.customerId);
+        if (purchaseError) throw purchaseError;
+        for (const purchase of purchases ?? [])
+          referenceNumbers.set('purchase:' + purchase.id, String(purchase.purchase_number));
+      }
+
       const redemptionRefs = [
         ...new Set(
           rows
@@ -379,7 +491,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (redemptionRefs.length > 0) {
         const { data: redemptions } = await db
           .from('redemptions')
-          .select('id, redemption_number, item_name_snapshot, item_code_snapshot, quantity, total_points, customer_id')
+          .select(
+            'id, redemption_number, item_name_snapshot, item_code_snapshot, quantity, total_points, customer_id',
+          )
           .in('id', redemptionRefs)
           .eq('customer_id', principal.customerId);
         for (const row of (redemptions ?? []) as Record<string, unknown>[]) {
@@ -387,9 +501,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      return list(
-        res,
-        rows.map((row) => {
+      return res.status(200).json({
+        meta: { nextCursor },
+        data: rows.map((row) => {
           const redemption =
             row.entry_type === 'redemption' && typeof row.reference_id === 'string'
               ? redemptionByRef.get(String(row.reference_id))
@@ -401,6 +515,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             balanceAfter: Number(row.balance_after),
             reason: isoOrNull(row.reason),
             occurredAt: isoOrNull(row.created_at) ?? '',
+            referenceNumber:
+              row.reference_type === 'point_refund' && typeof row.reference_id === 'string'
+                ? row.reference_id
+                : referenceNumbers.get(String(row.reference_type) + ':' + String(row.reference_id)),
             // Present only on a redemption, and only ever for this member.
             ...(redemption
               ? {
@@ -412,7 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : {}),
           };
         }),
-      );
+      });
     }
 
     /* ---------------- payment history ---------------- */
@@ -437,7 +555,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (saleIds.length === 0) return list(res, []);
       const { data, error } = await db
         .from('payments')
-        .select('id, sale_id, payment_number, amount, payment_type, method, reference, status, recorded_at, verified_at')
+        .select(
+          'id, sale_id, payment_number, amount, payment_type, method, reference, status, recorded_at, verified_at',
+        )
         .in('sale_id', saleIds)
         .order('recorded_at', { ascending: false })
         .limit(100);
@@ -480,8 +600,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (error) return mapRpcError(res, error);
       const row = (Array.isArray(data) ? data[0] : data) as
-        | { membership_id: string; fallback_code: string; qr_token: string }
-        | undefined;
+        { membership_id: string; fallback_code: string; qr_token: string } | undefined;
       if (!row) return fail(res, 'INTERNAL', 'Could not issue a new card code', 500);
 
       // Returned exactly once. It is never stored in readable form, so this

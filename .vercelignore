@@ -32,3 +32,5 @@ C：UsersSSD-OR~1AppDataLocalTemplint.txt
 # Retired JAD dev scratch scripts (operated on the JAD `marketing-tools` bucket)
 test-cleanup.ts
 test-realtime.ts
+# Disposable SQL and HTTP fixtures are never deployed.
+packages/db-testing/

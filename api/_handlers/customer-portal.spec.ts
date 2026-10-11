@@ -14,6 +14,7 @@
  *      permission resolver is never consulted.
  */
 import { createHash } from 'node:crypto';
+import { customerPointsEntrySchema } from '@afhomes/contracts';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1048,6 +1049,25 @@ describe('customer membership summary', () => {
 });
 
 describe('customer points', () => {
+  it('paginates customer points chronologically across timestamp ties without duplicates', async () => {
+    const own='abababab-0000-4000-8000-000000000001';
+    const entries=Array.from({length:101},(_,i)=>({id:String(i+1),account_id:own,entry_type:'earned',amount:1,balance_after:i+1,created_at:'2026-10-01T00:00:00.000Z'}));
+    install({tables:baseTables({points_ledger:[...entries,{...entries[0],id:500,created_at:'2026-09-01T00:00:00.000Z'},{...entries[0],id:900,account_id:ACCOUNT_ID}]})});
+    const first=await callPortal('points/ledger');
+    const page=body(first) as {data:{id:string}[];meta:{nextCursor:string}};
+    expect(page.data.map(r=>r.id)).toEqual(Array.from({length:100},(_,i)=>String(101-i)));
+    expect(page.meta.nextCursor).toEqual(expect.any(String));
+    (holder.db as FakeSupabase).rows('points_ledger').push({...entries[0],id:'102'});
+    const {res,state}=makeRes();
+    await portal(makeReq({familyPath:'points/ledger',token:TOKEN,query:{cursor:page.meta.nextCursor}}) as never,res as never);
+    expect(body(state)).toMatchObject({data:[{id:'1'},{id:'500'}],meta:{nextCursor:null}});
+  });
+  it('rejects malformed customer points cursors', async () => {
+    const {res,state}=makeRes();
+    await portal(makeReq({familyPath:'points/ledger',token:TOKEN,query:{cursor:'malformed'}}) as never,res as never);
+    expect(state.status).toBe(400);
+  });
+
   beforeEach(() => install());
 
   it('returns the caller own points POSITION', async () => {
@@ -1153,6 +1173,82 @@ describe('customer points', () => {
     const s = await callPortal('points');
     expect(body(s).balance).not.toBe(25000);
     expect(body(s).membershipId).not.toBe(OTHER_MEMBERSHIP_ID);
+  });
+
+  it('resolves customer-owned operational spending references without exposing another customer quote', async () => {
+    install({
+      tables: baseTables({
+        points_ledger: [
+        { id: '14', account_id: 'abababab-0000-4000-8000-000000000001', entry_type: 'reversal', amount: -100, balance_after: 59400, reference_type: 'purchase', reference_id: 'own-purchase', created_at: agoHours(1) },
+          {
+            id: '10',
+            account_id: 'abababab-0000-4000-8000-000000000001',
+            entry_type: 'redemption',
+            amount: -1000,
+            balance_after: 59000,
+            reference_type: 'redemption_quote',
+            reference_id: 'own-quote',
+            created_at: agoHours(1),
+          },
+          {
+            id: '11',
+            account_id: 'abababab-0000-4000-8000-000000000001',
+            entry_type: 'redemption',
+            amount: -1000,
+            balance_after: 58000,
+            reference_type: 'redemption_quote',
+            reference_id: 'other-quote',
+            created_at: agoHours(1),
+          },
+          {
+            id: '12',
+            account_id: 'abababab-0000-4000-8000-000000000001',
+            entry_type: 'adjustment',
+            amount: 500,
+            balance_after: 58500,
+            reference_type: 'point_refund',
+            reference_id: 'REFUND-LOCAL-001',
+            created_at: agoHours(1),
+          },
+          {
+            id: '13',
+            account_id: 'abababab-0000-4000-8000-000000000001',
+            entry_type: 'earned',
+            amount: 1000,
+            balance_after: 59500,
+            reference_type: 'earning_claim',
+            reference_id: 'own-claim',
+            created_at: agoHours(1),
+          },
+        ],
+        purchases: [{ id: 'own-purchase', customer_id: CUSTOMER_ID, purchase_number: 'P-LOCAL-001' }],
+      redemption_quotes: [
+          { id: 'own-quote', approval_customer_id: CUSTOMER_ID, quote_number: 'Q-LOCAL-001' },
+          {
+            id: 'other-quote',
+            approval_customer_id: OTHER_CUSTOMER_ID,
+            quote_number: 'OTHER-CUSTOMER-PRIVATE',
+          },
+        ],
+        earning_claims: [
+          { id: 'own-claim', customer_id: CUSTOMER_ID, claim_number: 'CLM-LOCAL-001' },
+        ],
+      }),
+    });
+    const result = await callPortal('points/ledger');
+    expect(result.status).toBe(200);
+    expect(customerPointsEntrySchema.array().safeParse(data(result)).success).toBe(true);
+    expect(data(result)).toContainEqual(
+      expect.objectContaining({ id: '10', referenceNumber: 'Q-LOCAL-001' }),
+    );
+    expect(data(result)).toContainEqual(
+      expect.objectContaining({ id: '12', referenceNumber: 'REFUND-LOCAL-001' }),
+    );
+    expect(data(result)).toContainEqual(
+      expect.objectContaining({ id: '13', referenceNumber: 'CLM-LOCAL-001' }),
+    );
+    expect(data(result)).toContainEqual(expect.objectContaining({ id: '14', referenceNumber: 'P-LOCAL-001' }));
+    expect(JSON.stringify(result.body)).not.toContain('OTHER-CUSTOMER-PRIVATE');
   });
 
   it('returns only the caller own ledger entries', async () => {

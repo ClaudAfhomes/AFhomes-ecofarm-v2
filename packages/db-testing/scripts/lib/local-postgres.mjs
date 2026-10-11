@@ -42,10 +42,10 @@ export function listMigrations() {
 
 /**
  * Boot a disposable PostgreSQL, install the shim, and apply every migration.
- * @param {{ beforeMigration?: string }} [options] Exclusive baseline migration boundary.
+ * @param {{ beforeMigration?: string, excludedMigrations?: string[] }} [options] Exclusive baseline migration boundary.
  * @returns {{ url: string, applied: string[], client: import('pg').Client, stop: () => Promise<void> }}
  */
-export async function startDisposablePostgres({ beforeMigration } = {}) {
+export async function startDisposablePostgres({ beforeMigration, excludedMigrations = [] } = {}) {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 
   const server = new EmbeddedPostgres({
@@ -87,13 +87,18 @@ export async function startDisposablePostgres({ beforeMigration } = {}) {
   await client.query(fs.readFileSync(SHIM, 'utf8'));
 
   const migrations = listMigrations();
-  if (beforeMigration && !migrations.includes(beforeMigration)) {
+  if (
+    (beforeMigration && !migrations.includes(beforeMigration)) ||
+    excludedMigrations.some((file) => !migrations.includes(file))
+  ) {
     await client.end();
     await server.stop();
     throw new Error('Unknown baseline migration boundary');
   }
   const applied = [];
-  for (const file of migrations.filter((file) => !beforeMigration || file < beforeMigration)) {
+  for (const file of migrations.filter(
+    (file) => (!beforeMigration || file < beforeMigration) && !excludedMigrations.includes(file),
+  )) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
     try {
       await client.query(sql);

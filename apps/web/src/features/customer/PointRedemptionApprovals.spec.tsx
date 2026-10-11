@@ -15,6 +15,8 @@ const quote = {
   quoteNumber: 'AF-QTE-TEST',
   purchaseNumber: 'AF-TXN-TEST',
   serviceName: 'Hotel night',
+  lines: [{ serviceName: 'Hotel night', quantity: 2, tierDiscountRate: 0 }],
+  pesoValuePerPoint: '0.50',
   pointsRequested: 1000,
   pesoValue: '500.00',
   grossAmount: '1000.00',
@@ -35,7 +37,16 @@ describe('customer spending approval', () => {
     expect(await screen.findByText('Hotel night')).toBeInTheDocument();
     expect(screen.getByText('1,000')).toBeInTheDocument();
     expect(screen.getAllByText('₱500.00')).toHaveLength(2);
+    expect(screen.getByText('Gross amount')).toBeInTheDocument();
+    expect(screen.getByText('VIP tier discount')).toBeInTheDocument();
+    expect(screen.getByText('2 x Hotel night - VIP discount 0%')).toBeInTheDocument();
+    expect(screen.getByText('\u20b10.50 per point')).toBeInTheDocument();
     expect(decidePointApproval).not.toHaveBeenCalled();
+  });
+  it('preserves a configured four-decimal conversion rate', async () => {
+    vi.mocked(getPointApprovals).mockResolvedValue([{ ...quote, pesoValuePerPoint: '0.0001' }]);
+    renderWithProviders(<PointRedemptionApprovals />);
+    expect(await screen.findByText('\u20b10.0001 per point')).toBeInTheDocument();
   });
   it('a declined confirmation sends no approval', async () => {
     vi.mocked(notifyConfirm).mockResolvedValue(false);
