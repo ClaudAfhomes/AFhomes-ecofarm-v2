@@ -50,6 +50,6 @@
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "git": {
-    "deploymentEnabled": { "claud/develop": false }
+    "deploymentEnabled": { "claud/develop": true }
   }
 }

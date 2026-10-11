@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
 describe('VIP release deployment guard', () => {
-  it('disables Git deployment only for claud/develop without wildcard re-enablement', () => {
-    expect(config.git.deploymentEnabled).toEqual({ 'claud/develop': false });
+  it('enables Git Preview deployment for claud/develop without wildcard changes', () => {
+    expect(config.git.deploymentEnabled).toEqual({ 'claud/develop': true });
   });
   it('keeps the monorepo build, API function and customer/staff routing', () => {
     expect(config.installCommand).toBe('pnpm install --filter=!@afhomes/db-testing');
