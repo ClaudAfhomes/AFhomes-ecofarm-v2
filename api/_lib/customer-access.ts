@@ -18,7 +18,7 @@
 import { verifySessionToken } from './auth-verify.js';
 import { toErrorEnvelope } from './envelope.js';
 import { extractBearerToken } from './token.js';
-import { anonClient, serviceClient } from './rest.js';
+import { anonClient, serviceClient, userClient } from './rest.js';
 import type { VercelRequest } from './http.js';
 
 type Db = ReturnType<typeof serviceClient>;
@@ -54,7 +54,11 @@ export async function resolveCustomerPrincipal(
 
   const anon = anonClient();
   const svc = serviceClient() as Db;
-  if (!anon || !svc) {
+  // Keyless fallback (e.g. Preview without a service role): the ownership
+  // lookup below is self-scoped, so the bearer's own RLS policies resolve it
+  // completely. Anything else stays denied, never escalated.
+  const db = (svc ?? userClient(token)) as Db;
+  if (!anon || !db) {
     return deny('INTERNAL', 'Server configuration is incomplete', 500);
   }
 
@@ -65,13 +69,15 @@ export async function resolveCustomerPrincipal(
   }
 
   // Ownership lookup. `auth_user_id` is unique, so at most one row matches.
-  const { data, error } = await svc
+  // The id is re-checked after the read: RLS already scopes this to the
+  // caller, and the assertion keeps a misconfigured policy from leaking.
+  const { data, error } = await db
     .from('customers')
     .select('id, customer_number, email, status, auth_user_id')
     .eq('auth_user_id', user.id)
     .maybeSingle();
   if (error) return deny('INTERNAL', 'Could not resolve your account', 500);
-  if (!data) {
+  if (!data || data.auth_user_id !== user.id) {
     return deny(
       'FORBIDDEN',
       'This sign-in is not a customer account. Staff accounts use the administration console.',

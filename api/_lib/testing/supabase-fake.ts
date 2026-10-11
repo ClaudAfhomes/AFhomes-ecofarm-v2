@@ -1071,6 +1071,7 @@ export class FakeSupabase {
                   ? 'fully_paid'
                   : 'partially_paid',
             verified_paid: paid,
+            frozen_total: Number(sale?.cash_price_snapshot ?? 0),
           };
         })
         .filter(

@@ -1,0 +1,129 @@
+/* Customer import/export workspace: tabbed panels around the shared import,
+   export, and job-history workflow. Page-scoped so other tables are unaffected. */
+.workspace {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.guidance {
+  margin: 0;
+}
+
+.tabs {
+  margin-top: var(--space-2);
+}
+
+.panel {
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+}
+
+.hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.fileRow {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.filePicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.fileName {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.sheetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+  margin-top: var(--space-3);
+}
+
+.sheetField {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 280px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Fluid sheet URL input: full width with a desktop cap, no rigid floor, so the
+   row stays usable on narrow viewports. */
+.sheetInput {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+}
+
+.summaryChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.tableWrap {
+  margin-top: var(--space-4);
+}
+
+.tableWrap > table {
+  min-width: 960px;
+}
+
+.jobsWrap > table {
+  min-width: 1080px;
+}
+
+.errorMore {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+/* Pagination footer: record range plus Previous/Next. */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.paginationRange {
+  margin-right: auto;
+}
+
+/* Export filter labels match the shared Customers-page pattern. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}

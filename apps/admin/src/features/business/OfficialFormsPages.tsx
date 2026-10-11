@@ -1,7 +1,7 @@
 import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { HumanInputValidity } from '../../lib/human-input-validity';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type {
@@ -24,24 +24,36 @@ import {
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { formatDateTime } from '../../lib/format';
+import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
-import { formatMoney } from './format';
+import { formatMoney, formatPoints } from './format';
 import {
   notifySuccess,
   notifyWarning,
   Alert,
   Button,
   IdCapturePicker,
+  DetailCard,
+  DetailCardTitle,
+  DetailField,
+  DetailFieldGrid,
+  Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
   PageHeader,
+  Pagination,
   SearchField,
+  Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
+import styles from './OfficialFormsPages.module.css';
+import { TierBadge } from './TierBadge';
+import { ReservationStatusBadge } from './ReservationStatusBadge';
 
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
@@ -68,7 +80,9 @@ import {
   getCardProducts,
   getCustomerApplication,
   getCustomerApplications,
-  getCustomers,
+  getCustomerApplicationsPage,
+  getCustomerById,
+  getCustomersPage,
   getOfficialFormTemplate,
   getPurchaseTermsProposal,
   getReservationPayments,
@@ -78,6 +92,7 @@ import {
   finalizeReservationPurchase,
   getReservationAgreement,
   getReservationAgreements,
+  getReservationAgreementsPage,
   getSaleSummary,
   getSales,
   previewOfficialFormImport,
@@ -113,6 +128,47 @@ const asBase64 = async (file: File) => {
   return btoa(binary);
 };
 
+/** Human file size for the import status line, so the chosen file is confirmable. */
+const formatFileSize = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/**
+ * Form labels for a raw state key: `contactNumber` -> `Contact Number`.
+ *
+ * These groups are iterated straight off their state objects, so the key IS the
+ * field identity. Displaying it raw leaks camelCase into the UI and reads as a
+ * variable, not a label; the keys with brand spellings get an explicit entry
+ * because a generic split cannot know them.
+ */
+const FIELD_LABEL_OVERRIDES: Record<string, string> = { tinNumber: 'TIN Number' };
+const fieldLabel = (key: string) =>
+  FIELD_LABEL_OVERRIDES[key] ??
+  key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join(' ');
+
+/**
+ * The VIP tiers the schema accepts, as a closed choice.
+ *
+ * A dropdown rather than a text box: the value is a closed enum, so free typing
+ * could only ever produce a value the server rejects. It also keeps the stored
+ * value and the displayed option in lockstep, which a raw `value` with no
+ * matching `<option>` silently breaks.
+ */
+const VIP_TIER_FIELD_OPTIONS = [
+  { value: '', label: 'Not specified' },
+  { value: 'BRONZE', label: 'BRONZE' },
+  { value: 'SILVER', label: 'SILVER' },
+  { value: 'GOLD', label: 'GOLD' },
+];
+const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' =>
+  value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
+
 function Field({
   normalize,
   suggestName = false,
@@ -122,6 +178,7 @@ function Field({
   onChange,
   type = 'text',
   required = false,
+  placeholder,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
@@ -131,6 +188,7 @@ function Field({
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  placeholder?: string;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -138,23 +196,30 @@ function Field({
   const isName =
     suggestName || /^(?:first|last|middle|printed|primary|secondary) name$/i.test(label);
   // HumanInput owns contact/name errors; only date validation belongs here.
+  // A required field left empty always explains itself, whatever its kind.
   const validator = /birth date/i.test(label) ? birthDateSchema : null;
+  const empty = touched && required && value === '';
   const error =
-    touched &&
-    Boolean(validator && !validator.safeParse(value).success && (required || value !== ''));
-  const errorMessage = 'Enter a valid past birth date.';
+    empty ||
+    Boolean(
+      touched && validator && !validator.safeParse(value).success && (required || value !== ''),
+    );
+  const errorMessage = empty
+    ? 'This field cannot be left empty.'
+    : 'Enter a valid past birth date.';
   return (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span id={`${id}-label`}>{label}</span>
+    <label className={styles.filterLabel} htmlFor={id}>
+      <span>{label}</span>
       <NormalizedInput
+        id={id}
         landline={/landline/i.test(label)}
         normalize={normalize}
         suggestName={isName}
         type={isPhone ? 'tel' : /email/i.test(label) ? 'email' : type}
         inputMode={isPhone ? 'tel' : undefined}
         value={value}
+        placeholder={placeholder}
         required={required}
-        aria-labelledby={`${id}-label`}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
@@ -186,13 +251,15 @@ function DateField({
   const id = useId();
   const [touched, setTouched] = useState(false);
   const todayValue = new Date().toISOString().slice(0, 10);
-  const error = touched && (required || value !== '') && !birthDateSchema.safeParse(value).success;
+  const empty = touched && required && value === '';
+  const error =
+    empty || (touched && (required || value !== '') && !birthDateSchema.safeParse(value).success);
   return (
-    <label style={{ display: 'grid', gap: 4 }}>
-      <span id={`${id}-label`}>{label}</span>
+    <label className={styles.filterLabel} htmlFor={id}>
+      <span>{label}</span>
       <input
+        id={id}
         type="date"
-        aria-labelledby={`${id}-label`}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         value={value}
@@ -206,7 +273,9 @@ function DateField({
       />
       {error ? (
         <small id={`${id}-error`} role="alert">
-          Enter a valid past birth date in YYYY-MM-DD format.
+          {empty
+            ? 'This field cannot be left empty.'
+            : 'Enter a valid past birth date in YYYY-MM-DD format.'}
         </small>
       ) : null}
     </label>
@@ -224,9 +293,9 @@ function HolderFields({
 }) {
   const set = (key: keyof ApplicationHolder, next: string) => onChange({ ...value, [key]: next });
   return (
-    <fieldset>
-      <legend>{title}</legend>
-      <div className="form-grid">
+    <fieldset className={styles.panel}>
+      <legend className={styles.panelTitle}>{title}</legend>
+      <div className={styles.editorGrid}>
         <Field
           label="Last name"
           value={value.lastName}
@@ -377,16 +446,84 @@ function HolderFields({
   );
 }
 
+/** Fixed queue page size. The server also enforces its own max (200). */
+const QUEUE_PAGE_SIZE = 10;
+
+/**
+ * Application status badge tones. Stated explicitly per status instead of
+ * relying on the shared fallback: cancelled and rejected read danger,
+ * submitted reads in progress, approved reads success, drafts stay neutral.
+ */
+const APPLICATION_STATUS_TONES: Record<string, 'neutral' | 'info' | 'success' | 'danger'> = {
+  draft: 'neutral',
+  submitted: 'info',
+  approved: 'success',
+  rejected: 'danger',
+  cancelled: 'danger',
+};
+
+/**
+ * Recommender fields with explicit human labels (never generated from keys),
+ * so renaming a label cannot silently rename the payload field.
+ */
+function RecommenderFields({
+  meta,
+  onChange,
+}: {
+  meta: {
+    salesManagerName: string;
+    vipRecommenderName: string;
+    recommenderContact: string;
+    recommenderEmail: string;
+    vipReferrer: string;
+    acknowledgedAt: string;
+  };
+  onChange: (key: keyof typeof meta, value: string) => void;
+}) {
+  const fields = [
+    { key: 'salesManagerName', label: 'Sales Manager Name', optionalPhone: false },
+    { key: 'vipRecommenderName', label: 'VIP Recommender Name', optionalPhone: false },
+    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
+    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
+    { key: 'vipReferrer', label: 'VIP Referrer', optionalPhone: false },
+    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
+  ] as const;
+  return (
+    <>
+      {fields.map(({ key, label, optionalPhone }) => (
+        <Field
+          key={key}
+          label={label}
+          value={meta[key]}
+          type={key === 'acknowledgedAt' ? 'date' : 'text'}
+          normalize={(v) => normalizeLiveHumanField(key, v)}
+          optionalPhone={optionalPhone}
+          onChange={(v) => onChange(key, v)}
+        />
+      ))}
+    </>
+  );
+}
+
 export function CustomerApplicationsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [page, setPage] = useState(0);
   // Default: only applications that still need APPLICATION work. Turning this
   // off reveals the progressed history, which is never deleted or archived.
   const [applicationWorkOnly, setApplicationWorkOnly] = useState(true);
-  const debouncedSearch = useDebouncedValue(search);
+  // Realtime search: pagination resets only when the settled term changes.
+  const settledSearch = useRef('');
+  const debouncedSearch = useDebouncedValue(search, 300, (term) => {
+    const next = term.trim();
+    if (next === settledSearch.current) return;
+    settledSearch.current = next;
+    setPage(0);
+  });
   const query = useQuery({
     queryKey: [
       'customer-applications',
@@ -396,27 +533,83 @@ export function CustomerApplicationsPage() {
       from,
       to,
       applicationWorkOnly,
+      page,
     ],
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
-      getCustomerApplications({
+      getCustomerApplicationsPage({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
         ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
+        limit: QUEUE_PAGE_SIZE,
+        offset: page * QUEUE_PAGE_SIZE,
       }),
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
+  const rows = query.data?.data ?? [];
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  // A shrunken result can leave the page past the last one. Correct during
+  // render on a total change (the documented previous-value pattern, not an
+  // effect); display clamps meanwhile.
+  const [prevTotal, setPrevTotal] = useState(total);
+  if (prevTotal !== total) {
+    setPrevTotal(total);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous list visible and never reach this branch.
+  if (query.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading applications"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
   return (
-    <section>
+    <section className={styles.listSection}>
       <PageHeader
         title="Customer Applications"
-        description="Official application transactions still awaiting application work. Applications that have progressed to a reservation are owned by the reservation and Finance queues, and stay reachable here with 'Include progressed'."
-        actions={<Link to="/admin/customers/applications/new">New application</Link>}
+        description="Applications still needing application work."
+        actions={
+          <Button onClick={() => navigate('/admin/customers/applications/new')}>
+            New application
+          </Button>
+        }
       />
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search applications"
@@ -428,55 +621,94 @@ export function CustomerApplicationsPage() {
         }
         filters={
           <>
-            <label>
+            <label className={styles.filterLabel}>
               Queue
-              <select
+              <Select
+                aria-label="Queue"
                 value={applicationWorkOnly ? 'application_work' : 'all'}
-                onChange={(e) => setApplicationWorkOnly(e.target.value === 'application_work')}
-              >
-                <option value="application_work">Needs application work</option>
-                <option value="all">Include progressed</option>
-              </select>
+                onChange={(e) => {
+                  setApplicationWorkOnly(e.target.value === 'application_work');
+                  setPage(0);
+                }}
+                options={[
+                  { value: 'application_work', label: 'Needs application work' },
+                  { value: 'all', label: 'Include progressed' },
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Status
-              <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All</option>
-                {['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Status"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
+                    value: s,
+                    label: s[0]!.toUpperCase() + s.slice(1),
+                  })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Tier
-              <select value={tier} onChange={(e) => setTier(e.target.value)}>
-                <option value="">All</option>
-                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Tier"
+                value={tier}
+                onChange={(e) => {
+                  setTier(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               From
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              <input
+                aria-label="From date"
+                type="date"
+                value={from}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setPage(0);
+                }}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               To
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              <input
+                aria-label="To date"
+                type="date"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setPage(0);
+                }}
+              />
             </label>
           </>
         }
       />
-      {query.isPending ? (
-        <p role="status">Loading applications…</p>
-      ) : query.isError ? (
-        <ErrorState title="Applications could not be loaded" onRetry={() => void query.refetch()} />
-      ) : query.data?.length ? (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+      {query.isError ? (
+        <ErrorState
+          error={query.error}
+          title="Applications could not be loaded"
+          onRetry={() => void query.refetch()}
+        />
+      ) : rows.length ? (
+        <div
+          role="region"
+          aria-label="Customer application records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -485,26 +717,37 @@ export function CustomerApplicationsPage() {
                 <th>Tier</th>
                 <th>Seller</th>
                 <th>Status</th>
-                <th>Submitted</th>
-                <th>Created</th>
               </tr>
             </thead>
             <tbody>
-              {query.data.map((app) => (
-                <tr key={app.id}>
-                  <td>
-                    <Link to={`/admin/customers/applications/${app.id}`}>
+              {rows.map((app) => (
+                <tr
+                  key={app.id}
+                  tabIndex={0}
+                  role="link"
+                  aria-label={`Review application ${app.applicationNumber}`}
+                  onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ')
+                      navigate(`/admin/customers/applications/${app.id}`);
+                  }}
+                  className={styles.clickable}
+                >
+                  <td data-label="Application">
+                    <span className={styles.appRef}>
+                      <span className={styles.appRefDot} aria-hidden="true" />
                       {app.applicationNumber}
-                    </Link>
+                    </span>
                   </td>
-                  <td>{app.applicantName ?? '—'}</td>
-                  <td>{app.tier}</td>
-                  <td>{app.sellerName ?? '—'}</td>
-                  <td>
-                    <StatusChip label={app.status} />
+                  <td data-label="Applicant">{app.applicantName ?? '—'}</td>
+                  <td data-label="Tier">{app.tier}</td>
+                  <td data-label="Seller">{app.sellerName ?? '—'}</td>
+                  <td data-label="Status">
+                    <StatusChip
+                      label={app.status}
+                      tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
+                    />
                   </td>
-                  <td>{app.submittedAt ?? '—'}</td>
-                  <td>{app.createdAt}</td>
                 </tr>
               ))}
             </tbody>
@@ -516,6 +759,24 @@ export function CustomerApplicationsPage() {
           description="Create the first official application draft."
         />
       )}
+
+      {total > 0 ? (
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Customer applications pagination"
+          />
+          <span
+            role="status"
+            aria-label="Application record range"
+            className={styles.paginationRange}
+          >
+            Showing {rangeFrom}–{rangeTo} of {total}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -541,6 +802,26 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
 }
 
 /**
+ * Actionable detail-load guidance per failure cause. Raw server internals and
+ * stored values are never rendered (see `ErrorState`); each branch names the
+ * next step instead. Returns `undefined` for unknown errors so the shared
+ * generic message applies.
+ */
+function describeApplicationLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot open applications right now (role, password, or MFA). Contact an administrator.';
+  if (error instanceof ApiError && error.status === 404)
+    return 'No application exists at this link. Check the address, or open the record from the applications list.';
+  if (error instanceof ApiParseError)
+    return 'The saved record contains values this form cannot display. Note the application number and ask an administrator to review the record.';
+  return undefined;
+}
+
+/**
  * Purchase workflow progress and the ONE next action.
  *
  * Every state below is read from the server's own rows: the application's
@@ -558,8 +839,7 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
   });
   // A cancelled agreement hands the customer back to the application stage, so
   // it is not progress.
-  const reservation =
-    reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
+  const reservation = reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
   const status = application.status;
   const approved = status === 'approved' || Boolean(reservation);
   const hasReservation = Boolean(reservation);
@@ -659,7 +939,6 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerApplication(id!),
     enabled: Boolean(id),
   });
-  const customers = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers() });
   const plans = useQuery({ queryKey: ['card-products'], queryFn: () => getCardProducts() });
   // The server-authoritative offer. Nothing on this screen computes a price: the
   // proposal below is what the operator sees AND what the submit/review calls
@@ -693,11 +972,57 @@ export function CustomerApplicationEditorPage() {
   const [paymentProof, setPaymentProof] = useState(false);
   const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   const [ocrFile, setOcrFile] = useState<File | null>(null);
+  // Local thumbnail for the not-yet-uploaded selection. Object URLs never hit
+  // the network. Derived during render (no setState-in-effect); a cleanup-only
+  // effect revokes the URL the moment the selection changes or the component
+  // unmounts. Runtimes without createObjectURL simply get no thumbnail.
+  const ocrPreviewUrl = useMemo(() => {
+    if (!ocrFile || !ocrFile.type.startsWith('image/')) return null;
+    try {
+      return URL.createObjectURL(ocrFile);
+    } catch {
+      return null;
+    }
+  }, [ocrFile]);
+  useEffect(() => {
+    return () => {
+      if (ocrPreviewUrl) {
+        try {
+          URL.revokeObjectURL(ocrPreviewUrl);
+        } catch {
+          // Test environments without object URLs have nothing to revoke.
+        }
+      }
+    };
+  }, [ocrPreviewUrl]);
   const [idType, setIdType] = useState('');
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
   const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
   const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const xlsxInput = useRef<HTMLInputElement>(null);
+  const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
+  // Customer dropdown: one bounded page (the server max), so every option is
+  // reachable without loading an unbounded directory into the control. The
+  // chosen record resolves to a display name through the same single-customer
+  // query the detail page uses (shared cache key).
+  const customerOptions = useQuery({
+    queryKey: ['customer-picker'],
+    queryFn: () => getCustomersPage({ limit: 200, offset: 0 }),
+  });
+  const linkedCustomer = useQuery({
+    queryKey: ['business', 'customer', customerId],
+    queryFn: () => getCustomerById(customerId),
+    enabled: Boolean(customerId),
+  });
+  const pickCustomer = (next: string) => {
+    setCustomerId(next);
+    setOcrFile(null);
+    setPickerVersion((version) => version + 1);
+    setIdPreview(null);
+    setValidId(false);
+  };
   const documents = useQuery({
     queryKey: ['documents', 'customer', customerId],
     queryFn: () => getDocuments({ subjectType: 'customer', subjectId: customerId }),
@@ -779,6 +1104,14 @@ export function CustomerApplicationEditorPage() {
   // Same conditions, one derived list, rendered next to the button. Blocking is
   // unchanged; only the silence is removed. Transient states (a mutation in
   // flight) are deliberately NOT blockers - they are not something to fix.
+  //
+  // Save mirrors the submit pattern: the same contact/field checks that used
+  // to grey the button silently now read as an inline list in both modes.
+  const saveBlockers: string[] = [];
+  if (!optionalPhonesValid)
+    saveBlockers.push('Correct the recommender contact or landline number.');
+  if (Object.values(invalidFields).some(Boolean))
+    saveBlockers.push('Correct the highlighted fields.');
   const submitBlockers: string[] = [];
   if (!consent) submitBlockers.push('Certification and consent must be ticked.');
   if (!serverCurrentDocument?.reviewedFields?.idType)
@@ -835,11 +1168,7 @@ export function CustomerApplicationEditorPage() {
     mutationFn: () =>
       runSave(async () => {
         if (!planId) {
-          document
-            .querySelector<HTMLSelectElement>(
-              'select[aria-label="Customer"], select[name="customer"]',
-            )
-            ?.focus();
+          document.querySelector<HTMLInputElement>('input[aria-label="Customer"]')?.focus();
           throw new Error('Select a VIP plan before saving the registration application.');
         }
         if (!id && !customerId) {
@@ -945,7 +1274,7 @@ export function CustomerApplicationEditorPage() {
     setTier((f.card_tier?.toUpperCase() || 'BRONZE') as typeof tier);
     setPaymentScheme((f.payment_scheme || 'spot_cash') as typeof paymentScheme);
     setChannels((f.acquisition_channels ?? '').split('|').filter(Boolean));
-    setMessage('Imported candidates — please verify every field before saving.');
+    setMessage('Imported candidates: please verify every field before saving.');
   };
   const ocr = useMutation({
     mutationFn: async () => {
@@ -975,8 +1304,8 @@ export function CustomerApplicationEditorPage() {
       if (suggestedType.success) setIdType((current) => current || suggestedType.data);
       setMessage(
         doc.ocrStatus === 'completed'
-          ? 'OCR completed — review and correct suggestions before saving.'
-          : 'OCR failed — Enter details manually. Your private upload is retained.',
+          ? 'OCR completed: review and correct suggestions before saving.'
+          : 'OCR failed: enter details manually. Your private upload is retained.',
       );
     },
     onError: (e) =>
@@ -1074,31 +1403,81 @@ export function CustomerApplicationEditorPage() {
   });
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
-  const relatedCustomer = customers.data?.find((c) => c.id === customerId);
+  const relatedCustomer = linkedCustomer.data ?? null;
   if (id && existing.isPending) {
-    return <p role="status">Loading application…</p>;
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading application"
+        >
+          <Skeleton style={{ height: 40, maxWidth: 320 }} />
+          <Skeleton style={{ height: 16, maxWidth: 480 }} />
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 96 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
   }
   if (id && (existing.isError || !existing.data)) {
     return (
       <section>
-        <Link to="/admin/customers/applications">Back to applications</Link>
+        <PageHeader
+          title="Application"
+          description="The requested application could not be opened."
+          actions={
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+              Back to applications
+            </Button>
+          }
+        />
         <ErrorState
+          error={id && existing.isError ? existing.error : undefined}
           title="Application could not be loaded"
+          message={
+            id && existing.isError ? describeApplicationLoadError(existing.error) : undefined
+          }
           onRetry={() => void existing.refetch()}
         />
       </section>
     );
   }
+  // The primary action lives in the header and the sticky footer alike, so a
+  // long form never buries it. One element, rendered twice. Blocking matches
+  // the submit pattern: disabled with a visible inline list, never silent.
+  const saveAction = (
+    <Button
+      onClick={() => save.mutate()}
+      disabled={!editable || uploadId.isPending || ocr.isPending || saveBlockers.length > 0}
+      loading={save.isPending}
+      loadingLabel="Saving…"
+    >
+      Save draft
+    </Button>
+  );
   return (
     <HumanInputValidity.Provider value={reportValidity}>
-      <section>
+      <section className={styles.editorSection}>
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
-          description="Manual entry, XLSX, and OCR all converge on the same human-reviewed draft."
+          description="Manual entry, file upload, or scan."
+          actions={
+            <>
+              {saveAction}
+              <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+                Back to applications
+              </Button>
+            </>
+          }
         />
-        <p>
-          <Link to="/admin/customers/applications">Back to applications</Link>
-        </p>
+        <Alert variant="info" title="How this form works">
+          Save a draft first; submit later.
+        </Alert>
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1161,260 +1540,344 @@ export function CustomerApplicationEditorPage() {
           </section>
         ) : null}
         {selectedPlan ? (
-          <p>
-            Official {selectedPlan.code} benefits: {selectedPlan.discountPercent}% discount;{' '}
-            {selectedPlan.cardholderLimit} holder(s) max; {selectedPlan.yearlyPoints}/year ×{' '}
-            {selectedPlan.annualPointsTranches}; {selectedPlan.baseValidityYears}+
-            {selectedPlan.validityExtensionYears} years; ₱{selectedPlan.totalLoyaltyValue} total
-            value. Snapshots freeze at submit; later plan edits never rewrite this application.
-          </p>
+          <DetailCard>
+            <DetailCardTitle>Official {selectedPlan.code} plan benefits</DetailCardTitle>
+            <DetailFieldGrid>
+              <DetailField label="Discount">{selectedPlan.discountPercent}%</DetailField>
+              <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
+              <DetailField label="Yearly points">
+                {selectedPlan.yearlyPoints.toLocaleString()} × {selectedPlan.annualPointsTranches}
+              </DetailField>
+              <DetailField label="Validity">
+                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} years
+              </DetailField>
+              <DetailField label="Total value">
+                {formatMoney(selectedPlan.totalLoyaltyValue)}
+              </DetailField>
+            </DetailFieldGrid>
+            <p className={styles.hint}>
+              Snapshots freeze at submit; later plan edits never rewrite this application.
+            </p>
+          </DetailCard>
         ) : null}
-        <fieldset disabled={!editable}>
-          <div className="form-grid">
-            <label>
-              Customer
-              <select
-                aria-label="Customer"
-                value={customerId}
-                required={Boolean(id)}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(e) => {
-                  setCustomerId(e.target.value);
-                  setOcrFile(null);
-                  setPickerVersion((version) => version + 1);
-                  setIdPreview(null);
-                  setValidId(false);
-                }}
+        <fieldset disabled={!editable} className={styles.formRoot}>
+          <section className={styles.panel} aria-labelledby="application-panel-heading">
+            <h2 id="application-panel-heading" className={styles.panelTitle}>
+              1. Application
+            </h2>
+            <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+            <div className={styles.editorGrid}>
+              <div className={styles.pickerWrap}>
+                <label className={styles.filterLabel}>
+                  Customer
+                  <Select
+                    aria-label="Customer"
+                    value={customerId}
+                    disabled={uploadId.isPending || ocr.isPending}
+                    onChange={(e) => pickCustomer(e.target.value)}
+                    options={[
+                      { value: '', label: 'New customer: register with this application' },
+                      ...(customerOptions.data?.data.map((c) => ({
+                        value: c.id,
+                        label: c.fullName,
+                      })) ?? []),
+                    ]}
+                  />
+                </label>
+                {customerOptions.isPending ? (
+                  <div role="status" aria-label="Searching customers">
+                    <Skeleton style={{ height: 40 }} />
+                  </div>
+                ) : null}
+                {customerId && !linkedCustomer.data ? (
+                  <p role="status" className={styles.pickedLine}>
+                    Loading customer…
+                  </p>
+                ) : null}
+              </div>
+              <label className={styles.filterLabel}>
+                VIP plan
+                <Select
+                  aria-label="VIP plan"
+                  value={planId}
+                  onChange={(e) => {
+                    const plan = plans.data?.find((p) => p.id === e.target.value);
+                    setPlanId(e.target.value);
+                    if (plan) setTier(plan.code as typeof tier);
+                    else setTier('BRONZE');
+                    if (plan?.code !== 'GOLD') setSecondary(null);
+                  }}
+                  options={[
+                    { value: '', label: 'Select plan' },
+                    ...(plans.data
+                      ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
+                      .map((p) => ({ value: p.id, label: p.name })) ?? []),
+                  ]}
+                />
+              </label>
+              <label className={styles.filterLabel}>
+                Payment scheme
+                <Select
+                  aria-label="Payment scheme"
+                  value={paymentScheme}
+                  onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
+                  options={[
+                    'spot_cash',
+                    'move_a',
+                    'installment_4_month',
+                    'move_b1_40_12',
+                    'move_b2_25_12',
+                  ].map((scheme) => ({
+                    value: scheme,
+                    label: paymentSchemeLabel(scheme as typeof paymentScheme),
+                  }))}
+                />
+              </label>
+            </div>
+            <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}
               >
-                <option value="">New customer — register with this application</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              VIP plan
-              <select
-                aria-label="VIP plan"
-                value={planId}
-                onChange={(e) => {
-                  const plan = plans.data?.find((p) => p.id === e.target.value);
-                  setPlanId(e.target.value);
-                  if (plan) setTier(plan.code as typeof tier);
-                  else setTier('BRONZE');
-                  if (plan?.code !== 'GOLD') setSecondary(null);
-                }}
-              >
-                <option value="">Select plan</option>
-                {plans.data
-                  ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              Payment scheme
-              <select
-                value={paymentScheme}
-                onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
-              >
-                {[
-                  'spot_cash',
-                  'move_a',
-                  'installment_4_month',
-                  'move_b1_40_12',
-                  'move_b2_25_12',
-                ].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <p>
-            <Button onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}>
-              Download template
-            </Button>{' '}
-            <label>
-              Import XLSX{' '}
+                Download template
+              </Button>
               <input
+                ref={xlsxInput}
+                hidden
+                aria-label="Import XLSX file"
                 type="file"
                 accept=".xlsx"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) void importFile(file);
+                  if (file) {
+                    setChosenXlsx(file.name);
+                    void importFile(file);
+                  }
+                  e.target.value = '';
                 }}
               />
-            </label>
-          </p>
-          <fieldset>
-            <legend>VALID ID</legend>
-            <p>Valid ID: {validId ? 'Uploaded ✓' : 'Required / Missing'}</p>
-            {serverCurrentDocument ? (
-              <>
-                <p>Current ID: {serverCurrentDocument.originalFilename}</p>
-                <p>
-                  ID type:{' '}
-                  {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                    'Missing — review the identity document'}
-                </p>
-              </>
-            ) : null}
-            {ocrFile ? (
-              <div role="status">
-                <p>Replacement selected: {ocrFile.name} — Pending replacement. Not saved yet.</p>
-                <Button
-                  variant="secondary"
-                  disabled={uploadId.isPending || ocr.isPending}
-                  onClick={() => {
-                    setOcrFile(null);
-                    setPickerVersion((version) => version + 1);
-                  }}
-                >
-                  Cancel replacement
-                </Button>
-              </div>
-            ) : null}
-            <label>
-              ID Type *
-              <select
-                aria-label="ID Type"
-                value={idType}
-                disabled={uploadId.isPending || ocr.isPending}
-                onChange={(event) => setIdType(event.target.value)}
-              >
-                <option value="">Select ID type</option>
-                {governmentIdTypeSchema.options.map((value) => (
-                  <option key={value} value={value}>
-                    {value.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <IdCapturePicker
-              onFile={setOcrFile}
-              disabled={uploadId.isPending || ocr.isPending}
-              resetVersion={pickerVersion}
-            />
-            {ocrFile ? (
-              <p role="status">
-                Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
-                the OCR suggestions.
+              <Button onClick={() => xlsxInput.current?.click()}>Choose XLSX file</Button>
+              {chosenXlsx ? (
+                <span role="status" className={styles.fileName}>
+                  Selected: {chosenXlsx}
+                </span>
+              ) : null}
+            </div>
+          </section>
+          <section className={styles.panel} aria-labelledby="identity-panel-heading">
+            <h2 id="identity-panel-heading" className={styles.panelTitle}>
+              2. Identity
+            </h2>
+            <p className={styles.hint}>Capture ID, detect fields, record type.</p>
+            <fieldset className={styles.subGroup}>
+              <legend className={styles.subGroupTitle}>Valid ID</legend>
+              <p>
+                <StatusChip
+                  label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
+                  tone={validId ? 'success' : 'warning'}
+                />
               </p>
-            ) : null}
-            <Button
-              onClick={() => ocr.mutate()}
-              disabled={
-                (!ocrFile && !serverCurrentDocument) ||
-                !customerId ||
-                ocr.isPending ||
-                uploadId.isPending
-              }
-            >
-              {ocr.isPending || uploadId.isPending ? 'Processing…' : 'Detect fields'}
-            </Button>
-            {/* Submit requires an ID type recorded on the identity document, and
+              {serverCurrentDocument ? (
+                <>
+                  <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                  <p>
+                    ID type:{' '}
+                    {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
+                      'Missing: review the identity document'}
+                  </p>
+                </>
+              ) : null}
+              {ocrFile ? (
+                <div role="status">
+                  <p>Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).</p>
+                  {ocrPreviewUrl ? (
+                    <p>
+                      <img
+                        src={ocrPreviewUrl}
+                        alt={`Selected ID preview: ${ocrFile.name}`}
+                        className={styles.thumbnail}
+                      />
+                    </p>
+                  ) : null}
+                  <Button
+                    variant="secondary"
+                    disabled={uploadId.isPending || ocr.isPending}
+                    onClick={() => {
+                      setOcrFile(null);
+                      setPickerVersion((version) => version + 1);
+                    }}
+                  >
+                    Cancel replacement
+                  </Button>
+                </div>
+              ) : null}
+              <label className={styles.filterLabel}>
+                ID Type *
+                <Select
+                  aria-label="ID Type"
+                  value={idType}
+                  disabled={uploadId.isPending || ocr.isPending}
+                  onChange={(event) => setIdType(event.target.value)}
+                  options={[
+                    { value: '', label: 'Select ID type' },
+                    ...governmentIdTypeSchema.options.map((value) => ({
+                      value,
+                      label: value
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                    })),
+                  ]}
+                />
+              </label>
+              <IdCapturePicker
+                onFile={setOcrFile}
+                disabled={uploadId.isPending || ocr.isPending}
+                resetVersion={pickerVersion}
+              />
+              {ocrFile ? (
+                <p role="status">
+                  Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
+                  the OCR suggestions.
+                </p>
+              ) : null}
+              <Button
+                onClick={() => ocr.mutate()}
+                disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
+                loading={ocr.isPending || uploadId.isPending}
+                loadingLabel="Processing…"
+              >
+                Detect fields
+              </Button>
+              {/* Submit requires an ID type recorded on the identity document, and
                 that field is only ever written by the document-confirm endpoint.
                 Without this the requirement is unreachable from this screen and
                 Submit stays disabled after a successful upload, so the reviewer
                 records the ID type here through the same secure document
                 pipeline. The gate itself is unchanged. */}
-            {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
-              <p role="status">
-                Submit needs the ID type recorded against this identity document.{' '}
-                <Button
-                  variant="secondary"
-                  disabled={!idType || confirmIdType.isPending || uploadId.isPending}
-                  onClick={() => confirmIdType.mutate()}
-                >
-                  {confirmIdType.isPending ? 'Recording…' : 'Record ID type on this ID'}
-                </Button>
-              </p>
-            ) : null}
-            {serverCurrentDocument ? (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => previewId.mutate(serverCurrentDocument.id)}
-                >
-                  Preview uploaded ID
-                </Button>
-                <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
-                  Review identity document
-                </Link>
-              </>
-            ) : null}
-            {serverCurrentDocument ? (
-              <div>
-                <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
-                {Object.entries(serverCurrentDocument.extractedFields).length ? (
-                  <>
-                    <p>
-                      Detected suggestions — verify against the ID and correct the form manually. ID
-                      numbers remain masked; use document review to confirm them.
-                    </p>
-                    <dl>
-                      {Object.entries(serverCurrentDocument.extractedFields).map(([key, field]) => (
-                        <div key={key}>
-                          <dt>{key}</dt>
-                          <dd>
-                            {field.value ?? 'Not detected'}
-                            {field.confidence !== null
-                              ? ` (${Math.round(field.confidence * 100)}% confidence)`
-                              : ''}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-            {idPreview ? (
-              <a href={idPreview} target="_blank" rel="noreferrer">
-                Open short-lived private ID preview
-              </a>
-            ) : null}
-            {documents.data
-              ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
-              .map((doc) => (
-                <p key={doc.id}>
-                  Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
-                  <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
-                    Preview
-                  </Button>
-                </p>
-              ))}
-            {documents.data
-              ?.filter((doc) => !doc.hasFile)
-              .map((doc) => (
-                <p key={doc.id}>
-                  Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
+              {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
+                <p role="status">
+                  Submit needs the ID type recorded against this identity document.{' '}
                   <Button
-                    size="sm"
                     variant="secondary"
-                    disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
-                    onClick={() => uploadId.mutate(doc.id)}
+                    disabled={!idType || uploadId.isPending}
+                    loading={confirmIdType.isPending}
+                    loadingLabel="Recording…"
+                    onClick={() => confirmIdType.mutate()}
                   >
-                    Verify saved upload
+                    Record ID type on this ID
                   </Button>
                 </p>
-              ))}
-            {currentDocument.isError ? (
-              <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
-            ) : null}
-            {documents.isError ? (
-              <p role="status">
-                Existing ID documents could not be loaded. Document permissions still apply.
-              </p>
-            ) : null}
-          </fieldset>
-          <HolderFields title="PRIMARY CARDHOLDER" value={primary} onChange={setPrimary} />
-          <label>
+              ) : null}
+              {serverCurrentDocument ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => previewId.mutate(serverCurrentDocument.id)}
+                  >
+                    Preview uploaded ID
+                  </Button>
+                  <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
+                    Review identity document
+                  </Link>
+                </>
+              ) : null}
+              {serverCurrentDocument ? (
+                <div>
+                  <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
+                  {Object.entries(serverCurrentDocument.extractedFields).length ? (
+                    <>
+                      <p>
+                        Detected suggestions: verify against the ID and correct the form manually.
+                        ID numbers remain masked; use document review to confirm them.
+                      </p>
+                      <dl>
+                        {Object.entries(serverCurrentDocument.extractedFields).map(
+                          ([key, field]) => (
+                            <div key={key}>
+                              <dt>{key}</dt>
+                              <dd>
+                                {field.value ?? 'Not detected'}
+                                {field.confidence !== null
+                                  ? ` (${Math.round(field.confidence * 100)}% confidence)`
+                                  : ''}
+                              </dd>
+                            </div>
+                          ),
+                        )}
+                      </dl>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {idPreview ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.thumbnailButton}
+                    onClick={() => setPreviewOpen(true)}
+                    aria-label="View identity document preview fullscreen"
+                  >
+                    <img
+                      src={idPreview}
+                      alt="Identity document preview thumbnail"
+                      className={styles.thumbnail}
+                    />
+                  </button>
+                  <Dialog
+                    open={previewOpen}
+                    onClose={() => setPreviewOpen(false)}
+                    title="Identity document preview"
+                    footer={
+                      <Button variant="secondary" onClick={() => setPreviewOpen(false)}>
+                        Close
+                      </Button>
+                    }
+                  >
+                    <img
+                      src={idPreview}
+                      alt="Identity document preview"
+                      className={styles.previewImage}
+                    />
+                  </Dialog>
+                </>
+              ) : null}
+              {documents.data
+                ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
+                .map((doc) => (
+                  <p key={doc.id}>
+                    Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
+                    <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
+                      Preview
+                    </Button>
+                  </p>
+                ))}
+              {documents.data
+                ?.filter((doc) => !doc.hasFile)
+                .map((doc) => (
+                  <p key={doc.id}>
+                    Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
+                      onClick={() => uploadId.mutate(doc.id)}
+                    >
+                      Verify saved upload
+                    </Button>
+                  </p>
+                ))}
+              {currentDocument.isError ? (
+                <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
+              ) : null}
+              {documents.isError ? (
+                <p role="status">
+                  Existing ID documents could not be loaded. Document permissions still apply.
+                </p>
+              ) : null}
+            </fieldset>
+          </section>
+          <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+          <label className={styles.checkRow}>
             <input
               type="checkbox"
               checked={Boolean(secondary)}
@@ -1425,31 +1888,22 @@ export function CustomerApplicationEditorPage() {
           </label>
           {secondary ? (
             <HolderFields
-              title="SECONDARY CARDHOLDER — GOLD OPTIONAL"
+              title="4. Secondary holder (gold optional)"
               value={secondary}
               onChange={setSecondary}
             />
           ) : null}
-          <fieldset>
-            <legend>VIP RECOMMENDER'S DETAILS</legend>
-            <div className="form-grid">
-              {Object.entries(meta).map(([key, value]) => (
-                <Field
-                  key={key}
-                  label={key
-                    .replace(/[A-Z]/g, (c) => ` ${c}`)
-                    .replace(/^./, (c) => c.toUpperCase())}
-                  value={value}
-                  type={key === 'acknowledgedAt' ? 'date' : 'text'}
-                  normalize={(v) => normalizeLiveHumanField(key, v)}
-                  optionalPhone={key === 'recommenderContact'}
-                  onChange={(v) => setMeta({ ...meta, [key]: v })}
-                />
-              ))}
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>5. Recommender details</legend>
+            <div className={styles.editorGrid}>
+              <RecommenderFields
+                meta={meta}
+                onChange={(key, value) => setMeta({ ...meta, [key]: value })}
+              />
             </div>
           </fieldset>
-          <fieldset>
-            <legend>CLIENT ACQUISITION CHANNEL</legend>
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>6. Acquisition channel</legend>
             {[
               'CMP',
               'DRP',
@@ -1459,7 +1913,7 @@ export function CustomerApplicationEditorPage() {
               'Referral',
               'FB Ads',
             ].map((channel) => (
-              <label key={channel}>
+              <label key={channel} className={styles.checkRow}>
                 <input
                   type="checkbox"
                   checked={channels.includes(channel)}
@@ -1475,9 +1929,9 @@ export function CustomerApplicationEditorPage() {
               </label>
             ))}
           </fieldset>
-          <fieldset>
-            <legend>APPLICATION CERTIFICATION</legend>
-            <label>
+          <fieldset className={styles.panel}>
+            <legend className={styles.panelTitle}>7. Certification</legend>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={consent}
@@ -1485,7 +1939,7 @@ export function CustomerApplicationEditorPage() {
               />{' '}
               I certify the information and consent to verification and processing under RA 10173.
             </label>
-            <label>
+            <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={validId}
@@ -1495,20 +1949,19 @@ export function CustomerApplicationEditorPage() {
             </label>
           </fieldset>
         </fieldset>
+        {saveBlockers.length > 0 ? (
+          <Alert variant="warning" title="Cannot save yet:">
+            <ul>
+              {saveBlockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+        <div className={styles.stickyFooter}>
+          <div className={styles.stickyFooterActions}>{saveAction}</div>
+        </div>
         <p>
-          <Button
-            onClick={() => save.mutate()}
-            disabled={
-              !editable ||
-              save.isPending ||
-              uploadId.isPending ||
-              ocr.isPending ||
-              !optionalPhonesValid ||
-              Object.values(invalidFields).some(Boolean)
-            }
-          >
-            {save.isPending ? 'Saving…' : 'Save draft'}
-          </Button>{' '}
           {id && editable ? (
             <>
               {submitBlockers.length > 0 ? (
@@ -1523,30 +1976,37 @@ export function CustomerApplicationEditorPage() {
               <Button
                 onClick={() => submit.mutate()}
                 disabled={
-                  submitBlockers.length > 0 ||
-                  save.isPending ||
-                  uploadId.isPending ||
-                  ocr.isPending ||
-                  submit.isPending
+                  submitBlockers.length > 0 || save.isPending || uploadId.isPending || ocr.isPending
                 }
+                loading={submit.isPending}
+                loadingLabel="Submitting…"
               >
-                {submit.isPending ? 'Submitting...' : 'Submit'}
+                Submit
               </Button>
             </>
           ) : null}{' '}
           {id && existing.data?.status === 'submitted' ? (
             <>
-              <Button onClick={() => decide.mutate('approved')} disabled={decide.isPending}>
+              <Button
+                onClick={() => decide.mutate('approved')}
+                loading={decide.isPending}
+                loadingLabel="Approving…"
+              >
                 Approve
               </Button>{' '}
               <Button
                 variant="danger"
                 onClick={() => decide.mutate('rejected')}
-                disabled={decide.isPending}
+                loading={decide.isPending}
+                loadingLabel="Rejecting…"
               >
                 Reject
               </Button>{' '}
-              <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+              <Button
+                onClick={() => reopen.mutate()}
+                loading={reopen.isPending}
+                loadingLabel="Reopening…"
+              >
                 {existing.data.purchaseTermsId
                   ? 'Reopen to draft'
                   : 'Reopen to review purchase terms'}
@@ -1554,17 +2014,22 @@ export function CustomerApplicationEditorPage() {
             </>
           ) : null}{' '}
           {id && existing.data?.status === 'rejected' ? (
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+            <Button
+              onClick={() => reopen.mutate()}
+              loading={reopen.isPending}
+              loadingLabel="Reopening…"
+            >
               Reopen to draft
             </Button>
           ) : null}{' '}
           {id && existing.data?.status === 'approved' && !proposal.data ? (
             <Button
               onClick={() => void proposal.refetch()}
-              disabled={proposal.isFetching}
+              loading={proposal.isFetching}
+              loadingLabel="Loading offer…"
               type="button"
             >
-              {proposal.isFetching ? 'Loading offer…' : 'Load purchase terms offer'}
+              Load purchase terms offer
             </Button>
           ) : null}{' '}
           {id && existing.data?.status === 'approved' && proposal.data ? (
@@ -1580,16 +2045,22 @@ export function CustomerApplicationEditorPage() {
               </label>{' '}
               <Button
                 onClick={() => review.mutate()}
-                disabled={review.isPending || reviewReason.trim().length < 5}
+                disabled={reviewReason.trim().length < 5}
+                loading={review.isPending}
+                loadingLabel="Confirming…"
               >
-                {review.isPending ? 'Confirming…' : 'Confirm purchase terms'}
+                Confirm purchase terms
               </Button>
             </>
           ) : null}{' '}
           {id &&
           existing.data &&
           canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
-            <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
+            <Button
+              onClick={() => decide.mutate('cancelled')}
+              loading={decide.isPending}
+              loadingLabel="Cancelling…"
+            >
               Cancel
             </Button>
           ) : null}{' '}
@@ -1631,34 +2102,112 @@ export function CustomerApplicationEditorPage() {
 }
 
 export function ReservationAgreementsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
   // deleted - 'Include progressed' brings the executed history back.
   const [reservationWorkOnly, setReservationWorkOnly] = useState(true);
-  const debouncedSearch = useDebouncedValue(search);
+  // Realtime search: pagination resets only when the settled term changes.
+  const settledSearch = useRef('');
+  const debouncedSearch = useDebouncedValue(search, 300, (term) => {
+    const next = term.trim();
+    if (next === settledSearch.current) return;
+    settledSearch.current = next;
+    setPage(0);
+  });
   const query = useQuery({
-    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly],
+    queryKey: ['reservation-agreements', status, tier, debouncedSearch, reservationWorkOnly, page],
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: (previousData) => previousData,
     queryFn: () =>
-      getReservationAgreements({
+      getReservationAgreementsPage({
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
+        limit: QUEUE_PAGE_SIZE,
+        offset: page * QUEUE_PAGE_SIZE,
       }),
     // Agreement decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
+  const rows = query.data?.data ?? [];
+  const total = query.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  // A shrunken result can leave the page past the last one. Correct during
+  // render on a total change (the documented previous-value pattern, not an
+  // effect); display clamps meanwhile.
+  const [prevTotal, setPrevTotal] = useState(total);
+  if (prevTotal !== total) {
+    setPrevTotal(total);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous list visible and never reach this branch.
+  if (query.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading reservations"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+  const pendingSignatures = rows.filter(
+    (item) =>
+      item.primarySignatureStatus !== 'received' ||
+      (item.hasSecondaryHolder && item.secondarySignatureStatus !== 'received'),
+  ).length;
   return (
-    <section>
+    <section className={styles.listSection}>
       <PageHeader
         title="IST Reservation Agreements"
-        description="Agreements still awaiting reservation work. Once an agreement is executed, Finance owns collection and it moves to the payment queue; it stays readable and printable here with 'Include progressed'."
-        actions={<Link to="/admin/sales/reservations/new">New agreement</Link>}
+        description="Only agreements needing reservation work."
+        actions={
+          <Button onClick={() => navigate('/admin/sales/reservations/new')}>New agreement</Button>
+        }
       />
+      {total > 0 ? (
+        <p role="status" aria-label="Reservation queue summary" className={styles.queueSummary}>
+          <strong>{total}</strong> {total === 1 ? 'agreement' : 'agreements'}
+          {pendingSignatures > 0 ? (
+            <>
+              {' · '}
+              <strong>{pendingSignatures}</strong> awaiting signature
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search reservation agreements"
@@ -1670,107 +2219,153 @@ export function ReservationAgreementsPage() {
         }
         filters={
           <>
-            <label>
+            <label className={styles.filterLabel}>
               Queue
-              <select
+              <Select
+                aria-label="Queue"
                 value={reservationWorkOnly ? 'reservation_work' : 'all'}
-                onChange={(e) => setReservationWorkOnly(e.target.value === 'reservation_work')}
-              >
-                <option value="reservation_work">Needs reservation work</option>
-                <option value="all">Include progressed</option>
-              </select>
+                onChange={(e) => {
+                  setReservationWorkOnly(e.target.value === 'reservation_work');
+                  setPage(0);
+                }}
+                options={[
+                  { value: 'reservation_work', label: 'Needs reservation work' },
+                  { value: 'all', label: 'Include progressed' },
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Status
-              <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All</option>
-                {['draft', 'submitted', 'executed', 'cancelled'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Status"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['draft', 'submitted', 'executed', 'cancelled'].map((s) => ({
+                    value: s,
+                    label: s[0]!.toUpperCase() + s.slice(1),
+                  })),
+                ]}
+              />
             </label>
-            <label>
+            <label className={styles.filterLabel}>
               Tier
-              <select value={tier} onChange={(e) => setTier(e.target.value)}>
-                <option value="">All</option>
-                {['BRONZE', 'SILVER', 'GOLD'].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              <Select
+                aria-label="Tier"
+                value={tier}
+                onChange={(e) => {
+                  setTier(e.target.value);
+                  setPage(0);
+                }}
+                options={[
+                  { value: '', label: 'All' },
+                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                ]}
+              />
             </label>
           </>
         }
       />
-      {query.isPending ? (
-        <p role="status">Loading reservation agreements…</p>
-      ) : query.isError ? (
-        <ErrorState title="Agreements could not be loaded" onRetry={() => void query.refetch()} />
-      ) : query.data?.length ? (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
+      {query.isError ? (
+        <ErrorState
+          error={query.error}
+          title="Agreements could not be loaded"
+          onRetry={() => void query.refetch()}
+        />
+      ) : rows.length ? (
+        <div
+          role="region"
+          aria-label="Reservation agreement records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap} ${styles.queueCard}`}
+        >
+          <table className={styles.queueTable}>
             <thead>
               <tr>
                 <th>Reservation</th>
                 <th>Applicant</th>
                 <th>Tier</th>
-                <th>Sale</th>
                 <th>Payment scheme</th>
-                <th>Amount</th>
+                <th className={styles.numeric}>Amount</th>
                 <th>Signatures</th>
                 <th>Status</th>
-                <th>Submitted</th>
-                <th>Created</th>
               </tr>
             </thead>
             <tbody>
-              {query.data.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <Link to={`/admin/sales/reservations/${item.id}`}>
-                      {item.reservationNumber}
-                    </Link>
-                  </td>
-                  <td>{item.applicantName ?? '—'}</td>
-                  <td>{item.tier}</td>
-                  <td>{item.saleId ?? 'Not finalized'}</td>
-                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                  <td>{formatMoney(item.totalPrice)}</td>
-                  <td>
-                    {item.primarySignatureStatus === 'received' &&
-                    (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received')
-                      ? 'Complete'
-                      : 'Pending signature'}
-                  </td>
-                  <td>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        whiteSpace: 'nowrap',
-                        minWidth: 'max-content',
-                      }}
-                    >
+              {rows.map((item) => {
+                const signaturesComplete =
+                  item.primarySignatureStatus === 'received' &&
+                  (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received');
+                return (
+                  <tr
+                    key={item.id}
+                    tabIndex={0}
+                    role="link"
+                    aria-label={`Review reservation ${item.reservationNumber}`}
+                    onClick={() => navigate(`/admin/sales/reservations/${item.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ')
+                        navigate(`/admin/sales/reservations/${item.id}`);
+                    }}
+                    className={styles.clickable}
+                  >
+                    <td data-label="Reservation">
+                      <span className={styles.resRef}>
+                        <span className={styles.resRefDot} aria-hidden="true" />
+                        {item.reservationNumber}
+                      </span>
+                    </td>
+                    <td data-label="Applicant">{item.applicantName ?? '—'}</td>
+                    <td data-label="Tier">
+                      <TierBadge tier={item.tier} />
+                    </td>
+                    <td data-label="Payment scheme">{paymentSchemeLabel(item.paymentScheme)}</td>
+                    <td data-label="Amount" className={styles.numeric}>
+                      {formatMoney(item.totalPrice)}
+                    </td>
+                    <td data-label="Signatures">
                       <StatusChip
-                        label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                        label={signaturesComplete ? 'Complete' : 'Pending signature'}
+                        tone={signaturesComplete ? 'success' : 'warning'}
                       />
-                    </span>
-                  </td>
-                  <td>{item.submittedAt ? formatDateTime(item.submittedAt) : '—'}</td>
-                  <td>{formatDateTime(item.createdAt)}</td>
-                </tr>
-              ))}
+                    </td>
+                    <td data-label="Status">
+                      <ReservationStatusBadge status={item.status} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       ) : (
         <EmptyState
           title="No reservation agreements"
-          description="Create an agreement from an existing card sale."
+          description="Create an agreement from an approved application."
         />
       )}
+
+      {total > 0 ? (
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Reservation agreements pagination"
+          />
+          <span
+            role="status"
+            aria-label="Reservation record range"
+            className={styles.paginationRange}
+          >
+            Showing {rangeFrom}–{rangeTo} of {total}
+          </span>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1857,6 +2452,10 @@ export function ReservationAgreementEditorPage() {
     tinNumber: string;
   };
   const [secondary, setSecondary] = useState<SecondaryState | null>(null);
+  /** Chosen workbook for the IST bulk import, and whether it is still being read. */
+  const [istFile, setIstFile] = useState<{ name: string; size: number } | null>(null);
+  const [istReading, setIstReading] = useState(false);
+  const istImportLabelId = useId();
   const [schedule, setSchedule] = useState({
     particular: 'Monthly amortization',
     amount: '0.00',
@@ -2101,7 +2700,11 @@ export function ReservationAgreementEditorPage() {
     const f = preview.fields;
     if (f.sale_id) setSaleId(f.sale_id);
     if (f.customer_application_id) setCustomerApplicationId(f.customer_application_id);
-    if (f.vip_tier) setVipTier(f.vip_tier.toUpperCase());
+    // A workbook cell can hold anything. Only a real tier may reach the closed
+    // dropdown: setting an unknown value would leave the state out of step with
+    // the displayed option, and the server would reject it anyway.
+    const importedTier = (f.vip_tier ?? '').toUpperCase();
+    if (isVipTier(importedTier)) setVipTier(importedTier);
     if (f.reservation_date)
       setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
     if (f.agreement_date)
@@ -2136,38 +2739,43 @@ export function ReservationAgreementEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const salePlan = plans.data?.find((p) => p.id === summary.data?.saleId);
   return (
-    <section>
+    <section className={styles.editorSection}>
       <PageHeader
         title={existing.data?.reservationNumber ?? 'New IST Reservation Agreement'}
-        description="Benefits and economics are server-derived snapshots; schedule rows are not received payments."
+        description="Server-derived snapshots. Schedule rows are obligations."
+        actions={
+          <Button variant="secondary" onClick={() => navigate('/admin/sales/reservations')}>
+            Back to agreements
+          </Button>
+        }
       />
-      <p>
-        <Link to="/admin/sales/reservations">Back to agreements</Link>
-      </p>
       {existing.data ? (
-        <p>
-          Status: {existing.data.status} · Tier: {existing.data.tier} · Total:{' '}
-          {existing.data.totalPrice}
+        <p className={styles.stateSummary}>
+          <strong>Status:</strong> {existing.data.status} · <strong>Tier:</strong>{' '}
+          {existing.data.tier} · <strong>Total:</strong> {existing.data.totalPrice}
           {!applicationOrigin ? (
             <>
               {' '}
-              · Verified received: {existing.data.totalPaymentReceived} · Balance:{' '}
-              {existing.data.balance}
+              · <strong>Verified received:</strong> {existing.data.totalPaymentReceived} ·{' '}
+              <strong>Balance:</strong> {existing.data.balance}
             </>
           ) : null}{' '}
-          · Submitted: {existing.data.submittedAt ?? '—'} · Executed:{' '}
-          {existing.data.executedAt ?? '—'}
+          · <strong>Submitted:</strong> {existing.data.submittedAt ?? '—'} ·{' '}
+          <strong>Executed:</strong> {existing.data.executedAt ?? '—'}
         </p>
       ) : null}
       {summary.data ? (
-        <p>
-          Linked sale {summary.data.saleId}: verified {summary.data.verifiedTotal}, balance{' '}
-          {summary.data.remainingBalance}. Schedule rows below are obligations only — actual cash
-          lives in the payments table.
+        <p className={styles.moneyNote}>
+          <span>
+            Linked sale <strong>{summary.data.saleId}</strong>: verified{' '}
+            {formatMoney(summary.data.verifiedTotal)}, balance{' '}
+            {formatMoney(summary.data.remainingBalance)}.
+          </span>
+          <span>Schedule rows below are obligations only — actual cash lives in the payments table.</span>
         </p>
       ) : null}
       {salePlan ? (
-        <p>
+        <p className={styles.note}>
           Official {salePlan.code} benefits apply prospectively; this agreement freezes its own
           snapshot at creation.
         </p>
@@ -2184,244 +2792,372 @@ export function ReservationAgreementEditorPage() {
         </Alert>
       ) : null}
       {applicationOrigin && proposal.data ? (
-        <section aria-label="Frozen purchase terms">
-          <h2>Server-authoritative offer</h2>
-          <p>
+        <section className={styles.panel} aria-label="Frozen purchase terms">
+          <h2 className={styles.panelTitle}>Server-authoritative offer</h2>
+          <p className={styles.panelNote}>
             These figures are read-only. They are frozen purchase terms, not an editable quote, and
             the server revalidates them at save.
           </p>
-          <dl>
-            <dt>Card tier</dt>
-            <dd>{proposal.data.terms.tier}</dd>
-            <dt>Payment scheme</dt>
-            <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
-            <dt>Total purchase</dt>
-            <dd>{formatMoney(proposal.data.terms.totalPrice)}</dd>
-            <dt>Included reservation amount</dt>
-            <dd>{formatMoney(proposal.data.terms.reservationFee)}</dd>
-            <dt>Required initial</dt>
-            <dd>{formatMoney(proposal.data.terms.requiredInitial)}</dd>
-            <dt>Monthly amount</dt>
-            <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
-            <dt>Installment months</dt>
-            <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
-            <dt>Seller</dt>
-            <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
-            <dt>Benefits</dt>
-            <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
-            <dt>Purchase terms reference</dt>
-            <dd>{sourceApplication.data?.purchaseTermsId ?? 'Not captured'}</dd>
-            <dt>Offer as of</dt>
-            <dd>{formatDateTime(proposal.data.asOf)}</dd>
+          <dl className={styles.snapshotGrid}>
+            <div className={styles.snapshotField}>
+              <dt>Card tier</dt>
+              <dd>{proposal.data.terms.tier}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Payment scheme</dt>
+              <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Total purchase</dt>
+              <dd>{formatMoney(proposal.data.terms.totalPrice)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Included reservation amount</dt>
+              <dd>{formatMoney(proposal.data.terms.reservationFee)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Required initial</dt>
+              <dd>{formatMoney(proposal.data.terms.requiredInitial)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Monthly amount</dt>
+              <dd>{formatMoney(proposal.data.terms.monthlyAmount)}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Installment months</dt>
+              <dd>{proposal.data.terms.installmentMonths ?? '—'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Seller</dt>
+              <dd>{proposal.data.sellerName || 'Seller name unavailable'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Benefits</dt>
+              <dd>{proposal.data.terms.inclusions.length} captured item(s)</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Purchase terms reference</dt>
+              <dd>{sourceApplication.data?.purchaseTermsId ?? 'Not captured'}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Offer as of</dt>
+              <dd>{formatDateTime(proposal.data.asOf)}</dd>
+            </div>
           </dl>
         </section>
       ) : null}
-      <fieldset disabled={!editable}>
-        {/* Application-origin reservations have NO sale: the agreement comes
-            first and the sale arrives at finalization. */}
-        {applicationOrigin ? null : (
-          <>
-            <label>
-              Card sale
-              <select value={saleId} onChange={(e) => setSaleId(e.target.value)}>
-                <option value="">Select sale</option>
-                {sales.data?.map((sale) => (
-                  <option key={sale.id} value={sale.id}>
-                    {sale.saleNumber} — {sale.customerName}
-                  </option>
-                ))}
-              </select>
-            </label>{' '}
-            <Button onClick={autoFill}>Auto-fill from sale</Button>
-          </>
-        )}
-        <label>
-          Source Customer Application
-          <select
-            value={customerApplicationId}
-            aria-label="Source Customer Application"
-            onChange={(e) => setCustomerApplicationId(e.target.value)}
-          >
-            <option value="">Choose a submitted or approved application</option>
-            {applications.data
-              ?.filter((app) => ['submitted', 'approved'].includes(app.status))
-              .map((app) => (
-                <option key={app.id} value={app.id}>
-                  {app.applicationNumber} — {app.applicantName}
-                </option>
-              ))}
-          </select>
-        </label>
-        {sourceApplication.data && (
-          <p>
-            Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
-            {sourceApplication.data.tier} ·{' '}
-            {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
-            {formatMoney(sourceApplication.data.vipAmount)}.
-            {applicationOrigin
-              ? ' No card sale is needed: this reservation is the first commercial record.'
-              : ' Select the matching existing card sale if the application has not yet been linked.'}
+      <fieldset disabled={!editable} className={styles.formRoot}>
+        <section className={styles.panel} aria-labelledby="reservation-source-heading">
+          <h2 id="reservation-source-heading" className={styles.panelTitle}>
+            1. Source &amp; references
+          </h2>
+          <p className={styles.panelNote}>
+            Link the customer application or an existing card sale this reservation belongs to.
           </p>
-        )}
-        <label>
-          Imported tier context (validates secondary; sale tier stays authoritative)
-          <NormalizedInput
-            value={vipTier}
-            placeholder="BRONZE, SILVER, or GOLD"
-            normalize={(value) => value.toUpperCase()}
-            onChange={(e) => setVipTier(e.target.value)}
-          />
-        </label>
-        <div className="form-grid">
-          {Object.entries(dates).map(([key, value]) => (
-            <Field
-              key={key}
-              label={key.replace(/[A-Z]/g, (c) => ` ${c}`)}
-              value={value}
-              type={
-                key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
-                  ? 'date'
-                  : 'text'
-              }
-              onChange={(v) => setDates({ ...dates, [key]: v })}
-            />
-          ))}
-        </div>
-        <fieldset>
-          <legend>PRIMARY CARDHOLDER DETAILS</legend>
-          {Object.entries(primary)
-            .filter(([key]) => key !== 'holderType')
-            .map(([key, value]) => (
+          <div className={styles.editorGrid}>
+            {/* Application-origin reservations have NO sale: the agreement comes
+                first and the sale arrives at finalization. */}
+            {applicationOrigin ? null : (
+              <>
+                <label className={styles.filterLabel}>
+                  Card sale
+                  <Select
+                    aria-label="Card sale"
+                    value={saleId}
+                    onChange={(e) => setSaleId(e.target.value)}
+                    options={[
+                      { value: '', label: 'Select sale' },
+                      ...(sales.data?.map((sale) => ({
+                        value: sale.id,
+                        label: `${sale.saleNumber} — ${sale.customerName}`,
+                      })) ?? []),
+                    ]}
+                  />
+                </label>
+                <div className={styles.actions}>
+                  <Button variant="secondary" onClick={autoFill}>
+                    Auto-fill from sale
+                  </Button>
+                </div>
+              </>
+            )}
+            <label className={styles.filterLabel}>
+              Source Customer Application
+              <Select
+                aria-label="Source Customer Application"
+                value={customerApplicationId}
+                onChange={(e) => setCustomerApplicationId(e.target.value)}
+                options={[
+                  { value: '', label: 'Choose a submitted or approved application' },
+                  ...(applications.data
+                    ?.filter((app) => ['submitted', 'approved'].includes(app.status))
+                    .map((app) => ({
+                      value: app.id,
+                      label: `${app.applicationNumber} — ${app.applicantName}`,
+                    })) ?? []),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              Imported Tier
+              <Select
+                aria-label="Imported Tier"
+                value={vipTier}
+                onChange={(e) => setVipTier(e.target.value)}
+                options={VIP_TIER_FIELD_OPTIONS}
+              />
+            </label>
+          </div>
+          {sourceApplication.data ? (
+            <p className={styles.note}>
+              Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
+              {sourceApplication.data.tier} ·{' '}
+              {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
+              {formatMoney(sourceApplication.data.vipAmount)}.
+              {applicationOrigin
+                ? ' No card sale is needed: this reservation is the first commercial record.'
+                : ' Select the matching existing card sale if the application has not yet been linked.'}
+            </p>
+          ) : null}
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-dates-heading">
+          <h2 id="reservation-dates-heading" className={styles.panelTitle}>
+            2. Agreement dates
+          </h2>
+          <p className={styles.panelNote}>
+            Effective dates that bound this reservation agreement.
+          </p>
+          <div className={styles.editorGrid}>
+            {Object.entries(dates).map(([key, value]) => (
               <Field
                 key={key}
-                label={key}
+                label={fieldLabel(key)}
                 value={value}
-                normalize={(v) => normalizeLiveHumanField(key, v)}
-                onChange={(v) => setPrimary({ ...primary, [key]: v })}
+                type={
+                  key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
+                    ? 'date'
+                    : 'text'
+                }
+                onChange={(v) => setDates({ ...dates, [key]: v })}
               />
             ))}
-        </fieldset>
-        <label>
-          <input
-            type="checkbox"
-            checked={Boolean(secondary)}
-            onChange={(e) =>
-              setSecondary(
-                e.target.checked
-                  ? {
-                      holderType: 'SECONDARY' as const,
-                      name: '',
-                      address: '',
-                      contactNumber: '',
-                      email: '',
-                      tinNumber: '',
-                    }
-                  : null,
-              )
-            }
-          />{' '}
-          Add optional supplementary holder (Gold only; server rejects other tiers)
-        </label>
-        {secondary ? (
-          <fieldset>
-            <legend>SUPPLEMENTARY CARDHOLDER DETAILS</legend>
-            {Object.entries(secondary)
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-primary-heading">
+          <h2 id="reservation-primary-heading" className={styles.panelTitle}>
+            3. Primary cardholder
+          </h2>
+          <p className={styles.panelNote}>The cardholder who signs and owns this reservation.</p>
+          <div className={styles.editorGrid}>
+            {Object.entries(primary)
               .filter(([key]) => key !== 'holderType')
               .map(([key, value]) => (
                 <Field
                   key={key}
-                  label={key}
+                  label={fieldLabel(key)}
                   value={value}
                   normalize={(v) => normalizeLiveHumanField(key, v)}
-                  onChange={(v) => setSecondary({ ...secondary, [key]: v })}
+                  onChange={(v) => setPrimary({ ...primary, [key]: v })}
                 />
               ))}
-          </fieldset>
-        ) : null}
-        <fieldset>
-          <legend>PAYMENT PLAN SCHEDULE — NOT AN ACTUAL PAYMENT</legend>
-          {Object.entries(schedule).map(([key, value]) => (
-            <Field
-              key={key}
-              label={key}
-              value={value}
-              type={key === 'paymentDate' ? 'date' : 'text'}
-              onChange={(v) => setSchedule({ ...schedule, [key]: v })}
-            />
-          ))}
-        </fieldset>
-        <p>
-          <Button onClick={() => void getOfficialFormTemplate('ist').then(saveFile)}>
-            Download import template
-          </Button>{' '}
-          <label>
-            Import IST XLSX{' '}
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-secondary-heading">
+          <h2 id="reservation-secondary-heading" className={styles.panelTitle}>
+            4. Supplementary cardholder
+          </h2>
+          <label className={styles.toggleCard}>
             <input
-              type="file"
-              accept=".xlsx"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void importIstFile(file);
-              }}
+              type="checkbox"
+              checked={Boolean(secondary)}
+              onChange={(e) =>
+                setSecondary(
+                  e.target.checked
+                    ? {
+                        holderType: 'SECONDARY' as const,
+                        name: '',
+                        address: '',
+                        contactNumber: '',
+                        email: '',
+                        tinNumber: '',
+                      }
+                    : null,
+                )
+              }
             />
+            <span className={styles.toggleText}>
+              <span className={styles.toggleTitle}>
+                Add optional supplementary holder (Gold only)
+              </span>
+              <span className={styles.toggleHint}>The server rejects other tiers.</span>
+            </span>
           </label>
-        </p>
+          {secondary ? (
+            <div className={styles.editorGrid}>
+              {Object.entries(secondary)
+                .filter(([key]) => key !== 'holderType')
+                .map(([key, value]) => (
+                  <Field
+                    key={key}
+                    label={fieldLabel(key)}
+                    value={value}
+                    normalize={(v) => normalizeLiveHumanField(key, v)}
+                    onChange={(v) => setSecondary({ ...secondary, [key]: v })}
+                  />
+                ))}
+            </div>
+          ) : null}
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-schedule-heading">
+          <h2 id="reservation-schedule-heading" className={styles.panelTitle}>
+            5. Payment plan schedule
+          </h2>
+          <p className={styles.panelNote}>
+            An obligation plan — not an actual payment. Cash is recorded in the payments ledger.
+          </p>
+          <div className={styles.editorGrid}>
+            {Object.entries(schedule).map(([key, value]) => (
+              <Field
+                key={key}
+                label={fieldLabel(key)}
+                value={value}
+                type={key === 'paymentDate' ? 'date' : 'text'}
+                onChange={(v) => setSchedule({ ...schedule, [key]: v })}
+              />
+            ))}
+          </div>
+        </section>
+        <section className={styles.panel} aria-labelledby="reservation-import-heading">
+          <h2 id="reservation-import-heading" className={styles.panelTitle}>
+            6. Bulk import
+          </h2>
+          <p className={styles.panelNote}>
+            Pull candidates from an official IST workbook, then verify every field before saving.
+          </p>
+          <div className={styles.importCard} data-selected={istFile ? 'true' : 'false'}>
+            <div className={styles.importHead}>
+              <span className={styles.importTitle} id={istImportLabelId}>
+                Import IST XLSX
+              </span>
+              <span className={styles.importHint}>
+                Choose an official workbook. Imported values are suggestions only, never saved until
+                you verify them.
+              </span>
+            </div>
+            <div className={styles.importControls}>
+              <label className={styles.filePicker}>
+                <input
+                  className={styles.fileInput}
+                  type="file"
+                  accept=".xlsx"
+                  aria-labelledby={istImportLabelId}
+                  disabled={istReading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setIstFile({ name: file.name, size: file.size });
+                    setIstReading(true);
+                    void importIstFile(file).finally(() => setIstReading(false));
+                  }}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                onClick={() => void getOfficialFormTemplate('ist').then(saveFile)}
+              >
+                Download import template
+              </Button>
+            </div>
+            <p className={styles.fileName} role="status">
+              {istFile
+                ? `${istFile.name} · ${formatFileSize(istFile.size)}${
+                    istReading ? ' · reading…' : ''
+                  }`
+                : 'No workbook chosen yet.'}
+            </p>
+          </div>
+        </section>
       </fieldset>
-      <p>
-        <Button onClick={() => save.mutate()} disabled={!editable || save.isPending}>
-          {save.isPending
-            ? 'Saving…'
-            : applicationOrigin && !id
-              ? 'Create Reservation Agreement'
-              : 'Save draft'}
-        </Button>{' '}
-        {id && editable ? (
-          <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
-            Submit
+      <div className={styles.stickyFooter}>
+        <div className={styles.buttonRow}>
+          <Button
+            onClick={() => save.mutate()}
+            disabled={!editable}
+            loading={save.isPending}
+            loadingLabel="Saving…"
+          >
+            {applicationOrigin && !id ? 'Create Reservation Agreement' : 'Save draft'}
           </Button>
-        ) : null}{' '}
-        {id && existing.data?.status === 'submitted' ? (
-          <>
-            <Button onClick={() => decide.mutate('executed')} disabled={decide.isPending}>
+          {id && editable ? (
+            <Button
+              variant="secondary"
+              onClick={() => submit.mutate()}
+              loading={submit.isPending}
+              loadingLabel="Submitting…"
+            >
+              Submit
+            </Button>
+          ) : null}
+          {id && existing.data?.status === 'submitted' ? (
+            <Button
+              onClick={() => decide.mutate('executed')}
+              loading={decide.isPending}
+              loadingLabel="Executing…"
+            >
               Execute
-            </Button>{' '}
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
+            </Button>
+          ) : null}
+          {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
+            <Button
+              variant="danger"
+              onClick={() => decide.mutate('cancelled')}
+              loading={decide.isPending}
+              loadingLabel="Cancelling…"
+            >
+              Cancel
+            </Button>
+          ) : null}
+          {id && existing.data?.status === 'submitted' ? (
+            <Button
+              variant="secondary"
+              onClick={() => reopen.mutate()}
+              loading={reopen.isPending}
+              loadingLabel="Reopening…"
+            >
               Reopen to draft
-            </Button>{' '}
-          </>
-        ) : null}{' '}
-        {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
-          <Button onClick={() => decide.mutate('cancelled')} disabled={decide.isPending}>
-            Cancel
-          </Button>
-        ) : null}{' '}
-        {id ? (
-          <>
-            <Button
-              onClick={() =>
-                void exportReservationAgreement(id, 'xlsx')
-                  .then(saveFile)
-                  .catch((e: unknown) =>
-                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                  )
-              }
-            >
-              Export XLSX
             </Button>
-            <Button
-              onClick={() =>
-                void exportReservationAgreement(id, 'pdf')
-                  .then(saveFile)
-                  .catch((e: unknown) =>
-                    setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                  )
-              }
-            >
-              Export PDF
-            </Button>
-          </>
-        ) : null}
-      </p>
+          ) : null}
+          <span className={styles.spacer} />
+          {id ? (
+            <>
+              <Button
+                variant="primary"
+                onClick={() =>
+                  void exportReservationAgreement(id, 'xlsx')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export XLSX
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  void exportReservationAgreement(id, 'pdf')
+                    .then(saveFile)
+                    .catch((e: unknown) =>
+                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                    )
+                }
+              >
+                Export PDF
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </div>
       {id && existing.data?.origin === 'application' ? (
         <ApplicationOriginAgreementPanel id={id} agreement={existing.data} />
       ) : null}
@@ -2501,37 +3237,55 @@ function ApplicationOriginAgreementPanel({
   const money = finance.data;
   const lifecycle = agreement.status;
   return (
-    <section aria-label="Reservation lifecycle">
-      <h2>Purchase state</h2>
+    <section className={styles.editorSection} aria-label="Reservation lifecycle">
+      <h2 className={styles.panelTitle}>Purchase state</h2>
       {error ? <Alert variant="warning">{error}</Alert> : null}
-      <dl>
-        <dt>Agreement state</dt>
-        <dd>{lifecycle}</dd>
-        <dt>Card Sale (AF-CSALE)</dt>
-        <dd>
-          {money?.saleNumber ??
-            agreement.saleId ??
-            'Not created — created when the purchase is finalized'}
-        </dd>
-        <dt>Total purchase</dt>
-        <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
-        <dt>Included reservation amount</dt>
-        <dd>{formatMoney(money?.reservationFee ?? agreement.reservationFee)}</dd>
-        <dt>Verified paid</dt>
-        <dd>{formatMoney(money?.verifiedTotal ?? '0.00')}</dd>
-        <dt>Remaining</dt>
-        <dd>{formatMoney(money?.remainingBalance ?? agreement.balance)}</dd>
+      <dl className={styles.snapshotGrid}>
+        <div className={styles.snapshotField}>
+          <dt>Agreement state</dt>
+          <dd>
+            <StatusChip label={lifecycle} />
+          </dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Card Sale (AF-CSALE)</dt>
+          <dd>
+            {money?.saleNumber ??
+              agreement.saleId ??
+              'Not created — created when the purchase is finalized'}
+          </dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Total purchase</dt>
+          <dd>{formatMoney(money?.totalPrice ?? agreement.totalPrice)}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Included reservation amount</dt>
+          <dd>{formatMoney(money?.reservationFee ?? agreement.reservationFee)}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Verified paid</dt>
+          <dd>{formatMoney(money?.verifiedTotal ?? '0.00')}</dd>
+        </div>
+        <div className={styles.snapshotField}>
+          <dt>Remaining</dt>
+          <dd>{formatMoney(money?.remainingBalance ?? agreement.balance)}</dd>
+        </div>
         {money?.overpaidAmount && money.overpaidAmount !== '0.00' ? (
-          <>
+          <div className={styles.snapshotField}>
             <dt>Overpaid</dt>
             <dd>{formatMoney(money.overpaidAmount)}</dd>
-          </>
+          </div>
         ) : null}
       </dl>
-      <p>
-        <Button onClick={() => void print('reservation', 'Reservation')} disabled={busy}>
+      <div className={styles.actions}>
+        <Button
+          variant="secondary"
+          onClick={() => void print('reservation', 'Reservation')}
+          disabled={busy}
+        >
           Print Reservation Agreement
-        </Button>{' '}
+        </Button>
         {money?.fullyPaid ? (
           <Button
             onClick={() => void finalize()}
@@ -2545,29 +3299,38 @@ function ApplicationOriginAgreementPanel({
             Finalize Purchase
           </Button>
         ) : null}
-      </p>
+        {lifecycle === 'executed' && !money?.fullyPaid ? (
+          <Button
+            variant="secondary"
+            onClick={() => setRecording(true)}
+            disabled={busy || !canHandlePayments}
+          >
+            Record Payment
+          </Button>
+        ) : null}
+      </div>
       {lifecycle === 'executed' && !agreement.saleId ? (
         <Alert variant="info">
           Executed. This agreement is now in the Finance queue for collection. No card sale exists
           yet — one is created only when the whole price is verified.
         </Alert>
       ) : null}
-      {lifecycle === 'executed' && !money?.fullyPaid ? (
-        <p>
-          <Button onClick={() => setRecording(true)} disabled={busy || !canHandlePayments}>
-            Record Payment
-          </Button>
-        </p>
-      ) : null}
       {lifecycle === 'executed' && !money?.fullyPaid && money ? (
-        <p>
-          PAYMENT PROCESSING — verified {formatMoney(money.verifiedTotal)}, remaining{' '}
-          {formatMoney(money.remainingBalance)}.
+        <p className={styles.moneyNote}>
+          <StatusChip label="Payment processing" tone="warning" />
+          <span>
+            Verified {formatMoney(money.verifiedTotal)}, remaining{' '}
+            {formatMoney(money.remainingBalance)}.
+          </span>
         </p>
       ) : null}
       {lifecycle === 'executed' && money?.fullyPaid ? (
-        <p>
-          <strong>FULLY PAID</strong>
+        <p className={styles.moneyNote}>
+          <StatusChip label="Fully paid" tone="success" />
+          <span>
+            Verified {formatMoney(money.verifiedTotal)} against{' '}
+            {formatMoney(money.totalPrice)}. Ready to finalize.
+          </span>
         </p>
       ) : null}
       {recording ? (
@@ -2578,61 +3341,71 @@ function ApplicationOriginAgreementPanel({
           onClose={() => setRecording(false)}
         />
       ) : null}
-      <h3>Payments</h3>
+      <h3 className={styles.panelTitle}>Payments</h3>
       {payments.data && payments.data.length > 0 ? (
-        <table>
-          <caption>Every AF-PAY recorded against this agreement</caption>
-          <thead>
-            <tr>
-              <th scope="col">AF-PAY</th>
-              <th scope="col">Amount</th>
-              <th scope="col">Method</th>
-              <th scope="col">Recorded</th>
-              <th scope="col">Status</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.data.map((payment) => (
-              <tr key={payment.id}>
-                <td>{payment.paymentNumber ?? payment.id}</td>
-                <td>{formatMoney(payment.amount)}</td>
-                <td>{payment.method}</td>
-                <td>{formatDateTime(payment.recordedAt)}</td>
-                <td>{payment.status}</td>
-                <td>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
-                  >
-                    Print Recorded Receipt
-                  </Button>{' '}
-                  {/* A rejected payment never gets a verified receipt: there is no
-                      verified evidence to render, and inventing one would be a lie
-                      in a customer's hand. */}
-                  {payment.status === 'verified' ? (
+        <div className={`table-scroll ${styles.ledgerWrap}`}>
+          <table>
+            <caption>Every AF-PAY recorded against this agreement</caption>
+            <thead>
+              <tr>
+                <th scope="col">AF-PAY</th>
+                <th scope="col" className={styles.ledgerAmount}>
+                  Amount
+                </th>
+                <th scope="col">Method</th>
+                <th scope="col">Recorded</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.data.map((payment) => (
+                <tr key={payment.id}>
+                  <td data-label="AF-PAY">{payment.paymentNumber ?? payment.id}</td>
+                  <td data-label="Amount" className={styles.ledgerAmount}>
+                    {formatMoney(payment.amount)}
+                  </td>
+                  <td data-label="Method">{payment.method}</td>
+                  <td data-label="Recorded">{formatDateTime(payment.recordedAt)}</td>
+                  <td data-label="Status">
+                    <StatusChip label={payment.status} />
+                  </td>
+                  <td data-label="Actions">
                     <Button
                       size="sm"
                       variant="ghost"
                       disabled={busy}
-                      onClick={() => void print('payment_verified', 'Verified receipt', payment.id)}
+                      onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
                     >
-                      Print Verified Receipt
-                    </Button>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      Print Recorded Receipt
+                    </Button>{' '}
+                    {/* A rejected payment never gets a verified receipt: there is no
+                        verified evidence to render, and inventing one would be a lie
+                        in a customer's hand. */}
+                    {payment.status === 'verified' ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void print('payment_verified', 'Verified receipt', payment.id)
+                        }
+                      >
+                        Print Verified Receipt
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <p>No payments recorded against this agreement yet.</p>
+        <p className={styles.note}>No payments recorded against this agreement yet.</p>
       )}
       {agreement.saleId ? (
-        <p>
-          Final purchase record:{' '}
+        <div className={styles.actions}>
+          <span className={styles.note}>Final purchase record:</span>
           <Button
             size="sm"
             variant="ghost"
@@ -2641,7 +3414,7 @@ function ApplicationOriginAgreementPanel({
           >
             Print Final Purchase Record
           </Button>
-        </p>
+        </div>
       ) : null}
       <MembershipConfirmation saleId={agreement.saleId} persisted={money?.membership} />
     </section>
@@ -2686,18 +3459,26 @@ function MembershipConfirmation({
   if (!saleId) return null;
   const membershipId = result?.membershipId ?? persisted?.id;
   return (
-    <section aria-label="Membership activation">
-      <h3>Membership</h3>
+    <section className={styles.editorSection} aria-label="Membership activation">
+      <h3 className={styles.panelTitle}>Membership</h3>
       {error ? <Alert variant="warning">{error}</Alert> : null}
       {result || persisted ? (
         <>
-          <dl>
-            <dt>Membership</dt>
-            <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
-            <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
-            <dd>{result?.pointsAllocated ?? persisted?.pointsBalance}</dd>
-            <dt>Card Sale</dt>
-            <dd>{saleId}</dd>
+          <dl className={styles.snapshotGrid}>
+            <div className={styles.snapshotField}>
+              <dt>Membership</dt>
+              <dd>{result?.membershipNumber ?? persisted?.membershipNumber}</dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
+              <dd>
+                {formatPoints(result?.pointsAllocated ?? persisted?.pointsBalance)}
+              </dd>
+            </div>
+            <div className={styles.snapshotField}>
+              <dt>Card Sale</dt>
+              <dd>{saleId}</dd>
+            </div>
           </dl>
           <Alert variant="info">
             Card credentials are shown once, by the authorized activation flow, and are never
@@ -2706,9 +3487,11 @@ function MembershipConfirmation({
           {membershipId ? <PrintActivationConfirmation membershipId={membershipId} /> : null}
         </>
       ) : (
-        <Button onClick={() => void activate()} disabled={!canActivate || busy}>
-          Activate membership
-        </Button>
+        <div className={styles.actions}>
+          <Button onClick={() => void activate()} disabled={!canActivate || busy}>
+            Activate membership
+          </Button>
+        </div>
       )}
     </section>
   );
@@ -2719,10 +3502,10 @@ function PrintActivationConfirmation({ membershipId }: { membershipId: string })
   // The activation confirmation is addressed by the membership, which is the
   // source the evidence builder reads.
   return (
-    <p>
+    <div className={styles.actions}>
       <Button
         size="sm"
-        variant="ghost"
+        variant="secondary"
         onClick={() => {
           setError(null);
           void exportPurchaseDocument(membershipId, 'membership_activated')
@@ -2733,9 +3516,9 @@ function PrintActivationConfirmation({ membershipId }: { membershipId: string })
         }}
       >
         Print Activation Confirmation
-      </Button>{' '}
-      <span>Membership {membershipId}</span>
+      </Button>
+      <span className={styles.note}>Membership {membershipId}</span>
       {error ? <span role="alert"> {error}</span> : null}
-    </p>
+    </div>
   );
 }

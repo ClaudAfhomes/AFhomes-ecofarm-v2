@@ -5,6 +5,14 @@
   max-width: 100%;
 }
 
+/* Grid items default to min-width:auto (their min-content), so one wide
+   descendant — a nowrap figure, a date control, a table floor — would prop
+   every page open sideways. Pages may scroll internally, never the shell. */
+.content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 /**
  * Unresolved-permission notice: the session resolved a staff role but no
  * navigation modules came back (e.g. the role assignment or its permission

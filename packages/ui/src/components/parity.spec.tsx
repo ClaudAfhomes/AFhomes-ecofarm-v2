@@ -196,6 +196,36 @@ describe('FilterBar', () => {
     expect(screen.getByLabelText('Status')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
   });
+
+  it('renders no disclosure toggle unless filters are collapsible', () => {
+    render(
+      <FilterBar
+        search={<input aria-label="Search" />}
+        filters={<select aria-label="Status" />}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /filters/i })).toBeNull();
+  });
+
+  it('toggles collapsible filters between Expand and Collapse', async () => {
+    const user = userEvent.setup();
+    render(
+      <FilterBar
+        search={<input aria-label="Search" />}
+        filters={<select aria-label="Status" />}
+        filtersToggleLabel="Expand Filters"
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: 'Expand Filters' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Collapse Filters' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    // The filters themselves stay mounted for desktop; only the toggle flips.
+    expect(screen.getByLabelText('Status')).toBeInTheDocument();
+  });
 });
 
 describe('SearchField', () => {

@@ -25,7 +25,6 @@ import { PointsRulesPage } from '../features/business/PointsRulesPage';
 import { SalesRecordsPage } from '../features/business/SalesRecordsPage';
 import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
 import {
   CustomerApplicationEditorPage,
@@ -114,7 +113,6 @@ export default function App() {
           Redemption rather than from the global nav. */}
               <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
               <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
-              <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
               sales.card_sales nav key like the sales list; customers and
               anonymous visitors never reach the staff app at all. */}

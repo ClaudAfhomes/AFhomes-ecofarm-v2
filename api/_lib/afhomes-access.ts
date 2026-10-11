@@ -1,3 +1,4 @@
+import { afHomesSessionSchema } from '@afhomes/contracts';
 import type { AfHomesAction, AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
 
 import {
@@ -7,7 +8,7 @@ import {
 } from './auth-verify.js';
 import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest } from './http.js';
-import { anonClient, serviceClient } from './rest.js';
+import { anonClient, serviceClient, userClient } from './rest.js';
 import { extractBearerToken } from './token.js';
 
 // Supabase's fluent query type is intentionally kept behind this server-only adapter.
@@ -135,15 +136,56 @@ export async function resolveAfHomesPrincipal(
   if (!token) return { error: toErrorEnvelope('UNAUTHORIZED', 'Missing authentication', 401) };
   const anon = anonClient();
   const svc = serviceClient() as Db;
-  if (!anon || !svc)
-    return {
-      error: toErrorEnvelope('INTERNAL', 'Supabase server configuration is incomplete', 500),
-    };
+
+  if (!anon)
+    return { error: toErrorEnvelope('INTERNAL', 'Supabase authentication is not configured', 500) };
   const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
   const user = authData?.user;
   if (authError || !user?.id)
     return { error: toErrorEnvelope('UNAUTHORIZED', 'Invalid session', 401) };
-
+  if (!svc) {
+    const caller = userClient(token);
+    if (!caller)
+      return {
+        error: toErrorEnvelope('INTERNAL', 'Supabase authentication is not configured', 500),
+      };
+    const result = await caller.rpc('afhomes_self_session', {});
+    if (result.error)
+      return {
+        error: toErrorEnvelope(
+          'INTERNAL',
+          'Secure staff session verification is unavailable. Contact the administrator.',
+          503,
+        ),
+      };
+    if (result.data === null)
+      return {
+        error: toErrorEnvelope(
+          'FORBIDDEN',
+          'Active staff access and an active role are required.',
+          403,
+        ),
+      };
+    const parsed = afHomesSessionSchema.safeParse(result.data);
+    if (!parsed.success || parsed.data.id !== user.id || parsed.data.status !== 'active')
+      return { error: toErrorEnvelope('FORBIDDEN', 'Staff access required', 403) };
+    const own = parsed.data;
+    return {
+      userId: own.id,
+      email: own.email,
+      fullName: own.fullName,
+      status: own.status,
+      roleId: own.roleId,
+      roleSlug: own.roleSlug,
+      roleName: own.roleName,
+      mustChangePassword: own.mustChangePassword,
+      permissions: own.permissions,
+      mfaRequired:
+        process.env.AFHOMES_REQUIRE_ADMIN_MFA === 'true' &&
+        ['admin', 'super_admin'].includes(own.roleSlug) &&
+        (await verifiedAssuranceLevel(anon.auth, token, user.id)) !== 'aal2',
+    };
+  }
   const { data: staff, error: staffError } = await svc
     .from('staff_users')
     .select('id,email,full_name,status,must_change_password')

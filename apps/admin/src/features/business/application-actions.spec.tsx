@@ -139,9 +139,13 @@ it.each(['draft', 'submitted', 'approved', 'rejected', 'cancelled'] as const)(
   'keeps %s actions outside the read-only fields',
   async (status) => {
     await show(status);
-    if (status === 'draft')
-      expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
-    else expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    // Save lives in the header and the sticky footer alike; both share state.
+    const saves = screen.getAllByRole('button', { name: 'Save draft' });
+    expect(saves).toHaveLength(2);
+    for (const save of saves) {
+      if (status === 'draft') expect(save).toBeEnabled();
+      else expect(save).toBeDisabled();
+    }
     expect(screen.getByLabelText('First name')).toHaveProperty('disabled', false);
     if (status !== 'draft') expect(screen.getByLabelText('First name')).toBeDisabled();
     for (const name of ['Export XLSX', 'Export PDF'])
@@ -169,6 +173,7 @@ describe('purchase workflow next step', () => {
     id: 'bbbbbbbb-0000-4000-8000-000000000009',
     reservationNumber: 'AF-RES-Y7USC',
     saleId,
+    saleNumber: null,
     paymentScheme: 'spot_cash' as const,
     totalPrice: '60000.00',
     primarySignatureStatus: 'received' as const,
@@ -224,7 +229,9 @@ describe('purchase workflow next step', () => {
   it('ignores a cancelled reservation, which returns the customer to application work', async () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([reservation('cancelled')]);
     await show('approved');
-    expect(await screen.findByRole('link', { name: 'Create Reservation Agreement' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('link', { name: 'Create Reservation Agreement' }),
+    ).toBeInTheDocument();
   });
 
   it('asks a submitted application to review purchase terms instead of linking out', async () => {

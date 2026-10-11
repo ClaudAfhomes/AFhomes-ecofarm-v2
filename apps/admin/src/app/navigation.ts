@@ -35,13 +35,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'file-text',
     module: 'sales.card_sales',
     dropdown: [
-      { to: '/admin/sales', label: 'Card Sales', module: 'sales.card_sales' },
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
-      {
-        to: '/admin/customers/import-export',
-        label: 'Import / Export',
-        module: 'governance.customer_import',
-      },
       {
         to: '/admin/customers/applications',
         label: 'Customer Applications',
@@ -249,6 +243,11 @@ export function canAccessNavTarget(
   // Compatibility-only document routes remain protected after removing navigation.
   if (pathname === '/admin/documents' || pathname.startsWith('/admin/documents/'))
     return canViewModule(permissions, 'sales.id_documents');
+  // Customer import/export is reached from the Customers page action, not the
+  // sidebar, but the direct URL keeps its own permission gate so hiding the
+  // link and refusing the URL cannot disagree.
+  if (pathname === '/admin/customers/import-export')
+    return canViewModule(permissions, 'governance.customer_import');
   const sub = findNavSubItem(pathname);
   const item = findNavItem(pathname);
   const key = sub?.sub.module ?? item?.module;
@@ -293,7 +292,10 @@ export function findNavSubItem(pathname: string) {
   return best;
 }
 export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
-  if (pathname === '/admin') return [{ label: 'Dashboard' }];
+  // The dashboard is the console home: a self-referencing "Dashboard" crumb
+  // adds a redundant label above Operations Overview, so no trail renders here.
+  // Deeper pages keep their `Dashboard -> …` home link untouched.
+  if (pathname === '/admin') return null;
   if (pathname === '/admin/profile')
     return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
   const found = findNavSubItem(pathname);

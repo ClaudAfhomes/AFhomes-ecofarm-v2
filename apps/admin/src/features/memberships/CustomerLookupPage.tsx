@@ -1,10 +1,24 @@
-import { useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { customerLookupSchema, CUSTOMER_CATEGORY_LABELS } from '@afhomes/contracts';
-import { Button, PageHeader, SearchField, ErrorState, EmptyState, StatusChip } from '@afhomes/ui';
+import {
+  customerLookupSchema,
+  CUSTOMER_CATEGORY_LABELS,
+  type CustomerLookup,
+} from '@afhomes/contracts';
+import {
+  PageHeader,
+  SearchField,
+  ErrorState,
+  EmptyState,
+  StatusChip,
+  Icon,
+  Spinner,
+} from '@afhomes/ui';
+import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
 
 /**
  * Customer Lookup for the GSD / Employee desk.
@@ -21,17 +35,194 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
  * Membership Code in the first place. A GSD operator who needs to redeem points
  * goes to Membership Transaction, which is a separate screen and a separate
  * credential path.
+ *
+ * Search is live, but in two stages: typing only ever fills the suggestion
+ * list (matching names, or "Customer does not exist" when nothing matches).
+ * The record card below renders solely for a *picked* suggestion — typing
+ * alone never puts a card on screen, and typing on after a pick clears it.
+ * There is deliberately no Search button to click.
  */
+
+type TierKey = 'GOLD' | 'SILVER' | 'BRONZE' | 'NONE';
+
+/** Card theme key from the lookup tier. Anything unrecognised is cardless. */
+function tierKey(tier: string | null): TierKey {
+  const normalized = (tier ?? '').trim().toUpperCase();
+  if (normalized === 'GOLD' || normalized === 'SILVER' || normalized === 'BRONZE') {
+    return normalized;
+  }
+  return 'NONE';
+}
+
+const FACT_ICONS: { key: string; label: string; icon: IconName }[] = [
+  { key: 'customer', label: 'Customer Status', icon: 'user' },
+  { key: 'membership', label: 'Membership Status', icon: 'user-check' },
+  { key: 'tier', label: 'VIP Tier', icon: 'image' },
+  { key: 'validity', label: 'Valid Until', icon: 'clock' },
+];
+
+/** How many name suggestions the dropdown shows at most. */
+const MAX_SUGGESTIONS = 6;
+
+/**
+ * Name suggestions for the typed letters, ranked prefix-first.
+ *
+ * The source is the latest fetched lookup page — NOT a second endpoint — so
+ * suggestions appear instantly from what is already on hand (including while
+ * the next keystroke's fetch is still in flight) and cost zero extra network.
+ * Only display-safe fields feed the rows: names, categories and tiers. Codes
+ * match behind the scenes but are never printed here; the full identifiers
+ * stay on the result cards below.
+ */
+function rankSuggestions(rows: CustomerLookup[], term: string): CustomerLookup[] {
+  const needle = term.trim().toLowerCase();
+  if (needle.length < 2) return [];
+  const starts: CustomerLookup[] = [];
+  const contains: CustomerLookup[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.customerNumber)) continue;
+    const matches =
+      row.fullName.toLowerCase().includes(needle) ||
+      row.customerNumber.toLowerCase().includes(needle) ||
+      (row.customerCode ?? '').toLowerCase().includes(needle);
+    if (!matches) continue;
+    seen.add(row.customerNumber);
+    (row.fullName.toLowerCase().startsWith(needle) ? starts : contains).push(row);
+  }
+  return [...starts, ...contains].slice(0, MAX_SUGGESTIONS);
+}
+
+/** Bolds the typed letters inside a suggested name. Presentation only. */
+function HighlightedName({ name, term }: { name: string; term: string }) {
+  const needle = term.trim().toLowerCase();
+  const index = needle ? name.toLowerCase().indexOf(needle) : -1;
+  if (index < 0) return <>{name}</>;
+  return (
+    <>
+      {name.slice(0, index)}
+      <mark className={styles.mark}>{name.slice(index, index + needle.length)}</mark>
+      {name.slice(index + needle.length)}
+    </>
+  );
+}
+
+function CustomerCard({ customer }: { customer: CustomerLookup }) {
+  const tier = tierKey(customer.tier);
+  const artwork = tier === 'NONE' ? null : tierArtwork(tier);
+  return (
+    <article className={styles.member} data-tier={tier} aria-label={customer.fullName}>
+      <div className={styles.artWrap} aria-hidden={artwork ? undefined : true}>
+        {artwork ? (
+          <img className={styles.art} src={artwork.src} alt={artwork.alt} loading="lazy" />
+        ) : (
+          <div className={styles.artPlaceholder}>
+            <Icon name="user" size={28} />
+            <span>No card on file</span>
+          </div>
+        )}
+      </div>
+      <div className={styles.cardBody}>
+        <p className={styles.category}>{CUSTOMER_CATEGORY_LABELS[customer.category]}</p>
+        <h2>{customer.fullName}</h2>
+        <p className={styles.identifiers}>
+          {customer.customerNumber}
+          {customer.customerCode ? ` · ${customer.customerCode}` : ''}
+        </p>
+        {/* Customer Status and Membership Status are shown as separate facts,
+            never merged. An active customer can hold a suspended membership, and
+            conflating the two tells an operator the wrong thing about the record
+            in front of them. */}
+        <dl className={styles.details}>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
+              <Icon name={FACT_ICONS[0]!.icon} size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>{FACT_ICONS[0]!.label}</dt>
+              <dd>
+                <StatusChip label={customer.customerStatus} />
+              </dd>
+            </div>
+          </div>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
+              <Icon name={FACT_ICONS[1]!.icon} size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>{FACT_ICONS[1]!.label}</dt>
+              <dd>
+                {customer.membershipStatus ? (
+                  <StatusChip label={customer.membershipStatus} />
+                ) : (
+                  'None'
+                )}
+              </dd>
+            </div>
+          </div>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
+              <Icon name={FACT_ICONS[2]!.icon} size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>{FACT_ICONS[2]!.label}</dt>
+              <dd>{customer.tier ?? 'None'}</dd>
+            </div>
+          </div>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
+              <Icon name={FACT_ICONS[3]!.icon} size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>{FACT_ICONS[3]!.label}</dt>
+              <dd>{customer.membershipExpiresAt?.slice(0, 10) ?? 'Not applicable'}</dd>
+            </div>
+          </div>
+        </dl>
+      </div>
+    </article>
+  );
+}
+
+function LookupSkeleton() {
+  return (
+    <div
+      className={styles.results}
+      role="status"
+      aria-label="Looking for Customer"
+      aria-busy="true"
+    >
+      <p className={styles.loadingLine}>
+        <Spinner size="sm" />
+        <span>Looking for Customer…</span>
+      </p>
+      {[0, 1, 2].map((index) => (
+        <div className={styles.member} data-tier="NONE" aria-hidden="true" key={index}>
+          <div className={styles.artWrap}>
+            <div className={styles.artSkeleton} />
+          </div>
+          <div className={styles.cardBody}>
+            <span className={styles.skeletonLine} style={{ width: '8rem' }} />
+            <span className={styles.skeletonTitle} style={{ width: '14rem' }} />
+            <span className={styles.skeletonLine} style={{ width: '11rem' }} />
+            <div className={styles.details}>
+              {[0, 1, 2, 3].map((fact) => (
+                <div className={styles.fact} key={fact}>
+                  <span className={styles.skeletonLine} style={{ width: '100%' }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CustomerLookupPage() {
   const [search, setSearch] = useState('');
-  const [applied, setApplied] = useState('');
-  // Live lookup on the settled term (min 2 chars); the Search button stays as an
-  // instant-apply fallback for a fast typist.
-  void useDebouncedValue(search.trim(), 300, (term) => {
-    if (term.length >= 2) setApplied(term);
-    else setApplied('');
-  });
-  const activeTerm = search.trim().length >= 2 ? applied : '';
+  const debouncedTerm = useDebouncedValue(search.trim());
+  const activeTerm = debouncedTerm.length >= 2 ? debouncedTerm : '';
   const customers = useQuery({
     queryKey: ['customer-lookup', activeTerm],
     enabled: activeTerm.length >= 2,
@@ -40,80 +231,183 @@ export function CustomerLookupPage() {
         '/memberships/customer-lookup?search=' + encodeURIComponent(activeTerm),
         customerLookupSchema,
       ),
+    // Keep the previous page on screen while the next keystroke's fetch runs:
+    // refetches then feel instant (stale results + busy indicator) and the
+    // skeleton only ever appears on the very first search.
+    placeholderData: (previousData) => previousData,
+    staleTime: 15_000,
     refetchInterval: 30_000,
   });
+
+  // Suggestion dropdown: names matching the RAW keystrokes, ranked from the
+  // latest fetched page, so the list reacts before the debounced fetch lands.
+  const term = search.trim();
+  const suggestions = useMemo(
+    () => rankSuggestions(customers.data ?? [], term),
+    [customers.data, term],
+  );
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-suggest-${index}`;
+  const listOpen = suggestOpen && term.length >= 2;
+  // The debounced term actually sent to the server. The dropdown reacts to
+  // raw keystrokes; the cards below only ever render a committed pick.
+  const hasSearched = activeTerm.length >= 2;
+  const dropdownVisible = listOpen && !customers.isError;
+  const activeId =
+    dropdownVisible && activeIndex >= 0 && suggestions[activeIndex]
+      ? optionId(activeIndex)
+      : undefined;
+
+  // The picked record. Cards render for this and nothing else: clearing it
+  // (by typing on) takes the card back off screen.
+  const [selected, setSelected] = useState<CustomerLookup | null>(null);
+
+  const pickSuggestion = (row: CustomerLookup) => {
+    setSearch(row.fullName);
+    setSelected(row);
+    setActiveIndex(-1);
+    setSuggestOpen(false);
+  };
+
+  const onSuggestKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!suggestOpen) {
+        setSuggestOpen(true);
+        setActiveIndex(-1);
+        return;
+      }
+      if (suggestions.length === 0) return;
+      setActiveIndex((current) => {
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        return (current + step + suggestions.length) % suggestions.length;
+      });
+      return;
+    }
+    if (event.key === 'Enter') {
+      // An explicit highlight wins; otherwise Enter takes the top match, so
+      // the keyboard never dead-ends on a full suggestion list.
+      const row =
+        suggestOpen && activeIndex >= 0 && suggestions[activeIndex]
+          ? suggestions[activeIndex]
+          : suggestOpen && activeIndex < 0 && suggestions[0]
+            ? suggestions[0]
+            : undefined;
+      if (row) {
+        event.preventDefault();
+        pickSuggestion(row);
+      }
+      return;
+    }
+    if (event.key === 'Escape') {
+      if (!suggestOpen) return;
+      event.preventDefault();
+      setActiveIndex(-1);
+      setSuggestOpen(false);
+    }
+  };
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Membership Lookup"
-        description="Find a customer or member by Customer ID, Customer Code, or name. Read-only."
+        description="Find any customer or member."
       />
-      <form
-        className={styles.search}
-        onSubmit={(e) => {
-          e.preventDefault();
-          setApplied(search.trim());
-        }}
-      >
-        <SearchField
-          size="lg"
-          busy={customers.isFetching && activeTerm.length >= 2}
-          label="Find customer"
-          value={search}
-          onChange={(value) => {
-            setSearch(value);
-            if (value.trim().length < 2) setApplied('');
+      <div className={styles.search}>
+        <div
+          className={styles.suggestWrap}
+          ref={wrapRef}
+          onFocus={() => setSuggestOpen(true)}
+          onBlur={(event) => {
+            // Option rows never take focus (pointerdown is intercepted), so a
+            // blur means focus truly left the search box: shut the list.
+            if (!wrapRef.current?.contains(event.relatedTarget as Node)) {
+              setActiveIndex(-1);
+              setSuggestOpen(false);
+            }
           }}
-        />
-        <Button size="lg" variant="secondary" type="submit" disabled={search.trim().length < 2}>
-          Search
-        </Button>
-      </form>
-      {activeTerm.length < 2 ? (
+        >
+          <SearchField
+            size="lg"
+            busy={customers.isFetching && activeTerm.length >= 2}
+            label="Find customer"
+            placeholder="Customer ID, Customer Code, or name"
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              // Typing on unpicks: the card below belongs to the last pick.
+              setSelected(null);
+              setActiveIndex(-1);
+              setSuggestOpen(true);
+            }}
+            combobox={{
+              expanded: dropdownVisible,
+              controlsId: listId,
+              activeOptionId: activeId,
+              onKeyDown: onSuggestKeyDown,
+            }}
+          />
+          {dropdownVisible ? (
+            <ul className={styles.suggestList} id={listId} role="listbox" aria-label="Name suggestions">
+              {customers.isPending && suggestions.length === 0 ? (
+                <li className={styles.suggestHint} role="presentation">
+                  <Spinner size="sm" />
+                  <span>Searching for matches…</span>
+                </li>
+              ) : suggestions.length === 0 ? (
+                <li className={styles.suggestHint} role="presentation">
+                  Customer does not exist
+                </li>
+              ) : (
+                suggestions.map((row, index) => (
+                  <li
+                    key={row.customerNumber}
+                    id={optionId(index)}
+                    className={styles.suggestOption}
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    data-active={index === activeIndex ? 'true' : 'false'}
+                    onMouseDown={(event) => {
+                      // Land the pick before blur shuts the list.
+                      event.preventDefault();
+                      pickSuggestion(row);
+                    }}
+                    onMouseEnter={() => setActiveIndex(index)}
+                  >
+                    <span className={styles.suggestName}>
+                      <HighlightedName name={row.fullName} term={term} />
+                    </span>
+                    <span className={styles.suggestMeta}>
+                      {CUSTOMER_CATEGORY_LABELS[row.category]}
+                      {row.tier ? ` · ${row.tier}` : ''}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+      {term.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a customer or member" />
-      ) : customers.isPending ? (
-        <p role="status">Looking up customers - </p>
+      ) : selected ? (
+        <div className={styles.results}>
+          <CustomerCard key={selected.customerNumber} customer={selected} />
+        </div>
+      ) : !hasSearched ? null : customers.isPending ? (
+        <LookupSkeleton />
       ) : customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : customers.data?.length === 0 ? (
-        <EmptyState title="No matching customers or members" />
+        <EmptyState
+          title="Customer does not exist"
+          description="Check the spelling and try different letters."
+        />
       ) : (
-        customers.data?.map((c) => (
-          <article className={styles.member} key={c.customerNumber}>
-            <h2>{c.fullName}</h2>
-            <p>
-              {c.customerNumber}
-              {c.customerCode ? ` - ${c.customerCode}` : ''}
-            </p>
-            <p>
-              <strong>{CUSTOMER_CATEGORY_LABELS[c.category]}</strong>
-            </p>
-            {/* Customer Status and Membership Status are shown as separate facts,
-                never merged. An active customer can hold a suspended membership, and
-                conflating the two tells an operator the wrong thing about the record
-                in front of them. */}
-            <dl className={styles.details}>
-              <div>
-                <dt>Customer status</dt>
-                <dd>
-                  <StatusChip label={c.customerStatus} />
-                </dd>
-              </div>
-              <div>
-                <dt>Membership status</dt>
-                <dd>{c.membershipStatus ? <StatusChip label={c.membershipStatus} /> : 'None'}</dd>
-              </div>
-              <div>
-                <dt>VIP tier</dt>
-                <dd>{c.tier ?? 'None'}</dd>
-              </div>
-              <div>
-                <dt>Valid until</dt>
-                <dd>{c.membershipExpiresAt?.slice(0, 10) ?? 'Not applicable'}</dd>
-              </div>
-            </dl>
-          </article>
-        ))
+        <EmptyState title="Select a suggested name to view the record." />
       )}
     </section>
   );

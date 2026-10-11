@@ -1,4 +1,3 @@
-
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,10 +7,13 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  Icon,
   OverflowMenu,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
@@ -22,6 +24,8 @@ import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
+import { SettlementBadge } from './SettlementBadge';
+import { TierBadge } from './TierBadge';
 import {
   anonymizeCustomer,
   deactivateCustomer,
@@ -104,11 +108,14 @@ export function BusinessCustomersPage() {
     queryKey: ['customer-seller-options'],
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
-  const canCreate = user?.afHomesPermissions.some(p=>p.moduleKey==='sales.customers' && p.canCreate);
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
+    ) === true;
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
     ) === true;
 
   const [accountAction, setAccountAction] = useState<{
@@ -153,21 +160,56 @@ export function BusinessCustomersPage() {
     issueActivation.reset();
   };
 
+  // First load skeletonizes the whole page - header, filters, and table -
+  // so no static content flashes before the data it describes. Refetches keep
+  // the previous page visible via placeholderData and never reach this branch.
+  if (customers.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading customers"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Customers"
-        description="Customer directory and membership records. Start registration through a new customer application."
+        description="Customer directory and membership records."
         actions={
-          <>
-            {canCreate && <Button onClick={() => navigate('/admin/customers/applications/new')}>
-              New customer application
-            </Button>}
-          </>
+          canSeeImportExport ? (
+            <Button variant="primary" onClick={() => navigate('/admin/customers/import-export')}>
+              <Icon name="download" size={16} aria-hidden="true" />
+              Import/Export Data
+            </Button>
+          ) : undefined
         }
       />
 
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search customers"
@@ -221,41 +263,39 @@ export function BusinessCustomersPage() {
             </label>
             <label className={styles.filterLabel}>
               Seller
-                <Select
-                  aria-label="Seller"
-                  value={filters.seller}
-                  onChange={(e) => patchFilters({ seller: e.target.value })}
-                  options={[
-                    { value: '', label: 'All sellers' },
-                    ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
-                  ]}
-                />
-              </label>
-              <label className={styles.filterLabel}>
-                From
-                <input
-                  aria-label="From date"
-                  type="date"
-                  value={filters.from}
-                  onChange={(e) => patchFilters({ from: e.target.value })}
-                />
-              </label>
-              <label className={styles.filterLabel}>
-                To
-                <input
-                  aria-label="To date"
-                  type="date"
-                  value={filters.to}
-                  onChange={(e) => patchFilters({ to: e.target.value })}
-                />
-              </label>
-            </>
-          }
-        />
+              <Select
+                aria-label="Seller"
+                value={filters.seller}
+                onChange={(e) => patchFilters({ seller: e.target.value })}
+                options={[
+                  { value: '', label: 'All sellers' },
+                  ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+                ]}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              From
+              <input
+                aria-label="From date"
+                type="date"
+                value={filters.from}
+                onChange={(e) => patchFilters({ from: e.target.value })}
+              />
+            </label>
+            <label className={styles.filterLabel}>
+              To
+              <input
+                aria-label="To date"
+                type="date"
+                value={filters.to}
+                onChange={(e) => patchFilters({ to: e.target.value })}
+              />
+            </label>
+          </>
+        }
+      />
 
-      {customers.isPending ? (
-        <p role="status">Loading customers…</p>
-      ) : customers.isError ? (
+      {customers.isError ? (
         <ErrorState error={customers.error} onRetry={customers.refetch} />
       ) : rows.length === 0 ? (
         <EmptyState
@@ -272,9 +312,9 @@ export function BusinessCustomersPage() {
           <table>
             <thead>
               <tr>
-                <th>Customer ID</th>
                 <th>Name</th>
-                <th>Phone</th>
+                <th>Payment Status</th>
+                <th>VIP Tier</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -293,13 +333,25 @@ export function BusinessCustomersPage() {
                   }}
                   className={styles.clickable}
                 >
-                  <td className={styles.idCell}>{customer.customerNumber}</td>
-                  <td>{customer.fullName}</td>
-                  <td className={styles.phoneCell}>{customer.phone}</td>
-                  <td>
+                  <td data-label="Name">
+                    <span className={styles.identityCell}>
+                      <span className={styles.identityAvatar} aria-hidden="true">
+                        {(customer.fullName.trim().charAt(0) || '•').toUpperCase()}
+                      </span>
+                      <span className={styles.identityName}>{customer.fullName}</span>
+                    </span>
+                  </td>
+                  <td data-label="Payment Status">
+                    <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
+                  </td>
+                  <td data-label="VIP Tier">
+                    <TierBadge tier={customer.tier} />
+                  </td>
+                  <td data-label="Status">
                     <StatusChip label={customer.status} />
                   </td>
                   <td
+                    data-label="Actions"
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       // Only swallow the keys the row itself acts on. Escape
@@ -311,21 +363,6 @@ export function BusinessCustomersPage() {
                     <OverflowMenu
                       label={`More actions for ${customer.customerNumber}`}
                       items={[
-                        ...(canCreate
-                          ? [
-                              {
-                                label: 'New application',
-                                icon: 'file-text' as const,
-                                disabled: customer.status === 'cancelled',
-                                onClick: () => {
-                                  navigate(
-                                    '/admin/customers/applications/new?customerId=' +
-                                      encodeURIComponent(customer.id),
-                                  );
-                                },
-                              },
-                            ]
-                          : []),
                         ...(canIssueActivation &&
                         customer.hasActiveMembership &&
                         !customer.portalAccountActivated
@@ -377,33 +414,17 @@ export function BusinessCustomersPage() {
       )}
 
       {total > 0 ? (
-        <nav aria-label="Customers pagination" className={styles.pagination}>
-          <span
-            role="status"
-            aria-label="Customer record range"
-            className={styles.paginationRange}
-          >
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Customers pagination"
+          />
+          <span role="status" aria-label="Customer record range" className={styles.paginationRange}>
             Showing {rangeFrom}–{rangeTo} of {total}
           </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={safePage === 0}
-            onClick={() => setPage(Math.max(0, safePage - 1))}
-            aria-label="Previous customers page"
-          >
-            Previous
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={safePage >= pageCount - 1}
-            onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
-            aria-label="Next customers page"
-          >
-            Next
-          </Button>
-        </nav>
+        </div>
       ) : null}
 
       <Dialog

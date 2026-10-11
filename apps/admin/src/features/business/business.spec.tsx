@@ -52,14 +52,6 @@ function renderPath(permissions: AfHomesPermission[], path: string) {
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route
-            path="/admin/sales"
-            element={
-              <RequireRole>
-                <p>Card Sales screen</p>
-              </RequireRole>
-            }
-          />
-          <Route
             path="/admin/customers"
             element={
               <RequireRole>
@@ -111,7 +103,6 @@ function renderPath(permissions: AfHomesPermission[], path: string) {
 /* ================================================================== */
 
 const BUSINESS_ROUTES = [
-  { path: '/admin/sales', module: 'sales.card_sales', label: 'Card Sales screen' },
   { path: '/admin/customers', module: 'sales.customers', label: 'Customers screen' },
   { path: '/admin/products', module: 'sales.card_plans', label: 'Card Products screen' },
   {

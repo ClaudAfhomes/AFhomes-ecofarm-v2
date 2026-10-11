@@ -658,7 +658,6 @@ async function dashboard(db: Db, range: string) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
-  if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   const path = String(req.query.afPath ?? '');
   const method = req.method ?? 'GET';
   try {
@@ -690,6 +689,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mfaRequired: principal.mfaRequired ?? false,
       });
     }
+    if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
     // My Account display-name update (AF Homes pattern: PATCH /admin/session).
     // Self-service: resolves the principal directly so it stays reachable
     // while `mustChangePassword` gates every module-guarded endpoint.

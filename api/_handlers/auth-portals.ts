@@ -16,26 +16,40 @@ import { authPortalsSchema } from '@afhomes/contracts';
 
 import { verifySessionToken } from '../_lib/auth-verify.js';
 import { fail, type Db, mapRpcError, method } from '../_lib/handler-kit.js';
-import { serviceClient, anonClient } from '../_lib/rest.js';
+import { serviceClient, anonClient, userClient } from '../_lib/rest.js';
 import { extractBearerToken } from '../_lib/token.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const anon = anonClient();
-  const db = serviceClient() as Db;
-  if (!anon || !db)
-    return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
-
   try {
     if (method(req) !== 'GET') return fail(res, 'NOT_FOUND', 'Not found', 404);
 
     const token = extractBearerToken(req);
     if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+    const anon = anonClient();
+    const svc = serviceClient() as Db;
+    if (!anon) return fail(res, 'INTERNAL', 'Supabase authentication is not configured', 500);
+    const db = svc;
     const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
     const userId = authData?.user?.id;
     if (authError || !userId)
       return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
 
+    if (!db) {
+      const caller = userClient(token);
+      if (!caller) return fail(res, 'INTERNAL', 'Supabase authentication is not configured', 500);
+      const result = await caller.rpc('afhomes_self_portals', {});
+      if (result.error)
+        return fail(
+          res,
+          'INTERNAL',
+          'Secure portal verification is unavailable. Contact the administrator.',
+          503,
+        );
+      const own = authPortalsSchema.safeParse(result.data);
+      if (!own.success) return fail(res, 'INTERNAL', 'Could not resolve your portals', 500);
+      return res.status(200).json(own.data);
+    }
     const [{ data: staff }, { data: assignment }, { data: customer }, { data: ost }] =
       await Promise.all([
         db
@@ -43,14 +57,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .select('id, status, must_change_password')
           .eq('id', userId)
           .maybeSingle(),
-        db.from('staff_role_assignments').select('role_id').eq('staff_id', userId).maybeSingle(),
-        db.from('customers').select('id, status').eq('auth_user_id', userId).maybeSingle(),
+        db
+          .from('staff_role_assignments')
+          .select('staff_id, role_id')
+          .eq('staff_id', userId)
+          .maybeSingle(),
+        db
+          .from('customers')
+          .select('id, status, auth_user_id')
+          .eq('auth_user_id', userId)
+          .maybeSingle(),
         db.from('ost_members').select('id, ost_number, status').eq('id', userId).maybeSingle(),
       ]);
 
+    // Ownership re-check (defense in depth): RLS already scopes fallback
+    // reads to the caller, and the service path filters by the same id. A
+    // row that does not belong to the bearer reads as absent, never leaks.
+    const ownStaff = staff?.id === userId ? staff : null;
+    const ownAssignment = assignment?.staff_id === userId ? assignment : null;
+    const ownCustomer = customer?.auth_user_id === userId ? customer : null;
+    const ownOst = ost?.id === userId ? ost : null;
+
     let roleSlug: string | null = null;
     let roleName: string | null = null;
-    const assignmentRow = assignment as { role_id?: string } | null;
+    const assignmentRow = ownAssignment as { role_id?: string } | null;
     if (assignmentRow?.role_id) {
       const { data: role } = await db
         .from('roles')
@@ -62,12 +92,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       roleName = typeof roleRow?.name === 'string' ? roleRow.name : null;
     }
 
-    const staffRow = staff as {
+    const staffRow = ownStaff as {
       status?: string;
       must_change_password?: boolean;
     } | null;
-    const customerRow = customer as { status?: string } | null;
-    const ostRow = ost as { status?: string; ost_number?: string } | null;
+    const customerRow = ownCustomer as { status?: string } | null;
+    const ostRow = ownOst as { status?: string; ost_number?: string } | null;
 
     const parsed = authPortalsSchema.safeParse({
       staff: staffRow

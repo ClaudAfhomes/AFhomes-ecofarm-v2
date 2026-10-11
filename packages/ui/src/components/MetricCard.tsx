@@ -29,6 +29,21 @@ export function MetricCard({ label, value, description, icon, chip, trend, to }:
   const accessibleLabel = typeof value === 'string' || typeof value === 'number'
     ? `${label}: ${value}`
     : label;
+  // Long figures stay on exactly one row: shrink the glyph size as the digit
+  // count grows (presentation only — the value itself is untouched), with the
+  // CSS nowrap + ellipsis as the final guard for non-text nodes.
+  const valueText = typeof value === 'string' || typeof value === 'number' ? String(value) : null;
+  const valueLength = valueText?.length ?? 0;
+  const countStyle =
+    valueLength > 22
+      ? { fontSize: '0.95rem' }
+      : valueLength > 18
+        ? { fontSize: '1.05rem' }
+        : valueLength > 14
+          ? { fontSize: '1.25rem' }
+          : valueLength > 10
+            ? { fontSize: '1.5rem' }
+            : undefined;
   const body = (
     <>
       <div className={styles.cardHeader}>
@@ -37,7 +52,9 @@ export function MetricCard({ label, value, description, icon, chip, trend, to }:
         </span>
         {chip ? <StatusChip label={chip.label} tone={chip.tone} /> : null}
       </div>
-      <span className={styles.count}>{value}</span>
+      <span className={styles.count} style={countStyle} title={valueText ?? undefined}>
+        {value}
+      </span>
       <span className={styles.label}>{label}</span>
       {description ? <span className={styles.description}>{description}</span> : null}
       {trend ? <span className={styles.trend}>{trend}</span> : null}

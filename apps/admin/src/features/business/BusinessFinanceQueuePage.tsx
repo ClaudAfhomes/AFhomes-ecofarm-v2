@@ -408,7 +408,9 @@ export function RecordPaymentDialog({
           'The payment is saved as recorded and does not count toward the price until it is verified.',
         detail: [
           customerName ? `Customer: ${customerName}` : null,
-          recordLabel ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}` : null,
+          recordLabel
+            ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`
+            : null,
           `Amount: ₱${input.amount}`,
           `Type: ${input.paymentType.replace(/_/g, ' ')}`,
           `Method: ${input.method}`,
@@ -503,10 +505,12 @@ export function RecordPaymentDialog({
             Cancel
           </Button>
           <Button
-            disabled={!paymentValid || save.isPending || save.isSuccess || confirming}
+            disabled={!paymentValid || save.isSuccess || confirming}
+            loading={save.isPending}
+            loadingLabel="Recording…"
             onClick={() => save.mutate(paymentInput)}
           >
-            {confirming ? 'Recording…' : save.isPending ? 'Recording…' : 'Record'}
+            {confirming ? 'Recording…' : 'Record'}
           </Button>
         </>
       }
@@ -603,11 +607,7 @@ export function RecordPaymentDialog({
           Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya
           transaction, deposit slip, or official receipt.
         </p>
-        {save.error ? (
-          <p role="alert">
-            The payment was not recorded. {save.error.message}
-          </p>
-        ) : null}
+        {save.error ? <p role="alert">The payment was not recorded. {save.error.message}</p> : null}
       </div>
     </Dialog>
   );
@@ -683,9 +683,10 @@ export function VerifyDialog({
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                 <Button
                   onClick={() => decide.mutate({ paymentId: payment.id, decision: 'verified' })}
-                  disabled={decide.isPending}
+                  loading={decide.isPending}
+                  loadingLabel="Verifying…"
                 >
-                  {decide.isPending ? 'Verifying…' : 'Verify'}
+                  Verify
                 </Button>
                 <Button
                   variant="danger"

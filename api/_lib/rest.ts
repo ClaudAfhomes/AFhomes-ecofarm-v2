@@ -9,7 +9,7 @@ import type { VercelResponse } from './http.js';
  * what `requestList` validates (`{ data, meta: { page, pageSize, total } }`),
  * service-role client acquisition, and small error shortcuts.
  *
- * Clients are cached per Vercel instance (keyed by the resolved key) instead
+ * Clients are cached per Vercel instance (keyed by the resolved URL and key) instead
  * of rebuilt on every request - supabase-js re-initializes its realtime/
  * storage machinery on each `createClient`, which is pure overhead here.
  *
@@ -19,14 +19,19 @@ import type { VercelResponse } from './http.js';
  */
 
 function makeServiceClient(url: string, serviceKey: string) {
-  return createClient(url, serviceKey, { auth: { autoRefreshToken: false } });
+  return createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
 
-function makeAnonClient(url: string, anonKey: string) {
-  return createClient(url, anonKey, { auth: { autoRefreshToken: false } });
+function makeAnonClient(url: string, anonKey: string, bearer?: string) {
+  return createClient(url, anonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    ...(bearer ? { global: { headers: { Authorization: `Bearer ${bearer}` } } } : {}),
+  });
 }
 
-/** Cached service-role client (keyed by key so a changed env rebuilds). */
+/** Cached service-role client (keyed by URL and key so a changed env rebuilds). */
 let serviceClientCached: ReturnType<typeof makeServiceClient> | null = null;
 let serviceClientKey = '';
 
@@ -38,9 +43,9 @@ let anonClientKey = '';
 export function serviceClient() {
   const { url, serviceKey } = getSupabaseEnv();
   if (!url || !serviceKey) return null;
-  if (!serviceClientCached || serviceClientKey !== serviceKey) {
+  if (!serviceClientCached || serviceClientKey !== url + serviceKey) {
     serviceClientCached = makeServiceClient(url, serviceKey);
-    serviceClientKey = serviceKey;
+    serviceClientKey = url + serviceKey;
   }
   return serviceClientCached;
 }
@@ -49,11 +54,25 @@ export function serviceClient() {
 export function anonClient() {
   const { url, anonKey } = getSupabaseEnv();
   if (!url || !anonKey) return null;
-  if (!anonClientCached || anonClientKey !== anonKey) {
+  if (!anonClientCached || anonClientKey !== url + anonKey) {
     anonClientCached = makeAnonClient(url, anonKey);
-    anonClientKey = anonKey;
+    anonClientKey = url + anonKey;
   }
   return anonClientCached;
+}
+
+/**
+ * Bearer-scoped client for self reads when the service role is unavailable
+ * (e.g. a keyless Preview that must never hold production-write credentials).
+ * PostgREST enforces the caller's own RLS policies; every caller additionally
+ * asserts row ownership before use, so a misconfigured policy yields absence,
+ * never another user's row. NEVER cached: the credential differs per request
+ * and a shared instance would leak one user's identity into another's reads.
+ */
+export function userClient(token: string) {
+  const { url, anonKey } = getSupabaseEnv();
+  if (!url || !anonKey || !token) return null;
+  return makeAnonClient(url, anonKey, token);
 }
 
 export function okList(res: VercelResponse, rows: unknown[]): void {

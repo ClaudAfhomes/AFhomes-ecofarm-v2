@@ -14,7 +14,7 @@
 import { AuthError } from '@supabase/auth-js';
 import type { GoTrueClient, User } from '@supabase/auth-js';
 import { createClient } from '@supabase/supabase-js';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveAfHomesPrincipal } from './afhomes-access.js';
 import type { AuthSessionVerifier } from './auth-verify.js';
@@ -23,11 +23,12 @@ import { resolveCustomerPrincipal } from './customer-access.js';
 import { baseTables, baseTokens, TOKEN, UUID } from './testing/fixtures.js';
 import { FakeSupabase, makeReq } from './testing/supabase-fake.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown }));
+const holder = vi.hoisted(() => ({ db: null as unknown, userDb: null as unknown, svcNull: false }));
 
 vi.mock('./rest.js', () => ({
-  serviceClient: () => holder.db,
+  serviceClient: () => (holder.svcNull ? null : holder.db),
   anonClient: () => holder.db,
+  userClient: () => holder.userDb,
   requireService: () => holder.db,
   okList: () => {},
   methodNotAllowed: () => {},
@@ -232,5 +233,150 @@ describe('resolveCustomerPrincipal through the verification seam', () => {
     if (!('error' in result)) return;
     expect(result.error.error.code).toBe('FORBIDDEN');
     expect(result.error.status).toBe(403);
+  });
+});
+
+describe('keyless Preview fallback (no service role)', () => {
+  const ownedRow = {
+    id: '33333333-3333-4333-8333-3333333333cc',
+    customer_number: 'AFH-0002',
+    email: 'fallback@afhomes.test',
+    status: 'active',
+    auth_user_id: CUSTOMER_AUTH_ID,
+  };
+  beforeEach(() => {
+    install({
+      tables: { customers: [ownedRow] },
+      tokens: {
+        [CUSTOMER_TOKEN]: {
+          id: CUSTOMER_AUTH_ID,
+          email: 'fallback@afhomes.test',
+          email_confirmed_at: '2026-09-01T00:00:00.000Z',
+        },
+      },
+    });
+    holder.svcNull = true;
+    holder.userDb = new FakeSupabase({
+      tables: { customers: [ownedRow] },
+      tokens: {},
+    });
+  });
+  afterEach(() => {
+    holder.svcNull = false;
+    holder.userDb = null;
+  });
+
+  it('resolves the owned record through bearer-scoped reads', async () => {
+    const principal = await resolveCustomerPrincipal(req(CUSTOMER_TOKEN));
+    expect('error' in principal).toBe(false);
+    if ('error' in principal) return;
+    expect(principal.customerId).toBe(ownedRow.id);
+    expect(principal.status).toBe('active');
+  });
+
+  it('answers FORBIDDEN, not a configuration error, with no record', async () => {
+    holder.userDb = new FakeSupabase({ tables: { customers: [] }, tokens: {} });
+    const result = await resolveCustomerPrincipal(req(CUSTOMER_TOKEN));
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.error.error.code).toBe('FORBIDDEN');
+  });
+
+  it('withholds a record owned by another Auth user', async () => {
+    holder.userDb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { ...ownedRow, id: 'other-customer', auth_user_id: 'other-user' },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    };
+    const result = await resolveCustomerPrincipal(req(CUSTOMER_TOKEN));
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.error.error.code).toBe('FORBIDDEN');
+  });
+
+  it('reports an unavailable staff self-session RPC without granting access', async () => {
+    const result = await resolveAfHomesPrincipal(req(CUSTOMER_TOKEN));
+    expect('error' in result).toBe(true);
+    if (!('error' in result)) return;
+    expect(result.error.error.code).toBe('INTERNAL');
+    expect(result.error.status).toBe(503);
+  });
+});
+
+describe('read-only staff session without a service credential', () => {
+  afterEach(() => {
+    holder.svcNull = false;
+    holder.userDb = null;
+  });
+  it('resolves an active staff principal from the caller-bound read-only RPC', async () => {
+    const db = install();
+    const user = await db.auth.getUser(TOKEN.admin);
+    holder.svcNull = true;
+    holder.userDb = new FakeSupabase({
+      rpcs: [
+        {
+          fn: 'afhomes_self_session',
+          result: {
+            id: user.data.user!.id,
+            email: 'admin@afhomes.test',
+            fullName: 'LOCAL ADMIN',
+            status: 'active',
+            roleId: '00000000-0000-4000-8000-000000000001',
+            roleSlug: 'admin',
+            roleName: 'Admin',
+            mustChangePassword: false,
+            testPurgeEnabled: false,
+            permissions: [],
+          },
+        },
+      ],
+    });
+    const result = await resolveAfHomesPrincipal(req(TOKEN.admin));
+    expect('error' in result).toBe(false);
+    if ('error' in result) return;
+    expect(result.userId).toBe(user.data.user!.id);
+    expect(result.roleSlug).toBe('admin');
+    expect(
+      (holder.userDb as FakeSupabase).calls.find((c) => c.table === 'afhomes_self_session')?.arg,
+    ).toEqual({});
+  });
+  it.each([
+    ['foreign owner', '99999999-9999-4999-8999-999999999999', 'active'],
+    ['inactive staff', UUID.adminStaff, 'inactive'],
+    ['absent staff', null, null],
+  ])('denies %s in a keyless staff session', async (_label, id, status) => {
+    install();
+    holder.svcNull = true;
+    holder.userDb = new FakeSupabase({
+      rpcs: [
+        {
+          fn: 'afhomes_self_session',
+          result: id
+            ? {
+                id,
+                email: 'admin@afhomes.test',
+                fullName: 'LOCAL ADMIN',
+                status,
+                roleId: '00000000-0000-4000-8000-000000000001',
+                roleSlug: 'admin',
+                roleName: 'Admin',
+                mustChangePassword: false,
+                testPurgeEnabled: false,
+                permissions: [],
+              }
+            : null,
+        },
+      ],
+    });
+    const result = await resolveAfHomesPrincipal(req(TOKEN.admin));
+    expect('error' in result).toBe(true);
+    if ('error' in result) expect(result.error.status).toBe(403);
   });
 });

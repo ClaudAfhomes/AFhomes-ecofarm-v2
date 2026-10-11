@@ -23,11 +23,7 @@
 import { Combobox, type ComboboxOption } from '@afhomes/ui';
 import { useState } from 'react';
 
-import {
-  useBarangaysQuery,
-  useLocalitiesQuery,
-  useProvincesQuery,
-} from './useAddressHierarchy.js';
+import { useBarangaysQuery, useLocalitiesQuery, useProvincesQuery } from './useAddressHierarchy.js';
 
 /**
  * The geographic slice of a holder. Codes and names are carried separately:
@@ -84,16 +80,10 @@ export function GeographicAddressFields({
   const localityOption = shownAs(value.cityMunicipalityCode, value.cityMunicipality);
   const barangayOption = shownAs(value.barangayCode, value.barangay);
 
-  /** A level is only usable once its parent has a VERIFIED code. */
+  /** A level is only usable once its parent has a VERIFIED code. Locked levels
+      stay hint-free: the parent selector above already says what to do. */
   const localityUnlocked = Boolean(value.provinceCode) && !disabled;
   const barangayUnlocked = Boolean(value.cityMunicipalityCode) && !disabled;
-
-  const localityHint = value.provinceCode ? '' : 'Select a province first';
-  const barangayHint = value.cityMunicipalityCode
-    ? ''
-    : value.provinceCode
-      ? 'Select a city or municipality first'
-      : 'Select a province first';
 
   return (
     <>
@@ -127,7 +117,6 @@ export function GeographicAddressFields({
         label="City / municipality"
         required
         disabled={!localityUnlocked}
-        disabledHint={localityHint}
         loading={localities.isFetching}
         loadingLabel="Loading cities and municipalities"
         error={
@@ -156,7 +145,6 @@ export function GeographicAddressFields({
         label="Barangay"
         required
         disabled={!barangayUnlocked}
-        disabledHint={barangayHint}
         loading={barangays.isFetching}
         loadingLabel="Loading barangays"
         error={

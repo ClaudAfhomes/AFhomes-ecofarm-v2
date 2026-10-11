@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CardCategory, CardProduct, Customer } from '@afhomes/contracts';
 
@@ -346,6 +347,43 @@ describe('Card Plans states', () => {
     expect(screen.getByRole('button', { name: 'Edit plan' })).toBeInTheDocument();
   });
 
+  /**
+   * The detail dialog leads with the plan's identity and presents benefits and
+   * payment options as discrete pills, so each fact is readable on its own
+   * instead of dissolving into one run-on sentence.
+   */
+  it('opens the detail dialog with the plan identity and per-fact option pills', async () => {
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    const user = userEvent.setup();
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    await user.click(screen.getByRole('button', { name: 'View details' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Gold' });
+
+    // Identity: tier code, artwork, category and status.
+    expect(within(dialog).getByText('GOLD')).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'Gold VIP membership card' })).toBeTruthy();
+    expect(within(dialog).getByText(/Membership Cards/)).toBeInTheDocument();
+    expect(within(dialog).getAllByText('Active').length).toBeGreaterThan(0);
+
+    // Each enabled payment option is its own pill, not a sentence.
+    for (const option of [
+      'Spot Cash · 7 days',
+      'Standard · 4 months',
+      'Move A',
+      'B1 · 40% DP',
+      'B2 · 25% DP',
+    ]) {
+      expect(within(dialog).getByText(option)).toBeInTheDocument();
+    }
+    // The benefit is still stated, as its own pill.
+    expect(within(dialog).getByText('25% discount')).toBeInTheDocument();
+    // Actions live in the dialog footer, not duplicated in the body.
+    expect(within(dialog).getAllByRole('button', { name: 'Edit plan' })).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
   it('replaces loading with a retryable API error state', async () => {
     mockedGetCardProducts.mockRejectedValue(new Error('Plans service unavailable'));
     renderWithProviders(<BusinessProductsPage />);
@@ -361,6 +399,25 @@ describe('Card Plans states', () => {
     await screen.findByRole('heading', { name: 'Gold' });
     expect(screen.getByRole('searchbox', { name: 'Search card plans' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
+  });
+
+  /**
+   * Search is live: the debounced term drives the query, so a submit button
+   * would be a second, redundant way to do the same thing.
+   */
+  it('searches live without a Search button', async () => {
+    const user = userEvent.setup();
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Search card plans'), 'gol');
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'gol' }),
+      ),
+    );
   });
 
   it('creates a plan and refreshes the list', async () => {
@@ -415,8 +472,7 @@ describe('Card Plans states', () => {
     expect(mockedCreateCardProduct).not.toHaveBeenCalled();
   });
 
-  it('deactivates a plan through the row action', async () => {
-    mockedGetCardProducts.mockResolvedValue([GOLD]);
+  it('deactivates a plan through the row action', async () => {    mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedUpdateCardProduct.mockResolvedValue({ ...GOLD, isActive: false });
     renderWithProviders(<BusinessProductsPage />);
     await screen.findByRole('heading', { name: 'Gold' });
@@ -509,6 +565,42 @@ describe('Categories tab', () => {
 });
 
 describe('live plan management search', () => {
+  /**
+   * Regression: a loading skeleton must never replace live controls.
+   *
+   * Searching re-keys the query, which flips `isPending` back to true while the
+   * operator is still typing. A full-page skeleton then unmounted the search
+   * box itself, destroying focus and silently swallowing the next keystroke.
+   * Only the FIRST load may replace the screen; later fetches leave the chrome
+   * mounted and replace the results region alone.
+   */
+  it('keeps the search field mounted and focused while a search refetches', async () => {
+    const user = userEvent.setup();
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    const input = screen.getByLabelText('Search card plans');
+
+    await user.type(input, 'gol');
+    expect(input).toHaveFocus();
+    // Still the same live node after the debounce re-keys the query.
+    await waitFor(() => expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'gol' }),
+    ));
+    expect(screen.getByLabelText('Search card plans')).toBe(input);
+    expect(input).toHaveFocus();
+
+    // A clearing keystroke still reaches the component after the refetch.
+    await user.clear(input);
+    expect(input).toHaveValue('');
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: undefined }),
+      ),
+    );
+  });
+
   it('debounces plan search and clears without requiring submit', async () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);

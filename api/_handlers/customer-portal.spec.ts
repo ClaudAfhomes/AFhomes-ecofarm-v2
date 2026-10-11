@@ -20,10 +20,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown }));
+const holder = vi.hoisted(() => ({ db: null as unknown, svcNull: false }));
 
 vi.mock('../_lib/rest.js', () => ({
-  serviceClient: () => holder.db,
+  serviceClient: () => (holder.svcNull ? null : holder.db),
+  userClient: () => holder.db,
   anonClient: () => holder.db,
 }));
 
@@ -232,6 +233,7 @@ type Setup = {
 };
 
 function install(options: Setup = {}) {
+  holder.svcNull = false;
   const tables = options.tables ?? baseTables();
   holder.db = new FakeSupabase({
     tables: tables as never,
@@ -1385,5 +1387,49 @@ describe('customer and staff authorisation never mix', () => {
     const s = await callPortal('points', 'tok-staff-customer');
     expect(body(s).membershipId).toBe(MEMBERSHIP_ID);
     expect(body(s).balance).toBe(60000);
+  });
+});
+
+
+describe('customer profile on a read-only backend', () => {
+  beforeEach(() => install());
+  it('returns the owned profile through a caller-bound RPC without a service key', async () => {
+    const expected = makeRes();
+    await portal(makeReq({ familyPath: '', token: TOKEN }) as never, expected.res as never);
+    const profile = expected.state.body;
+    const db = install({ rpcs: [{ fn: 'afhomes_self_customer_profile', result: profile }] });
+    holder.svcNull = true;
+    const res = makeRes();
+    await portal(makeReq({ familyPath: '', token: TOKEN }) as never, res.res as never);
+    expect(res.state.status).toBe(200);
+    expect(res.state.body).toEqual(profile);
+    expect(db.calls.find((c) => c.table === 'afhomes_self_customer_profile')?.arg).toEqual({});
+  });
+  it('rejects a foreign profile returned by the RPC', async () => {
+    const res = makeRes();
+    await portal(makeReq({ familyPath: '', token: TOKEN }) as never, res.res as never);
+    install({
+      rpcs: [
+        {
+          fn: 'afhomes_self_customer_profile',
+          result: { ...(res.state.body as object), id: OTHER_CUSTOMER_ID },
+        },
+      ],
+    });
+    holder.svcNull = true;
+    const denied = makeRes();
+    await portal(makeReq({ familyPath: '', token: TOKEN }) as never, denied.res as never);
+    expect(denied.state.status).toBe(403);
+  });
+  it('keeps mutations unavailable without an isolated configured backend', async () => {
+    const db = holder.db as FakeSupabase;
+    holder.svcNull = true;
+    const res = makeRes();
+    await portal(
+      makeReq({ method: 'POST', familyPath: 'membership/credentials', token: TOKEN }) as never,
+      res.res as never,
+    );
+    expect(res.state.status).toBe(503);
+    expect(db.calls.some((c) => c.table === 'reissue_membership_credentials')).toBe(false);
   });
 });

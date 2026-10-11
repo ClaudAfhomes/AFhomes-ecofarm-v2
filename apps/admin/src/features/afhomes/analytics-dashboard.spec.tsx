@@ -7,7 +7,7 @@
  * unauthorized sections, and a 390px render without breakage. Every figure
  * asserted comes from the mocked server payload, never a constant.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -203,50 +203,6 @@ function mockFetch() {
 const render = (user: SessionUser = FINANCE_USER) =>
   renderWithProviders(<App />, { route: '/admin', user });
 
-const ADMIN_USER: SessionUser = {
-  ...FINANCE_USER,
-  id: '22222222-2222-4222-8222-222222222222',
-  name: 'Ada Admin',
-  email: 'admin@afhomes.test',
-  roleName: 'Admin',
-  afHomesPermissions: [
-    {
-      moduleKey: 'dashboard.view',
-      canView: true,
-      canCreate: false,
-      canUpdate: false,
-      canDelete: false,
-    },
-    {
-      moduleKey: 'network.ost_members',
-      canView: true,
-      canCreate: false,
-      canUpdate: false,
-      canDelete: false,
-    },
-    {
-      moduleKey: 'network.ost_registrations',
-      canView: true,
-      canCreate: false,
-      canUpdate: false,
-      canDelete: false,
-    },
-    {
-      moduleKey: 'finance.payment_verification',
-      canView: true,
-      canCreate: false,
-      canUpdate: false,
-      canDelete: false,
-    },
-    {
-      moduleKey: 'finance.card_activation',
-      canView: true,
-      canCreate: false,
-      canUpdate: false,
-      canDelete: false,
-    },
-  ],
-};
 
 beforeEach(() => {
   requests.length = 0;
@@ -264,14 +220,15 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByLabelText('Loading dashboard')).toBeInTheDocument();
   });
 
-  it('renders server finance facts with labeled money series', async () => {
+  it('renders server headline facts with labeled money series', async () => {
     render();
-    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
-    // Verified revenue renders as money, never a bare constant.
-    expect(screen.getByText('₱25000.00')).toBeInTheDocument();
-    expect(screen.getByText('Rejected payments')).toBeInTheDocument();
-    // Commission states stay distinct by name.
-    expect(await screen.findByText('Commission status')).toBeInTheDocument();
+    expect(await screen.findByText('Total Customers')).toBeInTheDocument();
+    expect(screen.getByText('New Applications')).toBeInTheDocument();
+    expect(screen.getByText('Card Sales')).toBeInTheDocument();
+    // Total sales renders as grouped money, never a raw decimal string.
+    // The same 60000.00 figure also feeds both breakdown tables.
+    expect(screen.getAllByText('₱60,000.00')).toHaveLength(3);
+    expect(screen.queryByText('₱60000.00')).toBeNull();
     expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=month'))).toBe(
       true,
     );
@@ -286,7 +243,7 @@ describe('Phase 29 role dashboard', () => {
     // The Sales Overview owns its data: an all-zero qualifying series shows
     // its empty state instead of a fake flat line.
     expect(await screen.findByText('No qualifying sales yet')).toBeInTheDocument();
-    expect(screen.queryByText('Sales by card plan')).toBeNull();
+    expect(screen.queryByText('Card Plans')).toBeNull();
   });
 
   it('renders a single trend point as a line chart', async () => {
@@ -324,12 +281,12 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
     install();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
+    expect(await screen.findByText('Total Customers')).toBeInTheDocument();
   });
 
   it('hides sections the finance role is not authorized to see', async () => {
     render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     // No organization block, no redemption block, no team block for finance.
     expect(screen.queryByText('Current team')).toBeNull();
     expect(document.body.textContent).not.toMatch(/Total staff|Points redeemed/);
@@ -343,36 +300,136 @@ describe('Phase 29 role dashboard', () => {
     window.innerWidth = 1024;
   });
 
-  it('2B. renders operational queue cards above the metrics with server counts', async () => {
-    render(ADMIN_USER);
-    expect(await screen.findByRole('link', { name: 'OST Members: 25 total' })).toHaveAttribute(
-      'href',
-      '/admin/ost/members',
+  /**
+   * The dashboard is deliberately four cards, one graph and two tables. This
+   * pins the cap AND the trimming, so neither can quietly grow back.
+   */
+  it('renders exactly four cards, one graph and two tables', async () => {
+    const { container } = render();
+    await screen.findByText('Total Customers');
+
+    // Four headline cards only.
+    const metrics = screen.getByRole('region', { name: 'Key metrics' });
+    expect(metrics.querySelectorAll('article')).toHaveLength(4);
+    // Shown in the fixed headline order, not re-picked per role.
+    for (const label of [
+      'Total Customers',
+      'New Applications',
+      'Card Sales',
+      'Total Sales',
+    ]) {
+      expect(within(metrics).getByText(label)).toBeInTheDocument();
+    }
+    // The old queue labels are gone from the headline set.
+    expect(screen.queryByText('Pending payments')).toBeNull();
+    expect(screen.queryByText('Activation queue')).toBeNull();
+
+    // Exactly one graph. recharts paints asynchronously, so wait for it.
+    await waitFor(() =>
+      expect(container.querySelectorAll('svg.recharts-surface')).toHaveLength(1),
     );
-    expect(screen.getByText('registered')).toBeInTheDocument();
+
+    // Exactly two tables: scheme breakdown and plan breakdown.
+    expect(screen.getAllByRole('table')).toHaveLength(2);
     expect(
-      await screen.findByRole('link', { name: 'OST Applications: 3 pending' }),
-    ).toHaveAttribute('href', '/admin/ost/applications');
+      within(screen.getByRole('region', { name: 'Payment Schemes' })).getByText('Spot Cash'),
+    ).toBeInTheDocument();
     expect(
-      await screen.findByRole('link', { name: 'Payment Verification: 5 pending' }),
-    ).toHaveAttribute('href', '/admin/finance/payments');
-    expect(screen.getAllByText('action needed')).toHaveLength(2);
-    // No withdrawals card: the payout workflow does not exist yet.
-    expect(screen.queryByText(/withdrawal/i)).toBeNull();
-    // 18/19. Queue cards coexist with the metric sections and Sales Overview.
-    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
-    expect(await screen.findByText('Sales Overview')).toBeInTheDocument();
-    const html = document.body.innerHTML;
-    expect(html.indexOf('Pending payments')).toBeLessThan(html.indexOf('OST Members'));
-    expect(html.indexOf('Sales Overview')).toBeLessThan(html.indexOf('OST Members'));
+      within(screen.getByRole('region', { name: 'Card Plans' })).getByText('Gold'),
+    ).toBeInTheDocument();
+    // Every money VALUE is grouped, never a raw decimal string. Scoped to the
+    // metric cards and table cells: the chart's own axis ticks are labels
+    // (e.g. "₱0"), not figures, and are formatted by the chart itself.
+    // MetricCard exposes "<label>: <value>" on its aria-label, so the value is
+    // read from the accessible name rather than a hashed CSS-module class.
+    const moneyValues = [
+      ...[...screen.getByRole('region', { name: 'Key metrics' }).querySelectorAll('article')].map(
+        (card) => (card.getAttribute('aria-label') ?? '').split(': ').slice(1).join(': '),
+      ),
+      ...[...screen.getAllByRole('table')].flatMap((table) =>
+        [...table.querySelectorAll('td')].map((cell) => cell.textContent ?? ''),
+      ),
+    ].filter((text) => text.includes('₱'));
+    expect(moneyValues.length).toBeGreaterThan(0);
+    for (const text of moneyValues) {
+      expect(text).toMatch(/₱[\d,]+\.\d{2}\s*$/);
+      // An ungrouped run of four or more digits is exactly the defect.
+      expect(text).not.toMatch(/₱\d{4,}/);
+    }
   });
 
-  it('2B. shows only the permitted queue card to a finance user', async () => {
+  /**
+   * Everything else was removed from this page: the eleven-link shortcut rail,
+   * the queue cards, and the secondary metric strips. Each asserted-absent item
+   * is content this page used to carry.
+   */
+  /**
+   * The heading is a stable product title, not a role string. It carries no
+   * subtitle either: the scope strip below it already states whose numbers
+   * these are, so a second explanatory line would just repeat it.
+   */
+  it('presents a stable title with no subtitle, not a role name', async () => {
     render();
+    await screen.findByText('Total Customers');
     expect(
-      await screen.findByRole('link', { name: 'Payment Verification: 5 pending' }),
+      screen.getByRole('heading', { level: 1, name: 'Operations Overview' }),
     ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Super Admin Dashboard/);
+    expect(document.body.textContent).not.toMatch(
+      /Live operational facts limited to your effective permissions/,
+    );
+    expect(document.body.textContent).not.toMatch(
+      /Sales, finance and membership activity for your scope/,
+    );
+  });
+
+  /**
+   * Breakdown rows are coloured by what the data IS: the scheme is a frozen
+   * property of the sale, and a plan carries its metallic tier. Each row also
+   * keeps a readable share bar, so the colour is never the only signal.
+   */
+  it('colours breakdown rows by scheme and by plan tier', async () => {
+    const { container } = render();
+    await screen.findByText('Total Customers');
+    const schemeRow = screen.getByText('Spot Cash').closest('tr');
+    const planRow = screen.getByText('Gold').closest('tr');
+    expect(schemeRow).toBeTruthy();
+    expect(planRow).toBeTruthy();
+    // Each row carries a tone class AND a decorative dot.
+    expect(schemeRow?.className).toMatch(/tone/);
+    expect(planRow?.className).toMatch(/tone/);
+    expect(schemeRow?.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(0);
+    // The share bar is decorative; the exact amount stays the readable value.
+    const bars = container.querySelectorAll('[aria-hidden="true"][style*="width"]');
+    expect(bars.length).toBeGreaterThan(0);
+    // One grouped figure per breakdown table plus the Total Sales headline
+    // card (all three carry 60000.00 here).
+    expect(screen.getAllByText('₱60,000.00')).toHaveLength(3);
+  });
+
+  it('shows nothing beyond the six blocks', async () => {
+    render();
+    await screen.findByText('Total Customers');
+    expect(screen.queryByRole('navigation', { name: 'Dashboard actions' })).toBeNull();
     expect(screen.queryByText('OST Members')).toBeNull();
-    expect(screen.queryByText('OST Applications')).toBeNull();
+    expect(screen.queryByText('Payment Verification')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'More metrics' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Commission status' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Current team' })).toBeNull();
+    expect(document.body.textContent).not.toContain('Direct reports');
+  });
+
+  /**
+   * The scope bound is stated before any figure is read: every number below it
+   * is permission- and scope-limited, and the raw enum is a developer token.
+   */
+  it('names the data scope and window before any figure is read', async () => {
+    render();
+    await screen.findByText('Total Customers');
+    const scope = within(screen.getByRole('group', { name: 'Data scope' }));
+    expect(scope.getByText('Finance')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Scope:\s*finance/);
+    expect(scope.getByText(/to\s*10\/1\/2026/)).toBeInTheDocument();
+    expect(scope.getByText('As of today')).toBeInTheDocument();
   });
 });

@@ -11,10 +11,6 @@
   box-sizing: border-box;
 }
 
-:where(input, textarea, select)[aria-invalid='true'] {
-  border-color: var(--color-danger);
-  box-shadow: 0 0 0 1px var(--color-danger);
-}
 small[role='alert'] {
   color: var(--color-danger);
 }
@@ -65,6 +61,14 @@ small[role='alert'] {
   background: var(--color-state-disabled-bg);
   color: var(--color-state-disabled-text);
 }
+
+/* Invalid fields turn red automatically. This rule must stay AFTER the base
+   control rules above: all of them are zero-specificity `:where()`, so source
+   order decides and the base border would otherwise win. */
+:where(input, textarea, select)[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
+}
 .table-scroll > table:not([class]) {
   width: 100%;
   border-collapse: collapse;
@@ -91,6 +95,10 @@ small[role='alert'] {
   outline-offset: 2px;
 }
 @media (max-width: 639px) {
+  /* Tables that collapse to labelled cards on phones (customers directory,
+     application/reservation queues, product categories, reservation ledger)
+     opt out of this floor inside their own modules with a winning
+     `div.<scope>.<scope> > table { min-width: 0 }` override. */
   .table-scroll > table:not([class]) {
     min-width: 640px;
   }

@@ -371,6 +371,21 @@ export const customerSchema = z.object({
   status: customerStatusSchema,
   /** Safe lifecycle flags; auth user IDs and membership rows are never exposed. */
   hasActiveMembership: z.boolean().optional(),
+  /**
+   * Membership facts mirrored from general Customer Lookup so the customer
+   * detail page carries everything the lookup shows. Card plan code when the
+   * customer holds a membership, else null. Never a membership number: codes
+   * are transaction credentials and stay off this read model.
+   */
+  tier: z.string().nullable().optional(),
+  /** Membership status when a membership exists, else null. Never a code. */
+  membershipStatus: z.string().nullable().optional(),
+  membershipExpiresAt: z.string().nullable().optional(),
+  /** Derived payment state from the directory RPC; absent on raw rows. */
+  paymentStatus: z.enum(['no_payment', 'partially_paid', 'fully_paid']).nullable().optional(),
+  /** Latest-sale aggregates backing the settlement rule; '0.00' when none. */
+  verifiedPaid: z.string().nullable().optional(),
+  frozenTotal: z.string().nullable().optional(),
   derivedCategory: customerCategorySchema.optional(),
   portalAccountActivated: z.boolean().optional(),
   createdBy: z.string().uuid().nullable(),

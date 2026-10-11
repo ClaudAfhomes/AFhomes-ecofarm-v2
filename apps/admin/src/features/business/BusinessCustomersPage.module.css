@@ -1,21 +1,239 @@
 /* Customers directory table: page-scoped width contract so the columns scroll
    horizontally with intact cells instead of squeezing. Applied alongside the
    global `table-scroll` class; other tables are unaffected. */
+
+/* Page shell: the root section is a grid item of the layout, so it must be
+   shrinkable — otherwise its min-content (nowrap names, date controls)
+   props the whole page open sideways on phones. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: this page never scrolls sideways — every block (header, filter
+   bar, cards) fits the viewport. `clip` (not `hidden`) keeps sticky and
+   fixed descendants working while killing the horizontal scrollbar. */
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  /* The scroll region is a desktop affordance only; on phones the card
+     layout fits, so the wrapper itself must not offer sideways scroll.
+     Doubled class beats the global `.table-scroll` rule regardless of
+     bundle order. */
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
+}
+
 .tableWrap {
   margin-top: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
 }
 
-.tableWrap > table {
-  min-width: 720px;
-}
-
-.tableWrap td.idCell,
-.tableWrap td.phoneCell {
-  white-space: nowrap;
+/* The wide-table floor is desktop-only: on phones the rows collapse to
+   labelled cards instead of scrolling sideways. */
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 720px;
+  }
 }
 
 .tableWrap tbody tr.clickable {
   cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr.clickable:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.tableWrap tbody tr.clickable:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+/* Identity cell: the customer name is the row's anchor, so it reads as a
+   highlighted identity — initial tile plus brand-ink semibold name — while
+   every other column stays neutral body text. */
+.identityCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.identityAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-primary),
+    var(--color-brand-secondary)
+  );
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.identityName {
+  min-width: 0;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Small viewports: directory rows collapse to stacked cards — the same
+   grammar as the shared Table primitives (thead hidden, one labelled row
+   per field, card chrome per record). Desktop table rendering is untouched. */
+@media (max-width: 639px) {
+  /* Kill the global 640px scroll floor: this table collapses to cards, so a
+     minimum width would prop every row open sideways. The doubled
+     class + element wins over `.table-scroll > table:not([class])`
+     regardless of bundle order; other scroll-tables keep their floor. */
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  /* Cards fit by construction — compact chrome plus wrapping content —
+     never by clipping. No overflow cut-offs anywhere in the card. */
+  .tableWrap tbody > tr {
+    display: block;
+    position: relative;
+    max-width: 100%;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Compressed card chrome: tight rows so the full record fits short
+     viewports without scrolling sideways. */
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    text-align: right;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* Values hug the right side at their content size — badges and pills
+     must never stretch full-width. `space-between` on the row already
+     pushes the value right; growing would only smear it across the card. */
+  .tableWrap tbody > tr > td > * {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .tableWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  /* The identity cell leads the card: name reads as the card title. On
+     phones the full name wraps onto its own lines at a slightly compressed
+     size instead of being ellipsis-cut — the whole record stays visible.
+     Right padding reserves room for the docked overflow trigger. */
+  .tableWrap tbody > tr > td[data-label='Name'] {
+    justify-content: flex-start;
+    padding-bottom: var(--space-1);
+    padding-right: 48px;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Name']::before {
+    display: none;
+  }
+
+  /* The Actions row dissolves on phones: its "Actions" label is dropped and
+     the three-dots trigger docks at the right end of the Name row. The
+     trigger stays mounted exactly once (no duplicate menus), only its paint
+     position changes — desktop keeps the real Actions column. */
+  .tableWrap tbody > tr > td[data-label='Actions'] {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    padding: 0;
+    min-width: 0;
+    /* The floating trigger carries no row separator — otherwise the cell's
+       bottom border draws a stray horizontal line under the dots. */
+    border-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Actions']::before {
+    display: none;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Name'] .identityCell {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Name'] .identityName {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 0.95rem;
+    line-height: 1.35;
+  }
 }
 
 /* Filter labels match the shared Sales-page pattern (grid label + control). */
@@ -24,18 +242,27 @@
   gap: 4px;
   font-size: 14px;
   font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
 }
 
-/* Pagination footer: record range plus Previous/Next. */
+.filterLabel select,
+.filterLabel input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Pagination footer: page controls with the record range below them. */
 .pagination {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   margin-top: var(--space-3);
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
 
 .paginationRange {
-  margin-right: auto;
+  margin: 0;
 }

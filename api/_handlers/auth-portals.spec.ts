@@ -11,11 +11,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown }));
+const holder = vi.hoisted(() => ({ db: null as unknown, userDb: null as unknown, svcNull: false }));
 
 vi.mock('../_lib/rest.js', () => ({
-  serviceClient: () => holder.db,
+  serviceClient: () => (holder.svcNull ? null : holder.db),
   anonClient: () => holder.db,
+  userClient: () => holder.userDb,
 }));
 
 const portals = (await import('./auth-portals.js')).default;
@@ -34,9 +35,27 @@ function install() {
   holder.db = new FakeSupabase({
     tables: {
       staff_users: [
-        { id: SM_ID, email: 'sm@afhomes.test', full_name: 'Sam Manager', status: 'active', must_change_password: false },
-        { id: ADMIN_ID, email: 'admin@afhomes.test', full_name: 'Ada Admin', status: 'active', must_change_password: true },
-        { id: AUTH_DUAL, email: 'dual@afhomes.test', full_name: 'Dual User', status: 'active', must_change_password: false },
+        {
+          id: SM_ID,
+          email: 'sm@afhomes.test',
+          full_name: 'Sam Manager',
+          status: 'active',
+          must_change_password: false,
+        },
+        {
+          id: ADMIN_ID,
+          email: 'admin@afhomes.test',
+          full_name: 'Ada Admin',
+          status: 'active',
+          must_change_password: true,
+        },
+        {
+          id: AUTH_DUAL,
+          email: 'dual@afhomes.test',
+          full_name: 'Dual User',
+          status: 'active',
+          must_change_password: false,
+        },
       ],
       staff_role_assignments: [
         { staff_id: SM_ID, role_id: 'r-sm' },
@@ -49,26 +68,64 @@ function install() {
         { id: 'r-emp', slug: 'employee', name: 'Employee', is_active: true },
       ],
       customers: [
-        { id: CUSTOMER_ID, customer_number: 'CUS-000777', email: 'ana@example.invalid', status: 'active', auth_user_id: AUTH_CUSTOMER },
-        { id: 'cccccccc-0000-4000-8000-000000000002', customer_number: 'CUS-000778', email: 'dual@example.invalid', status: 'active', auth_user_id: AUTH_DUAL },
+        {
+          id: CUSTOMER_ID,
+          customer_number: 'CUS-000777',
+          email: 'ana@example.invalid',
+          status: 'active',
+          auth_user_id: AUTH_CUSTOMER,
+        },
+        {
+          id: 'cccccccc-0000-4000-8000-000000000002',
+          customer_number: 'CUS-000778',
+          email: 'dual@example.invalid',
+          status: 'active',
+          auth_user_id: AUTH_DUAL,
+        },
       ],
       ost_members: [
         { id: AUTH_OST, ost_number: 'OST-000007', full_name: 'Ollie Seller', status: 'active' },
       ],
     } as never,
     tokens: {
-      'tok-sm': { id: SM_ID, email: 'sm@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-admin': { id: ADMIN_ID, email: 'admin@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-customer': { id: AUTH_CUSTOMER, email: 'ana@example.invalid', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-ost': { id: AUTH_OST, email: 'ost@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-dual': { id: AUTH_DUAL, email: 'dual@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-none': { id: AUTH_NONE, email: 'nobody@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
+      'tok-sm': {
+        id: SM_ID,
+        email: 'sm@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-admin': {
+        id: ADMIN_ID,
+        email: 'admin@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-customer': {
+        id: AUTH_CUSTOMER,
+        email: 'ana@example.invalid',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-ost': {
+        id: AUTH_OST,
+        email: 'ost@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-dual': {
+        id: AUTH_DUAL,
+        email: 'dual@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-none': {
+        id: AUTH_NONE,
+        email: 'nobody@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
     },
   });
 }
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  holder.svcNull = false;
+  holder.userDb = null;
 });
 
 async function call(token?: string) {
@@ -149,5 +206,70 @@ describe('GET /auth/portals', () => {
     const serialised = JSON.stringify(s.body);
     expect(serialised).not.toContain(SM_ID);
     expect(serialised).not.toContain('sm@afhomes.test');
+  });
+});
+
+describe('GET /auth/portals with caller-bound read-only RPC', () => {
+  beforeEach(() => {
+    install();
+    holder.svcNull = true;
+  });
+  it('resolves staff role metadata even when role catalog SELECT is withheld by RLS', async () => {
+    holder.userDb = new FakeSupabase({
+      rpcs: [
+        {
+          fn: 'afhomes_self_portals',
+          result: {
+            staff: {
+              roleSlug: 'sales_manager',
+              roleName: 'Sales Manager',
+              status: 'active',
+              mustChangePassword: false,
+            },
+            customer: null,
+            ost: null,
+          },
+        },
+      ],
+    });
+    const result = await call('tok-sm');
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      staff: { roleSlug: 'sales_manager', status: 'active' },
+      customer: null,
+      ost: null,
+    });
+    expect(
+      (holder.userDb as FakeSupabase).calls.find((c) => c.table === 'afhomes_self_portals')?.arg,
+    ).toEqual({});
+    expect((holder.userDb as FakeSupabase).calls.some((c) => c.table === 'roles')).toBe(false);
+  });
+  it('resolves only the customer identity returned by the self RPC', async () => {
+    holder.userDb = new FakeSupabase({
+      rpcs: [
+        {
+          fn: 'afhomes_self_portals',
+          result: { staff: null, customer: { status: 'active' }, ost: null },
+        },
+      ],
+    });
+    expect((await call('tok-customer')).body).toEqual({
+      staff: null,
+      customer: { status: 'active' },
+      ost: null,
+    });
+  });
+  it('reports an unavailable auth dependency rather than inventing missing identities', async () => {
+    holder.userDb = new FakeSupabase({
+      rpcErrors: { afhomes_self_portals: { code: 'PGRST202', message: 'function unavailable' } },
+    });
+    expect((await call('tok-sm')).status).toBe(503);
+  });
+  it('still refuses absent or invalid tokens before any self RPC', async () => {
+    const db = new FakeSupabase({});
+    holder.userDb = db;
+    expect((await call()).status).toBe(401);
+    expect((await call('unknown-token')).status).toBe(401);
+    expect(db.calls.some((c) => c.table === 'afhomes_self_portals')).toBe(false);
   });
 });

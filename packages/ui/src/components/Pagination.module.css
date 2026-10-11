@@ -40,6 +40,25 @@
   color: var(--color-text-muted);
 }
 
+/* Bordered containers around BOTH step controls so Previous and Next read as
+   one family next to the page numbers: same border, same surface, same size.
+   Each chevron stays a ghost IconButton, so there is exactly one border per
+   control. A disabled step mutes its container to match the faded chevron
+   inside instead of shouting with a raised box around a dead control. */
+.stepWrap {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  padding: 2px;
+}
+
+.stepWrap:has(button:disabled) {
+  border-color: var(--color-border-default);
+  background-color: var(--color-state-disabled-bg);
+}
+
 @media (max-width: 639px) {
   .pagination {
     gap: var(--space-1);

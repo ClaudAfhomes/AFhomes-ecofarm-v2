@@ -329,6 +329,18 @@ describe('official form review lifecycle', () => {
     expect(denied.status).toBe(403);
   });
 
+  it('serves a single application for an uppercase id instead of missing the route', async () => {
+    install({ customer_applications: [{ ...draftApplication }] });
+    const upper = await call(forms, {
+      path: `customer-applications/${APP_ID.toUpperCase()}`,
+    });
+    expect(upper.status).toBe(200);
+    const missing = await call(forms, {
+      path: 'customer-applications/ffffffff-0000-4000-8000-000000000009',
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it('freezes commission snapshots at sale time and never stacks', () => {
     // Single-level only: one rate, one basis, one amount. No upline share.
     expect(calculateCommission('50000.00', '0.15')).toBe('7500.00');
@@ -722,11 +734,7 @@ describe('application work queue ownership', () => {
     submitted_at: '2026-10-07',
   });
 
-  const agreement = (
-    id: string,
-    customerApplicationId: string,
-    status: string,
-  ) => ({
+  const agreement = (id: string, customerApplicationId: string, status: string) => ({
     id,
     reservation_number: `AF-RES-${id.slice(-3)}`,
     customer_application_id: customerApplicationId,
@@ -787,7 +795,10 @@ describe('application work queue ownership', () => {
 
   it('never counts a sale-origin reservation as application progress', async () => {
     installQueue([
-      { ...agreement('bbbbbbbb-0000-4000-8000-00000000c004', progressed, 'executed'), origin: 'sale' },
+      {
+        ...agreement('bbbbbbbb-0000-4000-8000-00000000c004', progressed, 'executed'),
+        origin: 'sale',
+      },
     ]);
     const result = await call(forms, {
       path: 'customer-applications',
@@ -964,9 +975,11 @@ describe('the Supabase fake refuses non-existent filter APIs', () => {
   it('throws when not() is called with the wrong arity', () => {
     const db = new FakeSupabase({ tables: { customer_applications: [] } as never });
     expect(() =>
-      (db.from('customer_applications') as unknown as {
-        not: (col: string, filter: unknown) => unknown;
-      }).not('id', { in: ['a'] }),
+      (
+        db.from('customer_applications') as unknown as {
+          not: (col: string, filter: unknown) => unknown;
+        }
+      ).not('id', { in: ['a'] }),
     ).toThrow(/unsupported not\(\) operator/);
   });
 
@@ -979,10 +992,7 @@ describe('the Supabase fake refuses non-existent filter APIs', () => {
         ],
       } as never,
     });
-    const { data } = await db
-      .from('customer_applications')
-      .select('*')
-      .not('id', 'in', '(drop)');
+    const { data } = await db.from('customer_applications').select('*').not('id', 'in', '(drop)');
     expect((data as { id: string }[]).map((row) => row.id)).toEqual(['keep']);
   });
 });

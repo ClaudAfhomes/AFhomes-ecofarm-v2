@@ -1,0 +1,836 @@
+/* Official paper-form list pages: page-scoped table and filter contracts so the
+   columns scroll horizontally with intact cells instead of squeezing. Applied
+   alongside the global `table-scroll` class; other tables are unaffected. */
+/* List-page shell: shrinkable like the customers directory shell, so the
+   section's min-content can never prop the page open sideways on phones. */
+.listSection {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: list pages never scroll sideways — `clip` (not `hidden`) keeps
+   fixed descendants (overflow menus) working. */
+@media (max-width: 639px) {
+  .listSection {
+    overflow-x: clip;
+  }
+}
+
+.queueSummary {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.queueSummary strong {
+  color: var(--color-text-primary);
+}
+
+.tableWrap {
+  margin-top: var(--space-2);
+}
+
+/* The wide-table floor is desktop-only: on phones the rows collapse to
+   labelled cards instead of scrolling sideways. */
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 920px;
+  }
+}
+
+/* Elevated card around the reservation queue table: the queue is the page's
+   working surface, so it reads as one panel rather than bare grid lines. */
+.queueCard {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+.queueTable {
+  width: 100%;
+  background-color: var(--color-bg-surface-raised);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Same header treatment as the customers and applications tables: a lightly
+   tinted band over white rows, so the body reads as data, not as chrome. */
+.queueTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-surface);
+  text-align: left;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.queueTable th,
+.queueTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.queueTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* White rows need an explicit base: `--color-state-hover` is a translucent
+   ink wash, which only composites correctly over an opaque white cell. */
+.queueTable tbody td {
+  background-color: var(--color-bg-surface-raised);
+}
+
+@media (hover: hover) {
+  .queueTable tbody tr.clickable:hover td {
+    background-color: var(--color-state-hover);
+  }
+}
+
+/* Record reference: the row's anchor reads as a highlighted pill — accent
+   dot plus brand-ink mono reference — while every other column stays neutral
+   body text. Shared by the application and reservation queues. */
+.appRef,
+.resRef {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 32%, white);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.appRefDot,
+.resRefDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tableWrap tbody tr.clickable {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr.clickable:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.tableWrap tbody tr.clickable:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+/* Small viewports: application and reservation rows collapse to stacked
+   cards — the same grammar as the shared Table primitives (thead hidden,
+   one labelled row per field, card chrome per record). The lead reference
+   cell (Application / Reservation) drops its label and reads as the card
+   title. Desktop table rendering is untouched. */
+@media (max-width: 639px) {
+  /* Kill the global 640px scroll floor on card-collapsing tables (see
+     BusinessCustomersPage): without this the floor props every row open
+     sideways and the cards can never fit the viewport. */
+  div.tableWrap.tableWrap > table,
+  div.tableWrap.tableWrap > table.queueTable {
+    min-width: 0;
+  }
+
+  .tableWrap > table,
+  .tableWrap > table.queueTable {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+    background-color: var(--color-bg-surface-raised);
+    border-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .tableWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Application'],
+  .tableWrap tbody > tr > td[data-label='Reservation'] {
+    justify-content: flex-start;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Application']::before,
+  .tableWrap tbody > tr > td[data-label='Reservation']::before {
+    display: none;
+  }
+}
+
+/* Filter labels match the shared Customers-page pattern (grid label + control). */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filterLabel select,
+.filterLabel input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Editor top-level section: breathing room between the header, the guidance
+   alert, and the first panel. */
+.editorSection {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* Editor form root: the disabling wrapper stays a fieldset for behavior, but
+   renders borderless so the panels below carry the visual structure. */
+.formRoot {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-5);
+}
+
+/* Numbered editor panels, same card pattern as the redemption and
+   import/export workflows. Works on <section> and <fieldset> alike. */
+.panel {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  font-size: var(--text-h3);
+}
+
+/* Inner grouping inside a panel: borderless, semibold legend. */
+.subGroup {
+  border: 0;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  min-width: 0;
+}
+
+.subGroupTitle {
+  padding: 0;
+  font-weight: 600;
+}
+
+.hint {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Real editor grid replacing the undefined `form-grid` class: responsive
+   columns on desktop, one column on narrow screens. */
+.editorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4);
+}
+
+.editorGrid > * {
+  min-width: 0;
+}
+
+.editorGrid input:not([type='checkbox']):not([type='file']),
+.editorGrid select,
+.editorGrid textarea {
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* Sticky save bar: the primary action stays reachable on long forms. */
+.stickyFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: var(--space-2);
+  padding: var(--space-3) 0;
+  background-color: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.stickyFooterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@media (max-width: 639px) {
+  .editorGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stickyFooterActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .stickyFooterActions > * {
+    width: 100%;
+  }
+}
+
+/* Inline action rows inside panels. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.fileName {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ID preview thumbnail: opens the fullscreen modal. */
+.thumbnailButton {
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.thumbnailButton:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.thumbnail {
+  width: 120px;
+  height: auto;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-control);
+}
+
+.previewImage {
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+/* Searchable customer picker: search field, name-only dropdown, and the
+   selection line beneath it. */
+.pickerWrap {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.pickedLine {
+  margin: 0;
+  font-size: var(--text-body-s);
+}
+
+/* Checkbox rows with full touch targets. */
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+/* Pagination footer: page controls with the record range below them. */
+.pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.paginationRange {
+  margin: 0;
+}
+
+/* Editor banner row: a back link and the live lifecycle state on one line. */
+.backRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.stateSummary {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.stateSummary strong {
+  color: var(--color-text-primary);
+}
+
+/* Read-only commercial snapshot: labelled values on a wrapping grid instead of
+   a flat definition list, so a wide agreement stays scannable. */
+.snapshotGrid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.snapshotField {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.snapshotField dt {
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.snapshotField dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.moneyNote {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Buttons grouped so primary, secondary, and destructive actions read as
+   separate tiers instead of one undifferentiated run of text. */
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.buttonRow > .spacer {
+  flex: 1 1 auto;
+}
+
+/* Payments ledger on the reservation detail screen. */
+.ledgerWrap {
+  margin-top: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.ledgerWrap > table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.ledgerWrap th,
+.ledgerWrap td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.ledgerWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ledgerWrap thead th {
+  text-align: left;
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.ledgerAmount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A toggle-style secondary-holder control with a full touch target. */
+.toggleCard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+}
+
+.toggleCard input {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--color-brand-primary);
+}
+
+.toggleText {
+  display: grid;
+  gap: 2px;
+}
+
+.toggleTitle {
+  font-weight: 600;
+}
+
+.toggleHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* File import control, styled as a button-ish target while keeping the real
+   input focusable for keyboard and assistive-technology use. */
+.fileInput {
+  display: inline-block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-control);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.fileInput:hover {
+  border-color: var(--color-brand-primary);
+  color: var(--color-text-primary);
+}
+
+.fileInput:focus-within {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+/* Bulk import card: the workbook picker is a task in its own right, so it gets
+   a labelled surface instead of sharing a row with the template download. */
+.importCard {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.importCard[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--color-success) 40%, white);
+  background-color: color-mix(in srgb, var(--color-success) 6%, white);
+}
+
+.importHead {
+  display: grid;
+  gap: 2px;
+}
+
+.importTitle {
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.01em;
+}
+
+.importHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.importControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The label wraps the real input, so the control keeps native keyboard and
+   screen-reader behaviour while the visible trigger is fully restyled. */
+.filePicker {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.filePicker .fileInput {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-text-secondary);
+  max-width: 100%;
+}
+
+.filePicker .fileInput::file-selector-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-brand-primary);
+  border-radius: var(--radius-control);
+  background-color: var(--color-brand-primary);
+  color: var(--color-text-on-brand);
+  font: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.filePicker .fileInput::file-selector-button:hover {
+  background-color: var(--color-brand-primary-hover);
+  border-color: var(--color-brand-primary-hover);
+}
+
+.filePicker .fileInput:focus-visible::file-selector-button {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.filePicker .fileInput:disabled::file-selector-button {
+  cursor: not-allowed;
+  background-color: var(--color-state-disabled-bg);
+  border-color: var(--color-border-default);
+  color: var(--color-state-disabled-text);
+}
+
+/* Section lede under a panel title. */
+.panelNote {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Small screen tweaks for the reservation editor. */
+@media (max-width: 639px) {
+  .buttonRow {
+    align-items: stretch;
+  }
+}
+
+/* Small viewports: ledger payments collapse to stacked cards — the same
+   grammar as the list tables (thead hidden, one labelled row per field).
+   Desktop keeps the wide ledger table. */
+@media (min-width: 640px) {
+  .ledgerWrap > table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Same global-floor kill as the list tables above. */
+  div.ledgerWrap.ledgerWrap > table {
+    min-width: 0;
+  }
+
+  .ledgerWrap {
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+    background: none;
+  }
+
+  .ledgerWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .ledgerWrap caption {
+    display: block;
+    padding: var(--space-2) var(--space-1);
+  }
+
+  .ledgerWrap thead {
+    display: none;
+  }
+
+  .ledgerWrap tbody {
+    display: block;
+  }
+
+  .ledgerWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .ledgerWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .ledgerWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+    border-bottom: 0;
+  }
+
+  .ledgerWrap tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .ledgerWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .ledgerWrap tbody > tr > td:not([data-label])::before,
+  .ledgerWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .ledgerWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  /* The payment reference leads the card: label dropped, value as title. */
+  .ledgerWrap tbody > tr > td[data-label='AF-PAY'] {
+    justify-content: flex-start;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--color-brand-primary);
+  }
+
+  .ledgerWrap tbody > tr > td[data-label='AF-PAY']::before {
+    display: none;
+  }
+
+  /* Money keeps its tabular figures; wrap the action buttons instead. */
+  .ledgerWrap tbody > tr > td[data-label='Actions'] {
+    flex-wrap: wrap;
+  }
+}

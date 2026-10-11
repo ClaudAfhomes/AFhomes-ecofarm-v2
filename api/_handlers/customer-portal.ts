@@ -1,4 +1,4 @@
-import { customerLedgerCursorSchema } from '@afhomes/contracts';
+import { customerLedgerCursorSchema, customerProfileSchema } from '@afhomes/contracts';
 /**
  * Customer portal reads: `GET /customer/*`.
  *
@@ -28,7 +28,8 @@ import {
   type CustomerPrincipal,
 } from '../_lib/customer-access.js';
 import { cardQrPayload } from '../_lib/identifier.js';
-import { serviceClient } from '../_lib/rest.js';
+import { serviceClient, userClient } from '../_lib/rest.js';
+import { extractBearerToken } from '../_lib/token.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 /**
@@ -132,7 +133,6 @@ const toMembership = (
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
-  if (!db) return fail(res, 'INTERNAL', 'Server configuration is incomplete', 500);
 
   try {
     if (method(req) !== 'GET' && method(req) !== 'POST') {
@@ -146,6 +146,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const principal: CustomerPrincipal = resolved;
     const path = subPath(req);
 
+    if (!db) {
+      if (path !== '' || method(req) !== 'GET')
+        return fail(
+          res,
+          'INTERNAL',
+          'This operation requires an isolated configured backend.',
+          503,
+        );
+      const caller = userClient(extractBearerToken(req) ?? '');
+      if (!caller) return fail(res, 'INTERNAL', 'Supabase authentication is not configured', 500);
+      const result = await caller.rpc('afhomes_self_customer_profile', {});
+      if (result.error)
+        return fail(res, 'INTERNAL', 'Secure customer profile verification is unavailable.', 503);
+      const own = customerProfileSchema.safeParse(result.data);
+      if (!own.success || own.data.id !== principal.customerId)
+        return fail(res, 'FORBIDDEN', 'Customer access required', 403);
+      return res.status(200).json(own.data);
+    }
     /* ---------------- profile ---------------- */
     if (path === '' && method(req) === 'GET') {
       const { data, error } = await db

@@ -14,16 +14,17 @@ function Field({ type = 'text', name = false }: { type?: string; name?: boolean 
     />
   );
 }
-it('shows accessible inline name errors only after interaction', () => {
+it('flags name errors on the field itself with no message text', () => {
   render(<Field name />);
   const field = screen.getByLabelText('QA field');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   fireEvent.change(field, { target: { value: 'Claud123' } });
+  // The red border keys off this attribute (see the global aria-invalid rule).
   expect(field).toHaveAttribute('aria-invalid', 'true');
-  expect(document.getElementById(field.getAttribute('aria-describedby')!)).toHaveTextContent(
-    'Names cannot contain numbers',
-  );
+  expect(field).not.toHaveAttribute('aria-describedby');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   fireEvent.change(field, { target: { value: 'Claud' } });
+  expect(field).not.toHaveAttribute('aria-invalid');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 it('blocks phone letters, explains why, and accepts a valid PH number', () => {

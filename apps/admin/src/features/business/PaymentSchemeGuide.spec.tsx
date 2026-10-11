@@ -70,8 +70,43 @@ describe('payment scheme guide (internal IST reference)', () => {
     expect(screen.getByText(/Never chain Move A into B1 or B2/i)).toBeInTheDocument();
   });
 
-  it('is reachable only with the sales grant (never customer, never anonymous)', () => {
-    const sales = navItemsForPermissions([permission('dashboard.view'), permission('sales.card_sales')]);
+  /**
+   * The confidentiality banner must be visible from the FIRST paint. Gating it
+   * behind the data it warns about would leave a blank, unlabelled page for the
+   * duration of the fetch, with nothing telling the operator the page is
+   * confidential.
+   */
+  it('shows the internal-use banner before the tiers have loaded', async () => {
+    mockedGetCardProducts.mockReturnValue(new Promise(() => {}));
+    renderWithProviders(<PaymentSchemeGuidePage />);
+    expect(screen.getByText('Internal sales team use only')).toBeInTheDocument();
+    expect(screen.getByText(/Do not share this page/i)).toBeInTheDocument();
+    // And the loading state announces itself, by name, without inventing figures.
+    // The banner is itself a polite live region, so the loading region is
+    // targeted by its label rather than assumed to be the only status.
+    expect(screen.getByRole('status', { name: 'Loading tiers…' })).toBeInTheDocument();
+    expect(screen.queryByText('Standard offer')).not.toBeInTheDocument();
+  });
+
+  it('structures the guide into numbered sections and a print action', async () => {
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    renderWithProviders(<PaymentSchemeGuidePage />);
+    await screen.findByText('Standard offer');
+    const headings = ['Standard offer', 'Internal flow', 'Sample schedules', 'Golden rules'];
+    for (const title of headings) {
+      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: title })).toBeInTheDocument();
+    }
+    // Ordered lists carry the reading order the numbers imply.
+    expect(screen.getAllByRole('list').map((list) => list.children.length)).toEqual([4, 7]);
+    expect(screen.getByRole('button', { name: 'Print guide' })).toBeInTheDocument();
+    // Each enabled move is its own pill, so a tier's availability is scannable.
+    expect(screen.getByText('Move A')).toBeInTheDocument();
+    expect(screen.getByText('Move B1')).toBeInTheDocument();
+    expect(screen.getByText('Move B2')).toBeInTheDocument();
+  });
+
+  it('is reachable only with the sales grant (never customer, never anonymous)', () => {    const sales = navItemsForPermissions([permission('dashboard.view'), permission('sales.card_sales')]);
     const group = sales.find((item) => item.label === 'Sales');
     expect(group?.dropdown?.map((d) => ('label' in d ? d.label : ''))).toContain(
       'Payment Scheme Guide',

@@ -33,6 +33,9 @@ export const paymentSchema = z.object({
   rejectionReason: z.string().nullable(),
   recordedBy: z.string().uuid(),
   verifiedBy: z.string().uuid().nullable(),
+  /** Display names resolved server-side; UUIDs stay the source of truth. */
+  recordedByName: z.string().nullable().optional(),
+  verifiedByName: z.string().nullable().optional(),
   recordedAt: z.string(),
   verifiedAt: z.string().nullable(),
 });

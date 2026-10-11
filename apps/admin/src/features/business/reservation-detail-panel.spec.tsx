@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SessionUser } from '../../lib/session';
 import { Route, Routes } from 'react-router';
@@ -24,6 +24,12 @@ const calls = {
   reopen: vi.fn(),
   activate: vi.fn(),
   finalize: vi.fn(),
+  preview: vi.fn(async () => ({
+    kind: 'reservation_agreement' as const,
+    fields: {},
+    errors: [],
+    requiresReview: true as const,
+  })),
   records: [] as string[],
 };
 
@@ -150,7 +156,7 @@ vi.mock('./services', async (importOriginal) => {
     getCustomerApplications: async () => [],
     getCustomerApplication: async () => null,
     getOfficialFormTemplate: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
-    previewOfficialFormImport: async () => ({ rows: [], errors: [] }),
+    previewOfficialFormImport: calls.preview,
     exportReservationAgreement: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
     createReservationAgreement: calls.createReservationAgreement,
     updateReservationAgreement: async () => current,
@@ -186,6 +192,12 @@ beforeEach(() => {
     saleId: SALE_ID,
     reservationId: RES_ID,
     activationRequired: true,
+  });
+  calls.preview.mockReset().mockResolvedValue({
+    kind: 'reservation_agreement',
+    fields: {},
+    errors: [],
+    requiresReview: true,
   });
   current = agreement();
   finance = {
@@ -359,4 +371,119 @@ it('loads the persisted membership and confirmation after reopening the reservat
   expect(await screen.findByText('MBS-PERSISTED')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /activate membership/i })).toBeNull();
   expect(screen.getByRole('button', { name: /print activation confirmation/i })).toBeTruthy();
+});
+
+/**
+ * The bulk import control: a real file input (keyboard and screen-reader
+ * reachable, never a styled div), named by its visible heading, and honest
+ * about what it has read so far.
+ */
+/**
+ * Field labels are derived from raw state keys (`reservationDate`,
+ * `contactNumber`). Showing the key leaks camelCase and reads as a variable
+ * rather than a label, so each group is humanized on the way out.
+ */
+describe('reservation detail field labels', () => {
+  it('shows readable labels for every date, holder, and schedule field', async () => {
+    renderDetail();
+    for (const label of [
+      'Reservation Date',
+      'Agreement Date',
+      'Revision Number',
+      'Monthly Amortization Start',
+      'Monthly Amortization End',
+      'Payment Due Day',
+      'Name',
+      'Address',
+      'Contact Number',
+      'Email',
+      'TIN Number',
+      'Particular',
+      'Amount',
+      'Payment Date',
+      'Remarks',
+      'Imported Tier',
+    ]) {
+      expect(await screen.findByLabelText(label)).toBeTruthy();
+    }
+  });
+
+  it('never leaks a raw camelCase key as a visible label', async () => {
+    renderDetail();
+    const labels = screen
+      .getAllByRole('textbox')
+      .map((input) => input.getAttribute('aria-label') ?? '')
+      .join(' ');
+    for (const key of ['contactNumber', 'tinNumber', 'paymentDate', 'reservationDate']) {
+      expect(labels).not.toContain(key);
+    }
+  });
+});
+
+describe('reservation bulk import control', () => {
+  it('exposes a named file input that accepts workbooks only', async () => {
+    renderDetail();
+    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
+    expect(input.tagName).toBe('INPUT');
+    expect(input.type).toBe('file');
+    expect(input.accept).toBe('.xlsx');
+    expect(screen.getByText('No workbook chosen yet.')).toBeTruthy();
+  });
+
+  it('confirms the chosen workbook and reports progress while reading it', async () => {
+    renderDetail();
+    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['sheet'], 'ist-batch-07.xlsx', { type: '' })] },
+    });
+    const status = await screen.findByText(/ist-batch-07\.xlsx/);
+    expect(status.textContent).toContain('1 KB');
+    expect(calls.preview).toHaveBeenCalledWith('reservation_agreement', expect.any(String));
+  });
+
+  /**
+   * The tier dropdown is a closed set of options. A workbook cell is not, so an
+   * unknown tier must never reach the state: a value with no matching option
+   * renders blank while the state keeps the bad value, and the browser would
+   * then submit it.
+   */
+  it('never lets a workbook put an unknown tier into the closed dropdown', async () => {
+    calls.preview.mockResolvedValue({
+      kind: 'reservation_agreement',
+      fields: { vip_tier: 'platinum' },
+      errors: [],
+      requiresReview: true,
+    });
+    renderDetail();
+    const select = (await screen.findByLabelText('Imported Tier')) as HTMLSelectElement;
+    // Wait for the agreement to hydrate: the page seeds the dropdown from the
+    // loaded record, and importing before that lands would race it.
+    await waitFor(() => expect(select.value).toBe('BRONZE'));
+    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['sheet'], 'ist-bad-tier.xlsx', { type: '' })] },
+    });
+    await screen.findByText(/ist-bad-tier\.xlsx/);
+    await waitFor(() => expect(calls.preview).toHaveBeenCalled());
+    // The loaded agreement's BRONZE stands: the unknown cell is discarded.
+    expect(select.value).toBe('BRONZE');
+  });
+
+  it('applies a recognised tier from the workbook to the dropdown', async () => {
+    calls.preview.mockResolvedValue({
+      kind: 'reservation_agreement',
+      fields: { vip_tier: 'gold' },
+      errors: [],
+      requiresReview: true,
+    });
+    renderDetail();
+    const select = (await screen.findByLabelText('Imported Tier')) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('BRONZE'));
+    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['sheet'], 'ist-good-tier.xlsx', { type: '' })] },
+    });
+    // The workbook wrote 'gold'; the stored option value is canonical 'GOLD'.
+    await waitFor(() => expect(select.value).toBe('GOLD'));
+  });
 });

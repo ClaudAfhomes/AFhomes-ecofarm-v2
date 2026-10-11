@@ -79,6 +79,20 @@ const toCustomer = (row: Record<string, unknown>) => ({
     isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
+  // Membership facts mirrored from general Customer Lookup. The directory RPC
+  // carries them (tier, member_status, expires_at, memberships embed); raw
+  // table rows (e.g. right after create) simply have none, hence nulls.
+  tier: (row.tier as string | null | undefined) ?? null,
+  membershipStatus:
+    ((row.memberships as { status?: unknown } | null | undefined)?.status as string | undefined) ??
+    isoOrNull(row.member_status),
+  membershipExpiresAt: isoOrNull(row.expires_at),
+  paymentStatus:
+    (row.payment_status as 'no_payment' | 'partially_paid' | 'fully_paid' | null | undefined) ??
+    null,
+  verifiedPaid: (row.verified_paid as string | null | undefined) ?? '0.00',
+  frozenTotal:
+    row.frozen_total === null || row.frozen_total === undefined ? '0.00' : String(row.frozen_total),
   derivedCategory: row.derivedCategory,
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,

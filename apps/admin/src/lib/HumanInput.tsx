@@ -35,13 +35,16 @@ export function HumanInput({
   const invalid =
     blockedPhone ||
     (dirty && schema && (props.required || value !== '') && !schema.safeParse(value).success);
+  // Name errors carry no text: the field itself turns red (see the global
+  // `aria-invalid` rule) and stays reported through HumanInputValidity, so
+  // blocking and guidance keep working without the paragraph.
   const message = phone
     ? 'Enter a valid contact number. Letters are not accepted.'
     : props.type === 'email'
       ? 'Please enter a valid email address.'
       : props.inputMode === 'decimal'
         ? 'Enter a valid amount without letters or scientific notation.'
-        : 'Names cannot contain numbers. Use letters, initials, apostrophes or hyphens.';
+        : null;
   const errorId = `${id}-error`;
   const report = useContext(HumanInputValidity);
   useEffect(() => {
@@ -54,8 +57,9 @@ export function HumanInput({
         {...props}
         aria-invalid={invalid ? true : props['aria-invalid']}
         aria-describedby={
-          [props['aria-describedby'], invalid ? errorId : undefined].filter(Boolean).join(' ') ||
-          undefined
+          [props['aria-describedby'], invalid && message ? errorId : undefined]
+            .filter(Boolean)
+            .join(' ') || undefined
         }
         onBlur={(event) => {
           setDirty(true);
@@ -79,7 +83,7 @@ export function HumanInput({
           onChange?.(event);
         }}
       />
-      {invalid ? (
+      {invalid && message ? (
         <small id={errorId} role="alert">
           {message}
         </small>

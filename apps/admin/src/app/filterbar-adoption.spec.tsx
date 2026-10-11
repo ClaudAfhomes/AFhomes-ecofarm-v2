@@ -18,7 +18,6 @@ import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
 import { DocumentsPage } from '../features/documents/DocumentsPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
@@ -52,6 +51,7 @@ vi.mock('../features/business/services', () => ({
   getCustomers: vi.fn(async () => []),
   getCustomersPage: vi.fn(async () => ({ data: [], total: 0 })),
   getCustomerById: vi.fn(),
+
   createCustomer: vi.fn(),
   getSales: vi.fn(async () => []),
   createSale: vi.fn(),
@@ -242,10 +242,6 @@ describe('FilterBar adoption', () => {
   it('staff renders search + status in one toolbar', async () => {
     await showsFilterBar(<AfHomesStaffPage />);
     expect(screen.getByLabelText('Search staff')).toBeInTheDocument();
-  });
-
-  it('sales renders its status filter in one toolbar', async () => {
-    await showsFilterBar(<BusinessSalesPage />);
   });
 
   it('customers renders search in one toolbar', async () => {
