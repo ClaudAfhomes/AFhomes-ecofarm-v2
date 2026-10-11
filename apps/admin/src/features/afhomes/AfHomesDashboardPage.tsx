@@ -67,26 +67,15 @@ export function dashboardMetrics(data: AnalyticsOverview): Metric[] {
           ['Points redeemed', data.redemptions.pointsRedeemed],
         ]
       : [];
-  if (data.scope.kind === 'finance')
-    return [
-      ['Pending payments', data.queues.pendingPaymentVerification],
-      ['Verified payments', formatMoney(data.headline.periodVerifiedPayments)],
-      ['Fully paid sales', data.queues.fullPaidSales],
-      ['Activation queue', data.queues.activationReadySales],
-      ['Rejected payments', data.queues.rejectedPayments],
-      ['Active memberships', data.headline.activatedMemberships],
-    ];
-  const values: Metric[] = [
-    [data.scope.kind === 'self' ? 'My customers' : 'Customers', data.headline.totalCustomers],
-    [data.scope.kind === 'self' ? 'My sales' : 'Card sales', data.headline.periodSales],
-    ['Frozen sale value', formatMoney(data.headline.grossFrozenSaleValue)],
-    ['Active memberships', data.headline.activatedMemberships],
+  // Headline cards are fixed: every operational scope reads the same four
+  // server-scoped figures (organization and redemption keep their own sets —
+  // they have no customer/sale headline to show).
+  return [
+    ['Total Customers', data.headline.totalCustomers],
+    ['New Applications', data.headline.newCustomers],
+    ['Card Sales', data.headline.periodSales],
+    ['Total Sales', formatMoney(data.headline.grossFrozenSaleValue)],
   ];
-  if (data.scope.kind === 'global') {
-    values.splice(1, 0, ['New customers', data.headline.newCustomers]);
-    values.push(['Verified payments', formatMoney(data.headline.periodVerifiedPayments)]);
-  }
-  return values;
 }
 
 /** Icon + helper text per metric label. Presentation only - values untouched. */
@@ -107,6 +96,10 @@ const METRIC_PRESENTATION: Record<string, { icon: IconName; description: string 
   'Active memberships': { icon: 'users', description: 'Activated membership cards' },
   Customers: { icon: 'users', description: '' },
   'My customers': { icon: 'users', description: 'Customers attributed to you' },
+  'Total Customers': { icon: 'users', description: 'Customers in your authorized scope' },
+  'New Applications': { icon: 'user-plus', description: 'New in the selected period' },
+  'Card Sales': { icon: 'file-text', description: 'Sales in the selected period' },
+  'Total Sales': { icon: 'wallet', description: 'Frozen sale value in the selected period' },
   'Card sales': { icon: 'file-text', description: '' },
   'My sales': { icon: 'file-text', description: 'Sales you recorded in period' },
   'Frozen sale value': { icon: 'wallet', description: '' },

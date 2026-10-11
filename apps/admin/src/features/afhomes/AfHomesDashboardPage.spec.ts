@@ -51,21 +51,28 @@ const overview = (kind: AnalyticsOverview['scope']['kind']): AnalyticsOverview =
 });
 
 describe('Phase 25 role dashboard presentation', () => {
-  it('gives Finance queue and money facts rather than generic seller metrics', () => {
-    expect(dashboardMetrics(overview('finance')).map(([label]) => label)).toEqual([
-      'Pending payments',
-      'Verified payments',
-      'Fully paid sales',
-      'Activation queue',
-      'Rejected payments',
-      'Active memberships',
-    ]);
+  it('gives every operational scope the same four headline cards', () => {
+    for (const kind of ['global', 'finance', 'team', 'self'] as const) {
+      expect(dashboardMetrics(overview(kind)).map(([label]) => label)).toEqual([
+        'Total Customers',
+        'New Applications',
+        'Card Sales',
+        'Total Sales',
+      ]);
+    }
+  });
+
+  it('carries the server figures behind the fixed headline labels', () => {
+    expect(dashboardMetrics(overview('finance'))).toContainEqual(['Total Customers', 4]);
+    expect(dashboardMetrics(overview('finance'))).toContainEqual(['New Applications', 1]);
+    expect(dashboardMetrics(overview('finance'))).toContainEqual(['Card Sales', 2]);
+    expect(dashboardMetrics(overview('finance'))).toContainEqual(['Total Sales', '₱60,000.00']);
   });
 
   it('gives HR real organization facts without financial metrics', () => {
     const metrics = dashboardMetrics(overview('organization'));
     expect(metrics).toContainEqual(['Total staff', 9]);
-    expect(metrics.map(([label]) => label)).not.toContain('Verified payments');
+    expect(metrics.map(([label]) => label)).not.toContain('Total Sales');
   });
 
   /**
@@ -75,10 +82,10 @@ describe('Phase 25 role dashboard presentation', () => {
    */
   it('ranks the headline metrics so the first four survive the dashboard cap', () => {
     expect(dashboardMetrics(overview('finance')).slice(0, 4).map(([label]) => label)).toEqual([
-      'Pending payments',
-      'Verified payments',
-      'Fully paid sales',
-      'Activation queue',
+      'Total Customers',
+      'New Applications',
+      'Card Sales',
+      'Total Sales',
     ]);
   });
 });

@@ -220,12 +220,15 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByLabelText('Loading dashboard')).toBeInTheDocument();
   });
 
-  it('renders server finance facts with labeled money series', async () => {
+  it('renders server headline facts with labeled money series', async () => {
     render();
-    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
-    // Verified revenue renders as grouped money, never a raw decimal string.
-    expect(screen.getByText('₱25,000.00')).toBeInTheDocument();
-    expect(screen.queryByText('₱25000.00')).toBeNull();
+    expect(await screen.findByText('Total Customers')).toBeInTheDocument();
+    expect(screen.getByText('New Applications')).toBeInTheDocument();
+    expect(screen.getByText('Card Sales')).toBeInTheDocument();
+    // Total sales renders as grouped money, never a raw decimal string.
+    // The same 60000.00 figure also feeds both breakdown tables.
+    expect(screen.getAllByText('₱60,000.00')).toHaveLength(3);
+    expect(screen.queryByText('₱60000.00')).toBeNull();
     expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=month'))).toBe(
       true,
     );
@@ -278,12 +281,12 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
     install();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('Pending payments')).toBeInTheDocument();
+    expect(await screen.findByText('Total Customers')).toBeInTheDocument();
   });
 
   it('hides sections the finance role is not authorized to see', async () => {
     render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     // No organization block, no redemption block, no team block for finance.
     expect(screen.queryByText('Current team')).toBeNull();
     expect(document.body.textContent).not.toMatch(/Total staff|Points redeemed/);
@@ -303,23 +306,23 @@ describe('Phase 29 role dashboard', () => {
    */
   it('renders exactly four cards, one graph and two tables', async () => {
     const { container } = render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
 
     // Four headline cards only.
     const metrics = screen.getByRole('region', { name: 'Key metrics' });
     expect(metrics.querySelectorAll('article')).toHaveLength(4);
-    // Shown in the order `dashboardMetrics` already ranks them, not re-picked.
+    // Shown in the fixed headline order, not re-picked per role.
     for (const label of [
-      'Pending payments',
-      'Verified payments',
-      'Fully paid sales',
-      'Activation queue',
+      'Total Customers',
+      'New Applications',
+      'Card Sales',
+      'Total Sales',
     ]) {
       expect(within(metrics).getByText(label)).toBeInTheDocument();
     }
-    // The tail of the server set is not shown here at all.
-    expect(screen.queryByText('Rejected payments')).toBeNull();
-    expect(screen.queryByText('Active memberships')).toBeNull();
+    // The old queue labels are gone from the headline set.
+    expect(screen.queryByText('Pending payments')).toBeNull();
+    expect(screen.queryByText('Activation queue')).toBeNull();
 
     // Exactly one graph. recharts paints asynchronously, so wait for it.
     await waitFor(() =>
@@ -367,7 +370,7 @@ describe('Phase 29 role dashboard', () => {
    */
   it('presents a stable title with no subtitle, not a role name', async () => {
     render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     expect(
       screen.getByRole('heading', { level: 1, name: 'Operations Overview' }),
     ).toBeInTheDocument();
@@ -387,7 +390,7 @@ describe('Phase 29 role dashboard', () => {
    */
   it('colours breakdown rows by scheme and by plan tier', async () => {
     const { container } = render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     const schemeRow = screen.getByText('Spot Cash').closest('tr');
     const planRow = screen.getByText('Gold').closest('tr');
     expect(schemeRow).toBeTruthy();
@@ -399,13 +402,14 @@ describe('Phase 29 role dashboard', () => {
     // The share bar is decorative; the exact amount stays the readable value.
     const bars = container.querySelectorAll('[aria-hidden="true"][style*="width"]');
     expect(bars.length).toBeGreaterThan(0);
-    // One grouped figure per breakdown table (both carry 60000.00 here).
-    expect(screen.getAllByText('₱60,000.00')).toHaveLength(2);
+    // One grouped figure per breakdown table plus the Total Sales headline
+    // card (all three carry 60000.00 here).
+    expect(screen.getAllByText('₱60,000.00')).toHaveLength(3);
   });
 
   it('shows nothing beyond the six blocks', async () => {
     render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     expect(screen.queryByRole('navigation', { name: 'Dashboard actions' })).toBeNull();
     expect(screen.queryByText('OST Members')).toBeNull();
     expect(screen.queryByText('Payment Verification')).toBeNull();
@@ -421,7 +425,7 @@ describe('Phase 29 role dashboard', () => {
    */
   it('names the data scope and window before any figure is read', async () => {
     render();
-    await screen.findByText('Pending payments');
+    await screen.findByText('Total Customers');
     const scope = within(screen.getByRole('group', { name: 'Data scope' }));
     expect(scope.getByText('Finance')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Scope:\s*finance/);

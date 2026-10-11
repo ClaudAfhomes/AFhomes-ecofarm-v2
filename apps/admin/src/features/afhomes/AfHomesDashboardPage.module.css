@@ -292,23 +292,102 @@
   overflow: hidden;
 }
 
+/* Headline metric cards — redesigned: each card owns a unique color story
+   (tinted border + soft wash + gradient icon tile + accented figure).
+   Deliberately NO hover lift/scale and NO left spine: cards are read-only
+   figures, so they stay perfectly still under the pointer. */
 .metrics > li :global(article),
 .metrics > li :global(a) {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-default);
+  border-left: 1px solid var(--color-border-default);
   box-shadow: var(--shadow-sm);
   transition:
-    transform var(--transition-fast),
-    box-shadow var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
-.metrics > li :global(article:hover) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-  border-color: color-mix(in srgb, var(--color-brand-primary) 35%, white);
+.metrics > li :global(article:hover),
+.metrics > li :global(a:hover) {
+  transform: none;
+  box-shadow: var(--shadow-sm);
 }
 
 .metrics > li:nth-child(1) :global(article) {
-  background: linear-gradient(180deg, var(--color-brand-soft) 0%, #fff 55%);
+  border-color: color-mix(in srgb, var(--color-brand-primary) 32%, white);
+  background: linear-gradient(180deg, var(--color-brand-soft) 0%, #fff 62%);
+}
+
+.metrics > li:nth-child(2) :global(article) {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, white);
+  background: linear-gradient(180deg, var(--color-accent-soft) 0%, #fff 62%);
+}
+
+.metrics > li:nth-child(3) :global(article) {
+  border-color: color-mix(in srgb, var(--color-info) 36%, white);
+  background: linear-gradient(180deg, #e3eff5 0%, #fff 62%);
+}
+
+.metrics > li:nth-child(4) :global(article) {
+  border-color: color-mix(in srgb, var(--color-brand-secondary) 36%, white);
+  background: linear-gradient(180deg, #e2efe7 0%, #fff 62%);
+}
+
+.metrics > li:nth-child(1) :global(article:hover) {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 32%, white);
+}
+
+.metrics > li:nth-child(2) :global(article:hover) {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, white);
+}
+
+.metrics > li:nth-child(3) :global(article:hover) {
+  border-color: color-mix(in srgb, var(--color-info) 36%, white);
+}
+
+.metrics > li:nth-child(4) :global(article:hover) {
+  border-color: color-mix(in srgb, var(--color-brand-secondary) 36%, white);
+}
+
+/* Per-card figure accents — the numbers echo their card's color story. */
+.metrics > li:nth-child(1) > article > span:nth-of-type(1) {
+  color: var(--color-brand-primary);
+}
+
+.metrics > li:nth-child(2) > article > span:nth-of-type(1) {
+  color: var(--color-accent-strong);
+}
+
+.metrics > li:nth-child(3) > article > span:nth-of-type(1) {
+  color: var(--color-info);
+}
+
+.metrics > li:nth-child(4) > article > span:nth-of-type(1) {
+  color: var(--color-brand-secondary);
+}
+
+/* Per-card icon tiles — solid brand washes so each headline reads at a glance. */
+.metrics > li > article > div:first-child > span:first-child {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: #fff;
+}
+
+.metrics > li:nth-child(1) > article > div:first-child > span:first-child {
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+}
+
+.metrics > li:nth-child(2) > article > div:first-child > span:first-child {
+  background: linear-gradient(135deg, var(--color-accent-strong), var(--color-accent));
+}
+
+.metrics > li:nth-child(3) > article > div:first-child > span:first-child {
+  background: linear-gradient(135deg, var(--color-info), #4a9ec4);
+}
+
+.metrics > li:nth-child(4) > article > div:first-child > span:first-child {
+  background: linear-gradient(135deg, var(--color-brand-secondary), var(--color-success));
 }
 
 .noticeBody {
