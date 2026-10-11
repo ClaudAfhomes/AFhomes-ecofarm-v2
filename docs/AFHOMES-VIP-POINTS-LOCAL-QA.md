@@ -269,3 +269,9 @@ No shared/production writes, migration, export, reset, backup change, Git commit
 ## Final commit/push audit (2026-10-11)
 
 See docs/AFHOMES-VIP-POINTS-COMMIT-READINESS.md for the latest verified candidate, receipt reconciliation fixes, 197 focused test passes, 83 disposable SQL/HTTP checks plus cleanup, safe staging allowlist and Vercel/schema blockers. This supersedes earlier receipt-orphan and remaining-task summaries. No files were staged or committed.
+
+## Local merge and legacy preservation continuation (2026-10-11)
+See docs/AFHOMES-LEGACY-POINTS-PRESERVATION.md. Local merge checkpoint f8a1c61 is complete; owner-confirmed Staff/Customer login is preserved. The exact 26-file migration rehearsal preserves 167000 points and repairs five stale derived caches, with 50 real PostgreSQL/API checks passing. Shared schema is unchanged. Encrypted actual backup captured; full restore is blocked by missing supabase_vault in disposable PostgreSQL. No push/deployment/shared migration.
+
+## Actual backup restore infrastructure gate (2026-10-11 21:10 PHT)
+See docs/AFHOMES-ACTUAL-RESTORE-BLOCKER.md. Actual custom backup metadata/checksum verified; encrypted role/ACL/schema supplements captured read-only. Local full restore is BLOCKED: no Docker/Podman/WSL runtime, Windows native Supabase unsupported. No plain PostgreSQL retry or actual-restored-copy migration was performed. Fresh focused migration regression: 17/17 PASS. Shared Supabase is unchanged.

@@ -39,6 +39,7 @@
  * directory, so it must be invoked from the repository root. `--check` prints
  * the resolved directory so a wrong CWD is immediately visible.
  */
+import { assertOrdinaryMigrationSafety } from './migration-safety.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnvFile } from 'node:process';
@@ -203,17 +204,14 @@ async function main(): Promise<void> {
     const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
     try {
       await client.connect();
-      await client.query('create schema if not exists supabase_migrations');
-      await client.query(
-        'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
-      );
       const selected = files[0]!;
       const selectedVersion = selected.split('_', 1)[0]!;
       const isApplied = async (version: string) =>
         (
-          await client.query('select 1 from supabase_migrations.schema_migrations where version=$1', [
-            version,
-          ])
+          await client.query(
+            'select 1 from supabase_migrations.schema_migrations where version=$1',
+            [version],
+          )
         ).rowCount
           ? true
           : false;
@@ -299,6 +297,15 @@ async function main(): Promise<void> {
     throw error;
   }
   try {
+    const historyExists = await client.query(
+      "select to_regclass('supabase_migrations.schema_migrations') relation",
+    );
+    const recorded = historyExists.rows[0]?.relation
+      ? (await client.query('select version from supabase_migrations.schema_migrations')).rows.map(
+          (row: { version: string }) => row.version,
+        )
+      : [];
+    assertOrdinaryMigrationSafety(files, recorded);
     await client.query('create schema if not exists supabase_migrations');
     await client.query(
       'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
