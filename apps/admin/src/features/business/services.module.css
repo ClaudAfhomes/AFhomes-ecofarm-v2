@@ -1,0 +1,61 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--space-4);
+}
+.card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--color-surface);
+}
+.photo {
+  width: 100%;
+  max-height: 220px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+/* The pre-upload preview. `max-inline-size` keeps a very wide image inside the
+   dialog on a 360px phone instead of forcing a horizontal scrollbar. */
+.preview {
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+.preview .photo {
+  max-width: 240px;
+}
+.preview figcaption {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+.form {
+  display: grid;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+.form label {
+  display: grid;
+  gap: var(--space-2);
+}
+.form input:not([type='checkbox']),
+.form textarea,
+.form select {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  width: 100%;
+  box-sizing: border-box;
+}

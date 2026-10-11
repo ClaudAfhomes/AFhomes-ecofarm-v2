@@ -37,6 +37,16 @@ export const afHomesModuleKeySchema = z.enum([
   'network.withdrawals',
   'operations.redemption',
   'operations.catalog',
+  // Operational Services selling. Deliberately NOT `sales.customers` create or
+  // update: those govern customer creation and the whole customer record, and a
+  // GSD who sells Teppanyaki must not inherit either. It also does not grant
+  // verification, which stays on `finance.payment_verification` update.
+  'operations.sales',
+  // Operational Services RECEIPTS. Deliberately NOT `finance.payment_verification`,
+  // which is the VIP-card verification key and belongs to a different workflow:
+  // the two payment systems are independent, and neither key authorises the other.
+  // `employee` holds no row here at all, so a GSD can never verify a receipt.
+  'operations.payments',
   'governance.audit',
   'governance.customer_import',
   'governance.config',

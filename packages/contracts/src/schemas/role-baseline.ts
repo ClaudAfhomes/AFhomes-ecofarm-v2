@@ -111,7 +111,22 @@ export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
 export const MIGRATION_SEEDED_GRANTS: readonly {
   moduleKey: AfHomesModuleKey;
   roles: readonly string[];
-}[] = [{ moduleKey: 'governance.customer_import', roles: ['admin'] }];
+}[] = [
+  { moduleKey: 'governance.customer_import', roles: ['admin'] },
+  // Operational Services selling, seeded by 20261105000001. `employee` (the GSD)
+  // holds view+create: enough to record a service sale and a receipt, and
+  // deliberately NOT update/delete, because no operation needs them. `finance`
+  // holds view only, because Finance verifies those receipts under
+  // finance.payment_verification update and must never originate a sale. It is
+  // seeded rather than folded into the matrix above because it arrived after the
+  // baseline was reviewed, and rewriting that matrix would rewrite history.
+  { moduleKey: 'operations.sales', roles: ['employee', 'admin', 'finance'] },
+  // Operational Services RECEIPT verification, seeded by 20261106000001.
+  // Deliberately its own key rather than the VIP-card
+  // `finance.payment_verification`: the two payment workflows stay independent,
+  // and `employee` is absent, so a GSD can never verify their own receipt.
+  { moduleKey: 'operations.payments', roles: ['finance', 'admin'] },
+];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {
   admin: [

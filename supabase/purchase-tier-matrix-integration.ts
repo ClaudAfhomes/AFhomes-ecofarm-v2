@@ -154,9 +154,23 @@ export async function runPurchaseTierMatrixChecks(world: {
           state.membership_count === 1 &&
           state.payment_count === 2,
       );
+      // REBUILD: the membership TERM still matches the frozen sale, but points
+      // are no longer allocated at activation - the member starts at zero and
+      // earns only from an eligible completed purchase. The frozen
+      // yearly_points term is still carried on the sale as contract metadata.
       check(
-        `${label}: points and membership term match frozen terms`,
-        Number(state.points) === terms.yearly_points && state.validity === terms.validity_months,
+        `${label}: membership term matches frozen terms`,
+        state.validity === terms.validity_months,
+      );
+      check(
+        `${label}: activation awards ZERO points (rebuild rule)`,
+        Number(state.points) === 0,
+        `balance ${state.points}`,
+      );
+      check(
+        `${label}: the yearly points term is still frozen on the sale`,
+        terms.yearly_points > 0,
+        `yearly_points ${terms.yearly_points}`,
       );
     }
     await db.query('set constraints all immediate');

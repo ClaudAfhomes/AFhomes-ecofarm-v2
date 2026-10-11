@@ -52,7 +52,7 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * query parameter. Declared as data so adding a family is a single entry and
  * `route-coverage` can still prove every handler is reachable.
  */
-const BUSINESS_FAMILIES = [
+export const BUSINESS_FAMILIES = [
   {
     prefix: 'ost-accreditation',
     module: 'ost-accreditation',
@@ -130,6 +130,23 @@ const BUSINESS_FAMILIES = [
     load: () => import('../_handlers/auth-portals.js'),
   },
   { prefix: 'customer', module: 'customer', load: () => import('../_handlers/customer-portal.js') },
+  // Points EARNING: recording a purchase, creating and reissuing an earning claim,
+// the customer's own QR claim, and the catalog/rules that decide what earns.
+  //
+  // The prefix is `earning`, NOT `points`. `/points` is ALREADY owned by
+  // memberships.ts (the per-member account, ledger and card), and selectHandler
+  // returns the FIRST matching family - so declaring a second `points` family
+  // shadowed this one entirely and every route below 404'd into the wrong handler
+  // while its unit tests stayed green, because those call the handler directly and
+  // never go through selectHandler. `router.spec.ts` now asserts prefix uniqueness
+  // and the dispatch target, so this cannot happen silently again.
+  //
+  // It reuses the EXISTING module keys - `sales.customers`,
+  // `operations.redemption` and `operations.catalog` - so the points rebuild adds
+  // NO new authorization vocabulary and the eight existing authorization
+  // invariants are untouched. The module field only builds the routeKey; each
+  // handler authorizes its own module and action.
+  { prefix: 'earning', module: 'operations.redemption', load: () => import('../_handlers/points.js') },
   // Staff redemption. Reuses the Phase 1 `operations.redemption` and
   // `operations.catalog` module keys, so Phase 4 adds NO new authorization
   // vocabulary. `items` and `history` live under the same prefix, and because a

@@ -118,7 +118,6 @@ function baseTables(over: Record<string, Row[]> = {}) {
         renewal_due_at: inHours(24 * 365 - 10),
         issued_at: agoHours(10),
         created_at: agoHours(10),
-        card_plans: { name: 'Gold', code: 'GOLD' },
       },
       {
         id: OTHER_MEMBERSHIP_ID,
@@ -136,8 +135,14 @@ function baseTables(over: Record<string, Row[]> = {}) {
         renewal_due_at: inHours(24 * 365 - 20),
         issued_at: agoHours(20),
         created_at: agoHours(20),
-        card_plans: { name: 'Bronze', code: 'BRONZE' },
       },
+    ],
+    // A REAL relation. These rows used to carry `card_plans: { name: 'Gold' }`
+    // inline, so the `card_plans!inner(name)` embed resolved nothing and the
+    // handler read the fixture's own copy - every productName assertion was green
+    // without the join ever running.
+    card_plans: [
+      { id: '33333333-3333-4333-8333-333333333333', code: 'GOLD', name: 'Gold' },
     ],
     points_accounts: [
       {
@@ -365,6 +370,41 @@ async function callPortal(path: string, token = TOKEN, method = 'GET'): Promise<
     res as never,
   );
   return state;
+}
+
+/**
+ * The points summary now comes from public.customer_points_position, which
+ * computes spendable and remaining capacity in SQL. This scripts that function so
+ * a test can ask for a position WITH debt without restating every fixture.
+ *
+ * The figures are produced by SQL, so they are scripted here rather than derived
+ * in the test: a client-side subtraction would be the very thing this shape
+ * exists to prevent.
+ */
+function installPointsPosition(overrides: Record<string, unknown> = {}) {
+  install({
+    rpcs: [
+      {
+        fn: 'customer_points_position',
+        result: () => [
+          {
+            membership_id: MEMBERSHIP_ID,
+            balance: '60000',
+            annual_cap: '100000',
+            remaining_earning_capacity: '40000',
+            spendable: '60000',
+            reversal_debt: '0',
+            period_start: '2026-01-01',
+            period_end: '2027-01-01',
+            tier: 'GOLD',
+            earned_this_period: '60000',
+            redeemed_this_period: '0',
+            ...overrides,
+          },
+        ],
+      },
+    ],
+  });
 }
 
 /** No `Authorization` header and no auth cookie at all. */
@@ -1010,18 +1050,106 @@ describe('customer membership summary', () => {
 describe('customer points', () => {
   beforeEach(() => install());
 
-  it('returns the caller own points summary', async () => {
-    const s = await callPortal('points');
+  it('returns the caller own points POSITION', async () => {
+    installPointsPosition();
+    const s = await callPortal('points/position');
     expect(s.status).toBe(200);
+    // THREE figures, not one. `spendable` is what may be used right now;
+    // `remainingEarningCapacity` is a ceiling on future earnings and is NOT
+    // spendable. Collapsing them would tell a capped member they have no points.
     expect(body(s)).toMatchObject({
       membershipId: MEMBERSHIP_ID,
       balance: 60000,
-      lifetimeAllocated: 60000,
-      lifetimeRedeemed: 0,
+      spendable: 60000,
+      remainingEarningCapacity: 40000,
+      annualCap: 100000,
+      reversalDebt: 0,
+      tier: 'GOLD',
     });
   });
 
+  it('reports outstanding reversal debt separately from the balance', async () => {
+    // spendable is 60000 - 15000, computed by SQL. The handler never does that
+    // subtraction itself, so a client bug could not flatter the figure.
+    installPointsPosition({ reversal_debt: '15000', spendable: '45000' });
+    const s = await callPortal('points/position');
+    expect(s.status).toBe(200);
+    expect(body(s)).toMatchObject({
+      balance: 60000,
+      reversalDebt: 15000,
+      spendable: 45000,
+    });
+  });
+
+  it('keeps the LEGACY points summary frozen for deployed clients', async () => {
+    // The five fields and their meanings are a published contract. `balance` is
+    // the RAW account balance here, not spendable: this endpoint has never
+    // subtracted debt, and quietly starting to would change what a deployed
+    // client displays without any signal.
+    install();
+    const s = await callPortal('points');
+    expect(s.status).toBe(200);
+    expect(Object.keys(body(s) as Record<string, unknown>).sort()).toEqual([
+      'balance',
+      'lifetimeAllocated',
+      'lifetimeRedeemed',
+      'membershipId',
+      'updatedAt',
+    ]);
+    expect(body(s)).toMatchObject({ balance: 60000, lifetimeAllocated: 60000, lifetimeRedeemed: 0 });
+    // It must NOT have quietly become the position shape.
+    expect(body(s)).not.toHaveProperty('spendable');
+    expect(body(s)).not.toHaveProperty('remainingEarningCapacity');
+    expect(body(s)).not.toHaveProperty('reversalDebt');
+  });
+
+  it('exposes the three figures on the separate position endpoint', async () => {
+    installPointsPosition();
+    const s = await callPortal('points/position');
+    expect(s.status).toBe(200);
+    expect(body(s)).toMatchObject({
+      balance: 60000,
+      spendable: 60000,
+      remainingEarningCapacity: 40000,
+      annualCap: 100000,
+      reversalDebt: 0,
+      tier: 'GOLD',
+    });
+  });
+
+  it('reports reversal debt on the position endpoint without touching the legacy one', async () => {
+    installPointsPosition({ reversal_debt: '15000', spendable: '45000' });
+    const position = await callPortal('points/position');
+    expect(body(position)).toMatchObject({ balance: 60000, reversalDebt: 15000, spendable: 45000 });
+
+    // The legacy endpoint keeps reporting the raw balance. Changing it would be
+    // the silent contract break this split exists to avoid.
+    install();
+    const legacy = await callPortal('points');
+    expect(body(legacy)).toMatchObject({ balance: 60000 });
+    expect(body(legacy)).not.toHaveProperty('reversalDebt');
+  });
+
+  it('authorizes the position endpoint identically to the legacy one', async () => {
+    installPointsPosition();
+    expect((await callPortal('points/position')).status).toBe(200);
+    // Same ownership gate: another member's token still cannot read it.
+    const other = await callPortal('points/position', OTHER_TOKEN);
+    expect(other.status).toBe(200);
+    expect(body(other).membershipId).not.toBe(OTHER_MEMBERSHIP_ID);
+    // And anonymous is refused, exactly as for `points`.
+    expect((await callPortalAnonymous('points/position')).status).toBe(401);
+  });
+
+  it('shows zeroes rather than an error for a card with no points account yet', async () => {
+    install({ rpcErrors: { customer_points_position: { message: 'POINTS_ACCOUNT_NOT_FOUND' } } });
+    const s = await callPortal('points/position');
+    expect(s.status).toBe(200);
+    expect(body(s)).toMatchObject({ balance: 0, spendable: 0, reversalDebt: 0 });
+  });
+
   it('never shows another member points', async () => {
+    installPointsPosition();
     const s = await callPortal('points');
     expect(body(s).balance).not.toBe(25000);
     expect(body(s).membershipId).not.toBe(OTHER_MEMBERSHIP_ID);
@@ -1131,6 +1259,29 @@ describe('customer and staff authorisation never mix', () => {
     install({
       tables: t,
       tokens: { 'tok-staff-customer': { id: '00000000-0000-4000-8000-0000000000bb', email: 'vd@afhomes.test', email_confirmed_at: agoHours(5) } },
+      // The points position is a scripted function, so it has to be scripted for
+      // this principal too. Ownership is unchanged: the staff account still reads
+      // ONE customer's points and no staff capability.
+      rpcs: [
+        {
+          fn: 'customer_points_position',
+          result: () => [
+            {
+              membership_id: MEMBERSHIP_ID,
+              balance: '60000',
+              annual_cap: '100000',
+              remaining_earning_capacity: '40000',
+              spendable: '60000',
+              reversal_debt: '0',
+              period_start: '2026-01-01',
+              period_end: '2027-01-01',
+              tier: 'GOLD',
+              earned_this_period: '60000',
+              redeemed_this_period: '0',
+            },
+          ],
+        },
+      ],
     });
     // Customer portal works: ownership only.
     expect((await callPortal('', 'tok-staff-customer')).status).toBe(200);

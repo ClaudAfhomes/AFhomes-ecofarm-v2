@@ -19,6 +19,10 @@ import { BusinessCustomersPage } from '../features/business/BusinessCustomersPag
 import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
 import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
+import { BusinessPointsPage } from '../features/business/BusinessPointsPage';
+import { PointsRulesPage } from '../features/business/PointsRulesPage';
+import { SalesRecordsPage } from '../features/business/SalesRecordsPage';
+import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
 import {
@@ -27,7 +31,7 @@ import {
   ReservationAgreementEditorPage,
   ReservationAgreementsPage,
 } from '../features/business/OfficialFormsPages';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
+import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
 import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
 import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import {
@@ -158,6 +162,20 @@ export default function App() {
                 path="/admin/finance/commissions"
                 element={protectedPage(<BusinessCommissionsPage />)}
               />
+              {/* Order is irrelevant to React Router (static segments outrank the
+                  bare prefix), but the deeper path is listed first so it reads as
+                  a child of Earn Points. */}
+              <Route path="/admin/points/records" element={protectedPage(<SalesRecordsPage />)} />
+              <Route path="/admin/points/rules" element={protectedPage(<PointsRulesPage />)} />
+              <Route
+                path="/admin/points/discount"
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
+              <Route
+                path="/admin/points/payments"
+                element={protectedPage(<PurchasePaymentsPage />)}
+              />
+              <Route path="/admin/points" element={protectedPage(<BusinessPointsPage />)} />
               <Route
                 path="/admin/finance/commissions/settings"
                 element={protectedPage(<CommissionSettingsPage />)}
@@ -178,7 +196,11 @@ export default function App() {
               />
               <Route
                 path="/admin/redemption/items"
-                element={protectedPage(<RedemptionCatalogPage />)}
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
+              <Route
+                path="/admin/redemption/legacy-history"
+                element={protectedPage(<LegacyRedemptionHistoryPage />)}
               />
               <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
               <Route path="/admin/genealogy" element={protectedPage(<GenealogyPage />)} />

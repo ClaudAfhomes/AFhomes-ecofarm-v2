@@ -210,7 +210,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(toMembership(row, true, await schemeOfSale(db, row.sale_id)));
     }
 
-    /* ---------------- points summary ---------------- */
+    /* ---------------- points summary (LEGACY SHAPE, UNCHANGED) ----------------
+     *
+     * This response is FROZEN. It is what deployed clients already validate
+     * against, so its fields and their meanings must not change:
+     *   balance          - the raw account balance
+     *   lifetimeAllocated / lifetimeRedeemed - the historical totals
+     *   updatedAt        - when the account row last changed
+     *
+     * The richer position - spendable, remaining annual earning capacity and
+     * reversal debt - lives at `points/position`, a SEPARATE endpoint, because
+     * `balance` alone cannot express them and changing this shape would break a
+     * client that is already deployed.
+     *
+     * Deliberately NOT "fixed" here: a member at their annual cap still sees a
+     * healthy `balance` here. That is correct for this endpoint, and the portal
+     * reads `points/position` for anything that needs to distinguish the three.
+     * -------------------------------------------------------------- */
     if (path === 'points' && method(req) === 'GET') {
       if (!isActiveCustomer(principal)) {
         return fail(
@@ -245,6 +261,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lifetimeAllocated: Number(account.lifetime_allocated ?? 0),
         lifetimeRedeemed: Number(account.lifetime_redeemed ?? 0),
         updatedAt: isoOrNull(account.updated_at) ?? '',
+      });
+    }
+
+    /* ---------------- points position (NEW, additive) ----------------
+     *
+     * The same ownership, the same active-customer gate and the same membership
+     * lookup as `points` - this is an ADDITIVE endpoint, not a replacement, and it
+     * authorizes identically.
+     *
+     * Three figures, never collapsed: balance, what is SPENDABLE now, and what may
+     * still be EARNED this period. The last is a CEILING, not money: a member who
+     * has hit their annual limit has capacity 0 and a healthy spendable balance,
+     * and rendering that as one number would tell them they have run out when they
+     * have not. Reversal debt is reported on its own because it reduces only what
+     * may be spent - never what may be earned.
+     *
+     * Every figure is computed by public.customer_points_position, which calls
+     * the SAME ensure_points_period the earning path uses. The browser never does
+     * this arithmetic.
+     * -------------------------------------------------------------- */
+    if (path === 'points/position' && method(req) === 'GET') {
+      if (!isActiveCustomer(principal)) {
+        return fail(
+          res,
+          'FORBIDDEN',
+          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          403,
+        );
+      }
+      const membership = await activeMembershipOf(db, principal.customerId);
+      if (!membership) return fail(res, 'NOT_FOUND', 'No active membership found', 404);
+
+      const { data, error } = await db.rpc('customer_points_position', {
+        p_membership_id: membership.id,
+      });
+      if (error) {
+        // A membership with no points account yet is a real state, not a failure:
+        // a brand-new card has nothing accrued, so the member sees zeroes.
+        if (/POINTS_ACCOUNT_NOT_FOUND/.test(error.message ?? '')) {
+          return res.status(200).json({
+            membershipId: membership.id,
+            balance: 0,
+            annualCap: 0,
+            remainingEarningCapacity: 0,
+            spendable: 0,
+            reversalDebt: 0,
+            periodStart: '',
+            periodEnd: '',
+            tier: 'BRONZE',
+            earnedThisPeriod: 0,
+            redeemedThisPeriod: 0,
+          });
+        }
+        throw error;
+      }
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      if (!row) return fail(res, 'NOT_FOUND', 'No points account found', 404);
+      return res.status(200).json({
+        membershipId: row.membership_id,
+        balance: Number(row.balance ?? 0),
+        annualCap: Number(row.annual_cap ?? 0),
+        remainingEarningCapacity: Number(row.remaining_earning_capacity ?? 0),
+        spendable: Number(row.spendable ?? 0),
+        reversalDebt: Number(row.reversal_debt ?? 0),
+        periodStart: isoOrNull(row.period_start) ?? '',
+        periodEnd: isoOrNull(row.period_end) ?? '',
+        tier: row.tier ?? 'BRONZE',
+        earnedThisPeriod: Number(row.earned_this_period ?? 0),
+        redeemedThisPeriod: Number(row.redeemed_this_period ?? 0),
       });
     }
 

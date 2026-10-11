@@ -23,8 +23,7 @@ import { DocumentsPage } from '../features/documents/DocumentsPage';
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { MembershipsPage } from '../features/memberships/MembershipsPage';
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
-import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
+import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
 import { AuditPage } from '../features/reports/AuditPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
 
@@ -70,8 +69,6 @@ vi.mock('../features/business/services', () => ({
 vi.mock('../features/redemption/services', () => ({
   getRedemptionItems: vi.fn(async () => []),
   getRedemptions: vi.fn(async () => []),
-  createRedemptionItem: vi.fn(),
-  updateRedemptionItem: vi.fn(),
 }));
 vi.mock('../features/ost/services', () => ({
   getOstApplications: vi.fn(async () => []),
@@ -263,13 +260,8 @@ describe('FilterBar adoption', () => {
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
   });
 
-  it('catalog renders search + status in one toolbar', async () => {
-    await showsFilterBar(<RedemptionCatalogPage />);
-    expect(screen.getByLabelText('Search catalog items')).toBeInTheDocument();
-  });
-
   it('history renders membership, item, and date filters in one toolbar', async () => {
-    await showsFilterBar(<RedemptionHistoryPage />);
+    await showsFilterBar(<LegacyRedemptionHistoryPage />);
     expect(screen.getByLabelText('Membership number')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });

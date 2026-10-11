@@ -85,6 +85,54 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
     expect(screen.queryByText('protected content')).not.toBeInTheDocument();
   });
 
+  /**
+   * The Operational Services split, asserted on the NAVIGATION rather than on a
+   * page. A GSD holds `operations.sales` (record a sale, record a receipt) and
+   * must therefore SEE the sale screen while being denied the two screens that
+   * would let them administer pricing or verify their own money.
+   */
+  it('shows a GSD the sale screen but hides the verification screen', () => {
+    const gsd: AfHomesPermission[] = [
+      view('dashboard.view'),
+      { ...view('operations.sales'), canCreate: true },
+      view('operations.redemption'),
+      view('operations.catalog'),
+    ];
+    // The declared navigation, which is where the labels actually live; the
+    // filtered sidebar union carries dividers as well and is checked below.
+    const shown = navItemsForPermissions(gsd, 'employee');
+    const declared = ADMIN_NAV_ITEMS.filter((item) =>
+      shown.some((s) => s.to === item.to),
+    ).flatMap((item) => [
+      item.label,
+      // Children are filtered by the SAME permission the sidebar uses, so this
+      // reports what a GSD actually sees rather than what is merely declared.
+      ...(item.dropdown ?? [])
+        .filter((child) => canViewModule(gsd, child.module))
+        .map((child) => child.label),
+    ]);
+    const labels = declared.join(' | ');
+
+    // Selling is the GSD's job.
+    expect(labels).toContain('New Service Sale');
+    // `employee` holds `operations.catalog` VIEW, because it needs the catalog to
+    // sell from and redeem against, so the Products & Services screen stays
+    // readable: read is enough to explain a sale. It is WITHHELD at the write
+    // controls instead, and the server refuses those writes regardless.
+    expect(labels).toContain('Products & Services');
+    // Verification is never the seller's, on its own key the GSD does not hold.
+    expect(labels).not.toContain('Sales Records & Verification');
+  });
+
+  it('denies a GSD the verification route directly, not only in the nav', async () => {
+    renderPath(
+      [view('dashboard.view'), { ...view('operations.sales'), canCreate: true }, view('operations.redemption')],
+      '/admin/points/payments',
+    );
+    expect(await screen.findByText('Access denied')).toBeInTheDocument();
+    expect(screen.queryByText('protected content')).not.toBeInTheDocument();
+  });
+
   it('agrees between the nav link and the direct route for the same module', async () => {
     const withRoles: AfHomesPermission[] = [view('dashboard.view'), view('organization.staff')];
     // The link is hidden...

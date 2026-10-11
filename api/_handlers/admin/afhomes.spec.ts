@@ -273,13 +273,21 @@ describe('GET /admin/afhomes/session', () => {
   });
 
   it('resolves a Super Admin session with every module granted', async () => {
+    const db = install();
     const state = await call({ afPath: 'session', token: TOKEN.superAdmin });
     expect(state.status).toBe(200);
     const body = state.body as Json;
     expect(body.roleSlug).toBe('super_admin');
     const perms = body.permissions as { moduleKey: string; canView: boolean }[];
-    expect(perms).toHaveLength(22);
+    // Super Admin is granted every module by SLUG rather than by row, so the
+    // meaningful assertion is "one grant per declared module", where the
+    // declared vocabulary is the fixture's own modules table. A hardcoded
+    // literal here silently passes for a different module set.
+    expect(perms).toHaveLength(db.rows('modules').length);
     expect(perms.every((p) => p.canView)).toBe(true);
+    // The Operational Services capability must be reachable by Super Admin, or
+    // the GSD sale workflow would be invisible to the one role that owns it.
+    expect(perms.some((p) => p.moduleKey === 'operations.sales')).toBe(true);
   });
 
   it('resolves a custom role with exactly its granted matrix', async () => {

@@ -726,6 +726,17 @@ export class FakeSupabase {
       const selectOp = ops.find((o) => o.t === 'select') as
         { t: 'select'; cols: string; count: boolean } | undefined;
       if (selectOp) {
+        // KNOWN GAP, deliberately left as-is: this fake returns the WHOLE row and
+        // does not project to the selected columns, so a handler that spreads a
+        // selected row can leak an unselected column and no assertion here will
+        // notice. Real PostgREST projects. Fixing it properly means reimplementing
+        // its grammar (`alias:col`, casts, spread `*`) and repairing three specs
+        // whose fixtures carry a PRE-BAKED embed property that was silently masking
+        // a broken `embed()` - a real finding, but a separate piece of work.
+        //
+        // Until then, a handler that must not leak a column must not spread: pick
+        // its fields explicitly. `points.ts` does, and `points.spec.ts` asserts
+        // the requested column list directly rather than trusting the fake.
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols, ops) }));
       }
       // Record the read shape (columns only, never row data) so tests can

@@ -23,7 +23,26 @@
 -- storage object delivery. This pass validates schema, constraints, functions,
 -- RLS and financial arithmetic; it does not validate authentication.
 
+-- Supabase exposes pgcrypto under BOTH names: the `extensions` schema (which the
+-- migrations put on their search_path, and which newer SQL calls qualified) and
+-- the default `public` schema that older unqualified calls resolve against.
+-- Reproducing only one of the two breaks migrations that predate the other, so
+-- both are provided here.
 create extension if not exists pgcrypto;
+create schema if not exists extensions;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'extensions' and p.proname = 'digest'
+  ) then
+    execute 'create function extensions.digest(bytea, text) returns bytea'
+      ' language sql immutable strict as $f$ select public.digest($1, $2) $f$';
+    execute 'create function extensions.digest(text, text) returns bytea'
+      ' language sql immutable strict as $f$ select public.digest($1::bytea, $2) $f$';
+  end if;
+end $$;
 
 -- Platform roles. NOLOGIN: these are switched into with SET ROLE, never logged
 -- into directly, exactly as on Supabase.

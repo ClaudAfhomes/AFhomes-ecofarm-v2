@@ -2,12 +2,22 @@ import { runPurchaseTierMatrixChecks } from './purchase-tier-matrix-integration.
 import { runIdempotencyChecks } from './idempotency-integration.js';
 import { runOstAccreditationChecks } from './ost-accreditation-integration.js';
 import { runPurchaseTermsChecks } from './purchase-terms-integration.js';
-import { runReservationPurchaseChecks, makePurchaseFixtures } from './reservation-purchase-integration.js';
+import {
+  runReservationPurchaseChecks,
+  makePurchaseFixtures,
+} from './reservation-purchase-integration.js';
 import { runReservationFinanceChecks } from './reservation-finance-integration.js';
 import { runPurchaseFinalizationChecks } from './purchase-finalization-integration.js';
 import { runActivationIntegrationChecks } from './activation-integration.js';
 import { runPurchaseConcurrencyChecks } from './purchase-concurrency-integration.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
+// The installed role_permissions rows are asserted against the CONTRACT, not
+// against hand-typed numbers, so a later migration that seeds a grant cannot
+// leave a stale literal behind that still passes for the wrong reason.
+import {
+  DEFAULT_ROLE_BASELINE,
+  MIGRATION_SEEDED_GRANTS,
+} from '../packages/contracts/src/schemas/role-baseline.js';
 /**
  * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
  *
@@ -165,6 +175,52 @@ const throws = async (name: string, fn: () => Promise<unknown>) => {
     return message;
   }
   return '';
+};
+
+/**
+ * An expected-error probe on the SHARED connection.
+ *
+ * The suite holds one long transaction, and a denied statement aborts it. A
+ * bare `throws` therefore poisons every later statement with "current
+ * transaction is aborted", which is both a false failure and — because the
+ * connection is left mid-abort when the process winds down — a way for a run
+ * to hang instead of failing. Each probe gets its own SAVEPOINT and is rolled
+ * back to on the error path, exactly as the RLS denial probes do.
+ *
+ * This never suppresses a failure: the probe still FAILS the check when the
+ * statement unexpectedly succeeds.
+ */
+let isolatedProbeSeq = 0;
+const throwsIsolated = async (name: string, fn: () => Promise<unknown>) => {
+  // The suite opens and closes transactions in several places, so a probe must
+  // work either way. Inside a transaction a denied statement aborts it, so the
+  // probe needs its own SAVEPOINT. Outside one, statements autocommit and a
+  // savepoint is simply illegal; attempting it is harmless because there is no
+  // transaction to abort, so the fallback is safe rather than a suppression.
+  const savepoint = `points_probe_${isolatedProbeSeq++}`;
+  let inTransaction = true;
+  try {
+    await db.query(`savepoint ${savepoint}`);
+  } catch {
+    inTransaction = false;
+  }
+
+  let message = '';
+  try {
+    await fn();
+    check(name, false, 'expected an error, but the call succeeded');
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+    check(name, true, message.split('\n')[0]!.slice(0, 90));
+  }
+
+  // On both paths, so an unexpected success cannot leave a doomed transaction
+  // behind for everything that follows.
+  if (inTransaction) {
+    await db.query(`rollback to savepoint ${savepoint}`);
+    await db.query(`release savepoint ${savepoint}`);
+  }
+  return message;
 };
 
 /**
@@ -463,6 +519,15 @@ async function main(): Promise<void> {
     db = new Client({ connectionString: target.url });
     db.on('error', () => {});
     await db.connect();
+    // Bound every statement on this connection. Without these a lock wait is
+    // unbounded, so a single mis-ordered fixture turns a failing run into a
+    // HANGING one that never reports a result. statement_timeout caps query
+    // execution; lock_timeout caps time spent waiting for another transaction.
+    // Both surface as an ordinary error the harness records, so a run always
+    // terminates with a verdict instead of stalling.
+    await db.query(`set statement_timeout = '120s'`);
+    await db.query(`set lock_timeout = '15s'`);
+    await db.query(`set idle_in_transaction_session_timeout = '60s'`);
     await captureBaseline();
 
     /* ---------------------------------------------------------------- */
@@ -1591,9 +1656,16 @@ async function main(): Promise<void> {
     );
     check('  QR token was generated', !!activation.qr_token);
     check('  fallback code was generated', !!activation.fallback_code);
-    eq(
-      '  annual points allocated from the snapshot',
-      String(activation.points_allocated),
+    // REBUILD: activation awards ZERO. This assertion previously required the
+    // yearly_points snapshot to be credited at activation. That behaviour is
+    // exactly what the rebuild removes, so the test is INVERTED rather than
+    // deleted: it now pins the new core rule, which is that a newly activated
+    // member starts at zero and earns points only from an eligible completed
+    // purchase. The snapshot is still frozen on the sale as contract metadata.
+    eq('  activation awards ZERO points (rebuild rule)', String(activation.points_allocated), '0');
+    check(
+      '  the yearly_points snapshot is still frozen on the sale, unread by activation',
+      String(gold.yearly_points) !== '0',
       String(gold.yearly_points),
     );
     check('  not flagged as already active', activation.already_active === false);
@@ -1635,16 +1707,10 @@ async function main(): Promise<void> {
       'select balance::text, lifetime_allocated::text from public.points_accounts where membership_id = $1',
       [membershipId],
     );
-    eq(
-      'points account balance = official Gold yearly points',
-      pointsAccount.balance,
-      String(gold.yearly_points),
-    );
-    eq(
-      '  lifetime allocated = official Gold yearly points',
-      pointsAccount.lifetime_allocated,
-      String(gold.yearly_points),
-    );
+    // REBUILD: the account exists (a membership must have one) but starts at
+    // zero, and the ledger records NO activation award at all.
+    eq('a newly activated member starts at ZERO points', pointsAccount.balance, '0');
+    eq('  lifetime allocated is zero at activation', pointsAccount.lifetime_allocated, '0');
 
     const ledger = await db.query<{
       entry_type: string;
@@ -1657,12 +1723,43 @@ async function main(): Promise<void> {
        from public.points_ledger where account_id = (select id from public.points_accounts where membership_id = $1)`,
       [membershipId],
     );
-    eq('exactly one allocation ledger entry', ledger.rows.length, 1);
-    eq('  entry type', ledger.rows[0]!.entry_type, 'annual_allocation');
-    eq('  amount', ledger.rows[0]!.amount, String(gold.yearly_points));
-    eq('  balance_after', ledger.rows[0]!.balance_after, String(gold.yearly_points));
-    eq('  reference type', ledger.rows[0]!.reference_type, 'membership');
-    eq('  reference id is the membership', ledger.rows[0]!.reference_id, membershipId);
+    eq('activation writes NO points ledger entry', ledger.rows.length, 0);
+
+    // The account must still exist, and must be reconciled against its ledger.
+    eq(
+      'the points ledger reconciles the new account',
+      (
+        await one<{ n: number }>(
+          `select count(*)::int n from public.points_accounts pa
+            where pa.membership_id = $1
+              and pa.balance - pa.reversal_debt <> coalesce(
+                    (select sum(l.amount) from public.points_ledger l where l.account_id = pa.id), 0)`,
+          [membershipId],
+        )
+      ).n,
+      0,
+    );
+    // The period is opened at activation, from the stored Manila anchor.
+    const period = await one<{ period_start: string; annual_points_cap: string }>(
+      `select period_start::text, annual_points_cap::text
+         from public.points_periods
+        where account_id = (select id from public.points_accounts where membership_id = $1)`,
+      [membershipId],
+    );
+    check(
+      'activation opens the first points period',
+      !!period && period.annual_points_cap === '60000',
+      JSON.stringify(period),
+    );
+    check(
+      'the points-year anchor is stored as a Manila date',
+      !!(
+        await one<{ a: string | null }>(
+          `select points_anniversary::text a from public.memberships where id = $1`,
+          [membershipId],
+        )
+      ).a,
+    );
 
     const saleAfter = await one<{ status: string }>(
       'select status from public.card_sales where id = $1',
@@ -1712,7 +1809,9 @@ async function main(): Promise<void> {
     );
     eq('  exactly one membership', counts.m, 1);
     eq('  exactly one points account', counts.a, 1);
-    eq('  exactly one allocation entry', counts.l, 1);
+    // REBUILD: idempotent re-entry must still create NO ledger entry. The
+    // account exists once and stays at zero; a second activation awards nothing.
+    eq('  repeated activation writes NO allocation entry', counts.l, 0);
     eq('  exactly one commission', counts.c, 1);
 
     /* ---------------------------------------------------------------- */
@@ -1770,26 +1869,32 @@ async function main(): Promise<void> {
             (select status from public.card_sales where id = $1) as s`,
       [rollSale],
     );
-    // Force a deterministic downstream failure: a trigger that rejects the points
-    // ledger insert. Everything the function does BEFORE that insert must roll
-    // back with it, leaving no partial state.
+    // Force a deterministic downstream failure with a trigger.
+    //
+    // REBUILD: this used to reject the points_ledger insert. Activation no
+    // longer writes a ledger row at all, so that fault could never fire and the
+    // atomicity proof was vacuous - the call simply succeeded. The points ACCOUNT
+    // insert is used instead: activation still performs it (at zero), it still
+    // sits after the membership insert and the verified-payment re-check, and
+    // failing it must roll all of that back. The property under test is
+    // unchanged: a failure anywhere in the function leaves no partial state.
     await db.query(
-      `create or replace function public.__test_force_ledger_failure() returns trigger
-       language plpgsql as $$ begin raise exception 'forced ledger failure'; end $$`,
+      `create or replace function public.__test_force_points_failure() returns trigger
+       language plpgsql as $$ begin raise exception 'forced points failure'; end $$`,
     );
     await db.query(
-      `create trigger __test_block_ledger before insert on public.points_ledger
-       for each row execute function public.__test_force_ledger_failure()`,
+      `create trigger __test_block_points_account before insert on public.points_accounts
+       for each row execute function public.__test_force_points_failure()`,
     );
 
-    const rollErr = await throws('activation fails when the ledger insert fails', () =>
+    const rollErr = await throws('activation fails when the points account insert fails', () =>
       db.query('select * from public.activate_card_sale($1,$2,$3)', [
         rollSale,
         staff['finance']!,
         12,
       ]),
     );
-    check('  the forced failure propagated', /forced ledger failure/.test(rollErr), rollErr);
+    check('  the forced failure propagated', /forced points failure/.test(rollErr), rollErr);
 
     const rollAfter = await one<{ m: number; a: number; c: string; s: string }>(
       `select (select count(*)::int from public.memberships where sale_id = $1) as m,
@@ -1808,8 +1913,8 @@ async function main(): Promise<void> {
     );
     eq('  ROLLBACK: customer did not become active', rollCustStatus.status, 'prospect');
 
-    await db.query('drop trigger if exists __test_block_ledger on public.points_ledger');
-    await db.query('drop function if exists public.__test_force_ledger_failure()');
+    await db.query('drop trigger if exists __test_block_points_account on public.points_accounts');
+    await db.query('drop function if exists public.__test_force_points_failure()');
     console.log('  (fault-injection trigger removed)');
 
     /* ---------------------------------------------------------------- */
@@ -2383,6 +2488,36 @@ async function main(): Promise<void> {
 
     const memA = await mkPortalMembership(custA, 'a');
     const memB = await mkPortalMembership(custB, 'b');
+
+    // REBUILD: activation awards zero, so a portal member that must HAVE ledger
+    // rows to read is funded explicitly. The credit is a real adjustment ledger
+    // row written with the balance, so the reconciliation invariant holds for
+    // this fixture too. Without it the RLS assertions below would pass vacuously
+    // against an empty ledger.
+    const fundPortalMember = async (membershipId: string, points: number) => {
+      const accountId = (
+        await one<{ id: string }>(
+          'select id from public.points_accounts where membership_id = $1',
+          [membershipId],
+        )
+      ).id;
+      await db.query(
+        `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'adjustment', $2, 0, $2, 'test fixture: portal member funded')`,
+        [accountId, points],
+      );
+      await db.query('update public.points_accounts set balance = $2 where id = $1', [
+        accountId,
+        points,
+      ]);
+      await db.query('update public.memberships set points_balance = $2 where id = $1', [
+        membershipId,
+        points,
+      ]);
+    };
+    await fundPortalMember(memA.membershipId, 5000);
+    await fundPortalMember(memB.membershipId, 5000);
 
     /* --- self read --- */
     const ownCustomer = await asA(async (c) => {
@@ -3238,12 +3373,30 @@ async function main(): Promise<void> {
         'select * from public.activate_card_sale($1,$2,$3)',
         [saleId, staff['finance'], 12],
       );
-      // The activated member holds the plan's annual allocation. Override it when
-      // a test needs a specific balance, so the fixture stays explicit about the
-      // figure every assertion depends on.
-      if (points !== plan.yearly_points) {
-        await db.query('update public.points_accounts set balance = $2 where membership_id = $1', [
-          membership.membership_id,
+      // REBUILD: activation now awards ZERO, so a redemption fixture has to fund
+      // the member explicitly. The figure is written as a real ADJUSTMENT ledger
+      // row in the same transaction as the balance, never as a bare balance
+      // update: the reconciliation invariant
+      // (balance - reversal_debt = sum(ledger.amount)) must hold for every
+      // fixture too, or these tests would be asserting against an impossible
+      // state. The adjustment is a manual points credit, which is exactly the
+      // mechanism the product provides for it.
+      if (points !== 0) {
+        const accountId = (
+          await one<{ id: string }>(
+            'select id from public.points_accounts where membership_id = $1',
+            [membership.membership_id],
+          )
+        ).id;
+        await db.query(
+          `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, reason)
+           values ($1, 'adjustment', $2, 0, $2,
+                   'test fixture: seeded balance for redemption coverage')`,
+          [accountId, points],
+        );
+        await db.query('update public.points_accounts set balance = $2 where id = $1', [
+          accountId,
           points,
         ]);
         await db.query('update public.memberships set points_balance = $2 where id = $1', [
@@ -3408,7 +3561,14 @@ async function main(): Promise<void> {
 
     const accountA = await accountIdOf(memberA.membershipId);
     const ledgerA = await ledgerRowsOf(accountA);
-    eq('the ledger has exactly two rows: allocation and this redemption', ledgerA.rowCount, 2);
+    // Two rows: the seeded adjustment that funded the member, and this
+    // redemption. Activation itself writes none, which is the rebuild rule.
+    eq(
+      'the ledger has exactly two rows: the seeded adjustment and this redemption',
+      ledgerA.rowCount,
+      2,
+    );
+    eq('  the first row is the seeding adjustment', ledgerA.rows[0]!.entry_type, 'adjustment');
     const debit = ledgerA.rows[1]!;
     eq('the redemption entry is typed `redemption`', debit.entry_type, 'redemption');
     eq('the amount is negative', Number(debit.amount), -2000);
@@ -3493,11 +3653,7 @@ async function main(): Promise<void> {
     eq('no redemption row was created', poorRedemptions.n, 0);
     const poorLedger = await ledgerRowsOf(await accountIdOf(poor.membershipId));
     eq('no ledger debit was written', poorLedger.rowCount, 1);
-    eq(
-      '  only the original allocation remains',
-      poorLedger.rows[0]!.entry_type,
-      'annual_allocation',
-    );
+    eq('  only the original seeding row remains', poorLedger.rows[0]!.entry_type, 'adjustment');
     const poorAudit = await one<{ n: number }>(
       `select count(*)::int as n from public.audit_events
        where action = 'REDEMPTION_COMPLETED' and entity_type = 'redemption'`,
@@ -3712,7 +3868,7 @@ async function main(): Promise<void> {
     eq('no redemption row survives', rollbackRedemptions.n, 0);
     const rollbackLedger = await ledgerRowsOf(await accountIdOf(rollback.membershipId));
     eq('no ledger debit survives', rollbackLedger.rowCount, 1);
-    eq('  only the allocation remains', rollbackLedger.rows[0]!.entry_type, 'annual_allocation');
+    eq('  only the seeding adjustment remains', rollbackLedger.rows[0]!.entry_type, 'adjustment');
     const rollbackCache = await one<{ points_balance: number }>(
       'select points_balance from public.memberships where id = $1',
       [rollback.membershipId],
@@ -4195,7 +4351,9 @@ async function main(): Promise<void> {
     eq('  including every redemption they made', debits.length, 2);
     check(
       '  and the redemption numbers join through',
-      debits.every((r) => /^(RDM-\d{6}|AF-RED-[A-HJ-NP-Z2-9]{5})$/.test(String(r.redemption_number))),
+      debits.every((r) =>
+        /^(RDM-\d{6}|AF-RED-[A-HJ-NP-Z2-9]{5})$/.test(String(r.redemption_number)),
+      ),
       debits.map((r) => r.redemption_number).join(','),
     );
     check(
@@ -4311,7 +4469,7 @@ async function main(): Promise<void> {
     check(
       '  the new row is a fresh debit, not a rewrite of an old one',
       afterRows.rows.at(-1)!.entry_type === 'redemption' &&
-        afterRows.rows[0]!.entry_type === 'annual_allocation',
+        afterRows.rows[0]!.entry_type === 'adjustment',
     );
 
     // The only injection point, and it sits at the end of the last section that
@@ -4778,21 +4936,28 @@ async function main(): Promise<void> {
     // is "the file says the right thing and the database does not" - for
     // example a runner that skipped the file, or a hand-edited row.
     {
-      // Counts include the bulk-import grant: migration 20261019000002 gives
-      // the Admin role one governance.customer_import row (view/create/update,
-      // never delete), so admin holds 21 of 71 total rows.
-      const expectedCounts: Record<string, number> = {
-        admin: 21,
-        finance: 8,
-        hr: 3,
-        vice_director: 10,
-        senior_sales_manager: 8,
-        sales_manager: 10,
-        ost: 8,
-        employee: 3,
-        customer: 0,
-        super_admin: 0,
-      };
+      // Counts are DERIVED from packages/contracts role-baseline.ts plus the
+      // grants seeded by later migrations, rather than hardcoded. The previous
+      // literals (21/8/3, total 71) had to be hand-bumped every time a later
+      // migration seeded a grant, which is exactly how a stale expectation
+      // survives: the assertion still ran, and still passed, against a matrix
+      // nobody had updated. Reading the authority makes the drift impossible.
+      const expectedCounts: Record<string, number> = (() => {
+        const counts: Record<string, number> = {};
+        for (const [slug, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+          counts[slug] = grants.length;
+        }
+        // Later migrations seed extra rows outside the reviewed matrix. They are
+        // listed in the contract for exactly this reason.
+        for (const seed of MIGRATION_SEEDED_GRANTS) {
+          for (const slug of seed.roles) counts[slug] = (counts[slug] ?? 0) + 1;
+        }
+        // Roles that hold nothing by design.
+        counts.customer = 0;
+        counts.super_admin = 0;
+        return counts;
+      })();
+      const expectedTotal = Object.values(expectedCounts).reduce((a, b) => a + b, 0);
       const countRows = (
         await db.query<{ slug: string; n: number }>(
           `select r.slug, count(rp.module_id)::int as n
@@ -4811,9 +4976,9 @@ async function main(): Promise<void> {
       }
       const total = [...counted.values()].reduce((sum, n) => sum + n, 0);
       check(
-        'the baseline installs 71 rows in total and no other role holds rows',
-        total === 71,
-        `total=${total}`,
+        'the installed grants are exactly the contract baseline plus the seeded ones',
+        total === expectedTotal,
+        `total=${total} expected=${expectedTotal}`,
       );
 
       const noDelete = await one<{ n: number }>(
@@ -4917,9 +5082,9 @@ async function main(): Promise<void> {
         await db.query<{ n: number }>('select count(*)::int as n from public.role_permissions')
       ).rows[0]!.n;
       check(
-        're-applying the baseline migration leaves exactly 71 rows',
-        recount === 71,
-        `count=${recount}`,
+        're-applying the baseline migration changes nothing',
+        recount === total,
+        `count=${recount} expected=${total}`,
       );
     }
 
@@ -5533,9 +5698,16 @@ async function main(): Promise<void> {
         'fallback code issued exactly once',
         typeof activated.fallback_code === 'string' && String(activated.fallback_code).length > 0,
       );
+      // REBUILD: activation awards ZERO. The Gold yearly points term is still
+      // frozen on the sale as contract metadata, but it is not credited.
       eq(
-        'yearly allocation is the official Gold yearly points',
+        'activation awards ZERO points, not the Gold yearly points',
         String(activated.points_allocated),
+        '0',
+      );
+      check(
+        'the Gold yearly points term is still frozen on the sale',
+        Number(gold.yearly_points) > 0,
         String(gold.yearly_points),
       );
       check('not already active on first activation', activated.already_active === false);
@@ -5557,27 +5729,14 @@ async function main(): Promise<void> {
         'select balance::text as balance, lifetime_allocated::text as lifetime from public.points_accounts where membership_id = $1',
         [membershipId],
       );
-      eq(
-        'points account balance is the official allocation',
-        acct.balance,
-        String(gold.yearly_points),
-      );
-      eq(
-        'lifetime allocated is the official allocation',
-        acct.lifetime,
-        String(gold.yearly_points),
-      );
+      eq('a newly activated member starts at ZERO points', acct.balance, '0');
+      eq('lifetime allocated is zero at activation', acct.lifetime, '0');
       const ledgerAfterActivate = await db.query(
         `select entry_type, amount from public.points_ledger
           where account_id = (select id from public.points_accounts where membership_id = $1)`,
         [membershipId],
       );
-      eq('exactly one allocation ledger row', ledgerAfterActivate.rows.length, 1);
-      eq(
-        'allocation amount',
-        String(ledgerAfterActivate.rows[0]!.amount),
-        String(gold.yearly_points),
-      );
+      eq('activation wrote NO allocation ledger row', ledgerAfterActivate.rows.length, 0);
       const commActivated = await one<{ status: string; earned: string | null; amount: string }>(
         'select status, earned_at::text as earned, amount::text as amount from public.commissions where sale_id = $1',
         [saleId],
@@ -5605,7 +5764,9 @@ async function main(): Promise<void> {
       );
       eq('still one membership', dupCounts.m, 1);
       eq('still one points account', dupCounts.a, 1);
-      eq('still one ledger entry', dupCounts.l, 1);
+      // REBUILD: activation writes no ledger entry, and a repeated activation
+      // writes none either, so the count stays at zero.
+      eq('still no ledger entry after repeated activation', dupCounts.l, 0);
       eq('still one commission', dupCounts.c, 1);
 
       // -- Flow E: onboarding token issue, claim, and portal isolation.
@@ -5637,6 +5798,33 @@ async function main(): Promise<void> {
       );
       eq('customer Auth identity linked', linked.auth, authA);
       check('token consumed, single-use', linked.consumed === true);
+      // REBUILD: activation awards zero, so the e2e customer is funded with a
+      // real adjustment ledger row before any step that spends points. The
+      // amount matches the Gold yearly-points term the rest of this flow's
+      // arithmetic was written against, so the redemption assertions below keep
+      // their original figures.
+      {
+        const acct = (
+          await one<{ id: string }>(
+            'select id from public.points_accounts where membership_id = $1',
+            [membershipId],
+          )
+        ).id;
+        await db.query(
+          `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, reason)
+           values ($1, 'adjustment', $2, 0, $2, 'e2e fixture: customer funded')`,
+          [acct, gold.yearly_points],
+        );
+        await db.query('update public.points_accounts set balance = $2 where id = $1', [
+          acct,
+          gold.yearly_points,
+        ]);
+        await db.query('update public.memberships set points_balance = $2 where id = $1', [
+          membershipId,
+          gold.yearly_points,
+        ]);
+      }
       const relink = await one<Record<string, string>>(
         'select * from public.claim_customer_onboarding_token($1,$2,$3)',
         [tokenHash, authA, 'account_activation'],
@@ -5784,7 +5972,7 @@ async function main(): Promise<void> {
         [membershipId],
       );
       eq(
-        'authoritative balance is the official allocation before rotation',
+        'the seeded balance is in place before rotation',
         Number(pointsBeforeRotate.account),
         Number(gold.yearly_points),
       );
@@ -5826,7 +6014,7 @@ async function main(): Promise<void> {
         [membershipId],
       );
       eq(
-        'authoritative balance still the official allocation',
+        'rotation leaves the seeded balance unchanged',
         Number(pointsAfterRotate.account),
         Number(gold.yearly_points),
       );
@@ -7700,8 +7888,7 @@ async function main(): Promise<void> {
         // without `raw_data.seller_code` is inserted with a NULL seller and the older
         // Phase 14 hierarchy trigger refuses it. This section needs its own live,
         // active referral code because the one section 47 made is deleted at its end.
-        const releaseSellerCode =
-          'OST-SEC48-' + RUN.slice(1, 7).toUpperCase().padEnd(6, 'X');
+        const releaseSellerCode = 'OST-SEC48-' + RUN.slice(1, 7).toUpperCase().padEnd(6, 'X');
         const releaseSellerCodeId = uuidFor('import:row48:seller-code');
         await db.query(
           `insert into referral_codes
@@ -8503,7 +8690,11 @@ async function main(): Promise<void> {
               createdApplications: createdApplicationIds,
             })
           ).reserved(),
-        record: async (reservationId: string, amount: string, extra: Record<string, unknown> = {}) => {
+        record: async (
+          reservationId: string,
+          amount: string,
+          extra: Record<string, unknown> = {},
+        ) => {
           const { rows } = await db.query<{ id: string }>(
             'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid) as id',
             [
@@ -8542,7 +8733,12 @@ async function main(): Promise<void> {
           const purchase = await (await purchaseWorld()).executed();
           await db.query(
             'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)',
-            [randomUUID(), purchase.reservationId, { amount: purchase.total, method: 'cash', paymentType: 'full', reference: 'ACT-1' }, staff['finance']!],
+            [
+              randomUUID(),
+              purchase.reservationId,
+              { amount: purchase.total, method: 'cash', paymentType: 'full', reference: 'ACT-1' },
+              staff['finance']!,
+            ],
           );
           const payment = (
             await db.query<{ id: string }>(
@@ -8571,16 +8767,21 @@ async function main(): Promise<void> {
       });
       section('64. Tier and installment purchase chains');
       await runPurchaseTierMatrixChecks({
-        db, check, actor: staff['sm']!, finance: staff['finance']!,
-        createdCustomers: createdCustomerIds, createdApplications: createdApplicationIds,
+        db,
+        check,
+        actor: staff['sm']!,
+        finance: staff['finance']!,
+        createdCustomers: createdCustomerIds,
+        createdApplications: createdApplicationIds,
       });
       section('53. AF business IDs: random allocation, backfill, legacy compatibility');
       {
         const AF5 = '[A-HJ-NP-Z2-9]{5}';
         const afRe = (prefix: string) => new RegExp(`^${prefix}-${AF5}$`);
         // Allocators answer the new format; the card sale is AF-CSALE, never AF-SALES.
-        const cn = (await one<{ customer_number: string }>('select * from public.next_customer_number()'))
-          .customer_number;
+        const cn = (
+          await one<{ customer_number: string }>('select * from public.next_customer_number()')
+        ).customer_number;
         check('new customers allocate AF-CUS-XXXXX', afRe('AF-CUS').test(cn), cn);
         const sn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
           .sale_number;
@@ -8589,10 +8790,12 @@ async function main(): Promise<void> {
           afRe('AF-CSALE').test(sn) && !sn.startsWith('AF-SALES-'),
           sn,
         );
-        const rn = (await one<{ redemption_number: string }>('select * from public.next_redemption_number()'))
-          .redemption_number;
+        const rn = (
+          await one<{ redemption_number: string }>('select * from public.next_redemption_number()')
+        ).redemption_number;
         check('new redemptions allocate AF-RED-XXXXX', afRe('AF-RED').test(rn), rn);
-        const on = (await one<{ ost_number: string }>('select * from public.next_ost_number()')).ost_number;
+        const on = (await one<{ ost_number: string }>('select * from public.next_ost_number()'))
+          .ost_number;
         check('new OST members allocate AF-OST-XXXXX', afRe('AF-OST').test(on), on);
         // Prefixes are server-chosen: arbitrary input is refused.
         const badPrefix = await throws('arbitrary prefix refused', () =>
@@ -8628,10 +8831,7 @@ async function main(): Promise<void> {
           vals.every((v) => afRe('AF-PAY').test(v)),
           vals.find((v) => !afRe('AF-PAY').test(v)) ?? '',
         );
-        check(
-          '1000 candidates are not sequential',
-          vals.join(',') !== [...vals].sort().join(','),
-        );
+        check('1000 candidates are not sequential', vals.join(',') !== [...vals].sort().join(','));
         // Two connections racing the same allocator must never agree.
         const racer = new Client({ connectionString: target.url });
         racer.on('error', () => {});
@@ -8711,10 +8911,9 @@ async function main(): Promise<void> {
           'a legacy CUS- number still resolves after the rollout',
           legacyFound.rows.some((r) => r.customer_id === legacyId),
         );
-        const legacyDir = await db.query(
-          'select * from public.customer_directory($1::jsonb)',
-          [JSON.stringify({ search: 'cus-900001', limit: 5 })],
-        );
+        const legacyDir = await db.query('select * from public.customer_directory($1::jsonb)', [
+          JSON.stringify({ search: 'cus-900001', limit: 5 }),
+        ]);
         check(
           'a legacy CUS- number stays searchable case-insensitively',
           legacyDir.rows.some((r) => (r.record as { id: string }).id === legacyId),
@@ -8757,12 +8956,10 @@ async function main(): Promise<void> {
           db.query(`select private.af_candidate('AF-CCODE')`),
         );
         check('prefix refusal names the boundary', /INVALID_BUSINESS_PREFIX/.test(bogus));
-        const wrongTarget = await throws(
-          'AF-CUS cannot claim customers.customer_code',
-          () =>
-            db.query(
-              `select private.claim_af_id('AF-CUS','public.customers'::regclass,'customer_code')`,
-            ),
+        const wrongTarget = await throws('AF-CUS cannot claim customers.customer_code', () =>
+          db.query(
+            `select private.claim_af_id('AF-CUS','public.customers'::regclass,'customer_code')`,
+          ),
         );
         check('wrong target for the code refused', /INVALID_BUSINESS_ID_TARGET/.test(wrongTarget));
         const rightTarget = await one<{ c: string }>(
@@ -8794,7 +8991,10 @@ async function main(): Promise<void> {
 
         // Backfill: complete, unique, well-formed.
         for (const [label, sql] of [
-          ['customers.customer_code has no nulls', `select count(*)::int n from public.customers where customer_code is null`],
+          [
+            'customers.customer_code has no nulls',
+            `select count(*)::int n from public.customers where customer_code is null`,
+          ],
           [
             'customers.customer_code has no duplicates',
             `select count(*)::int n from (select customer_code from public.customers group by customer_code having count(*)>1) d`,
@@ -8837,7 +9037,11 @@ async function main(): Promise<void> {
           `select id, customer_number, customer_code from public.customers
            where customer_number = 'CUS-900001'`,
         );
-        eq('the legacy fixture keeps its original Customer ID', legacy.customer_number, 'CUS-900001');
+        eq(
+          'the legacy fixture keeps its original Customer ID',
+          legacy.customer_number,
+          'CUS-900001',
+        );
         check(
           'the legacy fixture gained an independent Customer Code',
           ccRe.test(legacy.customer_code),
@@ -8865,7 +9069,9 @@ async function main(): Promise<void> {
           );
           check(
             `customer_directory resolves ${term === legacy.customer_code ? 'the' : 'a lower-cased'} Customer Code`,
-            dir.rows.some((r) => r.record.id === legacy.id && r.record.customer_code === legacy.customer_code),
+            dir.rows.some(
+              (r) => r.record.id === legacy.id && r.record.customer_code === legacy.customer_code,
+            ),
           );
         }
 
@@ -9003,9 +9209,10 @@ async function main(): Promise<void> {
             `select md5(coalesce(customer_code,'~')) from public.customers where id = $1`,
             [legacyCustomerId],
           ),
-          customerNumber: await scalar56(`select customer_number from public.customers where id = $1`, [
-            legacyCustomerId,
-          ]),
+          customerNumber: await scalar56(
+            `select customer_number from public.customers where id = $1`,
+            [legacyCustomerId],
+          ),
           points: await scalar56(
             `select md5(string_agg(membership_id::text||'='||balance,'|' order by membership_id)) from public.points_accounts where membership_id = any($1::uuid[])`,
             [invariantIds],
@@ -9015,17 +9222,25 @@ async function main(): Promise<void> {
         const before56 = await membershipInvariants();
 
         const converted56 = Number(
-          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n')).rows[0]!
-            .n,
+          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n'))
+            .rows[0]!.n,
         );
-        check('the membership conversion reports the rows it rewrote', converted56 >= 1, `${converted56}`);
+        check(
+          'the membership conversion reports the rows it rewrote',
+          converted56 >= 1,
+          `${converted56}`,
+        );
 
         const after56 = await membershipInvariants();
         eq('membership UUID set unchanged', after56.uuid, before56.uuid);
         eq('membership customer relation unchanged', after56.customer, before56.customer);
         eq('QR token hashes unchanged', after56.qr, before56.qr);
         eq('fallback code hashes unchanged', after56.fallback, before56.fallback);
-        eq('status / points_balance / activated_at / expires_on unchanged', after56.meta, before56.meta);
+        eq(
+          'status / points_balance / activated_at / expires_on unchanged',
+          after56.meta,
+          before56.meta,
+        );
         eq('Customer Code byte-identical', after56.customerCode, before56.customerCode);
         eq('Customer ID byte-identical', after56.customerNumber, before56.customerNumber);
         eq('points account balances unchanged', after56.points, before56.points);
@@ -9054,12 +9269,21 @@ async function main(): Promise<void> {
           ['current code', upgraded.membership_number],
           ['AFHOMES envelope of the legacy alias', `AFHOMES:${sequential}`],
         ] as const) {
-          const r = await db.query<{ membership_id: string; current_number: string; via_alias: boolean }>(
-            'select * from private.resolve_membership_code($1)',
-            [term],
+          const r = await db.query<{
+            membership_id: string;
+            current_number: string;
+            via_alias: boolean;
+          }>('select * from private.resolve_membership_code($1)', [term]);
+          eq(
+            `transaction lookup resolves the ${label} to the same membership`,
+            r.rows[0]?.membership_id,
+            legacyMembershipId,
           );
-          eq(`transaction lookup resolves the ${label} to the same membership`, r.rows[0]?.membership_id, legacyMembershipId);
-          eq(`transaction lookup returns the CURRENT code for the ${label}`, r.rows[0]?.current_number, upgraded.membership_number);
+          eq(
+            `transaction lookup returns the CURRENT code for the ${label}`,
+            r.rows[0]?.current_number,
+            upgraded.membership_number,
+          );
         }
         const viaNew = await db.query<{ via_alias: boolean }>(
           'select via_alias from private.resolve_membership_code($1)',
@@ -9083,7 +9307,11 @@ async function main(): Promise<void> {
             'select customer_id from public.search_customer_ids($1)',
             [term],
           );
-          eq(`customer search does NOT resolve Membership Code ${term}`, viaCustomerSearch.rows.length, 0);
+          eq(
+            `customer search does NOT resolve Membership Code ${term}`,
+            viaCustomerSearch.rows.length,
+            0,
+          );
           const viaDirectory = await db.query<{ record: unknown }>(
             `select record from public.customer_directory($1::jsonb)`,
             [JSON.stringify({ search: term })],
@@ -9115,26 +9343,33 @@ async function main(): Promise<void> {
 
         // Idempotency.
         const aliasesBefore56 = (
-          await one<{ n: number }>('select count(*)::int n from private.business_id_aliases where entity_type=$1', [
-            'membership',
-          ])
+          await one<{ n: number }>(
+            'select count(*)::int n from private.business_id_aliases where entity_type=$1',
+            ['membership'],
+          )
         ).n;
         const second56 = Number(
-          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n')).rows[0]!
-            .n,
+          (await db.query<{ n: string }>('select private.upgrade_legacy_membership_numbers() as n'))
+            .rows[0]!.n,
         );
         eq('a second membership run rewrites nothing', second56, 0);
         eq(
           'a second membership run adds no duplicate alias',
-          (await one<{ n: number }>('select count(*)::int n from private.business_id_aliases where entity_type=$1', ['membership'])).n,
+          (
+            await one<{ n: number }>(
+              'select count(*)::int n from private.business_id_aliases where entity_type=$1',
+              ['membership'],
+            )
+          ).n,
           aliasesBefore56,
         );
         eq(
           'a second membership run leaves the code untouched',
           (
-            await one<{ n: string }>('select membership_number n from public.memberships where id=$1', [
-              legacyMembershipId,
-            ])
+            await one<{ n: string }>(
+              'select membership_number n from public.memberships where id=$1',
+              [legacyMembershipId],
+            )
           ).n,
           upgraded.membership_number,
         );
@@ -9144,7 +9379,7 @@ async function main(): Promise<void> {
         );
         eq('no ambiguous membership alias', ambiguous.n, 0);
 
-// An already-randomized membership is skipped and gains NO alias. This is a
+        // An already-randomized membership is skipped and gains NO alias. This is a
         // real row, so the check cannot pass just because the table is empty.
         const randomMembership = (
           await db.query<{ id: string; membership_number: string }>(
@@ -9165,7 +9400,11 @@ async function main(): Promise<void> {
               [randomMembership.id],
             )
           ).rows[0]!;
-          eq('an already-randomized membership code is left exactly as it was', stillRandom.membership_number, randomMembership.membership_number);
+          eq(
+            'an already-randomized membership code is left exactly as it was',
+            stillRandom.membership_number,
+            randomMembership.membership_number,
+          );
           eq(
             'an already-randomized membership gains no alias',
             (
@@ -9193,10 +9432,10 @@ async function main(): Promise<void> {
         ).rows[0];
         if (suspendedTarget) {
           const suspendedSequential = nextSequential(2);
-          await db.query(
-            `update public.memberships set membership_number = $1 where id = $2`,
-            [suspendedSequential, suspendedTarget.id],
-          );
+          await db.query(`update public.memberships set membership_number = $1 where id = $2`, [
+            suspendedSequential,
+            suspendedTarget.id,
+          ]);
           // Run the conversion so the legacy value becomes a real alias rather
           // than still being the current number.
           await db.query('select private.upgrade_legacy_membership_numbers()');
@@ -9217,18 +9456,27 @@ async function main(): Promise<void> {
           );
           eq('and that identification is reported as via_alias', resolved.rows[0]?.via_alias, true);
           const afterSuspended = (
-            await db.query<{ status: string }>('select status from public.memberships where id=$1', [
-              suspendedTarget.id,
-            ])
+            await db.query<{ status: string }>(
+              'select status from public.memberships where id=$1',
+              [suspendedTarget.id],
+            )
           ).rows[0]!;
-          eq('resolving a suspended membership did NOT change its status', afterSuspended.status, 'suspended');
+          eq(
+            'resolving a suspended membership did NOT change its status',
+            afterSuspended.status,
+            'suspended',
+          );
           void suffix;
           await db.query(
             'delete from private.business_id_aliases where entity_type=$1 and entity_id=$2',
             ['membership', suspendedTarget.id],
           );
         } else {
-          check('a suspended membership exists to prove status is not a gate', false, 'none available');
+          check(
+            'a suspended membership exists to prove status is not a gate',
+            false,
+            'none available',
+          );
         }
 
         // Ambiguity: an alias that already points at a DIFFERENT membership must
@@ -9265,7 +9513,12 @@ async function main(): Promise<void> {
         for (const role of ['anon', 'authenticated'] as const) {
           eq(
             `${role} cannot read the alias table`,
-            (await one<{ a: boolean }>(`select has_table_privilege($1,'private.business_id_aliases','SELECT') a`, [role])).a,
+            (
+              await one<{ a: boolean }>(
+                `select has_table_privilege($1,'private.business_id_aliases','SELECT') a`,
+                [role],
+              )
+            ).a,
             false,
           );
           eq(
@@ -9312,7 +9565,13 @@ async function main(): Promise<void> {
         const scalar = async (sql: string): Promise<string> =>
           (await db!.query<{ v: string }>(sql)).rows[0]!.v;
         const aliasCount = async (): Promise<number> =>
-          Number((await db!.query<{ n: string }>('select count(*) as n from private.business_id_aliases')).rows[0]!.n);
+          Number(
+            (
+              await db!.query<{ n: string }>(
+                'select count(*) as n from private.business_id_aliases',
+              )
+            ).rows[0]!.n,
+          );
         // Identity, money and points must be identical before and after: only the
         // human-facing business-ID column is allowed to differ.
         const snapshotInvariants = async () => ({
@@ -9359,14 +9618,70 @@ async function main(): Promise<void> {
           modern: RegExp;
         };
         const targets: Target[] = [
-          { entity: 'customer', table: 'public.customers', column: 'customer_number', key: 'id', legacy: 'CUS-9000', modern: /^AF-CUS-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'card_sale', table: 'public.card_sales', column: 'sale_number', key: 'id', legacy: 'SALE-9000', modern: /^AF-CSALE-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'customer_application', table: 'public.customer_applications', column: 'application_number', key: 'id', legacy: 'APP-9000', modern: /^AF-APP-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'reservation_agreement', table: 'public.reservation_agreements', column: 'reservation_number', key: 'id', legacy: 'RES-9000', modern: /^AF-RES-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'ost_member', table: 'public.ost_members', column: 'ost_number', key: 'id', legacy: 'OST-9000', modern: /^AF-OST-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'redemption', table: 'public.redemptions', column: 'redemption_number', key: 'id', legacy: 'RDM-9000', modern: /^AF-RED-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'ost_renewal', table: 'private.ost_accreditation_renewals', column: 'renewal_number', key: 'id', legacy: 'REN-9000', modern: /^AF-REN-[A-HJ-NP-Z2-9]{5}$/ },
-          { entity: 'ost_accreditation', table: 'private.ost_registration_details', column: 'form_number', key: 'application_id', legacy: 'AF-9000', modern: /^AF-ACC-[A-HJ-NP-Z2-9]{5}$/ },
+          {
+            entity: 'customer',
+            table: 'public.customers',
+            column: 'customer_number',
+            key: 'id',
+            legacy: 'CUS-9000',
+            modern: /^AF-CUS-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'card_sale',
+            table: 'public.card_sales',
+            column: 'sale_number',
+            key: 'id',
+            legacy: 'SALE-9000',
+            modern: /^AF-CSALE-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'customer_application',
+            table: 'public.customer_applications',
+            column: 'application_number',
+            key: 'id',
+            legacy: 'APP-9000',
+            modern: /^AF-APP-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'reservation_agreement',
+            table: 'public.reservation_agreements',
+            column: 'reservation_number',
+            key: 'id',
+            legacy: 'RES-9000',
+            modern: /^AF-RES-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'ost_member',
+            table: 'public.ost_members',
+            column: 'ost_number',
+            key: 'id',
+            legacy: 'OST-9000',
+            modern: /^AF-OST-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'redemption',
+            table: 'public.redemptions',
+            column: 'redemption_number',
+            key: 'id',
+            legacy: 'RDM-9000',
+            modern: /^AF-RED-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'ost_renewal',
+            table: 'private.ost_accreditation_renewals',
+            column: 'renewal_number',
+            key: 'id',
+            legacy: 'REN-9000',
+            modern: /^AF-REN-[A-HJ-NP-Z2-9]{5}$/,
+          },
+          {
+            entity: 'ost_accreditation',
+            table: 'private.ost_registration_details',
+            column: 'form_number',
+            key: 'application_id',
+            legacy: 'AF-9000',
+            modern: /^AF-ACC-[A-HJ-NP-Z2-9]{5}$/,
+          },
         ];
 
         // One synthetic customer per legacy number proves random, non-sequential
@@ -9404,10 +9719,10 @@ async function main(): Promise<void> {
           // Run-unique so it can never collide with a legacy fixture another
           // section already created.
           const forced = `${t.legacy}-${RUN}`;
-          await db.query(
-            `update ${t.table} set ${t.column} = $1 where ${t.key} = $2`,
-            [forced, key],
-          );
+          await db.query(`update ${t.table} set ${t.column} = $1 where ${t.key} = $2`, [
+            forced,
+            key,
+          ]);
           await db.query(
             `insert into private.business_id_aliases (entity_type, entity_id, old_identifier, migration_source)
              values ($1,$2,$3,'pre-test') on conflict (entity_type, old_identifier) do update set is_active = false`,
@@ -9451,8 +9766,11 @@ async function main(): Promise<void> {
            values ($1,$2,$3,$4, now() + interval '1 year', $4)`,
           [
             referralCodeId,
-            (await db.query<{ h: string }>('select private.hash_token($1) as h', [RUN + '-legacy-ost']))
-              .rows[0]!.h,
+            (
+              await db.query<{ h: string }>('select private.hash_token($1) as h', [
+                RUN + '-legacy-ost',
+              ])
+            ).rows[0]!.h,
             `${RUN.slice(0, 6)}-HINT`,
             sponsorId,
           ],
@@ -9470,7 +9788,14 @@ async function main(): Promise<void> {
           `insert into public.ost_members
              (id, application_id, sponsor_staff_id, ost_number, full_name, email, phone, status, approved_by)
            values ($1,$2,$3,$4,'Legacy Ost Member',$5,'+639170000903','active',$6)`,
-          [ostMemberId, ostApplicationId, sponsorId, legacyOstNumber, `${RUN}-legacy-ost@example.invalid`, staff['super-admin']],
+          [
+            ostMemberId,
+            ostApplicationId,
+            sponsorId,
+            legacyOstNumber,
+            `${RUN}-legacy-ost@example.invalid`,
+            staff['super-admin'],
+          ],
         );
         await db.query(
           `insert into private.ost_registration_details
@@ -9501,7 +9826,15 @@ async function main(): Promise<void> {
               referrer_signature_status, created_by)
            values ($1,$2,$3,$4,$5,$6,'2026-09-15','2027-09-01','2028-09-01','{}','2026-09-01',
              '2027-09-01',$7,'{}','received','received',$7)`,
-          [renewalId, legacyRenewalNumber, uuidFor('legacy:ost:renewal-req'), 'c'.repeat(64), ostMemberId, termId, sponsorId],
+          [
+            renewalId,
+            legacyRenewalNumber,
+            uuidFor('legacy:ost:renewal-req'),
+            'c'.repeat(64),
+            ostMemberId,
+            termId,
+            sponsorId,
+          ],
         );
 
         // OST entity types are now seeded explicitly, so drop them from the
@@ -9561,9 +9894,8 @@ async function main(): Promise<void> {
         const before = await snapshotInvariants();
 
         const converted = Number(
-          (
-            await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n')
-          ).rows[0]!.n,
+          (await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n'))
+            .rows[0]!.n,
         );
         check('the conversion reports the rows it rewrote', converted >= 3, `${converted}`);
 
@@ -9587,7 +9919,9 @@ async function main(): Promise<void> {
         eq('every legacy customer number became AF-CUS', convertedCustomers.rows.length, 3);
         check(
           'converted customer numbers match the approved format',
-          convertedCustomers.rows.every((r) => r.customer_number.match(/^AF-CUS-[A-HJ-NP-Z2-9]{5}$/)),
+          convertedCustomers.rows.every((r) =>
+            r.customer_number.match(/^AF-CUS-[A-HJ-NP-Z2-9]{5}$/),
+          ),
           convertedCustomers.rows.map((r) => r.customer_number).join(','),
         );
         check(
@@ -9598,24 +9932,47 @@ async function main(): Promise<void> {
         );
 
         for (const c of seededCustomers) {
-          const byOld = await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+          const byOld = await db.query<{
+            entity_id: string;
+            current_identifier: string;
+            via_alias: boolean;
+          }>(
             `select entity_id, current_identifier, via_alias from private.resolve_business_identifier('customer', $1)`,
             [c.legacy],
           );
-          const byNew = await db.query<{ entity_id: string; current_identifier: string; via_alias: boolean }>(
+          const byNew = await db.query<{
+            entity_id: string;
+            current_identifier: string;
+            via_alias: boolean;
+          }>(
             `select entity_id, current_identifier, via_alias from private.resolve_business_identifier('customer', $1)`,
             [byOld.rows[0]?.current_identifier ?? ''],
           );
-          eq(`legacy ${c.legacy} resolves to the same customer UUID`, byOld.rows[0]?.entity_id, c.id);
-          eq(`legacy ${c.legacy} reports the CURRENT AF id`, byOld.rows[0]?.current_identifier, byNew.rows[0]?.current_identifier);
+          eq(
+            `legacy ${c.legacy} resolves to the same customer UUID`,
+            byOld.rows[0]?.entity_id,
+            c.id,
+          );
+          eq(
+            `legacy ${c.legacy} reports the CURRENT AF id`,
+            byOld.rows[0]?.current_identifier,
+            byNew.rows[0]?.current_identifier,
+          );
           eq(`current AF id resolves directly, not via alias`, byNew.rows[0]?.via_alias, false);
-          check(`legacy ${c.legacy} was reached through the alias table`, byOld.rows[0]?.via_alias === true);
+          check(
+            `legacy ${c.legacy} was reached through the alias table`,
+            byOld.rows[0]?.via_alias === true,
+          );
         }
         const caseInsensitive = await db.query<{ entity_id: string }>(
           `select entity_id from private.resolve_business_identifier('customer', $1)`,
           [seededCustomers[0]!.legacy.toLowerCase()],
         );
-        eq('alias lookup is case-insensitive', caseInsensitive.rows[0]?.entity_id, seededCustomers[0]!.id);
+        eq(
+          'alias lookup is case-insensitive',
+          caseInsensitive.rows[0]?.entity_id,
+          seededCustomers[0]!.id,
+        );
 
         const unknown = await db.query<{ entity_id: string | null }>(
           `select entity_id from private.resolve_business_identifier('customer', $1)`,
@@ -9626,9 +9983,8 @@ async function main(): Promise<void> {
         // Idempotency: a second run must not mint a new id or duplicate aliases.
         const aliasesBefore = await aliasCount();
         const second = Number(
-          (
-            await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n')
-          ).rows[0]!.n,
+          (await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n'))
+            .rows[0]!.n,
         );
         const stable = await db.query<{ customer_number: string }>(
           'select customer_number from public.customers where id = $1',
@@ -9637,7 +9993,11 @@ async function main(): Promise<void> {
         const firstConverted = stable.rows[0]!.customer_number;
         eq('a second run rewrites nothing', second, 0);
         eq('a second run adds no duplicate alias', await aliasCount(), aliasesBefore);
-        eq('a second run leaves the identifier untouched', stable.rows[0]!.customer_number, firstConverted);
+        eq(
+          'a second run leaves the identifier untouched',
+          stable.rows[0]!.customer_number,
+          firstConverted,
+        );
 
         // Already-modern identifiers are never regenerated.
         const modernUntouched = await db.query<{ n: number }>(
@@ -9685,7 +10045,11 @@ async function main(): Promise<void> {
               [e.entity, e.legacy],
             )
           ).rows[0];
-          eq(`${e.entity}: the legacy identifier resolves to the same key`, before?.entity_id, e.key);
+          eq(
+            `${e.entity}: the legacy identifier resolves to the same key`,
+            before?.entity_id,
+            e.key,
+          );
           check(
             `${e.entity}: the legacy identifier was reached through the alias`,
             before?.via_alias === true,
@@ -9697,7 +10061,11 @@ async function main(): Promise<void> {
               [e.entity, before?.current_identifier ?? ''],
             )
           ).rows[0];
-          eq(`${e.entity}: old and new identifier resolve to the SAME uuid`, after?.entity_id, before?.entity_id);
+          eq(
+            `${e.entity}: old and new identifier resolve to the SAME uuid`,
+            after?.entity_id,
+            before?.entity_id,
+          );
           eq(`${e.entity}: the new identifier resolves directly`, after?.via_alias, false);
           check(
             `${e.entity}: the stored identifier is the approved random AF format`,
@@ -9710,7 +10078,11 @@ async function main(): Promise<void> {
               [e.entity, (before?.current_identifier ?? '').toLowerCase()],
             )
           ).rows[0];
-          eq(`${e.entity}: the AF identifier resolves case-insensitively`, lowercased?.entity_id, e.key);
+          eq(
+            `${e.entity}: the AF identifier resolves case-insensitively`,
+            lowercased?.entity_id,
+            e.key,
+          );
         }
 
         // Authorized search accepts the legacy alias and still returns the record.
@@ -9718,21 +10090,37 @@ async function main(): Promise<void> {
           'select customer_id from public.search_customer_ids($1)',
           [seededCustomers[0]!.legacy],
         );
-        eq('authorized search resolves the legacy alias', searched.rows[0]?.customer_id, seededCustomers[0]!.id);
+        eq(
+          'authorized search resolves the legacy alias',
+          searched.rows[0]?.customer_id,
+          seededCustomers[0]!.id,
+        );
         const byCode = await db.query<{ customer_id: string }>(
           'select customer_id from public.search_customer_ids($1)',
           [seededCustomers[0]!.code],
         );
-        eq('the Customer Code still resolves after the upgrade', byCode.rows[0]?.customer_id, seededCustomers[0]!.id);
+        eq(
+          'the Customer Code still resolves after the upgrade',
+          byCode.rows[0]?.customer_id,
+          seededCustomers[0]!.id,
+        );
 
         // An alias is an identifier, never an authorization token: a caller who
         // is not the owner still gets nothing through the customer portal path.
-        const denied = await throws('customer portal rejects another customer by legacy alias', () =>
-          asBrowserRole(target.url, 'authenticated', uuidFor('legacy:owner'), (client) =>
-            client.query('select * from public.customer_directory($1::jsonb)', [JSON.stringify({ search: seededCustomers[0]!.legacy })]),
-          ),
+        const denied = await throws(
+          'customer portal rejects another customer by legacy alias',
+          () =>
+            asBrowserRole(target.url, 'authenticated', uuidFor('legacy:owner'), (client) =>
+              client.query('select * from public.customer_directory($1::jsonb)', [
+                JSON.stringify({ search: seededCustomers[0]!.legacy }),
+              ]),
+            ),
         );
-        check('an alias never grants unauthorized access', /permission denied/.test(denied), denied);
+        check(
+          'an alias never grants unauthorized access',
+          /permission denied/.test(denied),
+          denied,
+        );
 
         // 17. An already-modern identifier is skipped and gains NO alias.
         const modernCustomerId = uuidFor('legacy:modern');
@@ -9750,7 +10138,11 @@ async function main(): Promise<void> {
             [modernCustomerId],
           )
         ).rows[0]!;
-        eq('an already-modern identifier is left exactly as it was', modernAfter.customer_number, 'AF-CUS-K7M4Q');
+        eq(
+          'an already-modern identifier is left exactly as it was',
+          modernAfter.customer_number,
+          'AF-CUS-K7M4Q',
+        );
         eq('an already-modern record gains no alias', await aliasCount(), modernAliasBefore);
 
         // 19. current_identifier_snapshot is evidence only: the resolver must
@@ -9773,7 +10165,11 @@ async function main(): Promise<void> {
             [snapshotProbe.legacy],
           )
         ).rows[0]!.current_identifier;
-        eq('the resolver ignores the snapshot and returns the canonical column', afterTamper, canonical);
+        eq(
+          'the resolver ignores the snapshot and returns the canonical column',
+          afterTamper,
+          canonical,
+        );
         check(
           'the stored snapshot really was tampered with, so the check is not vacuous',
           canonical !== 'TAMPERED-SNAPSHOT',
@@ -9830,265 +10226,255 @@ async function main(): Promise<void> {
           [[ostMemberId, ostApplicationId, renewalId]],
         );
       }
-    section(
-      '57. Operational access: referral management and role editing are grant-bound',
-    );
-    // Migration 20261029000001 delivers two SECURITY DEFINER functions that the API
-    // calls with the service role, and whose absence in production was a live outage.
-    // A grant is a property of a REAL database: the in-memory fake cannot answer
-    // "can service_role execute this", and a text assertion over the migration file
-    // only proves the words are present, not that Postgres bound them.
-    //
-    // So this section executes both functions against real Postgres and asserts the
-    // grants AND the behaviour, including every refusal the business rules depend on.
-    {
-      const referralSig =
-        'public.manage_ost_referral_code(uuid,uuid,boolean,text,text,timestamptz,integer)';
-      const roleSig = 'public.update_operational_role(uuid,uuid,jsonb)';
-      for (const [name, sig] of [
-        ['manage_ost_referral_code', referralSig],
-        ['update_operational_role', roleSig],
-      ] as const) {
+      section('57. Operational access: referral management and role editing are grant-bound');
+      // Migration 20261029000001 delivers two SECURITY DEFINER functions that the API
+      // calls with the service role, and whose absence in production was a live outage.
+      // A grant is a property of a REAL database: the in-memory fake cannot answer
+      // "can service_role execute this", and a text assertion over the migration file
+      // only proves the words are present, not that Postgres bound them.
+      //
+      // So this section executes both functions against real Postgres and asserts the
+      // grants AND the behaviour, including every refusal the business rules depend on.
+      {
+        const referralSig =
+          'public.manage_ost_referral_code(uuid,uuid,boolean,text,text,timestamptz,integer)';
+        const roleSig = 'public.update_operational_role(uuid,uuid,jsonb)';
+        for (const [name, sig] of [
+          ['manage_ost_referral_code', referralSig],
+          ['update_operational_role', roleSig],
+        ] as const) {
+          eq(
+            `${name} exists exactly once`,
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
+                where p.proname=$1 and ns.nspname='public'`,
+                [name],
+              )
+            ).n,
+            1,
+          );
+          for (const browserRole of ['anon', 'authenticated']) {
+            eq(
+              `${browserRole} cannot execute ${name}`,
+              (
+                await one<{ a: boolean }>(`select has_function_privilege($1,$2,'EXECUTE') a`, [
+                  browserRole,
+                  sig,
+                ])
+              ).a,
+              false,
+            );
+          }
+          // The whole point of the migration: the API reaches these with service_role,
+          // so without this grant every call is a 42883 undefined_function.
+          eq(
+            `service_role can execute ${name}`,
+            (
+              await one<{ a: boolean }>(
+                `select has_function_privilege('service_role',$1,'EXECUTE') a`,
+                [sig],
+              )
+            ).a,
+            true,
+          );
+        }
+        // The helper must stay private-only. Granting it would let a browser role ask
+        // the database about arbitrary staff members' permissions.
         eq(
-          `${name} exists exactly once`,
+          'private.has_permission_for_user is reachable by no browser role and not service_role',
+          (
+            await one<{ a: boolean }>(
+              `select has_function_privilege('anon','private.has_permission_for_user(uuid,text,text)','EXECUTE')
+                    or has_function_privilege('authenticated','private.has_permission_for_user(uuid,text,text)','EXECUTE')
+                    or has_function_privilege('service_role','private.has_permission_for_user(uuid,text,text)','EXECUTE') a`,
+            )
+          ).a,
+          false,
+        );
+
+        // Synthetic principals. staff_users.id references auth.users(id) and that FK is
+        // enforced, so the Auth row comes first - the same order the main suite uses.
+        const opSm = uuidFor('ops-sm');
+        const opVd = uuidFor('ops-vd');
+        const opAdmin = uuidFor('ops-admin');
+        for (const [id, label] of [
+          [opSm, 'sm'],
+          [opVd, 'vd'],
+          [opAdmin, 'admin'],
+        ] as const) {
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [
+            id,
+            `${RUN}-ops-${label}@example.invalid`,
+          ]);
+        }
+        createdStaffIds.push(opSm, opVd, opAdmin);
+        const opRoleIds = await db.query<{ id: string; slug: string }>(
+          `select id, slug from public.roles where slug in ('sales_manager','vice_director','admin')`,
+        );
+        const opRole = (slug: string) => opRoleIds.rows.find((r) => r.slug === slug)!.id;
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status) values
+           ($1,$2,'Ops SM','active'),($3,$4,'Ops VD','active'),($5,$6,'Ops Admin','active')`,
+          [
+            opSm,
+            `${RUN}-ops-sm@example.invalid`,
+            opVd,
+            `${RUN}-ops-vd@example.invalid`,
+            opAdmin,
+            `${RUN}-ops-admin@example.invalid`,
+          ],
+        );
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id) values ($1,$4),($2,$5),($3,$6)`,
+          [opSm, opVd, opAdmin, opRole('sales_manager'), opRole('vice_director'), opRole('admin')],
+        );
+
+        const issueCode = async (actor: string, sponsor: string, rotate: boolean) =>
+          db.query<{ id: string }>(
+            `select public.manage_ost_referral_code($1::uuid,$2::uuid,$3,
+             encode(sha256(convert_to($4,'UTF8')),'hex'),'OST-?-probe',now()+interval '72 hours',5) id`,
+            [actor, sponsor, rotate, `${RUN}-probe-${Math.random()}`],
+          );
+        const ok = (name: string, condition: boolean) => check(name, condition);
+        /** Runs a call expected to be refused and returns the database's message. */
+        const refusal = async (fn: () => Promise<unknown>): Promise<string> => {
+          try {
+            await fn();
+            return '';
+          } catch (error) {
+            return safeErrorMessage(error);
+          }
+        };
+
+        const first = await issueCode(opSm, opSm, false);
+        eq('an ACTIVE Sales Manager may issue for themselves', typeof first.rows[0]?.id, 'string');
+
+        // A plain second issue must be refused; otherwise duplicates accumulate silently.
+        ok(
+          'a second live code is refused unless rotation is explicit',
+          /CONFLICT/.test(await refusal(() => issueCode(opSm, opSm, false))),
+        );
+
+        await issueCode(opSm, opSm, true);
+        eq(
+          'exactly ONE live code remains after rotation',
           (
             await one<{ n: number }>(
-              `select count(*)::int n from pg_proc p join pg_namespace ns on ns.oid=p.pronamespace
-                where p.proname=$1 and ns.nspname='public'`,
-              [name],
+              `select count(*)::int n from public.referral_codes where sponsor_staff_id=$1 and is_active`,
+              [opSm],
             )
           ).n,
           1,
         );
-        for (const browserRole of ['anon', 'authenticated']) {
-          eq(
-            `${browserRole} cannot execute ${name}`,
-            (
-              await one<{ a: boolean }>(
-                `select has_function_privilege($1,$2,'EXECUTE') a`,
-                [browserRole, sig],
-              )
-            ).a,
-            false,
-          );
-        }
-        // The whole point of the migration: the API reaches these with service_role,
-        // so without this grant every call is a 42883 undefined_function.
-        eq(
-          `service_role can execute ${name}`,
-          (
-            await one<{ a: boolean }>(
-              `select has_function_privilege('service_role',$1,'EXECUTE') a`,
-              [sig],
-            )
-          ).a,
-          true,
+
+        ok(
+          'an admin may NOT sponsor through a Vice Director',
+          /active Sales Manager/.test(await refusal(() => issueCode(opAdmin, opVd, true))),
         );
-      }
-      // The helper must stay private-only. Granting it would let a browser role ask
-      // the database about arbitrary staff members' permissions.
-      eq(
-        'private.has_permission_for_user is reachable by no browser role and not service_role',
-        (
-          await one<{ a: boolean }>(
-            `select has_function_privilege('anon','private.has_permission_for_user(uuid,text,text)','EXECUTE')
-                    or has_function_privilege('authenticated','private.has_permission_for_user(uuid,text,text)','EXECUTE')
-                    or has_function_privilege('service_role','private.has_permission_for_user(uuid,text,text)','EXECUTE') a`,
-          )
-        ).a,
-        false,
-      );
-
-      // Synthetic principals. staff_users.id references auth.users(id) and that FK is
-      // enforced, so the Auth row comes first - the same order the main suite uses.
-      const opSm = uuidFor('ops-sm');
-      const opVd = uuidFor('ops-vd');
-      const opAdmin = uuidFor('ops-admin');
-      for (const [id, label] of [
-        [opSm, 'sm'],
-        [opVd, 'vd'],
-        [opAdmin, 'admin'],
-      ] as const) {
-        await db.query('insert into auth.users (id, email) values ($1, $2)', [
-          id,
-          `${RUN}-ops-${label}@example.invalid`,
-        ]);
-      }
-      createdStaffIds.push(opSm, opVd, opAdmin);
-      const opRoleIds = await db.query<{ id: string; slug: string }>(
-        `select id, slug from public.roles where slug in ('sales_manager','vice_director','admin')`,
-      );
-      const opRole = (slug: string) => opRoleIds.rows.find((r) => r.slug === slug)!.id;
-      await db.query(
-        `insert into public.staff_users (id, email, full_name, status) values
-           ($1,$2,'Ops SM','active'),($3,$4,'Ops VD','active'),($5,$6,'Ops Admin','active')`,
-        [
-          opSm,
-          `${RUN}-ops-sm@example.invalid`,
-          opVd,
-          `${RUN}-ops-vd@example.invalid`,
-          opAdmin,
-          `${RUN}-ops-admin@example.invalid`,
-        ],
-      );
-      await db.query(
-        `insert into public.staff_role_assignments (staff_id, role_id) values ($1,$4),($2,$5),($3,$6)`,
-        [opSm, opVd, opAdmin, opRole('sales_manager'), opRole('vice_director'), opRole('admin')],
-      );
-
-      const issueCode = async (actor: string, sponsor: string, rotate: boolean) =>
-        db.query<{ id: string }>(
-          `select public.manage_ost_referral_code($1::uuid,$2::uuid,$3,
-             encode(sha256(convert_to($4,'UTF8')),'hex'),'OST-?-probe',now()+interval '72 hours',5) id`,
-          [actor, sponsor, rotate, `${RUN}-probe-${Math.random()}`],
+        ok(
+          'a Vice Director cannot issue for themselves at all',
+          /Only active Sales Managers or administrators/.test(
+            await refusal(() => issueCode(opVd, opVd, true)),
+          ),
         );
-      const ok = (name: string, condition: boolean) => check(name, condition);
-      /** Runs a call expected to be refused and returns the database's message. */
-      const refusal = async (fn: () => Promise<unknown>): Promise<string> => {
-        try {
-          await fn();
-          return '';
-        } catch (error) {
-          return safeErrorMessage(error);
-        }
-      };
 
-      const first = await issueCode(opSm, opSm, false);
-      eq('an ACTIVE Sales Manager may issue for themselves', typeof first.rows[0]?.id, 'string');
-
-      // A plain second issue must be refused; otherwise duplicates accumulate silently.
-      ok(
-        'a second live code is refused unless rotation is explicit',
-        /CONFLICT/.test(
-          await refusal(() => issueCode(opSm, opSm, false)),
-        ),
-      );
-
-      await issueCode(opSm, opSm, true);
-      eq(
-        'exactly ONE live code remains after rotation',
-        (
-          await one<{ n: number }>(
-            `select count(*)::int n from public.referral_codes where sponsor_staff_id=$1 and is_active`,
-            [opSm],
-          )
-        ).n,
-        1,
-      );
-
-      ok(
-        'an admin may NOT sponsor through a Vice Director',
-        /active Sales Manager/.test(
-          await refusal(() => issueCode(opAdmin, opVd, true)),
-        ),
-      );
-      ok(
-        'a Vice Director cannot issue for themselves at all',
-        /Only active Sales Managers or administrators/.test(
-          await refusal(() => issueCode(opVd, opVd, true)),
-        ),
-      );
-
-      // An Admin issuing ON BEHALF must produce a code owned by the selected SM, with
-      // the Admin recorded only as the issuer. Ownership by whoever clicked is the
-      // defect this prevents.
-      await issueCode(opAdmin, opSm, true);
-      const owned = await one<{ sponsor: string; creator: string }>(
-        `select sponsor_staff_id::text sponsor, created_by::text creator
+        // An Admin issuing ON BEHALF must produce a code owned by the selected SM, with
+        // the Admin recorded only as the issuer. Ownership by whoever clicked is the
+        // defect this prevents.
+        await issueCode(opAdmin, opSm, true);
+        const owned = await one<{ sponsor: string; creator: string }>(
+          `select sponsor_staff_id::text sponsor, created_by::text creator
            from public.referral_codes where sponsor_staff_id=$1
           order by created_at desc limit 1`,
-        [opSm],
-      );
-      eq('an admin-issued code is owned by the SELECTED sponsor', owned.sponsor, opSm);
-      eq('...while created_by records the admin actor', owned.creator, opAdmin);
+          [opSm],
+        );
+        eq('an admin-issued code is owned by the SELECTED sponsor', owned.sponsor, opSm);
+        eq('...while created_by records the admin actor', owned.creator, opAdmin);
 
-      // An INACTIVE Sales Manager cannot sponsor. Suspended, so the check has to be
-      // re-read from the staff row rather than cached in a role lookup.
-      await db.query(`update public.staff_users set status='suspended' where id=$1`, [opSm]);
-      ok(
-        'an INACTIVE Sales Manager cannot sponsor',
-        /active Sales Manager/.test(
-          await refusal(() => issueCode(opAdmin, opSm, true)),
-        ),
-      );
-      await db.query(`update public.staff_users set status='active' where id=$1`, [opSm]);
+        // An INACTIVE Sales Manager cannot sponsor. Suspended, so the check has to be
+        // re-read from the staff row rather than cached in a role lookup.
+        await db.query(`update public.staff_users set status='suspended' where id=$1`, [opSm]);
+        ok(
+          'an INACTIVE Sales Manager cannot sponsor',
+          /active Sales Manager/.test(await refusal(() => issueCode(opAdmin, opSm, true))),
+        );
+        await db.query(`update public.staff_users set status='active' where id=$1`, [opSm]);
 
-      eq(
-        'only hashes are stored, never plaintext',
-        (
-          await one<{ n: number }>(
-            `select count(*)::int n from public.referral_codes where code_hash !~ '^[a-f0-9]{64}$'`,
-          )
-        ).n,
-        0,
-      );
-      const opAudit = await db.query<{ action: string }>(
-        `select action from public.audit_events where entity_type='referral_code'`,
-      );
-      const opActions = opAudit.rows.map((r) => r.action);
-      ok('REFERRAL_CODE_ISSUED is audited', opActions.includes('REFERRAL_CODE_ISSUED'));
-      ok('REFERRAL_CODE_ROTATED is audited', opActions.includes('REFERRAL_CODE_ROTATED'));
+        eq(
+          'only hashes are stored, never plaintext',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.referral_codes where code_hash !~ '^[a-f0-9]{64}$'`,
+            )
+          ).n,
+          0,
+        );
+        const opAudit = await db.query<{ action: string }>(
+          `select action from public.audit_events where entity_type='referral_code'`,
+        );
+        const opActions = opAudit.rows.map((r) => r.action);
+        ok('REFERRAL_CODE_ISSUED is audited', opActions.includes('REFERRAL_CODE_ISSUED'));
+        ok('REFERRAL_CODE_ROTATED is audited', opActions.includes('REFERRAL_CODE_ROTATED'));
 
-      /* ---------------- role editing ---------------- */
-      const financeRole = (
-        await one<{ id: string }>(`select id from public.roles where slug='finance'`)
-      ).id;
-      ok(
-        'a plain Admin cannot edit a SYSTEM role',
-        /Protected role/.test(
-          await refusal(
-            () =>
+        /* ---------------- role editing ---------------- */
+        const financeRole = (
+          await one<{ id: string }>(`select id from public.roles where slug='finance'`)
+        ).id;
+        ok(
+          'a plain Admin cannot edit a SYSTEM role',
+          /Protected role/.test(
+            await refusal(() =>
               db.query(
                 `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"Renamed"}'::jsonb)`,
                 [opAdmin, financeRole],
               ),
+            ),
           ),
-        ),
-      );
-      for (const [label, slug] of [
-        ['super_admin', 'super_admin'],
-        ['customer', 'customer'],
-      ] as const) {
-        const id = (await one<{ id: string }>(`select id from public.roles where slug=$1`, [slug])).id;
-        ok(
-          `${label} is never editable`,
-          /Protected role/.test(
-            await refusal(
-              () =>
+        );
+        for (const [label, slug] of [
+          ['super_admin', 'super_admin'],
+          ['customer', 'customer'],
+        ] as const) {
+          const id = (
+            await one<{ id: string }>(`select id from public.roles where slug=$1`, [slug])
+          ).id;
+          ok(
+            `${label} is never editable`,
+            /Protected role/.test(
+              await refusal(() =>
                 db.query(
                   `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"x"}'::jsonb)`,
                   [opAdmin, id],
                 ),
+              ),
             ),
-          ),
-        );
-      }
-      // Nobody may edit a role they personally hold, which would otherwise be a
-      // quiet self-promotion path.
-      const ownRoleId = (
-        await one<{ id: string }>(
-          `select role_id::text id from public.staff_role_assignments where staff_id=$1 limit 1`,
-          [opAdmin],
-        )
-      ).id;
-      ok(
-        'nobody may edit a role they personally hold',
-        /Protected role/.test(
-          await refusal(
-            () =>
+          );
+        }
+        // Nobody may edit a role they personally hold, which would otherwise be a
+        // quiet self-promotion path.
+        const ownRoleId = (
+          await one<{ id: string }>(
+            `select role_id::text id from public.staff_role_assignments where staff_id=$1 limit 1`,
+            [opAdmin],
+          )
+        ).id;
+        ok(
+          'nobody may edit a role they personally hold',
+          /Protected role/.test(
+            await refusal(() =>
               db.query(
                 `select public.update_operational_role($1::uuid,$2::uuid,'{"name":"x"}'::jsonb)`,
                 [opAdmin, ownRoleId],
               ),
+            ),
           ),
-        ),
-      );
-      // The subset rule: an Admin cannot grant what it does not hold.
-      ok(
-        'an Admin cannot grant a permission it does not hold',
-        /do not possess|Protected role/.test(
-          await refusal(
-            () =>
+        );
+        // The subset rule: an Admin cannot grant what it does not hold.
+        ok(
+          'an Admin cannot grant a permission it does not hold',
+          /do not possess|Protected role/.test(
+            await refusal(() =>
               db.query(`select public.update_operational_role($1::uuid,$2::uuid,$3::jsonb)`, [
                 opAdmin,
                 ownRoleId,
@@ -10104,26 +10490,3227 @@ async function main(): Promise<void> {
                   ],
                 }),
               ]),
+            ),
           ),
-        ),
-      );
-      eq(
-        'no ROLE_PERMISSIONS_UPDATED event was written by a refused edit',
-        (
-          await one<{ n: number }>(
-            `select count(*)::int n from public.audit_events where action='ROLE_PERMISSIONS_UPDATED'`,
+        );
+        eq(
+          'no ROLE_PERMISSIONS_UPDATED event was written by a refused edit',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action='ROLE_PERMISSIONS_UPDATED'`,
+            )
+          ).n,
+          0,
+        );
+
+        // Referral rows created above are synthetic and must not survive, or cleanup's
+        // whole-table row-count proof fails on the next run.
+        await db.query(
+          `delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])`,
+          [[opSm, opVd, opAdmin]],
+        );
+      }
+
+      section('65. points rebuild foundation');
+      // 20261104000001 is the single forward-only migration the whole points rebuild
+      // appends to.
+      //
+      // The version is NOT asserted here. The disposable local runner applies
+      // migration files directly with client.query() and never runs
+      // supabase/apply-migrations.ts, so supabase_migrations.schema_migrations
+      // does not exist in this database at all. Asserting it would fail for a
+      // reason that has nothing to do with the SQL under test. The production
+      // runner's recording behaviour is covered by its own checks.
+      //
+      // What IS asserted is that the objects the rebuild has delivered so far all
+      // exist, and that no object exists whose table it depends on is missing.
+      // A partial append - a function whose table is missing, or a table with no
+      // function - is the half-created state that makes a later failure ambiguous.
+      {
+        // Objects delivered by tasks 2, 3, 4, 6, 7, 8 and 9. Extended in place as
+        // each later task lands its own objects.
+        const deliveredTables = [
+          'tier_points_config',
+          'points_periods',
+          'service_catalog',
+          'point_earning_rules',
+          'purchases',
+          'purchase_lines',
+          'purchase_payments',
+          'earning_claims',
+        ];
+        // to_regprocedure needs the ARGUMENT TYPES, not the bare name, so every
+        // signature below is written out in full. A bare name resolves to NULL
+        // and reads as "the function is missing" even when it exists.
+        const deliveredFunctions = [
+          'private.ensure_points_period(uuid)',
+          'private.points_capacity(uuid,uuid)',
+          'private.purchase_verified_total(uuid)',
+          'public.create_earning_claim(uuid,uuid)',
+          'public.create_purchase(uuid,text,jsonb,text,uuid)',
+          'public.complete_purchase(uuid,uuid)',
+          'public.adjust_membership_points(uuid,bigint,text,uuid)',
+          'public.claim_earning_points(text,uuid)',
+        ];
+
+        // eq() compares with Object.is, so a list is compared as one joined
+        // string. Comparing arrays of objects by identity could never pass.
+        const missingTables = (
+          await one<{ names: string | null }>(
+            `select string_agg(t, ', ' order by t) names
+             from unnest($1::text[]) t
+            where to_regclass('public.' || t) is null`,
+            [deliveredTables],
           )
-        ).n,
-        0,
-      );
+        ).names;
+        eq('every delivered table exists', missingTables ?? '', '');
 
-      // Referral rows created above are synthetic and must not survive, or cleanup's
-      // whole-table row-count proof fails on the next run.
-      await db.query(`delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])`, [
-        [opSm, opVd, opAdmin],
-      ]);
-    }
+        const missingFunctions = (
+          await one<{ names: string | null }>(
+            `select string_agg(t, ', ' order by t) names
+             from unnest($1::text[]) t
+            where to_regprocedure(t) is null`,
+            [deliveredFunctions],
+          )
+        ).names;
+        eq('every delivered function exists', missingFunctions ?? '', '');
 
+        // RLS is enabled on every new table, and the browser roles hold no
+        // privilege at all, so a direct PostgREST call has nothing to abuse.
+        const unenabled = (
+          await one<{ names: string | null }>(
+            `select string_agg(c.relname, ', ') names
+             from unnest($1::text[]) t
+             join pg_namespace n on n.nspname = 'public'
+             join pg_class c on c.relname = t and c.relnamespace = n.oid
+            where not c.relrowsecurity`,
+            [deliveredTables],
+          )
+        ).names;
+        eq('every new table has row level security enabled', unenabled ?? '', '');
+
+        const browserGrants = await one<{ n: number }>(
+          `select count(*)::int n
+           from information_schema.role_table_grants g
+          where g.table_schema = 'public'
+            and g.table_name = any($1::text[])
+            and g.grantee in ('anon','authenticated')`,
+          [deliveredTables],
+        );
+        eq('browser roles hold no privilege on the new tables', browserGrants.n, 0);
+
+        // The seeded caps are the business-approved annual maxima.
+        const caps = await one<{ caps: string | null }>(
+          `select string_agg(tier || '=' || annual_points_cap, ', ' order by tier) caps
+           from public.tier_points_config`,
+        );
+        eq('the three tier caps are seeded', caps.caps, 'BRONZE=25000, GOLD=60000, SILVER=40000');
+
+        // A cap is the ONLY authority: the plan's no-rollover and no-cap-exemption
+        // rules depend on there being exactly one source of the figure.
+        eq(
+          'exactly one cap table exists',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from information_schema.tables
+              where table_schema='public' and table_name like '%points_config%'`,
+            )
+          ).n,
+          1,
+        );
+      }
+
+      {
+        // Behaviour, not structure. Everything above proves the DDL applies; this
+        // block is the first thing that proves the BUSINESS RULES work.
+        //
+        // Each scenario builds its own throwaway customer/membership/purchase so
+        // it cannot perturb any other section, and every scenario ends by
+        // asserting the reconciliation invariant directly.
+
+        // One synthetic GOLD member with a settled purchase, used by the scenarios
+        // below. points_anniversary is pinned to 2025-10-09 so the period
+        // boundaries are deterministic.
+        const stamp = `p65_${Date.now().toString(36)}`;
+        // staff_users.id references auth.users(id) and that FK is enforced, so the
+        // auth principal is created first and its id reused. createdStaffIds is
+        // what section 21 cleanup reads, so the row is registered or it survives.
+        const principal = uuidFor('points:principal');
+        const staffEmail = `${RUN}-points@example.invalid`;
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          principal,
+          staffEmail,
+        ]);
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status)
+         values ($1, $2, 'Points Section Actor', 'active')`,
+          [principal, staffEmail],
+        );
+        createdStaffIds.push(principal);
+        // A SEPARATE Finance actor. Verification is a different attributed act
+        // performed by a different person, and since 20261105000001 it is a
+        // different PERMISSION: `finance.payment_verification` update. Using the
+        // seller to verify would now be refused, which is the whole point of the
+        // split, so the suite proves it with two actors rather than one.
+        const financePrincipal = uuidFor('points:finance');
+        const financeEmail = `${RUN}-points-finance@example.invalid`;
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          financePrincipal,
+          financeEmail,
+        ]);
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status)
+         values ($1, $2, 'Points Section Finance', 'active')`,
+          [financePrincipal, financeEmail],
+        );
+        createdStaffIds.push(financePrincipal);
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+         values ($1, (select id from public.roles where slug = 'finance'))`,
+          [financePrincipal],
+        );
+        const financeActor = financePrincipal;
+        // This actor RECORDS OPERATIONAL SERVICE SALES, so it holds the `employee`
+        // (GSD) role rather than being a roleless staff row. It was previously
+        // roleless because every purchase function only ever checked
+        // staff_users.status = 'active'; 20261105000001 makes create_purchase and
+        // record_purchase_payment resolve the real permission through
+        // private.mutation_actor_role('operations.sales','create'), so a fixture
+        // with no role would be refused for the right reason and fail for the
+        // wrong one. `employee` is the realistic GSD: it can record a sale and a
+        // receipt, and it holds no catalog, customer or verification key.
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+         values ($1, (select id from public.roles where slug = 'employee'))`,
+          [principal],
+        );
+        const actor = principal;
+        // The card sale's SELLER is an existing synthetic from section 4, which
+        // already carries a complete upline chain up to a vice_director. A trigger
+        // walks that chain on every sale insert, so minting a fresh seller here
+        // would fail with SALE_COMPLETE_HIERARCHY_REQUIRED. The points actor does
+        // not need a hierarchy, only staff_users.status = 'active'.
+        const seller = staff['sm']!;
+        const customer = uuidFor('points:customer');
+        await db.query(
+          `insert into public.customers
+           (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1, $2, 'Points', 'Probe', $3, '+639000000001', 'active')`,
+          [
+            customer,
+            `AF-CUS-PTS${stamp
+              .replace(/[^a-z0-9]/gi, '')
+              .toUpperCase()
+              .padEnd(5, 'X')
+              .slice(0, 5)}`,
+            staffEmail,
+          ],
+        );
+        createdCustomerIds.push(customer);
+        const plan = (
+          await one<{ id: string }>(`select id from public.card_plans where code = 'GOLD' limit 1`)
+        ).id;
+        // A membership requires a card sale, so a minimal sale chain is built
+        // first. This row exists ONLY to satisfy the membership foreign key; the
+        // points rebuild never reads or writes card_sales. It is deliberately
+        // left in 'draft': a status of 'active' asserts a verified payment and a
+        // completed activation hierarchy, which this fixture never performs and
+        // which is already proven by sections 11-14 and 62.
+        const sale = uuidFor('points:sale');
+        await db.query(
+          `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1, $2, $3, $4, 'staff', $5, '100000.00', now() + interval '30 days', 'draft')`,
+          [
+            sale,
+            `AF-CSALE-PTS${stamp
+              .replace(/[^a-z0-9]/gi, '')
+              .toUpperCase()
+              .padEnd(5, 'X')
+              .slice(0, 5)}`,
+            customer,
+            plan,
+            seller,
+          ],
+        );
+        const membership = (
+          await one<{ id: string }>(
+            `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash, qr_token_hash,
+              status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           values ($1, $2, $3, $4, $5, $6, 'active', 0, 0, $7, now(), now(), now() + interval '5 years')
+           returning id`,
+            [customer, sale, plan, `MBS-PTS${stamp}`, `fb_${stamp}`, `qr_${stamp}`, actor],
+          )
+        ).id;
+        await db.query(
+          `update public.memberships set points_anniversary = date '2025-10-09' where id = $1`,
+          [membership],
+        );
+        const account = (
+          await one<{ id: string }>(
+            `insert into public.points_accounts (membership_id) values ($1) returning id`,
+            [membership],
+          )
+        ).id;
+        // Declared here, beside the other fixtures, so the cleanup list further down
+        // can see the Task 10 services. Assigning to it inside the block below would
+        // be block-scoped and invisible to cleanup.
+        let promoServices: string[] = [];
+        // Shared by the Task 10 blocks below: one staycation service and a helper that
+        // opens a DRAFT purchase with given lines. Declared out here so the receipt
+        // block can reuse them instead of inventing a second set of fixtures.
+        let stayService = '';
+        let draftWithLines: (
+          lines: { service: string; total: string }[],
+        ) => Promise<string> = async () => '';
+
+        const service = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price)
+           values ($1, 'Teppanyaki Session', '10000.00') returning id`,
+            [`TEP_${stamp}`],
+          )
+        ).id;
+        await db.query(
+          `insert into public.point_earning_rules
+           (service_id, points_amount, eligible_tiers, effective_start, effective_end, created_by)
+         values ($1, 1000, array['BRONZE','SILVER','GOLD'], date '2026-01-01', date '2026-12-31', $2)`,
+          [service, actor],
+        );
+
+        // A purchase that is fully settled, so it is claim-eligible.
+        const settledPurchase = async (gross: string) => {
+          const p = (
+            await one<{ id: string }>(
+              `insert into public.purchases
+               (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, completed_at, created_by)
+             values ($1, $2, $3, 'completed', $4, $4, now(), $5) returning id`,
+              [
+                `AF-TXN-${stamp}-${Math.random().toString(36).slice(2, 8)}`,
+                customer,
+                membership,
+                gross,
+                actor,
+              ],
+            )
+          ).id;
+          await db.query(
+            `insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+                        values ($1, $2, 1, $3, $3)`,
+            [p, service, gross],
+          );
+          await db.query(
+            `insert into public.purchase_payments (purchase_id, amount, method, status, recorded_by, verified_by, verified_at)
+           values ($1, $2, 'cash', 'verified', $3, $3, now())`,
+            [p, gross, actor],
+          );
+          return p;
+        };
+
+        // The customer is owned by the same auth principal, so claim_earning_points
+        // resolves auth.uid() to them. The JWT claim is set at SESSION scope
+        // (is_local = false): a transaction-local setting is discarded at the end
+        // of the statement under autocommit, and auth.uid() would then read NULL.
+        await db.query(`update public.customers set auth_user_id = $1 where id = $2`, [
+          principal,
+          customer,
+        ]);
+        await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [principal]);
+
+        // Scoped to THIS account. The suite's own earlier sections create synthetic
+        // accounts whose balances are set directly by those fixtures without a
+        // matching ledger row, so a global invariant would measure the fixtures,
+        // not the cutover.
+        const invariant = async (id: string) =>
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n
+               from public.points_accounts a
+              where a.id = $1
+                and a.balance - a.reversal_debt <> coalesce(
+                      (select sum(l.amount) from public.points_ledger l where l.account_id = a.id), 0)`,
+              [id],
+            )
+          ).n;
+
+        // Collected outside the try so the finally can reach them even when the
+        // block fails part way through.
+        const claimIds: string[] = [];
+        try {
+          // --- 1. the cutover left the account at zero, and the ledger agrees ---
+          eq('the account starts at zero with a reconciling ledger', await invariant(account), 0);
+          eq(
+            'the membership cache agrees with the authoritative balance',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n
+               from public.memberships m
+               join public.points_accounts a on a.membership_id = m.id
+              where m.id = $1 and m.points_balance <> a.balance`,
+                [membership],
+              )
+            ).n,
+            0,
+          );
+
+          // --- 2. a settled purchase produces a claim, and an unsettled one does not ---
+          const purchaseA = await settledPurchase('50000.00');
+          // create_earning_claim RETURNS TABLE whose first column is claim_id, not id.
+          const claimA = await one<{
+            claim_id: string;
+            points_reserved: string;
+            expires_at: string;
+            qr_token: string;
+            fallback_code: string;
+          }>(`select * from public.create_earning_claim($1, $2)`, [purchaseA, actor]);
+          eq(
+            'a completed settled purchase creates a claim reserving the rule amount',
+            claimA.points_reserved,
+            '1000',
+          );
+          check(
+            'the plaintext tokens are returned exactly once, at creation',
+            (claimA.qr_token ?? '').length > 0 && (claimA.fallback_code ?? '').length > 0,
+          );
+          check(
+            'the claim expires at 24h or period end, whichever is first',
+            new Date(claimA.expires_at).getTime() - Date.now() <= 24 * 3600 * 1000 + 60_000,
+          );
+          const storedToken = (
+            await one<{ qr_token_hash: string }>(
+              `select qr_token_hash from public.earning_claims where id = $1`,
+              [claimA.claim_id],
+            )
+          ).qr_token_hash;
+          check(
+            'the stored credential is a hash, not the token',
+            storedToken.length === 64,
+            `len ${storedToken.length}`,
+          );
+
+          // An unsettled purchase is refused: the receipts do not cover the net.
+          const purchaseUnsettled = (
+            await one<{ id: string }>(
+              `insert into public.purchases (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, completed_at, created_by)
+           values ($1, $2, $3, 'completed', '50000.00', '50000.00', now(), $4) returning id`,
+              [`AF-TXN-${stamp}-u`, customer, membership, actor],
+            )
+          ).id;
+          await db.query(
+            `insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+                      values ($1, $2, 1, '50000.00', '50000.00')`,
+            [purchaseUnsettled, service],
+          );
+          await throwsIsolated('an unsettled purchase cannot create a claim', () =>
+            db.query(`select * from public.create_earning_claim($1, $2)`, [
+              purchaseUnsettled,
+              actor,
+            ]),
+          );
+
+          // --- 3. the reservation is real: capacity is held before the claim ---
+          eq(
+            'a pending claim holds its reservation against the cap',
+            (
+              await one<{ v: string }>(
+                `select private.points_capacity($1, (select period_id from public.earning_claims where id = $2))::text v`,
+                [account, claimA.claim_id],
+              )
+            ).v,
+            '59000',
+          );
+
+          // --- 4. claiming awards exactly once, and the wrong customer gets nothing ---
+          // The stored credential is a hash, so a plaintext is only ever obtainable
+          // from create_earning_claim or a reissue. Re-mint one to claim with.
+          const claimState = await one<{
+            status: string;
+            expires_at: string;
+            points_awarded: string;
+          }>(
+            `select status, expires_at::text, points_awarded::text
+           from public.earning_claims where id = $1`,
+            [claimA.claim_id],
+          );
+          const reissued = await one<{ qr_token: string; expires_at: string }>(
+            `select * from public.reissue_earning_claim($1, $2)`,
+            [claimA.claim_id, actor],
+          ).catch(() => null);
+          check(
+            'a reissue returns a fresh plaintext token',
+            (reissued?.qr_token ?? '').length > 0,
+            `claim state ${JSON.stringify(claimState)}`,
+          );
+          if (!reissued?.qr_token) throw new Error('reissue produced no token; cannot continue');
+          eq(
+            'a reissue of an unexpired claim preserves its expiry',
+            new Date(reissued.expires_at).toISOString().slice(0, 10),
+            new Date(claimA.expires_at).toISOString().slice(0, 10),
+          );
+
+          for (const browserRole of ['anon', 'authenticated'] as const) {
+            let denied = false;
+            try {
+              await asBrowserRole(target.url, browserRole, randomUUID(), (client) =>
+                client.query('select * from public.claim_earning_points($1, $2)', [
+                  reissued.qr_token,
+                  customer,
+                ]),
+              );
+            } catch (error) {
+              denied =
+                error instanceof Error &&
+                error.message.includes('permission denied for function claim_earning_points');
+            }
+            check(
+              `${browserRole} cannot claim with a forged customer identity through direct RPC`,
+              denied,
+            );
+          }
+          eq('denied direct claims leave the ledger intact', await invariant(account), 0);
+          await db.query('begin');
+          try {
+            const oldPeriod = await one<{ id: string }>(
+              "insert into public.points_periods(account_id,period_start,period_end,tier,annual_points_cap,opening_balance,status) values($1,'2020-01-01','2021-01-01','GOLD',60000,0,'open') returning id",
+              [account],
+            );
+            await db.query(
+              "update public.earning_claims set period_id=$1,status='expired',expires_at=now()-interval '1 second' where id=$2",
+              [oldPeriod.id, claimA.claim_id],
+            );
+            const renewed = await one<{ expires_at: string }>(
+              'select * from public.reissue_earning_claim($1,$2)',
+              [claimA.claim_id, actor],
+            );
+            check(
+              'expired reissue after an anniversary returns a future expiry',
+              new Date(renewed.expires_at).getTime() > Date.now(),
+            );
+            check(
+              'expired reissue reserves against the current earning period',
+              (
+                await one<{ period_id: string }>(
+                  'select period_id from public.earning_claims where id=$1',
+                  [claimA.claim_id],
+                )
+              ).period_id !== oldPeriod.id,
+            );
+          } finally {
+            await db.query('rollback');
+          }
+          const award = await one<{ points_awarded: string; balance_after: string }>(
+            `select * from public.claim_earning_points($1, $2)`,
+            [reissued.qr_token, customer],
+          );
+          eq('the rightful owner is awarded the full amount', award.points_awarded, '1000');
+          eq('the balance reflects the award', award.balance_after, '1000');
+          eq('the ledger still reconciles after an award', await invariant(account), 0);
+
+          await db.query('begin');
+          try {
+            await db.query(
+              'update public.point_earning_rules set points_amount = 58000 where service_id = $1',
+              [service],
+            );
+            const held = await one<{ claim_id: string }>(
+              'select * from public.create_earning_claim($1, $2)',
+              [await settledPurchase('10000.00'), actor],
+            );
+            await db.query(
+              'update public.point_earning_rules set points_amount = 5000 where service_id = $1',
+              [service],
+            );
+            const partial = await one<{
+              claim_id: string;
+              qr_token: string;
+              points_reserved: string;
+            }>('select * from public.create_earning_claim($1, $2)', [
+              await settledPurchase('10000.00'),
+              actor,
+            ]);
+            eq(
+              'another pending claim leaves only a partial reservation',
+              partial.points_reserved,
+              '1000',
+            );
+            await db.query(
+              "update public.earning_claims set expires_at = now() - interval '1 second' where id = $1",
+              [held.claim_id],
+            );
+            const changed = await one<{ points_awarded: string }>(
+              'select * from public.claim_earning_points($1, $2)',
+              [partial.qr_token, customer],
+            );
+            eq(
+              'elapsed reservations release capacity before the final award',
+              changed.points_awarded,
+              '5000',
+            );
+            const history = await one<{ points_awarded: string; points_capped: string }>(
+              'select points_awarded::text, points_capped::text from public.earning_claims where id = $1',
+              [partial.claim_id],
+            );
+            eq(
+              'claim history stores the actual award rather than its old reservation',
+              history.points_awarded,
+              '5000',
+            );
+            eq('claim history stores the actual capped amount', history.points_capped, '0');
+          } finally {
+            await db.query('rollback');
+          }
+
+          await throwsIsolated('a second claim of the same claim is refused', () =>
+            db.query(`select * from public.claim_earning_points($1, $2)`, [
+              reissued.qr_token,
+              customer,
+            ]),
+          );
+          eq('the second claim changed nothing', await invariant(account), 0);
+          eq(
+            'exactly one earned row exists for the claim',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from public.points_ledger
+              where entry_type='earned' and reference_id = $1`,
+                [claimA.claim_id],
+              )
+            ).n,
+            1,
+          );
+
+          // --- 5. reversal after spending creates debt, and the balance never goes negative ---
+          const purchaseB = await settledPurchase('10000.00');
+          // Called directly rather than joined: create_earning_claim is a
+          // RETURNS TABLE function, and a set-returning function in a FROM join
+          // returned no row here.
+          const claimB = await one<{ claim_id: string; qr_token: string }>(
+            `select * from public.create_earning_claim($1, $2)`,
+            [purchaseB, staff['super-admin']!],
+          );
+          claimIds.push(claimB.claim_id);
+          // Spend 800 of the 1000 balance so the reversal cannot be fully absorbed.
+          await db.query(
+            `insert into public.points_ledger (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'redemption', -800, 1000, 200, 'synthetic spend for the debt scenario')`,
+            [account],
+          );
+          await db.query(`update public.points_accounts set balance = 200 where id = $1`, [
+            account,
+          ]);
+          await db.query(`update public.memberships set points_balance = 200 where id = $1`, [
+            membership,
+          ]);
+          await db.query(`select * from public.claim_earning_points($1, $2)`, [
+            claimB.qr_token,
+            customer,
+          ]);
+          eq(
+            'the second award landed',
+            (
+              await one<{ balance: string }>(
+                `select balance::text from public.points_accounts where id = $1`,
+                [account],
+              )
+            ).balance,
+            '1200',
+          );
+
+          const currentBalance = (
+            await one<{ b: string }>(
+              `select balance::text b from public.points_accounts where id = $1`,
+              [account],
+            )
+          ).b;
+          // Spend the whole balance so the reversal cannot be fully absorbed. The
+          // debit MUST be written as a ledger row: adjusting the balance directly
+          // would break the invariant this section is here to prove, and would make
+          // a later assertion fail for a reason that has nothing to do with the
+          // reversal under test.
+          await db.query(
+            `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'redemption', -$2::bigint, $3::bigint, 0,
+                 'synthetic spend so the reversal exceeds the available balance')`,
+            [account, currentBalance, currentBalance],
+          );
+          await db.query(`update public.points_accounts set balance = 0 where id = $1`, [account]);
+          await db.query(`update public.memberships set points_balance = 0 where id = $1`, [
+            membership,
+          ]);
+          const reversal = await one<{
+            reversed_points: string;
+            reversal_debt: string;
+            balance_after: string;
+          }>(
+            `select * from public.reverse_purchase_points($1, $2, 'customer reversed the session')`,
+            [purchaseB, staff['super-admin']!],
+          );
+          claimIds.push(claimB.claim_id);
+          eq(
+            'the reversal is recorded in full, not truncated to the balance',
+            reversal.reversed_points,
+            '1000',
+          );
+          eq('the shortfall becomes non-monetary debt', reversal.reversal_debt, '1000');
+          eq('the balance floors at zero and never goes negative', reversal.balance_after, '0');
+          eq('the ledger still reconciles through a debt reversal', await invariant(account), 0);
+
+          // Earning repays debt first and is never blocked by it.
+          const purchaseC = await settledPurchase('10000.00');
+          const claimC = await one<{ claim_id: string; qr_token: string }>(
+            `select * from public.create_earning_claim($1, $2)`,
+            [purchaseC, actor],
+          );
+          claimIds.push(claimC.claim_id);
+          await db.query(`select * from public.claim_earning_points($1, $2)`, [
+            claimC.qr_token,
+            customer,
+          ]);
+          const afterDebt = await one<{ balance: string; reversal_debt: string }>(
+            `select balance::text, reversal_debt::text from public.points_accounts where id = $1`,
+            [account],
+          );
+          eq('earning is never blocked by outstanding debt', afterDebt.balance, '0');
+          eq('the full award repaid the debt first', afterDebt.reversal_debt, '0');
+          eq('the ledger reconciles after debt repayment', await invariant(account), 0);
+
+          // --- 6. the annual reset zeroes the balance, keeps the ledger, keeps debt ---
+          // Target state: balance 5000, debt 300, so the invariant requires a ledger
+          // total of 4700. One synthetic adjustment row carries it there, which keeps
+          // the fixture honest instead of setting fields behind the ledger's back.
+          await db.query(
+            `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after, reason)
+         values ($1, 'adjustment', 4700, 0, 4700,
+                 'synthetic pre-reset position: 5000 balance against 300 reversal debt')`,
+            [account],
+          );
+          await db.query(
+            `update public.points_accounts set balance = 5000, reversal_debt = 300 where id = $1`,
+            [account],
+          );
+          const beforeReset = await invariant(account);
+          eq('the synthetic pre-reset state reconciles', beforeReset, 0);
+          // Force an ELAPSED period so the reset path is genuinely exercised. The
+          // existing period already contains today, so ensure_points_period would
+          // return it unchanged; the scenario needs a period whose end is in the
+          // past. A stale row states that directly, without pretending the calendar
+          // moved. The anchor is set to 2020-12-25 so the period containing today
+          // is [2025-12-25, 2026-12-25) and the stale row is unambiguously behind it.
+          // Detach every reference to the period first. points_ledger.origin_period_id
+          // is a RESTRICT foreign key, and earning_claims.period_id is NOT NULL, so
+          // the claims are removed outright and the ledger reference is nulled. Every
+          // one of these rows is synthetic and is removed again in the finally block,
+          // which is idempotent.
+          await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+          await db.query(
+            `update public.points_ledger set origin_period_id = null where account_id = $1`,
+            [account],
+          );
+          await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+          await db.query(
+            `update public.memberships set points_anniversary = date '2020-12-25' where id = $1`,
+            [membership],
+          );
+          await db.query(
+            `insert into public.points_periods
+           (account_id, period_start, period_end, tier, annual_points_cap, opening_balance, status)
+         values ($1, date '2024-12-25', date '2025-12-25', 'GOLD', 60000, 0, 'open')`,
+            [account],
+          );
+          const newPeriod = await one<{ id: string }>(
+            `select private.ensure_points_period($1) id`,
+            [account],
+          );
+          const closed = await one<{
+            closing_balance: string;
+            status: string;
+            reset_source: string;
+          }>(
+            `select closing_balance::text, status, reset_source
+           from public.points_periods where id <> $1 and account_id = $2
+           order by period_start desc limit 1`,
+            [newPeriod.id, account],
+          );
+          eq('the elapsed period closed', closed?.status, 'reset');
+          eq('closing_balance is the balance BEFORE the reset', closed?.closing_balance, '5000');
+          eq('an automatic catch-up is recorded as automatic', closed?.reset_source, 'automatic');
+          await db.query('begin');
+          try {
+            const prior = await one<{ evidence: string }>(
+              "select to_jsonb(p)::text evidence from public.points_periods p where p.account_id=$1 and p.period_start='2024-12-25'",
+              [account],
+            );
+            await db.query('delete from public.points_periods where id=$1', [newPeriod.id]);
+            await db.query(
+              "insert into public.points_periods(account_id,period_start,period_end,tier,annual_points_cap,opening_balance,status) values($1,'2023-12-25','2024-12-25','GOLD',60000,0,'open')",
+              [account],
+            );
+            await db.query('select private.ensure_points_period($1)', [account]);
+            eq(
+              'later catch-up preserves every field of prior reset evidence',
+              (
+                await one<{ evidence: string }>(
+                  "select to_jsonb(p)::text evidence from public.points_periods p where p.account_id=$1 and p.period_start='2024-12-25'",
+                  [account],
+                )
+              ).evidence,
+              prior.evidence,
+            );
+          } finally {
+            await db.query('rollback');
+          }
+          eq(
+            'the balance is zero after the reset',
+            (
+              await one<{ balance: string }>(
+                `select balance::text from public.points_accounts where id = $1`,
+                [account],
+              )
+            ).balance,
+            '0',
+          );
+          eq(
+            'the reset does not erase outstanding debt',
+            (
+              await one<{ reversal_debt: string }>(
+                `select reversal_debt::text from public.points_accounts where id = $1`,
+                [account],
+              )
+            ).reversal_debt,
+            '300',
+          );
+          eq('the ledger still reconciles after a reset', await invariant(account), 0);
+          check(
+            'no rollover: the new period opened at zero',
+            (
+              await one<{ opening_balance: string | null }>(
+                `select opening_balance::text from public.points_periods where id = $1`,
+                [newPeriod.id],
+              )
+            ).opening_balance === '0',
+          );
+          check(
+            'the historical ledger rows survive the reset',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from public.points_ledger where account_id = $1`,
+                [account],
+              )
+            ).n > 0,
+          );
+
+          // --- 7. ensure_points_period is idempotent and leap-day safe ---
+          const again = await one<{ id: string }>(`select private.ensure_points_period($1) id`, [
+            account,
+          ]);
+          eq('ensure_points_period is idempotent', again.id, newPeriod.id);
+
+          // --- 8. THE RACES. Two real sessions, not one connection twice. ---
+          // A compare-and-set proves nothing on a single connection, because the
+          // two "concurrent" calls are simply serial. These use a second client so
+          // the two statements genuinely overlap in the database.
+          const secondSession = async () => {
+            const client = new Client({ connectionString: target.url });
+            await client.connect();
+            // Both sessions fail fast rather than hanging: a lock_timeout is a
+            // defined outcome to assert on, not a stuck suite.
+            await client.query(`set lock_timeout = '5s'`);
+            await client.query(`set statement_timeout = '20s'`);
+            return client;
+          };
+
+          // Race A: two simultaneous claims on the SAME claim. Exactly one may win.
+          {
+            const purchaseR = await settledPurchase('10000.00');
+            const claimR = await one<{ claim_id: string; qr_token: string }>(
+              `select * from public.create_earning_claim($1, $2)`,
+              [purchaseR, actor],
+            );
+            const other = await secondSession();
+            try {
+              await other.query(`select set_config('request.jwt.claim.sub', $1, false)`, [
+                principal,
+              ]);
+              const results = await Promise.allSettled([
+                db.query(`select * from public.claim_earning_points($1, $2)`, [
+                  claimR.qr_token,
+                  customer,
+                ]),
+                other.query(`select * from public.claim_earning_points($1, $2)`, [
+                  claimR.qr_token,
+                  customer,
+                ]),
+              ]);
+              const won = results.filter((r) => r.status === 'fulfilled').length;
+              eq('race: exactly one of two simultaneous claims succeeds', won, 1);
+              const lost = results.find((r) => r.status === 'rejected');
+              check(
+                'race: the loser is told the claim is already used, not that it is broken',
+                !!lost &&
+                  /ALREADY_CLAIMED|ALREADY CLAIMED/i.test(
+                    lost.reason instanceof Error ? lost.reason.message : String(lost.reason),
+                  ),
+                lost && String((lost.reason as Error)?.message ?? '').split('\n')[0],
+              );
+              eq(
+                'race: exactly one earned row exists for the claim',
+                (
+                  await one<{ n: number }>(
+                    `select count(*)::int n from public.points_ledger
+                  where entry_type='earned' and reference_id = $1`,
+                    [claimR.claim_id],
+                  )
+                ).n,
+                1,
+              );
+            } finally {
+              await other.end();
+            }
+          }
+
+          // Race B: two claims created for DIFFERENT purchases in the same period
+          // must not each draw on the full remaining capacity.
+          {
+            const fresh = (
+              await one<{ id: string }>(`select private.ensure_points_period($1) id`, [account])
+            ).id;
+            const cap = (
+              await one<{ v: string }>(`select private.points_capacity($1,$2)::text v`, [
+                account,
+                fresh,
+              ])
+            ).v;
+            const other = await secondSession();
+            try {
+              const p1 = await settledPurchase('10000.00');
+              const p2 = await settledPurchase('10000.00');
+              const results = await Promise.allSettled([
+                db.query(`select * from public.create_earning_claim($1,$2)`, [p1, actor]),
+                other.query(`select * from public.create_earning_claim($1,$2)`, [p2, actor]),
+              ]);
+              const reserved = results.reduce((sum, r) => {
+                if (r.status !== 'fulfilled') return sum;
+                const row = (r.value as { rows: { points_reserved: string }[] }).rows[0];
+                return sum + Number(row?.points_reserved ?? 0);
+              }, 0);
+              check(
+                'race: two concurrent claims never reserve more than the free capacity',
+                reserved <= Number(cap),
+                `reserved ${reserved} of ${cap}`,
+              );
+              check(
+                'race: both concurrent claims were still created',
+                results.every((r) => r.status === 'fulfilled'),
+                `${results.filter((r) => r.status === 'fulfilled').length}/2`,
+              );
+            } finally {
+              await other.end();
+            }
+          }
+
+          // --- Task 10: spending is restricted to staycation, unless promoted ---
+          //
+          // Earning is NOT restricted (the rule above still earns on any purchase).
+          // SPENDING is. These are two independent questions, so each is proven
+          // separately rather than assumed from the other.
+          {
+            // Two services: one accommodation, one not. The classification is the ONLY
+            // one, and it lives on the catalog row - no booking table was invented.
+            const stay = (stayService = (
+              await one<{ id: string }>(
+                `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Resort Stay', '4000.00', true) returning id`,
+                [`STAY-${stamp}`],
+              )
+            ).id);
+            const other = (
+              await one<{ id: string }>(
+                `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Teppanyaki', '2000.00', false) returning id`,
+                [`OTHER-${stamp}`],
+              )
+            ).id;
+
+            const draftWith = (draftWithLines = async (
+              lines: { service: string; total: string }[],
+            ) => {
+              const gross = lines.reduce((sum, l) => sum + Number(l.total), 0).toFixed(2);
+              const p = (
+                await one<{ id: string }>(
+                  `insert into public.purchases
+                 (purchase_number, customer_id, membership_id, status, gross_amount, net_amount, created_by)
+               values ($1, $2, $3, 'draft', $4, $4, $5) returning id`,
+                  [
+                    `AF-TXN-${stamp}-${Math.random().toString(36).slice(2, 8)}`,
+                    customer,
+                    membership,
+                    gross,
+                    actor,
+                  ],
+                )
+              ).id;
+              for (const line of lines) {
+                await db.query(
+                  `insert into public.purchase_lines (purchase_id, service_id, quantity, unit_amount, line_total)
+               values ($1, $2, 1, $3, $3)`,
+                  [p, line.service, line.total],
+                );
+              }
+              return p;
+            });
+
+            const quote = (purchase: string, points: number) =>
+              one<{ quote_id: string; peso_value: string; eligible_line_total: string }>(
+                `select * from public.quote_point_discount($1,$2,$3)`,
+                [purchase, points, actor],
+              );
+
+            const committed = async (points: number) =>
+              one<{ quote_id: string; peso_value: string }>(
+                `select * from public.quote_point_discount($1,$2,$3)`,
+                [await draftWith([{ service: stay, total: '4000.00' }]), points, actor],
+              );
+
+            // Fund the member so spending is testable at all. The ledger row is
+            // written ALONGSIDE the balance: a bare balance update would break
+            // `balance - reversal_debt = SUM(ledger.amount)` and the suite would then
+            // blame unrelated code.
+            await db.query(
+              `update public.points_accounts set balance = balance + 10000 where id = $1`,
+              [account],
+            );
+            await db.query(
+              `insert into public.points_ledger
+             (account_id, entry_type, amount, balance_before, balance_after, counts_toward_cap, reason)
+           select id, 'adjustment', 10000, balance - 10000, balance, false, 'test funding'
+             from public.points_accounts where id = $1`,
+              [account],
+            );
+
+            // 1. Staycation is discountable with NO promotion at all.
+            const stayQuote = await committed(1000);
+            eq(
+              'a staycation line is discountable with no promotion',
+              stayQuote.peso_value,
+              '1000.00',
+            );
+
+            // 2. A non-staycation service is NOT, with no promotion.
+            const noPromo = await draftWith([{ service: other, total: '2000.00' }]);
+            await throwsIsolated('a non-staycation purchase cannot be discounted', () =>
+              quote(noPromo, 1000),
+            );
+
+            // 3. An ACTIVE, IN-DATE promotion makes it discountable. Half-open dates.
+            const promo = (
+              await one<{ id: string }>(
+                `insert into public.point_redemption_rules
+               (service_id, peso_value_per_point, eligible_tiers, effective_start, effective_end,
+                promotion_reference, created_by)
+             values ($1, 1, array['BRONZE','SILVER','GOLD'], date '2026-01-01', date '2027-01-01',
+                     'Grand opening promo', $2) returning id`,
+                [other, actor],
+              )
+            ).id;
+            const promoted = await draftWith([{ service: other, total: '2000.00' }]);
+            const otherQuote = await quote(promoted, 500);
+            eq(
+              'a promoted non-staycation service becomes discountable',
+              otherQuote.peso_value,
+              '500.00',
+            );
+
+            // 4. The window is half-open: an EXPIRED promotion grants nothing.
+            await db.query(
+              `update public.point_redemption_rules set effective_end = date '2026-01-02' where id = $1`,
+              [promo],
+            );
+            const expiredPromo = await draftWith([{ service: other, total: '2000.00' }]);
+            await throwsIsolated('an expired promotion grants no discount', () =>
+              quote(expiredPromo, 500),
+            );
+            await db.query(
+              `update public.point_redemption_rules set effective_end = date '2027-01-01' where id = $1`,
+              [promo],
+            );
+
+            // 5. No INDEFINITE promotions. Both ends are NOT NULL, so this is
+            // unrepresentable rather than merely discouraged.
+            const notNulls = await one<{ s: string; e: string }>(
+              `select is_nullable s, is_nullable e from information_schema.columns
+            where table_schema = 'public' and table_name = 'point_redemption_rules'
+              and column_name in ('effective_start','effective_end') order by column_name`,
+            );
+            eq(
+              'a redemption promotion cannot be created without an end date',
+              `${notNulls.s}|${notNulls.e}`,
+              'NO|NO',
+            );
+            await throwsIsolated('an open-ended promotion is refused by the table', () =>
+              db.query(
+                `insert into public.point_redemption_rules
+               (service_id, peso_value_per_point, eligible_tiers, effective_start, effective_end,
+                promotion_reference, created_by)
+             values ($1, 1, array['GOLD'], date '2026-01-01', null, 'Never ends', $2)`,
+                [other, actor],
+              ),
+            );
+
+            // 6. MIXED purchase: the discount is capped at the ELIGIBLE lines only,
+            //    never at the gross. This is the whole point of ruling 1.
+            //    `plain` is a THIRD service that is never promoted, so the ineligible
+            //    half of this purchase stays ineligible no matter what the promotion
+            //    above does to `other`.
+            const plain = (
+              await one<{ id: string }>(
+                `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+             values ($1, 'Retail Product', '900.00', false) returning id`,
+                [`PLAIN-${stamp}`],
+              )
+            ).id;
+            promoServices = [stay, other, plain];
+            const mixed = await draftWith([
+              { service: stay, total: '1000.00' },
+              { service: plain, total: '9000.00' },
+            ]);
+            const mixedQuote = await quote(mixed, 4000);
+            eq(
+              'the mixed eligible base excludes the unpromoted line',
+              mixedQuote.eligible_line_total,
+              '1000.00',
+            );
+            eq(
+              'a mixed purchase is capped at its eligible lines, not its gross',
+              mixedQuote.peso_value,
+              '1000.00',
+            );
+
+            // 7. QUOTING SPENDS NOTHING.
+            const balanceBeforeQuote = (
+              await one<{ balance: string }>(
+                `select balance::text from public.points_accounts where id = $1`,
+                [account],
+              )
+            ).balance;
+            await quote(await draftWith([{ service: stay, total: '4000.00' }]), 100);
+            eq(
+              'quoting moves no points',
+              (
+                await one<{ balance: string }>(
+                  `select balance::text from public.points_accounts where id = $1`,
+                  [account],
+                )
+              ).balance,
+              balanceBeforeQuote,
+            );
+
+            // 8. COMMIT spends the points and settles the accounting triple.
+            const toCommit = await quote(
+              await draftWith([{ service: stay, total: '4000.00' }]),
+              1500,
+            );
+            await db.query(
+              `update public.redemption_quotes set expires_at = now() + interval '10 minutes' where id = $1`,
+              [toCommit.quote_id],
+            );
+            const result = await one<{
+              points_spent: string;
+              discount_applied: string;
+              net_amount: string;
+            }>(`select * from public.commit_point_discount($1,$2)`, [toCommit.quote_id, actor]);
+            eq('committing spends exactly the quoted points', result.points_spent, '1500');
+            eq('committing applies the quoted peso discount', result.discount_applied, '1500.00');
+            eq('committing reduces net by the discount', result.net_amount, '2500.00');
+            eq('the ledger still reconciles after a discount', await invariant(account), 0);
+            eq(
+              'the membership cache follows the discount',
+              (
+                await one<{ v: string }>(
+                  `select points_balance::text v from public.memberships where id = $1`,
+                  [membership],
+                )
+              ).v,
+              (
+                await one<{ v: string }>(
+                  `select balance::text v from public.points_accounts where id = $1`,
+                  [account],
+                )
+              ).v,
+            );
+
+            // 9. A quote is single-use. The second commit is refused by the CAS.
+            await throwsIsolated('a quote cannot be committed twice', () =>
+              db.query(`select * from public.commit_point_discount($1,$2)`, [
+                toCommit.quote_id,
+                actor,
+              ]),
+            );
+            eq('the refused second commit moved nothing', await invariant(account), 0);
+
+            // 10. An ineligible line can never carry a discount, even by direct write.
+            const mixedId = (
+              await one<{ id: string }>(`select id from public.purchases where id = $1`, [mixed])
+            ).id;
+            await throwsIsolated('a line cannot be discounted beyond its own total', () =>
+              db.query(
+                `update public.purchase_lines set points_discount_amount = '99999.00' where purchase_id = $1`,
+                [mixedId],
+              ),
+            );
+
+            // 11. Finance keeps the four figures apart. A discount is NOT a receipt.
+            const summary = await one<{
+              gross_amount: string;
+              points_discount_amount: string;
+              net_amount: string;
+              verified_total: string;
+              fully_paid: boolean;
+            }>(`select * from public.purchase_financial_summary_purchases($1)`, [mixed]);
+            eq('finance reports the gross separately', summary.gross_amount, '10000.00');
+            eq('finance reports the discount separately', summary.points_discount_amount, '0.00');
+            eq('finance reports the net separately', summary.net_amount, '10000.00');
+            eq(
+              'a points discount is never counted as a cash receipt',
+              summary.verified_total,
+              '0.00',
+            );
+            eq('an unreceipted purchase is not fully paid', summary.fully_paid, false);
+
+            // 12. Outstanding debt blocks SPENDING, exactly as it blocks nothing else.
+            await db.query(`update public.points_accounts set reversal_debt = 500 where id = $1`, [
+              account,
+            ]);
+            const whileInDebt = await draftWith([{ service: stay, total: '4000.00' }]);
+            await throwsIsolated('outstanding reversal debt refuses a quote', () =>
+              quote(whileInDebt, 100),
+            );
+            await db.query(`update public.points_accounts set reversal_debt = 0 where id = $1`, [
+              account,
+            ]);
+          }
+
+          // --- cash receipts: the write path that was missing entirely ---
+          //
+          // purchase_payments existed, was read by private.purchase_verified_total and
+          // gated complete_purchase, but NOTHING could insert into it. A purchase
+          // could therefore never be settled, so the whole record -> settle -> claim
+          // chain was unreachable. These prove the path exists and is fail-closed.
+          {
+            const paid = await draftWithLines([{ service: stayService, total: '4000.00' }]);
+            // A DISTINCT reference per receipt: purchase_payments_purchase_reference_uidx
+            // refuses a duplicate, which is what stops one bank reference being entered
+            // twice as two separate payments.
+            let refSeq = 0;
+            const pay = async (amount: string) =>
+              one<{ payment_id: string; payment_number: string; status: string }>(
+                `select * from public.record_purchase_payment($1,$2,'cash',$3,$4)`,
+                [paid, amount, `REF-${++refSeq}`, actor],
+              );
+
+            const recorded = await pay('4000.00');
+            eq('a recorded receipt is recorded, not verified', recorded.status, 'recorded');
+            eq(
+              'a RECORDED receipt is not money yet',
+              (
+                await one<{ v: string }>(`select private.purchase_verified_total($1)::text v`, [
+                  paid,
+                ])
+              ).v,
+              '0',
+            );
+            await throwsIsolated('an unsettled purchase cannot be completed', () =>
+              db.query(`select * from public.complete_purchase($1,$2)`, [paid, actor]),
+            );
+
+            // Verifying is a separate, attributed act, performed by Finance. The
+            // seller who recorded the receipt cannot verify it: `operations.sales`
+            // does not carry finance.payment_verification update.
+            await throwsIsolated('the seller cannot verify their own receipt', () =>
+              db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+                recorded.payment_id,
+                actor,
+              ]),
+            );
+            const verified = await one<{ status: string; verified_total: string }>(
+              `select * from public.verify_purchase_payment($1,'verified',null,$2)`,
+              [recorded.payment_id, financeActor],
+            );
+            eq('verifying makes the money real', verified.status, 'verified');
+            eq('the verified total now covers the net amount', verified.verified_total, '4000.00');
+
+            await db.query(`select * from public.complete_purchase($1,$2)`, [paid, actor]);
+            eq(
+              'a settled purchase is completed',
+              (
+                await one<{ v: string }>(`select status v from public.purchases where id = $1`, [
+                  paid,
+                ])
+              ).v,
+              'completed',
+            );
+
+            // A receipt moves out of 'recorded' exactly once.
+            await throwsIsolated('a receipt cannot be verified twice', () =>
+              db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+                recorded.payment_id,
+                financeActor,
+              ]),
+            );
+
+            // A rejection with no reason is unreviewable, so it is refused.
+            const rejected = await pay('100.00');
+            await throwsIsolated('a rejection with no reason is refused', () =>
+              db.query(`select * from public.verify_purchase_payment($1,'rejected','   ',$2)`, [
+                rejected.payment_id,
+                financeActor,
+              ]),
+            );
+
+            // Zero and negative receipts are both refused.
+            await throwsIsolated('a zero receipt is refused', () => pay('0'));
+            await throwsIsolated('a negative receipt is refused', () => pay('-500.00'));
+
+            // Finance keeps the four figures apart, and a discount is never a receipt.
+            const fin = await one<{
+              gross_amount: string;
+              points_discount_amount: string;
+              net_amount: string;
+              verified_total: string;
+              fully_paid: boolean;
+            }>(`select * from public.purchase_financial_summary_purchases($1)`, [paid]);
+            eq('finance reports gross separately', fin.gross_amount, '4000.00');
+            eq(
+              'finance reports the points discount separately',
+              fin.points_discount_amount,
+              '0.00',
+            );
+            eq('finance reports net separately', fin.net_amount, '4000.00');
+            eq('finance reports verified CASH separately', fin.verified_total, '4000.00');
+            eq('a fully receipted purchase is marked paid', fin.fully_paid, true);
+          }
+
+          // --- the manual adjustment, executed ---
+          //
+          // Three writes that must land together, so this is where the invariant
+          // `balance - reversal_debt = SUM(points_ledger.amount)` is actually proven
+          // rather than assumed. Reading it from a handler test would prove nothing:
+          // PostgREST cannot span these three statements.
+          {
+            await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+            await db.query(
+              `update public.points_ledger set origin_period_id = null where account_id = $1`,
+              [account],
+            );
+            await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+
+            const before = await one<{ balance: string; debt: string }>(
+              `select balance::text, reversal_debt::text from public.points_accounts where id = $1`,
+              [account],
+            );
+            const credited = await one<{ balance_after: string }>(
+              `select * from public.adjust_membership_points($1,$2,$3,$4)`,
+              [membership, 750, 'Goodwill credit for a missed service', staff['super-admin']!],
+            );
+            eq(
+              'an adjustment credits the account',
+              credited.balance_after,
+              String(Number(before.balance) + 750),
+            );
+
+            eq(
+              'the adjustment writes exactly one permanent ledger row',
+              (
+                await one<{ n: number }>(
+                  `select count(*)::int n from public.points_ledger
+                where entry_type = 'adjustment' and amount = 750 and reason = 'Goodwill credit for a missed service'`,
+                )
+              ).n,
+              1,
+            );
+            eq(
+              'an adjustment never counts toward the annual earning cap',
+              (
+                await one<{ n: number }>(
+                  `select count(*)::int n from public.points_ledger
+                where entry_type = 'adjustment' and reason = 'Goodwill credit for a missed service'
+                  and counts_toward_cap is false`,
+                )
+              ).n,
+              1,
+            );
+            eq(
+              'the membership cache follows the account, so the two cannot drift',
+              (
+                await one<{ v: string }>(
+                  `select points_balance::text v from public.memberships where id = $1`,
+                  [membership],
+                )
+              ).v,
+              credited.balance_after,
+            );
+            eq('the adjustment leaves the ledger reconcilable', await invariant(account), 0);
+
+            // A negative adjustment is the same mechanism in the other direction.
+            const debited = await one<{ balance_after: string }>(
+              `select * from public.adjust_membership_points($1,$2,$3,$4)`,
+              [membership, -250, 'Reversal of the goodwill credit', staff['super-admin']!],
+            );
+            eq(
+              'a negative adjustment debits the account',
+              debited.balance_after,
+              String(Number(credited.balance_after) - 250),
+            );
+            eq('the ledger still reconciles after a debit', await invariant(account), 0);
+
+            // The refusals. Each is a distinct, named reason a caller can act on.
+            await throwsIsolated('a zero adjustment is refused', () =>
+              db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+                membership,
+                0,
+                'Nothing to change',
+                staff['super-admin']!,
+              ]),
+            );
+            await throwsIsolated('an adjustment with no reason is refused', () =>
+              db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+                membership,
+                100,
+                '   ',
+                staff['super-admin']!,
+              ]),
+            );
+            await throwsIsolated('an adjustment that would go negative is refused', () =>
+              db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+                membership,
+                -999999999,
+                'More than the member holds',
+                staff['super-admin']!,
+              ]),
+            );
+            await throwsIsolated('an adjustment by an inactive staff member is refused', () =>
+              db.query(`select * from public.adjust_membership_points($1,$2,$3,$4)`, [
+                membership,
+                100,
+                'A reason that is long enough',
+                uuidFor('cc:inactive-actor'),
+              ]),
+            );
+            eq('none of the refused adjustments changed the balance', await invariant(account), 0);
+            eq(
+              'a refused adjustment writes no ledger row',
+              (
+                await one<{ n: number }>(
+                  `select count(*)::int n from public.points_ledger
+                where account_id = $1 and reason in ('Nothing to change','   ','More than the member holds','A reason that is long enough')`,
+                  [account],
+                )
+              ).n,
+              0,
+            );
+            eq(
+              'the adjustment is audited with its reason',
+              (
+                await one<{ n: number }>(
+                  `select count(*)::int n from public.audit_events
+                where action = 'POINTS_ADJUSTED' and entity_id = $1`,
+                  [membership],
+                )
+              ).n >= 2,
+              true,
+            );
+          }
+
+          // The leap-day scenario needs a clean slate for the same reason the reset
+          // scenario did: ensure_points_period returns any existing period that
+          // contains today, so a stale row would mask the new anchor entirely.
+          await db.query(`delete from public.earning_claims where account_id = $1`, [account]);
+          await db.query(
+            `update public.points_ledger set origin_period_id = null where account_id = $1`,
+            [account],
+          );
+          await db.query(`delete from public.points_periods where account_id = $1`, [account]);
+          await db.query(
+            `update public.memberships set points_anniversary = date '2024-02-29' where id = $1`,
+            [membership],
+          );
+          const leap = await one<{ id: string }>(`select private.ensure_points_period($1) id`, [
+            account,
+          ]);
+          const leapPeriod = await one<{ period_start: string; period_end: string }>(
+            `select period_start::text, period_end::text from public.points_periods where id = $1`,
+            [leap.id],
+          );
+          // The period containing today (2026) clamps to 28 February, which is the
+          // APPROVED policy, not a defect: a leap-day member gets a one-day-shorter
+          // period in a non-leap year. What must never happen is a permanent drift
+          // to the 28th, so the next leap year is asserted explicitly.
+          eq(
+            'a 2026 period from a 29 February anchor clamps to 28 February, never 1 March',
+            leapPeriod.period_start,
+            '2026-02-28',
+          );
+          eq(
+            'the 2026 period ends on the clamped anniversary',
+            leapPeriod.period_end,
+            '2027-02-28',
+          );
+          const leapArithmetic = await one<{ non_leap: string; leap: string }>(
+            `select (date '2024-02-29' + make_interval(years => 2))::date::text non_leap,
+                (date '2024-02-29' + make_interval(years => 4))::date::text leap`,
+          );
+          eq('a non-leap period clamps to 28 February', leapArithmetic.non_leap, '2026-02-28');
+          eq(
+            'the anchor does NOT drift: 29 February returns in the next leap year',
+            leapArithmetic.leap,
+            '2028-02-29',
+          );
+        } finally {
+          // The hierarchy-snapshot delete needs the maintenance flag the same way
+          // the suite's rollback fixture sets it.
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          // This block's own rows, deleted in reverse foreign-key order so section
+          // 21's pre-run row-count proof still holds. Registering them with the
+          // suite's cleanup registry would require touching shared state; removing
+          // them here keeps the section self-contained. It runs in a finally so a
+          // mid-block failure can never leak rows into the next section.
+          const cleanupSql = [
+            [
+              `delete from public.audit_events
+            where action = 'EARNING_CLAIM_REISSUED'
+              and (entity_id = any($1::text[]) or after_data->>'actorId' = $2)`,
+              [claimIds, actor],
+            ],
+            [`delete from public.earning_claims where account_id = $1`, [account]],
+            [
+              `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id = $1)`,
+              [membership],
+            ],
+            [
+              `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id = $1)`,
+              [membership],
+            ],
+            // redemption_quotes RESTRICTS a delete of the ledger row it spent, so the
+            // quotes MUST go first or the ledger delete below fails. The RESTRICT is
+            // deliberate: a committed quote is permanent history.
+            [
+              `delete from public.redemption_quotes where membership_id = $1 or purchase_id in (select id from public.purchases where membership_id = $1)`,
+              [membership],
+            ],
+            [`delete from public.points_ledger where account_id = $1`, [account]],
+            [`delete from public.purchases where membership_id = $1`, [membership]],
+            // points_periods references points_accounts, so the account goes LAST.
+            [`delete from public.points_periods where account_id = $1`, [account]],
+            [`delete from public.points_accounts where id = $1`, [account]],
+            // The Task 10 services and the promotion that names them. The promotion
+            // RESTRICTS the service, so it goes first.
+            [
+              `delete from public.point_redemption_rules where service_id = any($1::uuid[])`,
+              [promoServices],
+            ],
+            [
+              `delete from public.point_earning_rules where service_id = any($1::uuid[])`,
+              [[...promoServices, service]],
+            ],
+            [
+              `delete from public.service_catalog where id = any($1::uuid[])`,
+              [[...promoServices, service]],
+            ],
+            [`delete from public.memberships where id = $1`, [membership]],
+            // The sale-hierarchy trigger writes an immutable snapshot per sale. The
+            // suite's own sanctioned escape hatch is the allow_snapshot_maintenance
+            // flag, used the same way by the rollback fixture; without it the
+            // snapshot can never be removed and the synthetic sale would leak.
+            [`delete from public.card_sale_hierarchy_snapshots where sale_id = $1`, [sale]],
+            [`delete from public.card_sales where id = $1`, [sale]],
+          ] as const;
+          // Removal failures are REPORTED, not swallowed: a silently skipped delete
+          // is exactly how a row leaks into section 21 and turns a section-65 bug
+          // into an unrelated-looking cleanup failure. Deleting rows that are already
+          // gone is not an error, so only genuine failures are reported.
+          for (const [sql, params] of cleanupSql) {
+            try {
+              await db.query(sql, params as unknown as unknown[]);
+            } catch (error) {
+              check(
+                `points cleanup: ${sql.slice(0, 60)}`,
+                false,
+                error instanceof Error ? error.message.split('\n')[0]! : String(error),
+              );
+            }
+          }
+        }
+      }
+
+      section('66. operational services tier discounts and the operations.sales grant');
+
+      // 20261105000001 adds the Operational Services tier-discount model and the
+      // narrowly scoped `operations.sales` capability. Everything below is proven
+      // by EXECUTION against real PostgreSQL, because the failure modes here are
+      // arithmetic and authorization, and both survive a text review.
+      //
+      // The two properties that matter:
+      //   1. gross - tier_discount - points_discount = net, on every row.
+      //   2. A GSD can record a sale and a receipt, and can do NOTHING else.
+      // Declared out here so the `finally` can reach them. A section that leaks its
+      // synthetic rows on failure turns one real failure into a cascade of
+      // unrelated-looking cleanup failures, which is exactly the confusion this
+      // file's own history warns about.
+      let customer: string | null = null;
+      let saleId: string | null = null;
+      let goldMembership: string | null = null;
+      let svc: string | null = null;
+      let expiredSvc: string | null = null;
+      let finActor: string | null = null;
+      let gsdAuth: string | null = null;
+      try {
+        // Section 65 declares `stamp`, `actor`, `customer` and `membership` for its
+        // OWN fixtures inside its own try block. Section 66 needs its own run
+        // marker and its own seller, so its rows cannot collide with section 65's
+        // and a failure in one section cannot be caused by the other's teardown.
+        const stamp = `p66_${Date.now().toString(36)}`;
+        const past = '2000-01-01';
+        const future = '2099-01-01';
+
+        gsdAuth = uuidFor('p66:gsd');
+        const gsdEmail = `${RUN}-p66-gsd@example.invalid`;
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [gsdAuth, gsdEmail]);
+        await db.query(
+          `insert into public.staff_users (id, email, full_name, status)
+         values ($1, $2, 'Tier Discount GSD', 'active')`,
+          [gsdAuth, gsdEmail],
+        );
+        createdStaffIds.push(gsdAuth);
+        // The GSD role: can record a service sale and a receipt, and holds no
+        // catalog, customer or verification key.
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+         values ($1, (select id from public.roles where slug = 'employee'))`,
+          [gsdAuth],
+        );
+        const actor = gsdAuth;
+
+        customer = uuidFor('p66:customer');
+        await db.query(
+          `insert into public.customers
+           (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1, $2, 'TIER', 'BUYER', $3, $4, 'active')`,
+          [customer, `CUS-${stamp}`, `tier-buyer-${stamp}@example.invalid`, '09180000000'],
+        );
+
+        // The card sale that produced the membership. `memberships.sale_id` is
+        // NOT NULL and the sale-hierarchy trigger walks the seller's upline chain,
+        // so this sale needs a real seller with a complete chain - the same
+        // synthetic Sales Manager section 65 uses. `draft` is deliberate: a
+        // sale's own payment and activation gates are proven elsewhere.
+        saleId = uuidFor('p66:sale');
+        await db.query(
+          `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1, $2, $3, (select id from public.card_plans where code = 'GOLD'),
+                 'staff', $4, '100000.00', now() + interval '30 days', 'draft')`,
+          [
+            saleId,
+            `AF-CSALE${stamp.replace(/[^a-z0-9]/gi, '').toUpperCase()}`,
+            customer,
+            staff['sm']!,
+          ],
+        );
+
+        eq(
+          'the operations.sales module exists',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.modules where key = 'operations.sales' and is_active`,
+            )
+          ).n,
+          1,
+        );
+
+        const grantFor = async (slug: string) =>
+          (await one<{ v: boolean; c: boolean; u: boolean; d: boolean }>(
+            `select rp.can_view v, rp.can_create c, rp.can_update u, rp.can_delete d
+               from public.role_permissions rp
+               join public.roles r on r.id = rp.role_id
+               join public.modules m on m.id = rp.module_id
+              where r.slug = $1 and m.key = 'operations.sales'`,
+            [slug],
+          )) ?? { v: false, c: false, u: false, d: false };
+
+        const gsd = await grantFor('employee');
+        check(
+          'the GSD role may view and create an operational sale',
+          gsd.v && gsd.c,
+          JSON.stringify(gsd),
+        );
+        check(
+          'the GSD role may NOT update or delete an operational sale',
+          !gsd.u && !gsd.d,
+          JSON.stringify(gsd),
+        );
+
+        const finance = await grantFor('finance');
+        check(
+          'Finance may READ an operational sale in order to verify it',
+          finance.v,
+          JSON.stringify(finance),
+        );
+        check('Finance may NOT create an operational sale', !finance.c, JSON.stringify(finance));
+
+        // The narrowness IS the feature. Every key the GSD must not hold is named
+        // here, so widening operations.sales cannot quietly widen these.
+        const gsdForbidden = (
+          await one<{ keys: string | null }>(
+            `select string_agg(m.key, ', ' order by m.key) keys
+             from public.role_permissions rp
+             join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+            where r.slug = 'employee'
+              and m.key in ('operations.catalog','sales.customers','organization.roles',
+                            'finance.payment_verification')
+              and (rp.can_create or rp.can_update or rp.can_delete)`,
+          )
+        ).keys;
+        eq(
+          'the GSD role holds no create/update/delete on catalog, customers, roles or verification',
+          gsdForbidden ?? '',
+          '',
+        );
+
+        // --- the discount model ---
+        svc = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price)
+           values ($1, 'Teppanyaki', '2000.00') returning id`,
+            [`TEP-${stamp}`],
+          )
+        ).id;
+
+        eq(
+          'a service with no configured rule resolves to no discount',
+          (
+            await one<{ rate: string | null }>(
+              `select private.service_tier_discount_rate($1,'GOLD') rate`,
+              [svc],
+            )
+          ).rate ?? '',
+          '',
+        );
+
+        const ruleId = (
+          await one<{ id: string }>(
+            `insert into public.service_tier_discounts
+             (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+           values ($1,'GOLD',25,$2,$3,$4) returning id`,
+            [svc, past, future, actor],
+          )
+        ).id;
+
+        eq(
+          'an active in-date Gold rule resolves to exactly 25',
+          (
+            await one<{ rate: string }>(
+              `select private.service_tier_discount_rate($1,'GOLD') rate`,
+              [svc],
+            )
+          ).rate,
+          '25.0000',
+        );
+        eq(
+          'a Gold rule grants a Bronze member nothing',
+          (
+            await one<{ rate: string | null }>(
+              `select private.service_tier_discount_rate($1,'BRONZE') rate`,
+              [svc],
+            )
+          ).rate ?? '',
+          '',
+        );
+
+        expiredSvc = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price)
+           values ($1, 'Expired Promo Service', '1000.00') returning id`,
+            [`EXPIRED-${stamp}`],
+          )
+        ).id;
+        await db.query(
+          `insert into public.service_tier_discounts
+           (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+         values ($1,'GOLD',10,$2,'2000-01-02',$3)`,
+          [expiredSvc, past, actor],
+        );
+        eq(
+          'a window that closed in the past resolves to no discount today',
+          (
+            await one<{ rate: string | null }>(
+              `select private.service_tier_discount_rate($1,'GOLD') rate`,
+              [expiredSvc],
+            )
+          ).rate ?? '',
+          '',
+        );
+
+        // Ambiguity is refused at write time, so "the" rate is always determinate.
+        const refused = async (fn: () => Promise<unknown>) => {
+          try {
+            await fn();
+            return false;
+          } catch {
+            return true;
+          }
+        };
+
+        check(
+          'two simultaneously active rules for one service and tier are refused',
+          await refused(() =>
+            db.query(
+              `insert into public.service_tier_discounts
+               (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+             values ($1,'GOLD',30,$2,$3,$4)`,
+              [svc, past, future, actor],
+            ),
+          ),
+        );
+        check(
+          'an inverted effective window is refused',
+          await refused(() =>
+            db.query(
+              `insert into public.service_tier_discounts
+               (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+             values ($1,'SILVER',10,$2,$3,$4)`,
+              [svc, future, past, actor],
+            ),
+          ),
+        );
+        check(
+          'a discount rate above 100 percent is refused',
+          await refused(() =>
+            db.query(
+              `insert into public.service_tier_discounts
+               (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+             values ($1,'SILVER',150,$2,$3,$4)`,
+              [svc, past, future, actor],
+            ),
+          ),
+        );
+
+        // --- the arithmetic, on the required example ---
+        // A Gold member, 50 heads at 2,000.00:
+        //   gross 100,000.00 - tier discount 25,000.00 = net 75,000.00
+        goldMembership = (
+          await one<{ id: string }>(
+            // A membership is issued FROM a card sale, and memberships.sale_id is
+            // NOT NULL: a membership cannot be conjured without the sale that
+            // produced it. The sale itself is created first, through the real
+            // activation path, so the tier this discount resolves is the tier the
+            // member actually holds rather than a hand-written label.
+            `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash,
+              qr_token_hash, status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           select $1, $2, cp.id, $3, $4, $5, 'active', 0, 0, $6, now(), now(), now() + interval '5 years'
+             from public.card_plans cp where cp.code = 'GOLD'
+           returning id`,
+            [customer, saleId, `MBG-${stamp}`, `fb_${stamp}`, `qr_${stamp}`, gsdAuth],
+          )
+        ).id;
+        // An activated membership always has a points account, and the earning
+        // claim reserves capacity against it, so the fixture creates one at zero.
+        // The anniversary anchor is what `ensure_points_period` walks forward from;
+        // without it the claim is refused with POINTS_ANCHOR_MISSING, which is the
+        // correct refusal rather than something to work around.
+        await db.query(`insert into public.points_accounts (membership_id) values ($1)`, [
+          goldMembership,
+        ]);
+        await db.query(
+          `update public.memberships set points_anniversary = date '2025-10-09' where id = $1`,
+          [goldMembership],
+        );
+
+        // An earning rule is what a completed purchase actually AWARDS. Without one the
+        // claim is refused with NO_ELIGIBLE_EARNING_RULE, which is the correct
+        // behaviour: selling a service that earns nothing must earn nothing.
+        await db.query(
+          `insert into public.point_earning_rules
+           (service_id, points_amount, eligible_tiers, effective_start, effective_end, created_by)
+         values ($1, 500, array['GOLD'], $2, $3, $4)`,
+          [svc, past, future, gsdAuth],
+        );
+
+        const sale = await one<{
+          purchase_id: string;
+          gross: string;
+          tier_discount: string;
+          net: string;
+        }>(
+          `select purchase_id, gross_amount gross, tier_discount_amount tier_discount, net_amount net
+           from public.create_purchase($1, '999999.99', $2::jsonb, $3, $4)`,
+          [
+            goldMembership,
+            JSON.stringify([{ serviceId: svc, quantity: 50, unitAmount: '2000.00' }]),
+            `SALE-${stamp}`,
+            actor,
+          ],
+        );
+
+        eq(
+          'gross is computed from the lines, ignoring the submitted total',
+          sale.gross,
+          '100000.00',
+        );
+        eq('a 25 percent Gold rule discounts 25000.00', sale.tier_discount, '25000.00');
+        eq('net is gross minus the tier discount', sale.net, '75000.00');
+        await throwsIsolated('GSD cannot credit points through manual adjustment', () =>
+          db.query('select * from public.adjust_membership_points($1,100000,$2,$3)', [
+            goldMembership,
+            'Unauthorized synthetic credit',
+            actor,
+          ]),
+        );
+        await throwsIsolated('GSD cannot reverse a purchase through the correction RPC', () =>
+          db.query('select * from public.reverse_purchase_points($1,$2,$3)', [
+            sale.purchase_id,
+            actor,
+            'Unauthorized synthetic reversal',
+          ]),
+        );
+
+        await db.query('begin');
+        try {
+          const maintainer = randomUUID();
+          await db.query('insert into auth.users(id,email) values($1,$2)', [
+            maintainer,
+            `${RUN}-catalog-maintainer@example.invalid`,
+          ]);
+          await db.query(
+            "insert into public.staff_users(id,email,full_name,status) values($1,$2,'Catalog Maintainer','active')",
+            [maintainer, `${RUN}-catalog-maintainer@example.invalid`],
+          );
+          await db.query(
+            "insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='super_admin'",
+            [maintainer],
+          );
+          const configured = await one<{ id: string; code: string }>(
+            'select * from public.save_service_catalog(null,$1::jsonb,$2)',
+            [
+              JSON.stringify({
+                name: 'Persisted synthetic service',
+                description: 'Saved details',
+                basePrice: '1234.56',
+              }),
+              maintainer,
+            ],
+          );
+          check(
+            'service identifiers are generated without manual product codes',
+            configured.code.startsWith('AF-SVC-'),
+          );
+          await db.query('select * from public.save_service_catalog($1,$2::jsonb,$3)', [
+            configured.id,
+            JSON.stringify({ published: true, availability: 'coming_soon' }),
+            maintainer,
+          ]);
+          await db.query('select * from public.append_service_photo($1,$2,$3,$4)', [
+            configured.id,
+            `${maintainer}/synthetic.jpg`,
+            'Synthetic persisted image',
+            maintainer,
+          ]);
+          const persisted = await one<{
+            published: boolean;
+            availability: string;
+            photos: unknown[];
+          }>('select published,availability,photos from public.service_catalog where id=$1', [
+            configured.id,
+          ]);
+          check(
+            'service publication and availability survive reload',
+            persisted.published && persisted.availability === 'coming_soon',
+          );
+          eq('service photo metadata is persisted', persisted.photos.length, 1);
+          eq(
+            'service mutations append attributable immutable evidence',
+            (
+              await one<{ n: number }>(
+                'select count(*)::int n from public.audit_events where entity_id=$1 and actor_id=$2',
+                [configured.id, maintainer],
+              )
+            ).n,
+            3,
+          );
+          eq(
+            'service images use a private bucket',
+            (
+              await one<{ public: boolean }>(
+                "select public from storage.buckets where id='afhomes-service-images'",
+              )
+            ).public,
+            false,
+          );
+          const policy = await one<{ id: string }>(
+            "insert into public.point_earning_rules(service_id,points_amount,eligible_tiers,effective_start,effective_end) values($1,100,array['GOLD'],'2026-01-01','2027-01-01') returning id",
+            [configured.id],
+          );
+          await db.query("select public.set_service_policy_active('earning_rule',$1,false,$2)", [
+            policy.id,
+            maintainer,
+          ]);
+          eq(
+            'policy deactivation persists without rewriting its award configuration',
+            (
+              await one<{ n: number }>(
+                'select points_amount::int n from public.point_earning_rules where id=$1 and is_active=false',
+                [policy.id],
+              )
+            ).n,
+            100,
+          );
+          eq(
+            'policy status has atomic audit evidence',
+            (
+              await one<{ n: number }>(
+                "select count(*)::int n from public.audit_events where entity_id=$1 and actor_id=$2 and action='SERVICE_POLICY_STATUS_CHANGED'",
+                [policy.id, maintainer],
+              )
+            ).n,
+            1,
+          );
+          await throwsIsolated('GSD cannot toggle earning policies through SQL', () =>
+            db.query("select public.set_service_policy_active('earning_rule',$1,true,$2)", [
+              policy.id,
+              actor,
+            ]),
+          );
+          await db.query('select * from public.save_service_catalog($1,$2::jsonb,$3)', [
+            configured.id,
+            JSON.stringify({
+              summary: 'Persisted summary',
+              category: 'Dining',
+              location: 'Laguna',
+              pricingUnit: 'person',
+              highlights: ['Per-head dining'],
+              availability: 'available',
+            }),
+            maintainer,
+          ]);
+          eq(
+            'service details and pricing units persist',
+            (
+              await one<{ unit: string }>(
+                "select details->>'pricingUnit' unit from public.service_catalog where id=$1",
+                [configured.id],
+              )
+            ).unit,
+            'person',
+          );
+          const pricedDetails = await one<{ purchase_id: string }>(
+            'select * from public.create_purchase($1,$2,$3::jsonb,$4,$5)',
+            [
+              goldMembership,
+              '0.00',
+              JSON.stringify([{ serviceId: configured.id, quantity: 50 }]),
+              'META-' + stamp,
+              actor,
+            ],
+          );
+          eq(
+            'operational sale freezes the configured pricing unit',
+            (
+              await one<{ unit: string }>(
+                'select pricing_unit_snapshot unit from public.purchase_lines where purchase_id=$1',
+                [pricedDetails.purchase_id],
+              )
+            ).unit,
+            'person',
+          );
+          const firstPhoto = await one<{ id: string }>(
+            "select encode(extensions.digest($1,'sha256'),'hex') id",
+            [maintainer + '/synthetic.jpg'],
+          );
+          await db.query('select * from public.append_service_photo($1,$2,$3,$4)', [
+            configured.id,
+            maintainer + '/gallery.jpg',
+            'Gallery',
+            maintainer,
+          ]);
+          const galleryPhoto = await one<{ id: string }>(
+            "select encode(extensions.digest($1,'sha256'),'hex') id",
+            [maintainer + '/gallery.jpg'],
+          );
+          await db.query("select * from public.manage_service_photo($1,$2,'cover',null,null,$3)", [
+            configured.id,
+            galleryPhoto.id,
+            maintainer,
+          ]);
+          eq(
+            'cover selection persists the selected photo first',
+            (
+              await one<{ alt: string }>(
+                "select photos->0->>'alt' alt from public.service_catalog where id=$1",
+                [configured.id],
+              )
+            ).alt,
+            'Gallery',
+          );
+          await db.query("select * from public.manage_service_photo($1,$2,'remove',null,null,$3)", [
+            configured.id,
+            firstPhoto.id,
+            maintainer,
+          ]);
+          eq(
+            'removal changes the current listing only',
+            (
+              await one<{ n: number }>(
+                'select jsonb_array_length(photos)::int n from public.service_catalog where id=$1',
+                [configured.id],
+              )
+            ).n,
+            1,
+          );
+          await db.query("select * from public.manage_service_photo($1,$2,'replace',$3,$4,$5)", [
+            configured.id,
+            galleryPhoto.id,
+            maintainer + '/replacement.jpg',
+            'Replacement',
+            maintainer,
+          ]);
+          eq(
+            'replacement metadata survives reload',
+            (
+              await one<{ alt: string }>(
+                "select photos->0->>'alt' alt from public.service_catalog where id=$1",
+                [configured.id],
+              )
+            ).alt,
+            'Replacement',
+          );
+          await throwsIsolated(
+            'stale image identifiers cannot remove a different replacement',
+            () =>
+              db.query("select * from public.manage_service_photo($1,$2,'remove',null,null,$3)", [
+                configured.id,
+                galleryPhoto.id,
+                maintainer,
+              ]),
+          );
+          await throwsIsolated('GSD cannot remove catalog photos through SQL', () =>
+            db.query("select * from public.manage_service_photo($1,$2,'remove',null,null,$3)", [
+              configured.id,
+              firstPhoto.id,
+              actor,
+            ]),
+          );
+          await throwsIsolated('GSD cannot maintain service prices through SQL', () =>
+            db.query('select * from public.save_service_catalog($1,$2::jsonb,$3)', [
+              configured.id,
+              JSON.stringify({ basePrice: '0.00' }),
+              actor,
+            ]),
+          );
+        } finally {
+          await db.query('rollback');
+        }
+
+        await db.query('begin');
+        try {
+          const tampered = await one<{ gross_amount: string }>(
+            'select * from public.create_purchase($1, $2, $3::jsonb, $4, $5)',
+            [
+              goldMembership,
+              '0.00',
+              JSON.stringify([{ serviceId: svc, quantity: 1, unitAmount: '0.00' }]),
+              `PRICE-TAMPER-${stamp}`,
+              actor,
+            ],
+          );
+          eq(
+            'a forged zero unit price cannot create a free service sale',
+            tampered.gross_amount,
+            '2000.00',
+          );
+        } finally {
+          await db.query('rollback');
+        }
+
+        eq(
+          'gross - tier_discount - points_discount = net holds on the row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchases
+              where id = $1
+                and net_amount::numeric = gross_amount::numeric
+                                       - tier_discount_amount::numeric
+                                       - points_discount_amount::numeric`,
+              [sale.purchase_id],
+            )
+          ).n,
+          1,
+        );
+
+        const snap = await one<{ rate: string; tier: string; rule: string | null }>(
+          `select tier_discount_rate rate, tier, tier_discount_rule_id::text rule
+           from public.purchase_lines where purchase_id = $1`,
+          [sale.purchase_id],
+        );
+        eq('the applied rate is snapshotted onto the line', snap.rate, '25.0000');
+        eq('the tier that earned the discount is snapshotted', snap.tier, 'GOLD');
+        eq('the rule that earned the discount is referenced', snap.rule, ruleId);
+
+        // Editing the rule AFTER the sale must change nothing about that sale.
+        await db.query(
+          `update public.service_tier_discounts set discount_rate = 90 where id = $1`,
+          [ruleId],
+        );
+        const afterEdit = await one<{ gross: string; tier_discount: string; net: string }>(
+          `select gross_amount gross, tier_discount_amount tier_discount, net_amount net
+           from public.purchases where id = $1`,
+          [sale.purchase_id],
+        );
+        eq('editing the rule leaves the settled gross unchanged', afterEdit.gross, '100000.00');
+        eq(
+          'editing the rule leaves the settled discount unchanged',
+          afterEdit.tier_discount,
+          '25000.00',
+        );
+        eq('editing the rule leaves the settled net unchanged', afterEdit.net, '75000.00');
+        await db.query(
+          `update public.service_tier_discounts set discount_rate = 25 where id = $1`,
+          [ruleId],
+        );
+
+        const noRuleSale = await one<{ gross: string; tier_discount: string; net: string }>(
+          `select gross_amount gross, tier_discount_amount tier_discount, net_amount net
+           from public.create_purchase($1, '1.00', $2::jsonb, $3, $4)`,
+          [
+            goldMembership,
+            JSON.stringify([{ serviceId: expiredSvc, quantity: 2, unitAmount: '500.00' }]),
+            `NORULE-${stamp}`,
+            actor,
+          ],
+        );
+        eq('a service with no active rule sells at full price', noRuleSale.tier_discount, '0.00');
+        eq('and its net equals its gross', noRuleSale.net, noRuleSale.gross);
+
+        check(
+          'a zero or negative quantity is refused',
+          await refused(() =>
+            db.query(`select * from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`, [
+              goldMembership,
+              JSON.stringify([{ serviceId: svc, quantity: 0, unitAmount: '2000.00' }]),
+              `ZEROQTY-${stamp}`,
+              actor,
+            ]),
+          ),
+        );
+
+        // A disabled service cannot be sold: this is what stops a stale page from
+        // selling a product an administrator just switched off.
+        await db.query(`update public.service_catalog set is_active = false where id = $1`, [svc]);
+        check(
+          'a disabled service cannot be sold',
+          await refused(() =>
+            db.query(`select * from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`, [
+              goldMembership,
+              JSON.stringify([{ serviceId: svc, quantity: 1, unitAmount: '2000.00' }]),
+              `DISABLED-${stamp}`,
+              actor,
+            ]),
+          ),
+        );
+        await db.query(`update public.service_catalog set is_active = true where id = $1`, [svc]);
+
+        // --- settlement still gates on VERIFIED receipts, at the discounted net ---
+        // The auth row FIRST: staff_users.id is a primary key that REFERENCES
+        // auth.users(id), so the parent must exist before the child or the
+        // foreign key is violated.
+        const finAuth = randomUUID();
+        await db.query('insert into auth.users (id, email) values ($1, $2)', [
+          finAuth,
+          `tier-finance-${stamp}@example.invalid`,
+        ]);
+        finActor = (
+          await one<{ id: string }>(
+            `insert into public.staff_users (id, email, full_name, status)
+           values ($1, $2, 'Tier Finance', 'active') returning id`,
+            [finAuth, `tier-finance-${stamp}@example.invalid`],
+          )
+        ).id;
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+         values ($1, (select id from public.roles where slug = 'finance'))`,
+          [finActor],
+        );
+
+        const receipt = (
+          await one<{ payment_id: string }>(
+            `select payment_id from public.record_purchase_payment($1,'75000.00','cash',$2,$3)`,
+            [sale.purchase_id, `TIER-${stamp}`, actor],
+          )
+        ).payment_id;
+
+        // Recorded is NOT verified. This is the gate that matters most.
+        check(
+          'a recorded but unverified receipt does not settle the sale',
+          await refused(() =>
+            db.query(`select * from public.complete_purchase($1,$2)`, [sale.purchase_id, actor]),
+          ),
+        );
+
+        // The GSD cannot verify their own receipt: verification needs the Finance
+        // key, which operations.sales deliberately does not grant.
+        check(
+          'a GSD cannot verify their own receipt',
+          await refused(() =>
+            db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+              receipt,
+              actor,
+            ]),
+          ),
+        );
+
+        const verified = await one<{ status: string; verified_total: string }>(
+          `select status, verified_total from public.verify_purchase_payment($1,'verified',null,$2)`,
+          [receipt, finActor],
+        );
+        eq('Finance verifies the receipt', verified.status, 'verified');
+        eq('the verified total is the discounted net', verified.verified_total, '75000.00');
+
+        await db.query(`select * from public.complete_purchase($1,$2)`, [sale.purchase_id, actor]);
+        eq(
+          'the sale completes once verified receipts cover the discounted net',
+          (
+            await one<{ status: string }>(`select status from public.purchases where id = $1`, [
+              sale.purchase_id,
+            ])
+          ).status,
+          'completed',
+        );
+
+        // --- reporting keeps the four figures apart ---
+        const summary = await one<{
+          gross: string;
+          tier_discount: string;
+          points_discount: string;
+          net: string;
+          verified_total: string;
+          fully_paid: boolean;
+        }>(
+          `select gross_amount gross, tier_discount_amount tier_discount,
+                points_discount_amount points_discount, net_amount net,
+                verified_total, fully_paid
+           from public.purchase_financial_summary_purchases($1)`,
+          [sale.purchase_id],
+        );
+        eq('finance reports the gross', summary.gross, '100000.00');
+        eq('finance reports the tier discount separately', summary.tier_discount, '25000.00');
+        eq('finance reports zero points discount on this sale', summary.points_discount, '0.00');
+        eq('finance reports the net', summary.net, '75000.00');
+        eq('finance reports the verified receipts', summary.verified_total, '75000.00');
+        check('a discount is never counted as a receipt', summary.fully_paid === true);
+
+        const claim = await one<{ claim_id: string }>(
+          `select * from public.create_earning_claim($1,$2)`,
+          [sale.purchase_id, actor],
+        );
+        check('a completed, settled sale produces exactly one earning claim', !!claim?.claim_id);
+
+        // The GLOBAL audit from `supabase/security/rls_invariants.sql`, executed here
+        // rather than left as a file nobody runs. It is the invariant AGENTS.md
+        // requires after every batch, and it covers tables this section never
+        // touched - which is the point of a global check.
+        eq(
+          'no browser role may write ANY public table',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from information_schema.role_table_grants
+              where table_schema = 'public'
+                and grantee in ('anon','authenticated','PUBLIC')
+                and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')`,
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'no browser role may EXECUTE a private schema function',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from information_schema.role_routine_grants
+              where routine_schema = 'private'
+                and grantee in ('PUBLIC','anon')`,
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'no browser write policy exists on any public table',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from pg_policies
+              where schemaname = 'public'
+                and roles && array['anon','authenticated','public']::name[]
+                and cmd in ('INSERT','UPDATE','DELETE','ALL')`,
+            )
+          ).n,
+          0,
+        );
+
+        // card_plans.discount_percent is a CARD discount. Assert the column still
+        // exists, so "separate" is proven rather than asserted in a comment.
+        check(
+          'card_plans.discount_percent still exists as a card-purchase discount',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from information_schema.columns
+              where table_schema='public' and table_name='card_plans'
+                and column_name='discount_percent'`,
+            )
+          ).n === 1,
+        );
+
+        // The points ledger invariant survives this migration untouched.
+        eq(
+          'the points ledger still reconciles for every account',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_accounts a
+              where a.balance - a.reversal_debt <> coalesce(
+                    (select sum(l.amount) from public.points_ledger l where l.account_id = a.id), 0)`,
+            )
+          ).n,
+          0,
+        );
+      } catch (error) {
+        check('operational services tier discounts completed', false, safeErrorMessage(error));
+      } finally {
+        // cleanup, in reverse foreign-key order, and ALWAYS: a section that leaks
+        // its synthetic rows on failure turns one real failure into a cascade of
+        // unrelated-looking cleanup failures in section 21.
+        const ids = [svc, expiredSvc].filter((v): v is string => v !== null);
+        const sales = saleId === null ? [] : [saleId];
+        const staff = [finActor, gsdAuth].filter((v): v is string => v !== null);
+        // The hierarchy-snapshot trigger writes an immutable row per sale; the
+        // suite's sanctioned escape hatch is the maintenance flag.
+        if (sales.length) {
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          await db.query(
+            `delete from public.card_sale_hierarchy_snapshots where sale_id = any($1::uuid[])`,
+            [sales],
+          );
+        }
+        if (ids.length) {
+          await db
+            .query(
+              `delete from public.earning_claims where purchase_id in (select id from public.purchases where membership_id = any($1::uuid[]))`,
+              [[goldMembership].filter((v): v is string => v !== null)],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.point_earning_rules where service_id = any($1::uuid[])`, [
+              ids,
+            ])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_tier_discounts where service_id = any($1::uuid[])`, [
+              ids,
+            ])
+            .catch(() => undefined);
+        }
+        if (goldMembership) {
+          await db
+            .query(
+              `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id = $1)`,
+              [goldMembership],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id = $1)`,
+              [goldMembership],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.purchases where membership_id = $1`, [goldMembership])
+            .catch(() => undefined);
+          // audit_events is append-only by design, so these rows are removed by ACTOR:
+          // this section's two staff members exist nowhere else, so every event
+          // they authored is necessarily synthetic. Section 21 counts rows, not
+          // meaning, so a leaked event reads there as an unrelated failure.
+          if (staff.length) {
+            await db
+              .query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [staff])
+              .catch(() => undefined);
+          }
+          // points_accounts references memberships, so the account, its period and its
+          // ledger rows all go BEFORE the membership itself.
+          await db
+            .query(
+              `delete from public.points_ledger where account_id in
+               (select id from public.points_accounts where membership_id = $1)`,
+              [goldMembership],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.points_periods where account_id in
+               (select id from public.points_accounts where membership_id = $1)`,
+              [goldMembership],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.points_accounts where membership_id = $1`, [goldMembership])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.memberships where id = $1`, [goldMembership])
+            .catch(() => undefined);
+        }
+        if (ids.length) {
+          await db
+            .query(`delete from public.service_catalog where id = any($1::uuid[])`, [ids])
+            .catch(() => undefined);
+        }
+        if (sales.length) {
+          await db
+            .query(`delete from public.card_sales where id = any($1::uuid[])`, [sales])
+            .catch(() => undefined);
+        }
+        if (customer) {
+          await db
+            .query(`delete from public.customers where id = $1`, [customer])
+            .catch(() => undefined);
+        }
+        if (staff.length) {
+          await db
+            .query(`delete from public.staff_users where id = any($1::uuid[])`, [staff])
+            .catch(() => undefined);
+        }
+      }
+      section('67. operational service payment isolation, and NO points spend at the till');
+
+      // 20261106000001. Three properties are proven by execution here, because
+      // each one is a claim about what CANNOT happen, and a comment cannot prove
+      // a negative:
+      //   1. Operational receipts live only in purchase_payments, and the
+      //      VIP-card workflow is untouched.
+      //   2. A GSD can record a receipt but can never verify or reject one.
+      //   3. A bill can no longer be reduced by a member's points balance at all:
+      //      the till spend function refuses to run.
+      let gsd: string | null = null;
+      let fin: string | null = null;
+      let buyer: string | null = null;
+      let sale: string | null = null;
+      let member: string | null = null;
+      let svcIds: string[] = [];
+      try {
+        const s67 = `p67_${Date.now().toString(36)}`;
+        const past = '2000-01-01';
+        const future = '2099-01-01';
+
+        const mkStaff = async (slug: string, name: string, email: string) => {
+          const auth = uuidFor(`${s67}:${slug}`);
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [auth, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status) values ($1,$2,$3,'active')`,
+            [auth, email, name],
+          );
+          await db.query(
+            `insert into public.staff_role_assignments (staff_id, role_id)
+           values ($1, (select id from public.roles where slug = $2))`,
+            [auth, slug],
+          );
+          return auth;
+        };
+        gsd = await mkStaff('employee', `Till GSD ${s67}`, `gsd-${s67}@example.invalid`);
+        fin = await mkStaff('finance', `Ops Finance ${s67}`, `fin-${s67}@example.invalid`);
+        createdStaffIds.push(gsd, fin);
+
+        buyer = uuidFor(`${s67}:customer`);
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1,$2,'TILL','BUYER',$3,'09180000001','active')`,
+          [buyer, `CUS-${s67}`, `till-${s67}@example.invalid`],
+        );
+        sale = uuidFor(`${s67}:sale`);
+        await db.query(
+          `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+                 'staff',$4,'100000.00', now() + interval '30 days','draft')`,
+          [sale, `AF-CSALE${s67.replace(/[^a-z0-9]/gi, '').toUpperCase()}`, buyer, staff['sm']!],
+        );
+        member = (
+          await one<{ id: string }>(
+            `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash,
+              qr_token_hash, status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           select $1,$2,cp.id,$3,$4,$5,'active',0,0,$6, now(), now(), now() + interval '5 years'
+             from public.card_plans cp where cp.code='GOLD'
+           returning id`,
+            [buyer, sale, `MBS-${s67}`, `fb_${s67}`, `qr_${s67}`, gsd],
+          )
+        ).id;
+        await db.query(`insert into public.points_accounts (membership_id) values ($1)`, [member]);
+        await db.query(
+          `update public.memberships set points_anniversary = date '2025-10-09' where id = $1`,
+          [member],
+        );
+
+        // --- ISOLATION -------------------------------------------------------
+        const coupled = (
+          await one<{ n: number }>(
+            `select count(*)::int n from information_schema.columns
+            where table_schema='public' and table_name='purchase_payments'
+              and column_name in ('card_sale_id','sale_id','reservation_id')`,
+          )
+        ).n;
+        eq('operational receipts are stored in a table with no card-sale coupling', coupled, 0);
+
+        // STRUCTURAL isolation, which is stronger than an empirical one. The card
+        // payment table carries a CLOSED origin CHECK (20261101000001:119-121)
+        // admitting only 'sale' or 'reservation', so an operational receipt is not
+        // merely absent from it - it is unrepresentable there. `sale_id` itself is
+        // nullable, because reservations legitimately have none.
+        eq(
+          'the card-sale payments table admits only sale or reservation origins',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from pg_constraint
+              where conrelid = 'public.payments'::regclass
+                and conname = 'payments_purchase_origin_check'
+                and pg_get_constraintdef(oid) ~* 'origin *= *''sale'''
+                and pg_get_constraintdef(oid) ~* 'origin *= *''reservation'''`,
+            )
+          ).n,
+          1,
+        );
+
+        // The VIP-card verification key is unchanged: it still exists, and the
+        // Operational Services key does not replace it.
+        eq(
+          'the VIP-card finance.payment_verification key is untouched',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.modules where key='finance.payment_verification' and is_active`,
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'operational verification uses its own separate key',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.modules where key='operations.payments' and is_active`,
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'the GSD holds no operational payment verification at all',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.role_permissions rp
+               join public.roles r on r.id=rp.role_id
+               join public.modules m on m.id=rp.module_id
+              where r.slug='employee' and m.key='operations.payments'
+                and (rp.can_create or rp.can_update or rp.can_delete)`,
+            )
+          ).n,
+          0,
+        );
+
+        // --- the till: 10 nights x 10,000, 25,000 points spent ----------------
+        const hotel = (
+          await one<{ id: string }>(
+            `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+           values ($1,'EcoFarm Hotel night','10000.00', true) returning id`,
+            [`HOTEL-${s67}`],
+          )
+        ).id;
+        svcIds.push(hotel);
+        // NO point_redemption_rules row here on purpose. That table configured the
+        // peso value of a SPEND, and section 68 proves the spend no longer runs.
+
+        const op = await one<{
+          purchase_id: string;
+          gross: string;
+          tier_discount: string;
+          net: string;
+        }>(
+          `select purchase_id, gross_amount gross, tier_discount_amount tier_discount, net_amount net
+           from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`,
+          [
+            member,
+            JSON.stringify([{ serviceId: hotel, quantity: 10, unitAmount: '10000.00' }]),
+            `SALE-${s67}`,
+            gsd,
+          ],
+        );
+        eq('ten nights at ten thousand is a 100000.00 gross', op.gross, '100000.00');
+
+        // --- IDEMPOTENCY: a retried sale is the SAME sale --------------------
+        // A double-click or a lost response must not create a second purchase with
+        // real lines that could earn points.
+        const retriedSale = await one<{ purchase_id: string; gross: string }>(
+          `select purchase_id, gross_amount gross from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`,
+          [
+            member,
+            JSON.stringify([{ serviceId: hotel, quantity: 10, unitAmount: '10000.00' }]),
+            `SALE-${s67}`,
+            gsd,
+          ],
+        );
+        eq(
+          'a retried sale reference returns the ORIGINAL purchase',
+          retriedSale.purchase_id,
+          op.purchase_id,
+        );
+        eq(
+          'and creates no second purchase',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchases where idempotency_reference = $1`,
+              [`SALE-${s67}`],
+            )
+          ).n,
+          1,
+        );
+
+        // --- concurrency: two real connections racing one reference ----------
+        // A REAL second connection, not a second call on one pool client: a race
+        // proven on one connection proves nothing, because both calls would
+        // serialise behind it.
+        const racer = new Client({ connectionString: target.url });
+        racer.on('error', () => {});
+        await racer.connect();
+        try {
+          const lines = JSON.stringify([
+            { serviceId: hotel, quantity: 10, unitAmount: '10000.00' },
+          ]);
+          const results = await Promise.allSettled([
+            db.query(`select purchase_id from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`, [
+              member,
+              lines,
+              `RACE-${s67}`,
+              gsd,
+            ]),
+            racer.query(
+              `select purchase_id from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`,
+              [member, lines, `RACE-${s67}`, gsd],
+            ),
+          ]);
+          check(
+            'race: two concurrent sales with one reference both succeed',
+            results.every((r) => r.status === 'fulfilled'),
+            `${results.filter((r) => r.status === 'fulfilled').length}/2`,
+          );
+          eq(
+            'race: and exactly one purchase row exists for that reference',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from public.purchases where idempotency_reference = $1`,
+                [`RACE-${s67}`],
+              )
+            ).n,
+            1,
+          );
+        } finally {
+          await racer.end();
+        }
+
+        // The member holds NO points balance, and that is the point of this block:
+        // a bill is never reduced by an existing balance. The EARNING rule is
+        // inserted further down and pays out on CLAIM, not on sale.
+        let spendBlocked = false;
+        let spendReason = '';
+        try {
+          await db.query(`select * from public.apply_purchase_points_discount($1, 25000, $2, $3)`, [
+            op.purchase_id,
+            `POS-${s67}`,
+            gsd,
+          ]);
+        } catch (e) {
+          spendBlocked = true;
+          spendReason = safeErrorMessage(e);
+        }
+        check(
+          'the till CANNOT reduce a bill with the member points balance',
+          spendBlocked,
+          spendReason || 'the spend function still ran',
+        );
+        eq(
+          'and the purchase was left undiscounted',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchases
+              where id = $1 and points_discount_amount::numeric = 0`,
+              [op.purchase_id],
+            )
+          ).n,
+          1,
+        );
+
+        // --- settlement: recorded is NOT money -------------------------------
+        const receipt = (
+          await one<{ payment_id: string }>(
+            `select payment_id from public.record_purchase_payment($1,'70000.00','cash',$2,$3)`,
+            [op.purchase_id, `RCPT-${s67}`, gsd],
+          )
+        ).payment_id;
+
+        const pending = await one<{
+          status: string;
+          verified_total: string;
+          remaining_amount: string;
+          fully_paid: boolean;
+          claimable: boolean;
+          pending_receipts: number;
+        }>(`select * from public.operational_purchase_settlement($1)`, [op.purchase_id]);
+        eq('the sale is still a draft while the receipt is unverified', pending.status, 'draft');
+        eq('an unverified receipt is not money received', pending.verified_total, '0.00');
+        eq('the whole amount is still outstanding', pending.remaining_amount, '100000.00');
+        eq('the sale is not fully paid', pending.fully_paid, false);
+        eq('and nothing is claimable', pending.claimable, false);
+        eq('exactly one receipt is pending', pending.pending_receipts, 1);
+
+        // Partial payment: still short, still not claimable.
+        const partial = (
+          await one<{ payment_id: string }>(
+            `select payment_id from public.record_purchase_payment($1,'30000.00','cash',$2,$3)`,
+            [op.purchase_id, `PART-${s67}`, gsd],
+          )
+        ).payment_id;
+        await db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+          partial,
+          fin,
+        ]);
+
+        const short = await one<{
+          verified_total: string;
+          remaining_amount: string;
+          fully_paid: boolean;
+        }>(`select * from public.operational_purchase_settlement($1)`, [op.purchase_id]);
+        eq('a partial payment leaves an outstanding balance', short.remaining_amount, '70000.00');
+        eq('and the sale is still not fully paid', short.fully_paid, false);
+
+        // --- IDEMPOTENCY: a retried receipt is the SAME receipt ----------------
+        // The till sent no reference before, so the unique index was never
+        // consulted and the same cash could be recorded twice.
+        const retriedReceipt = await one<{ payment_id: string }>(
+          `select payment_id from public.record_purchase_payment($1,'70000.00','cash',$2,$3)`,
+          [op.purchase_id, `RCPT-${s67}`, gsd],
+        );
+        eq(
+          'a retried receipt reference returns the ORIGINAL receipt',
+          retriedReceipt.payment_id,
+          receipt,
+        );
+        eq(
+          'and records the cash once',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchase_payments
+              where purchase_id = $1 and reference = $2`,
+              [op.purchase_id, `RCPT-${s67}`],
+            )
+          ).n,
+          1,
+        );
+
+        let premature = false;
+        try {
+          await db.query(`select * from public.complete_purchase($1,$2)`, [op.purchase_id, gsd]);
+        } catch {
+          premature = true;
+        }
+        check('insufficient verified payment cannot complete the purchase', premature);
+
+        // --- the GSD cannot verify ------------------------------------------
+        let gsdVerify = false;
+        try {
+          await db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+            receipt,
+            gsd,
+          ]);
+        } catch {
+          gsdVerify = true;
+        }
+        check('a GSD cannot verify their own receipt', gsdVerify);
+
+        // --- rejection is not money -----------------------------------------
+        let noReason = false;
+        try {
+          await db.query(`select * from public.verify_purchase_payment($1,'rejected','   ',$2)`, [
+            receipt,
+            fin,
+          ]);
+        } catch {
+          noReason = true;
+        }
+        check('a rejection with no reason is refused', noReason);
+
+        // --- Finance verifies, and the sale completes ------------------------
+        // --- concurrency: two verifiers, ONE still-recorded receipt -------------
+        // Racing `receipt` specifically: it is the one still in 'recorded' at this
+        // point. Racing an already-decided receipt would prove nothing, because
+        // both callers would legitimately lose.
+        const vracer = new Client({ connectionString: target.url });
+        vracer.on('error', () => {});
+        await vracer.connect();
+        let verified: { status: string; verified_total: string } | null = null;
+        try {
+          const vresults = await Promise.allSettled([
+            db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+              receipt,
+              fin,
+            ]),
+            vracer.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+              receipt,
+              fin,
+            ]),
+          ]);
+          const won = vresults.filter((r) => r.status === 'fulfilled');
+          eq(
+            'race: a receipt is accepted exactly once under concurrent verification',
+            won.length,
+            1,
+          );
+          check(
+            'race: the loser is a clean conflict, not a second acceptance',
+            vresults.some((r) => r.status === 'rejected'),
+            `${vresults.filter((r) => r.status === 'rejected').length} rejected`,
+          );
+          if (won.length === 1) {
+            verified = (won[0] as { value: { rows: Record<string, unknown>[] } }).value.rows[0] as {
+              status: string;
+              verified_total: string;
+            };
+          }
+        } finally {
+          await vracer.end();
+        }
+
+        check('Finance verifies the operational receipt', verified !== null, 'no winner');
+        // Both receipts are now verified, so the verified TOTAL is their sum. A
+        // partial payment is money received too - it just is not enough alone.
+        eq('verified receipts now cover the FULL net', verified?.verified_total, '100000.00');
+
+        // A receipt cannot be verified twice.
+        let twice = false;
+        try {
+          await db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [
+            receipt,
+            fin,
+          ]);
+        } catch {
+          twice = true;
+        }
+        check('a receipt cannot be verified twice', twice);
+
+        await db.query(`select * from public.complete_purchase($1,$2)`, [op.purchase_id, gsd]);
+        await db.query(
+          `insert into public.point_earning_rules
+           (service_id, points_amount, eligible_tiers, effective_start, effective_end, created_by)
+         values ($1, 500, array['GOLD'], $2, $3, $4)`,
+          [hotel, past, future, fin],
+        );
+
+        let completeTwice = false;
+        try {
+          await db.query(`select * from public.complete_purchase($1,$2)`, [op.purchase_id, gsd]);
+        } catch {
+          completeTwice = true;
+        }
+        check('a purchase cannot be completed twice', completeTwice);
+
+        // --- the claim, and only then ---------------------------------------
+        const claim = await one<{ claim_id: string }>(
+          `select * from public.create_earning_claim($1,$2)`,
+          [op.purchase_id, gsd],
+        );
+        check('a settled, completed purchase yields one earning claim', !!claim?.claim_id);
+
+        let claimTwice = false;
+        try {
+          await db.query(`select * from public.create_earning_claim($1,$2)`, [op.purchase_id, gsd]);
+        } catch {
+          claimTwice = true;
+        }
+        check('the same purchase cannot yield a second claim', claimTwice);
+
+        const ready = await one<{
+          status: string;
+          net_amount: string;
+          remaining_amount: string;
+          fully_paid: boolean;
+          claimable: boolean;
+          claim_status: string;
+        }>(`select * from public.operational_purchase_settlement($1)`, [op.purchase_id]);
+        eq('the sale is completed', ready.status, 'completed');
+        eq('nothing is outstanding', ready.remaining_amount, '0.00');
+        eq('the sale is fully paid', ready.fully_paid, true);
+        eq('the claim is claimable only now', ready.claimable, true);
+        eq('and it is available', ready.claim_status, 'available');
+
+        // --- an operational action cannot touch a card sale ------------------
+        eq(
+          'no operational action wrote a card-sale payment row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.payments where sale_id = $1`,
+              [sale],
+            )
+          ).n,
+          0,
+        );
+
+        // The VIP-card ledger still reconciles; the points invariant survives.
+        eq(
+          'the points ledger invariant still holds',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_accounts a
+              where a.balance - a.reversal_debt <> coalesce(
+                    (select sum(l.amount) from public.points_ledger l where l.account_id=a.id),0)`,
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'the four-term identity holds with NO points discount taken',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchases
+              where net_amount::numeric <> gross_amount::numeric
+                                     - tier_discount_amount::numeric
+                                     - points_discount_amount::numeric`,
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'and this sale took no points discount at all',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.purchases
+              where id = $1 and points_discount_amount::numeric <> 0`,
+              [op.purchase_id],
+            )
+          ).n,
+          0,
+        );
+      } catch (error) {
+        check('operational service payment isolation completed', false, safeErrorMessage(error));
+      } finally {
+        const staff67 = [gsd, fin].filter((v): v is string => v !== null);
+        if (staff67.length) {
+          await db
+            .query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [staff67])
+            .catch(() => undefined);
+        }
+        if (buyer && member) {
+          await db
+            .query(
+              `delete from public.earning_claims where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.redemption_quotes where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.purchases where membership_id = $1`, [member])
+            .catch(() => undefined);
+        }
+        if (svcIds.length) {
+          await db
+            .query(`delete from public.point_earning_rules where service_id = any($1::uuid[])`, [
+              svcIds,
+            ])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.point_redemption_rules where service_id = any($1::uuid[])`, [
+              svcIds,
+            ])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_catalog where id = any($1::uuid[])`, [svcIds])
+            .catch(() => undefined);
+        }
+        if (member) {
+          await db
+            .query(
+              `delete from public.points_ledger where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.points_periods where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.points_accounts where membership_id = $1`, [member])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.memberships where id = $1`, [member])
+            .catch(() => undefined);
+        }
+        if (sale) {
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          await db
+            .query(`delete from public.card_sale_hierarchy_snapshots where sale_id = $1`, [sale])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.card_sales where id = $1`, [sale])
+            .catch(() => undefined);
+        }
+        if (buyer) {
+          await db
+            .query(`delete from public.customers where id = $1`, [buyer])
+            .catch(() => undefined);
+        }
+        if (staff67.length) {
+          await db
+            .query(`delete from public.staff_users where id = any($1::uuid[])`, [staff67])
+            .catch(() => undefined);
+        }
+      }
+
+      section('68. points spending is retired; earning and claiming are not');
+
+      // Business rule B. The product EARNS points on a purchase and the CUSTOMER
+      // claims them in their own account. Spending an existing balance is gone.
+      //
+      // A removed button proves nothing, so these check the database itself. Four
+      // separate claims, because "it is gone" is not one thing:
+      //   1. nothing can execute a spend function, not even the API's own role;
+      //   2. a catalog redemption cannot be created either;
+      //   3. EARNING and CLAIMING still work, or this migration would have
+      //      silently retired the actual product;
+      //   4. history is intact, because retirement removes a capability, never a
+      //      record.
+      try {
+        const spendFns = [
+          ['quote_point_discount', 'public.quote_point_discount(uuid,bigint,uuid)'],
+          ['commit_point_discount', 'public.commit_point_discount(uuid,uuid)'],
+          [
+            'apply_purchase_points_discount',
+            'public.apply_purchase_points_discount(uuid,bigint,text,uuid)',
+          ],
+          [
+            'redeem_membership_points',
+            'public.redeem_membership_points(uuid,uuid,integer,text,uuid)',
+          ],
+        ] as const;
+
+        for (const [label, sig] of spendFns) {
+          for (const role of ['service_role', 'authenticated', 'anon'] as const) {
+            eq(
+              `${role} cannot execute ${label}`,
+              (
+                await one<{ ok: boolean }>(
+                  `select has_function_privilege('${role}','${sig}','execute') ok`,
+                )
+              ).ok,
+              false,
+            );
+          }
+        }
+
+        // The product still WORKS. Retiring spending must not have taken earning
+        // and claiming with it, so the two paths that matter are checked for
+        // positive privilege rather than assumed.
+        eq(
+          'the customer claim operation is still executable',
+          (
+            await one<{ ok: boolean }>(
+              `select has_function_privilege('service_role','public.claim_earning_points(text,uuid)','execute') ok`,
+            )
+          ).ok,
+          true,
+        );
+        eq(
+          'and so is the earning-claim issue used by staff',
+          (
+            await one<{ ok: boolean }>(
+              `select has_function_privilege('service_role','public.create_earning_claim(uuid,uuid)','execute') ok`,
+            )
+          ).ok,
+          true,
+        );
+        eq(
+          'and the audited manual correction, which is not a spend',
+          (
+            await one<{ ok: boolean }>(
+              `select has_function_privilege('service_role','public.adjust_membership_points(uuid,bigint,text,uuid)','execute') ok`,
+            )
+          ).ok,
+          true,
+        );
+
+        // History is intact: the tables the old flow wrote are still present and
+        // readable. A drop would have taken the audit trail with it.
+        eq(
+          'the historical points tables are all still present',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from information_schema.tables
+              where table_schema='public' and table_name in
+                ('points_ledger','redemptions','redemption_quotes','redemption_items','points_accounts')`,
+            )
+          ).n,
+          5,
+        );
+
+        // An operator reading the product's own audit log must find the reason, so
+        // the notice is not only in git history.
+        eq(
+          'the retirement is recorded in the audit trail',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action = 'POINTS_SPENDING_RETIRED'`,
+            )
+          ).n,
+          1,
+        );
+
+        // Idempotent: re-applying the migration must not stack a second notice on
+        // every deploy.
+        eq(
+          'the retirement notice is inserted once, not once per deploy',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action = 'POINTS_SPENDING_RETIRED'`,
+            )
+          ).n,
+          1,
+        );
+      } catch (error) {
+        check('points spending retirement verified', false, safeErrorMessage(error));
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -10230,6 +13817,27 @@ async function main(): Promise<void> {
         await db?.query(
           `delete from public.final_qualifications
           where sale_id in (select id from public.card_sales where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
+        // points_periods now exist for every activated membership, and both
+        // points_ledger.origin_period_id and points_periods.account_id are
+        // RESTRICT foreign keys, so the references are cleared and the periods
+        // removed before the account itself.
+        await db?.query(
+          `update public.points_ledger l
+              set origin_period_id = null
+            where l.account_id in (
+              select pa.id from public.points_accounts pa
+               where pa.membership_id in (
+                 select id from public.memberships where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        await db?.query(
+          `delete from public.points_periods
+            where account_id in (
+              select pa.id from public.points_accounts pa
+               where pa.membership_id in (
+                 select id from public.memberships where customer_id = any($1::uuid[])))`,
           [custSet],
         );
         await db?.query(
@@ -10346,9 +13954,10 @@ async function main(): Promise<void> {
             'delete from private.ost_accreditation_renewals where id = any($1::uuid[])',
             [ids],
           );
-          await db?.query('delete from private.ost_accreditation_terms where id = any($1::uuid[])', [
-            ids,
-          ]);
+          await db?.query(
+            'delete from private.ost_accreditation_terms where id = any($1::uuid[])',
+            [ids],
+          );
           await db?.query(
             'delete from private.ost_registration_details where application_id = any($1::uuid[])',
             [ids],
@@ -10368,15 +13977,16 @@ async function main(): Promise<void> {
         // staff_role_assignments and staff_permission_restrictions cascade from
         // staff_users, so they need no statement of their own.
         // Sections 47 and 48 each create their own live referral code, sponsored by the
-      // synthetic Sales Manager, because `commit_customer_import_row` resolves the sale
-      // seller from `raw_data.seller_code` and the Phase 14 trigger refuses a sale with
-      // no seller. `referral_codes.sponsor_staff_id` is a RESTRICT foreign key, so any
-      // survivor makes the `staff_users` delete below fail and takes the whole cleanup
-      // with it. Delete every synthetic staff member's codes, not just section 57's.
-      await db?.query('delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])', [
-        staffSet,
-      ]);
-      await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
+        // synthetic Sales Manager, because `commit_customer_import_row` resolves the sale
+        // seller from `raw_data.seller_code` and the Phase 14 trigger refuses a sale with
+        // no seller. `referral_codes.sponsor_staff_id` is a RESTRICT foreign key, so any
+        // survivor makes the `staff_users` delete below fail and takes the whole cleanup
+        // with it. Delete every synthetic staff member's codes, not just section 57's.
+        await db?.query(
+          'delete from public.referral_codes where sponsor_staff_id = any($1::uuid[])',
+          [staffSet],
+        );
+        await db?.query('delete from public.staff_users where id = any($1::uuid[])', [staffSet]);
         await db?.query('delete from auth.users where id = any($1::uuid[])', [authSet]);
         await db?.query('delete from public.redemption_items where code like $1', [`${RUN}-%`]);
         await db?.query('commit');

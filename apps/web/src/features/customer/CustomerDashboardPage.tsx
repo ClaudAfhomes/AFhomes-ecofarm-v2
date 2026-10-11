@@ -10,7 +10,12 @@ import {
   type StatusTone,
 } from '@afhomes/ui';
 
-import { useCustomerLedgerQuery, useCustomerMembershipQuery, useCustomerProfileQuery, useCustomerPointsQuery } from './queries';
+import {
+  useCustomerLedgerQuery,
+  useCustomerMembershipQuery,
+  useCustomerPointsPositionQuery,
+  useCustomerProfileQuery,
+} from './queries';
 import { isForbidden, isNotFound } from './http';
 import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './portal-ui';
 
@@ -29,12 +34,14 @@ import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './po
 export function CustomerDashboardPage() {
   const profile = useCustomerProfileQuery();
   const membership = useCustomerMembershipQuery();
-  const points = useCustomerPointsQuery();
+  // The POSITION endpoint, not the legacy summary: the dashboard headline is
+  // SPENDABLE, and debt must be visible here rather than only on the points page.
+  const position = useCustomerPointsPositionQuery();
   const ledger = useCustomerLedgerQuery();
 
   if (profile.isLoading) return <p role="status">Loading your account…</p>;
 
-  const kpiLoading = membership.isLoading || points.isLoading;
+  const kpiLoading = membership.isLoading || position.isLoading;
 
   return (
     <>
@@ -83,11 +90,15 @@ export function CustomerDashboardPage() {
           <li>
             <MetricCard
               label="Points balance"
-              value={(points.data?.balance ?? 0).toLocaleString('en-PH')}
+              value={(position.data?.spendable ?? 0).toLocaleString('en-PH')}
               icon="wallet"
               description={
-                points.data
-                  ? `${points.data.lifetimeAllocated.toLocaleString('en-PH')} allocated all time`
+                position.data
+                  ? `${position.data.balance.toLocaleString('en-PH')} on your card${
+                      position.data.reversalDebt > 0
+                        ? ` · ${position.data.reversalDebt.toLocaleString('en-PH')} held for a reversal`
+                        : ''
+                    }`
                   : 'Points are not available right now.'
               }
               to="/customer/points"
