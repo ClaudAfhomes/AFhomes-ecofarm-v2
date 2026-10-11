@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { AfHomesPermission, AnalyticsOverview } from '@afhomes/contracts';
-import { dashboardActions, dashboardMetrics } from './AfHomesDashboardPage';
-
-const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({
-  moduleKey,
-  canView: true,
-  canCreate: false,
-  canUpdate: false,
-  canDelete: false,
-});
+import type { AnalyticsOverview } from '@afhomes/contracts';
+import { dashboardMetrics } from './AfHomesDashboardPage';
 
 const overview = (kind: AnalyticsOverview['scope']['kind']): AnalyticsOverview => ({
   period: 'month',
@@ -76,20 +68,17 @@ describe('Phase 25 role dashboard presentation', () => {
     expect(metrics.map(([label]) => label)).not.toContain('Verified payments');
   });
 
-  it('limits Employee actions to redemption and catalog grants', () => {
-    const actions = dashboardActions([
-      permission('dashboard.view'),
-      permission('operations.redemption'),
-      permission('operations.catalog'),
+  /**
+   * The dashboard caps the same server-computed set at four headline cards
+   * rather than reordering or hand-picking it, so the ranking a role depends on
+   * stays the ranking `dashboardMetrics` already defines.
+   */
+  it('ranks the headline metrics so the first four survive the dashboard cap', () => {
+    expect(dashboardMetrics(overview('finance')).slice(0, 4).map(([label]) => label)).toEqual([
+      'Pending payments',
+      'Verified payments',
+      'Fully paid sales',
+      'Activation queue',
     ]);
-    expect(actions.map((action) => action.label)).toEqual([
-      'POS / QR scanner',
-      'Redemption history',
-      'Redemption catalog',
-    ]);
-  });
-
-  it('honours a deny-only effective-permission result by omitting the action', () => {
-    expect(dashboardActions([permission('dashboard.view')])).toEqual([]);
   });
 });

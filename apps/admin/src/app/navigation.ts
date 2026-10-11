@@ -263,7 +263,10 @@ export function findNavSubItem(pathname: string) {
   return best;
 }
 export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
-  if (pathname === '/admin') return [{ label: 'Dashboard' }];
+  // The dashboard is the console home: a self-referencing "Dashboard" crumb
+  // adds a redundant label above Operations Overview, so no trail renders here.
+  // Deeper pages keep their `Dashboard -> …` home link untouched.
+  if (pathname === '/admin') return null;
   if (pathname === '/admin/profile')
     return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
   const found = findNavSubItem(pathname);
