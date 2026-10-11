@@ -4,17 +4,27 @@ import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/Badge';
 import { SmartImage } from '../components/ui/SmartImage';
 import { Seo } from '../lib/seo';
+import { cmsRepository } from '../lib/cms';
 import { usePublishedServices, serviceExperience } from '../lib/services';
 import { ErrorState, Skeleton } from '@afhomes/ui';
 
 export default function ExperienceDetail() {
   const { slug } = useParams<{ slug: string }>();
+  // CMS slugs are the authoritative destination pages. A service id is only an
+  // additive fallback, so an Operational Services outage can never blank a
+  // destination page.
+  const cmsExperience =
+    cmsRepository.getExperiences().find((item) => item.slug === slug) ??
+    cmsRepository.getExperiences().find((item) => item.id === slug);
   const services = usePublishedServices();
-  const service = services.data?.find((item) => item.id === slug);
-  const experience = service ? serviceExperience(service) : null;
+  const rawService = !cmsExperience
+    ? services.data?.find((item) => item.id === slug) ?? null
+    : null;
+  const experience = cmsExperience ?? (rawService ? serviceExperience(rawService) : null);
   // `isLoading` rather than `isPending`, so a background refetch of a detail page
-  // keeps the article on screen instead of flashing a skeleton over it.
-  if (services.isLoading)
+  // keeps the article on screen instead of flashing a skeleton over it. A CMS
+  // match renders immediately without waiting for the services query.
+  if (!cmsExperience && services.isLoading)
     return (
       <Container className="py-32">
         <div role="status" aria-label="Loading experience" aria-busy="true">
@@ -30,7 +40,7 @@ export default function ExperienceDetail() {
         </div>
       </Container>
     );
-  if (services.isError)
+  if (!cmsExperience && services.isError)
     return (
       <Container className="py-32">
         <ErrorState error={services.error} onRetry={services.refetch} />
@@ -85,9 +95,9 @@ export default function ExperienceDetail() {
           <p className="text-xl leading-relaxed text-ink-700 sm:text-2xl">
             {experience.description}
           </p>
-          {service && service.photos.length > 1 && (
+          {rawService && rawService.photos.length > 1 && (
             <div className="mt-10 grid gap-4 sm:grid-cols-2" aria-label="Service photo gallery">
-              {service.photos.slice(1).map((photo) => (
+              {rawService.photos.slice(1).map((photo) => (
                 <SmartImage
                   key={photo.url}
                   spec={{ src: photo.url, alt: photo.alt }}

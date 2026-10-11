@@ -4,6 +4,7 @@
  * decision lives in the browser.
  */
 import {
+  pointApprovalSchema,pointApprovalDecisionResultSchema,
   customerActivationResultSchema,
   customerCredentialsSchema,
   customerMembershipSchema,
@@ -114,3 +115,6 @@ export type {
   CustomerPayment,
   CustomerCredentials,
 };
+
+export const getPointApprovals=()=>requestList('/earning/approvals',pointApprovalSchema);
+export const decidePointApproval=(quoteId:string,approve:boolean)=>request('/earning/approvals/'+quoteId+'/decision',pointApprovalDecisionResultSchema,{method:'POST',body:JSON.stringify({approve})});

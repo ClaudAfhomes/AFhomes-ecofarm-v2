@@ -66,8 +66,8 @@ export function RedemptionWorkflowPage({ history = false }: { history?: boolean 
   return (
     <>
       <PageHeader
-        title={history ? 'Earning Claim History' : 'Redeem Points'}
-        description="Points earned from paid service purchases. Customers claim them in their own accounts."
+        title={history ? 'Earning Claim History' : 'Earned Points Claims'}
+        description="Points earned from paid service purchases. Customers claim them in their own accounts. Spending a balance happens only on the Use VIP Points screen, never here."
       />
       <nav className={styles.links} aria-label="Claim records">
         <Link to={history ? '/admin/redemption' : '/admin/redemption/history'}>

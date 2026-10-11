@@ -626,10 +626,11 @@ describe('points: recording a purchase', () => {
    * button is not an authorization control.
    * ---------------------------------------------------------------- */
   describe('GSD operations.sales scope', () => {
-    // Points are EARNED and CLAIMED now. Spending an existing balance is
-    // retired, and these assert the endpoints are GONE rather than merely
-    // unlinked: a spend route that still answers behind a removed button is
-    // exactly the hidden endpoint the requirement forbids.
+    // Points spending is RESTORED under the staycation-default policy: a quote
+    // prices without spending, a commit spends exactly what was quoted, and the
+    // till applies both in one idempotent step. These assert the routes are
+    // WIRED again (not 404) and still gated: authorization first, eligibility
+    // in SQL, and every peso figure the server's.
     const SPENDER: Grant[] = [
       {
         moduleKey: 'operations.redemption',
@@ -647,15 +648,75 @@ describe('points: recording a purchase', () => {
       },
     ];
 
+    it('prices a discount without spending anything', async () => {
+      const db = install({
+        permissions: SPENDER,
+        rpcs: [{ fn: 'prepare_customer_point_redemption', result: QUOTE_RPC }],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/quote`,
+        method: 'POST',
+        body: { pointsRequested: 500 },
+      });
+      expect(s.status).toBe(200);
+      expect(body(s)).toMatchObject({
+        quoteNumber: 'AF-QTE-000001',
+        pointsRequested: 500,
+        pesoValue: '500.00',
+      });
+      expect(
+        db.calls.find((c) => c.table === 'prepare_customer_point_redemption')?.arg,
+      ).toMatchObject({
+        p_purchase_id: PURCHASE_ID,
+        p_points_requested: 500,
+        p_actor_id: STAFF_ID,
+      });
+    });
+
+    it('refuses a forged peso value on a quote LOUDLY', async () => {
+      const db = install({
+        permissions: SPENDER,
+        rpcs: [{ fn: 'prepare_customer_point_redemption', result: QUOTE_RPC }],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/quote`,
+        method: 'POST',
+        body: { pointsRequested: 500, pesoValue: '99999.00' },
+      });
+      expect(s.status).toBe(400);
+      expect(db.calls.some((c) => c.table === 'prepare_customer_point_redemption')).toBe(false);
+    });
+
+    it('needs create permission to quote, not view', async () => {
+      install({
+        permissions: VIEW_ONLY,
+        rpcs: [{ fn: 'prepare_customer_point_redemption', result: QUOTE_RPC }],
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/quote`,
+        method: 'POST',
+        body: { pointsRequested: 500 },
+      });
+      expect(s.status).toBe(403);
+    });
+
     it.each([
-      ['the till points spend', 'purchases/abc/points-discount'],
-      ['a points-discount quote', 'purchases/abc/quote'],
-      ['a points-discount commit', 'quotes/abc/commit'],
-      ['a points-discount promotion', 'redemption-rules'],
-    ])('does not serve %s', async (_label: string, path: string) => {
-      const db = install({ permissions: SPENDER });
-      const s = await call({ familyPath: path, method: 'POST', body: { pointsRequested: 1000 } });
-      expect(s.status).toBe(404);
+      ['an ineligible service with no promotion', 'NO_DISCOUNT_ELIGIBLE_LINES'],
+      ['a balance that cannot cover the request', 'INSUFFICIENT_POINTS:needed=500 available=100'],
+      ['outstanding reversal debt', 'REVERSAL_DEBT_OUTSTANDING'],
+    ])('refuses %s without spending', async (_label: string, message: string) => {
+      const db = install({
+        permissions: SPENDER,
+        rpcErrors: { prepare_customer_point_redemption: { message } },
+      });
+      const s = await call({
+        familyPath: `purchases/${PURCHASE_ID}/quote`,
+        method: 'POST',
+        body: { pointsRequested: 500 },
+      });
+      expect(s.status).toBe(409);
+      // The member is told the staycation/promotion rule, never the internals.
+      expect(String(errMsg(s))).not.toMatch(/needed=|available=/);
     });
 
     const GSD: Grant[] = [
@@ -1737,5 +1798,113 @@ describe('points: reads', () => {
   it('404s an unknown sub-path rather than falling through', async () => {
     install();
     expect((await call({ familyPath: 'nope' })).status).toBe(404);
+  });
+});
+
+describe('customer-only point spending approvals and Finance refunds', () => {
+  it('resolves approval ownership and Auth identity from the customer session', async () => {
+    const db = install({ rpcs: [{ fn: 'decide_point_redemption_approval', result: 'approved' }] });
+    const result = await call({
+      familyPath: 'approvals/' + CLAIM_ID + '/decision',
+      method: 'POST',
+      token: CUSTOMER_TOKEN,
+      body: { approve: true },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ status: 'approved' });
+    expect(
+      db.calls.find((entry) => entry.table === 'decide_point_redemption_approval')?.arg,
+    ).toEqual({
+      p_quote_id: CLAIM_ID,
+      p_customer_id: CUSTOMER_ID,
+      p_auth_user_id: CUSTOMER_AUTH_ID,
+      p_approve: true,
+    });
+  });
+  it('refuses a body that tries to nominate another customer', async () => {
+    const db = install();
+    const result = await call({
+      familyPath: 'approvals/' + CLAIM_ID + '/decision',
+      method: 'POST',
+      token: CUSTOMER_TOKEN,
+      body: { approve: true, customerId: OTHER_CUSTOMER_ID },
+    });
+    expect(result.status).toBe(400);
+    expect(db.calls.some((entry) => entry.table === 'decide_point_redemption_approval')).toBe(
+      false,
+    );
+  });
+  it('staff cannot authorize points through the customer approval endpoint', async () => {
+    const db = install();
+    const result = await call({
+      familyPath: 'approvals/' + CLAIM_ID + '/decision',
+      method: 'POST',
+      token: TOKEN,
+      body: { approve: true },
+    });
+    expect(result.status).toBe(403);
+    expect(db.calls.some((entry) => entry.table === 'decide_point_redemption_approval')).toBe(
+      false,
+    );
+  });
+  it('the legacy staff commit endpoint never invokes a debit RPC', async () => {
+    const db = install();
+    const result = await call({ familyPath: 'quotes/' + CLAIM_ID + '/commit', method: 'POST' });
+    expect(result.status).toBe(409);
+    expect(db.calls.some((entry) => entry.table === 'commit_point_discount')).toBe(false);
+  });
+  it('Finance refund requires update permission and cannot take a client point count', async () => {
+    let db = install({ permissions: VIEW_ONLY });
+    let result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/point-refunds',
+      method: 'POST',
+      body: {
+        serviceValue: '250.00',
+        reference: 'refund-local',
+        reason: 'Reviewed service',
+        serviceReviewConfirmed: true,
+      },
+    });
+    expect(result.status).toBe(403);
+    expect(db.calls.some((entry) => entry.table === 'refund_purchase_redeemed_points')).toBe(false);
+    db = install();
+    result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/point-refunds',
+      method: 'POST',
+      body: {
+        serviceValue: '250.00',
+        reference: 'refund-local',
+        reason: 'Reviewed service',
+        serviceReviewConfirmed: true,
+        pointsRestored: 9999,
+      },
+    });
+    expect(result.status).toBe(400);
+    expect(db.calls.some((entry) => entry.table === 'refund_purchase_redeemed_points')).toBe(false);
+  });
+  it('Finance records a server-calculated refund with its session actor', async () => {
+    const db = install({
+      rpcs: [
+        {
+          fn: 'refund_purchase_redeemed_points',
+          result: [{ refund_id: CLAIM_ID, points_restored: 125, balance_after: 50125 }],
+        },
+      ],
+    });
+    const result = await call({
+      familyPath: 'purchases/' + PURCHASE_ID + '/point-refunds',
+      method: 'POST',
+      body: {
+        serviceValue: '250.00',
+        reference: 'refund-local',
+        reason: 'Reviewed service',
+        serviceReviewConfirmed: true,
+      },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ refundId: CLAIM_ID, pointsRestored: 125, balanceAfter: 50125 });
+    expect(
+      db.calls.find((entry) => entry.table === 'refund_purchase_redeemed_points')?.arg,
+    ).toMatchObject({ p_actor_id: STAFF_ID, p_service_value: '250.00' });
   });
 });

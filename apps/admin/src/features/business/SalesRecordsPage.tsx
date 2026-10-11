@@ -1,14 +1,22 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import { Button, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
 import { formatMoney } from './format';
 import styles from './points.module.css';
-import { listClaims, listPurchases, type ClaimRow, type PurchaseRow } from './points-services';
+import {
+  listClaimsPage,
+  listPurchasesPage,
+  type ClaimRow,
+  type PurchaseRow,
+} from './points-services';
 import { useSession } from '../../lib/session';
 
 export function SalesRecordsPage() {
+  const [purchasePage, setPurchasePage] = useState(0);
+  const [claimPage, setClaimPage] = useState(0);
   const purchases = useQuery({
-    queryKey: ['earning', 'purchases'],
-    queryFn: listPurchases,
+    queryKey: ['earning', 'purchases', purchasePage],
+    queryFn: () => listPurchasesPage(purchasePage),
     refetchInterval: 15000,
   });
   const mayViewClaims =
@@ -16,8 +24,8 @@ export function SalesRecordsPage() {
       (p) => p.moduleKey === 'operations.redemption' && p.canView,
     ) === true;
   const claims = useQuery({
-    queryKey: ['earning', 'claims'],
-    queryFn: listClaims,
+    queryKey: ['earning', 'claims', claimPage],
+    queryFn: () => listClaimsPage(claimPage),
     refetchInterval: 15000,
     enabled: mayViewClaims,
   });
@@ -57,6 +65,44 @@ export function SalesRecordsPage() {
           claims={mayViewClaims ? (claims.data ?? []) : []}
         />
       )}
+      <nav aria-label="Purchase history pages">
+        <Button
+          variant="secondary"
+          disabled={purchasePage === 0 || purchases.isFetching}
+          onClick={() => setPurchasePage((page) => page - 1)}
+        >
+          Previous purchases
+        </Button>
+        <span>Purchase page {purchasePage + 1}</span>
+        <Button
+          variant="secondary"
+          disabled={
+            purchases.isFetching || purchases.isError || (purchases.data?.length ?? 0) < 200
+          }
+          onClick={() => setPurchasePage((page) => page + 1)}
+        >
+          Older purchases
+        </Button>
+      </nav>
+      {mayViewClaims && (
+        <nav aria-label="Claim history pages">
+          <Button
+            variant="secondary"
+            disabled={claimPage === 0 || claims.isFetching}
+            onClick={() => setClaimPage((page) => page - 1)}
+          >
+            Previous claims
+          </Button>
+          <span>Claim page {claimPage + 1}</span>
+          <Button
+            variant="secondary"
+            disabled={claims.isFetching || claims.isError || (claims.data?.length ?? 0) < 200}
+            onClick={() => setClaimPage((page) => page + 1)}
+          >
+            Older claims
+          </Button>
+        </nav>
+      )}
     </>
   );
 }
@@ -85,7 +131,7 @@ function PointsHistory({ purchases, claims }: { purchases: PurchaseRow[]; claims
                   <th scope="col">Status</th>
                   <th scope="col">Gross</th>
                   <th scope="col">VIP discount</th>
-                  <th scope="col">Legacy points discount</th>
+                  <th scope="col">Points discount</th>
                   <th scope="col">Recorded</th>
                   <th scope="col">Verified</th>
                   <th scope="col">Customer / seller</th>

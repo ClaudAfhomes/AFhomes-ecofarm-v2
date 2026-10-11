@@ -95,10 +95,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'wallet',
     module: 'operations.redemption',
     dropdown: [
-      { to: '/admin/redemption', label: 'Redeem Points', module: 'operations.redemption' },
+      { to: '/admin/redemption', label: 'Earned Points Claims', module: 'operations.redemption' },
       {
         to: '/admin/redemption/history',
-        label: 'Redemption History',
+        label: 'Earning Claim History',
         module: 'operations.redemption',
       },
     ],
@@ -116,6 +116,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // The GSD screen. `operations.sales` view+create is what a seller holds;
       // it grants no catalog, customer or verification authority.
       { to: '/admin/points', label: 'New Service Sale', module: 'operations.sales' },
+      // Points spending is a POS act, not a redemption-desk one: it lives with
+      // the sale, keyed to the same `operations.sales` the seller holds, and
+      // nowhere near the earning-claim queue.
+      { to: '/admin/points/use', label: 'Use VIP Points', module: 'operations.sales' },
       // Admin only: products, tier discounts and earning rules.
       { to: '/admin/points/rules', label: 'Products & Services', module: 'operations.catalog' },
       { to: '/admin/points/records', label: 'Sales Records', module: 'sales.customers' },

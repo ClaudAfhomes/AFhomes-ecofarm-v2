@@ -33,13 +33,18 @@
  */
 import {
   adjustPointsInputSchema,
+  appliedPointsDiscountSchema,
+  applyPointsDiscountInputSchema,
   claimEarningPointsRequestSchema,
   createEarningClaimRequestSchema,
   createPurchaseInputSchema,
   pointEarningRuleInputSchema,
+  pointRedemptionRuleInputSchema,
+  pointRedemptionRulePatchSchema,
   purchaseReceiptInputSchema,
   reversePurchaseInputSchema,
   purchaseReceiptDecisionSchema,
+  quotePointDiscountSchema,
   serviceTierDiscountInputSchema,
   servicePolicyStatusSchema,
   operationalSettlementSchema,
@@ -63,11 +68,28 @@ import {
 import { serviceClient } from '../_lib/rest.js';
 import { resolveCustomerPrincipal } from '../_lib/customer-access.js';
 import { hashIdentifier, normalizeIdentifier } from '../_lib/identifier.js';
+import { handlePointRefunds } from './_point-refunds.js';
+import { handlePointApprovals } from './_point-approvals.js';
 import { handleServiceCatalog } from './_service-catalog.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 /** A database refusal -> a stable, safe client message. */
 const REFUSALS: Record<string, [string, string, number]> = {
+  APPROVAL_REQUIRED: [
+    'CONFLICT',
+    'Customer portal approval is required before completing this points purchase.',
+    409,
+  ],
+  APPROVAL_UNAVAILABLE: [
+    'CONFLICT',
+    'The customer approval expired or changed. Prepare a new quote.',
+    409,
+  ],
+  POINT_REFUND_REVIEW_REQUIRED: [
+    'CONFLICT',
+    'Use Finance point-refund review for this purchase.',
+    409,
+  ],
   ACTOR_REQUIRED: ['UNAUTHORIZED', 'Sign in to continue', 401],
   ACTOR_NOT_ACTIVE: ['FORBIDDEN', 'Your staff account is not active.', 403],
   PURCHASE_NOT_FOUND: ['NOT_FOUND', 'No purchase matches that reference', 404],
@@ -110,14 +132,32 @@ const REFUSALS: Record<string, [string, string, number]> = {
     409,
   ],
   INSUFFICIENT_POINTS: ['CONFLICT', 'This member does not have that many points.', 409],
+  // The tier rate and the points spend never combine on their own. The message
+  // names the member's two lawful options rather than the missing promotion
+  // row: naming the rule would let a caller probe which services are promoted.
+  STACKING_NOT_AUTHORIZED: [
+    'CONFLICT',
+    'This purchase already carries a VIP tier discount. Complete it with the tier discount, create the sale without the tier discount to use points, or ask an Admin for a stacking promotion.',
+    409,
+  ],
   PURCHASE_NOT_DISCOUNTABLE: [
     'CONFLICT',
-    'Only a purchase that has not been settled can take a points discount.',
+    'Only an unsettled purchase with an amount still due can take a points discount.',
     409,
   ],
   QUOTE_NOT_FOUND: ['NOT_FOUND', 'No quote matches that reference', 404],
   QUOTE_NOT_OPEN: ['CONFLICT', 'That quote has already been used.', 409],
   QUOTE_EXPIRED: ['CONFLICT', 'That quote has expired. Please request a new one.', 409],
+  DISCOUNT_REFERENCE_REQUIRED: [
+    'VALIDATION_ERROR',
+    'A sale reference is required to spend points at the till.',
+    400,
+  ],
+  PURCHASE_ALREADY_DISCOUNTED: [
+    'CONFLICT',
+    'This purchase already has a points discount. A second one is never stacked.',
+    409,
+  ],
   DISCOUNT_EXCEEDS_GROSS: ['CONFLICT', 'That discount is larger than the purchase.', 409],
   POINTS_AMOUNT_REQUIRED: ['VALIDATION_ERROR', 'Enter how many points to use.', 400],
   PAYMENT_METHOD_REQUIRED: ['VALIDATION_ERROR', 'Choose a payment method.', 400],
@@ -150,12 +190,14 @@ const splitCode = (message: string) => (message.split(':')[0] ?? '').trim();
  */
 const REDEMPTION_RULE_COLUMNS =
   'id, service_id, peso_value_per_point, eligible_tiers, min_points, max_points, ' +
-  'min_purchase_amount, effective_start, effective_end, is_active, promotion_reference';
+  'min_purchase_amount, effective_start, effective_end, is_active, promotion_reference, ' +
+  'allow_discount_stacking, rule_kind';
 
 /** Row -> response. Fields are PICKED, never spread. */
 const toRedemptionRule = (row: Record<string, unknown>) => ({
   id: row.id,
   serviceId: row.service_id,
+  ruleKind: row.rule_kind ?? 'promotion',
   pesoValuePerPoint: String(row.peso_value_per_point ?? '0'),
   eligibleTiers: (row.eligible_tiers ?? []) as string[],
   minPoints: Number(row.min_points ?? 0),
@@ -169,6 +211,7 @@ const toRedemptionRule = (row: Record<string, unknown>) => ({
   effectiveEnd: isoOrNull(row.effective_end),
   isActive: row.is_active === true,
   promotionReference: row.promotion_reference ?? null,
+  allowDiscountStacking: row.allow_discount_stacking === true,
 });
 
 /** Map a SQL refusal onto the client's error envelope. */
@@ -187,15 +230,22 @@ function refuse(res: VercelResponse, error: { message?: string } | null): void {
  * also keeps the response camelCase, matching every other AF Homes handler and
  * the contracts the client validates against.
  */
-async function listPurchases(db: Db, customerId: string | null) {
+async function listPurchases(
+  db: Db,
+  customerId: string | null,
+  actorId: string | null = null,
+  page = 0,
+) {
   let query = db
     .from('purchases')
     .select(
       'id, purchase_number, customer_id, membership_id, status, gross_amount, tier_discount_amount, tier_snapshot, points_discount_amount, net_amount, created_by, completed_at, reversed_at, reversal_reason, created_at',
     )
     .order('created_at', { ascending: false })
-    .limit(200);
+    .order('id', { ascending: false })
+    .range(page * 200, page * 200 + 199);
   if (customerId) query = query.eq('customer_id', customerId);
+  if (actorId) query = query.eq('created_by', actorId);
   const { data, error } = await query;
   if (error) throw error;
   const rows = (data ?? []) as Record<string, unknown>[];
@@ -337,8 +387,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const verb = method(req);
   const path = subPath(req);
+  const page = req.query.page === undefined ? 0 : Number(req.query.page);
+  if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000)
+    return fail(res, 'VALIDATION_ERROR', 'Invalid history page.', 400);
 
   try {
+    const pointRefundRoute =
+      /^purchases\/([0-9a-f-]{36})\/(point-refunds|cancel-point-reservation)$/.exec(path);
+    if (pointRefundRoute)
+      return await handlePointRefunds(req, res, db, pointRefundRoute[1], pointRefundRoute[2], verb);
+    if (path === 'approvals' || path.startsWith('approvals/'))
+      return await handlePointApprovals(req, res, db, path, verb);
     if (path === 'services' || path.startsWith('services/') || path === 'public/services')
       return await handleServiceCatalog(req, res, path);
     /* ================================================================
@@ -434,6 +493,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * `employee` holds no `sales.customers` row at all, so the operational
      * screen can read back its own sale through the per-purchase summary below
      * without ever seeing the ledger of everyone else's. */
+    if (path === 'pos/purchases' && verb === 'GET') {
+      const reader = await authorizeAfHomes(req, 'operations.sales', 'view');
+      if ('error' in reader) return deny(res, reader);
+      return list(res, await listPurchases(db, null, reader.userId, page));
+    }
     if ((path === 'purchases' || path === 'finance/purchases') && verb === 'GET') {
       const records = await authorizeAfHomes(
         req,
@@ -442,7 +506,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       if ('error' in records) return deny(res, records);
       const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : null;
-      return res.status(200).json({ data: await listPurchases(db, customerId) });
+      return res.status(200).json({ data: await listPurchases(db, customerId, null, page) });
     }
 
     /* ---------------- POST /points/purchases ---------------- */
@@ -455,6 +519,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'Check the purchase details and try again.', 400);
       }
       // SQL prices the selected services from the catalog and freezes the result.
+      // The tier choice travels explicitly: omitted means today's behavior.
       const { data, error } = await db.rpc('create_purchase', {
         p_membership_id: parsed.data.membershipId,
         p_gross_amount: '0.00',
@@ -466,6 +531,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // real purchase that could earn points.
         p_reference: parsed.data.reference,
         p_actor_id: auth.userId,
+        p_apply_tier_discount: parsed.data.applyTierDiscount ?? true,
       });
       if (error) return mapRpcError(res, error);
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
@@ -648,6 +714,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    /* ---------------- POST /points/purchases/:id/quote ----------------
+     *
+     * Prices a points discount and SPENDS NOTHING. The request names the purchase
+     * and a point COUNT; it never states a peso value, a rate, or a resulting
+     * balance. Every peso figure below is the server's, from the staycation
+     * default or the matched promotion and the eligible line total.
+     * -------------------------------------------------------------- */
+    const quoteRoute = route(req, 'POST', /^purchases\/([^/]+)\/quote$/);
+    if (quoteRoute) {
+      const write = await authorizeAfHomes(req, 'operations.redemption', 'create');
+      if ('error' in write) return deny(res, write);
+
+      const parsed = quotePointDiscountSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
+      }
+      const { data, error } = await db.rpc('prepare_customer_point_redemption', {
+        p_purchase_id: quoteRoute[1],
+        p_points_requested: parsed.data.pointsRequested,
+        p_actor_id: auth.userId,
+      });
+      if (error) return refuse(res, error);
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      if (!row) return fail(res, 'CONFLICT', 'That discount is not available.', 409);
+
+      return res.status(200).json({
+        quoteId: row.quote_id,
+        quoteNumber: String(row.quote_number ?? ''),
+        pointsRequested: Number(row.points_requested ?? 0),
+        pesoValue: String(row.peso_value ?? '0.00'),
+        eligibleLineTotal: String(row.eligible_line_total ?? '0.00'),
+        remainingPointsAfter: Number(row.remaining_points_after ?? 0),
+        expiresAt: isoOrNull(row.expires_at) ?? '',
+      });
+    }
+
+    /* ---------------- POST /points/quotes/:id/commit ----------------
+     *
+     * The single place a QUOTED discount becomes a spend. One transaction in SQL:
+     * the ledger row, the account balance, the membership cache, the per-line
+     * discount allocation and the purchase net all land together or not at all.
+     * -------------------------------------------------------------- */
+    const commitRoute = route(req, 'POST', /^quotes\/([^/]+)\/commit$/);
+    if (commitRoute) {
+      const write = await authorizeAfHomes(req, 'operations.redemption', 'create');
+      if ('error' in write) return deny(res, write);
+
+      return fail(
+        res,
+        'CONFLICT',
+        'Customer portal approval and verified purchase completion are required. Prepare a new quote.',
+        409,
+      );
+    }
+
     /* ---------------- GET /points/purchases/:id/summary ----------------
      *
      * Finance. Returns gross, discount, net and the ACTUAL verified receipts as
@@ -825,6 +946,206 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    /* ---------------- POST /points/redemption-rules ----------------
+     *
+     * Creates a PROMOTION: what makes a non-staycation service discountable, and
+     * at what conversion.
+     *
+     * The mandatory bits are enforced by the TABLE as well as here, so a direct
+     * SQL insert cannot produce an indefinite promotion either:
+     *   - effective_start AND effective_end are NOT NULL (no open-ended promo)
+     *   - effective_start < effective_end (half-open interval)
+     *   - promotion_reference is NOT NULL and non-blank (it must be reviewable)
+     *   - eligible_tiers is a non-empty subset of the three known tiers
+     *
+     * There is deliberately NO cap-exemption and no "applies to everything"
+     * option: a promotion names ONE service, and every award still counts toward
+     * the annual cap.
+     * -------------------------------------------------------------- */
+    if (path === 'redemption-rules' && verb === 'POST') {
+      const write = await authorizeAfHomes(req, 'operations.catalog', 'create');
+      if ('error' in write) return deny(res, write);
+
+      const parsed = pointRedemptionRuleInputSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Check the promotion details and try again.', 400);
+      }
+      const rule = parsed.data;
+      if (rule.maxPoints !== null && rule.minPoints > rule.maxPoints) {
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'The minimum points must not exceed the maximum.',
+          400,
+        );
+      }
+
+      // A promotion pointing at a deactivated service would earn nothing and
+      // discount nothing, forever, in silence.
+      const service = await db
+        .from('service_catalog')
+        .select('id, is_active, is_staycation_eligible')
+        .eq('id', rule.serviceId)
+        .maybeSingle();
+      if (service.error) return mapRpcError(res, service.error);
+      if (!service.data) return fail(res, 'NOT_FOUND', 'No service matches that reference', 404);
+      if (service.data.is_active !== true) {
+        return fail(res, 'CONFLICT', 'That service is deactivated.', 409);
+      }
+
+      if (rule.ruleKind === 'accommodation' && service.data.is_staycation_eligible !== true)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Accommodation conversion rules require an accommodation-eligible service.',
+          400,
+        );
+      const { data, error } = await db
+        .from('point_redemption_rules')
+        .insert({
+          service_id: rule.serviceId,
+          rule_kind: rule.ruleKind,
+          peso_value_per_point: rule.pesoValuePerPoint,
+          eligible_tiers: rule.eligibleTiers,
+          min_points: rule.minPoints,
+          max_points: rule.maxPoints,
+          min_purchase_amount: rule.minPurchaseAmount,
+          effective_start: rule.effectiveStart,
+          effective_end: rule.effectiveEnd,
+          is_active: rule.isActive,
+          promotion_reference: rule.promotionReference,
+          allow_discount_stacking: rule.allowDiscountStacking,
+          created_by: auth.userId,
+        })
+        .select(REDEMPTION_RULE_COLUMNS)
+        .single();
+      if (error) return mapRpcError(res, error);
+      const row = data as Record<string, unknown>;
+      // Audited with the actor: a promotion changes what members may SPEND points
+      // on, so it is a commercial event and never a silent configuration change.
+      // The stacking flag is audited too: it is the authorization to combine.
+      await audit(
+        db,
+        auth.userId,
+        'REDEMPTION_RULE_CREATED',
+        'point_redemption_rules',
+        String(row.id),
+        null,
+        {
+          serviceId: rule.serviceId,
+          pesoValuePerPoint: rule.pesoValuePerPoint,
+          eligibleTiers: rule.eligibleTiers,
+          effectiveStart: rule.effectiveStart,
+          effectiveEnd: rule.effectiveEnd,
+          promotionReference: rule.promotionReference,
+          allowDiscountStacking: rule.allowDiscountStacking,
+        },
+      );
+      return res.status(201).json(toRedemptionRule(row));
+    }
+
+    /* ---------------- PATCH /points/redemption-rules/:id ---------------- */
+    const patchRule = route(req, 'PATCH', /^redemption-rules\/([^/]+)$/);
+    if (patchRule) {
+      const write = await authorizeAfHomes(req, 'operations.catalog', 'update');
+      if ('error' in write) return deny(res, write);
+
+      const parsed = pointRedemptionRulePatchSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Check the promotion details and try again.', 400);
+      }
+      const patch = parsed.data;
+      if (
+        patch.minPoints !== undefined &&
+        patch.maxPoints !== undefined &&
+        patch.maxPoints !== null &&
+        patch.minPoints > patch.maxPoints
+      ) {
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'The minimum points must not exceed the maximum.',
+          400,
+        );
+      }
+
+      // The CURRENT row is read first because the table CHECKs apply to the FINAL
+      // state. Without this, toggling `is_active` on a row whose window already
+      // closed would be refused for a reason the admin cannot see or fix.
+      const existing = await db
+        .from('point_redemption_rules')
+        .select('id, effective_start, effective_end, is_active')
+        .eq('id', patchRule[1])
+        .maybeSingle();
+      if (existing.error) return mapRpcError(res, existing.error);
+      if (!existing.data) return fail(res, 'NOT_FOUND', 'No promotion matches that reference', 404);
+
+      const nextStart = patch.effectiveStart ?? String(existing.data.effective_start);
+      const nextEnd = patch.effectiveEnd ?? String(existing.data.effective_end);
+      if (nextStart >= nextEnd) {
+        return fail(res, 'VALIDATION_ERROR', 'The end date must be after the start date.', 400);
+      }
+
+      const update: Record<string, unknown> = {};
+      if (patch.pesoValuePerPoint !== undefined) {
+        update.peso_value_per_point = patch.pesoValuePerPoint;
+      }
+      if (patch.eligibleTiers !== undefined) update.eligible_tiers = patch.eligibleTiers;
+      if (patch.minPoints !== undefined) update.min_points = patch.minPoints;
+      if (patch.maxPoints !== undefined) update.max_points = patch.maxPoints;
+      if (patch.minPurchaseAmount !== undefined)
+        update.min_purchase_amount = patch.minPurchaseAmount;
+      if (patch.effectiveStart !== undefined) update.effective_start = patch.effectiveStart;
+      if (patch.effectiveEnd !== undefined) update.effective_end = patch.effectiveEnd;
+      if (patch.isActive !== undefined) update.is_active = patch.isActive;
+      if (patch.promotionReference !== undefined) {
+        update.promotion_reference = patch.promotionReference;
+      }
+      if (patch.allowDiscountStacking !== undefined) {
+        update.allow_discount_stacking = patch.allowDiscountStacking;
+      }
+      update.updated_at = new Date().toISOString();
+
+      const { data, error } = await db
+        .from('point_redemption_rules')
+        .update(update)
+        .eq('id', patchRule[1])
+        .select(REDEMPTION_RULE_COLUMNS)
+        .single();
+      if (error) return mapRpcError(res, error);
+      const row = data as Record<string, unknown>;
+      await audit(
+        db,
+        auth.userId,
+        'REDEMPTION_RULE_UPDATED',
+        'point_redemption_rules',
+        patchRule[1],
+        existing.data,
+        row,
+      );
+      return res.status(200).json(toRedemptionRule(row));
+    }
+
+    /* ---------------- GET /points/redemption-rules ----------------
+     *
+     * Readable by anyone who may sell, because choosing what a member can
+     * spend on requires seeing the current promotions. Writable only through the
+     * two authorized routes above; the browser holds no table privilege at all.
+     * -------------------------------------------------------------- */
+    if (path === 'redemption-rules' && verb === 'GET') {
+      const seller = await authorizeAfHomes(req, 'operations.sales', 'view');
+      if ('error' in seller) {
+        const catalog = await authorizeAfHomes(req, 'operations.catalog', 'view');
+        if ('error' in catalog) return deny(res, seller);
+      }
+      const { data, error } = await db
+        .from('point_redemption_rules')
+        .select(REDEMPTION_RULE_COLUMNS)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return list(res, ((data ?? []) as Record<string, unknown>[]).map(toRedemptionRule));
+    }
+
     if (path === 'rules' && verb === 'GET') {
       const reader = await authorizeAfHomes(req, 'operations.catalog', 'view');
       if ('error' in reader) return deny(res, reader);
@@ -915,6 +1236,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         effectiveEnd: isoOrNull(row.effective_end),
         isActive: row.is_active === true,
       });
+    }
+
+    /* ---------------- POST /points/purchases/:id/points-discount ----------------
+     *
+     * THE TILL. A GSD spends a member's points as part of the sale, in one step.
+     *
+     * The body carries a points figure and a POS reference and NOTHING else: no
+     * peso value, no rate, no balance, no resulting net. The server resolves the
+     * CONFIGURED conversion rate from the staycation default or the active
+     * promotion and prices it, so a tampered body cannot change what the member
+     * pays.
+     *
+     * The reference is the idempotency key. A retried request returns the
+     * original figures instead of spending the points twice, and the database
+     * enforces that as well.
+     * -------------------------------------------------------------- */
+    const applyDiscount = route(req, 'POST', /^purchases\/([^/]+)\/points-discount$/);
+    if (applyDiscount) {
+      const write = await authorizeAfHomes(req, 'operations.sales', 'create');
+      if ('error' in write) return deny(res, write);
+      const parsed = applyPointsDiscountInputSchema.safeParse(jsonBody(req));
+      if (!parsed.success) {
+        return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
+      }
+      return fail(
+        res,
+        'CONFLICT',
+        'Prepare a quote for customer portal approval. Points are deducted only at verified purchase completion.',
+        409,
+      );
     }
 
     /* ---------------- GET /points/purchases/:id/settlement ----------------
@@ -1018,7 +1369,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'id, claim_number, customer_id, purchase_id, status, points_requested, points_awarded, points_capped, expires_at, claimed_at, created_at, customers(customer_number, first_name, middle_name, last_name), memberships(membership_number), purchases(purchase_number), service_catalog(name)',
         )
         .order('created_at', { ascending: false })
-        .limit(200);
+        .order('id', { ascending: false })
+        .range(page * 200, page * 200 + 199);
       if (error) throw error;
       // Token hashes are NEVER selected, and fields are picked rather than
       // spread, so neither the driver nor a future column can leak one.

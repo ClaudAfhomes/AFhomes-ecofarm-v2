@@ -57,7 +57,7 @@ vi.mock('@afhomes/ui', async (original) => ({
   notifySuccess,
 }));
 
-vi.mock('./points-services', () => api);
+vi.mock('./points-services', () => ({...api,listPurchasesPage:api.listPurchases,listClaimsPage:api.listClaims}));
 
 import { SalesRecordsPage } from './SalesRecordsPage';
 import { RedemptionWorkflowPage } from '../redemption/RedemptionWorkflowPage';

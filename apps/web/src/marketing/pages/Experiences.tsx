@@ -10,11 +10,16 @@ import { ImageReveal } from '../components/ui/ImageReveal';
 import { cn } from '../lib/cn';
 import type { Experience } from '../types/experience';
 import { usePublishedServices, serviceExperience } from '../lib/services';
-import { EmptyState, ErrorState, Skeleton } from '@afhomes/ui';
+import { ErrorState, Skeleton } from '@afhomes/ui';
 
 export default function Experiences() {
+  // Original destination content is synchronous and always available, even when
+  // the Operational Services API is down. Service products are a DIFFERENT
+  // content domain and render as an additive section below, never as a
+  // replacement.
+  const cmsExperiences = cmsRepository.getExperiences();
   const services = usePublishedServices();
-  const experiences = (services.data ?? []).map(serviceExperience);
+  const bookable = (services.data ?? []).map(serviceExperience);
   const content = cmsRepository.getPageContent().experiences;
   return (
     <>
@@ -32,49 +37,47 @@ export default function Experiences() {
 
       <div className="py-20 sm:py-28">
         <div className="space-y-24 sm:space-y-32">
-          {/*
-            `isLoading`, not `isPending`: this query refetches on an interval, and
-            only `isLoading` is false once data has arrived, so a background
-            refetch keeps the visible page instead of collapsing it back to a
-            skeleton.
-
-            The placeholders mirror the real row - a 4:3 image beside two text
-            columns - so the page does not shift when the rows land. They are
-            aria-hidden, so the region carries the announcement.
-          */}
-          {services.isLoading && (
-            <Container>
-              <div role="status" aria-label="Loading experiences" aria-busy="true">
-                <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
-                  <Skeleton className="aspect-[4/3] w-full" />
-                  <div className="space-y-4">
-                    <Skeleton className="h-10 w-3/4" />
-                    <Skeleton className="h-4 w-1/3" />
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-5/6" />
-                  </div>
-                </div>
-              </div>
-            </Container>
-          )}
-          {services.isError && (
-            <Container>
-              <ErrorState error={services.error} onRetry={services.refetch} />
-            </Container>
-          )}
-          {services.isSuccess && experiences.length === 0 && (
-            <Container>
-              <EmptyState
-                title="Experiences coming soon"
-                description="Published services will appear here. Contact AF Homes for current availability."
-              />
-            </Container>
-          )}
-          {experiences.map((experience, index) => (
+          {cmsExperiences.map((experience, index) => (
             <ExperienceRow key={experience.id} experience={experience} index={index} />
           ))}
         </div>
       </div>
+
+      {services.isLoading && (
+        <Container>
+          <div role="status" aria-label="Loading bookable services" aria-busy="true">
+            <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
+              <Skeleton className="aspect-[4/3] w-full" />
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-3/4" />
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+              </div>
+            </div>
+          </div>
+        </Container>
+      )}
+      {services.isError && (
+        <Container>
+          <ErrorState error={services.error} onRetry={services.refetch} />
+        </Container>
+      )}
+      {services.isSuccess && bookable.length > 0 && (
+        <div className="py-20 sm:py-28">
+          <Container>
+            <p className="label-caps text-ink-400">Also bookable now</p>
+            <h2 className="font-display mt-2 text-3xl font-medium text-navy-900">
+              Operational services
+            </h2>
+          </Container>
+          <div className="mt-10 space-y-24 sm:space-y-32">
+            {bookable.map((experience, index) => (
+              <ExperienceRow key={experience.id} experience={experience} index={index} />
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

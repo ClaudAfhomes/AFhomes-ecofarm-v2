@@ -105,6 +105,7 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.set('/customer', ok(CUSTOMER));
   routes.set('/customer/points', ok(LEGACY_SUMMARY));
   routes.set('/customer/points/position', ok(SUMMARY));
+  routes.set('/earning/approvals', list([]));
   routes.set('/customer/points/ledger', list(LEDGER.data));
   for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
 }
@@ -145,6 +146,19 @@ beforeEach(() => {
 });
 
 describe('customer points position', () => {
+  it('keeps the claim interface usable when the balance cannot be loaded', async () => {
+    installRoutes({ '/customer/points/position': err(500, 'INTERNAL') });
+    renderWithProviders(<CustomerPointsPage />);
+
+    // The balance card reports its own failure…
+    expect(await screen.findByText(/points unavailable/i)).toBeTruthy();
+    // …but the claim interface stays: a member with a code in hand must still
+    // be able to review and confirm it. A balance failure must never hide it.
+    expect(screen.getByRole('button', { name: /scan claim qr/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/claim code/i)).toBeInTheDocument();
+    // And no figure is invented: zero balances would be a lie about the card.
+    expect(screen.queryByText('points accumulated on your card')).toBeNull();
+  });
   it('warns about outstanding reversal debt and what it leaves spendable', async () => {
     installRoutes({
       '/customer/points/position': ok({

@@ -12,11 +12,21 @@
 
 ## 2026-10-10 reconstruction checklist (current scope)
 
+> **Current owner-approved recovery policy (2026-10-11, local only).** Customer
+> portal approval reserves points against an exact server-calculated quote.
+> Deduction happens once at fully verified purchase completion, including
+> legitimately zero-cash purchases. Accommodation requires an applicable Admin
+> conversion rule; other services require a promotion. Tier discounts stack only
+> under an explicit eligible promotion. Finance reviews cancellations/refunds and
+> appends proportional compensations; no historical financial entry is deleted.
+> Target: claud-promote, claud/develop, HEAD fd05b35eb7feca613c0dbfd630b55b656580dcc8.
+> Earlier immediate staff-commit and retirement descriptions below are historical.
+
 The user-approved reconstruction supersedes the old spending and QR-link-only
 requirements below. Existing migrations stay immutable; all SQL changes are new
 forward-only files executed only against disposable loopback PostgreSQL. No
 commit, push, shared Supabase apply, legacy reset, or deployment is authorized.
-Target verified: claud-promote, claud/develop, HEAD 8ffdb35e8227c63a757f8cb084a53b42e7936a0c.
+Current HEAD verified above; the earlier 8ffdb35 reference is superseded.
 Existing uncommitted changes are authorized continuation input; preserve them.
 UI reference: orly/develop commit d05a453 (page skeletons and action spinners),
 and the existing @afhomes/ui Button/loading, Skeleton, and SweetAlert notify APIs.
@@ -73,21 +83,98 @@ pages were using it only half-way.
       flash, no premature success) and `responsive.spec.tsx` (scroll-region
       contract on the three wide operational tables).
 
-### Open, deliberately not done
+### Current recovery evidence and deployment gate
 
-- No browser UAT was run. There is no development/staging Supabase project, so
-  camera capture, Storage upload and cross-session Finance verification cannot be
-  exercised against a real Auth/Storage stack. Everything below is proven against
-  a disposable loopback PostgreSQL and jsdom only.
-- The claim queue filters by status through a `<select>`, not tabs. Functionally
-  identical; revisit only if the queue grows enough to need them.
-- `service_catalog.code` is server-generated but still stored. It is an internal
-  identifier, never a customer claim code, and nothing presents it to a customer.
+Local work continues from the existing dirty worktree. No commit, push,
+shared Supabase migration, credential change or deployment was performed.
+Existing tracked migrations are unchanged; all recovery SQL files are new.
 
-Persistent migration history is not available through the connected Supabase
-account (it exposes only an unrelated inactive project). Do not infer applied
-versions or modify any existing migration. Managed Auth/Storage/deployed exposure
-must be reported separately from local PostgreSQL proof.
+- Experiences is CMS-first; the three destination slugs and details remain
+  available independently of operational services. Published services are additive.
+- Balance errors no longer hide customer claim controls or fabricate a zero balance.
+- Service accommodation metadata, catalog price authority, purchase snapshots,
+  claim lifecycle, annual earning caps and reversal debt remain server-controlled.
+- GSD prepares its own purchase quote. The authenticated customer alone may
+  approve or reject it. Approval has a bounded expiry, exact pricing snapshot,
+  customer/Auth binding and auditable lifecycle. The old application-role
+  immediate-debit RPCs and staff commit/apply actions are denied.
+- Approved points are held without a ledger deduction. Membership locks serialize
+  competing holds; changed/expired/rejected/replaced quotes release their holds.
+  Completion checks verified net cash, current membership/customer/rule eligibility
+  and the approved snapshot, then creates one deduction. Zero-cash purchases work.
+- Finance review restores the cumulative attributable points fraction, never more
+  than the original deduction. Credits repay reversal debt first. Full cancellations
+  reverse related earning claims. New claims freeze their eligibility threshold;
+  refund-before-claim uses retained whole service quantity. Partial refunds of legacy
+  claims lacking this snapshot safely require separate review rather than guessing
+  the historical rule. Generic reversal cannot bypass Finance after acquiring locks.
+- Refunds advance an expired points period before compensation, preserving the new
+  credit on the next portal read. Refund history is append-only for service_role.
+- Purchase/claim history has older-page navigation with a stable secondary ordering.
+  Finance and GSD retain their existing distinct permission scopes.
+- Orly primitives are reused: skeletons, action loading states, dialogs and
+  SweetAlert confirmations. Confirmation windows block duplicate UI actions.
+
+Verification:
+- Offline: 3,394 tests across seven workspaces (API 2,027; Admin 693;
+  Web 243; contracts 217; UI 181; shared 27; config 6), all passing.
+- Typecheck: all seven tasks plus Supabase scripts passed.
+- Lint: zero errors, 19 existing React Fast Refresh warnings.
+- Build: both SPAs passed; existing bundle-size advisories remain.
+- Environment isolation guard passed. Tracked migration diff is empty.
+- PostgreSQL: 2,359/2,359 passing, including current Auth ownership,
+  deterministic reversal locking, anniversary refunds and complete cleanup.
+- Final failure-injection harness passed 13/13, including normal execution and
+  non-zero failure with complete cleanup.
+  RLS invariant SQL is executed by the PostgreSQL suite, with zero unsafe rows.
+
+Earlier 2222/2254
+counts and all-phase PASS claims are superseded; local tests do not prove managed
+PostgREST/Auth/Storage or a deployed Preview. The cause of live endpoint failures
+must be verified against the intended managed environment before release.
+
+Responsive read-only browser evidence used a clearly labelled disposable UI
+fixture, not real Auth: original destinations at 360/768/1440, no page overflow,
+claim review and cancelled confirmation, and no browser console errors during the
+public destination checks. Camera, uploads, authenticated cross-session settlement
+and deployed routes remain unverified. Automatic approval review rejected the
+final browser claim-confirmation click as a consequential financial action requiring
+user handoff. The agent did not execute it or bypass the rejection.
+
+New local migrations, in order:
+- 20261113000001_afhomes_service_staycation_eligibility.sql
+- 20261114000001_afhomes_restore_points_spending.sql
+- 20261115000001_afhomes_commit_keeps_tier_discount.sql
+- 20261115000002_afhomes_fix_customer_points_position.sql
+- 20261116000001_afhomes_promotion_stacking.sql
+- 20261116000002_afhomes_sale_tier_choice.sql
+- 20261117000001_afhomes_customer_redemption_approval.sql
+- 20261118000001_afhomes_reserved_point_settlement.sql
+- 20261119000001_afhomes_point_refund_compensation.sql
+
+These require a separately approved migration-history comparison and scoped staging
+apply. Do not apply the whole directory to shared Supabase. The existing untracked
+packages/db-testing/scripts/probe-tmp.mjs is not part of the approved delivery.
+
+Release gate: LOCAL CHECKS PASS. MANAGED RELEASE NOT READY until separately
+authorized staging migration comparison and authenticated Auth/Storage/browser UAT.
+
+### Recovery file inventory
+
+API: points.ts and points.spec.ts; _service-catalog.ts; new _point-approvals.ts
+and _point-refunds.ts. Contracts: points.ts, new point-approvals.ts and index.ts.
+
+Admin: App/navigation; BusinessPointsPage; PointsRulesPage; PurchasePaymentsPage;
+SalesRecordsPage and its tests; ServiceCatalogEditor and tests; loading-states tests;
+points-services/points.module.css; RedemptionWorkflowPage/retirement tests;
+responsive tests. New UseVipPointsPage, PointsPromotions tests, PointRefundReview
+and their focused tests.
+
+Customer: CustomerPointsPage/services; customer-claim/customer-portal tests;
+new PointRedemptionApprovals and tests. Marketing: Experiences, ExperienceDetail
+and marketing tests. SQL: the nine new recovery migrations listed above and
+updated db-integration.ts. This plan records the delivery evidence.
+
 ## Global Constraints
 
 - Work only in `C:\Users\SSD-CLAUD\Documents\AFhomes-ecofarm-v2-claud-promote`, branch `claud/develop`, base commit `a42ce6b`. No new branch, worktree, or repository.
@@ -99,7 +186,7 @@ must be reported separately from local PostgreSQL proof.
 - Business timezone is **Asia/Manila**, date-based, half-open `period_start <= v_today < period_end`.
 - Cap authority is `tier_points_config` only. Caps are 25,000 / 40,000 / 60,000.
 - Ledger invariant, asserted after every operation: `points_accounts.balance - points_accounts.reversal_debt = SUM(points_ledger.amount)`.
-- `counts_toward_cap` is always `true` for rows this release creates. No exemption path exists.
+- Earned awards count toward the annual cap; redemption and refund compensations do not create new earning capacity. Historical cap attribution remains unchanged.
 - Reversal debt: non-monetary, no automatic expiry, no waiver, earning never blocked, spending blocked while `> 0`.
 - `total_loyalty_value` is display-only legacy metadata. It affects nothing: not points, redemption, caps, authorization, or eligibility.
 - Prettier: `semi`, `singleQuote`, `printWidth: 100`, `trailingComma: all`. CSS Modules per component; tokens from `@afhomes/ui`; no hardcoded px.
@@ -1192,3 +1279,13 @@ All 91 cases from the spec §8. `DB` = a new check in `supabase/db-integration.t
 Tasks 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → {9, 10, 13} → 11 → 12 → 14 → 15 → 19 → 16 → 17 → 18.
 
 Task 18 runs last deliberately: it redefines `activate_card_sale`, so it should land only once the points tables it depends on exist and the cutover has run. Task 19 precedes 16 and 17 because both consume `LoadingTable`, and Task 17 also modifies `CustomerPointsPage.tsx` that Task 19 touches — 19 must finish first.
+
+
+## Independent final audit ? 2026-10-11
+
+See [the independent audit](../../AFHOMES-PRECOMMIT-AUDIT-2026-10-11.md), [all63 migration prerequisites](../../AFHOMES-MIGRATION-INVENTORY-2026-10-11.md) and [the isolated human UAT plan](../../AFHOMES-ISOLATED-UAT-2026-10-11.md). These fresh results supersede earlier readiness claims: local commit BLOCKED by refund/earning order policy and a reproducible reservation offline test failure; disposable PostgreSQL2,369/2,369 and failure harness13/13 pass. No external release action performed.
+
+
+## Pre-commit blocker resolution - 2026-10-11
+
+[Reservation focus-race correction and refund policy plan](../../AFHOMES-BLOCKER-RESOLUTION-2026-10-11.md): reservation16/16, full bounded offline3,394/3,394, PostgreSQL2,374/2,374, harness13/13; typecheck/lint/build/env/diff pass. All19 lint warnings match committed source. No financial policy implementation or migration change in this task. Local commit remains BLOCKED awaiting explicit owner refund-policy approval.

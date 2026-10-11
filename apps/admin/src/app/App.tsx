@@ -20,6 +20,7 @@ import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
 import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
 import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
 import { BusinessPointsPage } from '../features/business/BusinessPointsPage';
+import { UseVipPointsPage } from '../features/business/UseVipPointsPage';
 import { PointsRulesPage } from '../features/business/PointsRulesPage';
 import { SalesRecordsPage } from '../features/business/SalesRecordsPage';
 import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
@@ -169,6 +170,7 @@ export default function App() {
                   a child of Earn Points. */}
               <Route path="/admin/points/records" element={protectedPage(<SalesRecordsPage />)} />
               <Route path="/admin/points/rules" element={protectedPage(<PointsRulesPage />)} />
+              <Route path="/admin/points/use" element={protectedPage(<UseVipPointsPage />)} />
               <Route
                 path="/admin/points/discount"
                 element={protectedPage(<Navigate replace to="/admin/redemption" />)}

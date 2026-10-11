@@ -11,7 +11,7 @@ import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const SELECT =
-  'id,code,name,description,base_price,is_active,published,availability,photos,details';
+  'id,code,name,description,base_price,is_active,is_staycation_eligible,published,availability,photos,details';
 const BUCKET = 'afhomes-service-images';
 
 async function present(db: Db, row: Record<string, unknown>) {
@@ -35,6 +35,7 @@ async function present(db: Db, row: Record<string, unknown>) {
     description: row.description ?? null,
     basePrice: String(row.base_price),
     isActive: row.is_active === true,
+    isStaycationEligible: row.is_staycation_eligible === true,
     published: row.published === true,
     availability: row.availability ?? 'available',
     photos,

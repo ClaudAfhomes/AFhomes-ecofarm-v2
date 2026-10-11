@@ -69,6 +69,14 @@ export function BusinessPointsPage() {
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState('');
   const [quantity, setQuantity] = useState('1');
+  /**
+   * The sale-time discount choice. Checked means today's behavior: the VIP tier
+   * rate applies and is snapshotted. Unchecked records a points-path sale with
+   * no tier figures, so points may later discount it without a stacking
+   * promotion. Immutable once recorded: unchecking after the fact changes
+   * nothing, and the server refuses a stacked spend either way.
+   */
+  const [applyTier, setApplyTier] = useState(true);
   const [issued, setIssued] = useState<IssuedClaim | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -118,6 +126,9 @@ export function BusinessPointsPage() {
       // The idempotency key for the whole sale. Stable for this screen, so a
       // retried request is the SAME sale rather than a second purchase.
       reference,
+      // The member's discount path for this sale. Sent explicitly so the choice
+      // is visible; omitted would silently default to the tier rate.
+      applyTierDiscount: applyTier,
       lines: [
         {
           serviceId,
@@ -366,6 +377,19 @@ export function BusinessPointsPage() {
                 value={quantity}
                 onChange={(event) => setQuantity(event.target.value)}
               />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={applyTier}
+                  onChange={(event) => setApplyTier(event.target.checked)}
+                />
+                Apply the VIP tier discount
+              </label>
+              <p className={styles.hint}>
+                {applyTier
+                  ? 'The tier rate is snapshotted onto the sale. Points can only discount it later through an explicit stacking promotion.'
+                  : 'No tier discount is recorded, so the member may later use points on this sale without a stacking promotion.'}
+              </p>
 
               {/* `aria-busy` on the region, and the Button's own `loading` supplies
                 the spinner, the `aria-busy` and the `role="status"` label. The

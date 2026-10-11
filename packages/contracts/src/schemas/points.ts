@@ -209,6 +209,7 @@ export const serviceCatalogItemSchema = z.object({
   description: z.string().nullable(),
   basePrice: exactDecimalStringSchema,
   isActive: z.boolean(),
+  isStaycationEligible: z.boolean().default(false),
   published: z.boolean().default(false),
   availability: z.enum(['available', 'unavailable', 'coming_soon']).default('available'),
   photos: z
@@ -256,6 +257,7 @@ export const serviceCatalogItemInputSchema = z
     description: z.string().trim().max(5000).nullable().default(null),
     basePrice: exactDecimalStringSchema,
     isActive: z.boolean().default(true),
+    isStaycationEligible: z.boolean().default(false),
     published: z.boolean().default(false),
     availability: z.enum(['available', 'unavailable', 'coming_soon']).default('available'),
   })
@@ -318,6 +320,7 @@ export const pointEarningRuleSchema = z.object({
 export const pointRedemptionRuleInputSchema = z
   .object({
     serviceId: z.string().uuid(),
+    ruleKind:z.enum(['promotion','accommodation']).default('promotion'),
     // Shape AND positivity. The shape regex alone admits "0" and "0.00", which
     // the table CHECK (peso_value_per_point > 0) would reject anyway - but as an
     // opaque constraint violation rather than a field the admin can fix.
@@ -335,6 +338,13 @@ export const pointRedemptionRuleInputSchema = z
     effectiveEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     isActive: z.boolean().default(true),
     promotionReference: z.string().trim().min(3).max(200),
+    /**
+     * Explicit stacking authorization (approved Option C). False by default: a
+     * spending promotion authorizes spending alone, never stacking. True
+     * permits a points discount on a purchase that already carries a VIP tier
+     * discount, for this service, tier and window only.
+     */
+    allowDiscountStacking: z.boolean().default(false),
   })
   .strict()
   .refine((v) => v.effectiveStart < v.effectiveEnd, {
@@ -371,8 +381,11 @@ export const pointRedemptionRulePatchSchema = z
       .optional(),
     isActive: z.boolean().optional(),
     promotionReference: z.string().trim().min(3).max(200).optional(),
+    allowDiscountStacking: z.boolean().optional(),
   })
   .strict();
+
+export type PointRedemptionRulePatch = z.infer<typeof pointRedemptionRulePatchSchema>;
 
 export const pointEarningRuleInputSchema = z
   .object({
@@ -408,6 +421,7 @@ export const pointEarningRuleInputSchema = z
 export const pointRedemptionRuleSchema = z.object({
   id: z.string().uuid(),
   serviceId: z.string().uuid(),
+  ruleKind:z.enum(['promotion','accommodation']).default('promotion'),
   pesoValuePerPoint: z.string().regex(/^\d+(\.\d{1,4})?$/),
   eligibleTiers: z.array(tierSchema).min(1),
   minPoints: pointsAmountSchema,
@@ -417,6 +431,7 @@ export const pointRedemptionRuleSchema = z.object({
   effectiveEnd: z.string(),
   isActive: z.boolean(),
   promotionReference: z.string().nullable(),
+  allowDiscountStacking: z.boolean(),
 });
 
 /**
@@ -615,6 +630,13 @@ export const createPurchaseInputSchema = z
      * "no reference" the unprotected default.
      */
     reference: z.string().trim().min(1).max(120),
+    /**
+     * The sale-time discount choice. True (the default) applies the VIP tier
+     * rate and snapshots it; false records a points-path sale with no tier
+     * figures at all, so points may later discount it without a stacking
+     * promotion. Immutable once recorded: a retry returns the original choice.
+     */
+    applyTierDiscount: z.boolean().default(true),
     lines: z
       .array(
         z.object({

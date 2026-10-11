@@ -223,10 +223,32 @@ describe('homepage critical sections', () => {
     expect(scope.getByRole('heading', { name: PUBLISHED_SERVICE.name })).toBeInTheDocument();
     expect(requestList).toHaveBeenCalledWith('/earning/public/services', expect.anything());
   });
-  it('shows an honest empty state when no service is published', async () => {
+  it('keeps the three CMS experiences when the services API fails', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences' });
+    const { main } = await chrome();
+    const scope = within(main);
+    // Original destination content is synchronous and must survive an API outage.
+    expect(await scope.findByText('AFhomes Smart Wellness Hotel')).toBeInTheDocument();
+    expect(scope.getByText('AFhomes ALM Japanese Restaurant')).toBeInTheDocument();
+    expect(scope.getByText('AFhomes Hotspring & Ecofarm Resort')).toBeInTheDocument();
+  });
+  it('renders a CMS detail slug when the services API fails', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences/alm-japanese-restaurant' });
+    const { main } = await chrome();
+    expect(
+      await within(main).findAllByText('The art of Japanese dining.', { exact: false }),
+    ).not.toHaveLength(0);
+  });
+  it('keeps CMS experiences when no service is published', async () => {
     vi.mocked(requestList).mockResolvedValue([]);
     renderWithProviders(<App />, { route: '/experiences' });
-    expect(await screen.findByText('Experiences coming soon')).toBeInTheDocument();
+    const { main } = await chrome();
+    const scope = within(main);
+    // An empty catalog hides the additive section, never the destinations.
+    expect(await scope.findByText('AFhomes Smart Wellness Hotel')).toBeInTheDocument();
+    expect(screen.queryByText('Experiences coming soon')).not.toBeInTheDocument();
   });
   it('offers retry when published services cannot be loaded', async () => {
     vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));

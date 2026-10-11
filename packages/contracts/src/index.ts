@@ -174,6 +174,7 @@ export type {
   ReversePurchaseInput,
   PointEarningRuleInput,
   PointRedemptionRuleInput,
+  PointRedemptionRulePatch,
   PurchaseReceiptInput,
   PurchaseReceiptDecision,
   ServiceCatalogItemInput,
@@ -650,3 +651,5 @@ export {
 export * from './schemas/purchase-flow.js';
 
 export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.js';
+
+export * from './schemas/point-approvals.js';

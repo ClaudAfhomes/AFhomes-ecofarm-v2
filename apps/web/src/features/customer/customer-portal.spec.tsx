@@ -171,6 +171,7 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
   routes.set('/customer/points/position', ok(POSITION));
+  routes.set('/earning/approvals', list([]));
   routes.set('/customer/points/ledger', list(LEDGER.data));
   for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
 }
@@ -544,10 +545,12 @@ describe('points position vs legacy summary', () => {
     });
     render('/customer/points');
     const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
-    // Capacity 0 must not read as "no points": the balance is untouched.
+    // Capacity 0 must not read as "no points": the balance is untouched. Await
+    // the loaded balance card: the shell renders while loading, so the heading
+    // alone does not prove the figures arrived.
+    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
     expect(within(card).getByText('Points on your card')).toBeInTheDocument();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
-    expect(within(card).getByText('points accumulated on your card')).toBeInTheDocument();
   });
 });
 
@@ -555,9 +558,8 @@ describe('points screen', () => {
   it('separates spendable points from what may still be earned', async () => {
     render('/customer/points');
     const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
-    // The headline is SPENDABLE, not balance: it is what a member can actually
-    // use today.
-    expect(within(card).getByText('points accumulated on your card')).toBeInTheDocument();
+    // Await the loaded figures: the card shell renders while loading.
+    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
     // The three figures are labelled separately so none can be read as another.
     expect(within(card).getByText('Points on your card')).toBeInTheDocument();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();

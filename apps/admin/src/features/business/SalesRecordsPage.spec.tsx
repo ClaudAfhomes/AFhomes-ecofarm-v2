@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 /**
  * The staff sales records view and the claim hand-off.
  *
@@ -18,11 +19,11 @@ vi.mock('../../lib/session', async (original) => ({
 }));
 import { SalesRecordsPage } from './SalesRecordsPage';
 import { ClaimQr } from './ClaimQr';
-import { getPurchaseSummary, listClaims, listPurchases } from './points-services';
+import { getPurchaseSummary, listClaimsPage, listPurchasesPage } from './points-services';
 
 vi.mock('./points-services', async () => ({
-  listPurchases: vi.fn(),
-  listClaims: vi.fn(),
+  listPurchasesPage: vi.fn(),
+  listClaimsPage: vi.fn(),
   getPurchaseSummary: vi.fn(),
   listReceipts: vi.fn(),
   recordReceipt: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock('./points-services', async () => ({
   resolveMemberIdentifier: vi.fn(),
 }));
 
-const mockedList = vi.mocked(listPurchases);
+const mockedList = vi.mocked(listPurchasesPage);
 const mockedSummary = vi.mocked(getPurchaseSummary);
 
 const PURCHASE_ID = 'dddddddd-0000-4000-8000-000000000001';
@@ -52,6 +53,7 @@ const DRAFT = {
   membershipId: 'bbbbbbbb-0000-4000-8000-000000000001',
   status: 'draft' as const,
   grossAmount: '5000.00',
+  tierDiscountAmount:'0.00',tierSnapshot:null,createdByName:null,customerName:null,claimStatus:null,claimable:false,
   recordedTotal: '0.00',
   verifiedTotal: '0.00',
   pointsDiscountAmount: '0.00',
@@ -79,11 +81,30 @@ const SUMMARY = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedList.mockResolvedValue([DRAFT] as never);
-  vi.mocked(listClaims).mockResolvedValue([] as never);
+  vi.mocked(listClaimsPage).mockResolvedValue([] as never);
   mockedSummary.mockResolvedValue(SUMMARY as never);
 });
 
 describe('history', () => {
+  it('opens older purchase pages without truncating history at 200 rows', async () => {
+    mockedList
+      .mockResolvedValueOnce(
+        Array.from({ length: 200 }, (_, index) => ({
+          ...DRAFT,
+          id: 'purchase-' + index,
+          purchaseNumber: 'AF-TXN-' + index,
+        })),
+      )
+      .mockResolvedValueOnce([{ ...DRAFT, purchaseNumber: 'AF-TXN-OLDER' }]);
+    const user = userEvent.setup();
+    renderWithProviders(<SalesRecordsPage />);
+    await screen.findByText('AF-TXN-199');
+    await user.click(screen.getByRole('button', { name: 'Older purchases' }));
+    expect(await screen.findByText('AF-TXN-OLDER')).toBeInTheDocument();
+    expect(mockedList).toHaveBeenCalledWith(1);
+    expect(screen.getByText('Purchase page 2')).toBeInTheDocument();
+  });
+
   const CLAIM = {
     id: 'eeeeeeee-0000-4000-8000-000000000002',
     claimNumber: 'AF-EARN-000002',
@@ -100,7 +121,7 @@ describe('history', () => {
   };
 
   it('shows a completed purchase alongside a claim', async () => {
-    vi.mocked(listClaims).mockResolvedValue([CLAIM] as never);
+    vi.mocked(listClaimsPage).mockResolvedValue([CLAIM] as never);
     mockedList.mockResolvedValue([{ ...DRAFT, status: 'completed' }] as never);
     renderWithProviders(<SalesRecordsPage />);
 
@@ -111,7 +132,7 @@ describe('history', () => {
   });
 
   it('shows the capped portion of an award rather than hiding it', async () => {
-    vi.mocked(listClaims).mockResolvedValue([
+    vi.mocked(listClaimsPage).mockResolvedValue([
       { ...CLAIM, pointsAwarded: 4000, pointsCapped: 20000 },
     ] as never);
     renderWithProviders(<SalesRecordsPage />);
@@ -122,7 +143,7 @@ describe('history', () => {
   });
 
   it('offers NO way to edit history or a ledger row', async () => {
-    vi.mocked(listClaims).mockResolvedValue([CLAIM] as never);
+    vi.mocked(listClaimsPage).mockResolvedValue([CLAIM] as never);
     renderWithProviders(<SalesRecordsPage />);
 
     await screen.findByText('AF-EARN-000002');

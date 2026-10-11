@@ -1,3 +1,4 @@
+import { PointRedemptionApprovals } from './PointRedemptionApprovals';
 import { useRef, useState } from 'react';
 
 import {
@@ -69,6 +70,12 @@ export function CustomerPointsPage() {
   // A member's own balance, capacity and debt are three DIFFERENT numbers and are
   // shown as three: spendable points are not remaining annual earning capacity,
   // and outstanding reversal debt is neither of them.
+  //
+  // The balance card reports its own loading and failure states INLINE. An early
+  // return here would hide the scanner and the typed-code field exactly when a
+  // member holding a claim code needs them most; the claim flow never reads the
+  // balance card, so it stays usable while the balance is unknown. No figure is
+  // ever invented: while the balance is unknown, none is shown.
 
   const submit = async () => {
     const token = credential.trim();
@@ -101,75 +108,72 @@ export function CustomerPointsPage() {
     }
   };
 
-  if (summary.isLoading)
-    return (
-      <div role="status" aria-label="Loading your points" aria-busy="true">
-        <Skeleton />
-        <Skeleton />
-        <Skeleton />
-      </div>
-    );
-  if (summary.isError) {
-    return (
-      <ErrorState
-        title="Points unavailable"
-        message={
-          isForbidden(summary.error)
-            ? 'Your account is not active, so points are not available. Contact AF Homes Ecofarm to restore access.'
-            : 'We could not load your points. Please try again in a moment.'
-        }
-        onRetry={summary.refetch}
-      />
-    );
-  }
-
   const entries = ledger.data ?? [];
   const hasRedemptions = entries.some((entry) => entry.entryType === 'redemption');
+  const position = !summary.isLoading && !summary.isError ? summary.data : undefined;
 
   return (
     <>
       <Card title="Your points">
-        <p className={styles.balance}>{summary.data!.balance.toLocaleString('en-PH')}</p>
-        <p className={styles.balanceCaption}>points accumulated on your card</p>
-        <FieldList>
-          {/* THREE different numbers. Spending capacity is a ceiling on future
-              earnings, not money: a member who has reached their annual limit sees
-              0 here while their spendable balance stays healthy. */}
-          <Field
-            label="Points on your card"
-            value={summary.data!.balance.toLocaleString('en-PH')}
+        {summary.isLoading ? (
+          <div role="status" aria-label="Loading your points" aria-busy="true">
+            <Skeleton />
+            <Skeleton />
+            <Skeleton />
+          </div>
+        ) : summary.isError || !position ? (
+          <ErrorState
+            title="Points unavailable"
+            message={
+              isForbidden(summary.error)
+                ? 'Your account is not active, so points are not available. Contact AF Homes Ecofarm to restore access.'
+                : 'We could not load your points. You can still review and claim a purchase code below — your balance will appear here once it loads.'
+            }
+            onRetry={summary.refetch}
           />
-          <Field
-            label="Can still earn this year"
-            value={summary.data!.remainingEarningCapacity.toLocaleString('en-PH')}
-          />
-          <Field label="Annual limit" value={summary.data!.annualCap.toLocaleString('en-PH')} />
-          <Field
-            label="Tier"
-            value={summary.data!.tier.charAt(0) + summary.data!.tier.slice(1).toLowerCase()}
-          />
-          <Field
-            label="Year"
-            value={`${formatDate(summary.data!.periodStart)} to ${formatDate(summary.data!.periodEnd)}`}
-          />
-        </FieldList>
+        ) : (
+          <>
+            <p className={styles.balance}>{position.balance.toLocaleString('en-PH')}</p>
+            <p className={styles.balanceCaption}>points accumulated on your card</p>
+            <FieldList>
+              {/* THREE different numbers. Spending capacity is a ceiling on future
+                  earnings, not money: a member who has reached their annual limit sees
+                  0 here while their spendable balance stays healthy. */}
+              <Field
+                label="Points on your card"
+                value={position.balance.toLocaleString('en-PH')}
+              />
+              <Field
+                label="Can still earn this year"
+                value={position.remainingEarningCapacity.toLocaleString('en-PH')}
+              />
+              <Field label="Annual limit" value={position.annualCap.toLocaleString('en-PH')} />
+              <Field
+                label="Tier"
+                value={position.tier.charAt(0) + position.tier.slice(1).toLowerCase()}
+              />
+              <Field
+                label="Year"
+                value={`${formatDate(position.periodStart)} to ${formatDate(position.periodEnd)}`}
+              />
+            </FieldList>
 
-        {summary.data!.reversalDebt > 0 && (
-          <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-            {summary.data!.reversalDebt.toLocaleString('en-PH')} points are held against a reversed
-            purchase, so{' '}
-            {Math.max(summary.data!.balance - summary.data!.reversalDebt, 0).toLocaleString(
-              'en-PH',
-            )}{' '}
-            points remain after that correction. Future earnings repay any outstanding reversal debt
-            first.
-          </p>
+            {position.reversalDebt > 0 && (
+              <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
+                {position.reversalDebt.toLocaleString('en-PH')} points are held against a reversed
+                purchase, so{' '}
+                {Math.max(position.balance - position.reversalDebt, 0).toLocaleString('en-PH')}{' '}
+                points remain after that correction. Future earnings repay any outstanding reversal
+                debt first.
+              </p>
+            )}
+
+            <p className={styles.notice}>
+              Points accumulate from eligible paid purchases. Claim each purchase code in your own
+              account.
+            </p>
+          </>
         )}
-
-        <p className={styles.notice}>
-          Points accumulate from eligible paid purchases. Claim each purchase code in your own
-          account.
-        </p>
       </Card>
 
       <Card title="Claim points from a purchase">
@@ -323,6 +327,7 @@ export function CustomerPointsPage() {
         )}
       </Card>
 
+      <PointRedemptionApprovals/>
       <Card title="Points activity">
         {/* A Skeleton rather than a sentence: it reserves roughly the height the
             table will occupy, so the card does not jump when the rows arrive.
