@@ -36,6 +36,100 @@
   gap: var(--space-4);
 }
 
+/* Categories directory: desktop keeps the wide table; phones collapse rows
+   to labelled cards instead of scrolling sideways. */
+.categoriesWrap {
+  margin-top: var(--space-4);
+}
+
+@media (min-width: 640px) {
+  .categoriesWrap > table {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Kill the global 640px scroll floor: this table collapses to cards
+     (see BusinessCustomersPage for why the doubled selector is needed). */
+  div.categoriesWrap.categoriesWrap > table {
+    min-width: 0;
+  }
+
+  .categoriesWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .categoriesWrap thead {
+    display: none;
+  }
+
+  .categoriesWrap tbody {
+    display: block;
+  }
+
+  .categoriesWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .categoriesWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .categoriesWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+  }
+
+  .categoriesWrap tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .categoriesWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .categoriesWrap tbody > tr > td:not([data-label])::before,
+  .categoriesWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .categoriesWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  /* The category name leads the card: label dropped, value reads as title. */
+  .categoriesWrap tbody > tr > td[data-label='Name'] {
+    justify-content: flex-start;
+    font-weight: 700;
+    color: var(--color-brand-primary);
+  }
+
+  .categoriesWrap tbody > tr > td[data-label='Name']::before {
+    display: none;
+  }
+}
+
 /* Plan card: raised surface, artwork banner, and a title row that keeps the
    plan name and its status chip on one baseline. */
 .card {

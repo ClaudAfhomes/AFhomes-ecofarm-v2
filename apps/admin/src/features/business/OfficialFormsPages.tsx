@@ -598,7 +598,7 @@ export function CustomerApplicationsPage() {
       </section>
     );
   return (
-    <section>
+    <section className={styles.listSection}>
       <PageHeader
         title="Customer Applications"
         description="Applications still needing application work."
@@ -609,6 +609,7 @@ export function CustomerApplicationsPage() {
         }
       />
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search applications"
@@ -732,11 +733,16 @@ export function CustomerApplicationsPage() {
                   }}
                   className={styles.clickable}
                 >
-                  <td>{app.applicationNumber}</td>
-                  <td>{app.applicantName ?? '—'}</td>
-                  <td>{app.tier}</td>
-                  <td>{app.sellerName ?? '—'}</td>
-                  <td>
+                  <td data-label="Application">
+                    <span className={styles.appRef}>
+                      <span className={styles.appRefDot} aria-hidden="true" />
+                      {app.applicationNumber}
+                    </span>
+                  </td>
+                  <td data-label="Applicant">{app.applicantName ?? '—'}</td>
+                  <td data-label="Tier">{app.tier}</td>
+                  <td data-label="Seller">{app.sellerName ?? '—'}</td>
+                  <td data-label="Status">
                     <StatusChip
                       label={app.status}
                       tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
@@ -2201,6 +2207,7 @@ export function ReservationAgreementsPage() {
         </p>
       ) : null}
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search reservation agreements"
@@ -2306,22 +2313,27 @@ export function ReservationAgreementsPage() {
                     }}
                     className={styles.clickable}
                   >
-                    <td>
-                      <span className={styles.reservationNumber}>{item.reservationNumber}</span>
+                    <td data-label="Reservation">
+                      <span className={styles.resRef}>
+                        <span className={styles.resRefDot} aria-hidden="true" />
+                        {item.reservationNumber}
+                      </span>
                     </td>
-                    <td>{item.applicantName ?? '—'}</td>
-                    <td>
+                    <td data-label="Applicant">{item.applicantName ?? '—'}</td>
+                    <td data-label="Tier">
                       <TierBadge tier={item.tier} />
                     </td>
-                    <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                    <td className={styles.numeric}>{formatMoney(item.totalPrice)}</td>
-                    <td>
+                    <td data-label="Payment scheme">{paymentSchemeLabel(item.paymentScheme)}</td>
+                    <td data-label="Amount" className={styles.numeric}>
+                      {formatMoney(item.totalPrice)}
+                    </td>
+                    <td data-label="Signatures">
                       <StatusChip
                         label={signaturesComplete ? 'Complete' : 'Pending signature'}
                         tone={signaturesComplete ? 'success' : 'warning'}
                       />
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <ReservationStatusBadge status={item.status} />
                     </td>
                   </tr>
@@ -3349,14 +3361,16 @@ function ApplicationOriginAgreementPanel({
             <tbody>
               {payments.data.map((payment) => (
                 <tr key={payment.id}>
-                  <td>{payment.paymentNumber ?? payment.id}</td>
-                  <td className={styles.ledgerAmount}>{formatMoney(payment.amount)}</td>
-                  <td>{payment.method}</td>
-                  <td>{formatDateTime(payment.recordedAt)}</td>
-                  <td>
+                  <td data-label="AF-PAY">{payment.paymentNumber ?? payment.id}</td>
+                  <td data-label="Amount" className={styles.ledgerAmount}>
+                    {formatMoney(payment.amount)}
+                  </td>
+                  <td data-label="Method">{payment.method}</td>
+                  <td data-label="Recorded">{formatDateTime(payment.recordedAt)}</td>
+                  <td data-label="Status">
                     <StatusChip label={payment.status} />
                   </td>
-                  <td>
+                  <td data-label="Actions">
                     <Button
                       size="sm"
                       variant="ghost"

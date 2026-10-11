@@ -90,6 +90,64 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Loading shell: mirrors the loaded page rhythm (scope strip, metric
+   panel, trend card, breakdown grid) so first paint already holds the final
+   spacing and nothing jumps when the data arrives. */
+.loadingShell {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.skeletonRows {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.skeletonRow {
+  height: 44px;
+  border-radius: var(--radius-sm);
+}
+
+.skeletonLine,
+.skeletonLineShort {
+  display: block;
+  height: 14px;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sunken) 25%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.skeletonLineShort {
+  height: 11px;
+  opacity: 0.8;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonLine,
+  .skeletonLineShort {
+    animation: none;
+  }
+}
+
 /* Scope strip */
 .scopeBar {
   display: flex;

@@ -319,7 +319,7 @@ export function AfHomesDashboardPage() {
         ) : null}
       </div>
       {query.isPending ? (
-        <div role="status" aria-label="Loading dashboard">
+        <div role="status" aria-label="Loading dashboard" className={styles.loadingShell}>
           <div className={styles.scopeBar} aria-hidden="true">
             <Skeleton style={{ height: 20, width: 180 }} />
             <Skeleton style={{ height: 20, width: 220 }} />
@@ -328,6 +328,17 @@ export function AfHomesDashboardPage() {
             <MetricCardSkeletons />
           </Panel>
           <TrendChartSkeleton />
+          <div className={styles.breakdownGrid} aria-hidden="true">
+            {['Payment Schemes', 'Card Plans'].map((title) => (
+              <Panel key={title} icon={title === 'Payment Schemes' ? 'wallet' : 'file-text'} title={title}>
+                <div className={styles.skeletonRows}>
+                  {[0, 1, 2].map((index) => (
+                    <Skeleton key={index} className={styles.skeletonRow} />
+                  ))}
+                </div>
+              </Panel>
+            ))}
+          </div>
         </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />

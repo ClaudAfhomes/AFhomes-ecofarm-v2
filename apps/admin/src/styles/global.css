@@ -95,6 +95,10 @@ small[role='alert'] {
   outline-offset: 2px;
 }
 @media (max-width: 639px) {
+  /* Tables that collapse to labelled cards on phones (customers directory,
+     application/reservation queues, product categories, reservation ledger)
+     opt out of this floor inside their own modules with a winning
+     `div.<scope>.<scope> > table { min-width: 0 }` override. */
   .table-scroll > table:not([class]) {
     min-width: 640px;
   }

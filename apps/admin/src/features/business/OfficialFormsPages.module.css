@@ -1,10 +1,22 @@
 /* Official paper-form list pages: page-scoped table and filter contracts so the
    columns scroll horizontally with intact cells instead of squeezing. Applied
    alongside the global `table-scroll` class; other tables are unaffected. */
+/* List-page shell: shrinkable like the customers directory shell, so the
+   section's min-content can never prop the page open sideways on phones. */
 .listSection {
   display: grid;
   gap: var(--space-3);
   align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: list pages never scroll sideways — `clip` (not `hidden`) keeps
+   fixed descendants (overflow menus) working. */
+@media (max-width: 639px) {
+  .listSection {
+    overflow-x: clip;
+  }
 }
 
 .queueSummary {
@@ -21,8 +33,12 @@
   margin-top: var(--space-2);
 }
 
-.tableWrap > table {
-  min-width: 920px;
+/* The wide-table floor is desktop-only: on phones the rows collapse to
+   labelled cards instead of scrolling sideways. */
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 920px;
+  }
 }
 
 /* Elevated card around the reservation queue table: the queue is the page's
@@ -79,9 +95,32 @@
   }
 }
 
-.reservationNumber {
+/* Record reference: the row's anchor reads as a highlighted pill — accent
+   dot plus brand-ink mono reference — while every other column stays neutral
+   body text. Shared by the application and reservation queues. */
+.appRef,
+.resRef {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 32%, white);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
   font-weight: 700;
   white-space: nowrap;
+}
+
+.appRefDot,
+.resRefDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-accent);
 }
 
 .numeric {
@@ -106,12 +145,111 @@
   outline-offset: -2px;
 }
 
+/* Small viewports: application and reservation rows collapse to stacked
+   cards — the same grammar as the shared Table primitives (thead hidden,
+   one labelled row per field, card chrome per record). The lead reference
+   cell (Application / Reservation) drops its label and reads as the card
+   title. Desktop table rendering is untouched. */
+@media (max-width: 639px) {
+  /* Kill the global 640px scroll floor on card-collapsing tables (see
+     BusinessCustomersPage): without this the floor props every row open
+     sideways and the cards can never fit the viewport. */
+  div.tableWrap.tableWrap > table,
+  div.tableWrap.tableWrap > table.queueTable {
+    min-width: 0;
+  }
+
+  .tableWrap > table,
+  .tableWrap > table.queueTable {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+    background-color: var(--color-bg-surface-raised);
+    border-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .tableWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Application'],
+  .tableWrap tbody > tr > td[data-label='Reservation'] {
+    justify-content: flex-start;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Application']::before,
+  .tableWrap tbody > tr > td[data-label='Reservation']::before {
+    display: none;
+  }
+}
+
 /* Filter labels match the shared Customers-page pattern (grid label + control). */
 .filterLabel {
   display: grid;
   gap: 4px;
   font-size: 14px;
   font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filterLabel select,
+.filterLabel input {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Editor top-level section: breathing room between the header, the guidance
@@ -585,8 +723,114 @@
   .buttonRow {
     align-items: stretch;
   }
+}
+
+/* Small viewports: ledger payments collapse to stacked cards — the same
+   grammar as the list tables (thead hidden, one labelled row per field).
+   Desktop keeps the wide ledger table. */
+@media (min-width: 640px) {
+  .ledgerWrap > table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Same global-floor kill as the list tables above. */
+  div.ledgerWrap.ledgerWrap > table {
+    min-width: 0;
+  }
+
+  .ledgerWrap {
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+    background: none;
+  }
 
   .ledgerWrap > table {
-    min-width: 640px;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .ledgerWrap caption {
+    display: block;
+    padding: var(--space-2) var(--space-1);
+  }
+
+  .ledgerWrap thead {
+    display: none;
+  }
+
+  .ledgerWrap tbody {
+    display: block;
+  }
+
+  .ledgerWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .ledgerWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .ledgerWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+    border-bottom: 0;
+  }
+
+  .ledgerWrap tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .ledgerWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .ledgerWrap tbody > tr > td:not([data-label])::before,
+  .ledgerWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .ledgerWrap tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+
+  /* The payment reference leads the card: label dropped, value as title. */
+  .ledgerWrap tbody > tr > td[data-label='AF-PAY'] {
+    justify-content: flex-start;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--color-brand-primary);
+  }
+
+  .ledgerWrap tbody > tr > td[data-label='AF-PAY']::before {
+    display: none;
+  }
+
+  /* Money keeps its tabular figures; wrap the action buttons instead. */
+  .ledgerWrap tbody > tr > td[data-label='Actions'] {
+    flex-wrap: wrap;
   }
 }

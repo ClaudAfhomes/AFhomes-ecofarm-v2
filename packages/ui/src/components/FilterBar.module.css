@@ -32,6 +32,45 @@
   margin-left: auto;
 }
 
+/* Mobile disclosure toggle for collapsible filters. Desktop never shows
+   it — the filters are always visible there regardless of toggle state. */
+.filtersToggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-md);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.filtersToggle:hover {
+  border-color: var(--color-border-strong);
+}
+
+.filtersToggle:focus-visible {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.filtersChevron {
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.filtersToggle[aria-expanded='true'] .filtersChevron {
+  transform: rotate(180deg);
+}
+
 @media (max-width: 639px) {
   .bar {
     align-items: stretch;
@@ -40,6 +79,21 @@
   .search {
     flex-basis: 100%;
     max-width: none;
+  }
+
+  .filtersToggle {
+    display: inline-flex;
+  }
+
+  /* Collapsible filters stay shut on phones until the toggle opens them.
+     Desktop has no such rule, so the filters are always visible there.
+     Labels come from the page (`filtersToggleLabel`), never invented here. */
+  .filters[data-collapsible]:not([data-open='true']) {
+    display: none;
+  }
+
+  .filters[data-collapsible][data-open='true'] {
+    flex-basis: 100%;
   }
 
   .actions {

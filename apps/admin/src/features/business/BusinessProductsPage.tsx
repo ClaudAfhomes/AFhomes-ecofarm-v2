@@ -749,7 +749,7 @@ export function BusinessProductsPage() {
               role="region"
               aria-label="Scrollable records"
               tabIndex={0}
-              className="table-scroll"
+              className={`table-scroll ${styles.categoriesWrap}`}
             >
               <table>
                 <thead>
@@ -766,18 +766,18 @@ export function BusinessProductsPage() {
                 <tbody>
                   {categories.data?.map((category) => (
                     <tr key={category.id}>
-                      <td>{category.name}</td>
-                      <td>{category.slug}</td>
-                      <td>{category.description ?? '—'}</td>
-                      <td>
+                      <td data-label="Name">{category.name}</td>
+                      <td data-label="Slug">{category.slug}</td>
+                      <td data-label="Description">{category.description ?? '—'}</td>
+                      <td data-label="Status">
                         <StatusChip
                           label={category.isActive ? 'Active' : 'Inactive'}
                           tone={category.isActive ? 'success' : 'neutral'}
                         />
                       </td>
-                      <td>{category.sortOrder}</td>
-                      <td>{category.planCount ?? '—'}</td>
-                      <td>
+                      <td data-label="Sort Order">{category.sortOrder}</td>
+                      <td data-label="Plans">{category.planCount ?? '—'}</td>
+                      <td data-label="Actions">
                         <Button
                           size="sm"
                           variant="ghost"

@@ -194,13 +194,13 @@ export function BusinessCustomersPage() {
     );
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Customers"
         description="Customer directory and membership records."
         actions={
           canSeeImportExport ? (
-            <Button variant="secondary" onClick={() => navigate('/admin/customers/import-export')}>
+            <Button variant="primary" onClick={() => navigate('/admin/customers/import-export')}>
               <Icon name="download" size={16} aria-hidden="true" />
               Import/Export Data
             </Button>
@@ -209,6 +209,7 @@ export function BusinessCustomersPage() {
       />
 
       <FilterBar
+        filtersToggleLabel="Expand Filters"
         search={
           <SearchField
             label="Search customers"
@@ -332,17 +333,25 @@ export function BusinessCustomersPage() {
                   }}
                   className={styles.clickable}
                 >
-                  <td>{customer.fullName}</td>
-                  <td>
+                  <td data-label="Name">
+                    <span className={styles.identityCell}>
+                      <span className={styles.identityAvatar} aria-hidden="true">
+                        {(customer.fullName.trim().charAt(0) || '•').toUpperCase()}
+                      </span>
+                      <span className={styles.identityName}>{customer.fullName}</span>
+                    </span>
+                  </td>
+                  <td data-label="Payment Status">
                     <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
                   </td>
-                  <td>
+                  <td data-label="VIP Tier">
                     <TierBadge tier={customer.tier} />
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <StatusChip label={customer.status} />
                   </td>
                   <td
+                    data-label="Actions"
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => {
                       // Only swallow the keys the row itself acts on. Escape
