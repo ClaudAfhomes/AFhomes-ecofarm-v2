@@ -29,8 +29,6 @@ const AUTH_DUAL = '66666666-6666-4666-8666-666666666666';
 const AUTH_NONE = '77777777-7777-4777-8777-777777777777';
 const CUSTOMER_ID = 'cccccccc-0000-4000-8000-000000000001';
 
-type Row = Record<string, unknown>;
-
 function install() {
   holder.db = new FakeSupabase({
     tables: {
@@ -138,6 +136,20 @@ async function call(token?: string) {
 }
 
 describe('GET /auth/portals', () => {
+  it.each(['staff_users', 'staff_role_assignments', 'customers', 'ost_members', 'roles'])(
+    'reports unavailable verification when %s cannot be read',
+    async (table) => {
+      install();
+      (holder.db as FakeSupabase).errors[table] = {
+        code: '42501',
+        message: 'private database failure detail',
+      };
+      const result = await call('tok-sm');
+      expect(result.status).toBe(503);
+      expect(JSON.stringify(result.body)).not.toContain('private database failure detail');
+      expect(result.body).not.toMatchObject({ staff: null, customer: null, ost: null });
+    },
+  );
   it('reports a staff-only identity with role and flag', async () => {
     install();
     const s = await call('tok-sm');

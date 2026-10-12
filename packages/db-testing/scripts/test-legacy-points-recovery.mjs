@@ -383,7 +383,12 @@ try {
       2,
     ),
   );
-  check('Exact preservation allowlist contains 26 pending versions', selected.length, 26);
+  check('Exact preservation allowlist includes the server-only ACL correction', selected.length, 27);
+  check(
+    'Selected batch ends with the forward-only ACL patch',
+    selected.at(-1),
+    '20261124000001_afhomes_points_position_service_acl.sql',
+  );
   await db.query('begin');
   const m = members[0],
     admin = staff.admin,

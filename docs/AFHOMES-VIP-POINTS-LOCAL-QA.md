@@ -1,4 +1,4 @@
-﻿# VIP Points: Local Implementation and QA Evidence
+# VIP Points: Local Implementation and QA Evidence
 
 Checkpoint: claud/develop, b8d624188910e407d374d5d85ebb0315ad10290c.
 Worktree: AFhomes-ecofarm-v2-claud-promote.
@@ -275,3 +275,89 @@ See docs/AFHOMES-LEGACY-POINTS-PRESERVATION.md. Local merge checkpoint f8a1c61 i
 
 ## Actual backup restore infrastructure gate (2026-10-11 21:10 PHT)
 See docs/AFHOMES-ACTUAL-RESTORE-BLOCKER.md. Actual custom backup metadata/checksum verified; encrypted role/ACL/schema supplements captured read-only. Local full restore is BLOCKED: no Docker/Podman/WSL runtime, Windows native Supabase unsupported. No plain PostgreSQL retry or actual-restored-copy migration was performed. Fresh focused migration regression: 17/17 PASS. Shared Supabase is unchanged.
+
+## Recovery continuation — October 12, 2026
+
+This entry supersedes earlier infrastructure-blocked statuses above; those entries remain historical evidence.
+
+- Owner confirmed existing local Staff/Customer login works again after the original API (3000), Admin (5174), and Web (5173) servers were restarted. Orly changes remain merged at f8a1c61; HEAD remains 02ff97d. No authentication rewrite or configuration replacement was performed.
+- Actual encrypted backup restoration passed in isolated Supabase PostgreSQL 17.6 with Vault 0.3.1. The original 26-migration preservation rehearsal and original ledger payload comparison passed, as recorded in the protected runtime verification report.
+- Fresh isolated database inspection: 10 original points accounts retain 167,000 points; migration history contains 66 entries (39 original plus 27 selected forward migrations). All 27 repository allowlist hashes match. Historical migration files are unchanged.
+- New 20261124000001_afhomes_points_position_service_acl.sql grants only service_role execution of private.release_point_reservations(uuid,uuid), required by customer_points_position. Fresh privileges: service_role=true, anon=false, authenticated=false. Real PostgreSQL pre-fix denial, post-fix access, replay and browser-role denial regression passed in the prior stabilization session.
+- SALE_REFERENCE_CONFLICT now maps to controlled HTTP 409 instead of 500. Previous focused verification: 189 unit checks, 22 genuine GoTrue/PostgREST lifecycle checks, and 10 genuine HTTP duplicate/concurrency checks passed. Typecheck, lint and production build passed; existing warnings remained. These checks were not unnecessarily rerun in this continuation.
+- Browser E2E remains UNVERIFIED: disposable browser identity setup did not complete. Working owner login on the original ports is a separate milestone, not proof of an isolated financial browser lifecycle. Private Storage uploads/downloads, device QR scanning and full desktop/mobile operational UAT remain unverified.
+- Shared Supabase still lacks the selected new schema. No shared migration, points reset, Preview credential change, commit, push or deployment was performed in this continuation.
+
+Next gates: complete disposable identity setup without storing passwords/tokens; verify the existing Admin/GSD/Finance/Customer browser workflow on isolated ports 15174/15173; verify private Storage separately; review precise staging inventory; obtain separate release authorization before any shared apply or deployment. The selected preservation runner, rather than a naive historical migration replay, is required to avoid the legacy cutover reset.
+### Isolated browser login infrastructure correction
+
+A real browser-compatible OPTIONS request to the isolated Auth gateway returned HTTP 204 without Access-Control-Allow-Origin/Headers/Methods. Shell Auth checks did not exercise this browser requirement. The private local nginx gateway configuration now allows only http://127.0.0.1:15173 and http://127.0.0.1:15174. nginx configuration validation and reload passed; both origins receive their exact allowed origin, and an unapproved HTTPS origin receives no allow-origin header. No wildcard or shared/production gateway change was made. Password authentication and authenticated browser workflow still require an actual successful browser submission; network tracing is enabled for that next step.
+### Authenticated Admin browser milestone
+
+The failed QA login also hit API CORS: direct cross-origin OPTIONS requests to /api/v1/auth/portals and /api/v1/admin/afhomes/session returned 404. The temporary isolated Vite runtime was corrected to use VITE_API_BASE_URL=/api/v1 and its existing /api proxy pattern targeting loopback API port 15440. No repository authentication code or persistent environment file changed.
+
+After reload, the already-authenticated disposable Admin session redirected to Operations Overview. The authenticated Points Rules screen loaded service, tier-discount, earning-rule and spending-rule records. Through the actual browser UI, Admin created QA Browser Stay 1791735097 at 2000.00 per night, classified as accommodation and points-eligible, with public publishing disabled. A full reload preserved the new service. Screenshot captured with synthetic service records.
+
+Tier/earning/promotion creation through the browser is not yet verified: the tier form remained disabled during automated date entry; this has not been established as an application defect. No policy was changed to bypass that state. Customer browser login is the next gate; the disposable Customer form is ready for private password entry. Full financial browser E2E remains unverified. Shared Supabase, regular local runtime configuration, original accounts, and existing migrations are unchanged.
+### Customer browser + genuine authenticated API lifecycle
+
+Customer QA sign-in passed. Its Points page survived reload and showed balance 0, Gold annual cap 60,000, claim, approval, refund and history controls. A 390x844 viewport check showed no page-level horizontal overflow (content and viewport widths both 375 after scrollbar).
+
+Using disposable identities with actual GoTrue password grants and the isolated API: Admin configured an earning rule; GSD created a 2,000.00 accommodation purchase; completion before verification returned 409; Finance verified the recorded cash; completion issued a claim. The signed-in Customer reviewed and confirmed that claim in the real browser, including the existing SweetAlert confirmation. Exactly 1,000 points appeared with an earned history entry.
+
+GSD prepared a separate 2,000.00 staycation quote. The Customer browser displayed quantity 1, tier discount 0.00, conversion 0.5001, 1,000 points, points discount 500.10, cash payable 1,499.90 and Manila expiry. The temporary quote harness expected 201 but the established endpoint correctly returned 200; the quote succeeded and was not recreated. Customer approval through the portal reserved 1,000 points: SQL position showed balance=1,000, spendable=0. After genuine Finance verification of cash and purchase completion, balance=0 and redeemed=1,000. Repeated completion did not deduct again. Reload showed completed approval and earned/redemption history.
+
+Finance API full mixed refund approval restored 1,000 points while cashRepaid=0.00 and cashOutstanding=1,499.90. A separately recorded synthetic external repayment and identical retry produced exactly one repayment and outstanding=0.00. No real payout occurred. Customer reload displayed completed refund, cash repaid/outstanding, points restored and the compensating +1,000 ledger entry. Ending synthetic balance=1,000, remaining annual earning capacity=59,000, reversal debt=0. Automatic review rejected an imprecise refund selection; continuation used the exact inspected refund ID and asserted its purchase ownership.
+
+A new synthetic restaurant purchase quote returned 409 without a promotion. After an applicable Admin promotion, a quote for 100 points returned value 50.01 at rate 0.5001. It remains unapproved; no additional points were reserved or deducted.
+
+Coverage distinction: Admin login/service creation and Customer claim/approval/history are actual browser proofs. GSD/Finance transactions and rule/promotion configuration used genuine authenticated APIs, not their browser forms. Full all-role browser E2E, device-camera scanning, private Storage receipts and Admin date-form creation remain unverified. Temporary harness parsing/response-shape errors were repaired without changing business policies or weakening application tests. No application source changed in this continuation; only this QA report changed. No commit, shared apply, push or deployment.
+### GSD browser continuation and receipt-response repair
+
+Disposable GSD Staff login passed. Its nav exposes New Service Sale and Use VIP Points, while privileged Admin configuration controls remain separate. The original synthetic membership number was outside the existing MBS identifier format; only this disposable fixture number was corrected to MBS-QA-1791735097, with exact membership ID and customer-email guards. No balance or real membership changed.
+
+GSD browser lookup resolved the synthetic customer and 1,000-point balance. It created one accommodation sale at 2,000.00 without tier stacking and recorded receipt AF-PAY-AYATA against purchase AF-TXN-F9H63 (1b1e2086-1e04-41b4-884b-52ee28eb5226). Recorded=2,000.00, verified=0.00, outstanding=2,000.00, claim unavailable: Finance gate preserved.
+
+Demonstrated defect: recordPurchaseReceipt validated the POST response with purchaseReceiptSchema (a full history row), although the handler returns paymentId/paymentNumber/amount/status. The database write succeeded but the UI falsely showed receipt failure. Repaired the shared client caller to reuse its existing purchaseReceiptWriteSchema. New points-services.spec.ts reproduced RED, then GREEN. Focused client + BusinessPointsPage: 13/13 tests passed; Admin typecheck, affected-file ESLint, production build and diff check passed. Existing large bundle warning remains. The already-recorded payment was not resubmitted.
+
+Finance browser verification of this exact receipt remains pending private Finance sign-in. Local runtime has no Storage service; private receipt object upload/download cannot be claimed as verified. Existing orphan/ambiguous-write/cleanup regression coverage remains present in points.spec.ts. No commit, push, deployment or shared migration was performed.
+### Isolated Finance login dependency repair (2026-10-12)
+- Disposable Finance profile and active finance role were present; isolated runtime API keys expired overnight.
+- Refreshed isolated runtime keys only. Failed identity/role reads now return safe HTTP 503 instead of falsely reporting missing identities; ownership checks unchanged.
+- RED: 5 new cases returned HTTP 200 incorrectly. GREEN: 22 focused portal/handler-kit tests pass; API typecheck passes.
+- Finance browser session requires owner sign-in again after the earlier false missing-identity response. No shared database or deployment changes.
+
+### Finance browser milestone (2026-10-12)
+- Disposable Finance login PASS: actual Finance session and role-specific navigation.
+- Browser verified existing receipt AF-PAY-AYATA for sale AF-TXN-F9H63: verified cash 2000.00, outstanding 0.00; no additional receipt created.
+- Purchase remains draft and earning claim remains unavailable until authorized GSD completion. Shared Supabase untouched.
+
+### GSD browser completion and claim recovery (2026-10-12)
+- Demonstrated missing resume path after role/session switch. Added member-filtered existing-sale selection through the existing GSD-owned purchases API; no new authorization or financial policy.
+- Existing sale AF-TXN-F9H63 completed through GSD browser after Finance verification. Receipt re-recording disabled when recorded or verified cash already exists.
+- Fixed circular initial-issuance UI gate: completed, fully paid and no existing claim permits issuing; server remains authoritative.
+- Fixed issued-claim contract requiring awarded/status fields absent from the actual issuance response. Credit remains customer-only.
+- Existing claim AF-EARN-SK7CB issued once; initial display failed before contract repair. Existing audited rotation recovered visible QR/typed code; reserved 1000, awarded 0.
+- RED reproduced each gap. GREEN 16 focused Admin tests; Admin typecheck, affected lint and production build PASS (existing chunk-size warning). Customer personal claim for this transaction pending private sign-in.
+
+### Customer browser claim milestone (2026-10-12)
+- Customer signed in with their own disposable identity, reviewed AF-EARN-SK7CB for exact purchase AF-TXN-F9H63, and confirmed through the customer SweetAlert dialog.
+- Actual browser result: 1000 points added; balance 1000 -> 2000, annual capacity 59000 -> 58000. Reload persisted the balance and matching earning history.
+- Real isolated PostgreSQL: claim status claimed, points_awarded 1000; exactly 1 matching ledger entry totaling 1000; membership balance 2000.
+- No staff substitute approval, duplicate credit, shared database write, commit, push or deployment.
+
+### Full browser points-spending settlement (2026-10-12)
+- GSD browser created AF-TXN-94LS9, gross 2000.00, tier discount 0.00; generated quote AF-QTE-2VY42 for 1000 points at 0.5001 -> discount 500.10, cash 1499.90.
+- Customer personally approved exact quote through their own portal. PostgreSQL before settlement: balance 2000, spendable 1000; reservation did not deduct balance.
+- Fixed demonstrated resume exclusion for points-discounted purchases and displayed points discount separately. RED reproduced; GREEN 16 focused tests, Admin typecheck and affected lint PASS.
+- GSD browser recorded cash 1499.90; Finance browser verified AF-PAY-V2E7P. Before completion: draft, balance 2000, spendable 1000.
+- GSD browser completed the same sale. Real PostgreSQL: completed; exactly 1 ledger entry totaling -1000, exactly 1 verified receipt totaling 1499.90; balance/spendable 1000, reversal debt 0.
+- Finance browser refund review of this sale remains pending. No shared database changes, commit, push or deployment.
+
+### Finance refund and final Customer browser history (2026-10-12)
+- Finance browser requested and approved a full mixed refund for AF-TXN-94LS9. Approval restored 1000 points while cash remained unpaid: repaid 0.00, outstanding 1499.90.
+- A separate synthetic external repayment record for 1499.90 used Cash and reference SYNTHETIC-QA-94LS9-NO-MONEY-SENT. No money was transferred. Final Finance status completed, outstanding 0.00, points restored 1000, earned-points adjustment 0.
+- Real isolated PostgreSQL confirmed balance/spendable 2000, reversal debt 0, and exactly one compensating ledger entry for the cancellation.
+- Customer signed in personally. /customer/points displayed AF-TXN-94LS9 completed refund, cash repaid 1499.90, outstanding 0.00, restored 1000, and matching -1000/+1000 ledger history. Reload persisted all values; annual earning capacity remained 58000.
+- Actual isolated browser earning, customer claim, quote approval/reservation, verified settlement, refund approval, separate repayment recording and customer histories PASS. Admin rule/promotion creation and restaurant permission scenarios retain authenticated API proof only; full browser coverage of those forms remains unverified. Private Storage receipt upload/download and device-camera scanning remain unverified.
+- Final Admin production build PASS with existing chunk-size warning. No repeated full suite, commit, push, shared migration, Preview credential change or deployment.

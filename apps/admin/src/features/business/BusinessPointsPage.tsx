@@ -37,6 +37,7 @@ import {
   completePurchase,
   issueEarningClaim,
   listServices,
+  listOwnPurchases,
   recordPurchase,
   reversePurchasePoints,
 } from './points-services';
@@ -167,6 +168,18 @@ export function BusinessPointsPage() {
     },
   });
 
+  const ownPurchases = useQuery({
+    queryKey: ['earning', 'own-purchases'],
+    queryFn: listOwnPurchases,
+    enabled: Boolean(member),
+    refetchInterval: 15_000,
+  });
+  const resumable = (ownPurchases.data ?? []).filter(
+    (purchase) =>
+      purchase.membershipId === member?.membershipId &&
+      purchase.status !== 'reversed' &&
+      !purchase.claimStatus,
+  );
   const [lastPurchase, setLastPurchase] = useState<string | null>(null);
   /**
    * What the SERVER priced. Held so the GSD can show the member the gross, the
@@ -270,6 +283,43 @@ export function BusinessPointsPage() {
         description="Scan the member's card, record the purchase, and issue their claim code."
       />
 
+      {member && (
+        <section aria-label="Resume sale">
+          {ownPurchases.isLoading && <Skeleton />}
+          {ownPurchases.isError && (
+            <ErrorState error={ownPurchases.error} onRetry={() => void ownPurchases.refetch()} />
+          )}
+          {resumable.length > 0 && (
+            <>
+              <label htmlFor="earning-resume">Resume an existing sale</label>
+              <select
+                id="earning-resume"
+                value={lastPurchase ?? ''}
+                onChange={(event) => {
+                  const purchase = resumable.find((row) => row.id === event.target.value);
+                  if (!purchase) return;
+                  setLastPurchase(purchase.id);
+                  setPriced({
+                    purchaseId: purchase.id,
+                    purchaseNumber: purchase.purchaseNumber,
+                    grossAmount: purchase.grossAmount,
+                    tierDiscountAmount: purchase.tierDiscountAmount,
+                    pointsDiscountAmount: purchase.pointsDiscountAmount,
+                    netAmount: purchase.netAmount,
+                  });
+                }}
+              >
+                <option value="">Choose a sale</option>
+                {resumable.map((purchase) => (
+                  <option key={purchase.id} value={purchase.id}>
+                    {purchase.purchaseNumber} — {formatMoney(purchase.netAmount)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </section>
+      )}
       <section aria-label="Identify the member">
         <h2>1. Identify the member</h2>
 
@@ -433,6 +483,12 @@ export function BusinessPointsPage() {
                 ? `- ${formatMoney(priced.tierDiscountAmount)}`
                 : 'No tier discount applies'}
             </dd>
+            <dt>Points discount</dt>
+            <dd>
+              {priced.pointsDiscountAmount && priced.pointsDiscountAmount !== '0.00'
+                ? `- ${formatMoney(priced.pointsDiscountAmount)}`
+                : 'No points discount applies'}
+            </dd>
             <dt>Amount due</dt>
             <dd>{formatMoney(priced.netAmount)}</dd>
           </dl>
@@ -441,6 +497,12 @@ export function BusinessPointsPage() {
             <Button
               onClick={() =>
                 receipt.mutate({ purchaseId: priced.purchaseId, amount: priced.netAmount })
+              }
+              disabled={
+                !settlement.data ||
+                settlement.data.status !== 'draft' ||
+                settlement.data.recordedTotal !== '0.00' ||
+                settlement.data.verifiedTotal !== '0.00'
               }
               loading={receipt.isPending}
               loadingLabel="Recording…"
@@ -457,7 +519,11 @@ export function BusinessPointsPage() {
               was not, and could not be: completion requires VERIFIED money and
               the seller may not verify. */}
           <h3>Settlement</h3>
-          <p role="status">Pending Finance verification.</p>
+          <p role="status">
+            {settlement.data?.fullyPaid
+              ? 'Verified payment covers the amount due.'
+              : 'Pending Finance verification.'}
+          </p>
           <p>
             A recorded receipt is not money received. Finance verifies it on the Operational
             Services Payments screen, and only then can this sale complete and the member&apos;s
@@ -489,15 +555,17 @@ export function BusinessPointsPage() {
             <ErrorState title="Not completed" message={message(complete.error)} />
           )}
 
-          {settlement.data?.claimable && (
-            <Button
-              onClick={() => claim.mutate(lastPurchase as string, { onSuccess: refresh })}
-              loading={claim.isPending}
-              loadingLabel="Issuing…"
-            >
-              Issue the member’s claim code
-            </Button>
-          )}
+          {settlement.data?.status === 'completed' &&
+            settlement.data.fullyPaid &&
+            !settlement.data.claimStatus && (
+              <Button
+                onClick={() => claim.mutate(lastPurchase as string, { onSuccess: refresh })}
+                loading={claim.isPending}
+                loadingLabel="Issuing…"
+              >
+                Issue the member’s claim code
+              </Button>
+            )}
           {claim.isError && <ErrorState title="Claim not issued" message={message(claim.error)} />}
         </section>
       )}

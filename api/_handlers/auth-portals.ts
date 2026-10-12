@@ -50,25 +50,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!own.success) return fail(res, 'INTERNAL', 'Could not resolve your portals', 500);
       return res.status(200).json(own.data);
     }
-    const [{ data: staff }, { data: assignment }, { data: customer }, { data: ost }] =
-      await Promise.all([
-        db
-          .from('staff_users')
-          .select('id, status, must_change_password')
-          .eq('id', userId)
-          .maybeSingle(),
-        db
-          .from('staff_role_assignments')
-          .select('staff_id, role_id')
-          .eq('staff_id', userId)
-          .maybeSingle(),
-        db
-          .from('customers')
-          .select('id, status, auth_user_id')
-          .eq('auth_user_id', userId)
-          .maybeSingle(),
-        db.from('ost_members').select('id, ost_number, status').eq('id', userId).maybeSingle(),
-      ]);
+    const identities = await Promise.all([
+      db
+        .from('staff_users')
+        .select('id, status, must_change_password')
+        .eq('id', userId)
+        .maybeSingle(),
+      db
+        .from('staff_role_assignments')
+        .select('staff_id, role_id')
+        .eq('staff_id', userId)
+        .maybeSingle(),
+      db
+        .from('customers')
+        .select('id, status, auth_user_id')
+        .eq('auth_user_id', userId)
+        .maybeSingle(),
+      db.from('ost_members').select('id, ost_number, status').eq('id', userId).maybeSingle(),
+    ]);
+
+    if (identities.some((result) => result.error))
+      return fail(
+        res,
+        'INTERNAL',
+        'Secure portal verification is unavailable. Contact the administrator.',
+        503,
+      );
+    const [{ data: staff }, { data: assignment }, { data: customer }, { data: ost }] = identities;
 
     // Ownership re-check (defense in depth): RLS already scopes fallback
     // reads to the caller, and the service path filters by the same id. A
@@ -82,11 +90,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let roleName: string | null = null;
     const assignmentRow = ownAssignment as { role_id?: string } | null;
     if (assignmentRow?.role_id) {
-      const { data: role } = await db
+      const { data: role, error: roleError } = await db
         .from('roles')
         .select('slug, name')
         .eq('id', assignmentRow.role_id)
         .maybeSingle();
+      if (roleError)
+        return fail(
+          res,
+          'INTERNAL',
+          'Secure portal verification is unavailable. Contact the administrator.',
+          503,
+        );
       const roleRow = role as { slug?: string; name?: string } | null;
       roleSlug = typeof roleRow?.slug === 'string' ? roleRow.slug : null;
       roleName = typeof roleRow?.name === 'string' ? roleRow.name : null;

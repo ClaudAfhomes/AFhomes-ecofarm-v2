@@ -133,6 +133,11 @@
       "file": "20261123000001_afhomes_preserve_legacy_points.sql",
       "transactionEnvelope": "none",
       "sha256": "a7864bc69af0945d8633fac3f9bb7ad6fd38859dc0fc6ac6da3afa09255b1566"
+    },
+    {
+      "file": "20261124000001_afhomes_points_position_service_acl.sql",
+      "transactionEnvelope": "none",
+      "sha256": "36debcf3b1033a2443ce8b212320df729e7a370a1113b6adf5c03b214b68ae9e"
     }
   ]
 }

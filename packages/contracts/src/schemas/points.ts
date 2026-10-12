@@ -320,7 +320,7 @@ export const pointEarningRuleSchema = z.object({
 export const pointRedemptionRuleInputSchema = z
   .object({
     serviceId: z.string().uuid(),
-    ruleKind:z.enum(['promotion','accommodation']).default('promotion'),
+    ruleKind: z.enum(['promotion', 'accommodation']).default('promotion'),
     // Shape AND positivity. The shape regex alone admits "0" and "0.00", which
     // the table CHECK (peso_value_per_point > 0) would reject anyway - but as an
     // opaque constraint violation rather than a field the admin can fix.
@@ -421,7 +421,7 @@ export const pointEarningRuleInputSchema = z
 export const pointRedemptionRuleSchema = z.object({
   id: z.string().uuid(),
   serviceId: z.string().uuid(),
-  ruleKind:z.enum(['promotion','accommodation']).default('promotion'),
+  ruleKind: z.enum(['promotion', 'accommodation']).default('promotion'),
   pesoValuePerPoint: z.string().regex(/^\d+(\.\d{1,4})?$/),
   eligibleTiers: z.array(tierSchema).min(1),
   minPoints: pointsAmountSchema,
@@ -707,9 +707,11 @@ export const completedPurchaseSchema = z.object({
  * recover them, so a lost code is reissued rather than looked up. A client must
  * therefore never cache or retry this response.
  */
-export const issuedEarningClaimSchema = earningClaimSchema.extend({
-  pointsReserved: pointsAmountSchema,
-});
+export const issuedEarningClaimSchema = earningClaimSchema
+  .omit({ pointsAwarded: true, status: true })
+  .extend({
+    pointsReserved: pointsAmountSchema,
+  });
 
 /** A rotated claim credential. Also the only time the new plaintext exists. */
 export const reissuedEarningClaimSchema = z.object({

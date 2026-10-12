@@ -81,6 +81,7 @@ export const recordPurchase = (input: CreatePurchaseInput) =>
  */
 export type PricedPurchase = z.infer<typeof recordedPurchaseSchema> & {
   tierDiscountAmount?: string;
+  pointsDiscountAmount?: string;
 };
 
 /**
@@ -103,7 +104,7 @@ export const recordPurchaseReceipt = (input: {
   method: string;
   reference?: string;
 }) =>
-  post(`/earning/purchases/${input.purchaseId}/payments`, purchaseReceiptSchema, {
+  post(`/earning/purchases/${input.purchaseId}/payments`, purchaseReceiptWriteSchema, {
     amount: input.amount,
     method: input.method,
     ...(input.reference ? { reference: input.reference } : {}),
