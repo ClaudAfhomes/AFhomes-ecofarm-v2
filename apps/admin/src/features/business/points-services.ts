@@ -24,6 +24,7 @@ import {
   appliedPointsDiscountSchema,
   purchaseRowSchema,
   servicePolicyStatusSchema,
+  servicePolicyManagementResultSchema,
   committedPointDiscountSchema,
   completedPurchaseSchema,
   pointDiscountQuoteSchema,
@@ -414,3 +415,13 @@ export const reconcileServiceRefundReceipt = (
     serviceRefundReconciliationResultSchema,
     { uploadAuditId, reason },
   );
+
+export const manageServicePolicy = (
+  kind: 'rules' | 'tier-discounts' | 'redemption-rules',
+  id: string,
+  patch?: Record<string, unknown>,
+) =>
+  request('/earning/' + kind + '/' + id, servicePolicyManagementResultSchema, {
+    method: patch ? 'PUT' : 'DELETE',
+    ...(patch ? { body: JSON.stringify(patch) } : {}),
+  });

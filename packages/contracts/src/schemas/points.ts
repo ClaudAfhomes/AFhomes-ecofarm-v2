@@ -878,3 +878,5 @@ export const purchaseRowSchema = z.object({
     }),
   ),
 });
+
+export const servicePolicyManagementResultSchema = z.object({ success: z.literal(true) });

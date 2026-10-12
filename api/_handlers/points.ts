@@ -1064,6 +1064,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const policyManagement = route(req, 'DELETE', /^(rules|tier-discounts|redemption-rules)\/([^/]+)$/) ?? route(req, 'PUT', /^(rules|tier-discounts|redemption-rules)\/([^/]+)$/);
+    if (policyManagement) {
+      const deleting = verb === 'DELETE';
+      const writer = await authorizeAfHomes(req, 'operations.catalog', deleting ? 'delete' : 'update');
+      if ('error' in writer) return deny(res, writer);
+      if (keyless) return fail(res, 'UNAVAILABLE', 'Policy management requires the authorized server configuration.', 503);
+      const { error } = await db.rpc('manage_service_policy', {
+        p_kind: policyManagement[1], p_id: policyManagement[2],
+        p_patch: deleting ? null : jsonBody(req), p_actor_id: writer.userId, p_delete: deleting,
+      });
+      if (error) {
+        if (error.code === '23503') return fail(res, 'PROTECTED_HISTORY', 'This policy is referenced by history. Deactivate it and create a replacement.', 409);
+        if (error.code === 'P0002') return fail(res, 'NOT_FOUND', 'This policy no longer exists.', 404);
+        if (error.code?.startsWith('22') || error.code === '23514' || error.code === '23502') return fail(res, 'VALIDATION_ERROR', 'Check the policy values, tiers and dates.', 400);
+        if (error.code === '23505') return fail(res, 'CONFLICT', 'This policy conflicts with another active rule.', 409);
+        return mapRpcError(res, error);
+      }
+      return res.status(200).json({ success: true });
+    }
+
     const policyStatus = route(req, 'PATCH', /^(rules|tier-discounts)\/([^/]+)$/);
     if (policyStatus) {
       const writer = await authorizeAfHomes(req, 'operations.catalog', 'update');

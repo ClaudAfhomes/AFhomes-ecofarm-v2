@@ -138,20 +138,26 @@ describe('Use VIP Points', () => {
     renderWithProviders(<UseVipPointsPage />);
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     await user.type(screen.getByLabelText(/points to spend/i), '2000');
-    await user.click(screen.getByRole('button', { name: /see what this is worth/i }));
+    await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/2,000 points are worth/)).toBeInTheDocument();
     expect(quotePointDiscount).toHaveBeenCalledWith(PURCHASE_ID, 2000);
     expect(commitPointDiscount).not.toHaveBeenCalled();
   });
 
-  it('requires portal approval and offers no staff debit action', async()=>{
-    const user=userEvent.setup();renderWithProviders(<UseVipPointsPage/>);
-    await user.click(await screen.findByRole('button',{name:/use points/i}));
-    await user.type(screen.getByLabelText(/points to spend/i),'2000');
-    await user.click(screen.getByRole('button',{name:/see what this is worth/i}));
+  it('requires portal approval and offers no staff debit action', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UseVipPointsPage />);
+    await user.click(await screen.findByRole('button', { name: /use points/i }));
+    await user.type(screen.getByLabelText(/points to spend/i), '2000');
+    await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/customer portal approval required/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button',{name:/apply the discount/i})).not.toBeInTheDocument();
-    expect(commitPointDiscount).not.toHaveBeenCalled();expect(notifyConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Open customer approval portal' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/customer/points'),
+    );
+    expect(screen.queryByRole('button', { name: /apply the discount/i })).not.toBeInTheDocument();
+    expect(commitPointDiscount).not.toHaveBeenCalled();
+    expect(notifyConfirm).not.toHaveBeenCalled();
   });
 
   it('refuses an ineligible purchase with the staycation reason, not silence', async () => {
@@ -162,8 +168,10 @@ describe('Use VIP Points', () => {
     renderWithProviders(<UseVipPointsPage />);
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     await user.type(screen.getByLabelText(/points to spend/i), '2000');
-    await user.click(screen.getByRole('button', { name: /see what this is worth/i }));
-    expect(await screen.findByText(/points can only be used on accommodation/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /request customer approval/i }));
+    expect(
+      await screen.findByText(/points can only be used on accommodation/i),
+    ).toBeInTheDocument();
     expect(commitPointDiscount).not.toHaveBeenCalled();
   });
 
@@ -174,7 +182,7 @@ describe('Use VIP Points', () => {
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     const input = screen.getByLabelText(/points to spend/i);
     await user.type(input, '2000');
-    await user.click(screen.getByRole('button', { name: /see what this is worth/i }));
+    await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/no promotion price/i)).toBeInTheDocument();
     expect(input).toHaveValue(2000);
   });

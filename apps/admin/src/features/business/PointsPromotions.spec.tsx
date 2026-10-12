@@ -18,12 +18,14 @@ import {
   listRedemptionRules,
   listServices,
   updateRedemptionRule,
+  manageServicePolicy,
 } from './points-services';
 import type { SessionUser } from '../../lib/session';
 
 const { notifyConfirm } = vi.hoisted(() => ({ notifyConfirm: vi.fn(async () => true) }));
 
 vi.mock('./points-services', () => ({
+  manageServicePolicy: vi.fn(async () => ({ isActive: false })),
   createEarningRule: vi.fn(),
   setServicePolicyActive: vi.fn(),
   listEarningRules: vi.fn(async () => []),
@@ -192,7 +194,7 @@ describe('spending promotions', () => {
   it('deactivates a promotion only after an explicit confirmation', async () => {
     const user = userEvent.setup();
     renderWithProviders(<PointsRulesPage />, { user: admin });
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(notifyConfirm).toHaveBeenCalled());
     await waitFor(() =>
       expect(updateRedemptionRule).toHaveBeenCalledWith(PROMOTION.id, { isActive: false }),
@@ -221,9 +223,16 @@ it('keeps only failed services selected when a multi-service promotion save is r
   const user = userEvent.setup();
   renderWithProviders(<PointsRulesPage />, { user: admin });
   await screen.findByText('TEP-2026');
-  await user.selectOptions(screen.getByLabelText('Service', { selector: '#promo-service' }), [SERVICE_ID, secondId]);
-  fireEvent.change(screen.getByLabelText(/effective from/i, { selector: '#promo-start' }), { target: { value: '2026-02-01' } });
-  fireEvent.change(screen.getByLabelText(/effective to/i, { selector: '#promo-end' }), { target: { value: '2026-03-01' } });
+  await user.selectOptions(screen.getByLabelText('Service', { selector: '#promo-service' }), [
+    SERVICE_ID,
+    secondId,
+  ]);
+  fireEvent.change(screen.getByLabelText(/effective from/i, { selector: '#promo-start' }), {
+    target: { value: '2026-02-01' },
+  });
+  fireEvent.change(screen.getByLabelText(/effective to/i, { selector: '#promo-end' }), {
+    target: { value: '2026-03-01' },
+  });
   await user.type(screen.getByLabelText(/pesos per point/i), '0.5001');
   await user.type(screen.getByLabelText(/promotion reference/i), 'MULTI-2026');
   await user.click(screen.getByRole('button', { name: 'Add promotion' }));
@@ -231,25 +240,73 @@ it('keeps only failed services selected when a multi-service promotion save is r
   expect(createRedemptionRule).toHaveBeenCalledTimes(2);
   await user.click(screen.getByRole('button', { name: 'Add promotion' }));
   await waitFor(() => expect(createRedemptionRule).toHaveBeenCalledTimes(3));
-  expect(createRedemptionRule).toHaveBeenNthCalledWith(3, expect.objectContaining({ serviceId: secondId, pesoValuePerPoint: '0.5001' }));
-  expect(notifyConfirm).toHaveBeenCalledWith(expect.objectContaining({ confirmButtonText: 'Save rules' }));
+  expect(createRedemptionRule).toHaveBeenNthCalledWith(
+    3,
+    expect.objectContaining({ serviceId: secondId, pesoValuePerPoint: '0.5001' }),
+  );
+  expect(notifyConfirm).toHaveBeenCalledWith(
+    expect.objectContaining({ confirmButtonText: 'Save rules' }),
+  );
 });
 
 import { createTierDiscount, createEarningRule } from './points-services';
 
-it.each(['tier', 'rule'] as const)('saves a separate %s rule for each selected service', async (kind) => {
-  const secondId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-  vi.mocked(listServices).mockResolvedValue([SERVICE, { ...SERVICE, id: secondId, name: 'Hotel' }]);
+it.each(['tier', 'rule'] as const)(
+  'saves a separate %s rule for each selected service',
+  async (kind) => {
+    const secondId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    vi.mocked(listServices).mockResolvedValue([
+      SERVICE,
+      { ...SERVICE, id: secondId, name: 'Hotel' },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<PointsRulesPage />, { user: admin });
+    await screen.findByText('TEP-2026');
+    await user.selectOptions(screen.getByLabelText('Service', { selector: `#${kind}-service` }), [
+      SERVICE_ID,
+      secondId,
+    ]);
+    fireEvent.change(document.getElementById(`${kind}-start`)!, {
+      target: { value: '2026-02-01' },
+    });
+    fireEvent.change(document.getElementById(`${kind}-end`)!, { target: { value: '2026-03-01' } });
+    if (kind === 'rule') await user.type(screen.getByLabelText('Points per service unit'), '100');
+    await user.click(
+      screen.getByRole('button', { name: kind === 'tier' ? 'Add tier discount' : 'Add rule' }),
+    );
+    const create = kind === 'tier' ? createTierDiscount : createEarningRule;
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({ serviceId: SERVICE_ID }));
+    expect(create).toHaveBeenNthCalledWith(2, expect.objectContaining({ serviceId: secondId }));
+  },
+);
+
+it('permanently removes a promotion through the delete endpoint when permitted', async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<PointsRulesPage />, {
+    user: {
+      ...admin,
+      afHomesPermissions: admin.afHomesPermissions?.map((p) => ({ ...p, canDelete: true })),
+    },
+  });
+  await user.click(await screen.findByRole('button', { name: 'Delete' }));
+  await waitFor(() =>
+    expect(manageServicePolicy).toHaveBeenCalledWith('redemption-rules', PROMOTION.id, undefined),
+  );
+  expect(updateRedemptionRule).not.toHaveBeenCalled();
+});
+it('edits the existing promotion instead of creating a duplicate', async () => {
   const user = userEvent.setup();
   renderWithProviders(<PointsRulesPage />, { user: admin });
-  await screen.findByText('TEP-2026');
-  await user.selectOptions(screen.getByLabelText('Service', { selector: `#${kind}-service` }), [SERVICE_ID, secondId]);
-  fireEvent.change(document.getElementById(`${kind}-start`)!, { target: { value: '2026-02-01' } });
-  fireEvent.change(document.getElementById(`${kind}-end`)!, { target: { value: '2026-03-01' } });
-  if (kind === 'rule') await user.type(screen.getByLabelText('Points per service unit'), '100');
-  await user.click(screen.getByRole('button', { name: kind === 'tier' ? 'Add tier discount' : 'Add rule' }));
-  const create = kind === 'tier' ? createTierDiscount : createEarningRule;
-  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-  expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({ serviceId: SERVICE_ID }));
-  expect(create).toHaveBeenNthCalledWith(2, expect.objectContaining({ serviceId: secondId }));
+  await user.click(await screen.findByRole('button', { name: 'Edit' }));
+  fireEvent.change(screen.getByLabelText('peso value per point'), { target: { value: '0.5001' } });
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  await waitFor(() =>
+    expect(manageServicePolicy).toHaveBeenCalledWith(
+      'redemption-rules',
+      PROMOTION.id,
+      expect.objectContaining({ peso_value_per_point: '0.5001' }),
+    ),
+  );
+  expect(createRedemptionRule).not.toHaveBeenCalled();
 });

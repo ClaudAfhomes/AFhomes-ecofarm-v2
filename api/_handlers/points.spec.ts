@@ -2263,3 +2263,22 @@ describe('Finance targeted receipt reconciliation', () => {
     expect(db.calls.some((r) => r.table === 'reconcile_service_refund_receipt')).toBe(false);
   });
 });
+
+describe('catalog policy removal and editing', () => {
+ it('uses deletion rather than a status toggle and binds the actor to the session', async () => {
+  const db=install({rpcs:[{fn:'manage_service_policy',result:true}]});
+  expect((await call({familyPath: 'rules/'+RULE_ID,method:'DELETE'})).status).toBe(200);
+  expect(db.calls.find(c=>c.table==='manage_service_policy')?.arg).toMatchObject({p_kind:'rules',p_id:RULE_ID,p_actor_id:STAFF_ID,p_delete:true,p_patch:null});
+  expect(db.calls.some(c=>c.table==='set_service_policy_active')).toBe(false);
+ });
+ it('denies catalog removal to a view-only caller',async()=>{
+  const db=install({permissions:VIEW_ONLY});
+  expect((await call({familyPath:'rules/'+RULE_ID,method:'DELETE'})).status).toBe(403);
+  expect(db.calls.some(c=>c.table==='manage_service_policy')).toBe(false);
+ });
+ it('edits an existing row through the atomic operation',async()=>{
+  const db=install({rpcs:[{fn:'manage_service_policy',result:true}]});
+  expect((await call({familyPath:'rules/'+RULE_ID,method:'PUT',body:{points_amount:500}})).status).toBe(200);
+  expect(db.calls.find(c=>c.table==='manage_service_policy')?.arg).toMatchObject({p_delete:false,p_patch:{points_amount:500},p_actor_id:STAFF_ID});
+ });
+});

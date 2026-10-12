@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
+  Dialog,
   EmptyState,
   ErrorState,
   PageHeader,
@@ -14,6 +15,7 @@ import { ServiceCatalogEditor } from './ServiceCatalogEditor';
 import { useSession } from '../../lib/session';
 import {
   createEarningRule,
+  manageServicePolicy,
   setServicePolicyActive,
   listEarningRules,
   listTierDiscounts,
@@ -69,6 +71,9 @@ export function PointsRulesPage() {
     useSession().user?.afHomesPermissions?.find((p) => p.moduleKey === 'operations.catalog')
       ?.canUpdate === true;
 
+  const mayDelete =
+    useSession().user?.afHomesPermissions?.find((p) => p.moduleKey === 'operations.catalog')
+      ?.canDelete === true;
   const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
   const rules = useQuery({ queryKey: ['earning', 'rules'], queryFn: listEarningRules });
   const tierDiscounts = useQuery({
@@ -146,12 +151,26 @@ export function PointsRulesPage() {
                   <td>
                     {rule.isActive ? 'Active' : 'Inactive'}
                     {mayUpdate && (
-                      <PolicyStatusButton
-                        kind="tier-discounts"
-                        id={rule.id}
-                        active={rule.isActive}
-                        onSaved={invalidate}
-                      />
+                      <>
+                        {' '}
+                        <PolicyStatusButton
+                          kind="tier-discounts"
+                          id={rule.id}
+                          active={rule.isActive}
+                          onSaved={invalidate}
+                        />{' '}
+                        <PolicyManagement
+                          kind="tier-discounts"
+                          id={rule.id}
+                          values={{
+                            discount_rate: rule.discountRate,
+                            effective_start: rule.effectiveStart,
+                            effective_end: rule.effectiveEnd,
+                          }}
+                          mayDelete={mayDelete}
+                          onSaved={invalidate}
+                        />
+                      </>
                     )}
                   </td>
                 </tr>
@@ -212,12 +231,30 @@ export function PointsRulesPage() {
                   <td>
                     {rule.isActive ? 'Yes' : 'No'}
                     {mayUpdate && (
-                      <PolicyStatusButton
-                        kind="rules"
-                        id={rule.id}
-                        active={rule.isActive}
-                        onSaved={invalidate}
-                      />
+                      <>
+                        {' '}
+                        <PolicyStatusButton
+                          kind="rules"
+                          id={rule.id}
+                          active={rule.isActive}
+                          onSaved={invalidate}
+                        />{' '}
+                        <PolicyManagement
+                          kind="rules"
+                          id={rule.id}
+                          values={{
+                            points_amount: rule.pointsAmount,
+                            eligible_tiers: rule.eligibleTiers,
+                            min_quantity: rule.minQuantity,
+                            max_award: rule.maxAward,
+                            promotion_reference: rule.promotionReference,
+                            effective_start: rule.effectiveStart,
+                            effective_end: rule.effectiveEnd,
+                          }}
+                          mayDelete={mayDelete}
+                          onSaved={invalidate}
+                        />
+                      </>
                     )}
                   </td>
                 </tr>
@@ -233,9 +270,9 @@ export function PointsRulesPage() {
         <p>
           What makes a NON-staycation service discountable by points, and at what conversion. A
           staycation or hotel service needs no promotion. Every other service refuses points
-          spending unless an active promotion names it, covers the member&apos;s tier, and is
-          inside its effective window. Both dates are mandatory: a promotion that never expires
-          cannot be created. There is no cap exemption and no applies-to-everything option.
+          spending unless an active promotion names it, covers the member&apos;s tier, and is inside
+          its effective window. Both dates are mandatory: a promotion that never expires cannot be
+          created. There is no cap exemption and no applies-to-everything option.
         </p>
         {promotions.isLoading && (
           <div role="status" aria-label="Loading spending promotions" aria-busy="true">
@@ -293,11 +330,30 @@ export function PointsRulesPage() {
                     <td>
                       {rule.isActive ? 'Yes' : 'No'}
                       {mayUpdate && (
-                        <PromotionStatusButton
-                          id={rule.id}
-                          active={rule.isActive}
-                          onSaved={invalidate}
-                        />
+                        <>
+                          {' '}
+                          <PromotionStatusButton
+                            id={rule.id}
+                            active={rule.isActive}
+                            onSaved={invalidate}
+                          />{' '}
+                          <PolicyManagement
+                            kind="redemption-rules"
+                            id={rule.id}
+                            values={{
+                              peso_value_per_point: rule.pesoValuePerPoint,
+                              eligible_tiers: rule.eligibleTiers,
+                              allow_discount_stacking: rule.allowDiscountStacking,
+                              min_points: rule.minPoints,
+                              max_points: rule.maxPoints,
+                              promotion_reference: rule.promotionReference,
+                              effective_start: rule.effectiveStart,
+                              effective_end: rule.effectiveEnd,
+                            }}
+                            mayDelete={mayDelete}
+                            onSaved={invalidate}
+                          />
+                        </>
                       )}
                     </td>
                   </tr>
@@ -306,9 +362,7 @@ export function PointsRulesPage() {
             </table>
           </div>
         )}
-        {mayAdminister && (
-          <NewPromotionForm services={services.data ?? []} onSaved={invalidate} />
-        )}
+        {mayAdminister && <NewPromotionForm services={services.data ?? []} onSaved={invalidate} />}
       </section>
     </>
   );
@@ -342,16 +396,16 @@ function PolicyStatusButton({
         onClick={async () => {
           if (
             await notifyConfirm({
-              title: active ? 'Delete this policy?' : 'Activate this policy?',
-              confirmButtonText: active ? 'Delete' : 'Activate',
+              title: active ? 'Deactivate this policy?' : 'Activate this policy?',
+              confirmButtonText: active ? 'Deactivate' : 'Activate',
               message:
-                'Delete deactivates this rule for future purchases. Historical prices, awards and audit records are preserved.',
+                'Deactivation stops this rule for future purchases. Historical prices, awards and audit records are preserved.',
             })
           )
             save.mutate();
         }}
       >
-        {active ? 'Delete' : 'Activate'}
+        {active ? 'Deactivate' : 'Activate'}
       </Button>
       {save.isError && <p role="alert">{save.error.message}</p>}
     </>
@@ -378,12 +432,12 @@ function NewTierDiscountForm({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createTierDiscount({
-        serviceId,
-        tier,
-        discountRate: Number(rate),
-        effectiveStart: start,
-        effectiveEnd: end,
-      });
+          serviceId,
+          tier,
+          discountRate: Number(rate),
+          effectiveStart: start,
+          effectiveEnd: end,
+        });
         setServiceIds((current) => current.filter((id) => id !== serviceId));
         onSaved();
       }
@@ -407,9 +461,20 @@ function NewTierDiscountForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add a tier discount</h3><p>Select one or more services. Save a separate percentage for each VIP tier.</p>
+      <h3>Add a tier discount</h3>
+      <p>Select one or more services. Save a separate percentage for each VIP tier.</p>
       <label htmlFor="tier-service">Service</label>
-      <select id="tier-service" multiple disabled={save.isPending} value={serviceIds} onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}>
+      <select
+        id="tier-service"
+        multiple
+        disabled={save.isPending}
+        value={serviceIds}
+        onChange={(e) =>
+          setServiceIds(
+            Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean),
+          )
+        }
+      >
         <option value="">Choose a service</option>
         {services.map((service) => (
           <option key={service.id} value={service.id}>
@@ -451,7 +516,14 @@ function NewTierDiscountForm({
         loading={save.isPending}
         loadingLabel="Saving…"
         onClick={async () => {
-          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+          if (
+            await notifyConfirm({
+              title: 'Save these service rules?',
+              message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`,
+              confirmButtonText: 'Save rules',
+            })
+          )
+            save.mutate();
         }}
       >
         Add tier discount
@@ -481,18 +553,18 @@ function NewRuleForm({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createEarningRule({
-        serviceId,
-        pointsAmount: Number(pointsAmount),
-        eligibleTiers: tiers,
-        // A year-long window from today, as an ISO instant. Sent explicitly
-        // rather than defaulted server-side, so the rule's window is visible.
-        effectiveStart: start,
-        effectiveEnd: end,
-        isActive: true,
-        minQuantity: Number(minimum),
-        maxAward: maximum ? Number(maximum) : null,
-        promotionReference: null,
-      });
+          serviceId,
+          pointsAmount: Number(pointsAmount),
+          eligibleTiers: tiers,
+          // A year-long window from today, as an ISO instant. Sent explicitly
+          // rather than defaulted server-side, so the rule's window is visible.
+          effectiveStart: start,
+          effectiveEnd: end,
+          isActive: true,
+          minQuantity: Number(minimum),
+          maxAward: maximum ? Number(maximum) : null,
+          promotionReference: null,
+        });
         setServiceIds((current) => current.filter((id) => id !== serviceId));
         onSaved();
       }
@@ -514,9 +586,20 @@ function NewRuleForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add an earning rule</h3><p>Select one or more services; each receives its own earning rule.</p>
+      <h3>Add an earning rule</h3>
+      <p>Select one or more services; each receives its own earning rule.</p>
       <label htmlFor="rule-service">Service</label>
-      <select id="rule-service" multiple disabled={save.isPending} value={serviceIds} onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}>
+      <select
+        id="rule-service"
+        multiple
+        disabled={save.isPending}
+        value={serviceIds}
+        onChange={(e) =>
+          setServiceIds(
+            Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean),
+          )
+        }
+      >
         <option value="">Choose a service</option>
         {services
           .filter((service) => service.isActive)
@@ -599,7 +682,14 @@ function NewRuleForm({
           !minimum
         }
         onClick={async () => {
-          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+          if (
+            await notifyConfirm({
+              title: 'Save these service rules?',
+              message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`,
+              confirmButtonText: 'Save rules',
+            })
+          )
+            save.mutate();
         }}
       >
         Add rule
@@ -635,16 +725,16 @@ function PromotionStatusButton({
         onClick={async () => {
           if (
             await notifyConfirm({
-              title: active ? 'Delete this promotion?' : 'Activate this promotion?',
-              confirmButtonText: active ? 'Delete' : 'Activate',
+              title: active ? 'Deactivate this promotion?' : 'Activate this promotion?',
+              confirmButtonText: active ? 'Deactivate' : 'Activate',
               message:
-                'Delete deactivates this promotion. Historical discounts and audit records are preserved.',
+                'Deactivation stops this promotion. Historical discounts and audit records are preserved.',
             })
           )
             save.mutate();
         }}
       >
-        {active ? 'Delete' : 'Activate'}
+        {active ? 'Deactivate' : 'Activate'}
       </Button>
       {save.isError && <p role="alert">{save.error.message}</p>}
     </>
@@ -655,11 +745,11 @@ function NewPromotionForm({
   services,
   onSaved,
 }: {
-  services: { id: string; name: string; isActive: boolean; isStaycationEligible?:boolean }[];
+  services: { id: string; name: string; isActive: boolean; isStaycationEligible?: boolean }[];
   onSaved: () => void;
 }) {
   const [serviceIds, setServiceIds] = useState<string[]>([]);
-  const [ruleKind,setRuleKind]=useState<'promotion'|'accommodation'>('promotion');
+  const [ruleKind, setRuleKind] = useState<'promotion' | 'accommodation'>('promotion');
   const [rate, setRate] = useState('');
   const [tiers, setTiers] = useState<Tier[]>(['GOLD']);
   const [minimum, setMinimum] = useState('1');
@@ -674,19 +764,19 @@ function NewPromotionForm({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createRedemptionRule({
-        serviceId,
-        ruleKind,
-        pesoValuePerPoint: rate,
-        eligibleTiers: tiers,
-        minPoints: Number(minimum),
-        maxPoints: maximum ? Number(maximum) : null,
-        minPurchaseAmount: null,
-        effectiveStart: start,
-        effectiveEnd: end,
-        isActive: true,
-        promotionReference: reference.trim(),
-        allowDiscountStacking: stacking,
-      });
+          serviceId,
+          ruleKind,
+          pesoValuePerPoint: rate,
+          eligibleTiers: tiers,
+          minPoints: Number(minimum),
+          maxPoints: maximum ? Number(maximum) : null,
+          minPurchaseAmount: null,
+          effectiveStart: start,
+          effectiveEnd: end,
+          isActive: true,
+          promotionReference: reference.trim(),
+          allowDiscountStacking: stacking,
+        });
         setServiceIds((current) => current.filter((id) => id !== serviceId));
         onSaved();
       }
@@ -708,21 +798,41 @@ function NewPromotionForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add a spending promotion</h3><p>Select one or more services; each receives its own promotion or conversion rule.</p>
+      <h3>Add a spending promotion</h3>
+      <p>Select one or more services; each receives its own promotion or conversion rule.</p>
       <p>
-        Selected services, both dates, and a named reference are all mandatory: a promotion that never
-        expires, names nothing, or cannot be reviewed cannot be created.
+        Selected services, both dates, and a named reference are all mandatory: a promotion that
+        never expires, names nothing, or cannot be reviewed cannot be created.
       </p>
-      <label htmlFor="promo-kind">Redemption rule type</label><select id="promo-kind" value={ruleKind} onChange={event=>setRuleKind(event.target.value==='accommodation'?'accommodation':'promotion')}><option value="promotion">Service spending promotion</option><option value="accommodation">Accommodation conversion rule</option></select>
+      <label htmlFor="promo-kind">Redemption rule type</label>
+      <select
+        id="promo-kind"
+        value={ruleKind}
+        onChange={(event) =>
+          setRuleKind(event.target.value === 'accommodation' ? 'accommodation' : 'promotion')
+        }
+      >
+        <option value="promotion">Service spending promotion</option>
+        <option value="accommodation">Accommodation conversion rule</option>
+      </select>
       <label htmlFor="promo-service">Service</label>
       <select
         id="promo-service"
-        multiple disabled={save.isPending} value={serviceIds}
-        onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}
+        multiple
+        disabled={save.isPending}
+        value={serviceIds}
+        onChange={(e) =>
+          setServiceIds(
+            Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean),
+          )
+        }
       >
         <option value="">Choose a service</option>
         {services
-          .filter((service) => service.isActive&&(ruleKind!=='accommodation'||service.isStaycationEligible))
+          .filter(
+            (service) =>
+              service.isActive && (ruleKind !== 'accommodation' || service.isStaycationEligible),
+          )
           .map((service) => (
             <option key={service.id} value={service.id}>
               {service.name}
@@ -819,12 +929,148 @@ function NewPromotionForm({
           reference.trim().length < 3
         }
         onClick={async () => {
-          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+          if (
+            await notifyConfirm({
+              title: 'Save these service rules?',
+              message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`,
+              confirmButtonText: 'Save rules',
+            })
+          )
+            save.mutate();
         }}
       >
         Add promotion
       </Button>
       {error && <ErrorState title="Not saved" message={error} />}
     </div>
+  );
+}
+
+function PolicyManagement({
+  kind,
+  id,
+  values,
+  mayDelete,
+  onSaved,
+}: {
+  kind: 'rules' | 'tier-discounts' | 'redemption-rules';
+  id: string;
+  values: Record<string, string | number | boolean | string[] | null>;
+  mayDelete: boolean;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [fields, setFields] = useState(values);
+  const save = useMutation({
+    mutationFn: (patch: Record<string, unknown> | undefined) =>
+      manageServicePolicy(kind, id, patch),
+    retry: false,
+    onSuccess: () => {
+      setEditing(false);
+      onSaved();
+      notifySuccess({ title: 'Policy saved' });
+    },
+  });
+  return (
+    <>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setFields(values);
+          setEditing(true);
+        }}
+      >
+        Edit
+      </Button>
+      {mayDelete && (
+        <Button
+          variant="secondary"
+          loading={save.isPending}
+          onClick={async () => {
+            if (
+              await notifyConfirm({
+                title: 'Permanently delete this policy?',
+                message:
+                  'Unused policies are removed. Policies referenced by claims or quotes cannot be removed. Financial history is preserved.',
+                confirmButtonText: 'Delete',
+              })
+            )
+              save.mutate(undefined);
+          }}
+        >
+          Delete
+        </Button>
+      )}
+      {save.isError && <ErrorState title="Not saved" message={save.error.message} />}
+      {editing && (
+        <Dialog
+          open
+          title="Edit policy"
+          onClose={() => {
+            if (!save.isPending) setEditing(false);
+          }}
+          footer={
+            <Button
+              loading={save.isPending}
+              onClick={async () => {
+                if (
+                  await notifyConfirm({
+                    title: 'Save policy changes?',
+                    message:
+                      'Existing purchase snapshots remain unchanged. Policies used by claims or quotes are protected.',
+                    confirmButtonText: 'Save',
+                  })
+                )
+                  save.mutate(fields);
+              }}
+            >
+              Save changes
+            </Button>
+          }
+        >
+          {Object.entries(fields).map(([key, value]) => (
+            <label key={key}>
+              {key.replaceAll('_', ' ')}
+              <input
+                type={
+                  typeof value === 'boolean'
+                    ? 'checkbox'
+                    : key.startsWith('effective_')
+                      ? 'date'
+                      : 'text'
+                }
+                checked={typeof value === 'boolean' ? value : undefined}
+                value={
+                  typeof value === 'boolean'
+                    ? undefined
+                    : Array.isArray(value)
+                      ? value.join(',')
+                      : (value ?? '')
+                }
+                onChange={(event) =>
+                  setFields({
+                    ...fields,
+                    [key]:
+                      typeof value === 'boolean'
+                        ? event.target.checked
+                        : Array.isArray(value)
+                          ? event.target.value
+                              .split(',')
+                              .map((t) => t.trim().toUpperCase())
+                              .filter(Boolean)
+                          : event.target.value === '' &&
+                              (key === 'max_award' ||
+                                key === 'max_points' ||
+                                key === 'promotion_reference')
+                            ? null
+                            : event.target.value,
+                  })
+                }
+              />
+            </label>
+          ))}
+        </Dialog>
+      )}
+    </>
   );
 }

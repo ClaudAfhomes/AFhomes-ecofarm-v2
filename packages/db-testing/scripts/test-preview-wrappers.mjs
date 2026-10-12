@@ -627,6 +627,28 @@ try {
   });
   check('duplicate purchase reference replays the original', dup, true);
 
+  for (const role of ['anon','authenticated','service_role']) {
+    check(role+' policy management execute grant', (await one(db, "select has_function_privilege($1,'public.manage_service_policy(text,uuid,jsonb,uuid,boolean)','execute') allowed", [role])).allowed, role==='service_role');
+  }
+  const used = await one(db,'select rule_id id from public.earning_claims limit 1');
+  const rule = await one(db, "insert into public.point_earning_rules(service_id,points_amount,eligible_tiers,effective_start,effective_end) values($1,123,array['GOLD'],'2000-01-01','2099-01-01') returning id", [svc.serviceId]);
+  await asRole(url,'service_role',null,async(c)=> {
+    const usedPromotion=await one(db,'select redemption_rule_id id from public.redemption_quotes where redemption_rule_id is not null limit 1');
+    await denied(c,'used promotion cannot be deleted',()=>call(c,'manage_service_policy',['redemption-rules',usedPromotion.id,null,superadmin,true]),/POLICY_HAS_HISTORY/);
+    await denied(c,'used promotion cannot be edited',()=>call(c,'manage_service_policy',['redemption-rules',usedPromotion.id,JSON.stringify({peso_value_per_point:'1.0001'}),superadmin,false]),/POLICY_HAS_HISTORY/);
+    await denied(c,'used earning rule cannot be deleted',()=>call(c,'manage_service_policy',['rules',used.id,null,superadmin,true]),/POLICY_HAS_HISTORY/);
+    await denied(c,'used earning rule cannot be edited',()=>call(c,'manage_service_policy',['rules',used.id,JSON.stringify({points_amount:999}),superadmin,false]),/POLICY_HAS_HISTORY/);
+    await call(c,'manage_service_policy',['rules',rule.id,JSON.stringify({points_amount:456}),superadmin,false]);
+
+    await denied(c,'employee cannot delete policies',()=>call(c,'manage_service_policy',['rules',rule.id,null,staff.employee,true]));
+    await denied(c,'protected identifiers cannot be edited',()=>call(c,'manage_service_policy',['rules',rule.id,JSON.stringify({service_id:svc.serviceId}),superadmin,false]),/POLICY_FIELD_INVALID/);
+  },true);
+  check('edit changes existing unused rule',Number((await one(db,'select points_amount from public.point_earning_rules where id=$1',[rule.id])).points_amount),456);
+  await asRole(url,'service_role',null,async(c)=>{ await call(c,'manage_service_policy',['rules',rule.id,null,superadmin,true]); },true);
+  {
+    check('delete actually removes row',Number((await one(db,'select count(*) n from public.point_earning_rules where id=$1',[rule.id])).n),0);
+    check('delete audit is preserved',Number((await one(db,"select count(*) n from public.audit_events where entity_id=$1 and action='SERVICE_POLICY_DELETED'",[rule.id])).n),1);
+  }
   console.log(`\npreview-wrappers: ${checks} checks passed`);
 } catch (e) {
   console.error('FAILED:', e.message);

@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 
 import {
   Button,
+  QrCode,
   Dialog,
   EmptyState,
   ErrorState,
@@ -11,18 +12,19 @@ import {
   Skeleton,
   StatusChip,
 } from '@afhomes/ui';
+import { webBase } from '../../lib/portal';
 import { formatMoney } from './format';
 import styles from './points.module.css';
 
-import {
-  getPurchaseSummary,
-  listOwnPurchases,
-  quotePointDiscount,
-} from './points-services';
+import { getPurchaseSummary, listOwnPurchases, quotePointDiscount } from './points-services';
 import type { PurchaseRow, PurchaseSummaryRow } from './points-services';
 
 export function UseVipPointsPage() {
-  const purchases = useQuery({ queryKey: ['earning', 'pos', 'purchases'], queryFn: listOwnPurchases,refetchInterval:15_000 });
+  const purchases = useQuery({
+    queryKey: ['earning', 'pos', 'purchases'],
+    queryFn: listOwnPurchases,
+    refetchInterval: 15_000,
+  });
 
   // Only DRAFT purchases can take a discount; a settled one has already been
   // verified against its net, so changing net now would invalidate that decision.
@@ -56,7 +58,12 @@ export function UseVipPointsPage() {
       )}
 
       {drafts.length > 0 && (
-        <div role="region" aria-label="Scrollable draft purchases" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable draft purchases"
+          tabIndex={0}
+          className="table-scroll"
+        >
           <table>
             <thead>
               <tr>
@@ -141,9 +148,22 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
           }}
           title={`Use points on ${purchase.purchaseNumber}`}
           footer={
-            <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>
-              Close
-            </Button>
+            <>
+              {!quote && (
+                <Button
+                  onClick={() => ask.mutate()}
+                  loading={ask.isPending}
+                  loadingLabel="Pricing…"
+                  disabled={busy || !points || Number(points) <= 0}
+                >
+                  Request customer approval
+                </Button>
+              )}
+
+              <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>
+                Close
+              </Button>
+            </>
           }
         >
           {/* Only this dialog is busy. The list behind it stays interactive. */}
@@ -163,17 +183,6 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
               disabled={busy}
             />
 
-            {!quote && (
-              <Button
-                onClick={() => ask.mutate()}
-                loading={ask.isPending}
-                loadingLabel="Pricing…"
-                disabled={busy || !points || Number(points) <= 0}
-              >
-                See what this is worth
-              </Button>
-            )}
-
             {ask.isError && (
               <ErrorState title="Cannot use points here" message={messageOf(ask.error)} />
             )}
@@ -184,10 +193,29 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
                   {quote.pointsRequested.toLocaleString('en-PH')} points are worth{' '}
                   <strong>{formatMoney(quote.pesoValue)}</strong> off this purchase.
                 </p>
-                <p role="status">Customer portal approval required. The customer must review this quote in their signed-in account. Approval reserves the points; deduction happens only after verified settlement and purchase completion.</p>
+                <QrCode
+                  value={webBase().replace(/\/$/, '') + '/customer/points'}
+                  alt="Customer points approval portal QR"
+                  size={180}
+                />
+                <a
+                  href={webBase().replace(/\/$/, '') + '/customer/points'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open customer approval portal
+                </a>
+                <p>
+                  Ask the customer to scan this QR on their own device, sign in, and approve
+                  purchase {purchase.purchaseNumber}. Scanning alone does not spend points.
+                </p>
+                <p role="status">
+                  Customer portal approval required. The customer must review this quote in their
+                  signed-in account. Approval reserves the points; deduction happens only after
+                  verified settlement and purchase completion.
+                </p>
               </>
             )}
-
           </div>
         </Dialog>
       )}
