@@ -342,16 +342,16 @@ function PolicyStatusButton({
         onClick={async () => {
           if (
             await notifyConfirm({
-              title: active ? 'Deactivate this policy?' : 'Activate this policy?',
-              confirmButtonText: active ? 'Deactivate' : 'Activate',
+              title: active ? 'Delete this policy?' : 'Activate this policy?',
+              confirmButtonText: active ? 'Delete' : 'Activate',
               message:
-                'Future eligibility changes. Existing sale prices and awarded points stay in the ledger.',
+                'Delete deactivates this rule for future purchases. Historical prices, awards and audit records are preserved.',
             })
           )
             save.mutate();
         }}
       >
-        {active ? 'Deactivate' : 'Activate'}
+        {active ? 'Delete' : 'Activate'}
       </Button>
       {save.isError && <p role="alert">{save.error.message}</p>}
     </>
@@ -367,7 +367,7 @@ function NewTierDiscountForm({
   onSaved: () => void;
   disabled: boolean;
 }) {
-  const [serviceId, setServiceId] = useState('');
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('GOLD');
   const [rate, setRate] = useState('25');
   const [start, setStart] = useState('');
@@ -375,14 +375,20 @@ function NewTierDiscountForm({
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
-      createTierDiscount({
+    mutationFn: async () => {
+      for (const serviceId of serviceIds) {
+        await createTierDiscount({
         serviceId,
         tier,
         discountRate: Number(rate),
         effectiveStart: start,
         effectiveEnd: end,
-      }),
+      });
+        setServiceIds((current) => current.filter((id) => id !== serviceId));
+        onSaved();
+      }
+    },
+    retry: false,
     onSuccess: () => {
       setRate('25');
       setStart('');
@@ -401,9 +407,9 @@ function NewTierDiscountForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add a tier discount</h3>
+      <h3>Add a tier discount</h3><p>Select one or more services. Save a separate percentage for each VIP tier.</p>
       <label htmlFor="tier-service">Service</label>
-      <select id="tier-service" value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+      <select id="tier-service" multiple disabled={save.isPending} value={serviceIds} onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}>
         <option value="">Choose a service</option>
         {services.map((service) => (
           <option key={service.id} value={service.id}>
@@ -441,10 +447,12 @@ function NewTierDiscountForm({
       <input id="tier-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
 
       <Button
-        disabled={disabled || !serviceId || !rateValid || !datesOrdered}
+        disabled={disabled || serviceIds.length === 0 || !rateValid || !datesOrdered}
         loading={save.isPending}
         loadingLabel="Saving…"
-        onClick={() => save.mutate()}
+        onClick={async () => {
+          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+        }}
       >
         Add tier discount
       </Button>
@@ -460,7 +468,7 @@ function NewRuleForm({
   services: { id: string; name: string; isActive: boolean }[];
   onSaved: () => void;
 }) {
-  const [serviceId, setServiceId] = useState('');
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [pointsAmount, setPointsAmount] = useState('');
   const [tiers, setTiers] = useState<Tier[]>(['GOLD']);
   const [start, setStart] = useState('');
@@ -470,8 +478,9 @@ function NewRuleForm({
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
-      createEarningRule({
+    mutationFn: async () => {
+      for (const serviceId of serviceIds) {
+        await createEarningRule({
         serviceId,
         pointsAmount: Number(pointsAmount),
         eligibleTiers: tiers,
@@ -483,7 +492,12 @@ function NewRuleForm({
         minQuantity: Number(minimum),
         maxAward: maximum ? Number(maximum) : null,
         promotionReference: null,
-      }),
+      });
+        setServiceIds((current) => current.filter((id) => id !== serviceId));
+        onSaved();
+      }
+    },
+    retry: false,
     onSuccess: () => {
       setError(null);
       notifySuccess({ title: 'Earning rule added' });
@@ -500,9 +514,9 @@ function NewRuleForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add an earning rule</h3>
+      <h3>Add an earning rule</h3><p>Select one or more services; each receives its own earning rule.</p>
       <label htmlFor="rule-service">Service</label>
-      <select id="rule-service" value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+      <select id="rule-service" multiple disabled={save.isPending} value={serviceIds} onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}>
         <option value="">Choose a service</option>
         {services
           .filter((service) => service.isActive)
@@ -576,7 +590,7 @@ function NewRuleForm({
         loading={save.isPending}
         loadingLabel="Saving…"
         disabled={
-          !serviceId ||
+          serviceIds.length === 0 ||
           !pointsAmount ||
           tiers.length === 0 ||
           !start ||
@@ -584,7 +598,9 @@ function NewRuleForm({
           start >= end ||
           !minimum
         }
-        onClick={() => save.mutate()}
+        onClick={async () => {
+          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+        }}
       >
         Add rule
       </Button>
@@ -619,16 +635,16 @@ function PromotionStatusButton({
         onClick={async () => {
           if (
             await notifyConfirm({
-              title: active ? 'Deactivate this promotion?' : 'Activate this promotion?',
-              confirmButtonText: active ? 'Deactivate' : 'Activate',
+              title: active ? 'Delete this promotion?' : 'Activate this promotion?',
+              confirmButtonText: active ? 'Delete' : 'Activate',
               message:
-                'Future spending eligibility changes. Past discounts keep the rate they were given.',
+                'Delete deactivates this promotion. Historical discounts and audit records are preserved.',
             })
           )
             save.mutate();
         }}
       >
-        {active ? 'Deactivate' : 'Activate'}
+        {active ? 'Delete' : 'Activate'}
       </Button>
       {save.isError && <p role="alert">{save.error.message}</p>}
     </>
@@ -642,7 +658,7 @@ function NewPromotionForm({
   services: { id: string; name: string; isActive: boolean; isStaycationEligible?:boolean }[];
   onSaved: () => void;
 }) {
-  const [serviceId, setServiceId] = useState('');
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [ruleKind,setRuleKind]=useState<'promotion'|'accommodation'>('promotion');
   const [rate, setRate] = useState('');
   const [tiers, setTiers] = useState<Tier[]>(['GOLD']);
@@ -655,8 +671,9 @@ function NewPromotionForm({
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
-      createRedemptionRule({
+    mutationFn: async () => {
+      for (const serviceId of serviceIds) {
+        await createRedemptionRule({
         serviceId,
         ruleKind,
         pesoValuePerPoint: rate,
@@ -669,7 +686,12 @@ function NewPromotionForm({
         isActive: true,
         promotionReference: reference.trim(),
         allowDiscountStacking: stacking,
-      }),
+      });
+        setServiceIds((current) => current.filter((id) => id !== serviceId));
+        onSaved();
+      }
+    },
+    retry: false,
     onSuccess: () => {
       setError(null);
       notifySuccess({ title: 'Spending promotion added' });
@@ -686,17 +708,17 @@ function NewPromotionForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add a spending promotion</h3>
+      <h3>Add a spending promotion</h3><p>Select one or more services; each receives its own promotion or conversion rule.</p>
       <p>
-        One service, both dates, and a named reference are all mandatory: a promotion that never
+        Selected services, both dates, and a named reference are all mandatory: a promotion that never
         expires, names nothing, or cannot be reviewed cannot be created.
       </p>
       <label htmlFor="promo-kind">Redemption rule type</label><select id="promo-kind" value={ruleKind} onChange={event=>setRuleKind(event.target.value==='accommodation'?'accommodation':'promotion')}><option value="promotion">Service spending promotion</option><option value="accommodation">Accommodation conversion rule</option></select>
       <label htmlFor="promo-service">Service</label>
       <select
         id="promo-service"
-        value={serviceId}
-        onChange={(e) => setServiceId(e.target.value)}
+        multiple disabled={save.isPending} value={serviceIds}
+        onChange={(e) => setServiceIds(Array.from(e.target.selectedOptions, (option) => option.value).filter(Boolean))}
       >
         <option value="">Choose a service</option>
         {services
@@ -787,7 +809,7 @@ function NewPromotionForm({
         loading={save.isPending}
         loadingLabel="Saving…"
         disabled={
-          !serviceId ||
+          serviceIds.length === 0 ||
           !rate ||
           tiers.length === 0 ||
           !minimum ||
@@ -796,7 +818,9 @@ function NewPromotionForm({
           start >= end ||
           reference.trim().length < 3
         }
-        onClick={() => save.mutate()}
+        onClick={async () => {
+          if (await notifyConfirm({ title: 'Save these service rules?', message: `${serviceIds.length} service(s) selected. Each receives its own rule. Existing transactions stay unchanged.`, confirmButtonText: 'Save rules' })) save.mutate();
+        }}
       >
         Add promotion
       </Button>

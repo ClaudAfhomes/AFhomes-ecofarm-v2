@@ -18,7 +18,7 @@
  * The SQL itself is executed by the database integration suite, not here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { pointApprovalSchema } from '@afhomes/contracts';
+import { pointApprovalSchema, pointEarningRuleSchema } from '@afhomes/contracts';
 import { hashIdentifier } from '../_lib/identifier.js';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
@@ -1579,6 +1579,7 @@ describe('points: service catalog and earning rules', () => {
     const s = await call({ familyPath: 'rules', method: 'POST', body: ADULT_RULE });
     expect(s.status).toBe(201);
     expect(body(s)).toMatchObject({ serviceId: SERVICE_ID, pointsAmount: 500 });
+    expect(pointEarningRuleSchema.safeParse(body(s)).success).toBe(true);
     expect(db.calls.some((c) => c.table === 'audit_events' && c.op === 'insert')).toBe(true);
   });
 
