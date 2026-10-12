@@ -104,8 +104,7 @@ describe('earn points: identify', () => {
       claimable: false,
     } as never);
     render();
-    await user.type(await screen.findByLabelText(/member code/i), 'MBS-000777');
-    await user.click(screen.getByRole('button', { name: /find member/i }));
+
     await user.selectOptions(await screen.findByLabelText('Resume an existing sale'), id);
     await user.click(await screen.findByRole('button', { name: 'Complete the sale' }));
     expect(completePurchase).toHaveBeenCalledWith(id);

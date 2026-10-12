@@ -15,7 +15,7 @@
 
 /* Hidden until the camera is actually asked for, so the screen does not open on
    an empty grey box and staff do not think the scanner is broken. */
-.scanVideo:not([srcObject]) {
+.scanVideo[data-scanning='false'] {
   display: none;
 }
 

@@ -113,6 +113,7 @@ export function BusinessPointsPage() {
   // cannot prove the returned callback ref is stable while it is reached through
   // an object.
   const {
+    status: scanStatus,
     message: scanMessage,
     videoRef,
     start: startScan,
@@ -171,12 +172,12 @@ export function BusinessPointsPage() {
   const ownPurchases = useQuery({
     queryKey: ['earning', 'own-purchases'],
     queryFn: listOwnPurchases,
-    enabled: Boolean(member),
+
     refetchInterval: 15_000,
   });
   const resumable = (ownPurchases.data ?? []).filter(
     (purchase) =>
-      purchase.membershipId === member?.membershipId &&
+      (!member || purchase.membershipId === member.membershipId) &&
       purchase.status !== 'reversed' &&
       !purchase.claimStatus,
   );
@@ -279,11 +280,10 @@ export function BusinessPointsPage() {
   return (
     <>
       <PageHeader
-        title="Earn Points"
+        title="Elite Service Delivery"
         description="Scan the member's card, record the purchase, and issue their claim code."
       />
 
-      {member && (
         <section aria-label="Resume sale">
           {ownPurchases.isLoading && <Skeleton />}
           {ownPurchases.isError && (
@@ -319,14 +319,13 @@ export function BusinessPointsPage() {
             </>
           )}
         </section>
-      )}
       <section aria-label="Identify the member">
         <h2>1. Identify the member</h2>
 
         <Button variant="secondary" onClick={() => startScan()}>
           Scan the member&apos;s card
         </Button>
-        <video ref={videoRef} className={styles.scanVideo} aria-label="Card scanner" />
+        <video ref={videoRef} className={styles.scanVideo} data-scanning={scanStatus === 'scanning'} aria-label="Card scanner" />
         {scanMessage && <p role="status">{scanMessage}</p>}
 
         <label htmlFor="earning-manual">Or type the member code</label>
