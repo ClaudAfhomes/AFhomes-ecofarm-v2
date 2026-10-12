@@ -35,7 +35,15 @@ export const loginPathFor = (portal: EntryPortal): string =>
   portal === 'staff' ? '/staff/login' : '/admin/login';
 
 /** Same-origin web (customer/OST) base. Falls back to this origin in production. */
-export const webBase = (): string => env.VITE_WEB_URL || window.location.origin;
+export const webBase = (): string => {
+  const base = env.VITE_WEB_URL || window.location.origin;
+  const loopback = new Set(['localhost', '127.0.0.1', '[::1]']);
+  // A deployed portal must not inherit the local development URL default.
+  if (!loopback.has(window.location.hostname) && loopback.has(new URL(base).hostname)) {
+    return window.location.origin;
+  }
+  return base;
+};
 
 /** Auth pages must never become a post-login landing: the forced-change
  *  screen (`/admin/profile`) renders identically to the account screen, so
