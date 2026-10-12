@@ -16,7 +16,8 @@ import {
 } from '../../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../../_lib/envelope.js';
 import type { VercelRequest, VercelResponse } from '../../_lib/http.js';
-import { anonClient, serviceClient } from '../../_lib/rest.js';
+import { anonClient, serviceClient, userClient } from '../../_lib/rest.js';
+import { extractBearerToken } from '../../_lib/token.js';
 
 // All database access in this handler uses the server-only service client after authorization.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -657,7 +658,14 @@ async function dashboard(db: Db, range: string) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const db = serviceClient() as Db;
+  const svc = serviceClient() as Db | null;
+  // Preview holds no service role: GET endpoints read through the caller's
+  // own RLS-scoped rows (SELECT-only browser grants plus has_permission
+  // policies, exactly as designed). Every mutation stays service-only: staff
+  // invitation and password rotation need the Auth admin API, and governance
+  // writes are deliberately not exposed to browser roles.
+  const db = (svc ?? userClient(extractBearerToken(req) ?? '')) as Db;
+  const keyless = !svc;
   const path = String(req.query.afPath ?? '');
   const method = req.method ?? 'GET';
   try {
@@ -690,6 +698,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
     if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+    // Mutations need the service role (Auth admin API, governance writes).
+    if (keyless && method !== 'GET')
+      return fail(res, 'INTERNAL', 'This operation requires an isolated configured backend.', 503);
     // My Account display-name update (AF Homes pattern: PATCH /admin/session).
     // Self-service: resolves the principal directly so it stays reachable
     // while `mustChangePassword` gates every module-guarded endpoint.

@@ -1421,15 +1421,27 @@ describe('customer profile on a read-only backend', () => {
     await portal(makeReq({ familyPath: '', token: TOKEN }) as never, denied.res as never);
     expect(denied.state.status).toBe(403);
   });
-  it('keeps mutations unavailable without an isolated configured backend', async () => {
-    const db = holder.db as FakeSupabase;
+  it('rotates credentials through the caller-bound wrapper without a service key', async () => {
+    const db = install({
+      rpcs: [
+        {
+          fn: 'preview_customer_reissue',
+          result: [
+            { membership_id: MEMBERSHIP_ID, fallback_code: 'AFH-1111-2222', qr_token: 'qrtoken' },
+          ],
+        },
+      ],
+    });
     holder.svcNull = true;
     const res = makeRes();
     await portal(
       makeReq({ method: 'POST', familyPath: 'membership/credentials', token: TOKEN }) as never,
       res.res as never,
     );
-    expect(res.state.status).toBe(503);
+    expect(res.state.status).toBe(201);
+    expect(db.calls.find((c) => c.table === 'preview_customer_reissue')?.arg).toEqual({
+      p_membership_id: MEMBERSHIP_ID,
+    });
     expect(db.calls.some((c) => c.table === 'reissue_membership_credentials')).toBe(false);
   });
 });

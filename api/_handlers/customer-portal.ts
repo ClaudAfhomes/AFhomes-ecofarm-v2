@@ -131,8 +131,30 @@ const toMembership = (
   };
 };
 
+/** One position row. Shared by the service fetch and the Preview bundle. */
+const toPointsPosition = (row: Record<string, unknown>) => ({
+  membershipId: row.membership_id,
+  balance: Number(row.balance ?? 0),
+  annualCap: Number(row.annual_cap ?? 0),
+  remainingEarningCapacity: Number(row.remaining_earning_capacity ?? 0),
+  spendable: Number(row.spendable ?? 0),
+  reversalDebt: Number(row.reversal_debt ?? 0),
+  periodStart: isoOrNull(row.period_start) ?? '',
+  periodEnd: isoOrNull(row.period_end) ?? '',
+  tier: row.tier ?? 'BRONZE',
+  earnedThisPeriod: Number(row.earned_this_period ?? 0),
+  redeemedThisPeriod: Number(row.redeemed_this_period ?? 0),
+});
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const db = serviceClient() as Db;
+  const svc = serviceClient() as Db | null;
+  // Preview holds no service role: the principal above still resolves through
+  // the caller-bound ownership lookup, and the paths below switch to the
+  // matching preview_* wrapper. Other customer reads attempt the caller's own
+  // RLS-scoped rows directly.
+  const caller = svc ? null : (userClient(extractBearerToken(req) ?? '') as Db | null);
+  const db = (svc ?? caller) as Db;
+  const keyless = !svc;
 
   try {
     if (method(req) !== 'GET' && method(req) !== 'POST') {
@@ -146,15 +168,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const principal: CustomerPrincipal = resolved;
     const path = subPath(req);
 
-    if (!db) {
-      if (path !== '' || method(req) !== 'GET')
-        return fail(
-          res,
-          'INTERNAL',
-          'This operation requires an isolated configured backend.',
-          503,
-        );
-      const caller = userClient(extractBearerToken(req) ?? '');
+    if (!db)
+      return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+
+    // Keyless profile reads keep the existing caller-bound RPC contract:
+    // the member's own profile resolves through afhomes_self_customer_profile
+    // and nothing else. Every other path below uses a preview_* wrapper.
+    if (!svc && path === '' && method(req) === 'GET') {
       if (!caller) return fail(res, 'INTERNAL', 'Supabase authentication is not configured', 500);
       const result = await caller.rpc('afhomes_self_customer_profile', {});
       if (result.error)
@@ -309,6 +329,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           403,
         );
       }
+      // Keyless callers use the wrapper, which resolves the same membership
+      // from auth.uid() and returns the identical position shape.
+      if (keyless) {
+        const wrapped = await db.rpc('preview_customer_position');
+        if (wrapped.error) {
+          if (String(wrapped.error.message ?? '').includes('MEMBERSHIP_NOT_FOUND'))
+            return fail(res, 'NOT_FOUND', 'No active membership found', 404);
+          throw wrapped.error;
+        }
+        const own = (
+          Array.isArray(wrapped.data) ? wrapped.data[0] : wrapped.data
+        ) as Record<string, unknown> | undefined;
+        if (!own) return fail(res, 'NOT_FOUND', 'No points account found', 404);
+        return res.status(200).json(toPointsPosition(own));
+      }
       const membership = await activeMembershipOf(db, principal.customerId);
       if (!membership) return fail(res, 'NOT_FOUND', 'No active membership found', 404);
 
@@ -337,28 +372,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
       if (!row) return fail(res, 'NOT_FOUND', 'No points account found', 404);
-      return res.status(200).json({
-        membershipId: row.membership_id,
-        balance: Number(row.balance ?? 0),
-        annualCap: Number(row.annual_cap ?? 0),
-        remainingEarningCapacity: Number(row.remaining_earning_capacity ?? 0),
-        spendable: Number(row.spendable ?? 0),
-        reversalDebt: Number(row.reversal_debt ?? 0),
-        periodStart: isoOrNull(row.period_start) ?? '',
-        periodEnd: isoOrNull(row.period_end) ?? '',
-        tier: row.tier ?? 'BRONZE',
-        earnedThisPeriod: Number(row.earned_this_period ?? 0),
-        redeemedThisPeriod: Number(row.redeemed_this_period ?? 0),
-      });
+      return res.status(200).json(toPointsPosition(row));
     }
 
     if (path === 'refunds' && method(req) === 'GET') {
       if (!isActiveCustomer(principal))
         return fail(res, 'FORBIDDEN', 'Your account is not active.', 403);
-      const result = await db.rpc('service_refund_history', {
-        p_purchase_id: null,
-        p_customer_id: principal.customerId,
-      });
+      // Keyless callers use the wrapper, which scopes history to auth.uid().
+      const result = keyless
+        ? await db.rpc('preview_customer_refunds')
+        : await db.rpc('service_refund_history', {
+          p_purchase_id: null,
+          p_customer_id: principal.customerId,
+        });
       if (result.error) return fail(res, 'INTERNAL', 'Refund history is unavailable.', 500);
       return list(res, result.data ?? []);
     }
@@ -410,6 +436,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('account_id', (account as { id: string }).id);
         return req.query.entryType === 'redemption' ? query.eq('entry_type', 'redemption') : query;
       };
+      let rows: Record<string, unknown>[];
+      let nextCursor: string | null;
+      const referenceNumbers = new Map<string, string>();
+      const redemptionByRef = new Map<string, Record<string, unknown>>();
+      if (keyless) {
+        // The wrapper pages the caller's own ledger and resolves the same
+        // reference numbers server-side; the entry mapping below is shared.
+        const wrapped = await db.rpc('preview_customer_ledger', {
+          p_cursor_occurred_at: cursor?.occurredAt ?? null,
+          p_cursor_id: cursor ? cursor.id : null,
+          p_entry_type: req.query.entryType === 'redemption' ? 'redemption' : null,
+        });
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        const bundle = (wrapped.data ?? {}) as {
+          rows?: Record<string, unknown>[];
+          next_cursor?: { occurredAt?: string; id?: string | number } | null;
+          quotes?: { id?: string; quote_number?: string }[];
+          claims?: { id?: string; claim_number?: string }[];
+          purchases?: { id?: string; purchase_number?: string }[];
+          redemptions?: Record<string, unknown>[];
+        };
+        rows = bundle.rows ?? [];
+        nextCursor = bundle.next_cursor
+          ? Buffer.from(
+              JSON.stringify({
+                occurredAt: String(bundle.next_cursor.occurredAt),
+                id: String(bundle.next_cursor.id),
+              }),
+            ).toString('base64url')
+          : null;
+        for (const quote of bundle.quotes ?? [])
+          if (quote.id) referenceNumbers.set('redemption_quote:' + quote.id, String(quote.quote_number));
+        for (const claim of bundle.claims ?? [])
+          if (claim.id) referenceNumbers.set('earning_claim:' + claim.id, String(claim.claim_number));
+        for (const purchase of bundle.purchases ?? [])
+          if (purchase.id) referenceNumbers.set('purchase:' + purchase.id, String(purchase.purchase_number));
+        for (const redemption of bundle.redemptions ?? [])
+          redemptionByRef.set(String(redemption.id), redemption);
+      } else {
       let candidates: Record<string, unknown>[];
       if (cursor) {
         // Read the remaining timestamp ties first, then fill with strictly older rows.
@@ -438,20 +503,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (result.error) throw result.error;
         candidates = result.data ?? [];
       }
-      const rows = candidates.slice(0, pageSize);
-      const last = rows.at(-1);
-      const nextCursor =
-        candidates.length > pageSize && last
-          ? Buffer.from(
-              JSON.stringify({ occurredAt: String(last.created_at), id: String(last.id) }),
-            ).toString('base64url')
-          : null;
+      rows = candidates.slice(0, pageSize);
+      {
+        const last = rows.at(-1);
+        nextCursor =
+          candidates.length > pageSize && last
+            ? Buffer.from(
+                JSON.stringify({ occurredAt: String(last.created_at), id: String(last.id) }),
+              ).toString('base64url')
+            : null;
+      }
 
       /* Redemption rows are joined in so the member sees WHAT they spent points
        * on, not just a number going down. The driving set is already this
        * customer's own ledger, and the redemption is additionally pinned to the
        * same customer id, so the join cannot widen anything. */
-      const referenceNumbers = new Map<string, string>();
       const quoteRefs = rows
         .filter(
           (row) =>
@@ -505,7 +571,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .map((r) => String(r.reference_id)),
         ),
       ];
-      const redemptionByRef = new Map<string, Record<string, unknown>>();
       if (redemptionRefs.length > 0) {
         const { data: redemptions } = await db
           .from('redemptions')
@@ -517,6 +582,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const row of (redemptions ?? []) as Record<string, unknown>[]) {
           redemptionByRef.set(String(row.id), row);
         }
+      }
       }
 
       return res.status(200).json({
@@ -611,11 +677,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const membership = await activeMembershipOf(db, principal.customerId);
       if (!membership) return fail(res, 'NOT_FOUND', 'No active membership found', 404);
 
-      const { data, error } = await db.rpc('reissue_membership_credentials', {
-        p_membership_id: membership.id,
-        p_customer_id: principal.customerId,
-        p_actor_id: principal.userId,
-      });
+      // Keyless callers use the wrapper, which re-checks ownership in SQL.
+      const { data, error } = keyless
+        ? await db.rpc('preview_customer_reissue', {
+            p_membership_id: membership.id,
+          })
+        : await db.rpc('reissue_membership_credentials', {
+          p_membership_id: membership.id,
+          p_customer_id: principal.customerId,
+          p_actor_id: principal.userId,
+        });
       if (error) return mapRpcError(res, error);
       const row = (Array.isArray(data) ? data[0] : data) as
         { membership_id: string; fallback_code: string; qr_token: string } | undefined;

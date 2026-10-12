@@ -2,6 +2,17 @@ import { pointRefundInputSchema, pointPurchaseCancellationSchema } from '@afhome
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { deny, fail, jsonBody, list, mapRpcError, type Db } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+/** One point-refund row. Shared by the service fetch and the Preview bundle. */
+const toPointRefundRow = (row: Record<string, unknown>) => ({
+  id: row.id,
+  serviceValue: row.service_value,
+  pointsRestored: Number(row.points_restored),
+  reference: row.refund_reference,
+  reason: row.reason,
+  reviewedBy: row.reviewed_by,
+  reviewedAt: row.reviewed_at,
+});
+
 export async function handlePointRefunds(
   req: VercelRequest,
   res: VercelResponse,
@@ -9,6 +20,7 @@ export async function handlePointRefunds(
   purchaseId: string,
   operation: string,
   verb: string,
+  keyless = false,
 ) {
   const auth = await authorizeAfHomes(
     req,
@@ -17,6 +29,13 @@ export async function handlePointRefunds(
   );
   if ('error' in auth) return deny(res, auth);
   if (operation === 'point-refunds' && verb === 'GET') {
+    if (keyless) {
+      const wrapped = await db.rpc('preview_staff_point_refunds', {
+        p_purchase_id: purchaseId,
+      });
+      if (wrapped.error) return mapRpcError(res, wrapped.error);
+      return list(res, ((wrapped.data ?? []) as Record<string, unknown>[]).map(toPointRefundRow));
+    }
     const { data, error } = await db
       .from('purchase_point_refunds')
       .select('id,service_value,points_restored,refund_reference,reason,reviewed_by,reviewed_at')
@@ -25,15 +44,7 @@ export async function handlePointRefunds(
     if (error) return mapRpcError(res, error);
     return list(
       res,
-      (data ?? []).map((row: Record<string, unknown>) => ({
-        id: row.id,
-        serviceValue: row.service_value,
-        pointsRestored: Number(row.points_restored),
-        reference: row.refund_reference,
-        reason: row.reason,
-        reviewedBy: row.reviewed_by,
-        reviewedAt: row.reviewed_at,
-      })),
+      (data ?? []).map(toPointRefundRow),
     );
   }
   if (verb !== 'POST') return fail(res, 'NOT_FOUND', 'Not found', 404);
@@ -46,20 +57,34 @@ export async function handlePointRefunds(
   let result;
   if (operation === 'point-refunds') {
     const refund = pointRefundInputSchema.parse(body.data);
-    result = await db.rpc('refund_purchase_redeemed_points', {
-      p_purchase_id: purchaseId,
-      p_service_value: refund.serviceValue,
-      p_reference: refund.reference,
-      p_reason: refund.reason,
-      p_service_review_confirmed: refund.serviceReviewConfirmed,
-      p_actor_id: auth.userId,
-    });
+    // Keyless callers use the wrapper: same refund math, actor bound to the JWT.
+    result = keyless
+      ? await db.rpc('preview_staff_refund_points', {
+          p_purchase_id: purchaseId,
+          p_service_value: refund.serviceValue,
+          p_reference: refund.reference,
+          p_reason: refund.reason,
+          p_service_review_confirmed: refund.serviceReviewConfirmed,
+        })
+      : await db.rpc('refund_purchase_redeemed_points', {
+        p_purchase_id: purchaseId,
+        p_service_value: refund.serviceValue,
+        p_reference: refund.reference,
+        p_reason: refund.reason,
+        p_service_review_confirmed: refund.serviceReviewConfirmed,
+        p_actor_id: auth.userId,
+      });
   } else
-    result = await db.rpc('cancel_reserved_point_purchase', {
-      p_purchase_id: purchaseId,
-      p_reason: body.data.reason,
-      p_actor_id: auth.userId,
-    });
+    result = keyless
+      ? await db.rpc('preview_staff_cancel_reserved', {
+          p_purchase_id: purchaseId,
+          p_reason: body.data.reason,
+        })
+      : await db.rpc('cancel_reserved_point_purchase', {
+        p_purchase_id: purchaseId,
+        p_reason: body.data.reason,
+        p_actor_id: auth.userId,
+      });
   if (result.error) {
     if (
       result.error.message.includes('REFUND_') ||

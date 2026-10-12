@@ -383,11 +383,14 @@ try {
       2,
     ),
   );
-  check('Exact preservation allowlist includes the server-only ACL correction', selected.length, 27);
+  // The caller-bound Preview wrappers (20261125) ride the same atomic batch:
+  // function and grant creation only, no business rows, no locks, no
+  // transaction envelope, so the cutover/preservation accounting is unaffected.
+  check('Exact preservation allowlist includes the server-only ACL correction', selected.length, 28);
   check(
-    'Selected batch ends with the forward-only ACL patch',
+    'Selected batch ends with the forward-only Preview caller wrappers',
     selected.at(-1),
-    '20261124000001_afhomes_points_position_service_acl.sql',
+    '20261125000001_afhomes_preview_caller_wrappers.sql',
   );
   await db.query('begin');
   const m = members[0],

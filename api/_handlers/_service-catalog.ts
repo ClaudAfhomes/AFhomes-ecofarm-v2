@@ -7,7 +7,8 @@ import {
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { deny, fail, jsonBody, list, mapRpcError, method, type Db } from '../_lib/handler-kit.js';
 import { extensionFor, signatureMatches } from '../_lib/media-signature.js';
-import { serviceClient } from '../_lib/rest.js';
+import { serviceClient, userClient } from '../_lib/rest.js';
+import { extractBearerToken } from '../_lib/token.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const SELECT =
@@ -27,6 +28,14 @@ async function present(db: Db, row: Record<string, unknown>) {
       };
     }),
   );
+  return presentRow(row, photos);
+}
+
+/** Row presentation shared by the signed-URL path and the Preview path. */
+const presentRow = (
+  row: Record<string, unknown>,
+  photos: { id: string; url?: string; alt: string }[],
+) => {
   const details = (row.details ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
@@ -45,11 +54,19 @@ async function present(db: Db, row: Record<string, unknown>) {
     pricingUnit: details.pricingUnit ?? 'unit',
     highlights: details.highlights ?? [],
   };
-}
+};
+
+/** Preview rows carry stored photo metadata but no signed URLs (see above). */
+const toServiceRow = (row: Record<string, unknown>) => presentRow(row, []);
 
 export async function handleServiceCatalog(req: VercelRequest, res: VercelResponse, path: string) {
-  const db = serviceClient();
+  const svc = serviceClient();
+  // Preview holds no service key: reads and metadata writes go through the
+  // caller-bound wrappers. Photo bytes still need Storage, so uploads stay
+  // service-only (503 below) and Preview lists carry no signed image URLs.
+  const db = svc ?? userClient(extractBearerToken(req) ?? '');
   if (!db) return fail(res, 'INTERNAL', 'The service catalog is unavailable.', 500);
+  const keyless = !svc;
   const verb = method(req);
   if ((path === 'services' || path === 'public/services') && verb === 'GET') {
     const publicRead = path === 'public/services';
@@ -57,12 +74,21 @@ export async function handleServiceCatalog(req: VercelRequest, res: VercelRespon
       const auth = await authorizeAfHomes(req, 'operations.catalog', 'view');
       if ('error' in auth) return deny(res, auth);
     }
-    let query = db.from('service_catalog').select(SELECT).order('name').limit(200);
+    if (keyless && !publicRead) {
+      const wrapped = await (db as Db).rpc('preview_staff_services');
+      if (wrapped.error) return mapRpcError(res, wrapped.error);
+      res.setHeader('Cache-Control', 'no-store');
+      return list(res, ((wrapped.data ?? []) as Record<string, unknown>[]).map(toServiceRow));
+    }
+    // Public reads stay on the service path: unpublished rows must never leak
+    // through a caller-scoped client.
+    if (keyless) return fail(res, 'INTERNAL', 'The service catalog is unavailable.', 500);
+    let query = (db as Db).from('service_catalog').select(SELECT).order('name').limit(200);
     if (publicRead) query = query.eq('published', true).eq('is_active', true);
     const { data, error } = await query;
     if (error) return mapRpcError(res, error);
     res.setHeader('Cache-Control', 'no-store');
-    return list(res, await Promise.all((data ?? []).map((row) => present(db, row))));
+    return list(res, await Promise.all((data ?? []).map((row: Record<string, unknown>) => present(db as Db, row))));
   }
   const patch = path.match(/^services\/([0-9a-f-]{36})$/i);
   const photo = path.match(/^services\/([0-9a-f-]{36})\/photos$/i);
@@ -73,7 +99,16 @@ export async function handleServiceCatalog(req: VercelRequest, res: VercelRespon
   ) {
     const auth = await authorizeAfHomes(req, 'operations.catalog', 'update');
     if ('error' in auth) return deny(res, auth);
-    const { data, error } = await db.rpc('manage_service_photo', {
+    // Keyless callers use the wrapper: same photo rules, actor bound to the JWT.
+    const { data, error } = keyless
+      ? await (db as Db).rpc('preview_staff_service_photo', {
+          p_service_id: changePhoto[1],
+          p_photo_id: changePhoto[2],
+          p_operation: verb === 'DELETE' ? 'remove' : 'cover',
+          p_path: null,
+          p_alt: null,
+        })
+      : await (db as Db).rpc('manage_service_photo', {
       p_service_id: changePhoto[1],
       p_photo_id: changePhoto[2],
       p_operation: verb === 'DELETE' ? 'remove' : 'cover',
@@ -84,7 +119,7 @@ export async function handleServiceCatalog(req: VercelRequest, res: VercelRespon
     if (error) return mapRpcError(res, error);
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) return fail(res, 'NOT_FOUND', 'Service photo not found.', 404);
-    return res.status(200).json(await present(db, row));
+    return res.status(200).json(keyless ? toServiceRow(row) : await present(db as Db, row));
   }
   if ((path === 'services' && verb === 'POST') || (patch && verb === 'PATCH')) {
     const auth = await authorizeAfHomes(req, 'operations.catalog', patch ? 'update' : 'create');
@@ -95,7 +130,13 @@ export async function handleServiceCatalog(req: VercelRequest, res: VercelRespon
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Check the service details.', 400);
     const input = { ...parsed.data };
     if ('code' in input) delete input.code;
-    const { data, error } = await db.rpc('save_service_catalog', {
+    // Keyless callers use the wrapper: same catalog rules, actor bound to the JWT.
+    const { data, error } = keyless
+      ? await (db as Db).rpc('preview_staff_save_service', {
+          p_service_id: patch?.[1] ?? null,
+          p_input: input,
+        })
+      : await (db as Db).rpc('save_service_catalog', {
       p_service_id: patch?.[1] ?? null,
       p_input: input,
       p_actor_id: auth.userId,
@@ -103,11 +144,14 @@ export async function handleServiceCatalog(req: VercelRequest, res: VercelRespon
     if (error) return mapRpcError(res, error);
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) return fail(res, 'NOT_FOUND', 'Service not found.', 404);
-    return res.status(patch ? 200 : 201).json(await present(db, row));
+    return res.status(patch ? 200 : 201).json(keyless ? toServiceRow(row) : await present(db as Db, row));
   }
   if (photo && verb === 'POST') {
     const auth = await authorizeAfHomes(req, 'operations.catalog', 'update');
     if ('error' in auth) return deny(res, auth);
+    // Photo bytes live in private Storage, which needs the service key.
+    if (keyless)
+      return fail(res, 'INTERNAL', 'Photo upload needs a configured backend.', 503);
     const parsed = servicePhotoInputSchema.safeParse(jsonBody(req));
     if (!parsed.success)
       return fail(

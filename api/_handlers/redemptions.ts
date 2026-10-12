@@ -36,7 +36,8 @@ import {
   resolveMembershipByIdentifier,
 } from '../_lib/identifier.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
-import { serviceClient } from '../_lib/rest.js';
+import { serviceClient, userClient } from '../_lib/rest.js';
+import { extractBearerToken } from '../_lib/token.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 /** The name a member is greeted by. No government data, ever. */
@@ -97,8 +98,12 @@ const ITEM_SELECT =
   'id, code, name, description, category, points_cost, is_active, sort_order, created_at, updated_at';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const db = serviceClient() as Db;
+  const svc = serviceClient() as Db | null;
+  // Preview holds no service role: resolution goes through the caller-bound
+  // wrapper, which hashes server-side and returns the same no-PII preview.
+  const db = (svc ?? userClient(extractBearerToken(req) ?? '')) as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+  const keyless = !svc;
 
   const path = subPath(req);
   const verb = method(req);
@@ -137,6 +142,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'An identifier is required', 400);
       }
 
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_resolve_member', {
+          p_identifier: identifier,
+        });
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        const preview = wrapped.data as Record<string, unknown> | null;
+        // One refusal for unknown, rotated-out and malformed alike.
+        if (!preview) return fail(res, 'NOT_FOUND', 'No membership matches that identifier', 404);
+        return res.status(200).json({
+          membershipId: preview.membershipId,
+          membershipNumber: preview.membershipNumber,
+          customerDisplayName: preview.customerDisplayName ?? 'Unknown customer',
+          productName: preview.productName ?? null,
+          membershipStatus: preview.membershipStatus,
+          expired: preview.expired === true,
+          redeemable: preview.redeemable === true,
+          blockedReason: (preview.blockedReason as string | null) ?? null,
+          pointsBalance: Number(preview.pointsBalance ?? 0),
+          matchedBy: preview.matchedBy,
+        });
+      }
       const resolved = await resolveMembershipByIdentifier(db, identifier);
       // One refusal for unknown, rotated-out and malformed alike. Distinguishing
       // them would let a caller probe which codes ever existed.
@@ -170,6 +196,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (await authorizeAfHomes(req, 'operations.redemption', 'view')) ??
         (await authorizeAfHomes(req, 'operations.catalog', 'view'));
       if ('error' in auth) return deny(res, auth);
+      // The Phase-4 catalog tables are staff-only with no browser grants, so
+      // this retired catalog list stays service-only.
+      if (keyless)
+        return fail(res, 'INTERNAL', 'The redemption catalog needs a configured backend.', 503);
 
       // Inactive items are management-only: redemption operators and the
       // Phase 22 POS fetch normally receive active items only. A caller that
@@ -219,6 +249,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (await authorizeAfHomes(req, 'operations.redemption', 'view')) ??
         (await authorizeAfHomes(req, 'operations.catalog', 'view'));
       if ('error' in auth) return deny(res, auth);
+      if (keyless)
+        return fail(res, 'INTERNAL', 'The redemption catalog needs a configured backend.', 503);
 
       const { data, error } = await db
         .from('redemption_items')
@@ -264,6 +296,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if ((path === '' || path === 'history') && verb === 'GET') {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
       if ('error' in auth) return deny(res, auth);
+      // The Phase-4 redemption tables are staff-only with no browser grants.
+      if (keyless)
+        return fail(res, 'INTERNAL', 'Redemption history needs a configured backend.', 503);
       const parsed = historyQuery(req);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid history query', 400);
       const { limit, offset, status, itemId, membershipNumber, from, to } = parsed.data;
@@ -307,6 +342,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (detail) {
       const auth = await authorizeAfHomes(req, 'operations.redemption', 'view');
       if ('error' in auth) return deny(res, auth);
+      if (keyless)
+        return fail(res, 'INTERNAL', 'Redemption history needs a configured backend.', 503);
       const { data, error } = await db
         .from('redemptions')
         .select(SELECT_REDEMPTION)

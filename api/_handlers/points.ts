@@ -66,7 +66,8 @@ import {
   route,
   subPath,
 } from '../_lib/handler-kit.js';
-import { serviceClient } from '../_lib/rest.js';
+import { serviceClient, userClient } from '../_lib/rest.js';
+import { extractBearerToken } from '../_lib/token.js';
 import { resolveCustomerPrincipal } from '../_lib/customer-access.js';
 import { hashIdentifier, normalizeIdentifier } from '../_lib/identifier.js';
 import { handlePointRefunds } from './_point-refunds.js';
@@ -194,6 +195,34 @@ const REDEMPTION_RULE_COLUMNS =
   'min_purchase_amount, effective_start, effective_end, is_active, promotion_reference, ' +
   'allow_discount_stacking, rule_kind';
 
+/** One tier rate row. Shared by the service fetch and the Preview bundle. */
+const toTierDiscountRow = (row: Record<string, unknown>) => ({
+  id: row.id,
+  serviceId: row.service_id,
+  tier: row.tier,
+  discountRate: Number(row.discount_rate),
+  effectiveStart: String(row.effective_start).slice(0, 10),
+  effectiveEnd: String(row.effective_end).slice(0, 10),
+  isActive: row.is_active === true,
+});
+
+/** One earning rule row. Shared by the service fetch and the Preview bundle. */
+const toEarningRuleRow = (row: Record<string, unknown>) => ({
+  id: row.id,
+  serviceId: row.service_id,
+  pointsAmount: Number(row.points_amount),
+  eligibleTiers: row.eligible_tiers ?? [],
+  effectiveStart: isoOrNull(row.effective_start),
+  effectiveEnd: isoOrNull(row.effective_end),
+  isActive: row.is_active === true,
+  minQuantity: Number(row.min_quantity ?? 1),
+  maxAward:
+    row.max_award === null || row.max_award === undefined ? null : Number(row.max_award),
+  promotionReference: row.promotion_reference ?? null,
+  createdAt: isoOrNull(row.created_at),
+  updatedAt: isoOrNull(row.updated_at),
+});
+
 /** Row -> response. Fields are PICKED, never spread. */
 const toRedemptionRule = (row: Record<string, unknown>) => ({
   id: row.id,
@@ -231,12 +260,56 @@ function refuse(res: VercelResponse, error: { message?: string } | null): void {
  * also keeps the response camelCase, matching every other AF Homes handler and
  * the contracts the client validates against.
  */
+// Money is summed as exact decimals in SQL-free code by integer minor units,
+// never by Number(): a peso figure must not pass through a float.
+const sumMoney = (values: string[]): string => {
+  let total = 0n;
+  for (const v of values) {
+    const [whole, frac = ''] = String(v).split('.');
+    total += BigInt(whole || '0') * 100n + BigInt((frac + '00').slice(0, 2) || '0');
+  }
+  const sign = total < 0n ? '-' : '';
+  const abs = total < 0n ? -total : total;
+  return `${sign}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
+};
+
+// Money is compared in integer minor units. A STRING comparison of decimals
+// is wrong the moment a figure gains a digit ("100.00" vs "99.00"), so both
+// sides go through the same exact conversion first.
+const minorUnits = (value: string): bigint => {
+  const [whole, frac = ''] = String(value).split('.');
+  return BigInt(whole || '0') * 100n + BigInt((frac + '00').slice(0, 2) || '0');
+};
+
+/**
+ * Assemble one Sales Records page from raw rows. Shared by the service-role
+ * fetch below and the Preview wrapper bundle, so both paths present the same
+ * figures from the same code. Defined after listPurchases.
+ */
 async function listPurchases(
   db: Db,
   customerId: string | null,
   actorId: string | null = null,
   page = 0,
+  keyless = false,
 ) {
+  if (keyless) {
+    const { data, error } = await db.rpc('preview_staff_purchases', {
+      p_customer_id: customerId,
+      p_mine_only: actorId !== null,
+      p_page: page,
+    });
+    if (error) throw error;
+    const bundle = (data ?? {}) as Record<string, Record<string, unknown>[]>;
+    return assemblePurchaseList(
+      bundle.purchases ?? [],
+      bundle.payments ?? [],
+      bundle.customers ?? [],
+      bundle.staff ?? [],
+      bundle.claims ?? [],
+      bundle.lines ?? [],
+    );
+  }
   let query = db
     .from('purchases')
     .select(
@@ -267,31 +340,123 @@ async function listPurchases(
       : Promise.resolve({ data: [] as unknown[] }),
     db.from('earning_claims').select('purchase_id, status').in('purchase_id', ids),
   ]);
+  const { data: lines } = await db
+    .from('purchase_lines')
+    .select(
+      'id, purchase_id, service_id, service_name_snapshot, pricing_unit_snapshot, quantity, unit_amount, line_total, tier_discount_amount, tier_discount_rate, tier',
+    )
+    .in('purchase_id', ids);
+  return assemblePurchaseList(
+    rows,
+    asRows(paymentsRes),
+    asRows(customersRes),
+    asRows(staffRes),
+    asRows(claimsRes),
+    asRows({ data: lines }),
+  );
+}
 
-  // Money is summed as exact decimals in SQL-free code by integer minor units,
-  // never by Number(): a peso figure must not pass through a float.
-  const sumMoney = (values: string[]): string => {
-    let total = 0n;
-    for (const v of values) {
-      const [whole, frac = ''] = String(v).split('.');
-      total += BigInt(whole || '0') * 100n + BigInt((frac + '00').slice(0, 2) || '0');
-    }
-    const sign = total < 0n ? '-' : '';
-    const abs = total < 0n ? -total : total;
-    return `${sign}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
+const asRows = (res: { data?: unknown } | undefined): Record<string, unknown>[] =>
+  (res?.data ?? []) as Record<string, unknown>[];
+
+/** One claim list row: accepts the embedded service shape or the flat bundle. */
+const toClaimListRow = (row: Record<string, unknown>) => {
+  const customers = (row.customers ?? null) as Record<string, unknown> | null;
+  const names = customers ?? {
+    first_name: row.first_name,
+    middle_name: row.middle_name,
+    last_name: row.last_name,
   };
-
-  // Money is compared in integer minor units. A STRING comparison of decimals
-  // is wrong the moment a figure gains a digit ("100.00" vs "99.00"), so both
-  // sides go through the same exact conversion first.
-  const minorUnits = (value: string): bigint => {
-    const [whole, frac = ''] = String(value).split('.');
-    return BigInt(whole || '0') * 100n + BigInt((frac + '00').slice(0, 2) || '0');
+  return {
+    id: row.id,
+    claimNumber: row.claim_number,
+    customerId: row.customer_id,
+    purchaseId: row.purchase_id,
+    customerNumber: customers?.customer_number ?? row.customer_number ?? null,
+    customerName:
+      names && (names.first_name ?? names.middle_name ?? names.last_name)
+        ? ['first_name', 'middle_name', 'last_name']
+            .map((key) => names[key])
+            .filter(Boolean)
+            .join(' ')
+        : null,
+    membershipNumber:
+      (row.memberships as Record<string, unknown> | null)?.membership_number ??
+      row.membership_number ??
+      null,
+    purchaseNumber:
+      (row.purchases as Record<string, unknown> | null)?.purchase_number ??
+      row.purchase_number ??
+      null,
+    serviceName:
+      (row.service_catalog as Record<string, unknown> | null)?.name ?? row.service_name ?? null,
+    status:
+      row.status === 'available' && new Date(String(row.expires_at)).getTime() <= Date.now()
+        ? 'expired'
+        : row.status,
+    pointsRequested: Number(row.points_requested),
+    pointsReserved:
+      row.status === 'available' && new Date(String(row.expires_at)).getTime() > Date.now()
+        ? Number(row.points_awarded ?? 0)
+        : 0,
+    pointsAwarded:
+      row.claimed_at && (row.status === 'claimed' || row.status === 'reversed')
+        ? Number(row.points_awarded)
+        : 0,
+    pointsCapped: Number(row.points_capped),
+    expiresAt: isoOrNull(row.expires_at),
+    claimedAt: isoOrNull(row.claimed_at),
+    createdAt: isoOrNull(row.created_at),
   };
+};
 
+/** One claim row. Shared by the service fetch and the Preview bundle. */
+const toClaimRow = (row: Record<string, unknown>) => ({
+  id: row.id,
+  claimNumber: row.claim_number,
+  customerId: row.customer_id,
+  purchaseId: row.purchase_id,
+  status: row.status,
+  pointsRequested: Number(row.points_requested ?? 0),
+  pointsReserved:
+    row.status === 'available' && new Date(String(row.expires_at)).getTime() > Date.now()
+      ? Number(row.points_awarded ?? 0)
+      : 0,
+  pointsAwarded: row.claimed_at ? Number(row.points_awarded ?? 0) : 0,
+  pointsCapped: Number(row.points_capped ?? 0),
+  expiresAt: isoOrNull(row.expires_at),
+  claimedAt: isoOrNull(row.claimed_at),
+  reversedAt: isoOrNull(row.reversed_at),
+  createdAt: isoOrNull(row.created_at),
+});
+
+/** One receipt row. Shared by the service fetch and the Preview bundle. */
+const toPaymentRow = (row: Record<string, unknown>) => ({
+  id: row.id,
+  paymentNumber: row.payment_number,
+  amount: String(row.amount),
+  method: row.method,
+  reference: row.reference ?? null,
+  status: row.status,
+  recordedBy: row.recorded_by,
+  verifiedBy: row.verified_by ?? null,
+  recordedAt: isoOrNull(row.recorded_at),
+  verifiedAt: isoOrNull(row.verified_at),
+  rejectionReason: row.rejection_reason ?? null,
+});
+
+/** Page assembly shared by the service fetch above and the Preview bundle. */
+function assemblePurchaseList(
+  rows: Record<string, unknown>[],
+  payments: Record<string, unknown>[],
+  customers: Record<string, unknown>[],
+  staff: Record<string, unknown>[],
+  claims: Record<string, unknown>[],
+  lines: Record<string, unknown>[],
+) {
   const recordedBy = new Map<string, string[]>();
   const verifiedBy = new Map<string, string[]>();
-  for (const p of (paymentsRes.data ?? []) as Record<string, unknown>[]) {
+  for (const p of payments) {
     const pid = String(p.purchase_id);
     const bucket =
       p.status === 'verified' ? verifiedBy : p.status === 'recorded' ? recordedBy : null;
@@ -300,7 +465,7 @@ async function listPurchases(
   }
 
   const customerName = new Map<string, string>();
-  for (const c of (customersRes.data ?? []) as Record<string, unknown>[]) {
+  for (const c of customers) {
     customerName.set(
       String(c.id),
       [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(' ').trim() ||
@@ -309,22 +474,16 @@ async function listPurchases(
   }
 
   const staffName = new Map<string, string>();
-  for (const s of (staffRes.data ?? []) as Record<string, unknown>[]) {
+  for (const s of staff) {
     staffName.set(String(s.id), String(s.full_name ?? ''));
   }
 
   const claimBy = new Map<string, string>();
-  for (const c of (claimsRes.data ?? []) as Record<string, unknown>[]) {
+  for (const c of claims) {
     claimBy.set(String(c.purchase_id), String(c.status));
   }
-  const { data: lines } = await db
-    .from('purchase_lines')
-    .select(
-      'id, purchase_id, service_id, service_name_snapshot, pricing_unit_snapshot, quantity, unit_amount, line_total, tier_discount_amount, tier_discount_rate, tier',
-    )
-    .in('purchase_id', ids);
   const byPurchase = new Map<string, Record<string, unknown>[]>();
-  for (const line of (lines ?? []) as Record<string, unknown>[]) {
+  for (const line of lines) {
     const key = String(line.purchase_id);
     const bucket = byPurchase.get(key) ?? [];
     bucket.push({
@@ -383,8 +542,13 @@ async function listPurchases(
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const db = serviceClient() as Db;
+  const svc = serviceClient() as Db | null;
+  // Preview holds no service role: the principals above still resolve through
+  // their caller-bound fallbacks, and every database call below switches to
+  // the matching preview_* wrapper. Service deployments use the trusted RPCs.
+  const db = (svc ?? userClient(extractBearerToken(req) ?? '')) as Db;
   if (!db) return fail(res, 'INTERNAL', 'Server configuration is incomplete', 500);
+  const keyless = !svc;
 
   const verb = method(req);
   const path = subPath(req);
@@ -406,13 +570,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         serviceRefundRoute[3],
         verb,
         serviceRefundRoute[4],
+        keyless,
       );
     const pointRefundRoute =
       /^purchases\/([0-9a-f-]{36})\/(point-refunds|cancel-point-reservation)$/.exec(path);
     if (pointRefundRoute)
-      return await handlePointRefunds(req, res, db, pointRefundRoute[1], pointRefundRoute[2], verb);
+      return await handlePointRefunds(req, res, db, pointRefundRoute[1], pointRefundRoute[2], verb, keyless);
     if (path === 'approvals' || path.startsWith('approvals/'))
-      return await handlePointApprovals(req, res, db, path, verb);
+      return await handlePointApprovals(req, res, db, path, verb, keyless);
     if (path === 'services' || path.startsWith('services/') || path === 'public/services')
       return await handleServiceCatalog(req, res, path);
     /* ================================================================
@@ -447,6 +612,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       credential = normalizeIdentifier(credential);
       if (path === 'claim/preview') {
+        if (keyless) {
+          const { data, error } = await db.rpc('preview_customer_claim_preview', {
+            p_token: credential,
+          });
+          if (error) return mapRpcError(res, error);
+          const preview = (
+            Array.isArray(data) ? data[0] : data
+          ) as Record<string, unknown> | undefined;
+          if (!preview) return fail(res, 'NOT_FOUND', 'That claim code cannot be used.', 404);
+          return res.status(200).json({
+            claimNumber: preview.claim_number,
+            purchaseNumber: preview.purchase_number ?? null,
+            serviceName: preview.service_name ?? null,
+            pointsRequested: Number(preview.points_requested),
+            pointsReserved: Number(preview.points_awarded),
+            pointsCapped: Number(preview.points_capped),
+            expiresAt: isoOrNull(preview.expires_at),
+          });
+        }
         const hash = hashIdentifier(credential);
         const { data, error } = await db
           .from('earning_claims')
@@ -479,10 +663,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // p_customer_id comes from the session, never from the body. The schema is
       // strict, so a forged customerId in the payload was already rejected.
-      const { data, error } = await db.rpc('claim_earning_points', {
-        p_token: credential,
-        p_customer_id: resolved.customerId,
-      });
+      // Keyless callers use the wrapper, which binds auth.uid() itself.
+      const { data, error } = keyless
+        ? await db.rpc('preview_customer_claim', { p_token: credential })
+        : await db.rpc('claim_earning_points', {
+            p_token: credential,
+            p_customer_id: resolved.customerId,
+          });
       if (error) return refuse(res, error);
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
       if (!row) return fail(res, 'CONFLICT', 'This claim could not be redeemed.', 409);
@@ -511,7 +698,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'pos/purchases' && verb === 'GET') {
       const reader = await authorizeAfHomes(req, 'operations.sales', 'view');
       if ('error' in reader) return deny(res, reader);
-      return list(res, await listPurchases(db, null, reader.userId, page));
+      return list(res, await listPurchases(db, null, reader.userId, page, keyless));
     }
     if ((path === 'purchases' || path === 'finance/purchases') && verb === 'GET') {
       const records = await authorizeAfHomes(
@@ -521,7 +708,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       if ('error' in records) return deny(res, records);
       const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : null;
-      return res.status(200).json({ data: await listPurchases(db, customerId, null, page) });
+      return res.status(200).json({ data: await listPurchases(db, customerId, null, page, keyless) });
     }
 
     /* ---------------- POST /points/purchases ---------------- */
@@ -535,7 +722,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // SQL prices the selected services from the catalog and freezes the result.
       // The tier choice travels explicitly: omitted means today's behavior.
-      const { data, error } = await db.rpc('create_purchase', {
+      // Keyless callers use the wrapper: same pricing, actor bound to the JWT.
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_create_purchase', {
+            p_membership_id: parsed.data.membershipId,
+            p_lines: parsed.data.lines.map((l) => ({
+              serviceId: l.serviceId,
+              quantity: l.quantity,
+            })),
+            p_reference: parsed.data.reference,
+            p_apply_tier_discount: parsed.data.applyTierDiscount ?? true,
+          })
+        : await db.rpc('create_purchase', {
         p_membership_id: parsed.data.membershipId,
         p_gross_amount: '0.00',
         p_lines: parsed.data.lines.map((l) => ({
@@ -595,7 +793,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'Enter a valid amount and a payment method.', 400);
       }
-      const { data, error } = await db.rpc('record_purchase_payment', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_record_payment', {
+            p_purchase_id: payRoute[1],
+            p_amount: parsed.data.amount,
+            p_method: parsed.data.method,
+            p_reference: parsed.data.reference,
+          })
+        : await db.rpc('record_purchase_payment', {
         p_purchase_id: payRoute[1],
         p_amount: parsed.data.amount,
         p_method: parsed.data.method,
@@ -638,7 +843,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           400,
         );
       }
-      const { data, error } = await db.rpc('verify_purchase_payment', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_verify_payment', {
+            p_payment_id: verifyRoute[1],
+            p_decision: parsed.data.decision,
+            p_rejection_reason: parsed.data.rejectionReason,
+          })
+        : await db.rpc('verify_purchase_payment', {
         p_payment_id: verifyRoute[1],
         p_decision: parsed.data.decision,
         p_rejection_reason: parsed.data.rejectionReason,
@@ -658,6 +869,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (payListRoute) {
       const reader = await authorizeAfHomes(req, 'operations.payments', 'view');
       if ('error' in reader) return deny(res, reader);
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_payments', {
+          p_purchase_id: payListRoute[1],
+        });
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        return list(res, ((wrapped.data ?? []) as Record<string, unknown>[]).map(toPaymentRow));
+      }
       const { data, error } = await db
         .from('purchase_payments')
         .select(
@@ -672,19 +890,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rows = (data ?? []) as Record<string, unknown>[];
       return list(
         res,
-        rows.map((row) => ({
-          id: row.id,
-          paymentNumber: row.payment_number,
-          amount: String(row.amount),
-          method: row.method,
-          reference: row.reference ?? null,
-          status: row.status,
-          recordedBy: row.recorded_by,
-          verifiedBy: row.verified_by ?? null,
-          recordedAt: isoOrNull(row.recorded_at),
-          verifiedAt: isoOrNull(row.verified_at),
-          rejectionReason: row.rejection_reason ?? null,
-        })),
+        rows.map(toPaymentRow),
       );
     }
 
@@ -699,6 +905,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (claimRoute) {
       const reader = await authorizeAfHomes(req, 'operations.redemption', 'view');
       if ('error' in reader) return deny(res, reader);
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_claim', { p_claim_id: claimRoute[1] });
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        if (!wrapped.data) return fail(res, 'NOT_FOUND', 'No claim matches that reference', 404);
+        return res.status(200).json(toClaimRow(wrapped.data as Record<string, unknown>));
+      }
       const { data, error } = await db
         .from('earning_claims')
         .select(
@@ -709,24 +921,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) return mapRpcError(res, error);
       if (!data) return fail(res, 'NOT_FOUND', 'No claim matches that reference', 404);
       const row = data as Record<string, unknown>;
-      return res.status(200).json({
-        id: row.id,
-        claimNumber: row.claim_number,
-        customerId: row.customer_id,
-        purchaseId: row.purchase_id,
-        status: row.status,
-        pointsRequested: Number(row.points_requested ?? 0),
-        pointsReserved:
-          row.status === 'available' && new Date(String(row.expires_at)).getTime() > Date.now()
-            ? Number(row.points_awarded ?? 0)
-            : 0,
-        pointsAwarded: row.claimed_at ? Number(row.points_awarded ?? 0) : 0,
-        pointsCapped: Number(row.points_capped ?? 0),
-        expiresAt: isoOrNull(row.expires_at),
-        claimedAt: isoOrNull(row.claimed_at),
-        reversedAt: isoOrNull(row.reversed_at),
-        createdAt: isoOrNull(row.created_at),
-      });
+      return res.status(200).json(toClaimRow(row));
     }
 
     /* ---------------- POST /points/purchases/:id/quote ----------------
@@ -745,7 +940,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
       }
-      const { data, error } = await db.rpc('prepare_customer_point_redemption', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_prepare_quote', {
+            p_purchase_id: quoteRoute[1],
+            p_points_requested: parsed.data.pointsRequested,
+          })
+        : await db.rpc('prepare_customer_point_redemption', {
         p_purchase_id: quoteRoute[1],
         p_points_requested: parsed.data.pointsRequested,
         p_actor_id: auth.userId,
@@ -800,7 +1000,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'view',
       );
       if ('error' in reader) return deny(res, reader);
-      const { data, error } = await db.rpc('purchase_financial_summary_purchases', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_summary', { p_purchase_id: summaryRoute[1] })
+        : await db.rpc('purchase_financial_summary_purchases', {
         p_purchase_id: summaryRoute[1],
       });
       if (error) return refuse(res, error);
@@ -840,7 +1042,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'A non-zero amount and a reason are required.', 400);
       }
-      const { data, error } = await db.rpc('adjust_membership_points', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_adjust_points', {
+            p_membership_id: parsed.data.membershipId,
+            p_amount: parsed.data.amount,
+            p_reason: parsed.data.reason,
+          })
+        : await db.rpc('adjust_membership_points', {
         p_membership_id: parsed.data.membershipId,
         p_amount: parsed.data.amount,
         p_reason: parsed.data.reason,
@@ -862,7 +1070,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in writer) return deny(res, writer);
       const parsed = servicePolicyStatusSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Choose an active status.', 400);
-      const { error } = await db.rpc('set_service_policy_active', {
+      const { error } = keyless
+        ? await db.rpc('preview_staff_set_policy_active', {
+            p_kind: policyStatus[1] === 'rules' ? 'earning_rule' : 'tier_discount',
+            p_id: policyStatus[2],
+            p_active: parsed.data.isActive,
+          })
+        : await db.rpc('set_service_policy_active', {
         p_kind: policyStatus[1] === 'rules' ? 'earning_rule' : 'tier_discount',
         p_id: policyStatus[2],
         p_active: parsed.data.isActive,
@@ -882,6 +1096,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'tier-discounts' && verb === 'GET') {
       const reader = await authorizeAfHomes(req, 'operations.catalog', 'view');
       if ('error' in reader) return deny(res, reader);
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_tier_discounts');
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        return list(
+          res,
+          ((wrapped.data ?? []) as Record<string, unknown>[]).map(toTierDiscountRow),
+        );
+      }
       const { data, error } = await db
         .from('service_tier_discounts')
         .select('id, service_id, tier, discount_rate, effective_start, effective_end, is_active')
@@ -890,15 +1112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) throw error;
       return list(
         res,
-        ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-          id: row.id,
-          serviceId: row.service_id,
-          tier: row.tier,
-          discountRate: Number(row.discount_rate),
-          effectiveStart: String(row.effective_start).slice(0, 10),
-          effectiveEnd: String(row.effective_end).slice(0, 10),
-          isActive: row.is_active === true,
-        })),
+        ((data ?? []) as Record<string, unknown>[]).map(toTierDiscountRow),
       );
     }
 
@@ -915,6 +1129,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (parsed.data.effectiveStart >= parsed.data.effectiveEnd) {
         return fail(res, 'VALIDATION_ERROR', 'The end date must be after the start date.', 400);
+      }
+      if (keyless) {
+        const { data, error } = await db.rpc('preview_staff_tier_discount_create', {
+          p_input: parsed.data,
+        });
+        if (error) return mapRpcError(res, error);
+        const created = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
+        return res.status(201).json({ ...toTierDiscountRow(created), isActive: true });
       }
       // The overlap trigger refuses two simultaneously-active rules for one
       // service and tier. That is a DATABASE refusal on purpose: a handler bug
@@ -993,6 +1215,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'The minimum points must not exceed the maximum.',
           400,
         );
+      }
+
+      if (keyless) {
+        const { data, error } = await db.rpc('preview_staff_redemption_rule_create', {
+          p_input: rule,
+        });
+        if (error) return mapRpcError(res, error);
+        const created = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
+        return res.status(201).json(toRedemptionRule(created));
       }
 
       // A promotion pointing at a deactivated service would earn nothing and
@@ -1084,6 +1315,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
 
+      if (keyless) {
+        const { data, error } = await db.rpc('preview_staff_redemption_rule_patch', {
+          p_id: patchRule[1],
+          p_patch: patch,
+        });
+        if (error) {
+          if (String(error.message ?? '').includes('PROMOTION_NOT_FOUND'))
+            return fail(res, 'NOT_FOUND', 'No promotion matches that reference', 404);
+          return mapRpcError(res, error);
+        }
+        const patched = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
+        if (!patched) return fail(res, 'NOT_FOUND', 'No promotion matches that reference', 404);
+        return res.status(200).json(toRedemptionRule(patched));
+      }
+
       // The CURRENT row is read first because the table CHECKs apply to the FINAL
       // state. Without this, toggling `is_active` on a row whose window already
       // closed would be refused for a reason the admin cannot see or fix.
@@ -1153,6 +1399,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const catalog = await authorizeAfHomes(req, 'operations.catalog', 'view');
         if ('error' in catalog) return deny(res, seller);
       }
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_redemption_rules');
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        return list(res, ((wrapped.data ?? []) as Record<string, unknown>[]).map(toRedemptionRule));
+      }
       const { data, error } = await db
         .from('point_redemption_rules')
         .select(REDEMPTION_RULE_COLUMNS)
@@ -1164,6 +1415,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'rules' && verb === 'GET') {
       const reader = await authorizeAfHomes(req, 'operations.catalog', 'view');
       if ('error' in reader) return deny(res, reader);
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_earning_rules');
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        return list(
+          res,
+          ((wrapped.data ?? []) as Record<string, unknown>[]).map(toEarningRuleRow),
+        );
+      }
       const { data, error } = await db
         .from('point_earning_rules')
         .select(
@@ -1173,21 +1432,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) throw error;
       return list(
         res,
-        ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-          id: row.id,
-          serviceId: row.service_id,
-          pointsAmount: Number(row.points_amount),
-          eligibleTiers: row.eligible_tiers ?? [],
-          effectiveStart: isoOrNull(row.effective_start),
-          effectiveEnd: isoOrNull(row.effective_end),
-          isActive: row.is_active === true,
-          minQuantity: Number(row.min_quantity ?? 1),
-          maxAward:
-            row.max_award === null || row.max_award === undefined ? null : Number(row.max_award),
-          promotionReference: row.promotion_reference ?? null,
-          createdAt: isoOrNull(row.created_at),
-          updatedAt: isoOrNull(row.updated_at),
-        })),
+        ((data ?? []) as Record<string, unknown>[]).map(toEarningRuleRow),
       );
     }
 
@@ -1201,6 +1446,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rule = parsed.data;
       // The service must exist and be active, so a rule can never point at
       // nothing and silently earn nothing for every purchase of it.
+      if (keyless) {
+        const { data, error } = await db.rpc('preview_staff_earning_rule_create', {
+          p_input: rule,
+        });
+        if (error) {
+          if (String(error.message ?? '').includes('SERVICE_NOT_FOUND'))
+            return fail(res, 'NOT_FOUND', 'No service matches that reference', 404);
+          return mapRpcError(res, error);
+        }
+        const created = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
+        return res.status(201).json({
+          id: created.id,
+          serviceId: rule.serviceId,
+          pointsAmount: Number(created.points_amount),
+          eligibleTiers: rule.eligibleTiers,
+          effectiveStart: isoOrNull(created.effective_start),
+          effectiveEnd: isoOrNull(created.effective_end),
+          isActive: created.is_active === true,
+        });
+      }
       const service = await db
         .from('service_catalog')
         .select('id, is_active')
@@ -1299,7 +1564,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'view',
       );
       if ('error' in read) return deny(res, read);
-      const { data, error } = await db.rpc('operational_purchase_settlement', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_settlement', {
+            p_purchase_id: settlementRoute[1],
+          })
+        : await db.rpc('operational_purchase_settlement', {
         p_purchase_id: settlementRoute[1],
       });
       if (error) return mapRpcError(res, error);
@@ -1337,7 +1606,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // manufacture settlement. What it must not do is verify, and it does not.
       const write = await authorizeAfHomes(req, 'operations.sales', 'create');
       if ('error' in write) return deny(res, write);
-      const { data, error } = await db.rpc('complete_purchase', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_complete_purchase', {
+            p_purchase_id: complete[1],
+          })
+        : await db.rpc('complete_purchase', {
         p_purchase_id: complete[1],
         p_actor_id: auth.userId,
       });
@@ -1360,7 +1633,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) {
         return fail(res, 'VALIDATION_ERROR', 'A reason is required to reverse a purchase.', 400);
       }
-      const { data, error } = await db.rpc('reverse_purchase_points', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_reverse_purchase', {
+            p_purchase_id: reverse[1],
+            p_reason: parsed.data.reason,
+          })
+        : await db.rpc('reverse_purchase_points', {
         p_purchase_id: reverse[1],
         p_actor_id: auth.userId,
         p_reason: parsed.data.reason,
@@ -1378,6 +1656,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'claims' && verb === 'GET') {
       const reader = await authorizeAfHomes(req, 'operations.redemption', 'view');
       if ('error' in reader) return deny(res, reader);
+      if (keyless) {
+        const wrapped = await db.rpc('preview_staff_claims', { p_page: page });
+        if (wrapped.error) return mapRpcError(res, wrapped.error);
+        return list(
+          res,
+          ((wrapped.data ?? []) as Record<string, unknown>[]).map(toClaimListRow),
+        );
+      }
       const { data, error } = await db
         .from('earning_claims')
         .select(
@@ -1391,42 +1677,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // spread, so neither the driver nor a future column can leak one.
       return list(
         res,
-        ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-          id: row.id,
-          claimNumber: row.claim_number,
-          customerId: row.customer_id,
-          purchaseId: row.purchase_id,
-          customerNumber:
-            (row.customers as Record<string, unknown> | null)?.customer_number ?? null,
-          customerName: row.customers
-            ? ['first_name', 'middle_name', 'last_name']
-                .map((key) => (row.customers as Record<string, unknown>)[key])
-                .filter(Boolean)
-                .join(' ')
-            : null,
-          membershipNumber:
-            (row.memberships as Record<string, unknown> | null)?.membership_number ?? null,
-          purchaseNumber:
-            (row.purchases as Record<string, unknown> | null)?.purchase_number ?? null,
-          serviceName: (row.service_catalog as Record<string, unknown> | null)?.name ?? null,
-          status:
-            row.status === 'available' && new Date(String(row.expires_at)).getTime() <= Date.now()
-              ? 'expired'
-              : row.status,
-          pointsRequested: Number(row.points_requested),
-          pointsReserved:
-            row.status === 'available' && new Date(String(row.expires_at)).getTime() > Date.now()
-              ? Number(row.points_awarded ?? 0)
-              : 0,
-          pointsAwarded:
-            row.claimed_at && (row.status === 'claimed' || row.status === 'reversed')
-              ? Number(row.points_awarded)
-              : 0,
-          pointsCapped: Number(row.points_capped),
-          expiresAt: isoOrNull(row.expires_at),
-          claimedAt: isoOrNull(row.claimed_at),
-          createdAt: isoOrNull(row.created_at),
-        })),
+        ((data ?? []) as Record<string, unknown>[]).map(toClaimListRow),
       );
     }
 
@@ -1441,7 +1692,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // No points figure is read from the body. The rule, the cap and the amount
       // are all resolved inside the database function.
-      const { data, error } = await db.rpc('create_earning_claim', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_create_claim', {
+            p_purchase_id: parsed.data.purchaseId,
+          })
+        : await db.rpc('create_earning_claim', {
         p_purchase_id: parsed.data.purchaseId,
         p_actor_id: auth.userId,
       });
@@ -1466,7 +1721,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (reissue) {
       const write = await authorizeAfHomes(req, 'operations.redemption', 'create');
       if ('error' in write) return deny(res, write);
-      const { data, error } = await db.rpc('reissue_earning_claim', {
+      const { data, error } = keyless
+        ? await db.rpc('preview_staff_reissue_claim', {
+            p_claim_id: reissue[1],
+          })
+        : await db.rpc('reissue_earning_claim', {
         p_claim_id: reissue[1],
         p_actor_id: auth.userId,
       });

@@ -55,8 +55,11 @@ export async function startDisposablePostgres({ beforeMigration, excludedMigrati
     database: 'afhomes',
     port: PORT,
     persistent: true,
-    // Windows I/O workers can outlive this disposable cluster and stall the next initdb.
-    initdbFlags: process.platform === 'win32' ? ['-c', 'io_method=sync'] : [],
+    // Migrations are UTF-8 (one carries a leading BOM, covered byte-for-byte by
+    // the release allowlist hashes, so the file itself must not be edited).
+    // Force a UTF-8 cluster: a Windows-locale WIN1252 initdb cannot load them.
+    // ponytail: encoding-only override; locale left at platform default.
+    initdbFlags: process.platform === 'win32' ? ['-c', 'io_method=sync', '-E', 'UTF8'] : [],
     postgresFlags: process.platform === 'win32' ? ['-c', 'io_method=sync'] : [],
     onLog: () => {},
     onError: () => {},
@@ -99,7 +102,11 @@ export async function startDisposablePostgres({ beforeMigration, excludedMigrati
   for (const file of migrations.filter(
     (file) => (!beforeMigration || file < beforeMigration) && !excludedMigrations.includes(file),
   )) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+    // Same leading-BOM tolerance as the preservation batch's sql() helper:
+    // one allowlisted file carries a BOM pinned by its release hash, so the
+    // byte is stripped at load, never from the file. Hashes still cover raw
+    // bytes; shared psql-based apply skips a leading BOM the same way.
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').replace(/^\uFEFF/, '');
     try {
       await client.query(sql);
       applied.push(file);

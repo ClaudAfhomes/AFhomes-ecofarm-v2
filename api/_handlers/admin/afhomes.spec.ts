@@ -2399,7 +2399,9 @@ describe('read-only staff session HTTP boundary', () => {
     expect(session.status).toBe(200);
     expect((session.body as Json).id).toBe(UUID.adminStaff);
     const write = await call({ afPath: 'staff', method: 'POST', token: TOKEN.admin, body: {} });
-    expect(write.status).toBe(500);
+    // Mutations stay service-only: without a service key the write is refused
+    // before any insert reaches the database.
+    expect(write.status).toBe(503);
     expect((holder.userDb as FakeSupabase).calls.filter(c => c.op === 'insert')).toHaveLength(0);
   });
 });

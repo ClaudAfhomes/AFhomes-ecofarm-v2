@@ -138,6 +138,11 @@
       "file": "20261124000001_afhomes_points_position_service_acl.sql",
       "transactionEnvelope": "none",
       "sha256": "36debcf3b1033a2443ce8b212320df729e7a370a1113b6adf5c03b214b68ae9e"
+    },
+    {
+      "file": "20261125000001_afhomes_preview_caller_wrappers.sql",
+      "transactionEnvelope": "none",
+      "sha256": "eb57fd06a4cd67e18834d16103acae3f29c1319d63a60c08cbb3233a2fc97aa3"
     }
   ]
 }

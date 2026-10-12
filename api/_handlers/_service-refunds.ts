@@ -20,6 +20,7 @@ export async function handleServiceRefunds(
   operation: string | undefined,
   verb: string,
   repaymentId?: string,
+  keyless = false,
 ) {
   const principal = await authorizeAfHomes(
     req,
@@ -28,6 +29,8 @@ export async function handleServiceRefunds(
   );
   if ('error' in principal) return deny(res, principal);
   if (verb === 'GET' && operation === 'receipts' && refundId && repaymentId) {
+    // Receipt bytes live in private Storage, which needs the service key.
+    if (keyless) return fail(res, 'INTERNAL', 'Receipt storage is not configured.', 500);
     const payment = await db
       .from('service_refund_repayments')
       .select('receipt_path,refund_id')
@@ -52,6 +55,13 @@ export async function handleServiceRefunds(
       );
   }
   if (verb === 'GET' && !refundId) {
+    if (keyless) {
+      const wrapped = await db.rpc('preview_staff_refund_history', {
+        p_purchase_id: purchaseId,
+      });
+      if (wrapped.error) return fail(res, 'INTERNAL', 'Refund history is unavailable.', 500);
+      return list(res, wrapped.data ?? []);
+    }
     const result = await db.rpc('service_refund_history', {
       p_purchase_id: purchaseId,
       p_customer_id: null,
@@ -68,7 +78,14 @@ export async function handleServiceRefunds(
         'Choose an upload attempt and provide a Finance review note.',
         400,
       );
-    const result = await db.rpc('reconcile_service_refund_receipt', {
+    const result = keyless
+      ? await db.rpc('preview_staff_reconcile_receipt', {
+          p_purchase_id: purchaseId,
+          p_refund_id: refundId,
+          p_upload_audit_id: input.data.uploadAuditId,
+          p_reason: input.data.reason,
+        })
+      : await db.rpc('reconcile_service_refund_receipt', {
       p_purchase_id: purchaseId,
       p_refund_id: refundId,
       p_upload_audit_id: input.data.uploadAuditId,
@@ -91,6 +108,9 @@ export async function handleServiceRefunds(
     )
       return fail(res, 'INTERNAL', 'Receipt reconciliation unavailable.', 500);
     try {
+      // Preview has no Storage: confirmed reconciliations keep their object
+      // for explicit Finance reconciliation instead of deleting it here.
+      if (keyless) return res.status(200).json({ status: 'cleanup_pending' });
       const storage = storageClient();
       if (!storage) return res.status(200).json({ status: 'cleanup_pending' });
       const removed = await storage.from('afhomes-payment-receipts').remove([path]);
@@ -153,6 +173,9 @@ export async function handleServiceRefunds(
   };
   if (action === 'repay') {
     const repayment = serviceRefundRepaymentSchema.parse(parsed.data);
+    // Receipt bytes live in private Storage, which needs the service key.
+    if (repayment.receipt && keyless)
+      return fail(res, 'INTERNAL', 'Receipt storage is not configured.', 500);
     if (repayment.receipt) {
       const bytes = Buffer.from(repayment.receipt.dataBase64, 'base64');
       if (
@@ -254,7 +277,15 @@ export async function handleServiceRefunds(
       if ('receipt' in input) delete input.receipt;
     }
   }
-  const { data, error } = await db.rpc('manage_service_refund', {
+  // Keyless callers use the wrapper: same refund state machine, actor bound.
+  const { data, error } = keyless
+    ? await db.rpc('preview_staff_manage_refund', {
+        p_purchase_id: purchaseId,
+        p_refund_id: refundId ?? null,
+        p_operation: action,
+        p_input: input,
+      })
+    : await db.rpc('manage_service_refund', {
     p_purchase_id: purchaseId,
     p_refund_id: refundId ?? null,
     p_operation: action,
