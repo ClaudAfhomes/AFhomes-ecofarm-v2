@@ -66,6 +66,7 @@ const EXPECTED_WRAPPERS = [
 ];
 
 let postgres;
+let fatalFailure = false;
 let checks = 0;
 const check = (name, actual, expected) => {
   assert.deepEqual(actual, expected, name);
@@ -629,10 +630,13 @@ try {
   console.log(`\npreview-wrappers: ${checks} checks passed`);
 } catch (e) {
   console.error('FAILED:', e.message);
+  fatalFailure = true;
   process.exitCode = 1;
 } finally {
   if (postgres) await postgres.stop().catch(() => {});
 }
+
+if (fatalFailure) process.exit(1);
 
 async function claimIdOf(client, purchaseId) {
   return (await one(client, `select id from public.earning_claims where purchase_id=$1 order by created_at desc limit 1`, [purchaseId])).id;
