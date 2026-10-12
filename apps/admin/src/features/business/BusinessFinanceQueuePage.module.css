@@ -1,0 +1,663 @@
+/* Finance payment queue (payments).
+ *
+ * A dedicated module rather than the shared WorkflowCards one, which the
+ * membership surface still uses: every rule here is scoped to this screen so
+ * a change here can never repaint another page. Only VERIFIED money counts
+ * toward a price — that rule lives on the server; this file only paints it.
+ */
+
+/* Page shell: one consistent rhythm between hero, summary, toolbar and table. */
+.pageShell {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Hero: deep forest band with eyebrow, title and live queue meta. */
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-5);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(176, 131, 40, 0.28) 0%, transparent 55%),
+    radial-gradient(100% 140% at 0% 100%, rgba(255, 255, 255, 0.08) 0%, transparent 50%),
+    linear-gradient(135deg, var(--color-brand-deep) 0%, var(--color-brand-primary) 70%);
+  color: var(--color-on-dark);
+  box-shadow: var(--shadow-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.heroText {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: min(100%, 30rem);
+}
+
+.heroText :global(header) {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+/* PageHeader paints for light surfaces: on the forest band the title and the
+   description both need light ink, or the description reads dark-on-dark. */
+.heroText :global(h1) {
+  color: var(--color-on-dark) !important;
+}
+
+.heroText p:not(.eyebrow) {
+  color: var(--color-on-dark-muted) !important;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-light);
+}
+
+.heroMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heroChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  color: #fff;
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Summary strip: three headline counts above the queue. */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary > li {
+  min-width: 0;
+}
+
+/* Compact summary: smaller cards than the default MetricCard — tighter
+   padding, smaller icon tile and stepped-down type. Scoped to this strip, so
+   no other surface moves. */
+.summary > li :global(article) {
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+}
+
+.summary > li :global(article) > div:first-child > span:first-child {
+  width: 30px;
+  height: 30px;
+}
+
+.summary > li :global(article) > span:nth-of-type(1) {
+  font-size: var(--text-h3);
+}
+
+.summary > li :global(article) > span:nth-of-type(2) {
+  font-size: var(--text-body-s);
+}
+
+.summary > li :global(article) > span:nth-of-type(3) {
+  font-size: var(--text-caption);
+}
+
+/* Status filter label, matching the reservations/applications toolbar. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Toolbar result count, trailing the search + filter controls. */
+.resultCount {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Queue table: the page's working surface, wrapped in an elevated panel
+   like the reservations/applications queues. */
+.tableWrap {
+  margin-top: var(--space-2);
+}
+
+.queueCard {
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+/* The wide-table floor is desktop-only: on phones the rows collapse to
+   labelled cards (shared Table grammar) instead of scrolling sideways. */
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 760px;
+  }
+}
+
+/* Same header treatment as the reservations/applications tables: a lightly
+   tinted sticky band over the rows, so the body reads as data. */
+.queueTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--color-border-default);
+}
+
+.queueTable th,
+.queueTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.queueTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Clickable rows open the record's details; the hover wash and pointer are
+   the affordance. The row menu stops propagation, so menu use never opens. */
+.queueTable tbody tr.clickableRow {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .queueTable tbody tr.clickableRow:hover td {
+    background-color: var(--color-state-hover);
+  }
+}
+
+/* Record reference: the row's anchor reads as a highlighted pill — accent
+   dot plus brand-ink mono reference — while every other column stays neutral
+   body text. Same grammar as the application/reservation queues. */
+.recordRef {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 32%, white);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.recordRefDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Merged record cells: a titled value with a muted sub-line, so one column
+   carries what used to take two or three. */
+.cellTitle {
+  display: block;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cellSub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.balanceFigure {
+  display: block;
+  font-weight: 700;
+}
+
+/* Payment progress: decorative bar only (aria-hidden in markup). The figures
+   beside it stay the readable values; the bar never carries meaning alone. */
+.progress {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-border-subtle);
+  overflow: hidden;
+  min-width: 5rem;
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-brand-secondary), var(--color-brand-primary));
+}
+
+/* Action groups: one flex row with gaps, never whitespace separators. */
+.actionGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.figureLine {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.figureLine strong {
+  color: var(--color-text-primary);
+}
+
+/* Dialog hero: record identity beside its state, so the operator confirms
+   the right sale before touching money. */
+.dialogHero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--color-brand-soft) 65%, white),
+    var(--color-bg-surface-raised) 70%
+  );
+}
+
+.dialogHeroIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.dialogHeroBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.dialogHeroTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.dialogHeroMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Grouped detail sections inside the dialogs. */
+.detailSection {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-subtle);
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+/* Fact grid: label above value, hairline separated, tabular figures. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.facts > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.facts dt {
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Payment timeline: one card per recorded payment. */
+.timeline {
+  grid-column: 1 / -1;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.timelineItem {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+}
+
+.timelineTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.timelineAmount {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.timelineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Dialog form: labelled controls on a responsive grid. Labels keep WRAPPING
+   their inputs, so every accessible name in these forms is unchanged. */
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-4);
+}
+
+/* Grouped sections inside the form grid span the full width without doubling
+   the grid gap onto their outer margin. */
+.formGrid > .detailSection {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+/* Dialog heroes inside the form grid (Verify dialog) span the full width. */
+.formGrid > .dialogHero {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 400;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: var(--color-brand-secondary);
+}
+
+.field input:focus-visible,
+.field select:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
+  border-color: var(--color-brand-primary);
+}
+
+.field input[inputmode='decimal'] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.formNote {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-brand-secondary);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background-color: var(--color-brand-soft);
+  font-size: var(--text-body-s);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.formAlert {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+/* Dialog footer: dismiss pushed to the far end so the layout reads
+   left-to-right by intent. */
+.dialogFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.dialogFooterSpacer {
+  flex: 1 1 auto;
+}
+
+/* ---------------------------------------------------------------- */
+/* Loading skeleton: hero, summary, toolbar and table placeholders   */
+/* ---------------------------------------------------------------- */
+.skeletonShell {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.heroSkeleton {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: min(100%, 30rem);
+}
+
+.skeletonSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: var(--space-3);
+}
+
+/* Summary placeholders mirror a compact MetricCard: icon tile, figure,
+   label and hint stacked with the same rhythm. Geometry only — the shimmer
+   itself comes from the shared Skeleton. */
+.skMetric {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  min-height: 116px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+}
+
+.skTile {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+}
+
+.skPill {
+  height: 26px;
+  border-radius: var(--radius-pill);
+}
+
+.skDot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  justify-self: end;
+}
+
+.skTrack {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+}
+
+.skeletonTable {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 0.8fr 1.2fr 0.9fr 0.6fr;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.skeletonRow:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 1023px) {
+  .skeletonRow {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+@media (max-width: 639px) {
+  .hero {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  /* Kill the global scroll floor so rows collapse to labelled cards like the
+     reservations/applications queues. The lead reference cell drops its label
+     and reads as the card title. */
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap td[data-label='Record'] {
+    justify-content: flex-start;
+  }
+
+  .tableWrap td[data-label='Record']::before {
+    display: none;
+  }
+
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actionGroup > * {
+    flex: 1 1 auto;
+  }
+
+  .timelineActions > * {
+    flex: 1 1 auto;
+  }
+
+  .skeletonRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}

@@ -5,15 +5,7 @@ import {
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
 } from '@afhomes/contracts';
-import {
-  PageHeader,
-  SearchField,
-  ErrorState,
-  EmptyState,
-  StatusChip,
-  Icon,
-  Spinner,
-} from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
 import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
@@ -185,6 +177,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
 }
 
 function LookupSkeleton() {
+  // Two placeholder cards while the ≥2-character search resolves.
   return (
     <div
       className={styles.results}
@@ -192,23 +185,23 @@ function LookupSkeleton() {
       aria-label="Looking for Customer"
       aria-busy="true"
     >
-      <p className={styles.loadingLine}>
-        <Spinner size="sm" />
-        <span>Looking for Customer…</span>
-      </p>
-      {[0, 1, 2].map((index) => (
+      {[0, 1].map((index) => (
         <div className={styles.member} data-tier="NONE" aria-hidden="true" key={index}>
           <div className={styles.artWrap}>
             <div className={styles.artSkeleton} />
           </div>
           <div className={styles.cardBody}>
-            <span className={styles.skeletonLine} style={{ width: '8rem' }} />
+            <span className={styles.skeletonChip} style={{ width: '8rem' }} />
             <span className={styles.skeletonTitle} style={{ width: '14rem' }} />
             <span className={styles.skeletonLine} style={{ width: '11rem' }} />
             <div className={styles.details}>
               {[0, 1, 2, 3].map((fact) => (
                 <div className={styles.fact} key={fact}>
-                  <span className={styles.skeletonLine} style={{ width: '100%' }} />
+                  <span className={styles.factSkeletonIcon} />
+                  <div className={styles.factText}>
+                    <span className={styles.skeletonLine} style={{ width: '60%' }} />
+                    <span className={styles.skeletonLine} style={{ width: '90%' }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -312,10 +305,7 @@ export function CustomerLookupPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader
-        title="Membership Lookup"
-        description="Find any customer or member."
-      />
+      <PageHeader title="Membership Lookup" description="Find any customer or member." />
       <div className={styles.search}>
         <div
           className={styles.suggestWrap}
@@ -351,12 +341,24 @@ export function CustomerLookupPage() {
             }}
           />
           {dropdownVisible ? (
-            <ul className={styles.suggestList} id={listId} role="listbox" aria-label="Name suggestions">
+            <ul
+              className={styles.suggestList}
+              id={listId}
+              role="listbox"
+              aria-label="Name suggestions"
+            >
               {customers.isPending && suggestions.length === 0 ? (
-                <li className={styles.suggestHint} role="presentation">
-                  <Spinner size="sm" />
-                  <span>Searching for matches…</span>
-                </li>
+                [0, 1, 2].map((index) => (
+                  <li
+                    className={styles.suggestOption}
+                    role="presentation"
+                    aria-hidden="true"
+                    key={index}
+                  >
+                    <span className={styles.skeletonLine} style={{ width: '55%', height: 18 }} />
+                    <span className={styles.skeletonLine} style={{ width: '5rem' }} />
+                  </li>
+                ))
               ) : suggestions.length === 0 ? (
                 <li className={styles.suggestHint} role="presentation">
                   Customer does not exist

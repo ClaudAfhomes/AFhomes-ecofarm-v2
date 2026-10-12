@@ -86,17 +86,6 @@
   color: var(--color-text-muted);
 }
 
-/* Visible loading line above the skeleton cards. */
-.loadingLine {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  font-size: var(--text-body-s);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-
 .results {
   display: grid;
   gap: var(--space-4);
@@ -283,7 +272,9 @@
 }
 
 .skeletonLine,
-.skeletonTitle {
+.skeletonTitle,
+.skeletonChip,
+.factSkeletonIcon {
   display: block;
   max-width: 100%;
   border-radius: var(--radius-sm);
@@ -302,7 +293,25 @@
 }
 
 .skeletonTitle {
-  height: 22px;
+  height: 26px;
+}
+
+/* Category pill placeholder: same pill footprint as the tier chip. */
+.skeletonChip {
+  height: 18px;
+  border-radius: var(--radius-pill);
+}
+
+/* Fact icon-tile placeholder: same 32px tile as the loaded fact rows. */
+.factSkeletonIcon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+/* Skeleton suggestion rows are placeholders, never picks. */
+.suggestOption[aria-hidden='true'] {
+  cursor: default;
 }
 
 @keyframes lookup-shimmer {
@@ -317,7 +326,9 @@
 @media (prefers-reduced-motion: reduce) {
   .artSkeleton,
   .skeletonLine,
-  .skeletonTitle {
+  .skeletonTitle,
+  .skeletonChip,
+  .factSkeletonIcon {
     animation: none;
   }
 }
@@ -334,6 +345,13 @@
   }
 
   .art {
+    aspect-ratio: 16 / 9;
+    max-height: 180px;
+  }
+
+  /* The skeleton artwork follows the loaded art onto the stacked mobile
+     layout instead of collapsing to zero height. */
+  .artSkeleton {
     aspect-ratio: 16 / 9;
     max-height: 180px;
   }

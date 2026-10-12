@@ -11,9 +11,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { addMoney, formatMoney } from '@afhomes/shared';
+import { addMoney, formatCount, formatMoney } from '@afhomes/shared';
 import type { SalesTrendGranularity } from '@afhomes/contracts';
-import { EmptyState, ErrorState, Icon, Spinner } from '@afhomes/ui';
+import { EmptyState, ErrorState, Icon, Skeleton } from '@afhomes/ui';
 
 import { useAfHomesSalesTrend } from './useAfHomesSalesTrend';
 import styles from './AfHomesDashboardPage.module.css';
@@ -116,10 +116,8 @@ export function buildCenteredSeries(
   if (real.length === 0) return { display: [], latestIndex: -1 };
   if (real.length === 1) {
     const only = real[0] as PlotPoint;
-    const prevKey =
-      granularity === 'month' ? prevMonthKey(only.key) : String(Number(only.key) - 1);
-    const nextKey =
-      granularity === 'month' ? nextMonthKey(only.key) : String(Number(only.key) + 1);
+    const prevKey = granularity === 'month' ? prevMonthKey(only.key) : String(Number(only.key) - 1);
+    const nextKey = granularity === 'month' ? nextMonthKey(only.key) : String(Number(only.key) + 1);
     return {
       display: [
         {
@@ -202,11 +200,17 @@ export function AfHomesTrendChart() {
     },
     {
       label: 'Qualifying sales this year',
-      value: `${countThisYear} · ${formatMoney(totalThisYear)}`,
+      value: `${formatCount(countThisYear)} · ${formatMoney(totalThisYear)}`,
     },
   ];
 
   const hasData = points.some((period) => period.count > 0);
+
+  // Loading is skeleton-only: no spinner, and the static hero, toggles and
+  // KPIs stay skeleton too until the series arrives.
+  if (isPending) {
+    return <TrendChartSkeleton />;
+  }
 
   return (
     <section className={styles.chartCard} aria-label="Sales overview">
@@ -276,11 +280,7 @@ export function AfHomesTrendChart() {
       </div>
 
       <div className={styles.chartBox}>
-        {isPending ? (
-          <div className={styles.chartState} role="status" aria-live="polite" aria-busy="true">
-            <Spinner size="sm" /> Loading trend…
-          </div>
-        ) : isError ? (
+        {isError ? (
           <div className={styles.chartState}>
             <ErrorState error={error} onRetry={() => void refetch()} />
           </div>
@@ -329,11 +329,7 @@ export function AfHomesTrendChart() {
                         textAnchor="middle"
                         fontSize={isLatest ? 12 : 11}
                         fontWeight={isLatest ? 700 : 400}
-                        fill={
-                          isLatest
-                            ? 'var(--color-brand-primary)'
-                            : 'var(--color-text-muted)'
-                        }
+                        fill={isLatest ? 'var(--color-brand-primary)' : 'var(--color-text-muted)'}
                         opacity={isFuture ? 0.55 : 1}
                       >
                         {tick.payload?.value}
@@ -347,7 +343,7 @@ export function AfHomesTrendChart() {
                 />
                 <YAxis
                   tickFormatter={(v: number) =>
-                    metric === 'value' ? abbreviateMoney(v) : String(v)
+                    metric === 'value' ? abbreviateMoney(v) : formatCount(v)
                   }
                   tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
                   tickLine={false}
@@ -377,7 +373,7 @@ export function AfHomesTrendChart() {
                     if (point?.payload?.isProjection) return [null, ''];
                     if (point?.payload?.total !== undefined) {
                       return [
-                        `${formatMoney(point.payload.total)} · ${point.payload.count} sale(s)`,
+                        `${formatMoney(point.payload.total)} · ${formatCount(point.payload.count ?? 0)} sale(s)`,
                         'Sales value',
                       ];
                     }
@@ -437,8 +433,8 @@ export function AfHomesTrendChart() {
             </ResponsiveContainer>
             <p className={styles.chartFootnote}>
               <span className={styles.latestDot} aria-hidden="true" />
-              Latest ({latest?.label ?? ''}) sits in the middle — the shaded run-off is empty
-              axis space, not forecast data.
+              Latest ({latest?.label ?? ''}) sits in the middle — the shaded run-off is empty axis
+              space, not forecast data.
             </p>
           </div>
         )}
@@ -449,29 +445,37 @@ export function AfHomesTrendChart() {
 
 export function TrendChartSkeleton() {
   return (
-    <div className={styles.chartCard}>
+    <section
+      className={styles.chartCard}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label="Loading sales overview"
+    >
       <div className={styles.chartHero} aria-hidden="true">
         <span className={styles.cardIcon} aria-hidden="true">
           <Icon name="list" size={18} />
         </span>
-        <div className={styles.chartTitleWrap}>
-          <span className={styles.skeletonLine} style={{ width: '9rem' }} />
-          <span className={styles.skeletonLineShort} style={{ width: '14rem' }} />
+        <div className={styles.chartTitleWrap} style={{ gap: 'var(--space-2)' }}>
+          <span className={styles.skeletonLine} style={{ width: '9rem', height: 24 }} />
+          <span className={styles.skeletonLineShort} style={{ width: '14rem', height: 14 }} />
+        </div>
+        <div className={styles.toggles} aria-hidden="true">
+          <span className={styles.skeletonLine} style={{ width: '9rem', height: 32 }} />
+          <span className={styles.skeletonLine} style={{ width: '8rem', height: 32 }} />
         </div>
       </div>
       <div className={styles.kpis} aria-hidden="true">
         {[0, 1, 2].map((index) => (
           <div key={index} className={styles.kpi}>
-            <span className={styles.skeletonLine} style={{ width: '70%' }} />
-            <span className={styles.skeletonLineShort} style={{ width: '50%' }} />
+            <span className={styles.skeletonLine} style={{ width: '70%', height: 20 }} />
+            <span className={styles.skeletonLineShort} style={{ width: '50%', height: 14 }} />
           </div>
         ))}
       </div>
-      <div className={styles.chartBox}>
-        <div className={styles.chartState} role="status" aria-live="polite" aria-busy="true">
-          <Spinner size="sm" /> Loading trend…
-        </div>
+      <div className={styles.chartBox} aria-hidden="true">
+        <Skeleton style={{ height: 264, width: '100%' }} />
       </div>
-    </div>
+    </section>
   );
 }

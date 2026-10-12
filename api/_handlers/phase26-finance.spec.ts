@@ -146,9 +146,13 @@ async function callCommissions(opts: {
   );
   return state;
 }
-async function callQueues(path: string, token?: string): Promise<State> {
+async function callQueues(
+  path: string,
+  token?: string,
+  query?: Record<string, string>,
+): Promise<State> {
   const { res, state } = makeRes();
-  await queues(makeReq({ method: 'GET', familyPath: path, token }) as never, res as never);
+  await queues(makeReq({ method: 'GET', familyPath: path, token, query }) as never, res as never);
   return state;
 }
 
@@ -168,7 +172,12 @@ describe('Phase 26 payment recording', () => {
       method: 'POST',
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.admin,
-      body: { amount: '10000.00', paymentType: 'down_payment', method: 'bank_transfer', reference: 'TRF-26-1' },
+      body: {
+        amount: '10000.00',
+        paymentType: 'down_payment',
+        method: 'bank_transfer',
+        reference: 'TRF-26-1',
+      },
     });
     expect(state.status).toBe(201);
     const rpc = db.calls.find((c) => c.op === 'rpc' && c.table === 'record_card_payment');
@@ -223,7 +232,9 @@ describe('Phase 26 payment recording', () => {
     });
     const state = await callSales({ path: `${SALE.downPaid}/payments`, token: TOKEN.admin });
     expect(state.status).toBe(200);
-    expect(JSON.stringify(state.body)).not.toMatch(/secret\.pdf|receipt_storage_path|private\/afhomes/i);
+    expect(JSON.stringify(state.body)).not.toMatch(
+      /secret\.pdf|receipt_storage_path|private\/afhomes/i,
+    );
   });
 });
 
@@ -280,7 +291,21 @@ describe('Phase 26 payment verification', () => {
   it('6. rejects a payment with a reason when supported', async () => {
     const db = install();
     // The fixture payment is recorded, so a rejection flows to the RPC.
-    const rpcs = [{ fn: 'verify_card_payment', result: [{ sale_id: SALE.downPaid, status: 'payment_in_progress', verified_total: '15000.00', remaining_balance: '25000.00', fully_paid: false, spot_cash_deadline: null }] }];
+    const rpcs = [
+      {
+        fn: 'verify_card_payment',
+        result: [
+          {
+            sale_id: SALE.downPaid,
+            status: 'payment_in_progress',
+            verified_total: '15000.00',
+            remaining_balance: '25000.00',
+            fully_paid: false,
+            spot_cash_deadline: null,
+          },
+        ],
+      },
+    ];
     // Reinstall with a rejection-shaped RPC result by calling the handler with a
     // reason; the handler contract (decision + reason) is what this asserts.
     void db;
@@ -345,13 +370,28 @@ describe('Phase 26 spot-cash window', () => {
     const start = '2026-09-27T10:00:00.000Z';
     const deadline = spotCashDeadlineFrom(start);
     expect(
-      deriveSpotCashState({ fullyPaid: false, spotCashStartedAt: start, spotCashDeadline: deadline, now: new Date(deadline) }),
+      deriveSpotCashState({
+        fullyPaid: false,
+        spotCashStartedAt: start,
+        spotCashDeadline: deadline,
+        now: new Date(deadline),
+      }),
     ).toBe('within_deadline');
     expect(
-      deriveSpotCashState({ fullyPaid: false, spotCashStartedAt: start, spotCashDeadline: deadline, now: new Date(new Date(deadline).valueOf() + 1) }),
+      deriveSpotCashState({
+        fullyPaid: false,
+        spotCashStartedAt: start,
+        spotCashDeadline: deadline,
+        now: new Date(new Date(deadline).valueOf() + 1),
+      }),
     ).toBe('expired');
     expect(
-      deriveSpotCashState({ fullyPaid: true, spotCashStartedAt: start, spotCashDeadline: '2020-01-01T00:00:00.000Z', now: new Date('2030-01-01T00:00:00.000Z') }),
+      deriveSpotCashState({
+        fullyPaid: true,
+        spotCashStartedAt: start,
+        spotCashDeadline: '2020-01-01T00:00:00.000Z',
+        now: new Date('2030-01-01T00:00:00.000Z'),
+      }),
     ).toBe('fully_paid');
   });
 
@@ -366,7 +406,49 @@ describe('Phase 26 spot-cash window', () => {
       expect(row).toHaveProperty('spotCashDeadline');
       expect(row).toHaveProperty('firstVerifiedPayment');
     }
-    expect(rows.some((r) => r.spotCashState === 'expired' || r.spotCashState === 'within_deadline' || r.spotCashState === 'not_started')).toBe(true);
+    expect(
+      rows.some(
+        (r) =>
+          r.spotCashState === 'expired' ||
+          r.spotCashState === 'within_deadline' ||
+          r.spotCashState === 'not_started',
+      ),
+    ).toBe(true);
+  });
+
+  it('13b. meta.total counts every matching reservation, not just the page', async () => {
+    const reservation = (n: number) => ({
+      id: `eeeeeeee-0000-4000-8000-0000000000${n}`,
+      reservation_number: `AF-RES-0000${n}`,
+      origin: 'application',
+      status: 'executed',
+      sale_id: null,
+      customer_application_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      customer_id: 'cccccccc-0000-4000-8000-000000000003',
+      seller_staff_id: '11111111-1111-4111-8111-111111111111',
+      purchase_terms_id: '22222222-0000-4222-8222-222222222222',
+      tier_snapshot: 'BRONZE',
+      total_price_snapshot: '54000.00',
+      reservation_fee_snapshot: '10000.00',
+      required_initial_snapshot: '10000.00',
+      executed_at: '2026-10-07T00:00:00.000Z',
+    });
+    install({
+      tables: { reservation_agreements: [reservation(1), reservation(2), reservation(3)] },
+    });
+    const full = (await callQueues('finance', TOKEN.admin)).body as {
+      data: unknown[];
+      meta: { total: number };
+    };
+    expect(full.meta.total).toBeGreaterThan(2);
+    // A one-row page still reports the full count: the screen reads it to say
+    // "1 of N" instead of silently dropping the tail.
+    const page = (await callQueues('finance', TOKEN.admin, { limit: '1' })).body as {
+      data: unknown[];
+      meta: { total: number };
+    };
+    expect(page.data).toHaveLength(1);
+    expect(page.meta.total).toBe(full.meta.total);
   });
 });
 
@@ -404,14 +486,28 @@ describe('Phase 26 activation queue and gating', () => {
   });
 
   it('17. activation before fully paid is rejected', async () => {
-    install({ rpcErrors: { activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=15000.00 price=40000.00' } } });
-    const state = await callSales({ method: 'POST', path: `${SALE.downPaid}/activate`, token: TOKEN.admin, body: { validityMonths: 12 } });
+    install({
+      rpcErrors: {
+        activate_card_sale: { message: 'SALE_NOT_FULLY_PAID:verified=15000.00 price=40000.00' },
+      },
+    });
+    const state = await callSales({
+      method: 'POST',
+      path: `${SALE.downPaid}/activate`,
+      token: TOKEN.admin,
+      body: { validityMonths: 12 },
+    });
     expect(state.status).toBe(409);
     expect(err(state.body).message).toMatch(/not activatable/);
   });
 
   it('18/19. activation after fully paid succeeds and is idempotent', async () => {
-    const first = await callSales({ method: 'POST', path: `${SALE.fullyPaid}/activate`, token: TOKEN.admin, body: { validityMonths: 12 } });
+    const first = await callSales({
+      method: 'POST',
+      path: `${SALE.fullyPaid}/activate`,
+      token: TOKEN.admin,
+      body: { validityMonths: 12 },
+    });
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ alreadyActive: false });
   });
@@ -431,12 +527,16 @@ describe('Phase 26 commission basis', () => {
   it('23/24. the commission uses the snapshot rate; a live rate change never moves history', async () => {
     const db = install();
     const before = await callCommissions({ path: '', token: TOKEN.admin });
-    const pending = (data(before.body) as Record<string, unknown>[]).find((r) => r.status === 'pending')!;
+    const pending = (data(before.body) as Record<string, unknown>[]).find(
+      (r) => r.status === 'pending',
+    )!;
     expect(pending).toMatchObject({ rate: '0.04', basisAmount: '60000.00', amount: '2400.00' });
     db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!.commission_rate = '0.10';
     db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!.cash_price = '65000.00';
     const after = await callCommissions({ path: '', token: TOKEN.admin });
-    const same = (data(after.body) as Record<string, unknown>[]).find((r) => r.status === 'pending')!;
+    const same = (data(after.body) as Record<string, unknown>[]).find(
+      (r) => r.status === 'pending',
+    )!;
     expect(same).toMatchObject({ rate: '0.04', basisAmount: '60000.00', amount: '2400.00' });
   });
 });
@@ -504,8 +604,15 @@ describe('Phase 26 commission lifecycle', () => {
       body: { reference: 'PAYOUT-26-1' },
     });
     expect(paid.status).toBe(200);
-    expect(paid.body).toMatchObject({ status: 'paid', amount: '2400.00', rate: '0.04', basisAmount: '60000.00' });
-    const row = db.rows('commissions').find((c) => c.id === '99990000-0000-4000-8000-000000000002')!;
+    expect(paid.body).toMatchObject({
+      status: 'paid',
+      amount: '2400.00',
+      rate: '0.04',
+      basisAmount: '60000.00',
+    });
+    const row = db
+      .rows('commissions')
+      .find((c) => c.id === '99990000-0000-4000-8000-000000000002')!;
     expect(row.status).toBe('paid');
     expect(row.paid_by).toBe(UUID.adminStaff);
     expect(row.paid_reference).toBe('PAYOUT-26-1');
@@ -537,7 +644,9 @@ describe('Phase 26 commission lifecycle', () => {
     });
     expect(second.status).toBe(200);
     expect(second.body).toMatchObject({ status: 'paid' });
-    expect(db.rows('audit_events').filter((e) => e.action === 'COMMISSION_PAID')).toHaveLength(audits);
+    expect(db.rows('audit_events').filter((e) => e.action === 'COMMISSION_PAID')).toHaveLength(
+      audits,
+    );
   });
 
   it('29/30. pending -> paid and paid -> earned are rejected', async () => {
@@ -646,10 +755,14 @@ describe('Phase 26 seller commission scoping', () => {
     const db = install();
     // Sellers hold network.commissions VIEW in the real baseline (the Phase 2
     // fixture omits it, so grant it here for the sellers under test).
-    const sellerRoles = [db.rows('roles').find((r) => r.slug === 'sales_manager')?.id].filter(Boolean) as string[];
+    const sellerRoles = [db.rows('roles').find((r) => r.slug === 'sales_manager')?.id].filter(
+      Boolean,
+    ) as string[];
     void sellerRoles;
     // Grant view to the sales_manager test role directly.
-    const smRole = (db.rows('roles') as Record<string, unknown>[]).find((r) => r.slug === 'sales_manager');
+    const smRole = (db.rows('roles') as Record<string, unknown>[]).find(
+      (r) => r.slug === 'sales_manager',
+    );
     // The Phase 2 world has no sales_manager system role; use the SM test role instead.
     const ssmRoleId = (phase2WorldTokens(), null);
     void ssmRoleId;
@@ -697,7 +810,11 @@ describe('Phase 26 seller commission scoping', () => {
     expect(sellerView.status).toBe(200);
     const sellerRows = data(sellerView.body) as Record<string, unknown>[];
     expect(sellerRows.length).toBeGreaterThan(0);
-    expect(sellerRows.every((r) => String(r.saleId) === SALE.unpaid || r.id === '99990000-0000-4000-8000-000000002602')).toBe(true);
+    expect(
+      sellerRows.every(
+        (r) => String(r.saleId) === SALE.unpaid || r.id === '99990000-0000-4000-8000-000000002602',
+      ),
+    ).toBe(true);
     // Finance sees every commission.
     const financeView = await callCommissions({ path: '', token: TOKEN2.finance });
     expect(financeView.status).toBe(200);
@@ -734,8 +851,12 @@ describe('Phase 26 seller commission scoping', () => {
       created_at: '2026-09-28T00:00:00.000Z',
       updated_at: '2026-09-28T00:00:00.000Z',
     });
-    expect(db.rows('card_sales').find((r) => r.id === SALE.submitted)!.referral_relationship_id).toBe(beforeRel);
-    expect(db.rows('commissions').find((c) => c.sale_id === SALE.submitted)!.beneficiary_staff_id).toBe(beforeBeneficiary);
+    expect(
+      db.rows('card_sales').find((r) => r.id === SALE.submitted)!.referral_relationship_id,
+    ).toBe(beforeRel);
+    expect(
+      db.rows('commissions').find((c) => c.sale_id === SALE.submitted)!.beneficiary_staff_id,
+    ).toBe(beforeBeneficiary);
   });
 });
 
@@ -761,11 +882,15 @@ describe('Phase 26 audit', () => {
     const qualified = db.rows('audit_events').find((e) => e.action === 'COMMISSION_QUALIFIED')!;
     expect(qualified.entity_id).toBe('99990000-0000-4000-8000-000000000002');
     expect(JSON.stringify(qualified)).toMatch(/2400\.00/);
-    expect(JSON.stringify(qualified)).not.toMatch(/service[_-]?role|receipt_storage_path|fallback|qr_token|government/i);
+    expect(JSON.stringify(qualified)).not.toMatch(
+      /service[_-]?role|receipt_storage_path|fallback|qr_token|government/i,
+    );
     const paid = db.rows('audit_events').find((e) => e.action === 'COMMISSION_PAID')!;
     expect(paid.entity_id).toBe('99990000-0000-4000-8000-000000000002');
     expect(JSON.stringify(paid)).toMatch(/AUDIT-REF-1/);
-    expect(JSON.stringify(paid)).not.toMatch(/service[_-]?role|receipt_storage_path|fallback|qr_token|government/i);
+    expect(JSON.stringify(paid)).not.toMatch(
+      /service[_-]?role|receipt_storage_path|fallback|qr_token|government/i,
+    );
   });
 });
 
@@ -777,13 +902,27 @@ describe('Phase 26 commission search and filter', () => {
   beforeEach(() => install());
 
   it('44. lists filter by status and search by sale number or beneficiary', async () => {
-    const byStatus = await callCommissions({ path: '', token: TOKEN.admin, query: { status: 'pending' } });
+    const byStatus = await callCommissions({
+      path: '',
+      token: TOKEN.admin,
+      query: { status: 'pending' },
+    });
     expect(byStatus.status).toBe(200);
-    expect((data(byStatus.body) as Record<string, unknown>[]).every((r) => r.status === 'pending')).toBe(true);
-    const bySale = await callCommissions({ path: '', token: TOKEN.admin, query: { search: 'SALE-000001' } });
+    expect(
+      (data(byStatus.body) as Record<string, unknown>[]).every((r) => r.status === 'pending'),
+    ).toBe(true);
+    const bySale = await callCommissions({
+      path: '',
+      token: TOKEN.admin,
+      query: { search: 'SALE-000001' },
+    });
     expect(bySale.status).toBe(200);
     expect((data(bySale.body) as unknown[]).length).toBeGreaterThanOrEqual(0);
-    const invalid = await callCommissions({ path: '', token: TOKEN.admin, query: { limit: '9999' } });
+    const invalid = await callCommissions({
+      path: '',
+      token: TOKEN.admin,
+      query: { limit: '9999' },
+    });
     expect(invalid.status).toBe(400);
   });
 });

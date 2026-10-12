@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
@@ -190,14 +190,21 @@ it('searches live with no Search button to click', async () => {
   );
 });
 
-it('shows skeleton cards and a Looking for Customer line while pending', async () => {
+it('shows skeleton-only loading while pending (no spinner, no loading text)', async () => {
   vi.mocked(requestList).mockReturnValue(new Promise(() => {}));
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
   });
-  expect(await screen.findByRole('status', { name: 'Looking for Customer' })).toBeInTheDocument();
-  expect(screen.getByText('Looking for Customer…')).toBeInTheDocument();
+  const status = await screen.findByRole('status', { name: 'Looking for Customer' });
+  expect(status).toBeInTheDocument();
+  // Two placeholder cards while the search resolves.
+  expect(status.children).toHaveLength(2);
+  // The pending dropdown mirrors real suggestion rows (name + meta bars).
+  const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
+  expect(within(listbox).getAllByRole('presentation', { hidden: true })).toHaveLength(3);
+  expect(screen.queryByText('Looking for Customer…')).toBeNull();
+  expect(screen.queryByText('Searching for matches…')).toBeNull();
   expect(screen.queryByText('No matching customers or members')).not.toBeInTheDocument();
 });
 

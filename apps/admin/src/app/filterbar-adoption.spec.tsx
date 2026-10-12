@@ -3,7 +3,7 @@
  *
  * Every eligible admin list renders the canonical FilterBar (role="search")
  * instead of a one-off toolbar wrapper, and no migrated feature uses a
- * blocking browser dialog. Finance/Activation queues intentionally carry no
+ * blocking browser dialog. The Activation queue intentionally carries no
  * FilterBar: a queue is status-defined, not filterable.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -60,7 +60,7 @@ vi.mock('../features/business/services', () => ({
   recordPayment: vi.fn(),
   verifyPayment: vi.fn(),
   activateSale: vi.fn(),
-  getFinanceQueue: vi.fn(async () => []),
+  getFinanceQueue: vi.fn(async () => ({ items: [], total: 0 })),
   getActivationQueue: vi.fn(async () => []),
   getCommissions: vi.fn(async () => []),
   markCommissionPaid: vi.fn(),

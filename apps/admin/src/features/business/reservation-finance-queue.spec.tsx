@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SessionUser } from '../../lib/session';
 import { BusinessFinanceQueuePage } from './BusinessFinanceQueuePage';
@@ -150,6 +150,15 @@ beforeEach(() => {
 const renderQueue = (user: SessionUser = FINANCE_USER) =>
   renderWithProviders(<BusinessFinanceQueuePage />, { user });
 
+/** Row actions live behind the three-dots menu: open it, then pick an item. */
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Actions for AF-RES-ZZZZZ' }));
+}
+
+async function pickMenuItem(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
+
 describe('Finance queue with an application-origin reservation', () => {
   it('lists the executed AF-RES and never a sale number', async () => {
     renderQueue();
@@ -157,15 +166,20 @@ describe('Finance queue with an application-origin reservation', () => {
     expect(screen.queryByText(/AF-CSALE/)).toBeNull();
   });
 
-  it('shows the frozen total, the verified money and the balance', async () => {
+  it('shows the outstanding balance on the row with a capitalized badge', async () => {
     renderQueue();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();
-    expect(screen.getAllByText(/54,000\.00/).length).toBeGreaterThan(0);
+    expect(screen.getByText('₱54,000.00')).toBeInTheDocument();
+    expect(screen.getByText('Executed')).toBeInTheDocument();
+    expect(screen.queryByText('executed')).toBeNull();
   });
 
   it('reads the one ledger by reservation, never by a sale id', async () => {
+    const user = userEvent.setup();
     renderQueue();
     await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    await pickMenuItem(user, 'Verify');
     await waitFor(() => {
       expect(requests.map((r) => r.url).filter((u) => u.includes('/sales/'))).toEqual([]);
       expect(
@@ -175,13 +189,17 @@ describe('Finance queue with an application-origin reservation', () => {
   });
 
   it('offers Print reservation and withholds Finalize while money is short', async () => {
+    const user = userEvent.setup();
     renderQueue();
-    const print = await screen.findByRole('button', { name: /print reservation/i });
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    const print = await screen.findByRole('menuitem', { name: /print reservation/i });
     expect(print.hasAttribute('disabled')).toBe(false);
-    expect(screen.queryByRole('button', { name: /finalize purchase/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /finalize purchase/i })).toBeNull();
   });
 
   it('offers Finalize only when the server-reported figures say fully paid', async () => {
+    const user = userEvent.setup();
     queueRow = {
       ...RESERVATION_ROW,
       verifiedTotal: '54000.00',
@@ -189,10 +207,13 @@ describe('Finance queue with an application-origin reservation', () => {
       fullyPaid: true,
     };
     renderQueue();
-    expect(await screen.findByRole('button', { name: /finalize purchase/i })).toBeTruthy();
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    expect(await screen.findByRole('menuitem', { name: /finalize purchase/i })).toBeTruthy();
   });
 
   it('keeps Finalize disabled for a principal without the finance update grant', async () => {
+    const user = userEvent.setup();
     queueRow = {
       ...RESERVATION_ROW,
       verifiedTotal: '54000.00',
@@ -203,7 +224,9 @@ describe('Finance queue with an application-origin reservation', () => {
       ...FINANCE_USER,
       afHomesPermissions: FINANCE_USER.afHomesPermissions.map((p) => ({ ...p, canUpdate: false })),
     } as SessionUser);
-    const finalize = await screen.findByRole('button', { name: /finalize purchase/i });
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    const finalize = await screen.findByRole('menuitem', { name: /finalize purchase/i });
     expect(finalize.hasAttribute('disabled')).toBe(true);
     expect(requests.some((r) => r.url.includes('/finalize'))).toBe(false);
   });
@@ -217,7 +240,9 @@ describe('Finance queue with an application-origin reservation', () => {
       fullyPaid: true,
     };
     renderQueue();
-    await user.click(await screen.findByRole('button', { name: /finalize purchase/i }));
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    await pickMenuItem(user, 'Finalize purchase');
     await waitFor(() => {
       const call = requests.find((r) => r.url.includes('/finalize'));
       expect(call?.method).toBe('POST');
@@ -230,7 +255,9 @@ describe('Finance queue with an application-origin reservation', () => {
   it('reprints from the captured revision, not from a live view', async () => {
     const user = userEvent.setup();
     renderQueue();
-    await user.click(await screen.findByRole('button', { name: /print reservation/i }));
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    await pickMenuItem(user, 'Print reservation');
     await waitFor(() => {
       const issued = requests.map((r) => r.url).filter((u) => u.includes('/documents/'));
       // The client prefixes the API base, so match on the tail, not the whole URL.
@@ -239,10 +266,39 @@ describe('Finance queue with an application-origin reservation', () => {
       ]);
     });
   });
+
+  it('opens Record payment by clicking the reservation row', async () => {
+    renderQueue();
+    await screen.findByText('AF-RES-ZZZZZ');
+    fireEvent.click(
+      screen.getByRole('link', { name: 'Record a reservation payment for AF-RES-ZZZZZ' }),
+    );
+    expect(await screen.findByText('Record a payment')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Amount')).toBeInTheDocument();
+  });
+
+  it('opens the full reservation details from the row menu, never Verify', async () => {
+    const user = userEvent.setup();
+    renderQueue();
+    await screen.findByText('AF-RES-ZZZZZ');
+    await openRowMenu(user);
+    await pickMenuItem(user, 'View details');
+    // Figures, parties and status — not the Verify action.
+    expect(await screen.findByText('Reservation figures')).toBeInTheDocument();
+    const detail = within(screen.getByRole('dialog'));
+    expect(detail.getAllByText('₱54,000.00')).toHaveLength(2);
+    expect(detail.getByText('Ana Seller')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Verify$/i })).toBeNull();
+    // The ledger rows carry capitalized payment badges, never raw codes.
+    expect(await screen.findByText('Recorded')).toBeInTheDocument();
+    expect(screen.getByText(/REF-1/)).toBeInTheDocument();
+  });
 });
 it('offers reservation recording and verification controls', async () => {
+  const user = userEvent.setup();
   renderQueue();
   await screen.findByText('AF-RES-ZZZZZ');
-  expect(screen.getByRole('button', { name: /^Record payment$/i })).toBeTruthy();
-  expect(screen.getByRole('button', { name: /^Verify$/i })).toBeTruthy();
+  await openRowMenu(user);
+  expect(screen.getByRole('menuitem', { name: /^Record payment$/i })).toBeTruthy();
+  expect(screen.getByRole('menuitem', { name: /^Verify$/i })).toBeTruthy();
 });

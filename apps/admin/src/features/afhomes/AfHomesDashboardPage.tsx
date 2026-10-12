@@ -1,11 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type {
-  AnalyticsOverview,
-  AnalyticsPeriod,
-} from '@afhomes/contracts';
+import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
 import { paymentSchemeLabel } from '@afhomes/contracts';
-import { compareMoney, formatMoney } from '@afhomes/shared';
+import { compareMoney, formatCount, formatMoney } from '@afhomes/shared';
 import {
   EmptyState,
   ErrorState,
@@ -24,6 +21,8 @@ import {
 import type { IconName } from '@afhomes/ui';
 import { AfHomesTrendChart, TrendChartSkeleton } from './AfHomesTrendChart';
 import { getAnalyticsOverview } from './services';
+import { canViewModule } from '../../app/navigation';
+import { useSession } from '../../lib/session';
 import styles from './AfHomesDashboardPage.module.css';
 
 const PERIODS = [
@@ -76,6 +75,20 @@ export function dashboardMetrics(data: AnalyticsOverview): Metric[] {
     ['Card Sales', data.headline.periodSales],
     ['Total Sales', formatMoney(data.headline.grossFrozenSaleValue)],
   ];
+}
+
+/**
+ * Headline labels that require `sales.card_sales` view. Staff without Sales
+ * access keep the customer cards (and the organization/redemption sets, which
+ * never contain these labels); only the sales figures are stripped. The
+ * server remains the security boundary - this is display gating only, matching
+ * the Sales nav group which is keyed on the same module.
+ */
+const SALES_HEADLINE_LABELS: ReadonlySet<string> = new Set(['Card Sales', 'Total Sales']);
+
+export function filterSalesMetrics(values: Metric[], canViewSales: boolean): Metric[] {
+  if (canViewSales) return values;
+  return values.filter(([label]) => !SALES_HEADLINE_LABELS.has(label));
 }
 
 /** Icon + helper text per metric label. Presentation only - values untouched. */
@@ -160,11 +173,14 @@ function MetricCards({ values }: { values: Metric[] }) {
           icon: 'grid' as IconName,
           description: '',
         };
+        // Whole counts render grouped (`8000` → `8,000`); money strings arrive
+        // pre-formatted from `dashboardMetrics` and pass through untouched.
+        const display = typeof value === 'number' ? formatCount(value) : value;
         return (
           <li key={label}>
             <MetricCard
               label={label}
-              value={value}
+              value={display}
               icon={presentation.icon}
               description={presentation.description || undefined}
             />
@@ -278,6 +294,15 @@ function Trend() {
 
 export function AfHomesDashboardPage() {
   const [period, setPeriod] = useState<AnalyticsPeriod>('month');
+  const { status: sessionStatus, user } = useSession();
+  // UX-only gate (the server re-checks everything): without
+  // `sales.card_sales` view the sales sections stay off the dashboard, matching
+  // the hidden Sales nav group. While the session is still resolving, assume
+  // visible so the loading skeleton does not flicker.
+  const canViewSales =
+    sessionStatus === 'loading'
+      ? true
+      : canViewModule(user?.afHomesPermissions, 'sales.card_sales');
   const query = useQuery({
     queryKey: ['analytics', 'overview', period],
     queryFn: () => getAnalyticsOverview(period),
@@ -285,7 +310,9 @@ export function AfHomesDashboardPage() {
   // The dashboard is deliberately four cards, one graph and two tables. The
   // server-computed set is capped rather than reordered or hand-picked: the
   // first four, in the order `dashboardMetrics` already ranks them.
-  const metrics = query.data?.scope ? dashboardMetrics(query.data).slice(0, HEADLINE_METRICS) : [];
+  const metrics = query.data?.scope
+    ? filterSalesMetrics(dashboardMetrics(query.data), canViewSales).slice(0, HEADLINE_METRICS)
+    : [];
   // Share bars are drawn relative to the biggest row in each table, so each
   // breakdown reads as a proportion rather than a list of absolute totals.
   const largestSchemeValue =
@@ -301,10 +328,17 @@ export function AfHomesDashboardPage() {
   return (
     <section className={styles.page}>
       <div className={styles.hero}>
-        <div className={styles.heroText}>
-          <p className={styles.eyebrow}>AF Homes · Staff console</p>
-          <PageHeader title="Operations Overview" />
-        </div>
+        {query.isPending ? (
+          <div className={styles.heroSkeleton} aria-hidden="true">
+            <Skeleton style={{ height: 14, width: 160 }} />
+            <Skeleton style={{ height: 36, width: 280 }} />
+          </div>
+        ) : (
+          <div className={styles.heroText}>
+            <p className={styles.eyebrow}>AF Homes · Staff console</p>
+            <PageHeader title="Operations Overview" />
+          </div>
+        )}
         {!query.isPending && !query.isError && query.data ? (
           <div className={styles.heroMeta}>
             <span className={styles.heroScope}>
@@ -321,24 +355,28 @@ export function AfHomesDashboardPage() {
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard" className={styles.loadingShell}>
           <div className={styles.scopeBar} aria-hidden="true">
-            <Skeleton style={{ height: 20, width: 180 }} />
-            <Skeleton style={{ height: 20, width: 220 }} />
+            <Skeleton style={{ height: 22, width: 180 }} />
+            <Skeleton style={{ height: 22, width: 220 }} />
           </div>
-          <Panel icon="grid" title="Key metrics">
+          <div className={styles.panel} aria-hidden="true">
+            <Skeleton style={{ height: 22, width: 140 }} />
             <MetricCardSkeletons />
-          </Panel>
-          <TrendChartSkeleton />
-          <div className={styles.breakdownGrid} aria-hidden="true">
-            {['Payment Schemes', 'Card Plans'].map((title) => (
-              <Panel key={title} icon={title === 'Payment Schemes' ? 'wallet' : 'file-text'} title={title}>
-                <div className={styles.skeletonRows}>
-                  {[0, 1, 2].map((index) => (
-                    <Skeleton key={index} className={styles.skeletonRow} />
-                  ))}
-                </div>
-              </Panel>
-            ))}
           </div>
+          {canViewSales ? <TrendChartSkeleton /> : null}
+          {canViewSales ? (
+            <div className={styles.breakdownGrid} aria-hidden="true">
+              {['Payment Schemes', 'Card Plans'].map((title) => (
+                <div key={title} className={styles.panel} aria-hidden="true">
+                  <Skeleton style={{ height: 22, width: 160 }} />
+                  <div className={styles.skeletonRows}>
+                    {[0, 1, 2].map((index) => (
+                      <Skeleton key={index} className={styles.skeletonRow} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
@@ -375,13 +413,13 @@ export function AfHomesDashboardPage() {
             <MetricCards values={metrics} />
           </Panel>
 
-          {query.data.scope.kind === 'organization' ? (
+          {canViewSales && query.data.scope.kind === 'organization' ? (
             <h2 className={styles.sectionTitle}>Sales Overview</h2>
           ) : null}
-          {query.data.scope.kind !== 'organization' ? <Trend /> : null}
+          {canViewSales && query.data.scope.kind !== 'organization' ? <Trend /> : null}
 
           <div className={styles.breakdownGrid}>
-            {query.data.salesByScheme.length ? (
+            {canViewSales && query.data.salesByScheme.length ? (
               <Panel icon="wallet" title="Payment Schemes">
                 <div className="table-scroll">
                   <Table>
@@ -405,7 +443,7 @@ export function AfHomesDashboardPage() {
                             </span>
                           </TableCell>
                           <TableCell label="Sales" align="right" className={styles.numeric}>
-                            {entry.count}
+                            {formatCount(entry.count)}
                           </TableCell>
                           <ShareCell
                             label="Frozen value"
@@ -421,7 +459,7 @@ export function AfHomesDashboardPage() {
               </Panel>
             ) : null}
 
-            {query.data.salesByPlan.length ? (
+            {canViewSales && query.data.salesByPlan.length ? (
               <Panel icon="file-text" title="Card Plans">
                 <div className="table-scroll">
                   <Table>
@@ -434,7 +472,10 @@ export function AfHomesDashboardPage() {
                     </TableHead>
                     <TableBody>
                       {query.data.salesByPlan.map((plan) => (
-                        <TableRow key={plan.planId} className={cls(styles[planTone(plan.planName)])}>
+                        <TableRow
+                          key={plan.planId}
+                          className={cls(styles[planTone(plan.planName)])}
+                        >
                           <TableCell label="Plan" className={styles.rowTitle}>
                             <span className={styles.tag}>
                               <span className={styles.tagDot} aria-hidden="true" />
@@ -442,7 +483,7 @@ export function AfHomesDashboardPage() {
                             </span>
                           </TableCell>
                           <TableCell label="Sales" align="right" className={styles.numeric}>
-                            {plan.count}
+                            {formatCount(plan.count)}
                           </TableCell>
                           <ShareCell
                             label="Frozen value"
@@ -480,7 +521,7 @@ export function AfHomesDashboardPage() {
                 </span>
                 <span>
                   <strong>Historical sales awaiting attribution:</strong>{' '}
-                  {query.data.scope.unattributedLegacySaleCount} sale(s),{' '}
+                  {formatCount(query.data.scope.unattributedLegacySaleCount)} sale(s),{' '}
                   {formatMoney(query.data.scope.unattributedLegacySaleValue)}. They are excluded
                   from team totals.
                 </span>

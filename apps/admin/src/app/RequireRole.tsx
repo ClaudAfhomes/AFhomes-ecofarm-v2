@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Button, Forbidden, Skeleton, Spinner } from '@afhomes/ui';
+import { Button, Forbidden, Skeleton } from '@afhomes/ui';
 import { Navigate, useLocation } from 'react-router';
 import { useSession } from '../lib/session';
 import { entryPortal, loginPathFor } from '../lib/portal';
@@ -9,10 +9,13 @@ import { operationsPath, staffPortalPath } from '@afhomes/contracts';
 
 function Loading() {
   return (
-    <div className={styles.loading} role="status">
-      <Spinner />
-      <Skeleton />
-      <Skeleton />
+    <div className={styles.loading} role="status" aria-label="Loading">
+      <Skeleton className={styles.loadingHero} />
+      <div className={styles.loadingGrid}>
+        <Skeleton className={styles.loadingCard} />
+        <Skeleton className={styles.loadingCard} />
+        <Skeleton className={styles.loadingCard} />
+      </div>
     </div>
   );
 }

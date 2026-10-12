@@ -125,6 +125,15 @@ const FINANCE_USER: SessionUser = {
       canUpdate: false,
       canDelete: false,
     },
+    // The finance baseline holds `sales.card_sales` view, so the dashboard
+    // sales sections stay visible for this fixture.
+    {
+      moduleKey: 'sales.card_sales',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
     {
       moduleKey: 'finance.payment_verification',
       canView: true,
@@ -147,6 +156,17 @@ const FINANCE_USER: SessionUser = {
       canDelete: false,
     },
   ],
+};
+
+/** Staff with dashboard access but no Sales access: every sales section hides. */
+const NO_SALES_USER: SessionUser = {
+  ...FINANCE_USER,
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'No Sales Staff',
+  email: 'nosales@afhomes.test',
+  afHomesPermissions: FINANCE_USER.afHomesPermissions.filter(
+    (permission) => permission.moduleKey !== 'sales.card_sales',
+  ),
 };
 
 function install(over: Record<string, Route> = {}) {
@@ -203,7 +223,6 @@ function mockFetch() {
 const render = (user: SessionUser = FINANCE_USER) =>
   renderWithProviders(<App />, { route: '/admin', user });
 
-
 beforeEach(() => {
   requests.length = 0;
   install();
@@ -218,6 +237,12 @@ describe('Phase 29 role dashboard', () => {
     );
     render();
     expect(await screen.findByLabelText('Loading dashboard')).toBeInTheDocument();
+    // Even static headings stay skeleton until the data arrives.
+    expect(screen.queryByRole('heading', { name: 'Operations Overview' })).toBeNull();
+    expect(screen.queryByText('AF Homes · Staff console')).toBeNull();
+    expect(screen.queryByText('Key metrics')).toBeNull();
+    expect(screen.queryByText('Sales Overview')).toBeNull();
+    expect(screen.queryByText(/Loading trend/)).toBeNull();
   });
 
   it('renders server headline facts with labeled money series', async () => {
@@ -312,12 +337,7 @@ describe('Phase 29 role dashboard', () => {
     const metrics = screen.getByRole('region', { name: 'Key metrics' });
     expect(metrics.querySelectorAll('article')).toHaveLength(4);
     // Shown in the fixed headline order, not re-picked per role.
-    for (const label of [
-      'Total Customers',
-      'New Applications',
-      'Card Sales',
-      'Total Sales',
-    ]) {
+    for (const label of ['Total Customers', 'New Applications', 'Card Sales', 'Total Sales']) {
       expect(within(metrics).getByText(label)).toBeInTheDocument();
     }
     // The old queue labels are gone from the headline set.
@@ -325,9 +345,7 @@ describe('Phase 29 role dashboard', () => {
     expect(screen.queryByText('Activation queue')).toBeNull();
 
     // Exactly one graph. recharts paints asynchronously, so wait for it.
-    await waitFor(() =>
-      expect(container.querySelectorAll('svg.recharts-surface')).toHaveLength(1),
-    );
+    await waitFor(() => expect(container.querySelectorAll('svg.recharts-surface')).toHaveLength(1));
 
     // Exactly two tables: scheme breakdown and plan breakdown.
     expect(screen.getAllByRole('table')).toHaveLength(2);
@@ -431,5 +449,69 @@ describe('Phase 29 role dashboard', () => {
     expect(document.body.textContent).not.toMatch(/Scope:\s*finance/);
     expect(scope.getByText(/to\s*10\/1\/2026/)).toBeInTheDocument();
     expect(scope.getByText('As of today')).toBeInTheDocument();
+  });
+
+  it('hides every sales section for staff without sales.card_sales view', async () => {
+    render(NO_SALES_USER);
+    await screen.findByText('Total Customers');
+    // Customer headlines stay; sales headlines go.
+    expect(screen.getByText('New Applications')).toBeInTheDocument();
+    expect(screen.queryByText('Card Sales')).toBeNull();
+    expect(screen.queryByText('Total Sales')).toBeNull();
+    // The Sales Overview chart (and its empty state) never mounts.
+    expect(screen.queryByText('Sales Overview')).toBeNull();
+    expect(screen.queryByText('No qualifying sales yet')).toBeNull();
+    // Both sales breakdown tables stay off the page.
+    expect(screen.queryByRole('region', { name: 'Payment Schemes' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Card Plans' })).toBeNull();
+    // Key metrics keeps only the two customer cards.
+    expect(
+      screen.getByRole('region', { name: 'Key metrics' }).querySelectorAll('article'),
+    ).toHaveLength(2);
+    // The trend chart never mounts, so its endpoint is never called.
+    await waitFor(() => {
+      expect(requests.some((r) => r.path === '/analytics')).toBe(true);
+    });
+    expect(requests.some((r) => r.path === '/analytics/sales-trend')).toBe(false);
+  });
+
+  it('groups whole dashboard counts with thousands separators', async () => {
+    install({
+      'GET /analytics': {
+        status: 200,
+        body: financeOverview({
+          headline: {
+            totalCustomers: 8000,
+            newCustomers: 1500,
+            totalCardSales: 8000,
+            periodSales: 8000,
+            grossFrozenSaleValue: '60000.00',
+            periodVerifiedPayments: '25000.00',
+            activatedMemberships: 1200,
+          },
+          salesByPlan: [
+            {
+              planId: '33333333-3333-4333-8333-333333333333',
+              planName: 'Gold',
+              count: 8000,
+              value: '60000.00',
+            },
+          ],
+          salesByScheme: [{ scheme: 'spot_cash', count: 8000, value: '60000.00' }],
+        }),
+      },
+      'GET /analytics/sales-trend': {
+        status: 200,
+        body: salesTrendReport([{ key: '2026-09', count: 8000, total: '60000.00' }]),
+      },
+    });
+    render();
+    await screen.findByText('Total Customers');
+    // Headline cards, both breakdown tables, and the trend KPI all group.
+    expect(screen.getAllByText('8,000').length).toBeGreaterThan(0);
+    expect(screen.getByText('1,500')).toBeInTheDocument();
+    // No raw ungrouped count reaches the page as its own text.
+    expect(screen.queryByText('8000')).toBeNull();
+    expect(screen.queryByText('1500')).toBeNull();
   });
 });
