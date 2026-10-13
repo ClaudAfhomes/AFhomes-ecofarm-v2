@@ -1,0 +1,59 @@
+{
+  "base": "362bde5cccffd90fab5d6c87467db9ba25f8993f",
+  "patchApplies": true,
+  "files": [
+    {
+      "file": "api/_lib/afhomes-access.ts",
+      "sha256": "f2e913b144137d543b484d0af0607f7ecae5421a9d595b423e807bd8b6e592e6",
+      "normalizedSha256": "f2e913b144137d543b484d0af0607f7ecae5421a9d595b423e807bd8b6e592e6"
+    },
+    {
+      "file": "api/_lib/testing/supabase-fake.ts",
+      "sha256": "3742d48da18b655288475977aa0ceeb8a382b35c8c33c686acfc73c1d1de7f94",
+      "normalizedSha256": "3742d48da18b655288475977aa0ceeb8a382b35c8c33c686acfc73c1d1de7f94"
+    },
+    {
+      "file": "pnpm-lock.yaml",
+      "sha256": "ce4e9b9ec91bc451cc6f22a94a5dab5f48d1257f14ca2e43c579041ade226fc2",
+      "normalizedSha256": "ce4e9b9ec91bc451cc6f22a94a5dab5f48d1257f14ca2e43c579041ade226fc2"
+    },
+    {
+      "file": "api/_handlers/customer-lookup-authorization.spec.ts",
+      "sha256": "f98208dd46e9c2b6355a40fc1c7fd8d1ff578eb3e120cc9635177600df8b9074",
+      "normalizedSha256": "f98208dd46e9c2b6355a40fc1c7fd8d1ff578eb3e120cc9635177600df8b9074"
+    },
+    {
+      "file": "api/_handlers/mutation-idempotency.spec.ts",
+      "sha256": "1f2be12ec0b909e40eb98c1fc3f20373e2fe80488f4a89c10026b8ba7ae4f8b6",
+      "normalizedSha256": "1f2be12ec0b909e40eb98c1fc3f20373e2fe80488f4a89c10026b8ba7ae4f8b6"
+    },
+    {
+      "file": "api/_handlers/ost-accreditation.spec.ts",
+      "sha256": "621026949f173ca21d66aadacc33a5c63612e1003fdb610560fc97b2d734674d",
+      "normalizedSha256": "621026949f173ca21d66aadacc33a5c63612e1003fdb610560fc97b2d734674d"
+    },
+    {
+      "file": "api/_lib/afhomes-access-security.spec.ts",
+      "sha256": "50812d959aba98daba6c37d600ccd930fb60bd3161921e3160e2b171c1e22e63",
+      "normalizedSha256": "50812d959aba98daba6c37d600ccd930fb60bd3161921e3160e2b171c1e22e63"
+    },
+    {
+      "file": "supabase/migrations/20261128000002_afhomes_self_search_path_hardening.sql",
+      "sha256": "4f6f851392d3bb4a07ea8703f32dc4d632c608cbe6d60d01bff7db98d8077ba4",
+      "normalizedSha256": "4f6f851392d3bb4a07ea8703f32dc4d632c608cbe6d60d01bff7db98d8077ba4"
+    },
+    {
+      "file": "supabase/migrations/20261129000001_afhomes_document_scope_security.sql",
+      "sha256": "ae052d7e5e6c6bf9262ca54f0f085576445b3dae2d55f4b5982a0c85c11f0fca",
+      "normalizedSha256": "ae052d7e5e6c6bf9262ca54f0f085576445b3dae2d55f4b5982a0c85c11f0fca"
+    },
+    {
+      "file": "supabase/migrations/20261129000002_afhomes_staff_business_security.sql",
+      "sha256": "effe09b1b2929772622bad4234e82ab864d1003a02c9cbbbf42f8b74f6c56272",
+      "normalizedSha256": "effe09b1b2929772622bad4234e82ab864d1003a02c9cbbbf42f8b74f6c56272"
+    }
+  ],
+  "patchSha256": "5c8b0879fa1126a63617cf118c0e3a037fd783f611fd0fed49211d848ae2d40e",
+  "deployed": false,
+  "reviewSliceMatchesNormalized": true
+}

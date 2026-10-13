@@ -52,17 +52,19 @@ function invitationIsExpired(invitation: { expires_at?: string | null } | null):
 }
 
 async function assignedRole(db: Db, userId: string) {
-  const { data: assignment } = await db
+  const { data: assignment, error: assignmentError } = await db
     .from('staff_role_assignments')
     .select('role_id')
     .eq('staff_id', userId)
     .maybeSingle();
+  if (assignmentError) return { role: null, reason: 'unavailable' as const };
   if (!assignment?.role_id) return { role: null, reason: 'assignment' as const };
-  const { data: role } = await db
+  const { data: role, error: roleError } = await db
     .from('roles')
     .select('id,slug,name,is_active')
     .eq('id', assignment.role_id)
     .maybeSingle();
+  if (roleError) return { role: null, reason: 'unavailable' as const };
   return role?.is_active ? { role, reason: null } : { role: null, reason: 'role' as const };
 }
 
@@ -94,9 +96,13 @@ export async function resolveStaffAccountSetup(
     .select('id,email,full_name,status')
     .eq('id', user.id)
     .maybeSingle();
-  if (staffError || !staff || staff.status !== 'invited')
+  if (staffError)
+    return { error: toErrorEnvelope('INTERNAL', 'Staff verification unavailable', 503) };
+  if (!staff || staff.status !== 'invited')
     return { error: toErrorEnvelope('FORBIDDEN', 'Staff invitation is not active', 403) };
   const roleResolution = await assignedRole(db, user.id);
+  if (roleResolution.reason === 'unavailable')
+    return { error: toErrorEnvelope('INTERNAL', 'Staff role verification unavailable', 503) };
   const role = roleResolution.role;
   if (!role) return { error: toErrorEnvelope('FORBIDDEN', 'Staff role assignment required', 403) };
   const invitation = await pendingInvitation(db, user.id);
@@ -143,6 +149,17 @@ export async function resolveAfHomesPrincipal(
   const user = authData?.user;
   if (authError || !user?.id)
     return { error: toErrorEnvelope('UNAUTHORIZED', 'Invalid session', 401) };
+  const policyClient = svc ?? userClient(token);
+  const policy = await policyClient?.rpc('afhomes_admin_mfa_required', {});
+  if (
+    !policy ||
+    policy.error ||
+    typeof policy.data !== 'boolean' ||
+    (process.env.AFHOMES_REQUIRE_ADMIN_MFA === 'true' && !policy.data)
+  )
+    return {
+      error: toErrorEnvelope('INTERNAL', 'Staff security policy verification unavailable', 503),
+    };
   if (!svc) {
     const caller = userClient(token);
     if (!caller)
@@ -181,7 +198,7 @@ export async function resolveAfHomesPrincipal(
       mustChangePassword: own.mustChangePassword,
       permissions: own.permissions,
       mfaRequired:
-        process.env.AFHOMES_REQUIRE_ADMIN_MFA === 'true' &&
+        policy.data &&
         ['admin', 'super_admin'].includes(own.roleSlug) &&
         (await verifiedAssuranceLevel(anon.auth, token, user.id)) !== 'aal2',
     };
@@ -191,9 +208,12 @@ export async function resolveAfHomesPrincipal(
     .select('id,email,full_name,status,must_change_password')
     .eq('id', user.id)
     .maybeSingle();
-  if (staffError || !staff)
-    return { error: toErrorEnvelope('FORBIDDEN', 'Staff access required', 403) };
+  if (staffError)
+    return { error: toErrorEnvelope('INTERNAL', 'Staff verification unavailable', 503) };
+  if (!staff) return { error: toErrorEnvelope('FORBIDDEN', 'Staff access required', 403) };
   const roleResolution = await assignedRole(svc, user.id);
+  if (roleResolution.reason === 'unavailable')
+    return { error: toErrorEnvelope('INTERNAL', 'Staff role verification unavailable', 503) };
   const role = roleResolution.role;
   if (!role)
     return {
@@ -227,12 +247,12 @@ export async function resolveAfHomesPrincipal(
       return { error: toErrorEnvelope('INTERNAL', 'Unable to activate staff account', 500) };
 
     if (!activated) {
-      const { data: current } = await svc
+      const { data: current, error: currentError } = await svc
         .from('staff_users')
         .select('status')
         .eq('id', user.id)
         .maybeSingle();
-      if (current?.status !== 'active')
+      if (currentError || current?.status !== 'active')
         return { error: toErrorEnvelope('INTERNAL', 'Unable to activate staff account', 500) };
     }
 
@@ -280,7 +300,7 @@ export async function resolveAfHomesPrincipal(
   if (standing !== 'active')
     return { error: toErrorEnvelope('FORBIDDEN', 'Staff account is not active', 403) };
 
-  const [{ data: modules }, { data: roleRows }, { data: restrictions }] = await Promise.all([
+  const results = await Promise.all([
     svc.from('modules').select('id,key').eq('is_active', true),
     svc
       .from('role_permissions')
@@ -291,6 +311,11 @@ export async function resolveAfHomesPrincipal(
       .select('module_id,deny_view,deny_create,deny_update,deny_delete')
       .eq('staff_id', user.id),
   ]);
+  if (results.some((result) => result.error))
+    return {
+      error: toErrorEnvelope('INTERNAL', 'Staff permissions verification unavailable', 503),
+    };
+  const [{ data: modules }, { data: roleRows }, { data: restrictions }] = results;
   const moduleById = new Map(
     (modules ?? []).map((module: { id: string; key: AfHomesModuleKey }) => [module.id, module.key]),
   );
@@ -334,7 +359,7 @@ export async function resolveAfHomesPrincipal(
     mustChangePassword: staff.must_change_password === true,
     permissions,
     mfaRequired:
-      process.env.AFHOMES_REQUIRE_ADMIN_MFA === 'true' &&
+      policy.data &&
       ['admin', 'super_admin'].includes(role.slug) &&
       (await verifiedAssuranceLevel(anon.auth, token, user.id)) !== 'aal2',
   };

@@ -21,3 +21,4 @@ export {
   isAllowedRecoveryRedirect,
 } from './auth-recovery.js';
 export type { PasswordRuleId, PasswordRuleState, RecoveryRequestOutcome } from './auth-recovery.js';
+export { withRequestDeadline } from './request-deadline.js';

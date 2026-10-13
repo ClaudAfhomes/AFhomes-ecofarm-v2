@@ -6356,17 +6356,108 @@ async function main(): Promise<void> {
       // Sale creation itself is handler-audited (APPLICATION_SUBMITTED), so
       // its absence here is by architecture, not a gap: the database owns
       // the snapshot, the handler owns the event.
+      const auditJwtPattern = 'eyJ[A-Za-z0-9_-]{20,}[.][A-Za-z0-9_-]{20,}';
+      const knownSecrets = [
+        rawToken,
+        tokenHash,
+        String(activated.qr_token),
+        String(activated.fallback_code),
+        rotated.qr_token,
+        rotated.fallback_code,
+        hashesBefore.qr,
+        hashesBefore.fb,
+        hashesAfterRotate.qr,
+        hashesAfterRotate.fb,
+      ];
+      // A business reference may contain "eyj"; require JWT shape and also check exact issued credentials.
+      // `~` is case-sensitive: only a leading `eyJ` with two long segments counts, so
+      // `teyjgate`/`EYJ` substrings and short fragments never match. Real Supabase
+      // JWTs have three long segments, so both synthetic shapes below match.
+      for (const ordinary of [
+        'teyjgate-reference',
+        'PAY-eyj-2026-001',
+        'ITEM-EYJ-42',
+        'eyJ-short',
+        `eyJ.${'A'.repeat(10)}.${'B'.repeat(10)}`,
+      ]) {
+        eq(
+          `ordinary business reference is not a JWT (${ordinary.slice(0, 18)})`,
+          (await one<{ hit: boolean }>('select $1::text ~ $2 as hit', [ordinary, auditJwtPattern]))
+            .hit,
+          false,
+        );
+      }
+      for (const [i, syntheticJwt] of [
+        ['eyJ', 'A'.repeat(20), '.', 'B'.repeat(20)].join(''),
+        ['eyJ', 'A'.repeat(20), '.', 'B'.repeat(20), '.', 'C'.repeat(20)].join(''),
+      ].entries()) {
+        eq(
+          `audit JWT guard detects planted credential shape ${i + 1}`,
+          (
+            await one<{ hit: boolean }>('select $1::text ~ $2 as hit', [
+              syntheticJwt,
+              auditJwtPattern,
+            ])
+          ).hit,
+          true,
+        );
+        // Prove the full payload predicate would flag it, without writing audit rows.
+        eq(
+          `planted credential shape ${i + 1} fails the audit payload guard`,
+          (
+            await one<{ hit: boolean }>(
+              'select (coalesce($1::text,\'\') ~ $2) as hit',
+              [JSON.stringify({ note: `ref ${syntheticJwt}` }), auditJwtPattern],
+            )
+          ).hit,
+          true,
+        );
+      }
+      eq(
+        'exact issued opaque credentials are detected without a JWT prefix',
+        (
+          await one<{ hit: boolean }>(
+            "select strpos(jsonb_build_object('fixture',$1::text)::text,$1::text)>0 as hit",
+            [rotated.qr_token],
+          )
+        ).hit,
+        true,
+      );
       const secretScan = await one<{ n: number }>(
         `select count(*)::int as n from public.audit_events
           where actor_id = any($1::uuid[])
             and (coalesce(before_data::text,'') ~ '[0-9a-f]{64}'
               or coalesce(after_data::text,'') ~ '[0-9a-f]{64}'
               or after_data::text ilike '%AFH-%' or before_data::text ilike '%AFH-%'
-              or after_data::text ilike '%eyJ%' or before_data::text ilike '%eyJ%'
-              or after_data::text ilike '%BEGIN %' or before_data::text ilike '%BEGIN %')`,
-        [e2eActors],
+              or after_data::text ~ $2 or before_data::text ~ $2
+              or after_data::text ilike '%BEGIN %' or before_data::text ilike '%BEGIN %'
+              or exists(select 1 from unnest($3::text[]) credential where
+                strpos(coalesce(before_data::text,''),credential)>0 or
+                strpos(coalesce(after_data::text,''),credential)>0))`,
+        [e2eActors, auditJwtPattern, knownSecrets],
       );
       eq('no hashes, codes, tokens, or keys in E2E audit payloads', secretScan.n, 0);
+      if (secretScan.n > 0) {
+        const diagnostic = await db.query(
+          `select a.action, side.label, field.key,
+             field.value::text ~ '[0-9a-f]{64}' as hash_match,
+             field.value::text ilike '%AFH-%' as code_match,
+             field.value::text ~ $2 as jwt_match,
+             field.value::text ilike '%BEGIN %' as pem_match
+           from public.audit_events a
+           cross join lateral (values ('before',a.before_data),('after',a.after_data)) side(label,payload)
+           cross join lateral jsonb_each(coalesce(side.payload,'{}'::jsonb)) field
+           where a.actor_id=any($1::uuid[]) and
+             (field.value::text ~ '[0-9a-f]{64}' or field.value::text ilike '%AFH-%'
+               or field.value::text ~ $2 or field.value::text ilike '%BEGIN %'
+               or exists(select 1 from unnest($3::text[]) credential where strpos(field.value::text,credential)>0))`,
+          [e2eActors, auditJwtPattern, knownSecrets],
+        );
+        console.log(
+          'Secret scan diagnostic (field names and match categories only):',
+          diagnostic.rows,
+        );
+      }
 
       // -- Cross-module invariants: exactly one of everything intended.
       eq(

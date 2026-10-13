@@ -1,4 +1,5 @@
 import { listResponseSchema } from '@afhomes/contracts';
+import { withRequestDeadline } from '@afhomes/shared';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';
@@ -79,6 +80,7 @@ async function rawRequest(
   const token =
     forcedAccessToken ??
     (auth === 'required' ? await getFreshAccessToken() : await currentAccessToken());
+  init?.signal?.throwIfAborted();
   if (auth === 'required' && !token) {
     throw sessionExpired();
   }
@@ -91,14 +93,17 @@ async function rawRequest(
       credentials: fetchInit.credentials ?? 'same-origin',
     });
   } catch (cause) {
+    init?.signal?.throwIfAborted();
     throw new ApiNetworkError(cause);
   }
   // A 401 is rejected before a protected business mutation runs, so exactly
   // one refreshed retry is safe even for POST/PATCH/DELETE. Rebuild the
   // headers with the newly rotated token; never retry timeouts or 5xx errors.
+  init?.signal?.throwIfAborted();
   if (res.status === 401 && auth === 'required') {
     if (!retried) {
       const refreshedToken = await getFreshAccessToken(true);
+      init?.signal?.throwIfAborted();
       if (refreshedToken) return rawRequest(path, init, true, refreshedToken);
     }
     await clearSession();
@@ -117,14 +122,28 @@ async function parseBody(res: Response): Promise<unknown> {
   }
 }
 
+async function requestBody(path: string, init?: ApiRequestInit) {
+  try {
+    return await withRequestDeadline(async (signal) => {
+      const res = await rawRequest(path, { ...init, signal });
+      const body = await parseBody(res);
+      return { res, body };
+    }, init?.signal);
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+      throw new ApiNetworkError(cause);
+    }
+    throw cause;
+  }
+}
+
 /** GET a single resource; validates against `schema`; throws ApiError / ApiParseError. */
 export async function request<T>(
   path: string,
   schema: ZodType<T>,
   init?: ApiRequestInit,
 ): Promise<T> {
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -144,8 +163,7 @@ export async function requestList<T>(
   init?: ApiRequestInit,
 ): Promise<T[]> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -170,8 +188,7 @@ export async function requestListEnvelope<T>(
   init?: ApiRequestInit,
 ): Promise<{ data: T[]; meta: Record<string, unknown> }> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -197,8 +214,7 @@ export async function requestPage<T>(
   init?: ApiRequestInit,
 ): Promise<PageResult<T>> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);

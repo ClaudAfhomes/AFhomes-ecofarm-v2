@@ -349,6 +349,55 @@ describe('upload grants', () => {
 /* ================================================================== */
 
 describe('reads', () => {
+  it('returns a compact queue without OCR data and preserves the detailed read', async () => {
+    const { id } = await uploaded();
+    const db = holder.db as FakeSupabase;
+    const row = db.rows('identity_documents').find((r) => r.id === id)!;
+    row.extracted_data = {
+      fields: { full_name: { value: 'X'.repeat(20_000), confidence: 1 } },
+      warnings: [],
+    };
+    row.reviewed_data = { fields: { full_name: 'X'.repeat(20_000) } };
+    row.sha256 = 'a'.repeat(64);
+    db.calls.length = 0;
+    const summary = await call({
+      path: '',
+      token: SM_TOKEN,
+      query: { subjectType: 'customer', view: 'summary' },
+    });
+    expect(summary.status).toBe(200);
+    const item = (summary.body as { data: Record<string, unknown>[] }).data[0]!;
+    expect(item).toMatchObject({ id, hasFile: true, isCurrent: true });
+    expect(item).not.toHaveProperty('extractedFields');
+    expect(item).not.toHaveProperty('reviewedFields');
+    const selects = db.calls.filter(
+      (entry) => entry.op === 'select' && ['identity_documents', 'customers'].includes(entry.table),
+    );
+    expect(selects.length).toBeGreaterThan(0);
+    for (const entry of selects) {
+      expect(entry.arg).toEqual({ cols: expect.not.stringContaining('*') });
+      expect(entry.arg).toEqual({ cols: expect.not.stringContaining('extracted_data') });
+      expect(entry.arg).toEqual({ cols: expect.not.stringContaining('reviewed_data') });
+    }
+    const detail = await call({ path: `${id}`, token: SM_TOKEN });
+    expect(detail.body).toMatchObject({
+      extractedFields: { full_name: { value: 'X'.repeat(20_000) } },
+    });
+    const baseline = await call({ path: '', token: SM_TOKEN, query: { subjectType: 'customer' } });
+    expect(baseline.status).toBe(200);
+    expect(Buffer.byteLength(JSON.stringify(summary.body))).toBeLessThan(
+      Buffer.byteLength(JSON.stringify(baseline.body)) / 20,
+    );
+    expect(
+      (
+        await call({
+          path: '',
+          token: SM2_TOKEN,
+          query: { subjectType: 'customer', view: 'summary' },
+        })
+      ).body,
+    ).toMatchObject({ data: [] });
+  });
   it('4/19. hides other sellers\u2019 documents but shows the reviewer everything', async () => {
     const { id } = await uploaded();
     expect((await call({ path: `${id}`, token: SM2_TOKEN })).status).toBe(403);

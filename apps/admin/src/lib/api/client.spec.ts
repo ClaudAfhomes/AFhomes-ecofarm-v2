@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 const auth = vi.hoisted(() => ({
@@ -18,6 +18,87 @@ import { createAfHomesStaff, deleteAfHomesStaff } from '../../features/afhomes/s
 import { protectedRequest, request } from './client';
 
 const okSchema = z.object({ ok: z.literal(true) });
+afterEach(() => vi.useRealTimers());
+
+describe('request deadlines', () => {
+  it('cleans up a successful request deadline', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ok: true })));
+    await expect(protectedRequest('/protected', okSchema)).resolves.toEqual({ ok: true });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not retry or clear a session after a timed-out refresh finishes', async () => {
+    vi.useFakeTimers();
+    let finish: ((value: boolean) => void) | undefined;
+    auth.refresh.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue(response({}, 401));
+    vi.stubGlobal('fetch', fetchMock);
+    const rejected = expect(
+      protectedRequest('/protected', okSchema, { method: 'POST' }),
+    ).rejects.toMatchObject({ name: 'ApiNetworkError' });
+    await vi.advanceTimersByTimeAsync(60_001);
+    await rejected;
+    finish?.(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(auth.clear).not.toHaveBeenCalled();
+  });
+  it.each(['session', 'fetch', 'body'])(
+    'settles a stalled %s without replaying a mutation',
+    async (stage) => {
+      vi.useFakeTimers();
+      const pending = () => new Promise<never>(() => {});
+      if (stage === 'session') auth.getSession.mockImplementation(pending);
+      const fetchMock = vi.fn().mockImplementation(
+        stage === 'fetch'
+          ? pending
+          : async () => {
+              const res = response({ ok: true });
+              if (stage === 'body') vi.spyOn(res, 'text').mockImplementation(pending);
+              return res;
+            },
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      let failure: unknown;
+      void protectedRequest('/protected', okSchema, { method: 'POST' }).catch((error: unknown) => {
+        failure = error;
+      });
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(failure).toMatchObject({
+        name: 'ApiNetworkError',
+        message: expect.stringContaining('timed out'),
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(stage === 'session' ? 0 : 1);
+      expect(auth.refresh).not.toHaveBeenCalled();
+      expect(auth.clear).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not send a request after cancellation during session lookup', async () => {
+    let finish: ((value: Awaited<ReturnType<typeof session>>) => void) | undefined;
+    auth.getSession.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue(response({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    const result = protectedRequest('/protected', okSchema, { signal: controller.signal });
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    finish?.({ data: { session: { access_token: 'current-token' } }, error: null });
+    await rejected;
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -55,16 +136,19 @@ beforeEach(() => {
 });
 
 describe('required API authentication', () => {
-  it.each(['DELETE', 'POST', 'PATCH'])('attaches a Bearer token to protected %s', async (method) => {
-    const fetchMock = vi.fn().mockResolvedValue(response({ ok: true }));
-    vi.stubGlobal('fetch', fetchMock);
+  it.each(['DELETE', 'POST', 'PATCH'])(
+    'attaches a Bearer token to protected %s',
+    async (method) => {
+      const fetchMock = vi.fn().mockResolvedValue(response({ ok: true }));
+      vi.stubGlobal('fetch', fetchMock);
 
-    await protectedRequest('/protected', okSchema, { method });
+      await protectedRequest('/protected', okSchema, { method });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method });
-    expect(headersAt(fetchMock, 0).Authorization).toBe('Bearer current-token');
-  });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method });
+      expect(headersAt(fetchMock, 0).Authorization).toBe('Bearer current-token');
+    },
+  );
 
   it('refreshes before the first request when storage has no access token', async () => {
     auth.getSession
@@ -85,12 +169,12 @@ describe('required API authentication', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(protectedRequest('/protected', okSchema, { method: 'DELETE' })).rejects.toMatchObject(
-      {
-        status: 401,
-        message: 'Your session has expired. Please sign in again.',
-      },
-    );
+    await expect(
+      protectedRequest('/protected', okSchema, { method: 'DELETE' }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: 'Your session has expired. Please sign in again.',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -127,7 +211,9 @@ describe('required API authentication', () => {
     expect(auth.refresh).toHaveBeenCalledTimes(1);
     expect(auth.clear).toHaveBeenCalledTimes(1);
     expect(String(failure)).toBe('ApiError: Your session has expired. Please sign in again.');
-    expect(JSON.stringify(failure)).not.toMatch(/stale-secret-token|new-secret-token|Authorization/i);
+    expect(JSON.stringify(failure)).not.toMatch(
+      /stale-secret-token|new-secret-token|Authorization/i,
+    );
   });
 
   it('allows an explicitly public request to run without a session', async () => {

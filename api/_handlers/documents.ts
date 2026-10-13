@@ -21,6 +21,7 @@ import {
   documentListQuerySchema,
   documentConfirmSchema,
   documentUploadRequestSchema,
+  identityDocumentSummarySchema,
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
@@ -70,6 +71,9 @@ const MODULE_FOR_SUBJECT: Record<Subject, 'sales.id_documents' | 'network.ost_re
 const SELLER_ROLES = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const;
 
 type DocRow = Record<string, unknown>;
+const CURRENT_COLUMNS = 'id,created_at,verification_status,storage_path,sha256';
+const SUMMARY_COLUMNS =
+  'id,subject_type,customer_id,ost_application_id,original_filename,mime_type,size_bytes,storage_path,sha256,ocr_status,ocr_provider,verification_status,created_at,reviewed_at';
 const reviewResultSchema = z.object({
   document: z.record(z.string(), z.unknown()),
   isCurrent: z.boolean(),
@@ -177,6 +181,7 @@ async function currentDocumentsForSubjects(
   subjectType: Subject,
   ids: string[],
   owned?: Set<string>,
+  detailed = false,
 ): Promise<Map<string, DocRow>> {
   const result = new Map<string, DocRow>();
   if (!ids.length) return result;
@@ -190,7 +195,7 @@ async function currentDocumentsForSubjects(
     if (!group.length) continue;
     let query = db
       .from(table)
-      .select('id,current_documents:identity_documents(*)')
+      .select(`id,current_documents:identity_documents(${detailed ? '*' : CURRENT_COLUMNS})`)
       .in('id', group)
       .eq('current_documents.subject_type', subjectType)
       .neq('current_documents.storage_path', '')
@@ -400,9 +405,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { subjectType, subjectId } = parsed.data;
       const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
       if ('error' in auth) return deny(res, auth);
-      const current = (await currentDocumentsForSubjects(db, auth, subjectType, [subjectId])).get(
-        subjectId,
-      );
+      const current = (
+        await currentDocumentsForSubjects(db, auth, subjectType, [subjectId], undefined, true)
+      ).get(subjectId);
       return res
         .status(200)
         .json({ currentDocument: current ? toDocument(current, subjectId, true) : null });
@@ -412,14 +417,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === '' && method(req) === 'GET') {
       const parsed = documentListQuerySchema.safeParse(req.query);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid document list query', 400);
-      const { subjectType, subjectId, limit, offset } = parsed.data;
+      const { subjectType, subjectId, limit, offset, view } = parsed.data;
       const auth = await authorizeAfHomes(req, MODULE_FOR_SUBJECT[subjectType]);
       if ('error' in auth) return deny(res, auth);
       const column = subjectType === 'customer' ? 'customer_id' : 'ost_application_id';
       const owned = subjectId ? await ownedSubjects(db, auth, subjectType, [subjectId]) : undefined;
       let query = db
         .from('identity_documents')
-        .select('*', { count: 'exact' })
+        .select(view === 'summary' ? SUMMARY_COLUMNS : '*', { count: 'exact' })
         .eq('subject_type', subjectType)
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
@@ -436,9 +441,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rows = (data ?? []) as DocRow[];
       const ids = [...new Set(rows.map((row) => String(row[column])))];
       const current = await currentDocumentsForSubjects(db, auth, subjectType, ids, owned);
-      const visible = rows.map((row) =>
-        toDocument(row, String(row[column]), row.id === current.get(String(row[column]))?.id),
-      );
+      const visible = rows.map((row) => {
+        const document = toDocument(
+          row,
+          String(row[column]),
+          row.id === current.get(String(row[column]))?.id,
+        );
+        return view === 'summary' ? identityDocumentSummarySchema.parse(document) : document;
+      });
       return res
         .status(200)
         .json({ data: visible, meta: { total: count ?? rows.length, limit, offset } });

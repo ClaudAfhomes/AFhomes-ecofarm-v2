@@ -107,7 +107,7 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     let called = false;
     const original = db.rpc.bind(db);
     db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
-      called = true;
+      if (args[0] !== 'afhomes_admin_mfa_required') called = true;
       return original(...args);
     };
     const s = await lookup(TOKEN.unassigned);
@@ -146,7 +146,8 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     const seen: Array<Record<string, unknown>> = [];
     const original = db.rpc.bind(db);
     db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
-      seen.push((args[1] as { p_filters: Record<string, unknown> })?.p_filters ?? {});
+      if (args[0] !== 'afhomes_admin_mfa_required')
+        seen.push((args[1] as { p_filters: Record<string, unknown> })?.p_filters ?? {});
       return original(...args);
     };
     await lookup(TOKEN.viewer);

@@ -10,6 +10,7 @@ import {
   FilterBar,
   FileField,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
   Skeleton,
@@ -23,7 +24,7 @@ import { documentKeys } from '../business/queryKeys';
 import {
   ACCEPTED_MIME,
   MAX_BYTES,
-  getDocuments,
+  getDocumentSummaries,
   completeDocumentUpload,
   putUploadBytes,
   requestUploadGrant,
@@ -44,18 +45,24 @@ export function DocumentsPage() {
   const [subjectType, setSubjectType] = useState<'customer' | 'ost_application'>('customer');
   const [subjectId, setSubjectId] = useState('');
   const [appliedId, setAppliedId] = useState('');
+  const [page, setPage] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadedId, setUploadedId] = useState<string | null>(null);
 
   const docs = useQuery({
-    queryKey: documentKeys.list(subjectType, appliedId),
-    queryFn: () =>
-      getDocuments(appliedId ? { subjectType, subjectId: appliedId } : { subjectType }),
+    queryKey: [...documentKeys.list(subjectType, appliedId), page],
+    queryFn: ({ signal }) =>
+      getDocumentSummaries(
+        { subjectType, subjectId: appliedId || undefined, offset: (page - 1) * 25 },
+        signal,
+      ),
     // The list stays on screen while a subject change or a background refresh
     // reloads; only the very first load skeletonizes the page.
     placeholderData: keepPreviousData,
   });
+  const documents = docs.data?.data ?? [];
+  const total = typeof docs.data?.meta.total === 'number' ? docs.data.meta.total : documents.length;
 
   const upload = useBusinessMutation({
     mutationFn: async () => {
@@ -136,6 +143,7 @@ export function DocumentsPage() {
         onSubmit={(e) => {
           e.preventDefault();
           setAppliedId(subjectId.trim());
+          setPage(1);
         }}
       >
         <FilterBar
@@ -147,6 +155,7 @@ export function DocumentsPage() {
                 setSubjectType(e.target.value as 'customer' | 'ost_application');
                 setAppliedId('');
                 setSubjectId('');
+                setPage(1);
               }}
               options={[
                 { value: 'customer', label: 'Customer' },
@@ -203,61 +212,69 @@ export function DocumentsPage() {
           message={describeDocumentsLoadError(docs.error)}
           onRetry={() => void docs.refetch()}
         />
-      ) : (docs.data ?? []).length === 0 ? (
+      ) : documents.length === 0 ? (
         <EmptyState
           title="No documents"
           description="Upload a scan above, or pick a different record."
         />
       ) : (
-        <div
-          role="region"
-          aria-label="Scrollable records"
-          tabIndex={0}
-          className={`table-scroll ${styles.tableWrap}`}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>OCR</th>
-                <th>Verification</th>
-                <th>Uploaded</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(docs.data ?? []).map((doc) => (
-                <tr key={doc.id}>
-                  <td data-label="File" className={styles.fileCell}>
-                    {doc.originalFilename}
-                  </td>
-                  <td data-label="OCR">
-                    <StatusChip label={humanizeCode(doc.ocrStatus)} />
-                  </td>
-                  <td data-label="Verification">
-                    <StatusChip label={humanizeCode(doc.verificationStatus)} />
-                  </td>
-                  <td data-label="Uploaded">{formatDateTime(doc.uploadedAt)}</td>
-                  <td data-label="Actions">
-                    <span className={styles.rowActions}>
-                      <Link to={`/admin/documents/${doc.id}`}>Review</Link>
-                      {doc.ocrStatus !== 'completed' ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={ocr.isPending}
-                          onClick={() => ocr.mutate(doc.id)}
-                        >
-                          Run OCR
-                        </Button>
-                      ) : null}
-                    </span>
-                  </td>
+        <>
+          <div
+            role="region"
+            aria-label="Scrollable records"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>OCR</th>
+                  <th>Verification</th>
+                  <th>Uploaded</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {documents.map((doc) => (
+                  <tr key={doc.id}>
+                    <td data-label="File" className={styles.fileCell}>
+                      {doc.originalFilename}
+                    </td>
+                    <td data-label="OCR">
+                      <StatusChip label={humanizeCode(doc.ocrStatus)} />
+                    </td>
+                    <td data-label="Verification">
+                      <StatusChip label={humanizeCode(doc.verificationStatus)} />
+                    </td>
+                    <td data-label="Uploaded">{formatDateTime(doc.uploadedAt)}</td>
+                    <td data-label="Actions">
+                      <span className={styles.rowActions}>
+                        <Link to={`/admin/documents/${doc.id}`}>Review</Link>
+                        {doc.ocrStatus !== 'completed' ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={ocr.isPending}
+                            onClick={() => ocr.mutate(doc.id)}
+                          >
+                            Run OCR
+                          </Button>
+                        ) : null}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination
+            page={page}
+            pageCount={Math.max(1, Math.ceil(total / 25))}
+            onChange={setPage}
+            disabled={docs.isFetching}
+          />
+        </>
       )}
       {ocr.isError ? (
         <Alert variant="danger" title="Extraction could not start">
