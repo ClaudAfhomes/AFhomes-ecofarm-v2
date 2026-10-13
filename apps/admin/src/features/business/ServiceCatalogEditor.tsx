@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { z } from 'zod';
 import { serviceCatalogItemSchema, serviceCatalogItemInputSchema } from '@afhomes/contracts';
 import {
+  Alert,
   Button,
   Dialog,
   EmptyState,
   ErrorState,
   FileField,
+  FilterBar,
+  MetricCard,
+  OverflowMenu,
+  SearchField,
   Select,
   Skeleton,
   StatusChip,
@@ -16,6 +21,7 @@ import {
   notifySuccess,
   notifyConfirm,
 } from '@afhomes/ui';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   createService,
   updateService,
@@ -23,8 +29,9 @@ import {
   manageServicePhoto,
 } from './points-services';
 import { useSession } from '../../lib/session';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import styles from './services.module.css';
+import catalogStyles from './points.module.css';
 
 type Service = z.infer<typeof serviceCatalogItemSchema>;
 
@@ -43,12 +50,66 @@ export function ServiceCatalogEditor({
     (p) => p.moduleKey === 'operations.catalog',
   );
   const [editing, setEditing] = useState<Service | 'new' | null>(null);
+  const [detail, setDetail] = useState<Service | null>(null);
+  const [search, setSearch] = useState('');
+  const [applied, setApplied] = useState('');
+  void useDebouncedValue(search.trim(), 300, setApplied);
+  const term = applied.toLowerCase();
+  const visible = useMemo(
+    () =>
+      term.length === 0
+        ? services
+        : services.filter(
+            (service) =>
+              service.name.toLowerCase().includes(term) ||
+              (service.category ?? '').toLowerCase().includes(term),
+          ),
+    [services, term],
+  );
+  const activeCount = useMemo(() => visible.filter((s) => s.isActive).length, [visible]);
   return (
-    <section aria-label="Service catalog">
+    <section aria-label="Service catalog" className={catalogStyles.section}>
       <div className={styles.header}>
-        <h2>Services</h2>
+        <h2 className={catalogStyles.sectionTitle}>Services</h2>
         {permission?.canCreate && <Button onClick={() => setEditing('new')}>Add service</Button>}
       </div>
+      <Alert variant="info" title="Catalog drives every sale">
+        Prices and points here are database-backed. Editing a service never rewrites a recorded
+        sale; it only affects future purchases.
+      </Alert>
+      {!loading && !error && services.length > 0 ? (
+        <ul className={catalogStyles.metrics} aria-label="Catalog summary">
+          <li>
+            <MetricCard
+              label="Services"
+              value={formatCountOrDash(visible.length)}
+              icon="grid"
+              description="Catalog entries in view"
+            />
+          </li>
+          <li>
+            <MetricCard
+              label="Active"
+              value={formatCountOrDash(activeCount)}
+              icon="check"
+              description="Available for new sales"
+            />
+          </li>
+        </ul>
+      ) : null}
+      {!loading && !error && services.length > 0 ? (
+        <FilterBar
+          filtersToggleLabel="Expand Filters"
+          search={
+            <SearchField
+              label="Search services"
+              placeholder="Service name or category"
+              value={search}
+              onChange={setSearch}
+            />
+          }
+        />
+      ) : null}
       {loading ? (
         <div role="status" aria-label="Loading services">
           <Skeleton />
@@ -57,14 +118,14 @@ export function ServiceCatalogEditor({
         </div>
       ) : error ? (
         <ErrorState error={error} onRetry={onSaved} />
-      ) : services.length === 0 ? (
+      ) : visible.length === 0 ? (
         <EmptyState
           title="No services yet"
           description="Add a service, then configure its VIP discounts and earning rules below."
         />
       ) : (
         <div className={styles.cards}>
-          {services.map((service) => (
+          {visible.map((service) => (
             <article key={service.id} className={styles.card}>
               {service.photos[0] && (
                 <img
@@ -77,19 +138,108 @@ export function ServiceCatalogEditor({
               <p>{service.description ?? 'No description yet.'}</p>
               <strong>{formatMoneyOrDash(service.basePrice)}</strong>
               <div className={styles.header}>
-                <StatusChip label={service.availability} />
-                <StatusChip label={service.published ? 'Published' : 'Internal'} />
-                {service.isStaycationEligible && <StatusChip label="Points-eligible stay" />}
+                <StatusChip label={capitalizeStatus(service.availability)} />
+                <StatusChip
+                  label={service.published ? 'Published' : 'Internal'}
+                  tone={service.published ? 'success' : 'neutral'}
+                />
+                {service.isStaycationEligible && (
+                  <StatusChip label="Points-eligible stay" tone="info" />
+                )}
+                <StatusChip
+                  label={service.isActive ? 'Active' : 'Inactive'}
+                  tone={service.isActive ? 'success' : 'neutral'}
+                />
               </div>
-              {permission?.canUpdate && (
-                <Button variant="secondary" onClick={() => setEditing(service)}>
-                  Edit {service.name}
+              <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                <Button variant="secondary" onClick={() => setDetail(service)}>
+                  View details
                 </Button>
-              )}
+                {permission?.canUpdate && (
+                  <Button variant="secondary" onClick={() => setEditing(service)}>
+                    Edit {service.name}
+                  </Button>
+                )}
+                <OverflowMenu
+                  label={`More actions for ${service.name}`}
+                  items={[
+                    {
+                      label: 'View details',
+                      icon: 'info',
+                      onClick: () => setDetail(service),
+                    },
+                  ]}
+                />
+              </span>
             </article>
           ))}
         </div>
       )}
+      {detail ? (
+        <Dialog
+          open
+          onClose={() => setDetail(null)}
+          title={detail.name}
+          footer={
+            <>
+              {permission?.canUpdate ? (
+                <Button
+                  onClick={() => {
+                    setEditing(detail);
+                    setDetail(null);
+                  }}
+                >
+                  Edit {detail.name}
+                </Button>
+              ) : null}
+              <Button variant="ghost" onClick={() => setDetail(null)}>
+                Close
+              </Button>
+            </>
+          }
+        >
+          {detail.photos[0] ? (
+            <img src={detail.photos[0].url} alt={detail.photos[0].alt} className={styles.photo} />
+          ) : null}
+          <dl className={catalogStyles.figures}>
+            <div>
+              <dt>Base price</dt>
+              <dd>{formatMoneyOrDash(detail.basePrice)}</dd>
+            </div>
+            <div>
+              <dt>Availability</dt>
+              <dd>
+                <StatusChip label={capitalizeStatus(detail.availability)} />
+              </dd>
+            </div>
+            <div>
+              <dt>Visibility</dt>
+              <dd>
+                <StatusChip
+                  label={detail.published ? 'Published' : 'Internal'}
+                  tone={detail.published ? 'success' : 'neutral'}
+                />
+              </dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <StatusChip
+                  label={detail.isActive ? 'Active' : 'Inactive'}
+                  tone={detail.isActive ? 'success' : 'neutral'}
+                />
+              </dd>
+            </div>
+            <div>
+              <dt>Description</dt>
+              <dd>{detail.description ?? 'No description yet.'}</dd>
+            </div>
+          </dl>
+          <p className={catalogStyles.hint}>
+            This record is read-only here. Use the menu action to edit it.
+          </p>
+        </Dialog>
+      ) : null}
       {editing && (
         <ServiceEditor
           key={editing === 'new' ? 'new' : editing.id}
@@ -101,6 +251,10 @@ export function ServiceCatalogEditor({
       )}
     </section>
   );
+}
+
+function capitalizeStatus(value: string): string {
+  return value.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function ServiceEditor({

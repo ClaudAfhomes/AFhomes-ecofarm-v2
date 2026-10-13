@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Button,
   DateField,
+  Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -49,6 +50,9 @@ export function AuditPage() {
   const query = useQuery({
     queryKey: ['audit', debouncedAction, debouncedEntityType, from, to, offset],
     queryFn: () => getAudit(filters),
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: keepPreviousData,
     refetchInterval: 30_000,
   });
 
@@ -64,8 +68,37 @@ export function AuditPage() {
     }
   };
 
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous page visible via placeholderData and never reach this branch.
+  if (query.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading audit events"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Audit Log"
         description="Append-only governance trail. Metadata is redacted server-side before it reaches this screen."
@@ -80,6 +113,7 @@ export function AuditPage() {
             onChange={(value) => {
               setAction(value);
             }}
+            busy={query.isFetching && !query.isPending}
           />
         }
         filters={
@@ -123,23 +157,18 @@ export function AuditPage() {
         }
       />
 
-      {query.isPending ? (
-        <div
-          className={styles.loadingGrid}
-          role="status"
-          aria-label="Loading audit events"
-        >
-          <Skeleton style={{ height: 48 }} />
-          <Skeleton style={{ height: 48 }} />
-          <Skeleton style={{ height: 48 }} />
-        </div>
-      ) : query.isError ? (
+      {query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
-      ) : query.data.data.length === 0 ? (
+      ) : !query.data || query.data.data.length === 0 ? (
         <EmptyState title="No audit events" description="Nothing matches these filters." />
       ) : (
         <>
-          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <div
+            role="region"
+            aria-label="Scrollable records"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
             <table>
               <thead>
                 <tr>
@@ -154,16 +183,19 @@ export function AuditPage() {
               <tbody>
                 {query.data.data.map((event) => (
                   <tr key={String(event.id)}>
-                    <td>{formatDateTime(event.createdAt)}</td>
-                    <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td data-label="Time">{formatDateTime(event.createdAt)}</td>
+                    <td
+                      data-label="Actor"
+                      style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    >
                       {event.actorName ??
                         (event.actorId ? 'Former staff account' : 'System / public applicant')}
                       {event.actorRole && <small>{event.actorRole}</small>}
                     </td>
-                    <td>{humanizeReportLabel(event.action)}</td>
-                    <td>{humanizeReportLabel(event.entityType)}</td>
-                    <td>{event.summary}</td>
-                    <td>
+                    <td data-label="Action">{humanizeReportLabel(event.action)}</td>
+                    <td data-label="Entity">{humanizeReportLabel(event.entityType)}</td>
+                    <td data-label="Summary">{event.summary}</td>
+                    <td data-label="Details">
                       <Button size="sm" variant="secondary" onClick={() => setOpenId(event.id)}>
                         Metadata
                       </Button>
@@ -196,21 +228,24 @@ export function AuditPage() {
         </>
       )}
 
-      {openId !== null && query.data ? (
-        <div className={styles.detailSection}>
-          <h2>Event metadata (redacted)</h2>
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {JSON.stringify(
-              query.data.data.find((event) => event.id === openId)?.metadata ?? {},
-              null,
-              2,
-            )}
-          </pre>
+      <Dialog
+        open={openId !== null && Boolean(query.data)}
+        onClose={() => setOpenId(null)}
+        title="Event metadata (redacted)"
+        footer={
           <Button variant="secondary" onClick={() => setOpenId(null)}>
             Close
           </Button>
-        </div>
-      ) : null}
+        }
+      >
+        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {JSON.stringify(
+            query.data?.data.find((event) => event.id === openId)?.metadata ?? {},
+            null,
+            2,
+          )}
+        </pre>
+      </Dialog>
 
       {exportError ? (
         <ErrorState error={new Error(exportError)} onRetry={() => setExportError(null)} />

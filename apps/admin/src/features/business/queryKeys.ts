@@ -113,6 +113,37 @@ export const reservationKeys = {
     key('purchase-terms-proposal', 'reservation-source', customerApplicationId),
 };
 
+/** `['memberships', ...]` family: issued cards, points, and desk lookups. */
+export const membershipKeys = {
+  scope: key('memberships'),
+  list: (status: string) => key('memberships', status),
+  record: (id: string | undefined) => key('memberships', id),
+  card: (id: string | undefined) => key('memberships', id, 'card'),
+  history: (id: string | undefined) => key('memberships', id, 'history'),
+  points: (id: string | undefined) => key('memberships', id, 'points'),
+  ledger: (id: string | undefined, accountId: string | undefined) =>
+    key('memberships', id, 'ledger', accountId),
+  customerLookup: (term: string) => key('customer-lookup', term),
+  memberLookup: (term: string) => key('member-lookup', term),
+};
+
+/** `['documents', ...]` family: identity intake, review, and signed previews. */
+export const documentKeys = {
+  scope: key('documents'),
+  list: (subjectType: string, subjectId: string) => key('documents', subjectType, subjectId),
+  detail: (id: string | undefined) => key('documents', id),
+  accessUrl: (id: string | undefined, uploadedAt: unknown) =>
+    key('documents', id, 'access-url', uploadedAt),
+};
+
+/** `['genealogy', ...]` family: the authorized seller tree and its panels. */
+export const genealogyKeys = {
+  tree: key('genealogy'),
+  node: (staffId: string | undefined) => key('genealogy', staffId),
+  upline: (staffId: string | undefined) => key('genealogy', staffId, 'upline'),
+  summary: (staffId: string | undefined) => key('genealogy', staffId, 'summary'),
+};
+
 /** Roots shared with other domains; business pages only read or clear them. */
 export const sharedScopes = {
   sales: key('sales'),

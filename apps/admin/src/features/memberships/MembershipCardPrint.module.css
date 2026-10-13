@@ -3,6 +3,19 @@
 
 .screenOnly {
   margin-bottom: 24px;
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.screenActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.backRow {
+  margin: 0;
 }
 
 .card {

@@ -1,8 +1,28 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Button, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { useMemo, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import {
+  Alert,
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  MetricCard,
+  OverflowMenu,
+  PageHeader,
+  Pagination,
+  Skeleton,
+  StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '@afhomes/ui';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import styles from './points.module.css';
+import { TierBadge } from './TierBadge';
 import {
   listClaimsPage,
   listPurchasesPage,
@@ -12,12 +32,22 @@ import {
 import { useSession } from '../../lib/session';
 import { earningKeys } from './queryKeys';
 
+const statusTone = (status: string) =>
+  status === 'completed' || status === 'claimed'
+    ? ('success' as const)
+    : status === 'reversed'
+      ? ('danger' as const)
+      : status === 'expired'
+        ? ('warning' as const)
+        : ('neutral' as const);
+
 export function SalesRecordsPage() {
   const [purchasePage, setPurchasePage] = useState(0);
   const [claimPage, setClaimPage] = useState(0);
   const purchases = useQuery({
     queryKey: earningKeys.purchases(purchasePage),
     queryFn: () => listPurchasesPage(purchasePage),
+    placeholderData: keepPreviousData,
     refetchInterval: 15000,
   });
   const mayViewClaims =
@@ -27,32 +57,54 @@ export function SalesRecordsPage() {
   const claims = useQuery({
     queryKey: earningKeys.claims(claimPage),
     queryFn: () => listClaimsPage(claimPage),
+    placeholderData: keepPreviousData,
     refetchInterval: 15000,
     enabled: mayViewClaims,
   });
-  return (
-    <>
-      <PageHeader
-        title="Operational Services Sales Records"
-        description="Permanent purchase and claim evidence. Recorded receipts and verified money are shown separately."
-      />
-      <p>
-        The points ledger is permanent. Corrections require a separate authorized, audited
-        adjustment.
-      </p>
-      {/* `isLoading`, never `isPending`: the claims query is DISABLED for a caller
-          without `operations.redemption`, and in TanStack Query v5 a disabled
-          query stays `isPending` forever. Gating a skeleton on `isPending` is
-          exactly how a page becomes a permanent loading state for a legitimate
-          user. `aria-busy` says the region is working; the Skeletons are
-          aria-hidden, so this element is the only announcement. */}
-      {purchases.isLoading || (mayViewClaims && claims.isLoading) ? (
-        <div role="status" aria-label="Loading sales records" aria-busy="true">
-          <Skeleton />
-          <Skeleton />
-          <Skeleton />
+  const [detail, setDetail] = useState<PurchaseRow | null>(null);
+
+  const purchaseRows = useMemo(() => purchases.data ?? [], [purchases.data]);
+  const claimRows = useMemo(
+    () => (mayViewClaims ? (claims.data ?? []) : []),
+    [claims.data, mayViewClaims],
+  );
+
+  const completed = purchaseRows.filter((row) => row.status === 'completed').length;
+
+  // First load skeletonizes the whole page. Refetches keep the previous page
+  // visible via keepPreviousData and never reach this branch. Uses isLoading
+  // (not isPending) so a disabled claims query never pins the page as loading.
+  const firstLoad = purchases.isLoading || (mayViewClaims && claims.isLoading);
+  if (firstLoad)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading sales records"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 320 }} />
+            <Skeleton style={{ height: 16, maxWidth: 520 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+          <span className="sr-only">Loading sales records</span>
         </div>
-      ) : purchases.isError || (mayViewClaims && claims.isError) ? (
+      </section>
+    );
+
+  const failed = purchases.isError || (mayViewClaims && claims.isError);
+  if (failed)
+    return (
+      <section className={styles.page}>
+        <PageHeader
+          title="Operational Services Sales Records"
+          description="Permanent purchase and claim evidence. Recorded receipts and verified money are shown separately."
+        />
         <ErrorState
           error={purchases.error ?? claims.error}
           onRetry={() => {
@@ -60,13 +112,57 @@ export function SalesRecordsPage() {
             if (mayViewClaims) void claims.refetch();
           }}
         />
-      ) : (
-        <PointsHistory
-          purchases={purchases.data ?? []}
-          claims={mayViewClaims ? (claims.data ?? []) : []}
-        />
-      )}
+      </section>
+    );
+
+  return (
+    <section className={styles.page}>
+      <PageHeader
+        title="Operational Services Sales Records"
+        description="Permanent purchase and claim evidence. Recorded receipts and verified money are shown separately."
+      />
+      <Alert variant="warning" title="Permanent ledger">
+        The points ledger is permanent. Corrections require a separate authorized, audited
+        adjustment.
+      </Alert>
+
+      <ul className={styles.metrics} aria-label="Records summary">
+        <li>
+          <MetricCard
+            label="Purchases loaded"
+            value={formatCountOrDash(purchaseRows.length)}
+            icon="file-text"
+            description="Permanent purchase evidence on this page"
+          />
+        </li>
+        <li>
+          <MetricCard
+            label="Completed"
+            value={formatCountOrDash(completed)}
+            icon="check"
+            description="Settled purchases in this page"
+          />
+        </li>
+        {mayViewClaims ? (
+          <li>
+            <MetricCard
+              label="Claims loaded"
+              value={formatCountOrDash(claimRows.length)}
+              icon="grid"
+              description="Issued earning claims on this page"
+            />
+          </li>
+        ) : null}
+      </ul>
+
+      <PointsHistory purchases={purchaseRows} claims={claimRows} onView={setDetail} />
       <nav aria-label="Purchase history pages">
+        <Pagination
+          page={purchasePage + 1}
+          pageCount={Math.max(1, purchasePage + ((purchases.data?.length ?? 0) < 200 ? 1 : 2))}
+          onChange={(next) => setPurchasePage(next - 1)}
+          label="Purchases pagination"
+        />
         <Button
           variant="secondary"
           disabled={purchasePage === 0 || purchases.isFetching}
@@ -104,16 +200,91 @@ export function SalesRecordsPage() {
           </Button>
         </nav>
       )}
-    </>
+
+      {detail ? (
+        <Dialog
+          open
+          onClose={() => setDetail(null)}
+          title={`Purchase ${detail.purchaseNumber}`}
+          footer={
+            <Button variant="ghost" onClick={() => setDetail(null)}>
+              Close
+            </Button>
+          }
+        >
+          <dl className={styles.figures}>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <StatusChip tone={statusTone(detail.status)} label={detail.status} />
+              </dd>
+            </div>
+            {'tierSnapshot' in detail && detail.tierSnapshot ? (
+              <div>
+                <dt>Tier</dt>
+                <dd>
+                  <TierBadge tier={String(detail.tierSnapshot)} />
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Gross</dt>
+              <dd>{formatMoneyOrDash(detail.grossAmount)}</dd>
+            </div>
+            <div>
+              <dt>VIP discount</dt>
+              <dd>{formatMoneyOrDash(detail.tierDiscountAmount ?? '0.00')}</dd>
+            </div>
+            <div>
+              <dt>Points discount</dt>
+              <dd>{formatMoneyOrDash(detail.pointsDiscountAmount)}</dd>
+            </div>
+            <div>
+              <dt>Net</dt>
+              <dd>{formatMoneyOrDash(detail.netAmount)}</dd>
+            </div>
+            <div>
+              <dt>Recorded</dt>
+              <dd>{formatMoneyOrDash(detail.recordedTotal)}</dd>
+            </div>
+            <div>
+              <dt>Verified</dt>
+              <dd>{formatMoneyOrDash(detail.verifiedTotal)}</dd>
+            </div>
+            <div>
+              <dt>Customer</dt>
+              <dd>{detail.customerName ?? detail.customerId}</dd>
+            </div>
+          </dl>
+          <p className={styles.hint}>
+            This record is read-only. History is never edited here; corrections go through an
+            authorized adjustment.
+          </p>
+        </Dialog>
+      ) : null}
+    </section>
   );
 }
 
-function PointsHistory({ purchases, claims }: { purchases: PurchaseRow[]; claims: ClaimRow[] }) {
+function PointsHistory({
+  purchases,
+  claims,
+  onView,
+}: {
+  purchases: PurchaseRow[];
+  claims: ClaimRow[];
+  onView: (row: PurchaseRow) => void;
+}) {
   return (
     <>
-      <section aria-label="Purchases">
-        <h3>Purchases</h3>
-        {purchases.length === 0 && <p className={styles.hint}>No purchases recorded yet.</p>}
+      <section aria-label="Purchases" className={styles.section}>
+        <h2 className={styles.sectionTitle}>Purchases</h2>
+        {purchases.length === 0 && (
+          <EmptyState
+            title="No purchases recorded yet."
+            description="Record the first sale from the Elite Service Delivery screen."
+          />
+        )}
         {purchases.length > 0 && (
           // Eleven columns cannot fit a 360px phone. The shared `.table-scroll`
           // contract keeps the overflow INSIDE this region so the page itself
@@ -123,114 +294,143 @@ function PointsHistory({ purchases, claims }: { purchases: PurchaseRow[]; claims
             role="region"
             aria-label="Scrollable purchases"
             tabIndex={0}
-            className="table-scroll"
+            className={`table-scroll ${styles.tableWrap}`}
           >
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Purchase</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Gross</th>
-                  <th scope="col">VIP discount</th>
-                  <th scope="col">Points discount</th>
-                  <th scope="col">Recorded</th>
-                  <th scope="col">Verified</th>
-                  <th scope="col">Customer / seller</th>
-                  <th scope="col">Services</th>
-                  <th scope="col">Net</th>
-                  <th scope="col">Completed</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableCaption>
+                Permanent purchase evidence with recorded and verified money.
+              </TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Purchase</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell align="right">Gross</TableHeaderCell>
+                  <TableHeaderCell align="right">VIP discount</TableHeaderCell>
+                  <TableHeaderCell align="right">Points discount</TableHeaderCell>
+                  <TableHeaderCell align="right">Recorded</TableHeaderCell>
+                  <TableHeaderCell align="right">Verified</TableHeaderCell>
+                  <TableHeaderCell>Customer / seller</TableHeaderCell>
+                  <TableHeaderCell>Services</TableHeaderCell>
+                  <TableHeaderCell align="right">Net</TableHeaderCell>
+                  <TableHeaderCell>Completed</TableHeaderCell>
+                  <TableHeaderCell>
+                    <span className="sr-only">Actions</span>
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
                 {purchases.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.purchaseNumber}</td>
-                    <td>
-                      <StatusChip
-                        tone={
-                          row.status === 'completed'
-                            ? 'success'
-                            : row.status === 'reversed'
-                              ? 'danger'
-                              : 'neutral'
-                        }
-                        label={row.status}
-                      />
-                    </td>
-                    <td>{formatMoneyOrDash(row.grossAmount)}</td>
-                    <td>{formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}</td>
-                    <td>{formatMoneyOrDash(row.pointsDiscountAmount)}</td>
-                    <td>{formatMoneyOrDash(row.recordedTotal)}</td>
-                    <td>{formatMoneyOrDash(row.verifiedTotal)}</td>
-                    <td>
+                  <TableRow key={row.id}>
+                    <TableCell label="Purchase">{row.purchaseNumber}</TableCell>
+                    <TableCell label="Status">
+                      <StatusChip tone={statusTone(row.status)} label={row.status} />
+                    </TableCell>
+                    <TableCell label="Gross" align="right">
+                      {formatMoneyOrDash(row.grossAmount)}
+                    </TableCell>
+                    <TableCell label="VIP discount" align="right">
+                      {formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}
+                    </TableCell>
+                    <TableCell label="Points discount" align="right">
+                      {formatMoneyOrDash(row.pointsDiscountAmount)}
+                    </TableCell>
+                    <TableCell label="Recorded" align="right">
+                      {formatMoneyOrDash(row.recordedTotal)}
+                    </TableCell>
+                    <TableCell label="Verified" align="right">
+                      {formatMoneyOrDash(row.verifiedTotal)}
+                    </TableCell>
+                    <TableCell label="Customer / seller">
                       {row.customerName ?? row.customerId}
                       <br />
                       {row.createdByName ?? '-'}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell label="Services">
                       {row.lines
                         .map((line) => `${line.serviceName ?? 'Service'} x ${line.quantity}`)
                         .join(', ')}
-                    </td>
-                    <td>{formatMoneyOrDash(row.netAmount)}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell label="Net" align="right">
+                      {formatMoneyOrDash(row.netAmount)}
+                    </TableCell>
+                    <TableCell label="Completed">
                       {row.completedAt
                         ? new Date(row.completedAt).toLocaleDateString('en-PH')
                         : '—'}
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell label="Actions">
+                      <OverflowMenu
+                        label={`More actions for ${row.purchaseNumber}`}
+                        items={[
+                          {
+                            label: 'View details',
+                            icon: 'info',
+                            onClick: () => onView(row),
+                          },
+                        ]}
+                      />
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </section>
 
-      <section aria-label="Claims">
-        <h3>Claims</h3>
-        {claims.length === 0 && <p className={styles.hint}>No claims issued yet.</p>}
+      <section aria-label="Claims" className={styles.section}>
+        <h2 className={styles.sectionTitle}>Claims</h2>
+        {claims.length === 0 && (
+          <EmptyState
+            title="No claims issued yet."
+            description="Claims appear here once a completed sale is issued its code."
+          />
+        )}
         {claims.length > 0 && (
-          <div role="region" aria-label="Scrollable claims" tabIndex={0} className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Claim</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Reserved</th>
-                  <th scope="col">Awarded</th>
-                  <th scope="col">Capped</th>
-                  <th scope="col">Expires</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div
+            role="region"
+            aria-label="Scrollable claims"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
+            <Table>
+              <TableCaption>Issued earning claims with capped portions shown.</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Claim</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell align="right">Reserved</TableHeaderCell>
+                  <TableHeaderCell align="right">Awarded</TableHeaderCell>
+                  <TableHeaderCell align="right">Capped</TableHeaderCell>
+                  <TableHeaderCell>Expires</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
                 {claims.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.claimNumber}</td>
-                    <td>
-                      <StatusChip
-                        tone={
-                          row.status === 'claimed'
-                            ? 'success'
-                            : row.status === 'reversed'
-                              ? 'danger'
-                              : row.status === 'expired'
-                                ? 'warning'
-                                : 'neutral'
-                        }
-                        label={row.status}
-                      />
-                    </td>
-                    <td>{row.pointsReserved.toLocaleString('en-PH')}</td>
-                    <td>{row.pointsAwarded.toLocaleString('en-PH')}</td>
+                  <TableRow key={row.id}>
+                    <TableCell label="Claim">{row.claimNumber}</TableCell>
+                    <TableCell label="Status">
+                      <StatusChip tone={statusTone(row.status)} label={row.status} />
+                    </TableCell>
+                    <TableCell label="Reserved" align="right">
+                      {formatCountOrDash(row.pointsReserved)}
+                    </TableCell>
+                    <TableCell label="Awarded" align="right">
+                      {formatCountOrDash(row.pointsAwarded)}
+                    </TableCell>
                     {/* The capped figure is SHOWN, never hidden: it is the part of an
                         award the annual limit refused, and a member is entitled to
                         know it exists. */}
-                    <td>{row.pointsCapped.toLocaleString('en-PH')}</td>
-                    <td>{row.expiresAt ? new Date(row.expiresAt).toLocaleString('en-PH') : '—'}</td>
-                  </tr>
+                    <TableCell label="Capped" align="right">
+                      {formatCountOrDash(row.pointsCapped)}
+                    </TableCell>
+                    <TableCell label="Expires">
+                      {row.expiresAt ? new Date(row.expiresAt).toLocaleString('en-PH') : '—'}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </section>

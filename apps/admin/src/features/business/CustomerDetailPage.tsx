@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import type { Sale } from '@afhomes/contracts';
 import {
@@ -18,7 +18,7 @@ import {
 import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts';
 
 import { formatDate, formatDateTime } from '../../lib/format';
-import { ApiError } from '../../lib/api/errors';
+import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
 import { formatMoneyOrDash } from '@afhomes/shared';
@@ -27,6 +27,35 @@ import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
 import styles from './CustomerDetailPage.module.css';
+
+/**
+ * Actionable detail-load guidance per failure cause. Raw server internals are
+ * never rendered (see `ErrorState`); each branch names the next step instead.
+ * Returns `undefined` for unknown errors so the shared generic message applies.
+ */
+function describeCustomerLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot open customer records right now. Contact an administrator.';
+  if (error instanceof ApiError && error.status === 404)
+    return 'No customer exists at this link. Check the address, or open the record from the customers list.';
+  if (error instanceof ApiParseError)
+    return 'The saved record contains values this screen cannot display. Note the customer number and ask an administrator to review the record.';
+  return undefined;
+}
+
+function describeSalesLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiParseError)
+    return 'The saved sales contain values this screen cannot display. Note the customer number and ask an administrator to review the records.';
+  return undefined;
+}
 
 /**
  * Single customer record, reached by clicking a directory row.
@@ -46,6 +75,7 @@ export function CustomerDetailPage() {
     queryKey: businessKeys.customer(id),
     queryFn: () => getCustomerById(id ?? ''),
     enabled: Boolean(id),
+    placeholderData: keepPreviousData,
   });
   // The customer's purchase history: the sale facts removed from the sales
   // table live here instead. Read-only; payment actions stay on the
@@ -55,18 +85,22 @@ export function CustomerDetailPage() {
     queryKey: businessKeys.customerSales(id),
     queryFn: () => getSales({ customerId: id ?? '' }),
     enabled: Boolean(id),
+    placeholderData: keepPreviousData,
   });
   const salesHidden = sales.error instanceof ApiError && sales.error.status === 403;
 
   if (customer.isPending)
     return (
-      <section>
+      <section className={styles.page}>
         <div
           style={{ display: 'grid', gap: 'var(--space-4)' }}
           role="status"
           aria-label="Loading customer"
         >
-          <Skeleton style={{ height: 40 }} />
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
           <DetailGrid className={styles.topGrid}>
             {['Customer', 'Contact', 'Verification', 'Membership'].map((title) => (
               <DetailCard key={title}>
@@ -84,9 +118,24 @@ export function CustomerDetailPage() {
         </div>
       </section>
     );
-  if (customer.isError) return <ErrorState error={customer.error} onRetry={customer.refetch} />;
+  if (customer.isError)
+    return (
+      <section className={styles.page}>
+        <PageHeader title="Customer" description="Customer record and card sales." />
+        <ErrorState
+          error={customer.error}
+          message={describeCustomerLoadError(customer.error)}
+          onRetry={customer.refetch}
+        />
+      </section>
+    );
   if (!customer.data)
-    return <EmptyState title="Customer not found." description="It may have been deleted." />;
+    return (
+      <section className={styles.page}>
+        <PageHeader title="Customer" description="Customer record and card sales." />
+        <EmptyState title="Customer not found." description="It may have been deleted." />
+      </section>
+    );
 
   const record = customer.data;
   const groups: Array<{ title: string; fields: Array<[string, ReactNode]>; columns?: 2 }> = [
@@ -148,8 +197,8 @@ export function CustomerDetailPage() {
   ];
 
   return (
-    <section>
-      <PageHeader title={record.fullName} />
+    <section className={styles.page}>
+      <PageHeader title={record.fullName} description="Customer record and card sales." />
       <DetailGrid className={styles.topGrid}>
         {groups.map((group) => (
           <DetailCard key={group.title}>
@@ -181,7 +230,11 @@ export function CustomerDetailPage() {
               <>
                 <h2 className={styles.sectionTitle}>Card Sales</h2>
                 {sales.isError ? (
-                  <ErrorState error={sales.error} onRetry={sales.refetch} />
+                  <ErrorState
+                    error={sales.error}
+                    message={describeSalesLoadError(sales.error)}
+                    onRetry={sales.refetch}
+                  />
                 ) : sales.data.length === 0 ? (
                   <p className={styles.muted}>No card sales yet.</p>
                 ) : (
@@ -215,6 +268,7 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
   const payments = useQuery({
     queryKey: businessKeys.salePayments(sale.id),
     queryFn: () => getSalePayments(sale.id),
+    placeholderData: keepPreviousData,
   });
   return (
     <DetailCard>

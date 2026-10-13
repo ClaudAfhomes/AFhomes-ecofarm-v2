@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  notifySuccess,
+} from '@afhomes/ui';
 import type { AfHomesRole } from '@afhomes/contracts';
 import { createAfHomesRole, getAfHomesRoles, updateAfHomesRole } from './services';
 import {
@@ -11,11 +19,17 @@ import {
   type RoleFormInput,
 } from './AfHomesRoleFormDialog';
 import { useSession } from '../../lib/session';
+import styles from './AfHomesRolesPage.module.css';
 
 export function AfHomesRolesPage() {
   const queryClient = useQueryClient();
   const { user } = useSession();
-  const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
+  const roles = useQuery({
+    queryKey: ['afhomes', 'roles'],
+    queryFn: getAfHomesRoles,
+    // Refetches keep the previous rows visible instead of blanking the table.
+    placeholderData: keepPreviousData,
+  });
   const [editing, setEditing] = useState<AfHomesRole | null>(null);
   const [creating, setCreating] = useState(false);
   const mutation = useBusinessMutation({
@@ -27,24 +41,39 @@ export function AfHomesRolesPage() {
       await queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
       setCreating(false);
       setEditing(null);
-      notifySuccess({ title: 'Role updated', message: `${editing?.name ?? 'Role'} permissions updated successfully.` });
+      notifySuccess({
+        title: 'Role updated',
+        message: `${editing?.name ?? 'Role'} permissions updated successfully.`,
+      });
     },
   });
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Roles & Permissions"
         description="Server-enforced AF Homes module permissions and protected system roles"
         actions={<Button onClick={() => setCreating(true)}>New custom role</Button>}
       />
       {roles.isPending ? (
-        <p role="status">Loading roles…</p>
+        <div role="status" aria-label="Loading roles">
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }} aria-hidden="true">
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
       ) : roles.isError ? (
         <ErrorState error={roles.error} onRetry={roles.refetch} />
       ) : roles.data?.length === 0 ? (
         <EmptyState title="No roles" description="Create the first custom role." />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -52,7 +81,7 @@ export function AfHomesRolesPage() {
                 <th>Status</th>
                 <th>Assigned staff</th>
                 <th>Permissions</th>
-                <th />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -60,26 +89,26 @@ export function AfHomesRolesPage() {
                 ?.filter((role) => role.slug !== 'customer')
                 .map((role) => (
                   <tr key={role.id}>
-                    <td>
+                    <td data-label="Role">
                       <Link to={`/admin/roles/${role.id}`}>
                         <strong>{role.name}</strong>
                       </Link>
                       <br />
                       <small>{role.description || role.slug}</small>
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StatusChip
                         label={role.isActive ? 'Active' : 'Inactive'}
                         tone={role.isActive ? 'success' : 'neutral'}
                       />
                     </td>
-                    <td>{role.assignedCount}</td>
-                    <td>
+                    <td data-label="Assigned staff">{role.assignedCount}</td>
+                    <td data-label="Permissions">
                       {role.isSystem && role.slug === 'super_admin'
                         ? 'All modules'
                         : `${role.permissions.filter((p) => p.canView).length} modules`}
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <Button size="sm" variant="secondary" onClick={() => setEditing(role)}>
                         {isRoleAccessProtected(role, user?.roleSlug)
                           ? 'View access'

@@ -1,15 +1,23 @@
 import { useState } from 'react';
-import { useSession } from '../../lib/session';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { Link, useParams } from 'react-router';
+import { useSession } from '../../lib/session';
+import { Link, useNavigate, useParams } from 'react-router';
 import {
+  Alert,
   Button,
   ConfirmDialog,
   DateField,
+  DetailCard,
+  DetailCardTitle,
+  DetailField,
+  DetailFieldGrid,
+  Dialog,
+  EmptyState,
   ErrorState,
   FileField,
   PageHeader,
+  Skeleton,
   StatusChip,
   TextAreaField,
 } from '@afhomes/ui';
@@ -36,6 +44,15 @@ import {
   requestUploadGrant,
 } from '../documents/services';
 
+/** Query keys scoped to the OST application detail. */
+const ostDetailKeys = {
+  detail: (id: string) => ['ost', 'application', id] as const,
+  accreditation: (id: string) => ['ost', 'application-accreditation', id] as const,
+};
+
+const statusLabel = (status: string) =>
+  status.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+
 /**
  * OST application review. Approval is an explicitly-invoked, permission-gated
  * mutation: it creates the staff identity through the invitation flow, assigns
@@ -53,14 +70,17 @@ export function OstApplicationDetailPage() {
       (p) => p.moduleKey === 'network.ost_registrations' && p.canUpdate,
     );
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const client = useQueryClient();
   const query = useQuery({
-    queryKey: ['ost', 'application', id],
+    queryKey: ostDetailKeys.detail(id),
     queryFn: () => getOstApplication(id),
+    placeholderData: keepPreviousData,
   });
   const [reason, setReason] = useState('');
   const [signedOn, setSignedOn] = useState('');
   const [applicantSignedOn, setApplicantSignedOn] = useState('');
+  const [recordOpen, setRecordOpen] = useState(false);
   const signatures = useBusinessMutation({
     mutationFn: () => confirmAccreditationSignatures(id, applicantSignedOn, signedOn),
     onSuccess: () => {
@@ -73,8 +93,9 @@ export function OstApplicationDetailPage() {
   const [startsOn, setStartsOn] = useState('');
   const [expiresOn, setExpiresOn] = useState('');
   const records = useQuery({
-    queryKey: ['ost', 'application-accreditation', id],
+    queryKey: ostDetailKeys.accreditation(id),
     queryFn: () => getAccreditation('applications', id),
+    placeholderData: keepPreviousData,
   });
   const official = Boolean(records.data?.registration);
   const endorsement = useBusinessMutation({
@@ -127,67 +148,84 @@ export function OstApplicationDetailPage() {
       setOutcome(cause instanceof Error ? cause.message : 'Change request failed.'),
   });
 
-  if (query.isPending) return <p role="status">Loading application…</p>;
-  if (query.isError) return <ErrorState error={query.error} onRetry={query.refetch} />;
+  if (query.isPending) {
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading application"
+        >
+          <Skeleton style={{ height: 32, maxWidth: 280 }} />
+          <Skeleton style={{ height: 16, maxWidth: 460 }} />
+          <Skeleton style={{ height: 120 }} />
+          <Skeleton style={{ height: 96 }} />
+          <span className="sr-only">Loading application…</span>
+        </div>
+      </section>
+    );
+  }
+  if (query.isError) {
+    return (
+      <section className={styles.page}>
+        <PageHeader
+          title="OST Application"
+          description="The requested application could not be opened."
+          actions={
+            <Button variant="secondary" onClick={() => navigate('/admin/ost/applications')}>
+              Back to applications
+            </Button>
+          }
+        />
+        <ErrorState
+          error={query.error}
+          title="OST application could not be loaded"
+          onRetry={() => void query.refetch()}
+        />
+      </section>
+    );
+  }
   const app = query.data;
   const reviewable = ['submitted', 'under_review', 'changes_requested'].includes(app.status);
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
-        title={app.applicantName}
-        description={`OST application · ${app.status.replace(/_/g, ' ')}`}
+        title="OST Application"
+        description={`Review for ${statusLabel(app.status)} applications. Approval creates the OST member.`}
+        actions={
+          <Button variant="secondary" onClick={() => setRecordOpen(true)}>
+            View accreditation record
+          </Button>
+        }
       />
-      <p>
-        <Link to="/admin/ost/applications">← Back to applications</Link>
+      <p className={styles.backRow}>
+        <Link to="/admin/ost/applications">Back to applications</Link>
       </p>
-      <dl className={styles.factsGrid}>
-        <div>
-          <dt>Email</dt>
-          <dd>{app.email}</dd>
-        </div>
-        <div>
-          <dt>Phone</dt>
-          <dd>{app.phone}</dd>
-        </div>
-        <div>
-          <dt>Date of birth</dt>
-          <dd>{app.birthDate}</dd>
-        </div>
-        <div>
-          <dt>Sponsor (frozen)</dt>
-          <dd>{app.sponsorName}</dd>
-        </div>
-        <div>
-          <dt>Referral code</dt>
-          <dd>{app.referralCodeHint}</dd>
-        </div>
-        <div>
-          <dt>Submitted</dt>
-          <dd>{formatDateTime(app.submittedAt)}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>
+
+      <DetailCard>
+        <DetailCardTitle>{app.applicantName}</DetailCardTitle>
+        <DetailFieldGrid>
+          <DetailField label="Email">{app.email}</DetailField>
+          <DetailField label="Phone">{app.phone}</DetailField>
+          <DetailField label="Date of birth">{app.birthDate}</DetailField>
+          <DetailField label="Sponsor (frozen)">{app.sponsorName}</DetailField>
+          <DetailField label="Referral code">{app.referralCodeHint}</DetailField>
+          <DetailField label="Submitted">{formatDateTime(app.submittedAt)}</DetailField>
+          <DetailField label="Status">
             <StatusChip
-              label={app.status.replace(/_/g, ' ')}
+              label={statusLabel(app.status)}
               tone={app.status === 'approved' ? 'success' : 'neutral'}
             />
-          </dd>
-        </div>
-        {app.reviewNotes ? (
-          <div>
-            <dt>Review notes</dt>
-            <dd>{app.reviewNotes}</dd>
-          </div>
-        ) : null}
-        {app.reviewedAt ? (
-          <div>
-            <dt>Reviewed</dt>
-            <dd>{formatDateTime(app.reviewedAt)}</dd>
-          </div>
-        ) : null}
-      </dl>
+          </DetailField>
+          {app.reviewNotes ? (
+            <DetailField label="Review notes">{app.reviewNotes}</DetailField>
+          ) : null}
+          {app.reviewedAt ? (
+            <DetailField label="Reviewed">{formatDateTime(app.reviewedAt)}</DetailField>
+          ) : null}
+        </DetailFieldGrid>
+      </DetailCard>
 
       {reviewable ? (
         <div className={styles.reviewSection}>
@@ -260,8 +298,16 @@ export function OstApplicationDetailPage() {
                 onChange={setExpiresOn}
               />
               <p>No default accreditation duration is configured. Use management-approved dates.</p>
-              {endorsement.isError && <p role="alert">{endorsement.error.message}</p>}
-              {signatures.isError && <p role="alert">{signatures.error.message}</p>}
+              {endorsement.isError ? (
+                <Alert variant="danger" title="Endorsement failed">
+                  {endorsement.error.message}
+                </Alert>
+              ) : null}
+              {signatures.isError ? (
+                <Alert variant="danger" title="Signature confirmation failed">
+                  {signatures.error.message}
+                </Alert>
+              ) : null}
             </>
           )}
           <Button
@@ -336,15 +382,61 @@ export function OstApplicationDetailPage() {
           </Button>
         </div>
       ) : (
-        <p className={styles.noteSpaced}>
-          This application is {app.status.replace(/_/g, ' ')} and can no longer be reviewed.
-        </p>
+        <Alert variant="info" title="Review closed">
+          This application is {statusLabel(app.status)} and can no longer be reviewed.
+        </Alert>
       )}
       {outcome ? (
-        <p role="status" className={styles.outcome}>
+        <Alert
+          variant={outcome === 'Rejected.' || /failed/i.test(outcome) ? 'danger' : 'success'}
+          title="Review outcome"
+        >
           {outcome}
-        </p>
+        </Alert>
       ) : null}
+
+      <Dialog
+        open={recordOpen}
+        onClose={() => setRecordOpen(false)}
+        title="Accreditation record"
+        footer={
+          <Button variant="secondary" onClick={() => setRecordOpen(false)}>
+            Close
+          </Button>
+        }
+      >
+        <DetailFieldGrid>
+          <DetailField label="Applicant">{app.applicantName}</DetailField>
+          <DetailField label="Sponsor (frozen)">{app.sponsorName}</DetailField>
+          <DetailField label="Referral code">{app.referralCodeHint}</DetailField>
+          <DetailField label="Status">{statusLabel(app.status)}</DetailField>
+          <DetailField label="Submitted">{formatDateTime(app.submittedAt)}</DetailField>
+          <DetailField label="Reviewed">
+            {app.reviewedAt ? formatDateTime(app.reviewedAt) : 'Not reviewed yet'}
+          </DetailField>
+          <DetailField label="Review notes">
+            {app.reviewNotes ?? 'No review notes recorded'}
+          </DetailField>
+          {records.data?.registration ? (
+            <>
+              <DetailField label="Form number">{records.data.registration.form_number}</DetailField>
+              <DetailField label="Applicant signature">
+                {records.data.registration.applicant_signature_status}
+              </DetailField>
+              <DetailField label="Referrer signature">
+                {records.data.registration.referrer_signature_status}
+              </DetailField>
+              <DetailField label="Endorsement">
+                {records.data.registration.endorsed_at ? 'Received' : 'Pending'}
+              </DetailField>
+            </>
+          ) : (
+            <DetailField label="Official form">
+              No official accreditation record attached
+            </DetailField>
+          )}
+        </DetailFieldGrid>
+      </Dialog>
 
       <ApplicationDocuments applicationId={id} />
     </section>
@@ -363,6 +455,7 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
   const docs = useQuery({
     queryKey: ['documents', 'ost_application', applicationId],
     queryFn: () => getDocuments({ subjectType: 'ost_application', subjectId: applicationId }),
+    placeholderData: keepPreviousData,
   });
 
   const upload = useBusinessMutation({
@@ -396,16 +489,26 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
     <div className={styles.documentsSection}>
       <h2>Identity documents</h2>
       {docs.isPending ? (
-        <p role="status">Loading documents…</p>
+        <div role="status" aria-label="Loading documents">
+          <Skeleton style={{ height: 48 }} />
+          <span className="sr-only">Loading documents…</span>
+        </div>
       ) : docs.isError ? (
-        <ErrorState error={docs.error} onRetry={docs.refetch} />
+        <ErrorState
+          error={docs.error}
+          title="Identity documents could not be loaded"
+          onRetry={() => void docs.refetch()}
+        />
       ) : (docs.data ?? []).length === 0 ? (
-        <p>No identity scans are attached to this application yet.</p>
+        <EmptyState
+          title="No identity documents"
+          description="No identity scans are attached to this application yet."
+        />
       ) : (
         <ul>
           {(docs.data ?? []).map((doc) => (
             <li key={doc.id}>
-              {doc.originalFilename} — {doc.verificationStatus.replace(/_/g, ' ')} ·{' '}
+              {doc.originalFilename} - {statusLabel(doc.verificationStatus)} ·{' '}
               <Link to={`/admin/documents/${doc.id}`}>Review</Link>
             </li>
           ))}
@@ -418,6 +521,7 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
           label="Attach an ID scan (JPEG, PNG or PDF, max 10 MiB)"
           optional
           accept={ACCEPTED_MIME.join(',')}
+          status={file ? <p className={styles.fileName}>Selected: {file.name}</p> : null}
           onSelect={(file) => setFile(file)}
         />
         <Button onClick={() => upload.mutate()} disabled={upload.isPending || !file}>
@@ -425,9 +529,9 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
         </Button>
       </div>
       {error ? (
-        <p role="alert" className={styles.inlineError}>
+        <Alert variant="danger" title="Upload failed">
           {error}
-        </p>
+        </Alert>
       ) : null}
     </div>
   );

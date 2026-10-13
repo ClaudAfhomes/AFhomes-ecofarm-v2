@@ -1,6 +1,66 @@
 .chain {
   padding-left: var(--space-6);
 }
+
+/* Seller record shell: stable header, upline chain, and team summary. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.backRow {
+  margin: 0;
+}
+
+.panel {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  font-size: var(--text-h3);
+}
+
+.panelNote {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.facts {
+  margin: var(--space-3) 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.facts > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.facts dt {
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 .chain li {
   padding: var(--space-3);
   border-left: 2px solid var(--color-border-default);

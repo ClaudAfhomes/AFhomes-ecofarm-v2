@@ -9,7 +9,11 @@ import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } fro
 import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
+import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { humanizeCode } from '../business/format';
+import { membershipKeys } from '../business/queryKeys';
+import { TierBadge } from '../business/TierBadge';
 import { tierArtwork } from '@afhomes/ui';
 
 /**
@@ -133,7 +137,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             <div className={styles.factText}>
               <dt>{FACT_ICONS[0]!.label}</dt>
               <dd>
-                <StatusChip label={customer.customerStatus} />
+                <StatusChip label={humanizeCode(customer.customerStatus)} />
               </dd>
             </div>
           </div>
@@ -145,7 +149,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
               <dt>{FACT_ICONS[1]!.label}</dt>
               <dd>
                 {customer.membershipStatus ? (
-                  <StatusChip label={customer.membershipStatus} />
+                  <StatusChip label={humanizeCode(customer.membershipStatus)} />
                 ) : (
                   'None'
                 )}
@@ -158,7 +162,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             </span>
             <div className={styles.factText}>
               <dt>{FACT_ICONS[2]!.label}</dt>
-              <dd>{customer.tier ?? 'None'}</dd>
+              <dd>{customer.tier ? <TierBadge tier={customer.tier} /> : 'None'}</dd>
             </div>
           </div>
           <div className={styles.fact}>
@@ -217,7 +221,7 @@ export function CustomerLookupPage() {
   const debouncedTerm = useDebouncedValue(search.trim());
   const activeTerm = debouncedTerm.length >= 2 ? debouncedTerm : '';
   const customers = useQuery({
-    queryKey: ['customer-lookup', activeTerm],
+    queryKey: membershipKeys.customerLookup(activeTerm),
     enabled: activeTerm.length >= 2,
     queryFn: () =>
       requestList(
@@ -402,7 +406,12 @@ export function CustomerLookupPage() {
       ) : !hasSearched ? null : customers.isPending ? (
         <LookupSkeleton />
       ) : customers.isError ? (
-        <ErrorState error={customers.error} onRetry={customers.refetch} />
+        <ErrorState
+          error={customers.error}
+          title="Customer lookup is unavailable right now"
+          message={describeCustomerLookupError(customers.error)}
+          onRetry={() => void customers.refetch()}
+        />
       ) : customers.data?.length === 0 ? (
         <EmptyState
           title="Customer does not exist"
@@ -413,4 +422,19 @@ export function CustomerLookupPage() {
       )}
     </section>
   );
+}
+
+/**
+ * Actionable lookup-load guidance per failure cause. Raw server internals are
+ * never rendered (see `ErrorState`); each branch names the next step instead.
+ * Returns `undefined` for unknown errors so the shared generic message applies.
+ */
+function describeCustomerLookupError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot look up customers right now. Contact an administrator.';
+  return undefined;
 }

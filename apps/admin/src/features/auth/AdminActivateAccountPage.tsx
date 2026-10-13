@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { afHomesSessionSchema, staffAccountSetupSchema } from '@afhomes/contracts';
 import type { StaffAccountSetup } from '@afhomes/contracts';
 import { validateRecoveryPassword } from '@afhomes/shared';
-import { Alert, AuthLayout, Button, PasswordField, TextField } from '@afhomes/ui';
+import { Alert, AuthLayout, Button, PasswordField, Skeleton, TextField } from '@afhomes/ui';
 
 import { protectedRequest as request } from '../../lib/api/client';
 import { getSupabaseClient } from '../../lib/supabase';
@@ -198,9 +198,11 @@ export function AdminActivateAccountPage() {
       brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
     >
       {phase === 'checking' ? (
-        <p className={styles.prompt} role="status">
-          Checking your invitation…
-        </p>
+        <div role="status" aria-label="Checking your invitation">
+          <Skeleton style={{ height: 40 }} />
+          <Skeleton style={{ height: 40 }} />
+          <span className="sr-only">Checking your invitation…</span>
+        </div>
       ) : phase === 'done' ? (
         <div className={styles.resultPanel}>
           <Alert variant="success" title="Account activated">
@@ -265,7 +267,7 @@ export function AdminActivateAccountPage() {
             At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
           </p>
           <div className={styles.submitRow}>
-            <Button type="submit" loading={pending} disabled={pending}>
+            <Button type="submit" loading={pending} loadingLabel="Creating…" disabled={pending}>
               Create Password
             </Button>
           </div>

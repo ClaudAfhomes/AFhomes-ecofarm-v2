@@ -161,8 +161,8 @@ describe('Phase 27 documents list states', () => {
     install({ 'GET /documents': list([doc()]) });
     render('/admin/documents');
     await screen.findByText('id-front.jpg');
-    expect(screen.getByText('failed')).toBeInTheDocument();
-    expect(screen.getByText('pending review')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('Pending Review')).toBeInTheDocument();
   });
 });
 

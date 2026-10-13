@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { Customer, CustomerOnboardingRecovery, Sale } from '@afhomes/contracts';
 import {
+  Alert,
   Button,
   ConfirmDialog,
   DetailCard,
@@ -128,11 +129,18 @@ export function CustomerRecordActions({
     sales.length > 0 && (saleActions.canRecord || saleActions.canEdit || saleActions.canCancel);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
+  const deactivationBlocked = customer.status === 'suspended' || customer.status === 'cancelled';
 
   return (
     <>
       <DetailCard>
         <DetailCardTitle>Actions</DetailCardTitle>
+        {deactivationBlocked ? (
+          <Alert variant="warning">
+            Deactivation is unavailable while this account is {customer.status}. Only active or
+            prospect accounts can be deactivated.
+          </Alert>
+        ) : null}
         {sales.length > 1 && showSaleActions && selectedSale ? (
           <label className={styles.filterLabel}>
             Sale
@@ -181,7 +189,7 @@ export function CustomerRecordActions({
           <Button
             variant="secondary"
             className={styles.toneInfo}
-            disabled={customer.status === 'suspended' || customer.status === 'cancelled'}
+            disabled={deactivationBlocked}
             onClick={() => {
               setAccountAction('deactivate');
               setConfirmation('');
@@ -243,9 +251,11 @@ export function CustomerRecordActions({
             </span>
           ) : null}
         </div>
-        {statusMutation.error ? <p role="alert">{statusMutation.error.message}</p> : null}
+        {statusMutation.error ? (
+          <Alert variant="danger">{statusMutation.error.message}</Alert>
+        ) : null}
         {issueActivation.error && !activationResult ? (
-          <p role="alert">{issueActivation.error.message}</p>
+          <Alert variant="danger">{issueActivation.error.message}</Alert>
         ) : null}
       </DetailCard>
       {saleActions.paymentDialog?.kind === 'record' ? (

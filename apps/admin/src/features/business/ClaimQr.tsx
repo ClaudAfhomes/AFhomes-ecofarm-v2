@@ -43,14 +43,17 @@ export type IssuedClaim = {
 
 export function ClaimQr({ claim }: { claim: IssuedClaim }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const url = claimUrl(claim.qrToken);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      setCopyFailed(false);
     } catch {
       setCopied(false);
+      setCopyFailed(true);
     }
   };
 
@@ -86,7 +89,11 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
 
       {/* Spoken by a screen reader; the image alone conveys nothing useful. */}
       <p role="status" aria-live="polite">
-        {copied ? 'Claim link copied to the clipboard.' : ''}
+        {copied
+          ? 'Claim link copied to the clipboard.'
+          : copyFailed
+            ? 'Copy failed. Select and copy the link manually.'
+            : ''}
       </p>
     </div>
   );

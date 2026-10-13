@@ -1,0 +1,273 @@
+/* Commissions: page-scoped table and filter contracts so the columns scroll
+   with intact cells on desktop and collapse to labelled cards on phones
+   instead of squeezing. Applied alongside the global `table-scroll` class;
+   other tables are unaffected. */
+
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: this page never scrolls sideways. `clip` (not `hidden`) keeps
+   fixed descendants working while killing horizontal scroll. */
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
+}
+
+/* Summary strip: headline counts above the queue. */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary > li {
+  min-width: 0;
+}
+
+/* Compact summary: smaller cards than the default MetricCard. Scoped to this
+   strip, so no other surface moves. */
+.summary > li :global(article) {
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+}
+
+.summary > li :global(article) > div:first-child > span:first-child {
+  width: 30px;
+  height: 30px;
+}
+
+.summary > li :global(article) > span:nth-of-type(1) {
+  font-size: var(--text-h3);
+}
+
+.summary > li :global(article) > span:nth-of-type(2) {
+  font-size: var(--text-body-s);
+}
+
+.summary > li :global(article) > span:nth-of-type(3) {
+  font-size: var(--text-caption);
+}
+
+/* Filter and dialog labels match the shared customers-page pattern. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filterLabel select,
+.filterLabel input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Queue table: the page's working surface, wrapped in an elevated panel. */
+.tableWrap {
+  margin-top: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.queueCard {
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+.queueTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* The wide-table floor is desktop-only: on phones the rows collapse to
+   labelled cards instead of scrolling sideways. */
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 960px;
+  }
+}
+
+.queueTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--color-border-default);
+}
+
+.queueTable th,
+.queueTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.queueTable tbody td {
+  background-color: var(--color-bg-surface-raised);
+}
+
+.queueTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Record reference: accent dot plus brand-ink mono reference. */
+.recordRef {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 32%, white);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.recordRefDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Dialog form: note plus labelled controls on a responsive grid. */
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-4);
+}
+
+.formNote {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-brand-secondary);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background-color: var(--color-brand-soft);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.formAlert {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+/* Small viewports: rows collapse to stacked cards. The lead reference cell
+   drops its label and reads as the card title. Desktop rendering untouched. */
+@media (max-width: 639px) {
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    text-align: right;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Commission'] {
+    justify-content: flex-start;
+  }
+
+  .tableWrap tbody > tr > td[data-label='Commission']::before {
+    display: none;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+}

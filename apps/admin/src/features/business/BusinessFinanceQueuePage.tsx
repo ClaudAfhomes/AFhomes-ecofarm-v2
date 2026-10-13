@@ -49,17 +49,15 @@ import {
   SALE_STATUS_LABEL,
   SALE_STATUS_TONE,
   formatMoney,
-  formatPoints,
   humanizeCode,
 } from './format';
 import { TierBadge } from './TierBadge';
 import { businessKeys, sharedScopes } from './queryKeys';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import {
   exportPurchaseDocument,
   finalizeReservationPurchase,
   getFinanceQueue,
-  FINANCE_QUEUE_LIMIT,
   getReservationPayments,
   getReservationFinance,
   recordReservationPayment,
@@ -294,7 +292,7 @@ export function BusinessFinanceQueuePage() {
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
   const query = useQuery({
-    queryKey: ['business', 'queue', 'finance', settled, FINANCE_QUEUE_LIMIT],
+    queryKey: businessKeys.financeQueue(settled),
     queryFn: () => getFinanceQueue(settled),
     // Keep the previous page on screen while the next search (or poll) lands:
     // refetches then feel instant and the skeleton only ever appears on the
@@ -304,7 +302,7 @@ export function BusinessFinanceQueuePage() {
     // writes invalidate instantly).
     refetchInterval: 15_000,
   });
-  const rows = query.data?.items ?? [];
+  const rows = useMemo(() => query.data?.items ?? [], [query.data]);
   const [detail, setDetail] = useState<FinanceCollectionQueueItem | null>(null);
   const [recording, setRecording] = useState<{
     id: string;
@@ -383,6 +381,34 @@ export function BusinessFinanceQueuePage() {
     await client.invalidateQueries({ queryKey: businessKeys.sales });
   };
 
+  // First load skeletonizes the whole page: header, summary, filters and
+  // table. Refetches keep the previous page visible via placeholderData and
+  // never reach this branch.
+  if (query.isPending)
+    return (
+      <section className={styles.pageShell}>
+        <div className={styles.hero} aria-hidden="true">
+          <div className={styles.heroText}>
+            <Skeleton style={{ height: 14, width: 160 }} />
+            <Skeleton style={{ height: 30, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
+          <div className={styles.heroMeta}>
+            <Skeleton style={{ height: 30, width: 120, borderRadius: 999 }} />
+            <Skeleton style={{ height: 30, width: 110, borderRadius: 999 }} />
+          </div>
+        </div>
+        <div
+          style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}
+          aria-hidden="true"
+        >
+          <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+          <Skeleton style={{ height: 40, width: 160 }} />
+        </div>
+        <QueueSkeleton />
+      </section>
+    );
+
   return (
     <section className={styles.pageShell}>
       <div className={styles.hero}>
@@ -394,29 +420,18 @@ export function BusinessFinanceQueuePage() {
           />
         </div>
         <div className={styles.heroMeta}>
-          {query.isPending ? (
-            <>
-              <Skeleton style={{ height: 30, width: 120, borderRadius: 999 }} />
-              <Skeleton style={{ height: 30, width: 110, borderRadius: 999 }} />
-            </>
-          ) : (
-            <>
-              <span className={styles.heroChip}>
-                <Icon name="clock" size={14} aria-hidden="true" />
-                {formatPoints(summary.awaiting)} awaiting
-              </span>
-              <span className={styles.heroChip}>
-                <Icon name="check" size={14} aria-hidden="true" />
-                {formatPoints(summary.paid)} fully paid
-              </span>
-            </>
-          )}
+          <span className={styles.heroChip}>
+            <Icon name="clock" size={14} aria-hidden="true" />
+            {formatCountOrDash(summary.awaiting)} awaiting
+          </span>
+          <span className={styles.heroChip}>
+            <Icon name="check" size={14} aria-hidden="true" />
+            {formatCountOrDash(summary.paid)} fully paid
+          </span>
         </div>
       </div>
 
-      {query.isPending ? (
-        <QueueSkeleton />
-      ) : query.isError ? (
+      {query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : (
         <>
@@ -424,7 +439,7 @@ export function BusinessFinanceQueuePage() {
             <li>
               <MetricCard
                 label="Awaiting payment"
-                value={formatPoints(summary.awaiting)}
+                value={formatCountOrDash(summary.awaiting)}
                 icon="clock"
                 description="Records with a remaining balance"
               />
@@ -432,7 +447,7 @@ export function BusinessFinanceQueuePage() {
             <li>
               <MetricCard
                 label="Fully paid"
-                value={formatPoints(summary.paid)}
+                value={formatCountOrDash(summary.paid)}
                 icon="check"
                 description="Ready for activation review"
               />
@@ -440,7 +455,7 @@ export function BusinessFinanceQueuePage() {
             <li>
               <MetricCard
                 label="Queue records"
-                value={formatPoints(summary.total)}
+                value={formatCountOrDash(summary.total)}
                 icon="file-text"
                 description="Sales and reservations in scope"
               />
@@ -470,16 +485,16 @@ export function BusinessFinanceQueuePage() {
             actions={
               <p className={styles.resultCount}>
                 {statusFilter === 'all' && !settled && !truncated
-                  ? `${formatPoints(visible.length)} records`
-                  : `${formatPoints(visible.length)} of ${formatPoints(summary.total)} records`}
+                  ? `${formatCountOrDash(visible.length)} records`
+                  : `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`}
               </p>
             }
           />
 
           {truncated ? (
             <Alert variant="warning" title="Queue capped">
-              Showing the first {formatPoints(summary.loaded)} of {formatPoints(summary.total)}{' '}
-              records. Narrow the search to reach the rest.
+              Showing the first {formatCountOrDash(summary.loaded)} of{' '}
+              {formatCountOrDash(summary.total)} records. Narrow the search to reach the rest.
             </Alert>
           ) : null}
 
@@ -970,28 +985,34 @@ export function RecordPaymentDialog({
                 />
                 <label className={styles.field}>
                   Type
-                  <select value={type} onChange={(e) => setType(e.target.value as PaymentType)}>
-                    <option value="down_payment">Down payment</option>
-                    <option value="installment">Installment</option>
-                    <option value="full">Full payment</option>
-                  </select>
-                </label>
-                <label className={styles.field}>
-                  Method
-                  <input value={method} onChange={(e) => setMethod(e.target.value)} />
-                </label>
-                <label className={styles.field}>
-                  Payment reference
-                  <input
-                    aria-describedby="payment-reference-help"
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
+                  <Select
+                    aria-label="Type"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as PaymentType)}
+                    options={[
+                      { value: 'down_payment', label: 'Down payment' },
+                      { value: 'installment', label: 'Installment' },
+                      { value: 'full', label: 'Full payment' },
+                    ]}
                   />
                 </label>
-                <p id="payment-reference-help" className={styles.formNote}>
-                  Enter the transaction/reference number from the payment receipt, bank transfer,
-                  GCash/Maya transaction, deposit slip, or official receipt.
-                </p>
+                <TextField
+                  id="record-payment-method"
+                  name="method"
+                  label="Method"
+                  optional
+                  value={method}
+                  onChange={setMethod}
+                />
+                <TextField
+                  id="record-payment-reference"
+                  name="reference"
+                  label="Payment reference"
+                  optional
+                  value={reference}
+                  onChange={setReference}
+                  hint="Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya transaction, deposit slip, or official receipt."
+                />
                 {save.error ? (
                   <p role="alert" className={styles.formAlert}>
                     The payment was not recorded. {save.error.message}
@@ -1075,7 +1096,7 @@ export function VerifyDialog({
             </span>
             <div className={styles.dialogHeroBody}>
               <p className={styles.dialogHeroTitle}>
-                {formatPoints(pending.length)} awaiting verification
+                {formatCountOrDash(pending.length)} awaiting verification
               </p>
               <p className={styles.dialogHeroMeta}>
                 Verify to count the money toward the price, or reject it back for correction.
@@ -1123,10 +1144,13 @@ export function VerifyDialog({
             ))}
           </ul>
         )}
-        <label className={styles.field}>
-          Reason (required to reject)
-          <input value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
+        <TextField
+          id="verify-reject-reason"
+          name="reason"
+          label="Reason (required to reject)"
+          value={reason}
+          onChange={setReason}
+        />
         {decide.error ? (
           <p role="alert" className={styles.formAlert}>
             {decide.error.message}
@@ -1257,7 +1281,7 @@ function ReservationDetails({
           </div>
           <div>
             <dt>Recorded payments</dt>
-            <dd>{formatPoints(item.recordedPaymentCount)}</dd>
+            <dd>{formatCountOrDash(item.recordedPaymentCount)}</dd>
           </div>
         </dl>
       </section>

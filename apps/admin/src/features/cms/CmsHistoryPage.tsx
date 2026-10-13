@@ -1,32 +1,54 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, PageHeader, Skeleton } from '@afhomes/ui';
 import { getCmsHistory } from './services';
 import { formatDateTime } from '../../lib/format';
 import styles from './cms.module.css';
 export function CmsHistoryPage() {
-  const history = useQuery({ queryKey: ['cms', 'history'], queryFn: getCmsHistory });
-  if (history.isLoading)
+  const history = useQuery({
+    queryKey: ['cms', 'history'],
+    queryFn: getCmsHistory,
+    // Refetches keep the previous rows visible instead of blanking the table.
+    placeholderData: keepPreviousData,
+  });
+  // First load skeletonizes the whole page - header and table - so no static
+  // content flashes before the data it describes. Refetches keep the previous
+  // rows visible via placeholderData and never reach this branch.
+  if (history.isPending)
     return (
-      <div
-        style={{ display: 'grid', gap: 'var(--space-3)' }}
-        role="status"
-        aria-label="Loading CMS history"
-      >
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-      </div>
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading CMS history"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
     );
   if (history.isError)
     return (
-      <ErrorState
-        title="CMS history could not be loaded"
-        error={history.error}
-        onRetry={() => void history.refetch()}
-      />
+      <section className={styles.page}>
+        <PageHeader
+          title="CMS History"
+          description="Immutable content revisions with staff attribution and change summaries."
+        />
+        <ErrorState
+          title="CMS history could not be loaded"
+          error={history.error}
+          onRetry={() => void history.refetch()}
+        />
+      </section>
     );
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="CMS History"
         description="Immutable content revisions with staff attribution and change summaries."
@@ -37,7 +59,12 @@ export function CmsHistoryPage() {
           description="Saving the first draft creates the first revision."
         />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table className={styles.table}>
             <thead>
               <tr>
@@ -51,19 +78,19 @@ export function CmsHistoryPage() {
             <tbody>
               {history.data.map((item) => (
                 <tr key={item.id}>
-                  <td>{formatDateTime(item.createdAt)}</td>
-                  <td>
+                  <td data-label="When">{formatDateTime(item.createdAt)}</td>
+                  <td data-label="Content">
                     {item.entityType}: {item.entityId}
                   </td>
-                  <td>{item.action}</td>
-                  <td>{item.changeSummary}</td>
-                  <td>{item.authorName}</td>
+                  <td data-label="Action">{item.action}</td>
+                  <td data-label="Summary">{item.changeSummary}</td>
+                  <td data-label="Author">{item.authorName}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-    </>
+    </section>
   );
 }

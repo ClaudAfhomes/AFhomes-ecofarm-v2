@@ -35,26 +35,40 @@ import { ServiceRefundPanel } from './ServiceRefundPanel';
  * on one even by accident.
  */
 import { PointRefundReview } from './PointRefundReview';
-import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 
 import {
+  Alert,
   Button,
   Dialog,
   EmptyState,
   ErrorState,
+  FilterBar,
+  MetricCard,
   PageHeader,
+  SearchField,
   Select,
   Skeleton,
   StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
   TextField,
   notifySuccess,
 } from '@afhomes/ui';
 
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
-import styles from './points.module.css';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import styles from './PurchasePaymentsPage.module.css';
+import { TierBadge } from './TierBadge';
+import { humanizeCode } from './format';
 import {
   decideReceipt,
   getPurchaseSummary,
@@ -72,158 +86,273 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   voided: 'neutral',
 };
 
+const PURCHASE_STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  completed: 'success',
+  reversed: 'danger',
+  draft: 'warning',
+};
+
 export function PurchasePaymentsPage() {
   const purchases = useQuery({
     queryKey: earningKeys.financePurchases,
     queryFn: listFinancePurchases,
+    // Keep the previous list on screen while the next poll lands: refetches
+    // then feel instant and the skeleton only ever appears on first load.
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'completed' | 'reversed'>(
     'all',
   );
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
 
-  const rows = (purchases.data ?? []).filter(
-    (p) => statusFilter === 'all' || p.status === statusFilter,
-  );
+  const all = useMemo(() => purchases.data ?? [], [purchases.data]);
+  // Headline counts from the loaded purchases.
+  const summary = useMemo(() => {
+    const draft = all.filter((p) => p.status === 'draft').length;
+    const completed = all.filter((p) => p.status === 'completed').length;
+    const reversed = all.filter((p) => p.status === 'reversed').length;
+    return { total: all.length, draft, completed, reversed };
+  }, [all]);
+  // Client-side status and text filter over the loaded purchases.
+  const rows = useMemo(() => {
+    const term = settled.toLowerCase();
+    return all.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (!term) return true;
+      return [p.purchaseNumber, p.customerName ?? '', p.createdByName ?? ''].some((value) =>
+        value.toLowerCase().includes(term),
+      );
+    });
+  }, [all, statusFilter, settled]);
+
+  // First load skeletonizes the whole page: header, summary, filters and
+  // table. Refetches keep the previous list visible via placeholderData and
+  // never reach this branch.
+  if (purchases.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading purchases"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 320 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
 
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="Operational Payment Verification"
-        description="What was sold, to whom, at what price and discount, how much is verified, and whether the member has claimed their points. A recorded receipt is not money until it is verified."
+        description="Verify operational purchase receipts before settlement."
       />
+      <Alert variant="warning" title="Recorded is not received">
+        A recorded receipt is not money until it is verified. Only verified receipts count toward
+        the amount due.
+      </Alert>
 
-      {purchases.isLoading && (
-        <div role="status" aria-label="Loading sales" aria-busy="true">
-          <Skeleton />
-          <Skeleton />
-          <Skeleton />
-        </div>
-      )}
-      {purchases.isError && (
+      {purchases.isError ? (
         <ErrorState
           title="Payments unavailable"
           message="The purchase list could not be loaded. Try again."
           onRetry={purchases.refetch}
         />
-      )}
-      {purchases.data && purchases.data.length === 0 && (
-        <EmptyState
-          title="No sales yet"
-          description="A receipt is recorded against a purchase, so there is nothing to settle until a sale exists."
-        />
-      )}
+      ) : (
+        <>
+          <ul className={styles.summary} aria-label="Purchase summary">
+            <li>
+              <MetricCard
+                label="Open drafts"
+                value={formatCountOrDash(summary.draft)}
+                icon="clock"
+                description="Draft purchases awaiting settlement"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Completed sales"
+                value={formatCountOrDash(summary.completed)}
+                icon="check"
+                description="Settled purchases"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Reversed sales"
+                value={formatCountOrDash(summary.reversed)}
+                icon="close"
+                description="Reversed purchases"
+              />
+            </li>
+          </ul>
 
-      {purchases.data && purchases.data.length > 0 && (
-        <section aria-label="Sales records">
-          <label htmlFor="sales-status-filter">Status</label>
-          <Select
-            id="sales-status-filter"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'draft', label: 'Pending' },
-              { value: 'completed', label: 'Completed' },
-              { value: 'reversed', label: 'Reversed' },
-            ]}
+          <FilterBar
+            filtersToggleLabel="Expand Filters"
+            search={
+              <SearchField
+                label="Search purchases"
+                placeholder="Transaction, customer, or seller"
+                value={search}
+                onChange={setSearch}
+                busy={purchases.isFetching}
+              />
+            }
+            filters={
+              <label className={styles.filterLabel}>
+                Status
+                <Select
+                  aria-label="Filter by status"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                  options={[
+                    { value: 'all', label: 'All' },
+                    { value: 'draft', label: 'Pending' },
+                    { value: 'completed', label: 'Completed' },
+                    { value: 'reversed', label: 'Reversed' },
+                  ]}
+                />
+              </label>
+            }
+            actions={
+              <p className={styles.resultCount}>
+                {settled || statusFilter !== 'all'
+                  ? `${formatCountOrDash(rows.length)} of ${formatCountOrDash(summary.total)} purchases`
+                  : `${formatCountOrDash(rows.length)} purchases`}
+              </p>
+            }
           />
 
-          {rows.length === 0 ? (
-            <EmptyState title="No sales with that status" />
-          ) : (
-            // The shared `.table-scroll` contract: overflow stays inside this
-            // region so the page never scrolls sideways, and `tabIndex` keeps the
-            // scroller reachable by keyboard.
-            <div
-              role="region"
-              aria-label="Scrollable sales records"
-              tabIndex={0}
-              className="table-scroll"
-            >
-              <table>
-                <caption className={styles.hint}>
-                  Gross, the VIP tier discount and any points discount are shown separately: neither
-                  discount is a receipt, and the amount due is what must be collected.
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Transaction</th>
-                    <th scope="col">Date</th>
-                    <th scope="col">Service</th>
-                    <th scope="col">Customer</th>
-                    <th scope="col">GSD</th>
-                    <th scope="col">Tier</th>
-                    <th scope="col">Gross</th>
-                    <th scope="col">Tier discount</th>
-                    <th scope="col">Net due</th>
-                    <th scope="col">Verified</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Claim</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((purchase) => (
-                    <tr key={purchase.id}>
-                      <th scope="row">{purchase.purchaseNumber}</th>
-                      <td>{purchase.createdAt ? purchase.createdAt.slice(0, 10) : '-'}</td>
-                      <td>
-                        {purchase.lines
-                          .map((l) => `${l.quantity} x ${formatMoneyOrDash(l.unitAmount)}`)
-                          .join(', ') || '-'}
-                      </td>
-                      <td>{purchase.customerName ?? '-'}</td>
-                      <td>{purchase.createdByName ?? '-'}</td>
-                      <td>{purchase.tierSnapshot ?? '-'}</td>
-                      <td>{formatMoneyOrDash(purchase.grossAmount)}</td>
-                      <td>
-                        {purchase.tierDiscountAmount !== '0.00'
-                          ? `- ${formatMoneyOrDash(purchase.tierDiscountAmount)}`
-                          : '-'}
-                      </td>
-                      <td>{formatMoneyOrDash(purchase.netAmount)}</td>
-                      <td>{formatMoneyOrDash(purchase.verifiedTotal)}</td>
-                      <td>
-                        <StatusChip
-                          tone={
-                            purchase.status === 'completed'
-                              ? 'success'
-                              : purchase.status === 'reversed'
-                                ? 'danger'
-                                : 'warning'
-                          }
-                          label={purchase.status}
-                        />
-                      </td>
-                      <td>{purchase.claimStatus ?? 'not issued'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {rows
-            .filter((purchase) => purchase.status === 'draft')
-            .map((purchase) => (
-              <PointRefundReview key={purchase.id} purchase={purchase} />
-            ))}
-          {rows.map((purchase) => (
-            <ServiceRefundPanel key={purchase.id} purchase={purchase} />
-          ))}
-          {/* One receipt panel per sale, so a reviewer can accept or reject a
-              specific receipt. */}
-          {rows.map((purchase) => (
-            <PurchasePaymentRow
-              key={purchase.id}
-              purchaseId={purchase.id}
-              purchaseNumber={purchase.purchaseNumber}
-              netAmount={purchase.netAmount}
+          {all.length === 0 ? (
+            <EmptyState
+              title="No sales yet"
+              description="A receipt is recorded against a purchase, so there is nothing to settle until a sale exists."
             />
-          ))}
-        </section>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="No sales with that status"
+              description="No purchase matches the current filters."
+            />
+          ) : (
+            <section aria-label="Sales records">
+              {/* The shared `.table-scroll` contract: overflow stays inside this
+                  region so the page never scrolls sideways, and `tabIndex` keeps the
+                  scroller reachable by keyboard. */}
+              <div
+                role="region"
+                aria-label="Scrollable sales records"
+                tabIndex={0}
+                className={`table-scroll ${styles.tableWrap} ${styles.queueCard}`}
+              >
+                <Table className={styles.queueTable}>
+                  <TableCaption>
+                    Gross, the VIP tier discount and any points discount are shown separately:
+                    neither discount is a receipt, and the amount due is what must be collected.
+                  </TableCaption>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeaderCell>Transaction</TableHeaderCell>
+                      <TableHeaderCell>Date</TableHeaderCell>
+                      <TableHeaderCell>Service</TableHeaderCell>
+                      <TableHeaderCell>Customer</TableHeaderCell>
+                      <TableHeaderCell>GSD</TableHeaderCell>
+                      <TableHeaderCell>Tier</TableHeaderCell>
+                      <TableHeaderCell align="right">Gross</TableHeaderCell>
+                      <TableHeaderCell align="right">Tier discount</TableHeaderCell>
+                      <TableHeaderCell align="right">Net due</TableHeaderCell>
+                      <TableHeaderCell align="right">Verified</TableHeaderCell>
+                      <TableHeaderCell>Status</TableHeaderCell>
+                      <TableHeaderCell>Claim</TableHeaderCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((purchase) => (
+                      <TableRow key={purchase.id}>
+                        <TableCell label="Transaction">
+                          <span className={styles.recordRef}>
+                            <span className={styles.recordRefDot} aria-hidden="true" />
+                            {purchase.purchaseNumber}
+                          </span>
+                        </TableCell>
+                        <TableCell label="Date">
+                          {purchase.createdAt ? purchase.createdAt.slice(0, 10) : '-'}
+                        </TableCell>
+                        <TableCell label="Service">
+                          {purchase.lines
+                            .map((l) => `${l.quantity} x ${formatMoneyOrDash(l.unitAmount)}`)
+                            .join(', ') || '-'}
+                        </TableCell>
+                        <TableCell label="Customer">{purchase.customerName ?? '-'}</TableCell>
+                        <TableCell label="GSD">{purchase.createdByName ?? '-'}</TableCell>
+                        <TableCell label="Tier">
+                          <TierBadge tier={purchase.tierSnapshot} />
+                        </TableCell>
+                        <TableCell label="Gross" align="right" className={styles.numeric}>
+                          {formatMoneyOrDash(purchase.grossAmount)}
+                        </TableCell>
+                        <TableCell label="Tier discount" align="right" className={styles.numeric}>
+                          {purchase.tierDiscountAmount !== '0.00'
+                            ? `- ${formatMoneyOrDash(purchase.tierDiscountAmount)}`
+                            : '-'}
+                        </TableCell>
+                        <TableCell label="Net due" align="right" className={styles.numeric}>
+                          {formatMoneyOrDash(purchase.netAmount)}
+                        </TableCell>
+                        <TableCell label="Verified" align="right" className={styles.numeric}>
+                          {formatMoneyOrDash(purchase.verifiedTotal)}
+                        </TableCell>
+                        <TableCell label="Status">
+                          <StatusChip
+                            tone={PURCHASE_STATUS_TONE[purchase.status] ?? 'neutral'}
+                            label={humanizeCode(purchase.status)}
+                          />
+                        </TableCell>
+                        <TableCell label="Claim">
+                          {purchase.claimStatus ? humanizeCode(purchase.claimStatus) : 'Not issued'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {rows
+                .filter((purchase) => purchase.status === 'draft')
+                .map((purchase) => (
+                  <PointRefundReview key={purchase.id} purchase={purchase} />
+                ))}
+              {rows.map((purchase) => (
+                <ServiceRefundPanel key={purchase.id} purchase={purchase} />
+              ))}
+              {/* One receipt panel per sale, so a reviewer can accept or reject a
+                  specific receipt. */}
+              {rows.map((purchase) => (
+                <PurchasePaymentRow
+                  key={purchase.id}
+                  purchaseId={purchase.id}
+                  purchaseNumber={purchase.purchaseNumber}
+                  netAmount={purchase.netAmount}
+                />
+              ))}
+            </section>
+          )}
+        </>
       )}
-    </>
+    </section>
   );
 }
 
@@ -248,10 +377,12 @@ function PurchasePaymentRow({
   const summary = useQuery({
     queryKey: earningKeys.purchaseSummary(purchaseId),
     queryFn: () => getPurchaseSummary(purchaseId),
+    placeholderData: keepPreviousData,
   });
   const receipts = useQuery({
     queryKey: earningKeys.purchaseReceipts(purchaseId),
     queryFn: () => listReceipts(purchaseId),
+    placeholderData: keepPreviousData,
   });
 
   const refresh = () => {
@@ -272,21 +403,22 @@ function PurchasePaymentRow({
   const settlement = useQuery({
     queryKey: earningKeys.settlement(purchaseId),
     queryFn: () => getSettlement(purchaseId),
+    placeholderData: keepPreviousData,
   });
 
   return (
-    <section aria-label={`Receipts for ${purchaseNumber}`}>
-      <h2>{purchaseNumber}</h2>
+    <section aria-label={`Receipts for ${purchaseNumber}`} className={styles.panel}>
+      <h2 className={styles.panelTitle}>{purchaseNumber}</h2>
       <p className={styles.hint}>Amount due {formatMoneyOrDash(netAmount)}</p>
 
       {/* The single settlement answer, so Finance and the seller are never
           looking at different versions of the truth. */}
       {settlement.data && (
-        <div aria-live="polite">
-          <p>
+        <div aria-live="polite" className={styles.settlement}>
+          <p className={styles.settlementLine}>
             <StatusChip
               tone={settlement.data.status === 'completed' ? 'success' : 'warning'}
-              label={settlement.data.status}
+              label={settlement.data.status === 'completed' ? 'Settled' : 'Outstanding'}
             />{' '}
             Outstanding {formatMoneyOrDash(settlement.data.remainingAmount)}
             {settlement.data.pendingReceipts > 0 &&
@@ -313,19 +445,18 @@ function PurchasePaymentRow({
         </div>
       )}
 
-      {summary.isLoading && (
+      {summary.isPending ? (
         <div role="status" aria-label="Loading the financial summary" aria-busy="true">
           <Skeleton />
         </div>
-      )}
-      {summary.isError && (
+      ) : summary.isError ? (
         <ErrorState
           title="Summary unavailable"
           message="The figures for this purchase could not be loaded."
+          onRetry={summary.refetch}
         />
-      )}
-      {summary.data && (
-        <table>
+      ) : summary.data ? (
+        <table className={styles.factsTable}>
           <tbody>
             {/* Gross, each discount, then the net. Shown separately and in that
                 order so the arithmetic is legible: a reviewer must be able to
@@ -373,44 +504,51 @@ function PurchasePaymentRow({
             </tr>
           </tbody>
         </table>
-      )}
+      ) : null}
 
-      {receipts.isLoading && (
+      {receipts.isPending ? (
         <div role="status" aria-label="Loading receipts" aria-busy="true">
           <Skeleton />
           <Skeleton />
         </div>
-      )}
-      {receipts.isError && (
+      ) : receipts.isError ? (
         <ErrorState
           title="Receipts unavailable"
           message="The receipts for this purchase could not be loaded."
+          onRetry={receipts.refetch}
         />
-      )}
-      {receipts.data?.length === 0 && <p className={styles.hint}>No payment recorded yet.</p>}
-      {receipts.data && receipts.data.length > 0 && (
-        <div role="region" aria-label="Scrollable receipts" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Payment</th>
-                <th scope="col">Amount</th>
-                <th scope="col">Method</th>
-                <th scope="col">Status</th>
-                <th scope="col">Recorded by</th>
-                <th scope="col">Verified by</th>
-                <th scope="col">
+      ) : receipts.data?.length === 0 ? (
+        <p className={styles.hint}>No payment recorded yet.</p>
+      ) : receipts.data && receipts.data.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Scrollable receipts"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
+          <Table className={styles.queueTable}>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Payment</TableHeaderCell>
+                <TableHeaderCell align="right">Amount</TableHeaderCell>
+                <TableHeaderCell>Method</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Recorded by</TableHeaderCell>
+                <TableHeaderCell>Verified by</TableHeaderCell>
+                <TableHeaderCell>
                   <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {receipts.data.map((receipt) => (
-                <tr key={receipt.id}>
-                  <td>{receipt.paymentNumber}</td>
-                  <td>{formatMoneyOrDash(receipt.amount)}</td>
-                  <td>{receipt.method}</td>
-                  <td>
+                <TableRow key={receipt.id}>
+                  <TableCell label="Payment">{receipt.paymentNumber}</TableCell>
+                  <TableCell label="Amount" align="right" className={styles.numeric}>
+                    {formatMoneyOrDash(receipt.amount)}
+                  </TableCell>
+                  <TableCell label="Method">{receipt.method}</TableCell>
+                  <TableCell label="Status">
                     <StatusChip
                       tone={STATUS_TONE[receipt.status] ?? 'neutral'}
                       label={receipt.status}
@@ -418,27 +556,29 @@ function PurchasePaymentRow({
                     {receipt.rejectionReason && (
                       <span className={styles.hint}> {receipt.rejectionReason}</span>
                     )}
-                  </td>
+                  </TableCell>
                   {/* Two DIFFERENT attributed acts. Recording and verifying are never
                     collapsed into one column, because "who took the money" and
                     "who confirmed it" are separate questions. */}
-                  <td>{receipt.recordedBy ?? '—'}</td>
-                  <td>{receipt.verifiedBy ?? '—'}</td>
-                  <td>
+                  <TableCell label="Recorded by">{receipt.recordedBy ?? '—'}</TableCell>
+                  <TableCell label="Verified by">{receipt.verifiedBy ?? '—'}</TableCell>
+                  <TableCell label="Actions">
                     {receipt.status === 'recorded' && mayVerify && (
                       <VerifyActions paymentId={receipt.id} onDone={refresh} />
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
-      )}
+      ) : null}
 
-      <Button variant="secondary" disabled={!mayRecord} onClick={() => setRecording(true)}>
-        Record a payment
-      </Button>
+      <div>
+        <Button variant="secondary" disabled={!mayRecord} onClick={() => setRecording(true)}>
+          Record a payment
+        </Button>
+      </div>
 
       {recording && (
         <RecordDialog
@@ -620,7 +760,7 @@ function RecordDialog({
         </>
       }
     >
-      <div aria-busy={save.isPending}>
+      <div aria-busy={save.isPending} className={styles.formGrid}>
         <TextField
           id={`amount-${purchaseId}`}
           name="amount"
@@ -632,19 +772,22 @@ function RecordDialog({
           disabled={save.isPending}
         />
 
-        <label htmlFor={`method-${purchaseId}`}>Method</label>
-        <Select
-          id={`method-${purchaseId}`}
-          value={method}
-          onChange={(event) => setMethod(event.target.value)}
-          disabled={save.isPending}
-          options={[
-            { value: 'cash', label: 'Cash' },
-            { value: 'bank_transfer', label: 'Bank transfer' },
-            { value: 'card', label: 'Card' },
-            { value: 'cheque', label: 'Cheque' },
-          ]}
-        />
+        <label className={styles.field} htmlFor={`method-${purchaseId}`}>
+          Method
+          <Select
+            id={`method-${purchaseId}`}
+            aria-label="Method"
+            value={method}
+            onChange={(event) => setMethod(event.target.value)}
+            disabled={save.isPending}
+            options={[
+              { value: 'cash', label: 'Cash' },
+              { value: 'bank_transfer', label: 'Bank transfer' },
+              { value: 'card', label: 'Card' },
+              { value: 'cheque', label: 'Cheque' },
+            ]}
+          />
+        </label>
 
         <TextField
           id={`reference-${purchaseId}`}

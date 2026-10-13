@@ -61,21 +61,21 @@ export function MyAccountPage() {
   });
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader title="My Account" description="Your staff identity and sign-in" />
       {mustChangePassword ? (
         <Alert variant="warning" title="Set a new password to continue">
           Your account still uses the temporary password an administrator set. Choose your own
-          password below — the rest of the admin panel unlocks once it is changed.
+          password below - the rest of the admin panel unlocks once it is changed.
         </Alert>
       ) : null}
       <div className={styles.stack}>
         <DetailCard>
           <DetailCardTitle>Profile</DetailCardTitle>
           <DetailFieldGrid>
-            <DetailField label="Email">{user?.email ?? '—'}</DetailField>
+            <DetailField label="Email">{user?.email ?? '-'}</DetailField>
             <DetailField label="Role">
-              <StatusChip label={user?.roleName ?? '—'} tone="neutral" />
+              <StatusChip label={user?.roleName ?? '-'} tone="neutral" />
             </DetailField>
           </DetailFieldGrid>
           <div className={styles.formGrid}>

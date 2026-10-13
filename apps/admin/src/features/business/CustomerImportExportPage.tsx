@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
 import { CUSTOMER_CATEGORY_LABELS, customerSellerOptionSchema } from '@afhomes/contracts';
-import type { CustomerImportParseResponse } from '@afhomes/contracts';
+import type { CustomerImportParseResponse, ImportJobStatus } from '@afhomes/contracts';
 import {
   Alert,
   Button,
@@ -13,13 +13,17 @@ import {
   ErrorState,
   FilterBar,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
   Tabs,
 } from '@afhomes/ui';
 import { requestList } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
+import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import { formatCountOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import {
   cancelCustomerImport,
@@ -57,6 +61,37 @@ type FeedbackTone = 'info' | 'success' | 'danger';
 const PREVIEW_PAGE_SIZE = 10;
 
 const TAB_BASE_ID = 'customer-import-export';
+
+const JOB_STATUS_TONES: Record<
+  ImportJobStatus,
+  'neutral' | 'success' | 'warning' | 'danger' | 'info'
+> = {
+  uploaded: 'warning',
+  parsing: 'warning',
+  validated: 'info',
+  ready: 'info',
+  committing: 'warning',
+  completed: 'success',
+  completed_with_errors: 'warning',
+  failed: 'danger',
+  cancelled: 'neutral',
+};
+
+/**
+ * Actionable job-history load guidance per failure cause. Raw server internals
+ * are never rendered; each branch names the next step instead.
+ */
+function describeJobsLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot view import jobs right now. Contact an administrator.';
+  if (error instanceof ApiParseError)
+    return 'The saved jobs contain values this screen cannot display. Note the job number and ask an administrator to review the records.';
+  return undefined;
+}
 
 const renderRowErrors = (errors: CustomerImportParseResponse['rows'][number]['errors']) => {
   if (errors.length === 0) return '✓';
@@ -124,6 +159,8 @@ export function CustomerImportExportPage() {
     queryFn: () => getCustomerImportJobs(),
     // Import jobs progress server-side: poll so parse/commit/cancel status
     // advances without reload (mutations still invalidate instantly).
+    // Previous jobs stay visible during each poll so the list never blanks.
+    placeholderData: keepPreviousData,
     refetchInterval: 5_000,
   });
 
@@ -247,6 +284,29 @@ export function CustomerImportExportPage() {
   const previewRangeFrom = previewRows.length === 0 ? 0 : safePreviewPage * PREVIEW_PAGE_SIZE + 1;
   const previewRangeTo = Math.min(previewRows.length, (safePreviewPage + 1) * PREVIEW_PAGE_SIZE);
 
+  // Tab switcher stays mounted across every state: it is navigation, not data,
+  // so an operator can move between tabs while jobs are still loading. The
+  // switcher instance never unmounts (no early-return branch around it): a
+  // remount between role lookup and click would drop the click on a detached
+  // node and leave the tab unchanged. Only the history panel below reads the
+  // jobs query; import and export need no data and stay interactive at once.
+  // Polling refetches keep previous jobs visible via placeholderData.
+  const tabSwitcher = (
+    <div className={styles.tabs}>
+      <Tabs
+        items={[
+          { value: 'import', label: 'Import' },
+          { value: 'export', label: 'Export' },
+          { value: 'history', label: 'Job history' },
+        ]}
+        value={tab}
+        onChange={(next) => setTab(next as WorkspaceTab)}
+        baseId={TAB_BASE_ID}
+        ariaLabel="Customer import and export sections"
+      />
+    </div>
+  );
+
   return (
     <section className={styles.workspace}>
       <PageHeader
@@ -266,19 +326,7 @@ export function CustomerImportExportPage() {
       </Alert>
       {message ? <Alert variant={tone}>{message}</Alert> : null}
 
-      <div className={styles.tabs}>
-        <Tabs
-          items={[
-            { value: 'import', label: 'Import' },
-            { value: 'export', label: 'Export' },
-            { value: 'history', label: 'Job history' },
-          ]}
-          value={tab}
-          onChange={(next) => setTab(next as WorkspaceTab)}
-          baseId={TAB_BASE_ID}
-          ariaLabel="Customer import and export sections"
-        />
-      </div>
+      {tabSwitcher}
 
       {tab === 'import' ? (
         <div
@@ -372,13 +420,15 @@ export function CustomerImportExportPage() {
                   />
                 </label>
                 <Button
+                  loading={parse.isPending}
+                  loadingLabel="Reading…"
                   disabled={parse.isPending || !sheetUrl.trim()}
                   onClick={() => {
                     setChosenFile(null);
                     parse.mutate({ source: 'google_sheets', sheetUrl: sheetUrl.trim() });
                   }}
                 >
-                  {parse.isPending ? 'Reading…' : 'Read sheet'}
+                  Read sheet
                 </Button>
               </div>
             </div>
@@ -395,13 +445,22 @@ export function CustomerImportExportPage() {
                   3. Review preview
                 </h2>
                 <div role="status" className={styles.summaryChips}>
-                  <StatusChip label={`Total ${preview.job.totalRows}`} tone="neutral" />
-                  <StatusChip label={`${preview.job.validRows} valid`} tone="success" />
                   <StatusChip
-                    label={`${preview.job.invalidRows} invalid`}
+                    label={`Total ${formatCountOrDash(preview.job.totalRows)}`}
+                    tone="neutral"
+                  />
+                  <StatusChip
+                    label={`${formatCountOrDash(preview.job.validRows)} valid`}
+                    tone="success"
+                  />
+                  <StatusChip
+                    label={`${formatCountOrDash(preview.job.invalidRows)} invalid`}
                     tone={preview.job.invalidRows > 0 ? 'danger' : 'neutral'}
                   />
-                  <StatusChip label={preview.job.status} />
+                  <StatusChip
+                    label={preview.job.status}
+                    tone={JOB_STATUS_TONES[preview.job.status]}
+                  />
                 </div>
                 <div
                   role="region"
@@ -425,14 +484,14 @@ export function CustomerImportExportPage() {
                     <tbody>
                       {previewPageRows.map((row) => (
                         <tr key={row.id}>
-                          <td>{row.rowNumber}</td>
-                          <td>
+                          <td data-label="Row">{formatCountOrDash(row.rowNumber)}</td>
+                          <td data-label="Customer">
                             {row.fields.first_name} {row.fields.last_name} ({row.fields.email})
                           </td>
-                          <td>{row.fields.membership_number || '—'}</td>
-                          <td>{row.fields.vip_tier || '—'}</td>
-                          <td>{row.fields.source_status || '—'}</td>
-                          <td>
+                          <td data-label="Membership #">{row.fields.membership_number || '—'}</td>
+                          <td data-label="Tier">{row.fields.vip_tier || '—'}</td>
+                          <td data-label="Source status">{row.fields.source_status || '—'}</td>
+                          <td data-label="Category">
                             {typeof row.normalized.category === 'string' &&
                             row.normalized.category in CUSTOMER_CATEGORY_LABELS
                               ? CUSTOMER_CATEGORY_LABELS[
@@ -440,41 +499,27 @@ export function CustomerImportExportPage() {
                                 ]
                               : '—'}
                           </td>
-                          <td>
+                          <td data-label="Action">
                             <StatusChip label={row.action} />
                           </td>
-                          <td>{renderRowErrors(row.errors)}</td>
+                          <td data-label="Errors">{renderRowErrors(row.errors)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 {previewRows.length > PREVIEW_PAGE_SIZE ? (
-                  <nav aria-label="Import preview pagination" className={styles.pagination}>
+                  <div className={styles.pagination}>
+                    <Pagination
+                      page={safePreviewPage + 1}
+                      pageCount={previewPageCount}
+                      onChange={(next) => setPreviewPage(next - 1)}
+                      label="Import preview pagination"
+                    />
                     <span role="status" className={styles.paginationRange}>
                       Showing {previewRangeFrom}–{previewRangeTo} of {previewRows.length}
                     </span>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={safePreviewPage === 0}
-                      onClick={() => setPreviewPage(Math.max(0, safePreviewPage - 1))}
-                      aria-label="Previous preview page"
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={safePreviewPage >= previewPageCount - 1}
-                      onClick={() =>
-                        setPreviewPage(Math.min(previewPageCount - 1, safePreviewPage + 1))
-                      }
-                      aria-label="Next preview page"
-                    >
-                      Next
-                    </Button>
-                  </nav>
+                  </div>
                 ) : null}
               </section>
 
@@ -482,6 +527,12 @@ export function CustomerImportExportPage() {
                 <h2 id={`${TAB_BASE_ID}-confirm-heading`} className={styles.panelTitle}>
                   4. Confirm import
                 </h2>
+                {preview.job.validRows === 0 ? (
+                  <Alert variant="warning">
+                    No valid rows to import. Correct the errors above and upload again before
+                    confirming.
+                  </Alert>
+                ) : null}
                 <div className={styles.actions}>
                   <Button
                     loading={confirm.isPending}
@@ -626,9 +677,21 @@ export function CustomerImportExportPage() {
               Import jobs
             </h2>
             {jobs.isPending ? (
-              <p role="status">Loading jobs…</p>
+              <div
+                style={{ display: 'grid', gap: 'var(--space-3)' }}
+                role="status"
+                aria-label="Loading import jobs"
+              >
+                <Skeleton style={{ height: 48 }} />
+                <Skeleton style={{ height: 48 }} />
+                <Skeleton style={{ height: 48 }} />
+              </div>
             ) : jobs.isError ? (
-              <ErrorState error={jobs.error} onRetry={jobs.refetch} />
+              <ErrorState
+                error={jobs.error}
+                message={describeJobsLoadError(jobs.error)}
+                onRetry={jobs.refetch}
+              />
             ) : !jobs.data?.length ? (
               <EmptyState
                 title="No import jobs"
@@ -660,19 +723,19 @@ export function CustomerImportExportPage() {
                   <tbody>
                     {jobs.data.map((job) => (
                       <tr key={job.id}>
-                        <td>{job.jobNumber ?? '—'}</td>
-                        <td>{job.sourceName}</td>
-                        <td>{job.sourceType}</td>
-                        <td>
-                          <StatusChip label={job.status} />
+                        <td data-label="Job">{job.jobNumber ?? '—'}</td>
+                        <td data-label="Source">{job.sourceName}</td>
+                        <td data-label="Type">{job.sourceType}</td>
+                        <td data-label="Status">
+                          <StatusChip label={job.status} tone={JOB_STATUS_TONES[job.status]} />
                         </td>
-                        <td>{job.totalRows}</td>
-                        <td>{job.insertedRows}</td>
-                        <td>{job.updatedRows}</td>
-                        <td>{job.skippedRows}</td>
-                        <td>{job.failedRows}</td>
-                        <td>{formatDateTime(job.createdAt)}</td>
-                        <td>
+                        <td data-label="Total">{formatCountOrDash(job.totalRows)}</td>
+                        <td data-label="Inserted">{formatCountOrDash(job.insertedRows)}</td>
+                        <td data-label="Updated">{formatCountOrDash(job.updatedRows)}</td>
+                        <td data-label="Skipped">{formatCountOrDash(job.skippedRows)}</td>
+                        <td data-label="Failed / invalid">{formatCountOrDash(job.failedRows)}</td>
+                        <td data-label="Created">{formatDateTime(job.createdAt)}</td>
+                        <td data-label="Actions">
                           {job.status === 'committing' ? (
                             <Button
                               size="sm"
@@ -687,7 +750,8 @@ export function CustomerImportExportPage() {
                             <Button
                               size="sm"
                               variant="secondary"
-                              disabled={cancel.isPending}
+                              loading={cancel.isPending}
+                              loadingLabel="Cancelling…"
                               onClick={() => cancel.mutate(job.id)}
                             >
                               Cancel

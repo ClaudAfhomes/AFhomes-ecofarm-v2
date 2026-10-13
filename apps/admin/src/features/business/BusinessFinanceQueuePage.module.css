@@ -12,6 +12,19 @@
   gap: var(--space-4);
   align-content: start;
   min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: this page never scrolls sideways — `clip` (not `hidden`) keeps
+   fixed descendants (overflow menus) working. */
+@media (max-width: 639px) {
+  .pageShell {
+    overflow-x: clip;
+  }
+
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
 }
 
 /* Hero: deep forest band with eyebrow, title and live queue meta. */
@@ -201,6 +214,15 @@
   .queueTable tbody tr.clickableRow:hover td {
     background-color: var(--color-state-hover);
   }
+}
+
+.queueTable tbody tr.clickableRow:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+.queueTable tbody tr.clickableRow:focus-visible td {
+  background-color: var(--color-state-hover);
 }
 
 /* Record reference: the row's anchor reads as a highlighted pill — accent

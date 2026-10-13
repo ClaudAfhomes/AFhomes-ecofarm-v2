@@ -1,13 +1,15 @@
 ﻿import { useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
+  Alert,
   Button,
   Dialog,
   ErrorState,
   FileField,
   Select,
   Skeleton,
+  StatusChip,
   TextAreaField,
   TextField,
   notifyConfirm,
@@ -60,6 +62,7 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
     queryKey: earningKeys.serviceRefunds(purchase.id),
     queryFn: () => listServiceRefunds(purchase.id),
     enabled: open,
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const save = useBusinessMutation({
@@ -168,10 +171,10 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
             if (!busy) setOpen(false);
           }}
         >
-          <p>
+          <Alert variant="info" title="External repayment only">
             Record a refund request, review it, then record cash actually repaid externally.
             Approval alone does not repay cash.
-          </p>
+          </Alert>
           <TextField
             id="refund-service-value"
             name="serviceValue"
@@ -234,20 +237,22 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
             </div>
           )}
           {history.isError && (
-            <ErrorState title="Refund history unavailable" onRetry={history.refetch} />
-          )}
-          {save.isError && (
             <ErrorState
-              title="Refund not recorded"
-              message="Check eligible collected cash, previous refunds, references and Finance review. Reload history before retrying."
+              error={history.error}
+              onRetry={() => void history.refetch()}
+              title="Refund history unavailable"
             />
           )}
+          {save.isError && <ErrorState error={save.error} title="Refund not recorded" />}
           {history.data?.length === 0 && <p>No refund requests yet.</p>}
           {(history.data ?? []).map((refund) => (
             <section key={refund.id} aria-label={'Refund ' + refund.reference}>
               <h3>
                 {refund.reference}: {refund.status.replaceAll('_', ' ')}
               </h3>
+              <p>
+                <StatusChip label={refund.status} />
+              </p>
               <dl>
                 <dt>Requested cash</dt>
                 <dd>{formatMoneyOrDash(refund.cashAmount)}</dd>
@@ -350,35 +355,34 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
                       setReceipt(undefined);
                       setReceiptError('');
                       if (!file) return;
-                        if (
-                          file.size > 3 * 1024 * 1024 ||
-                          (file.type !== 'image/jpeg' &&
-                            file.type !== 'image/png' &&
-                            file.type !== 'application/pdf')
-                        ) {
-                          setReceiptError('Choose a JPEG, PNG or PDF up to 3 MiB.');
-                          return;
-                        }
-                        const mimeType = file.type;
-                        setReceiptReading(true);
-                        try {
-                          const dataBase64 = await new Promise<string>((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onload = () =>
-                              resolve(String(reader.result).split(',')[1] ?? '');
-                            reader.onerror = () => reject(new Error('Receipt could not be read'));
-                            reader.readAsDataURL(file);
-                          });
-                          if (revision === receiptRevision.current)
-                            setReceipt({ mimeType, dataBase64 });
-                        } catch {
-                          if (revision === receiptRevision.current)
-                            setReceiptError('Receipt could not be read.');
-                        } finally {
-                          if (revision === receiptRevision.current) setReceiptReading(false);
-                        }
-                      }}
-                    />
+                      if (
+                        file.size > 3 * 1024 * 1024 ||
+                        (file.type !== 'image/jpeg' &&
+                          file.type !== 'image/png' &&
+                          file.type !== 'application/pdf')
+                      ) {
+                        setReceiptError('Choose a JPEG, PNG or PDF up to 3 MiB.');
+                        return;
+                      }
+                      const mimeType = file.type;
+                      setReceiptReading(true);
+                      try {
+                        const dataBase64 = await new Promise<string>((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+                          reader.onerror = () => reject(new Error('Receipt could not be read'));
+                          reader.readAsDataURL(file);
+                        });
+                        if (revision === receiptRevision.current)
+                          setReceipt({ mimeType, dataBase64 });
+                      } catch {
+                        if (revision === receiptRevision.current)
+                          setReceiptError('Receipt could not be read.');
+                      } finally {
+                        if (revision === receiptRevision.current) setReceiptReading(false);
+                      }
+                    }}
+                  />
                   {receiptError && <p role="alert">{receiptError}</p>}
                   <Button
                     disabled={
@@ -409,8 +413,8 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
                   />
                   {refund.receiptAttempts?.map((attempt) => (
                     <p key={attempt.auditId}>
-                      Receipt attempt: {attempt.reference} �{' '}
-                      {new Date(attempt.preparedAt).toLocaleString('en-PH')} � {attempt.status}
+                      Receipt attempt: {attempt.reference} -{' '}
+                      {new Date(attempt.preparedAt).toLocaleString('en-PH')} - {attempt.status}
                       <Button
                         variant="secondary"
                         disabled={busy || reconciliationReason.trim().length < 3}
@@ -445,8 +449,9 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
           ))}
           {reconciliation.isError && (
             <ErrorState
+              error={reconciliation.error}
+              onRetry={() => void history.refetch()}
               title="Receipt reconciliation unavailable"
-              message="Reload history before retrying."
             />
           )}
           {reconciliation.data && (
@@ -459,7 +464,11 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
             </p>
           )}
           {receiptGrant.isError && (
-            <ErrorState title="Receipt unavailable" message="Try opening the receipt again." />
+            <ErrorState
+              error={receiptGrant.error}
+              onRetry={() => receiptGrant.reset()}
+              title="Receipt unavailable"
+            />
           )}
           {receiptGrant.data && (
             <a href={receiptGrant.data.url} target="_blank" rel="noopener noreferrer">

@@ -1,106 +1,291 @@
 /** Staff prepare a quote; only the customer portal can authorize points. */
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 
 import {
+  Alert,
   Button,
   QrCode,
   Dialog,
   EmptyState,
   ErrorState,
+  FilterBar,
+  MetricCard,
+  OverflowMenu,
   PageHeader,
+  Pagination,
+  SearchField,
   Skeleton,
   StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
 } from '@afhomes/ui';
 import { webBase } from '../../lib/portal';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './points.module.css';
+import { TierBadge } from './TierBadge';
 
 import { getPurchaseSummary, listOwnPurchases, quotePointDiscount } from './points-services';
 import type { PurchaseRow, PurchaseSummaryRow } from './points-services';
 import { earningKeys } from './queryKeys';
 
+const PAGE_SIZE = 10;
+
+const capitalize = (value: string) =>
+  value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
+
 export function UseVipPointsPage() {
+  const [search, setSearch] = useState('');
+  const [applied, setApplied] = useState('');
+  void useDebouncedValue(search.trim(), 300, setApplied);
+  const [page, setPage] = useState(0);
   const purchases = useQuery({
     queryKey: earningKeys.posPurchases,
     queryFn: listOwnPurchases,
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
 
   // Only DRAFT purchases can take a discount; a settled one has already been
   // verified against its net, so changing net now would invalidate that decision.
-  const drafts = (purchases.data ?? []).filter((row) => row.status === 'draft');
+  const drafts = useMemo(
+    () => (purchases.data ?? []).filter((row) => row.status === 'draft'),
+    [purchases.data],
+  );
+  const term = applied.toLowerCase();
+  const filtered = useMemo(
+    () =>
+      term.length === 0
+        ? drafts
+        : drafts.filter(
+            (row) =>
+              row.purchaseNumber.toLowerCase().includes(term) ||
+              (row.customerName ?? '').toLowerCase().includes(term),
+          ),
+    [drafts, term],
+  );
+  const total = filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const visible = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
+
+  const [detail, setDetail] = useState<PurchaseRow | null>(null);
+
+  if (purchases.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading purchases"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 460 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+          <span className="sr-only">Loading purchases</span>
+        </div>
+      </section>
+    );
 
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="Use VIP Points"
         description="Spend a member's accumulated points against an unsettled purchase. Staycation and hotel purchases are eligible by default; every other service needs an active promotion."
       />
 
-      {purchases.isLoading && (
-        <div role="status" aria-label="Loading purchases" aria-busy="true">
-          <Skeleton />
-          <Skeleton />
-        </div>
-      )}
-      {purchases.isError && (
-        <ErrorState
-          title="Purchases unavailable"
-          message="The purchase list could not be loaded, so a discount cannot be applied."
-          onRetry={purchases.refetch}
-        />
-      )}
-      {purchases.data && drafts.length === 0 && (
+      <Alert variant="info" title="Customer approval required">
+        Staff prepare the quote here. The customer approves it in their own signed-in portal.
+        Scanning or quoting alone never spends points.
+      </Alert>
+
+      <ul className={styles.metrics} aria-label="Discount queue summary">
+        <li>
+          <MetricCard
+            label="Draft purchases"
+            value={formatCountOrDash(filtered.length)}
+            icon="file-text"
+            description="Unsettled sales that can take a discount"
+          />
+        </li>
+        <li>
+          <MetricCard
+            label="Awaiting quote"
+            value={formatCountOrDash(visible.length)}
+            icon="clock"
+            description="Drafts on this page"
+          />
+        </li>
+      </ul>
+
+      <FilterBar
+        filtersToggleLabel="Expand Filters"
+        search={
+          <SearchField
+            label="Search draft purchases"
+            placeholder="Purchase number or customer"
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              setPage(0);
+            }}
+            busy={purchases.isFetching}
+          />
+        }
+      />
+
+      {purchases.isError ? (
+        <ErrorState error={purchases.error} onRetry={() => void purchases.refetch()} />
+      ) : filtered.length === 0 ? (
         <EmptyState
           title="Nothing to discount"
           description="A discount can only be applied to a purchase that has not been settled yet."
         />
-      )}
-
-      {drafts.length > 0 && (
+      ) : (
         <div
           role="region"
           aria-label="Scrollable draft purchases"
           tabIndex={0}
-          className="table-scroll"
+          className={`table-scroll ${styles.tableWrap}`}
         >
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Purchase</th>
-                <th scope="col">Customer</th>
-                <th scope="col">Gross</th>
-                <th scope="col">VIP tier discount</th>
-                <th scope="col">Net due</th>
-                <th scope="col">Status</th>
-                <th scope="col">
+          <Table>
+            <TableCaption>Draft purchases that can take a points discount.</TableCaption>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Purchase</TableHeaderCell>
+                <TableHeaderCell>Customer</TableHeaderCell>
+                <TableHeaderCell>Tier</TableHeaderCell>
+                <TableHeaderCell align="right">Gross</TableHeaderCell>
+                <TableHeaderCell align="right">VIP tier discount</TableHeaderCell>
+                <TableHeaderCell align="right">Net due</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>
                   <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {drafts.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.purchaseNumber}</td>
-                  <td>{row.customerName ?? row.customerId}</td>
-                  <td>{formatMoneyOrDash(row.grossAmount)}</td>
-                  <td>{formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}</td>
-                  <td>{formatMoneyOrDash(row.netAmount)}</td>
-                  <td>
-                    <StatusChip tone="neutral" label={row.status} />
-                  </td>
-                  <td>
-                    <DiscountButton purchase={row} />
-                  </td>
-                </tr>
+                </TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {visible.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell label="Purchase">{row.purchaseNumber}</TableCell>
+                  <TableCell label="Customer">{row.customerName ?? row.customerId}</TableCell>
+                  <TableCell label="Tier">
+                    <TierBadge tier={row.tierSnapshot ?? null} />
+                  </TableCell>
+                  <TableCell label="Gross" align="right">
+                    {formatMoneyOrDash(row.grossAmount)}
+                  </TableCell>
+                  <TableCell label="VIP tier discount" align="right">
+                    {formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}
+                  </TableCell>
+                  <TableCell label="Net due" align="right">
+                    {formatMoneyOrDash(row.netAmount)}
+                  </TableCell>
+                  <TableCell label="Status">
+                    <StatusChip label={capitalize(row.status)} />
+                  </TableCell>
+                  <TableCell label="Actions">
+                    <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                      <DiscountButton purchase={row} />
+                      <OverflowMenu
+                        label={`More actions for ${row.purchaseNumber}`}
+                        items={[
+                          {
+                            label: 'View details',
+                            icon: 'info',
+                            onClick: () => setDetail(row),
+                          },
+                        ]}
+                      />
+                    </span>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
-    </>
+
+      {total > 0 ? (
+        <div className={styles.pagination}>
+          <Pagination
+            page={safePage + 1}
+            pageCount={pageCount}
+            onChange={(next) => setPage(next - 1)}
+            label="Draft purchases pagination"
+          />
+          <span role="status" className={styles.paginationRange}>
+            Showing {rangeFrom}-{rangeTo} of {total}
+          </span>
+        </div>
+      ) : null}
+
+      {detail ? (
+        <Dialog
+          open
+          onClose={() => setDetail(null)}
+          title={`Purchase ${detail.purchaseNumber}`}
+          footer={
+            <Button variant="ghost" onClick={() => setDetail(null)}>
+              Close
+            </Button>
+          }
+        >
+          <dl className={styles.figures}>
+            <div>
+              <dt>Customer</dt>
+              <dd>{detail.customerName ?? detail.customerId}</dd>
+            </div>
+            <div>
+              <dt>Tier</dt>
+              <dd>
+                <TierBadge tier={detail.tierSnapshot ?? null} />
+              </dd>
+            </div>
+            <div>
+              <dt>Gross</dt>
+              <dd>{formatMoneyOrDash(detail.grossAmount)}</dd>
+            </div>
+            <div>
+              <dt>VIP tier discount</dt>
+              <dd>{formatMoneyOrDash(detail.tierDiscountAmount ?? '0.00')}</dd>
+            </div>
+            <div>
+              <dt>Net due</dt>
+              <dd>{formatMoneyOrDash(detail.netAmount)}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <StatusChip label={capitalize(detail.status)} />
+              </dd>
+            </div>
+          </dl>
+          <p className={styles.hint}>
+            This record is read-only here. To spend points, use the row action and let the customer
+            approve it in their portal.
+          </p>
+        </Dialog>
+      ) : null}
+    </section>
   );
 }
 
@@ -121,6 +306,7 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
     queryKey: earningKeys.purchaseSummary(purchase.id),
     queryFn: () => getPurchaseSummary(purchase.id),
     enabled: open,
+    placeholderData: keepPreviousData,
   });
 
   const ask = useBusinessMutation({

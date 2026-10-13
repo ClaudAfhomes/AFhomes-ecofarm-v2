@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
-import { AuthLayout, Button, ErrorState, TextField } from '@afhomes/ui';
+import { AuthLayout, Alert, Button, ErrorState, Skeleton, TextField } from '@afhomes/ui';
 import { getSupabaseClient } from '../../lib/supabase';
 import { useSession } from '../../lib/session';
 
@@ -50,10 +50,20 @@ export function AdminMfaPage() {
       brandTitle="Secure access to AF Homes."
       lead="Admin and Super Admin verification uses Supabase TOTP."
     >
-      {factors.isPending && <p role="status">Loading authenticator setup…</p>}
+      {factors.isPending && (
+        <div role="status" aria-label="Loading authenticator setup">
+          <Skeleton style={{ height: 40 }} />
+          <Skeleton style={{ height: 40 }} />
+          <span className="sr-only">Loading authenticator setup…</span>
+        </div>
+      )}
       {factors.isError && <ErrorState error={factors.error} onRetry={factors.refetch} />}
       {factors.data && !factorId && (
-        <Button onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>
+        <Button
+          onClick={() => enrollment.mutate()}
+          loading={enrollment.isPending}
+          loadingLabel="Setting up…"
+        >
           Set up authenticator
         </Button>
       )}
@@ -90,15 +100,21 @@ export function AdminMfaPage() {
             value={code}
             onChange={setCode}
           />
-          <Button type="submit" disabled={verify.isPending}>
+          <Button type="submit" loading={verify.isPending} loadingLabel="Verifying…">
             Verify
           </Button>
         </form>
       )}
       {enrollment.isError && (
-        <p role="alert">Unable to enroll an authenticator. Retry or contact the account owner.</p>
+        <Alert variant="danger" title="Authenticator setup failed">
+          Unable to enroll an authenticator. Retry or contact the account owner.
+        </Alert>
       )}
-      {verify.isError && <p role="alert">{verify.error.message}</p>}
+      {verify.isError && (
+        <Alert variant="danger" title="Verification failed">
+          {verify.error.message}
+        </Alert>
+      )}
     </AuthLayout>
   );
 }

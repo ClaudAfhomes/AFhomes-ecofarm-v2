@@ -15,6 +15,7 @@ import {
   ErrorState,
   PageHeader,
   Select,
+  Skeleton,
   StatusChip,
   TextField,
 } from '@afhomes/ui';
@@ -50,7 +51,26 @@ export function AfHomesStaffDetailPage() {
     enabled: Boolean(id),
   });
 
-  if (staff.isPending) return <p role="status">Loading staff member…</p>;
+  // First load skeletonizes the whole page - header and detail cards - so no
+  // static content flashes before the data it describes.
+  if (staff.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading staff member"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <Skeleton style={{ height: 160 }} />
+          <Skeleton style={{ height: 120 }} />
+          <Skeleton style={{ height: 120 }} />
+        </div>
+      </section>
+    );
   if (staff.isError) return <ErrorState error={staff.error} onRetry={staff.refetch} />;
   return (
     <StaffDetailForm
@@ -192,7 +212,7 @@ function StaffDetailForm({
           <DetailCardTitle>Account state</DetailCardTitle>
           <DetailFieldGrid>
             <DetailField label="Temporary password">
-              {member.mustChangePassword ? 'Change required — panel locked' : 'Changed'}
+              {member.mustChangePassword ? 'Change required - panel locked' : 'Changed'}
             </DetailField>
             <DetailField label="Invited">{formatDateTime(member.invitedAt)}</DetailField>
             <DetailField label="Activated">{formatDateTime(member.activatedAt)}</DetailField>
@@ -297,7 +317,10 @@ function StaffDetailForm({
         <DetailCard>
           <DetailCardTitle>Audit history</DetailCardTitle>
           {historyPending ? (
-            <p role="status">Loading audit history…</p>
+            <div role="status" aria-label="Loading audit history">
+              <Skeleton style={{ height: 44 }} />
+              <Skeleton style={{ height: 44 }} />
+            </div>
           ) : historyError ? (
             <ErrorState error={historyError} onRetry={onRetryHistory} />
           ) : history?.length ? (

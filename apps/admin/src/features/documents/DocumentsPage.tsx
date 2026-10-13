@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link } from 'react-router';
 import {
@@ -12,10 +12,14 @@ import {
   PageHeader,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 
+import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { formatDateTime } from '../../lib/format';
+import { humanizeCode } from '../business/format';
+import { documentKeys } from '../business/queryKeys';
 import {
   ACCEPTED_MIME,
   MAX_BYTES,
@@ -25,6 +29,7 @@ import {
   requestUploadGrant,
   runDocumentOcr,
 } from './services';
+import styles from './DocumentsPage.module.css';
 
 /**
  * Identity document intake and review queue.
@@ -44,9 +49,12 @@ export function DocumentsPage() {
   const [uploadedId, setUploadedId] = useState<string | null>(null);
 
   const docs = useQuery({
-    queryKey: ['documents', subjectType, appliedId],
+    queryKey: documentKeys.list(subjectType, appliedId),
     queryFn: () =>
       getDocuments(appliedId ? { subjectType, subjectId: appliedId } : { subjectType }),
+    // The list stays on screen while a subject change or a background refresh
+    // reloads; only the very first load skeletonizes the page.
+    placeholderData: keepPreviousData,
   });
 
   const upload = useBusinessMutation({
@@ -75,7 +83,7 @@ export function DocumentsPage() {
     onSuccess: (documentId) => {
       setUploadedId(documentId);
       setFile(null);
-      void client.invalidateQueries({ queryKey: ['documents'] });
+      void client.invalidateQueries({ queryKey: documentKeys.scope });
     },
     onError: (cause) => setError(cause instanceof Error ? cause.message : 'Upload failed.'),
   });
@@ -83,12 +91,42 @@ export function DocumentsPage() {
   const ocr = useBusinessMutation({
     mutationFn: (id: string) => runDocumentOcr(id),
     onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['documents'] });
+      void client.invalidateQueries({ queryKey: documentKeys.scope });
     },
   });
 
+  // First load skeletonizes the whole page so no static content flashes
+  // before the list it describes. Refetches keep the list visible and never
+  // reach this branch. The sr-only line keeps the exact pending copy.
+  if (docs.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading documents"
+        >
+          <span className="sr-only">Loading documents…</span>
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 480 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="ID Documents"
         description="Upload identity scans to private storage, extract suggestions with OCR where available, and confirm them by human review."
@@ -122,6 +160,7 @@ export function DocumentsPage() {
               placeholder="UUID of the record"
               value={subjectId}
               onChange={setSubjectId}
+              busy={docs.isFetching}
             />
           }
           actions={
@@ -132,9 +171,7 @@ export function DocumentsPage() {
         />
       </form>
 
-      <div
-        style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}
-      >
+      <div className={styles.uploadPanel}>
         <FileField
           id="document-scan"
           name="scan"
@@ -147,25 +184,37 @@ export function DocumentsPage() {
           {upload.isPending ? 'Uploading…' : 'Upload scan'}
         </Button>
       </div>
-      {error ? <Alert variant="danger">{error}</Alert> : null}
+      {error ? (
+        <Alert variant="danger" title="Upload failed">
+          {error}
+        </Alert>
+      ) : null}
       {uploadedId ? (
-        <p role="status">
+        <p role="status" className={styles.statusLine}>
           Uploaded. <Link to={`/admin/documents/${uploadedId}`}>Review it now</Link> — nothing is
           final until a human confirms it.
         </p>
       ) : null}
 
-      {docs.isPending ? (
-        <p role="status">Loading documents…</p>
-      ) : docs.isError ? (
-        <ErrorState error={docs.error} onRetry={docs.refetch} />
+      {docs.isError ? (
+        <ErrorState
+          error={docs.error}
+          title="Documents could not be loaded"
+          message={describeDocumentsLoadError(docs.error)}
+          onRetry={() => void docs.refetch()}
+        />
       ) : (docs.data ?? []).length === 0 ? (
         <EmptyState
           title="No documents"
           description="Upload a scan above, or pick a different record."
         />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -173,38 +222,36 @@ export function DocumentsPage() {
                 <th>OCR</th>
                 <th>Verification</th>
                 <th>Uploaded</th>
-                <th />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {(docs.data ?? []).map((doc) => (
                 <tr key={doc.id}>
-                  <td>{doc.originalFilename}</td>
-                  <td>
-                    <StatusChip
-                      label={doc.ocrStatus.replace(/_/g, ' ')}
-                      tone={doc.ocrStatus === 'completed' ? 'success' : 'neutral'}
-                    />
+                  <td data-label="File" className={styles.fileCell}>
+                    {doc.originalFilename}
                   </td>
-                  <td>
-                    <StatusChip
-                      label={doc.verificationStatus.replace(/_/g, ' ')}
-                      tone={doc.verificationStatus === 'confirmed' ? 'success' : 'neutral'}
-                    />
+                  <td data-label="OCR">
+                    <StatusChip label={humanizeCode(doc.ocrStatus)} />
                   </td>
-                  <td>{formatDateTime(doc.uploadedAt)}</td>
-                  <td style={{ display: 'flex', gap: 8 }}>
-                    <Link to={`/admin/documents/${doc.id}`}>Review</Link>
-                    {doc.ocrStatus !== 'completed' ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={ocr.isPending}
-                        onClick={() => ocr.mutate(doc.id)}
-                      >
-                        Run OCR
-                      </Button>
-                    ) : null}
+                  <td data-label="Verification">
+                    <StatusChip label={humanizeCode(doc.verificationStatus)} />
+                  </td>
+                  <td data-label="Uploaded">{formatDateTime(doc.uploadedAt)}</td>
+                  <td data-label="Actions">
+                    <span className={styles.rowActions}>
+                      <Link to={`/admin/documents/${doc.id}`}>Review</Link>
+                      {doc.ocrStatus !== 'completed' ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={ocr.isPending}
+                          onClick={() => ocr.mutate(doc.id)}
+                        >
+                          Run OCR
+                        </Button>
+                      ) : null}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -212,6 +259,26 @@ export function DocumentsPage() {
           </table>
         </div>
       )}
+      {ocr.isError ? (
+        <Alert variant="danger" title="Extraction could not start">
+          {ocr.error instanceof Error ? ocr.error.message : 'OCR failed.'}
+        </Alert>
+      ) : null}
     </section>
   );
+}
+
+/**
+ * Actionable list-load guidance per failure cause. Raw server internals are
+ * never rendered (see `ErrorState`); each branch names the next step instead.
+ * Returns `undefined` for unknown errors so the shared generic message applies.
+ */
+function describeDocumentsLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot open documents right now. Contact an administrator.';
+  return undefined;
 }

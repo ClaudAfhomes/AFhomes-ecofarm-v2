@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
@@ -19,7 +19,12 @@ import styles from './cms.module.css';
 export function CmsPagesPage() {
   const { user } = useSession();
   const client = useQueryClient();
-  const pages = useQuery({ queryKey: ['cms', 'pages'], queryFn: getCmsPages });
+  const pages = useQuery({
+    queryKey: ['cms', 'pages'],
+    queryFn: getCmsPages,
+    // Refetches keep the previous list visible instead of blanking the table.
+    placeholderData: keepPreviousData,
+  });
   const [editing, setEditing] = useState<CmsPage | null>(null);
   const [creating, setCreating] = useState(false);
   const canCreate =
@@ -30,28 +35,45 @@ export function CmsPagesPage() {
     mutationFn: ({ id, publish }: { id: string; publish: boolean }) => publishCmsPage(id, publish),
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'pages'] }),
   });
-  if (pages.isLoading)
+  // First load skeletonizes the whole page - header and table - so no static
+  // content flashes before the data it describes. Refetches keep the previous
+  // list visible via placeholderData and never reach this branch.
+  if (pages.isPending)
     return (
-      <div
-        style={{ display: 'grid', gap: 'var(--space-3)' }}
-        role="status"
-        aria-label="Loading CMS pages"
-      >
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-      </div>
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading CMS pages"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
     );
   if (pages.isError)
     return (
-      <ErrorState
-        title="CMS pages could not be loaded"
-        error={pages.error}
-        onRetry={() => void pages.refetch()}
-      />
+      <section className={styles.page}>
+        <PageHeader
+          title="CMS Pages"
+          description="Custom published pages built from the legacy block vocabulary."
+        />
+        <ErrorState
+          title="CMS pages could not be loaded"
+          error={pages.error}
+          onRetry={() => void pages.refetch()}
+        />
+      </section>
     );
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="CMS Pages"
         description="Custom published pages built from the legacy block vocabulary."
@@ -65,7 +87,12 @@ export function CmsPagesPage() {
           description="The Phase 3 routes continue using repository defaults."
         />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table className={styles.table}>
             <thead>
               <tr>
@@ -79,16 +106,16 @@ export function CmsPagesPage() {
             <tbody>
               {pages.data.map((page) => (
                 <tr key={page.id}>
-                  <td>{page.title}</td>
-                  <td>/{page.slug}</td>
-                  <td>
+                  <td data-label="Page">{page.title}</td>
+                  <td data-label="Slug">/{page.slug}</td>
+                  <td data-label="Status">
                     <StatusChip
                       label={page.status}
                       tone={page.status === 'published' ? 'success' : 'neutral'}
                     />
                   </td>
-                  <td>{page.version}</td>
-                  <td>
+                  <td data-label="Version">{page.version}</td>
+                  <td data-label="Actions">
                     <div className={styles.actions}>
                       {canUpdate && (
                         <Button size="sm" variant="ghost" onClick={() => setEditing(page)}>
@@ -126,7 +153,8 @@ export function CmsPagesPage() {
           }}
         />
       )}
-    </>
+      {publication.error ? <p role="alert">{publication.error.message}</p> : null}
+    </section>
   );
 }
 

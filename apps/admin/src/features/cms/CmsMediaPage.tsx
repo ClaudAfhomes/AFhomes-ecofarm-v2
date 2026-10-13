@@ -1,7 +1,16 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { Button, EmptyState, ErrorState, FileField, PageHeader, Skeleton, TextField } from '@afhomes/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  FileField,
+  PageHeader,
+  Skeleton,
+  TextField,
+} from '@afhomes/ui';
+import { formatCountOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import { deleteCmsMedia, getCmsMedia, uploadCmsMedia } from './services';
 import styles from './cms.module.css';
@@ -9,7 +18,12 @@ import styles from './cms.module.css';
 export function CmsMediaPage() {
   const { user } = useSession();
   const client = useQueryClient();
-  const media = useQuery({ queryKey: ['cms', 'media'], queryFn: getCmsMedia });
+  const media = useQuery({
+    queryKey: ['cms', 'media'],
+    queryFn: getCmsMedia,
+    // Refetches keep the previous grid visible instead of blanking it.
+    placeholderData: keepPreviousData,
+  });
   const [file, setFile] = useState<File | null>(null);
   const [alt, setAlt] = useState('');
   const [message, setMessage] = useState<string | null>(null);
@@ -47,28 +61,46 @@ export function CmsMediaPage() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'media'] }),
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Delete failed.'),
   });
-  if (media.isLoading)
+  // First load skeletonizes the whole page - header, upload panel, and grid -
+  // so no static content flashes before the data it describes. Refetches keep
+  // the previous grid visible via placeholderData and never reach this branch.
+  if (media.isPending)
     return (
-      <div
-        style={{ display: 'grid', gap: 'var(--space-3)' }}
-        role="status"
-        aria-label="Loading media"
-      >
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-      </div>
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading media"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <Skeleton style={{ height: 120 }} />
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
     );
   if (media.isError)
     return (
-      <ErrorState
-        title="Media could not be loaded"
-        error={media.error}
-        onRetry={() => void media.refetch()}
-      />
+      <section className={styles.page}>
+        <PageHeader
+          title="CMS Media"
+          description="Validated public images and video uploaded through the authorized API."
+        />
+        <ErrorState
+          title="Media could not be loaded"
+          error={media.error}
+          onRetry={() => void media.refetch()}
+        />
+      </section>
     );
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="CMS Media"
         description="Validated public images and video uploaded through the authorized API."
@@ -113,7 +145,7 @@ export function CmsMediaPage() {
               )}
               <strong>{item.name}</strong>
               <small>
-                {item.mimeType} · {Math.ceil(item.sizeBytes / 1024)} KB
+                {item.mimeType} · {formatCountOrDash(Math.ceil(item.sizeBytes / 1024))} KB
               </small>
               {canDelete && (
                 <Button
@@ -128,6 +160,7 @@ export function CmsMediaPage() {
           ))}
         </div>
       )}
-    </>
+      {remove.error ? <p role="alert">{remove.error.message}</p> : null}
+    </section>
   );
 }

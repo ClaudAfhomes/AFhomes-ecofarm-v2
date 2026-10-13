@@ -73,7 +73,7 @@ export const exportAudit = (
 
 /** Render a raw report cell: dates, money strings, and points read naturally. */
 export function formatCell(key: string, value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'number') {
     if (/points|spent|balance|count|qty|descendants|downline|sales|entries/i.test(key)) {

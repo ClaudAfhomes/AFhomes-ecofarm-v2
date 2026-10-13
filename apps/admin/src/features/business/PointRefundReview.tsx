@@ -1,8 +1,19 @@
 import { useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { addMoney, formatMoneyOrDash, subtractMoney } from '@afhomes/shared';
-import { Button, Dialog, ErrorState, Skeleton, TextAreaField, TextField, notifyConfirm, notifySuccess } from '@afhomes/ui';
+import { addMoney, formatCountOrDash, formatMoneyOrDash, subtractMoney } from '@afhomes/shared';
+import {
+  Alert,
+  Button,
+  Dialog,
+  ErrorState,
+  Skeleton,
+  StatusChip,
+  TextAreaField,
+  TextField,
+  notifyConfirm,
+  notifySuccess,
+} from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import {
   cancelPointPurchase,
@@ -29,6 +40,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
     queryKey: earningKeys.pointRefunds(purchase.id),
     queryFn: () => listPointRefunds(purchase.id),
     enabled: open,
+    placeholderData: keepPreviousData,
   });
   const originalValue = subtractMoney(purchase.grossAmount, purchase.tierDiscountAmount ?? '0.00');
   const refundedValue = (refunds.data ?? []).reduce(
@@ -75,9 +87,13 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
             if (!save.isPending) setOpen(false);
           }}
         >
-          <p>
+          <Alert variant="info" title="Points only">
             Review service delivery and cancellation/refund eligibility. This restores points only;
             it does not pay cash or alter recorded receipts.
+          </Alert>
+          <p>
+            <StatusChip label={purchase.status} /> Original service value before points:{' '}
+            {formatMoneyOrDash(originalValue)}.
           </p>
           {purchase.status !== 'draft' && (
             <>
@@ -88,15 +104,12 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
               )}
               {refunds.isError && (
                 <ErrorState
+                  error={refunds.error}
+                  onRetry={() => void refunds.refetch()}
                   title="Refund history unavailable"
-                  message="Existing refunds must be checked before another restoration."
-                  onRetry={refunds.refetch}
                 />
               )}
-              <p>
-                Original service value before points: {formatMoneyOrDash(originalValue)}. Remaining
-                attributable value: {formatMoneyOrDash(remainingValue)}.
-              </p>
+              <p>Remaining attributable value: {formatMoneyOrDash(remainingValue)}.</p>
               <TextField
                 id={'point-refund-value-' + purchase.id}
                 name="refundValue"
@@ -113,7 +126,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
               {refunds.data?.map((refund) => (
                 <p key={refund.id}>
                   {refund.reviewedAt.slice(0, 10)}: {formatMoneyOrDash(refund.serviceValue)},{' '}
-                  {refund.pointsRestored.toLocaleString('en-PH')} points restored. {refund.reason}
+                  {formatCountOrDash(refund.pointsRestored)} points restored. {refund.reason}
                 </p>
               ))}
             </>
@@ -139,12 +152,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
             />
             I reviewed service delivery, refund eligibility and the attributable service value.
           </label>
-          {save.isError && (
-            <ErrorState
-              title="Not recorded"
-              message="The review could not be recorded. Check existing history before retrying."
-            />
-          )}
+          {save.isError && <ErrorState error={save.error} title="Not recorded" />}
           <Button
             loading={save.isPending}
             loadingLabel="Recording…"
