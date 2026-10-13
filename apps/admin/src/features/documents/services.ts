@@ -10,6 +10,7 @@ import {
   documentAccessUrlSchema,
   documentUploadGrantSchema,
   identityDocumentSchema,
+  identityDocumentSummarySchema,
   currentDocumentResponseSchema,
   type DocumentAccessUrl,
   type DocumentConfirmRequest,
@@ -21,7 +22,22 @@ import { z } from 'zod';
 import {
   protectedRequest as request,
   protectedRequestList as requestList,
+  protectedRequestListEnvelope as requestListEnvelope,
 } from '../../lib/api/client';
+
+export const getDocumentSummaries = (
+  params: { subjectType: 'customer' | 'ost_application'; subjectId?: string; offset: number },
+  signal?: AbortSignal,
+) => {
+  const query = new URLSearchParams({
+    subjectType: params.subjectType,
+    view: 'summary',
+    limit: '25',
+    offset: String(params.offset),
+  });
+  if (params.subjectId) query.set('subjectId', params.subjectId);
+  return requestListEnvelope(`/documents?${query}`, identityDocumentSummarySchema, { signal });
+};
 
 const post = <T>(path: string, schema: z.ZodType<T>, body: unknown) =>
   request(path, schema, { method: 'POST', body: JSON.stringify(body) });

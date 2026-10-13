@@ -372,7 +372,11 @@ export function AfHomesDashboardPage() {
             <Skeleton style={{ height: 22, width: 140 }} />
             <MetricCardSkeletons />
           </div>
-          {canViewSales ? <TrendChartSkeleton /> : null}
+          {canViewSales ? (
+            <div className={styles.chartCard} aria-hidden="true">
+              <Skeleton className={styles.chartBox} />
+            </div>
+          ) : null}
           {canViewSales ? (
             <div className={styles.breakdownGrid} aria-hidden="true">
               {['Payment Schemes', 'Card Plans'].map((title) => (

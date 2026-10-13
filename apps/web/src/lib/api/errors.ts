@@ -44,7 +44,11 @@ export class ApiParseError extends Error {
  */
 export class ApiNetworkError extends Error {
   constructor(cause: unknown) {
-    super('Network failure while reaching the API');
+    super(
+      cause instanceof DOMException && cause.name === 'TimeoutError'
+        ? 'The request timed out. For changes, check whether they saved before trying again.'
+        : 'Network failure while reaching the API',
+    );
     this.name = 'ApiNetworkError';
     this.cause = cause;
   }

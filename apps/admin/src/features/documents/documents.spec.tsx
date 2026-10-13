@@ -130,6 +130,30 @@ beforeEach(() => {
 /* ================================================================== */
 
 describe('Phase 27 documents list states', () => {
+  it('requests compact pages of 25 and can reach older documents', async () => {
+    const user = userEvent.setup();
+    install({ 'GET /documents': { body: { data: [doc()], meta: { total: 26 } } } });
+    render('/admin/documents');
+    await screen.findByText('id-front.jpg');
+    expect(
+      new URLSearchParams(requests.find((r) => r.path === '/documents')!.query).get('view'),
+    ).toBe('summary');
+    expect(
+      new URLSearchParams(requests.find((r) => r.path === '/documents')!.query).get('limit'),
+    ).toBe('25');
+    install({
+      'GET /documents': {
+        body: { data: [doc({ originalFilename: 'older.jpg' })], meta: { total: 26 } },
+      },
+    });
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await screen.findByText('older.jpg');
+    expect(
+      new URLSearchParams(requests.filter((r) => r.path === '/documents').at(-1)!.query).get(
+        'offset',
+      ),
+    ).toBe('25');
+  });
   it('35. shows a loading state while the list is pending', async () => {
     vi.stubGlobal(
       'fetch',
