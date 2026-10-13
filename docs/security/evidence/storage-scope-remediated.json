@@ -1,0 +1,51 @@
+{
+  "target": "loopback only",
+  "platformSelectGrantVerifiedLive": true,
+  "sellerModuleGrantExplicitSynthetic": true,
+  "fixtureRolledBack": true,
+  "rows": [
+    {
+      "name": "audit-only/own.png",
+      "own": true
+    }
+  ],
+  "documents": [
+    {
+      "own": true
+    }
+  ],
+  "rawDenied": true,
+  "anonymousDenied": true,
+  "scopes": [
+    {
+      "name": "seller customer/OST/uploader",
+      "visibleDocuments": 3,
+      "visibleObjects": 3
+    },
+    {
+      "name": "authorized reviewer",
+      "visibleDocuments": 5,
+      "visibleObjects": 5
+    },
+    {
+      "name": "customer without staff role",
+      "visibleDocuments": 0,
+      "visibleObjects": 0
+    },
+    {
+      "name": "inactive seller",
+      "visibleDocuments": 0,
+      "visibleObjects": 0
+    },
+    {
+      "name": "forced-password seller",
+      "visibleDocuments": 0,
+      "visibleObjects": 0
+    },
+    {
+      "name": "restricted seller",
+      "visibleDocuments": 0,
+      "visibleObjects": 0
+    }
+  ]
+}

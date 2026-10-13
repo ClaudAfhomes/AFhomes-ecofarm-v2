@@ -28,6 +28,7 @@ export type FakeAuthUser = {
   user_metadata?: Record<string, unknown>;
   /** Verified JWT authentication method(s); active fixtures default to password. */
   amr?: (string | { method: string; timestamp: number })[];
+  aal?: 'aal1' | 'aal2';
 };
 
 /** Recorded writes, so tests can assert on side effects (audit rows, inserts). */
@@ -344,6 +345,7 @@ export class FakeSupabase {
         data: {
           claims: {
             sub: user.id,
+            aal: user.aal ?? 'aal1',
             amr: user.amr ?? [{ method: 'password', timestamp: 1 }],
           },
           header: { alg: 'RS256' },
@@ -847,6 +849,7 @@ export class FakeSupabase {
     const entry = (this.rpcs ?? []).find((r) => r.fn === fn);
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
+    if (!entry && fn === 'afhomes_admin_mfa_required') return { data: false, error: null };
     // Directory behavior is a handler fixture only; real SQL is separately executed.
     if (!entry && fn === 'match_import_emails') {
       const emails = Array.isArray(args.p_emails)

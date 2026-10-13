@@ -75,7 +75,9 @@ describe('official OST handler boundary', () => {
         )
       ).status,
     ).toBe(400);
-    expect(holder.db?.calls.some((c) => c.op === 'rpc')).toBe(false);
+    expect(
+      holder.db?.calls.some((c) => c.op === 'rpc' && c.table !== 'afhomes_admin_mfa_required'),
+    ).toBe(false);
   });
   it('uses the pending atomic registration RPC for authorized manual entry', async () => {
     expect(

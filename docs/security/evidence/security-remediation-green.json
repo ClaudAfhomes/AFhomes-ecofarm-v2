@@ -1,0 +1,22 @@
+{
+  "baseline": false,
+  "migrations": 73,
+  "results": [
+    {
+      "file": "docs/security/reproductions/storage-scope.mjs",
+      "exit": 0
+    },
+    {
+      "file": "docs/security/reproductions/rpc-password-gate.mjs",
+      "exit": 0
+    },
+    {
+      "file": "docs/security/reproductions/staff-security-gates.mjs",
+      "exit": 0
+    },
+    {
+      "file": "supabase/db-integration.ts",
+      "exit": 0
+    }
+  ]
+}
