@@ -46,7 +46,7 @@ export function BusinessActivationQueuePage() {
     <section>
       <PageHeader
         title="Activation Queue"
-        description="Fully paid applications awaiting activation. Activation requires confirmed full payment and is performed by the server, not the browser."
+        description="Fully paid sales awaiting activation"
       />
 
       {queue.isPending ? (

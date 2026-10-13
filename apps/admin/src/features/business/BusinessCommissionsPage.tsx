@@ -105,7 +105,7 @@ export function BusinessCommissionsPage() {
     <section>
       <PageHeader
         title="Commissions"
-        description="Single-level commissions from frozen sale snapshots. Account rules override role rules; no matching rule means 0%. Qualification and payout remain explicit audited decisions."
+        description="Commissions from frozen sale snapshots"
       />
 
       <FilterBar
