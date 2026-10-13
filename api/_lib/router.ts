@@ -40,11 +40,11 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * handler. Supports both `/api/v1/...` and bare `/api/...` prefixes (the bare
  * prefix only matters for the local dev server; Vercel only serves `/api/v1`).
  *
- * Phase 2 surface: the AF Homes operations API, the business families
+ * Phase 2 surface: the AFHomes operations API, the business families
  * (card products, customers, sales, payments, activation, memberships, points,
  * commissions, referrals, queues), and the health probe. Every other route
  * family (members, vouchers, withdrawals, CMS, ...) belonged to the retired
- * predecessor platform and was removed - none of it had a table in the AF Homes schema.
+ * predecessor platform and was removed - none of it had a table in the AFHomes schema.
  */
 
 /**

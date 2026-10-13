@@ -177,8 +177,8 @@ describe('CustomerApplicationsPage list states', () => {
       limit: 10,
       offset: 0,
     });
-    const range = () => screen.getByRole('status', { name: 'Application record range' });
-    expect(range()).toHaveTextContent('Showing 1–10 of 25');
+    expect(screen.getByRole('navigation', { name: 'Customer applications pagination' }))
+      .toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await waitFor(() =>
@@ -187,7 +187,6 @@ describe('CustomerApplicationsPage list states', () => {
         offset: 10,
       }),
     );
-    await waitFor(() => expect(range()).toHaveTextContent('Showing 11–20 of 25'));
   });
 });
 
@@ -316,8 +315,8 @@ describe('ReservationAgreementsPage list states', () => {
       limit: 10,
       offset: 0,
     });
-    const range = () => screen.getByRole('status', { name: 'Reservation record range' });
-    expect(range()).toHaveTextContent('Showing 1–10 of 25');
+    expect(screen.getByRole('navigation', { name: 'Reservation agreements pagination' }))
+      .toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await waitFor(() =>
@@ -326,7 +325,6 @@ describe('ReservationAgreementsPage list states', () => {
         offset: 10,
       }),
     );
-    await waitFor(() => expect(range()).toHaveTextContent('Showing 11–20 of 25'));
   });
 });
 

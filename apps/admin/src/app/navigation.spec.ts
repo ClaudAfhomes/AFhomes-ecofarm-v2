@@ -10,7 +10,7 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
   canDelete: false,
 });
 
-describe('AF Homes navigation', () => {
+describe('AFHomes navigation', () => {
   it('places Customer Lookup after Dashboard for employee without weakening route guards', () => {
     const grants = [
       permission('dashboard.view'),
@@ -117,6 +117,6 @@ describe('AF Homes navigation', () => {
     expect(breadcrumbItems('/admin/roles')).toEqual([
       { label: 'Dashboard', to: '/admin' },
       { label: 'Organization' },
-      { label: 'Roles & Permissions' },
+      { label: 'Roles' },
     ]));
 });

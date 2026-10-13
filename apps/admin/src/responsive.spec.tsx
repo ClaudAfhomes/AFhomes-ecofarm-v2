@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 33 - admin responsive completion.
+ * AFHomes Phase 33 - admin responsive completion.
  *
  * Renders the REAL pages through the REAL router at mobile widths and pins
  * the structural contracts the CSS relies on: every wide table inside a

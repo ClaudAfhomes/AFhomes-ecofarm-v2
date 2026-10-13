@@ -200,9 +200,8 @@ describe('BusinessCustomersPage directory table', () => {
       limit: 10,
       offset: 0,
     });
-    // The range renders across several text nodes, so assert on textContent.
-    const range = () => screen.getByRole('status', { name: 'Customer record range' });
-    expect(range()).toHaveTextContent('Showing 1–10 of 25');
+    // Pagination keeps working without a record counter: turning the page
+    // re-fetches with the next offset.
     expect(screen.getByRole('navigation', { name: 'Customers pagination' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Page 1' })).toBeDisabled();
@@ -214,7 +213,6 @@ describe('BusinessCustomersPage directory table', () => {
         offset: 10,
       }),
     );
-    await waitFor(() => expect(range()).toHaveTextContent('Showing 11–20 of 25'));
   });
 
   it('filters by status and payment without category or sort controls', async () => {

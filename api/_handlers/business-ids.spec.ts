@@ -1,5 +1,5 @@
 /**
- * AF Homes company-wide business IDs (AF-*).
+ * AFHomes company-wide business IDs (AF-*).
  *
  * Pins the SQL/contract linkage, the handler wiring for the newly numbered
  * entities (payments, commissions, import jobs, staff), and the statistical

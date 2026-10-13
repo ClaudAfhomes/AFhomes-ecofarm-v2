@@ -1,5 +1,5 @@
 /**
- * AF Homes authorization regression suite.
+ * AFHomes authorization regression suite.
  *
  * One explicitly-named test per security invariant, so a regression names the
  * invariant it broke. Backend authorization is authoritative throughout: every

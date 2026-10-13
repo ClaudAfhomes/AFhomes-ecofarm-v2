@@ -701,7 +701,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Mutations need the service role (Auth admin API, governance writes).
     if (keyless && method !== 'GET')
       return fail(res, 'INTERNAL', 'This operation requires an isolated configured backend.', 503);
-    // My Account display-name update (AF Homes pattern: PATCH /admin/session).
+    // My Account display-name update (AFHomes pattern: PATCH /admin/session).
     // Self-service: resolves the principal directly so it stays reachable
     // while `mustChangePassword` gates every module-guarded endpoint.
     if (path === 'session' && method === 'PATCH') {
@@ -744,7 +744,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         permissions: principal.permissions,
       });
     }
-    // My Account / forced first-login password change (AF Homes pattern:
+    // My Account / forced first-login password change (AFHomes pattern:
     // POST /admin/session/password). Verifies the current password with a
     // fresh `signInWithPassword` (Supabase does not require it by default),
     // rotates via the Admin API, then clears the temporary-password flag.
@@ -1004,7 +1004,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Cannot assign a role with permissions you do not possess',
           403,
         );
-      // AF Homes pattern: the Auth identity is created server-side with an
+      // AFHomes pattern: the Auth identity is created server-side with an
       // administrator-set temporary password (`auth.admin.createUser`), never
       // through the invitation callback. The account starts `active` but
       // gated on `must_change_password` until the forced first-login change.
@@ -1390,7 +1390,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
       return res.status(200).json(await dashboard(db, String(req.query.range ?? 'month')));
     }
-    return fail(res, 'NOT_FOUND', 'AF Homes endpoint not found', 404);
+    return fail(res, 'NOT_FOUND', 'AFHomes endpoint not found', 404);
   } catch (error) {
     console.error('[afhomes-api]', describeServerError(error));
     return fail(res, 'INTERNAL', 'Internal server error', 500);

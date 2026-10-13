@@ -1,5 +1,5 @@
 /**
- * AF Homes sales directory list filters (`GET /sales`).
+ * AFHomes sales directory list filters (`GET /sales`).
  *
  * Pins the card filter contract: a plan id narrows the directory to that
  * card, and a malformed id is rejected before any database call. Seller

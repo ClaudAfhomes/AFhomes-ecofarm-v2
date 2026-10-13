@@ -202,7 +202,7 @@ export function MembershipActivity({
                   .filter((row) => row.membershipNumber === number)
                   .map((row) => (
                     <li key={String(row.referenceNumber ?? row.id)}>
-                      {String(row.referenceNumber ?? row.id ?? 'Redemption')} ·{' '}
+                      {String(row.referenceNumber ?? 'Redemption')} ·{' '}
                       {String(row.serviceItem ?? 'Service transaction')} ·{' '}
                       {String(row.pointsUsed ?? '')}
                     </li>

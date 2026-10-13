@@ -5,7 +5,7 @@ import { customerStatusSchema } from './lifecycle.js';
 export type VipTier = z.infer<typeof vipTierSchema>;
 
 /**
- * AF Homes bulk customer import/export contracts.
+ * AFHomes bulk customer import/export contracts.
  *
  * Single source for the spreadsheet vocabulary, the friendly-status mapping
  * into authoritative fields, and the derived display category. The Customers

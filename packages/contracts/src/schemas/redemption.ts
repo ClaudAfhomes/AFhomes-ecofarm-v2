@@ -1,5 +1,5 @@
 /**
- * AF Homes staff redemption contracts.
+ * AFHomes staff redemption contracts.
  *
  * Two rules shape everything here.
  *

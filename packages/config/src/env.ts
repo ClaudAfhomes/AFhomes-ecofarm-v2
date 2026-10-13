@@ -6,7 +6,7 @@ import { z } from 'zod';
  * Private/backend configuration NEVER appears here.
  */
 const vitePublicEnvSchema = z.object({
-  /** Base URL of the AF Homes REST API. Defaults to same-origin `/api/v1`. */
+  /** Base URL of the AFHomes REST API. Defaults to same-origin `/api/v1`. */
   VITE_API_BASE_URL: z.string().min(1).default('/api/v1'),
   /** Public widget key; the verification secret belongs only in Supabase Auth. */
   VITE_TURNSTILE_SITE_KEY: z.string().min(1).optional(),

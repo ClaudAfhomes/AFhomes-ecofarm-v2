@@ -76,14 +76,6 @@
   max-width: 100%;
 }
 
-.resultCount {
-  margin: 0;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Tables: the page's working surfaces, wrapped in elevated panels. */
 .tableWrap {
   margin-top: var(--space-2);

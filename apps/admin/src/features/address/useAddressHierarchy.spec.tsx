@@ -43,7 +43,7 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 );
 
 describe('useProvincesQuery', () => {
-  it('loads the province list through the AF Homes API', async () => {
+  it('loads the province list through the AFHomes API', async () => {
     const { result } = renderHook(() => useProvincesQuery(), { wrapper });
 
     await waitFor(() => expect(result.current.data).toEqual([LAGUNA, BATANGAS]));

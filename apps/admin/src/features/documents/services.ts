@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 12 identity-document API client (staff side).
+ * AFHomes Phase 12 identity-document API client (staff side).
  *
  * Every call goes through `lib/api/client`, which validates the response
  * against `@afhomes/contracts`. The binary PUT to a signed upload URL is the one

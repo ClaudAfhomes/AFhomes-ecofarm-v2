@@ -75,8 +75,6 @@ export function UseVipPointsPage() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
 
   const [detail, setDetail] = useState<PurchaseRow | null>(null);
 
@@ -232,9 +230,6 @@ export function UseVipPointsPage() {
             onChange={(next) => setPage(next - 1)}
             label="Draft purchases pagination"
           />
-          <span role="status" className={styles.paginationRange}>
-            Showing {rangeFrom}-{rangeTo} of {total}
-          </span>
         </div>
       ) : null}
 

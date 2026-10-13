@@ -92,8 +92,6 @@ export function OstApplicationsPage() {
   }
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const needsReview = rows.filter((app) =>
     ['submitted', 'under_review', 'changes_requested'].includes(app.status),
   ).length;
@@ -288,9 +286,6 @@ export function OstApplicationsPage() {
             onChange={(next) => setPage(next - 1)}
             label="OST applications pagination"
           />
-          <span role="status" aria-label="Application record range" className={styles.range}>
-            Showing {rangeFrom} to {rangeTo} of {total}
-          </span>
         </div>
       ) : null}
     </section>

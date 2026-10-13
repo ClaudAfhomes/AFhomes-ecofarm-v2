@@ -1,5 +1,5 @@
 /**
- * AF Homes card categories (the `card_plans.category_id` vocabulary).
+ * AFHomes card categories (the `card_plans.category_id` vocabulary).
  *
  * Read: anyone who may sell needs the active categories to interpret the
  * catalogue. Non-privileged roles always see active-only; the Super Admin

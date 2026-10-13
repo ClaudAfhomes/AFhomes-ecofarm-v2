@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 describe('public site shell', () => {
-  it('serves the AF Homes public site at / without JAD branding', async () => {
+  it('serves the AFHomes public site at / without JAD branding', async () => {
     renderWithProviders(<App />);
     const main = await screen.findByRole('main', undefined, { timeout: 20000 });
     expect(

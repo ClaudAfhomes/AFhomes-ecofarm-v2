@@ -15,7 +15,7 @@ describe('Sidebar', () => {
     render(
       <MemoryRouter>
         <Sidebar
-          brand="AF Homes"
+          brand="AFHomes"
           items={[...NAV, { to: '/member/wallet', label: 'eWallet', badge: 2 }]}
         />
       </MemoryRouter>,

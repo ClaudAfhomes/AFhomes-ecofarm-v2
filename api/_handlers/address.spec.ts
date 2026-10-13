@@ -1,7 +1,7 @@
 /**
- * AF Homes geographic address lookup - handler tests.
+ * AFHomes geographic address lookup - handler tests.
  *
- * The point of these is the boundary: the browser gets AF Homes JSON and never
+ * The point of these is the boundary: the browser gets AFHomes JSON and never
  * a provider URL, an authorization header, or a provider error body. The real
  * cache and the real permission check run; only the upstream transport and the
  * staff principal resolver are stubbed.
@@ -73,7 +73,7 @@ beforeEach(() => {
 });
 
 describe('GET /address/provinces', () => {
-  it('returns an AF Homes list envelope, not the provider payload', async () => {
+  it('returns an AFHomes list envelope, not the provider payload', async () => {
     const state = await call('');
 
     expect(state.status).toBe(200);

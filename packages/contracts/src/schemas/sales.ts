@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - card products, customers, sales, and referrals.
+ * AFHomes Phase 2 - card products, customers, sales, and referrals.
  *
  * Money crosses the wire as an exact-decimal STRING everywhere (never a
  * number), matching the Phase 1 convention and the DB CHECK regexes.

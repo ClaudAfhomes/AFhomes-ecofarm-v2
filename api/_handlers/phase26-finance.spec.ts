@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 26 - finance + commission lifecycle.
+ * AFHomes Phase 26 - finance + commission lifecycle.
  *
  * Proves the financial lifecycle around customer payments, verification,
  * 7-day spot-cash tracking, fully-paid determination, activation eligibility,

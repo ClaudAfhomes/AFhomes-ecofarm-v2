@@ -88,7 +88,7 @@ describe('XLSX export', () => {
 describe('PDF export', () => {
   it('produces a valid PDF with title, scope, summary, and table', () => {
     const bytes = toPdf({
-      title: 'AF Homes - sales report',
+      title: 'AFHomes - sales report',
       generatedAt: '2026-09-28T00:00:00.000Z',
       scopeLabel: 'Global (super_admin)',
       windowLabel: '2026-09-01 to 2026-09-30',
@@ -98,7 +98,7 @@ describe('PDF export', () => {
     });
     const text = Buffer.from(bytes).toString('latin1');
     expect(text.startsWith('%PDF-1.4')).toBe(true);
-    expect(text).toContain('AF Homes - sales report');
+    expect(text).toContain('AFHomes - sales report');
     // PDF literal strings escape parentheses - the scope label is present,
     // just PDF-escaped.
     expect(text).toContain('Global \\(super_admin\\)');
@@ -125,7 +125,7 @@ describe('PDF export', () => {
 
   it('renders an empty dataset without error', () => {
     const bytes = toPdf({
-      title: 'AF Homes - sales report',
+      title: 'AFHomes - sales report',
       generatedAt: 'now',
       scopeLabel: 's',
       windowLabel: 'w',

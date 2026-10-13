@@ -1,4 +1,4 @@
-/** Production-safe AF Homes reference seed. No people, transactions, or credentials. */
+/** Production-safe AFHomes reference seed. No people, transactions, or credentials. */
 import { Client } from 'pg';
 
 const connectionString = process.env.DATABASE_URL;

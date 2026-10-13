@@ -117,7 +117,7 @@ export function createCachedAddressProvider(
  * Prove a submitted triple is internally consistent: the province exists, the
  * locality exists under it, and the barangay exists under the locality.
  *
- * The provider's own ancestry-checked paths do part of this, but the AF Homes
+ * The provider's own ancestry-checked paths do part of this, but the AFHomes
  * server is the authority - the provider is consulted for truth, not trusted
  * for enforcement. Returns the resolved records so the caller persists the
  * provider's own spelling rather than whatever the browser sent.

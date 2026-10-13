@@ -18,7 +18,7 @@ export interface FileFieldProps {
 }
 
 /**
- * File picker (AF Homes form-field pattern). Native file input with shared
+ * File picker (AFHomes form-field pattern). Native file input with shared
  * styling and label association; the caller renders selection status through
  * `status` so the chosen file is always confirmable.
  */

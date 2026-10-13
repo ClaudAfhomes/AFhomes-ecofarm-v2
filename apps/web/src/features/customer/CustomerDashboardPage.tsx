@@ -22,8 +22,8 @@ import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './po
 /**
  * Customer dashboard: the member's own position in one screen.
  *
- * AF Homes member-dashboard structure (page header, KPI grid, membership panel,
- * recent activity) with AF Homes content: deliberately read-only and
+ * AFHomes member-dashboard structure (page header, KPI grid, membership panel,
+ * recent activity) with AFHomes content: deliberately read-only and
  * deliberately narrow - name, card, status, activation and renewal dates,
  * points balance, and recent points activity. No staff-only field and no
  * finance data; the scannable card itself lives on the membership screen.
@@ -127,7 +127,7 @@ export function CustomerDashboardPage() {
             title="Card unavailable"
             message={
               isForbidden(membership.error)
-                ? 'Your account is not active, so your card is not available. Contact AF Homes Ecofarm to restore access.'
+                ? 'Your account is not active, so your card is not available. Contact AFHomes Ecofarm to restore access.'
                 : isNotFound(membership.error)
                   ? 'You do not have an active membership yet.'
                   : 'We could not load your card. Please try again in a moment.'
@@ -137,7 +137,7 @@ export function CustomerDashboardPage() {
         {membership.data && (
           <FieldList>
             <Field label="Membership number" value={membership.data.membershipNumber} />
-            <Field label="Product" value={membership.data.productName ?? 'AF Homes card'} />
+            <Field label="Product" value={membership.data.productName ?? 'AFHomes card'} />
             <Field label="Payment scheme" value={paymentSchemeLabel(membership.data.paymentScheme)} />
             <Field
               label="Status"

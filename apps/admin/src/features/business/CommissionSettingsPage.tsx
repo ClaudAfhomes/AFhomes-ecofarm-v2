@@ -311,13 +311,6 @@ export function CommissionSettingsPage() {
                 />
               </label>
             }
-            actions={
-              <p className={styles.resultCount}>
-                {search.trim() || statusFilter !== 'all'
-                  ? `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} rules`
-                  : `${formatCountOrDash(visible.length)} rules`}
-              </p>
-            }
           />
 
           {visible.length === 0 ? (

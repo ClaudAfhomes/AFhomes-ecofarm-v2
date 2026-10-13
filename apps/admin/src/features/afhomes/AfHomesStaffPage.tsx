@@ -406,10 +406,6 @@ export function AfHomesStaffPage() {
               onChange={setPage}
               label="Staff pagination"
             />
-            <p role="status" aria-label="Staff record range" className={styles.paginationRange}>
-              Showing {(safePage - 1) * PAGE_SIZE + 1}-
-              {Math.min(filtered.length, safePage * PAGE_SIZE)} of {filtered.length} staff member(s)
-            </p>
           </div>
         </>
       )}
@@ -562,7 +558,7 @@ export function AfHomesStaffPage() {
             <p>
               {accountAction?.kind === 'delete'
                 ? 'This action permanently removes the login/account if no protected business records exist. This cannot be undone.'
-                : 'This user will no longer be able to access the AF Homes staff system. Historical records will remain.'}
+                : 'This user will no longer be able to access the AFHomes staff system. Historical records will remain.'}
             </p>
             {accountAction?.kind === 'delete' ? (
               <TextField

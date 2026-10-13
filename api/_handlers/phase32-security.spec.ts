@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 32 - security + authorization UAT.
+ * AFHomes Phase 32 - security + authorization UAT.
  *
  * Drives the REAL handlers, the REAL staff/customer resolvers and the REAL
  * contracts against the in-memory Supabase fake. Each test is numbered for the

@@ -63,7 +63,7 @@ export default function CmsPage() {
   if (!page.data) return <NotFound />;
   return (
     <>
-      <PageHeader eyebrow="AF Homes" title={page.data.title} />
+      <PageHeader eyebrow="AFHomes" title={page.data.title} />
       <Container className="py-16">
         {page.data.sections.map((section) => (
           <Section key={section.id ?? section.sortOrder} section={section} />

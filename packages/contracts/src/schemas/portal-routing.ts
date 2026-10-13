@@ -1,5 +1,5 @@
 /**
- * AF Homes portal routing resolver (single source).
+ * AFHomes portal routing resolver (single source).
  *
  * Four portals share one Supabase Auth identity. Given what the server knows
  * about that identity - a staff row (with role + temporary-password flag), a
@@ -108,7 +108,7 @@ export type PortalDestination = z.infer<typeof portalDestinationSchema>;
  *    also own a customer record.
  * 5. A customer-only identity routes to the customer portal.
  * 6. A pending (non-approved) OST applicant has no portal yet.
- * 7. Anything else is `no-portal`: valid Auth, no AF Homes identity.
+ * 7. Anything else is `no-portal`: valid Auth, no AFHomes identity.
  */
 export function resolvePortalDestination(identity: PortalIdentity): PortalDestination {
   if (identity.mustChangePassword && identity.staffRole !== null) return 'password-change';

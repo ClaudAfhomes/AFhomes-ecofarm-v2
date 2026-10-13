@@ -83,30 +83,30 @@ export async function sendCustomerOnboardingEmail(
   const config = smtpConfig(env);
   if (!config) return { status: 'failed', reason: 'not_configured' };
 
-  const name = message.customerName.trim() || 'AF Homes member';
+  const name = message.customerName.trim() || 'AFHomes member';
   const expiry = new Date(message.expiresAt);
   const expiryText = Number.isNaN(expiry.valueOf()) ? message.expiresAt : expiry.toUTCString();
   try {
     await createTransport(config.options).sendMail({
       from: config.from,
       to: recipient.data,
-      subject: 'Activate your AF Homes Ecofarm customer account',
+      subject: 'Activate your AFHomes Ecofarm customer account',
       text: [
         `Hello ${name},`,
         '',
-        `Your AF Homes Ecofarm membership ${message.membershipNumber} is active.`,
+        `Your AFHomes Ecofarm membership ${message.membershipNumber} is active.`,
         'Open the secure link below and choose your own password:',
         message.activationUrl,
         '',
         `This one-time activation link expires at ${expiryText}.`,
         'If you already activated your account, use Forgot Password instead.',
-        'AF Homes staff will never ask for or know your password.',
+        'AFHomes staff will never ask for or know your password.',
       ].join('\n'),
       html: `<p>Hello ${escapeHtml(name)},</p>
-<p>Your AF Homes Ecofarm membership <strong>${escapeHtml(message.membershipNumber)}</strong> is active.</p>
+<p>Your AFHomes Ecofarm membership <strong>${escapeHtml(message.membershipNumber)}</strong> is active.</p>
 <p><a href="${escapeHtml(message.activationUrl)}">Activate your customer account and choose your password</a></p>
 <p>This one-time activation link expires at ${escapeHtml(expiryText)}.</p>
-<p>If you already activated your account, use Forgot Password instead. AF Homes staff will never ask for or know your password.</p>`,
+<p>If you already activated your account, use Forgot Password instead. AFHomes staff will never ask for or know your password.</p>`,
     });
     return { status: 'sent' };
   } catch {

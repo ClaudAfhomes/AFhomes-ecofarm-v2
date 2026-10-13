@@ -1,5 +1,5 @@
 /**
- * AF Homes staff redemption: identifier resolution, the catalog, the redemption
+ * AFHomes staff redemption: identifier resolution, the catalog, the redemption
  * transaction, and redemption history.
  *
  * Authorization model, and it is the existing one - no new vocabulary:

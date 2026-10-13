@@ -1,5 +1,5 @@
 /**
- * AF Homes points API - handler tests.
+ * AFHomes points API - handler tests.
  *
  * These drive the REAL handler, the REAL staff principal resolver, the REAL
  * customer principal resolver, the REAL contracts and the REAL router dispatch

@@ -46,7 +46,7 @@ function removeCallbackCredentials(): void {
 
 /**
  * Staff invitation landing page. Supabase owns link verification and password
- * storage. The AF Homes API only confirms that the current invite session is
+ * storage. The AFHomes API only confirms that the current invite session is
  * bound to an invited staff profile, and later activates that same profile
  * from a freshly password-authenticated session.
  */
@@ -191,7 +191,7 @@ export function AdminActivateAccountPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Set Up Your Staff Account"
       lead="Your invitation has been verified. Create a password to finish setting up your account."
       brandTitle="Grow with the farm you own a card in."

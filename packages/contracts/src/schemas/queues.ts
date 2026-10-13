@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Phase 2B operational dashboard queue cards (AF Homes queue-card pattern).
+ * Phase 2B operational dashboard queue cards (AFHomes queue-card pattern).
  *
  * Three lightweight server-side counts for the dashboard top section. Each
  * count is `null` when the caller may not know it (pattern A: the endpoint

@@ -411,10 +411,6 @@ export function OstReferralCodesPage() {
                 onChange={(next) => setCodePage(next - 1)}
                 label="Referral codes pagination"
               />
-              <span role="status" aria-label="Referral code range" className={styles.range}>
-                Showing {safeCodePage * CODE_PAGE_SIZE + 1} to{' '}
-                {Math.min(codeTotal, (safeCodePage + 1) * CODE_PAGE_SIZE)} of {codeTotal}
-              </span>
             </div>
           ) : null}
         </>
@@ -476,11 +472,6 @@ export function OstReferralCodesPage() {
                 onChange={(next) => setApplicationPage(next - 1)}
                 label="Sponsored applications pagination"
               />
-              <span role="status" aria-label="Application range" className={styles.range}>
-                Showing {safeApplicationPage * APPLICATION_PAGE_SIZE + 1} to{' '}
-                {Math.min(applicationTotal, (safeApplicationPage + 1) * APPLICATION_PAGE_SIZE)} of{' '}
-                {applicationTotal}
-              </span>
             </div>
           ) : null}
         </>

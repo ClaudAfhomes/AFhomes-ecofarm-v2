@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 30 reports and audit UI.
+ * AFHomes Phase 30 reports and audit UI.
  *
  * Renders the REAL Reports and Audit pages through the REAL router against a
  * mocked API: list loading/empty/error-with-retry, populated tables with
@@ -201,7 +201,6 @@ describe('Phase 30 reports page', () => {
     render('/admin/reports');
     expect(await screen.findByText('SALE-000001')).toBeInTheDocument();
     expect(screen.getByText(/Scope: Global \(super_admin\)/)).toBeInTheDocument();
-    expect(screen.getByText('1–1 of 1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
@@ -264,7 +263,6 @@ describe('Phase 30 audit page', () => {
     const user = userEvent.setup();
     render('/admin/audit');
     expect(await screen.findByText('Application submitted')).toBeInTheDocument();
-    expect(screen.getByText('1–1 of 1')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Metadata' }));
     expect(await screen.findByText('Event metadata (redacted)')).toBeInTheDocument();
     expect(screen.getByText(/SALE-000001/)).toBeInTheDocument();

@@ -1,5 +1,5 @@
 /**
- * AF Homes sale payment reads (`GET /sales/:id/payments`).
+ * AFHomes sale payment reads (`GET /sales/:id/payments`).
  *
  * Actor UUIDs stay the source of truth, but the response also carries
  * display names resolved server-side in one lookup - the UI must never show

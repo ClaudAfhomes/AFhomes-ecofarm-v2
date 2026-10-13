@@ -121,14 +121,6 @@
   font-weight: 600;
 }
 
-.resultCount {
-  margin: 0;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Rules table: the page's working surface, wrapped in an elevated panel. */
 .tableWrap {
   margin-top: var(--space-2);

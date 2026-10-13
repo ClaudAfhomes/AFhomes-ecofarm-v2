@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - payments, activation, memberships, points, commissions.
+ * AFHomes Phase 2 - payments, activation, memberships, points, commissions.
  */
 import { z } from 'zod';
 

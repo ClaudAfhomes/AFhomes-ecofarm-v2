@@ -208,13 +208,6 @@ export function BusinessActivationQueuePage() {
                 />
               </label>
             }
-            actions={
-              <p className={styles.resultCount}>
-                {settled || eligibility !== 'all'
-                  ? `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`
-                  : `${formatCountOrDash(visible.length)} records`}
-              </p>
-            }
           />
 
           {visible.length === 0 ? (

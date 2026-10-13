@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 1 (AF Homes pattern) - staff lifecycle frontend behavior.
+ * AFHomes Phase 1 (AFHomes pattern) - staff lifecycle frontend behavior.
  *
  * Pins the forced-password-change gating (nav hidden, module routes parked
  * on My Account, profile reachable), the UserMenu account entry, the

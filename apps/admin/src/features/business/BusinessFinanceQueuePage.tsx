@@ -482,13 +482,6 @@ export function BusinessFinanceQueuePage() {
                 />
               </label>
             }
-            actions={
-              <p className={styles.resultCount}>
-                {statusFilter === 'all' && !settled && !truncated
-                  ? `${formatCountOrDash(visible.length)} records`
-                  : `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`}
-              </p>
-            }
           />
 
           {truncated ? (
@@ -858,7 +851,7 @@ export function RecordPaymentDialog({
         detail: [
           `Amount: ${formatMoneyOrDash(stored?.amount ?? recorded.input.amount)}`,
           `Reference: ${stored?.reference ?? recorded.input.reference ?? '—'}`,
-          `Payment ID: ${stored?.paymentNumber ?? stored?.id ?? '—'}`,
+          `Payment ID: ${stored?.paymentNumber ?? '—'}`,
           customerName ? `Customer: ${customerName}` : null,
           recordLabel
             ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`

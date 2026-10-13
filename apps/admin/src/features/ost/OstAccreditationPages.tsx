@@ -880,10 +880,6 @@ export function OstImportExportPage() {
                 onChange={(next) => setPage(next - 1)}
                 label="Import preview pagination"
               />
-              <span role="status" aria-label="Preview row range" className={styles.range}>
-                Showing {safePage * IMPORT_PAGE_SIZE + 1} to{' '}
-                {Math.min(rowTotal, (safePage + 1) * IMPORT_PAGE_SIZE)} of {rowTotal}
-              </span>
             </div>
           ) : null}
           <div className={styles.actions}>

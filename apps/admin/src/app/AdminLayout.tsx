@@ -1,6 +1,6 @@
 import { Suspense, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { AppShell, Breadcrumbs, ConfirmDialog, Skeleton, UserMenu } from '@afhomes/ui';
+import { AppShell, Breadcrumbs, ConfirmDialog, Icon, Skeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
@@ -19,7 +19,7 @@ export function AdminLayout() {
       })),
     [location.pathname, user?.roleSlug],
   );
-  // AF Homes pattern: while the temporary password is still in force the normal
+  // AFHomes pattern: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
   return (
@@ -28,7 +28,7 @@ export function AdminLayout() {
         brand={
           <div className={styles.brandBlock}>
             <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>AF Homes</span>
+              <span className={styles.brandName}>AFHomes</span>
               <span className={styles.brandText}>Ecofarm Operations</span>
             </div>
           </div>
@@ -46,9 +46,25 @@ export function AdminLayout() {
                 ),
               }))
         }
-        navLabel="AF Homes administration"
+        navLabel="AFHomes administration"
         menuLabel="Open navigation"
         menuPosition="right"
+        sidebarFooter={
+          <button
+            type="button"
+            className={styles.logoutButton}
+            title="Log Out"
+            aria-label="Log Out"
+            onClick={() => setConfirm(true)}
+          >
+            <span className={styles.logoutIcon} aria-hidden="true">
+              <Icon name="logout" size={18} />
+            </span>
+            <span className="sidebar-footer-label" aria-hidden="true">
+              Log Out
+            </span>
+          </button>
+        }
         topbarActions={
           <UserMenu
             name={user?.name}
@@ -95,7 +111,7 @@ export function AdminLayout() {
           void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
-        message="Sign out of AF Homes administration?"
+        message="Sign out of AFHomes administration?"
         confirmLabel="Sign out"
         cancelLabel="Cancel"
       />

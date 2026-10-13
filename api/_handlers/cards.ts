@@ -1,5 +1,5 @@
 /**
- * AF Homes card plans (the `card_plans` catalogue, served as `card-products`).
+ * AFHomes card plans (the `card_plans` catalogue, served as `card-products`).
  *
  * Read: anyone who may sell needs the active catalogue. Non-privileged roles
  * always see active plans only; the Super Admin may also list inactive plans

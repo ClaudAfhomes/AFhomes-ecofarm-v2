@@ -438,10 +438,6 @@
   color: var(--color-text-secondary);
 }
 
-.paginationRange {
-  margin: 0;
-}
-
 /* Editor banner row: a back link and the live lifecycle state on one line. */
 .backRow {
   display: flex;

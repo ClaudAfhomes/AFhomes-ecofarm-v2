@@ -76,7 +76,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/health', {})?.routeKey).toBe('health');
   });
 
-  it('routes the AF Homes surface and captures the sub-path', () => {
+  it('routes the AFHomes surface and captures the sub-path', () => {
     const q: Record<string, string | undefined> = {};
     expect(selectHandler('/api/v1/admin/afhomes/session', q)?.routeKey).toBe(
       'admin/afhomes/session',
@@ -149,7 +149,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/customers-archive', {})).toBeNull();
   });
 
-  it('requires a sub-path on the AF Homes prefix', () => {
+  it('requires a sub-path on the AFHomes prefix', () => {
     // The catch-all is `(.+)`; the bare prefix must not swallow the prefix itself.
     expect(selectHandler('/api/v1/admin/afhomes', {})).toBeNull();
     expect(selectHandler('/api/v1/admin/afhomes/', {})).toBeNull();

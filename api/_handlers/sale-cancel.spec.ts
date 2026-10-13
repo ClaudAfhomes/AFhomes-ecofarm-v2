@@ -1,5 +1,5 @@
 /**
- * AF Homes sale cancellation (`POST /sales/:id/cancel`).
+ * AFHomes sale cancellation (`POST /sales/:id/cancel`).
  *
  * Cancellation is a terminal status move, never destruction: only `draft`
  * sales with no recorded/verified payments, no membership and no live

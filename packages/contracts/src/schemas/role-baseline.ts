@@ -1,5 +1,5 @@
 /**
- * AF Homes default role permission baseline (Phase 2).
+ * AFHomes default role permission baseline (Phase 2).
  *
  * Single source of truth for the explicit, reviewed, database-backed default
  * grants that take every non-customer operational role from zero modules to

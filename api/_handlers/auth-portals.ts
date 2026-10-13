@@ -1,7 +1,7 @@
 /**
  * Cross-portal identity probe: `GET /auth/portals`.
  *
- * Answers ONE question about the bearer's OWN Auth user: which AF Homes
+ * Answers ONE question about the bearer's OWN Auth user: which AFHomes
  * identities exist (a staff row, a customer row, an OST row). Login screens
  * call it after Supabase authentication to route to the right portal and to
  * name the wrong-portal message.

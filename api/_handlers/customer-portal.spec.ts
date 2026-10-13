@@ -1,5 +1,5 @@
 /**
- * AF Homes customer portal - activation, failure handling and portal reads.
+ * AFHomes customer portal - activation, failure handling and portal reads.
  *
  * These tests drive the REAL handlers, the REAL customer principal resolver and
  * the REAL Zod contracts against the in-memory Supabase fake.

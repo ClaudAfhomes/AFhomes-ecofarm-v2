@@ -148,15 +148,6 @@
   max-width: 100%;
 }
 
-/* Toolbar result count, trailing the search + filter controls. */
-.resultCount {
-  margin: 0;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Queue table: the page's working surface, wrapped in an elevated panel
    like the reservations/applications queues. */
 .tableWrap {

@@ -127,10 +127,6 @@
   color: var(--color-text-secondary);
 }
 
-.range {
-  margin: 0;
-}
-
 @media (max-width: 639px) {
   .editorGrid {
     grid-template-columns: 1fr;

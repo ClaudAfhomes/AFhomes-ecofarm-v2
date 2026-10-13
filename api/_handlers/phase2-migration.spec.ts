@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - migration invariants and the role authorization matrix.
+ * AFHomes Phase 2 - migration invariants and the role authorization matrix.
  *
  * Two things are proven here that a handler test cannot prove on its own:
  *

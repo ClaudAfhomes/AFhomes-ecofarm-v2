@@ -45,7 +45,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
       {
         to: '/admin/sales/payment-scheme-guide',
-        label: 'Payment Scheme Guide',
+        label: 'Scheme Guide',
         module: 'sales.card_sales',
       },
     ],
@@ -89,10 +89,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'wallet',
     module: 'operations.redemption',
     dropdown: [
-      { to: '/admin/redemption', label: 'Earned Points Claims', module: 'operations.redemption' },
+      { to: '/admin/redemption', label: 'Points Claims', module: 'operations.redemption' },
       {
         to: '/admin/redemption/history',
-        label: 'Earning Claim History',
+        label: 'Claim History',
         module: 'operations.redemption',
       },
     ],
@@ -103,19 +103,19 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   // re-keys them to the permission each one actually needs.
   {
     to: '/admin/points',
-    label: 'AFhomes Operational Services',
+    label: 'Services',
     icon: 'dollar-sign',
     module: 'operations.sales',
     dropdown: [
       // The GSD screen. `operations.sales` view+create is what a seller holds;
       // it grants no catalog, customer or verification authority.
-      { to: '/admin/points', label: 'New Service Sale', module: 'operations.sales' },
+      { to: '/admin/points', label: 'New Sale', module: 'operations.sales' },
       // Points spending is a POS act, not a redemption-desk one: it lives with
       // the sale, keyed to the same `operations.sales` the seller holds, and
       // nowhere near the earning-claim queue.
-      { to: '/admin/points/use', label: 'Use VIP Points', module: 'operations.sales' },
+      { to: '/admin/points/use', label: 'Use Points', module: 'operations.sales' },
       // Admin only: products, tier discounts and earning rules.
-      { to: '/admin/points/rules', label: 'Products & Services', module: 'operations.catalog' },
+      { to: '/admin/points/rules', label: 'Catalog', module: 'operations.catalog' },
       { to: '/admin/points/records', label: 'Sales Records', module: 'sales.customers' },
       // Finance/Admin only: operational receipt verification AND the sales
       // ledger. Keyed to `operations.payments`, which `employee` does not
@@ -124,7 +124,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // `finance.payment_verification`.
       {
         to: '/admin/points/payments',
-        label: 'Operational Payment Verification',
+        label: 'Verify Receipts',
         module: 'operations.payments',
       },
     ],
@@ -142,7 +142,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         module: 'network.ost_registrations',
       },
       { to: '/admin/ost/members', label: 'OST Members', module: 'network.ost_members' },
-      { to: '/admin/ost/referral-code', label: 'My Referral Code', module: 'network.referrals' },
+      { to: '/admin/ost/referral-code', label: 'Referral Code', module: 'network.referrals' },
     ],
   },
   {
@@ -153,7 +153,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     dropdown: [
       { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
       { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
-      { to: '/admin/roles', label: 'Roles & Permissions', module: 'organization.roles' },
+      { to: '/admin/roles', label: 'Roles', module: 'organization.roles' },
     ],
   },
   // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`

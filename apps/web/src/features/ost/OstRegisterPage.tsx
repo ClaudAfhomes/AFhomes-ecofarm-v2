@@ -97,7 +97,7 @@ export function OstRegisterPage() {
   if (submission.isSuccess) {
     return (
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFHomes Ecofarm"
         title="Application received"
         brandTitle="Sell the farm you believe in."
         brandLead="Your application is pending review under your sponsor."
@@ -123,7 +123,7 @@ export function OstRegisterPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Apply as an OST seller"
       lead="Register under your Sales Manager's referral code."
       brandTitle="Sell the farm you believe in."

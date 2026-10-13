@@ -1,5 +1,5 @@
 /**
- * AF Homes operations API - direct handler coverage.
+ * AFHomes operations API - direct handler coverage.
  *
  * Exercises `api/_handlers/admin/afhomes.ts` end to end through the same seam
  * production uses: the real handler, the real authorization resolver, the real
@@ -51,7 +51,7 @@ afterAll(() => {
 
 type Json = Record<string, unknown>;
 
-/** Unique keys as declared by the AF Homes foundation migration. */
+/** Unique keys as declared by the AFHomes foundation migration. */
 const UNIQUE = {
   departments: [['code'], ['name']],
   roles: [['slug'], ['name']],
@@ -2326,7 +2326,7 @@ describe('dashboard', () => {
 describe('handler surface', () => {
   beforeEach(() => install());
 
-  it('404s an unknown AF Homes sub-path', async () => {
+  it('404s an unknown AFHomes sub-path', async () => {
     const state = await call({ afPath: 'does/not/exist', token: TOKEN.admin });
     expect(state.status).toBe(404);
     expect(err(state.body)?.code).toBe('NOT_FOUND');
@@ -2361,7 +2361,7 @@ describe('handler surface', () => {
   });
 
   it('creates staff with a temporary password without any admin redirect target', async () => {
-    // AF Homes pattern: creation no longer depends on the invitation callback, so
+    // AFHomes pattern: creation no longer depends on the invitation callback, so
     // no redirect URL is required at all.
     const saved = process.env.AFHOMES_ADMIN_URL;
     delete process.env.AFHOMES_ADMIN_URL;

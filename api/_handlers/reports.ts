@@ -1678,7 +1678,7 @@ function sendExport(
     });
   }
   const pdf = toPdf({
-    title: `AF Homes - ${title}`,
+    title: `AFHomes - ${title}`,
     generatedAt: new Date().toISOString(),
     scopeLabel: 'server-scoped',
     windowLabel: 'all dates in scope',

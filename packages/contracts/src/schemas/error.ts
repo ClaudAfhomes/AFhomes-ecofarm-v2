@@ -17,7 +17,7 @@ export const errorEnvelopeSchema = z.object({
 export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;
 
 /**
- * The stable set of error codes the AF Homes API emits. Domain-specific codes
+ * The stable set of error codes the AFHomes API emits. Domain-specific codes
  * (commission, voucher, payout, qualification) are added here when their Phase
  * 2+ handlers land, so a client can narrow on `code` without string matching.
  */

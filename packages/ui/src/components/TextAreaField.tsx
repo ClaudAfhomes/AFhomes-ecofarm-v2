@@ -18,7 +18,7 @@ export interface TextAreaFieldProps {
 }
 
 /**
- * Multi-line text input (AF Homes form-field pattern). Same labels, hints,
+ * Multi-line text input (AFHomes form-field pattern). Same labels, hints,
  * and error wiring as `TextField`, for notes, descriptions, and summaries.
  */
 export function TextAreaField({

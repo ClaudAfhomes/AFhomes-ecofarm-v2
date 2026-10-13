@@ -202,7 +202,7 @@ function storedZipEntry(bytes: Uint8Array, wanted: string): string | null {
     const name = decoder.decode(bytes.slice(at + 30, at + 30 + nameLength));
     const start = at + 30 + nameLength + extraLength;
     if (name === wanted) {
-      if (method !== 0) throw new Error('Only AF Homes generated XLSX files are supported');
+      if (method !== 0) throw new Error('Only AFHomes generated XLSX files are supported');
       return decoder.decode(bytes.slice(start, start + size));
     }
     at = start + size;
@@ -210,7 +210,7 @@ function storedZipEntry(bytes: Uint8Array, wanted: string): string | null {
   return null;
 }
 
-/** Parse the first data row of an AF Homes generated XLSX. Never saves it. */
+/** Parse the first data row of an AFHomes generated XLSX. Never saves it. */
 export function parseFormXlsx(bytes: Uint8Array): Record<string, string> {
   const xml = storedZipEntry(bytes, 'xl/worksheets/sheet1.xml');
   if (!xml) throw new Error('Spreadsheet worksheet is missing');
@@ -445,7 +445,7 @@ export function officialFormPdf(
   const section = (name: string) => rows.push([name, '']);
   if (kind === 'reservation_agreement') {
     const tier = fields.tier ?? fields.card_tier ?? fields.vip_tier ?? 'BRONZE';
-    section('AF HOMES ECOFARM');
+    section('AFHOMES ECOFARM');
     rows.push(['document', title]);
     section('RESERVATION HEADER');
     for (const key of [
@@ -527,7 +527,7 @@ export function officialFormPdf(
     rows.push(['authorized seller line', '________________________  Date: __________']);
   } else {
     const tier = fields.card_tier ?? 'BRONZE';
-    section('AF HOMES ECOFARM');
+    section('AFHOMES ECOFARM');
     rows.push(['document', title]);
     section('PRIMARY CARDHOLDER');
     for (const [key, value] of Object.entries(fields))
@@ -566,7 +566,7 @@ export function officialFormPdf(
     ]);
   }
   return toPdf({
-    title: `AF Homes Ecofarm\n${title}`,
+    title: `AFHomes Ecofarm\n${title}`,
     generatedAt: new Date().toISOString(),
     scopeLabel: 'Official form',
     windowLabel: 'Transaction snapshot',

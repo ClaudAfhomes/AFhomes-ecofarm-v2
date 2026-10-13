@@ -26,7 +26,7 @@ export interface TextFieldProps {
 }
 
 /**
- * Text/email/tel input (AF Homes text-field pattern). Renders inside `FormField`
+ * Text/email/tel input (AFHomes text-field pattern). Renders inside `FormField`
  * with shared input styling and `aria-invalid`/`aria-describedby` wiring.
  */
 export function TextField({

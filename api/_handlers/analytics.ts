@@ -252,11 +252,11 @@ function bucketKey(value: unknown, period: AnalyticsPeriod) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Sales Overview trend (AF Homes sales-trend pattern)                   */
+/* Sales Overview trend (AFHomes sales-trend pattern)                   */
 /* ------------------------------------------------------------------ */
 
 /**
- * The single AF Homes state that counts as a recognized sale for the Sales
+ * The single AFHomes state that counts as a recognized sale for the Sales
  * Overview. Activation is the explicit, permission-gated recognition decision
  * after full verified payment - the same role the predecessor's `QUALIFYING_SALE`
  * transition plays after `PAYMENT_VERIFIED`. Pipeline states and cancelled

@@ -1,5 +1,5 @@
 /**
- * FilterBar adoption + UI safety scans (AF Homes pattern completion).
+ * FilterBar adoption + UI safety scans (AFHomes pattern completion).
  *
  * Every eligible admin list renders the canonical FilterBar (role="search")
  * instead of a one-off toolbar wrapper, and no migrated feature uses a

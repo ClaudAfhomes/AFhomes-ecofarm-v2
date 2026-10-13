@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 12 - pure document helpers.
+ * AFHomes Phase 12 - pure document helpers.
  *
  * Deterministic and side-effect free: file-type validation, magic-byte
  * checks, storage-path generation and ID masking live here so they can be

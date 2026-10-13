@@ -207,7 +207,7 @@ for (const gap of findRouteCoverageGaps(
   );
 }
 
-// Schema self-check: probe the AF Homes foundation tables via PostgREST so a
+// Schema self-check: probe the AFHomes foundation tables via PostgREST so a
 // missing migration is caught at startup (loud) instead of every endpoint
 // returning "Could not find the table ... in the schema cache".
 // Skipped when Supabase is not configured (mock/dev-server-only mode).
@@ -226,7 +226,7 @@ void (async () => {
   if (missing.length > 0) {
     // eslint-disable-next-line no-console
     console.error(
-      `[dev-server] FATAL: AF Homes schema incomplete (missing: ${missing.join(', ')}) - run \`pnpm db:migrate\`.`,
+      `[dev-server] FATAL: AFHomes schema incomplete (missing: ${missing.join(', ')}) - run \`pnpm db:migrate\`.`,
     );
   }
 })();

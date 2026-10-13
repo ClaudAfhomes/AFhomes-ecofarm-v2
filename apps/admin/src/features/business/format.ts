@@ -1,6 +1,6 @@
 import { compareMoney, subtractMoney } from '@afhomes/shared';
 
-/** Presentation helpers for AF Homes business values. */
+/** Presentation helpers for AFHomes business values. */
 
 /** Format an exact-decimal money string for display. Never parses to a number. */
 export function formatMoney(exactDecimal: string | null | undefined): string {

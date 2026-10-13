@@ -68,7 +68,7 @@ export async function handleOstImport(
         'approved_expiry',
       ].map((name) => [name, '________________________']),
     );
-    const bytes = officialFormPdf('AF HOMES SELLER ACCREDITATION / REGISTRATION FORM', fields);
+    const bytes = officialFormPdf('AFHOMES SELLER ACCREDITATION / REGISTRATION FORM', fields);
     return res.status(200).json({
       filename: 'afhomes-ost-accreditation-template.pdf',
       mime: 'application/pdf',

@@ -168,7 +168,7 @@ export function decideCustomerLogin(portals: AuthPortals): CustomerDecision {
     ? { kind: 'navigate', to: dashboard }
     : {
         kind: 'notice',
-        message: 'No customer access is assigned to this account. Contact AF Homes for assistance.',
+        message: 'No customer access is assigned to this account. Contact AFHomes for assistance.',
         signOut: true,
       };
 }

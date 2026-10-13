@@ -643,7 +643,7 @@ describe('exports from the scoped query', () => {
     );
     const doc = Buffer.from(pdf.content, 'base64').toString('latin1');
     expect(doc.startsWith('%PDF')).toBe(true);
-    expect(doc).toContain('AF Homes - memberships report');
+    expect(doc).toContain('AFHomes - memberships report');
   });
 
   it('rejects an unknown format instead of defaulting', async () => {

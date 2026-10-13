@@ -125,6 +125,14 @@
   color: var(--color-text-muted);
 }
 
+/* Footer action text collapses to icons only, matching the nav links above.
+   Any footer content carrying the global `sidebar-footer-label` class hides
+   its text when the rail is collapsed; the control itself keeps its
+   accessible name and tooltip. */
+.sidebar.collapsed .footer :global(.sidebar-footer-label) {
+  display: none;
+}
+
 /* ── Category (expandable) ────────────────────────────────────────────── */
 .category {
   /* Block layout: header + sub-list stack vertically. */

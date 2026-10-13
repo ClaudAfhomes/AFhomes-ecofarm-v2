@@ -21,7 +21,7 @@ export function CustomerPaymentsPage() {
         title="Payments unavailable"
         message={
           isForbidden(payments.error)
-            ? 'Your account is not active, so payments are not available. Contact AF Homes Ecofarm to restore access.'
+            ? 'Your account is not active, so payments are not available. Contact AFHomes Ecofarm to restore access.'
             : 'We could not load your payments. Please try again in a moment.'
         }
       />

@@ -228,13 +228,6 @@ export function PurchasePaymentsPage() {
                 />
               </label>
             }
-            actions={
-              <p className={styles.resultCount}>
-                {settled || statusFilter !== 'all'
-                  ? `${formatCountOrDash(rows.length)} of ${formatCountOrDash(summary.total)} purchases`
-                  : `${formatCountOrDash(rows.length)} purchases`}
-              </p>
-            }
           />
 
           {all.length === 0 ? (

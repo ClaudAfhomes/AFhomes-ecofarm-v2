@@ -268,10 +268,10 @@ export function toXlsx(sheetName: string, columns: XlsxColumn[], rows: unknown[]
     `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
   const core =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(safeName)}</dc:title><dc:creator>AF Homes</dc:creator></cp:coreProperties>`;
+    `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(safeName)}</dc:title><dc:creator>AFHomes</dc:creator></cp:coreProperties>`;
   const app =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>AF Homes Reports</Application></Properties>`;
+    `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>AFHomes Reports</Application></Properties>`;
   return zipStored([
     { name: '[Content_Types].xml', data: encoder.encode(contentTypes) },
     { name: '_rels/.rels', data: encoder.encode(rels) },
@@ -425,7 +425,7 @@ export function toPdf(doc: PdfDoc): Uint8Array {
   objects[3] = `3 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj`;
   objects[4] = `4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold>>endobj`;
   pages.forEach((ops, i) => {
-    const footer = `BT /F1 8 Tf ${margin.toFixed(1)} ${(margin - 14).toFixed(1)} Td (Page ${i + 1} of ${totalPages} - AF Homes) Tj ET`;
+    const footer = `BT /F1 8 Tf ${margin.toFixed(1)} ${(margin - 14).toFixed(1)} Td (Page ${i + 1} of ${totalPages} - AFHomes) Tj ET`;
     const stream = `${ops.join('\n')}\n${footer}\n`;
     const len = Buffer.byteLength(stream, 'latin1');
     objects[pageObjNums[i]!] =

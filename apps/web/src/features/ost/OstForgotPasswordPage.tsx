@@ -71,7 +71,7 @@ export function OstForgotPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Reset your password"
       lead="Enter your OST email and we will send you a link to choose a new password."
       brandTitle="Sell the farm you believe in."

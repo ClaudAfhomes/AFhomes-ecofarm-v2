@@ -129,10 +129,6 @@
   color: var(--color-text-secondary);
 }
 
-.paginationRange {
-  margin: 0;
-}
-
 .filterLabel {
   display: grid;
   gap: 4px;

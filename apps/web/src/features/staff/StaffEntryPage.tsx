@@ -127,7 +127,7 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
     }
   };
 
-  // A signed-in identity with no AF Homes home anywhere must not linger with
+  // A signed-in identity with no AFHomes home anywhere must not linger with
   // a live session on a login screen.
   useEffect(() => {
     if (decision?.action === 'refuse' && decision.message.includes('no staff identity')) {
@@ -141,7 +141,7 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
   return (
     <main>
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFHomes Ecofarm"
         title={isAdmin ? 'Admin Login' : 'Staff Login'}
         lead={
           isAdmin

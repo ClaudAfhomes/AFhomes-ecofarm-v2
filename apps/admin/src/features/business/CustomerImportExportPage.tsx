@@ -83,7 +83,7 @@ const JOB_STATUS_TONES: Record<
  */
 function describeJobsLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)
@@ -281,8 +281,6 @@ export function CustomerImportExportPage() {
     safePreviewPage * PREVIEW_PAGE_SIZE,
     (safePreviewPage + 1) * PREVIEW_PAGE_SIZE,
   );
-  const previewRangeFrom = previewRows.length === 0 ? 0 : safePreviewPage * PREVIEW_PAGE_SIZE + 1;
-  const previewRangeTo = Math.min(previewRows.length, (safePreviewPage + 1) * PREVIEW_PAGE_SIZE);
 
   // Tab switcher stays mounted across every state: it is navigation, not data,
   // so an operator can move between tabs while jobs are still loading. The
@@ -516,9 +514,6 @@ export function CustomerImportExportPage() {
                       onChange={(next) => setPreviewPage(next - 1)}
                       label="Import preview pagination"
                     />
-                    <span role="status" className={styles.paginationRange}>
-                      Showing {previewRangeFrom}–{previewRangeTo} of {previewRows.length}
-                    </span>
                   </div>
                 ) : null}
               </section>

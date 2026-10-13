@@ -123,7 +123,7 @@ export function purchaseDocumentPdf(evidence: PurchaseDocumentEvidence): Uint8Ar
       'EVIDENCE UNAVAILABLE: this record predates evidence capture. No amount, balance or term is shown, because none was captured at the time.',
     );
     return toPdf({
-      title: `AF Homes Ecofarm\n${TITLE[evidence.kind]}`,
+      title: `AFHomes Ecofarm\n${TITLE[evidence.kind]}`,
       generatedAt: new Date().toISOString(),
       scopeLabel: 'Historical purchase record',
       windowLabel: 'Evidence capture',
@@ -202,7 +202,7 @@ export function purchaseDocumentPdf(evidence: PurchaseDocumentEvidence): Uint8Ar
   rows.push(['Captured by (staff id)', evidence.actor ?? '']);
 
   return toPdf({
-    title: `AF Homes Ecofarm\n${TITLE[evidence.kind]}`,
+    title: `AFHomes Ecofarm\n${TITLE[evidence.kind]}`,
     generatedAt: new Date().toISOString(),
     scopeLabel: 'Historical purchase record',
     windowLabel: `Evidence capture revision ${String(evidence.revision ?? '-')}`,

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { exactDecimalStringSchema } from './money.js';
 
 /**
- * AF Homes points contracts.
+ * AFHomes points contracts.
  *
  * Two things this file must never do, because both are security properties
  * rather than conveniences:
@@ -106,7 +106,7 @@ export const earningClaimSchema = z.object({
 });
 
 /**
- * Redeem a claim. The token may be a bare credential OR a full AF Homes claim
+ * Redeem a claim. The token may be a bare credential OR a full AFHomes claim
  * URL; the server parses the URL, extracts the credential, and still re-verifies
  * ownership before consuming anything.
  *

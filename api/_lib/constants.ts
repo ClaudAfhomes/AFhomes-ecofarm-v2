@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 business constants.
+ * AFHomes Phase 2 business constants.
  *
  * Single source for values the database, the API, and the UI must agree on.
  * Anything here that also exists as a SQL literal is asserted against the
