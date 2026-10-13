@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { CommissionRule } from '@afhomes/contracts';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { Button, DateField, EmptyState, ErrorState, PageHeader, Select, StatusChip, TextField } from '@afhomes/ui';
 
 import { formatRate } from './format';
 import {
@@ -10,6 +11,7 @@ import {
   getCommissionRules,
   updateCommissionRule,
 } from './services';
+import { sharedScopes } from './queryKeys';
 import { useSession } from '../../lib/session';
 
 const initialForm = () => ({
@@ -32,12 +34,12 @@ export function CommissionSettingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const rules = useQuery({
-    queryKey: ['commission-rules'],
+    queryKey: sharedScopes.commissionRules,
     queryFn: getCommissionRules,
     enabled: mayManage,
   });
-  const refresh = () => client.invalidateQueries({ queryKey: ['commission-rules'] });
-  const create = useMutation({
+  const refresh = () => client.invalidateQueries({ queryKey: sharedScopes.commissionRules });
+  const create = useBusinessMutation({
     mutationFn: () =>
       editingId
         ? updateCommissionRule(editingId, {
@@ -60,7 +62,7 @@ export function CommissionSettingsPage() {
       await refresh();
     },
   });
-  const toggle = useMutation({
+  const toggle = useBusinessMutation({
     mutationFn: (rule: CommissionRule) =>
       updateCommissionRule(rule.id, { isActive: !rule.isActive }),
     onSuccess: refresh,
@@ -71,7 +73,7 @@ export function CommissionSettingsPage() {
     Number(form.rate) >= 0 &&
     Number(form.rate) <= 1;
   const history = useQuery({
-    queryKey: ['commission-rule-history', historyId],
+    queryKey: sharedScopes.commissionRuleHistory(historyId),
     queryFn: () => getCommissionRuleHistory(historyId!),
     enabled: Boolean(historyId),
   });
@@ -96,57 +98,60 @@ export function CommissionSettingsPage() {
       <div style={{ display: 'grid', gap: 10, maxWidth: 720, marginBottom: 24 }}>
         <label>
           Target type
-          <select
+          <Select
             value={form.targetType}
             onChange={(event) =>
               setForm({ ...form, targetType: event.target.value as 'role' | 'staff' | 'ost' })
             }
-          >
-            <option value="role">Role default</option>
-            <option value="staff">Staff account</option>
-            <option value="ost">OST account</option>
-          </select>
-        </label>
-        <label>
-          Role/account ID
-          <input
-            value={form.targetId}
-            onChange={(event) => setForm({ ...form, targetId: event.target.value })}
-            placeholder="UUID from Roles or Staff"
+            options={[
+              { value: 'role', label: 'Role default' },
+              { value: 'staff', label: 'Staff account' },
+              { value: 'ost', label: 'OST account' },
+            ]}
           />
         </label>
-        <label>
-          Rate (0.15 = 15%)
-          <input
-            value={form.rate}
-            onChange={(event) => setForm({ ...form, rate: event.target.value })}
-            inputMode="decimal"
-          />
-        </label>
-        <label>
-          Effective from
-          <input
-            type="date"
-            value={form.effectiveFrom}
-            onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })}
-          />
-        </label>
-        <label>
-          Effective until (optional)
-          <input
-            type="date"
-            value={form.effectiveUntil}
-            onChange={(event) => setForm({ ...form, effectiveUntil: event.target.value })}
-          />
-        </label>
-        <label>
-          Accredited on/after (optional)
-          <input
-            type="date"
-            value={form.accreditedOnOrAfter}
-            onChange={(event) => setForm({ ...form, accreditedOnOrAfter: event.target.value })}
-          />
-        </label>
+        <TextField
+          id="commission-target-id"
+          name="targetId"
+          label="Role/account ID"
+          optional
+          value={form.targetId}
+          onChange={(value) => setForm({ ...form, targetId: value })}
+          placeholder="UUID from Roles or Staff"
+        />
+        <TextField
+          id="commission-rate"
+          name="rate"
+          label="Rate (0.15 = 15%)"
+          optional
+          inputMode="decimal"
+          value={form.rate}
+          onChange={(value) => setForm({ ...form, rate: value })}
+        />
+        <DateField
+          id="rule-effective-from"
+          name="effectiveFrom"
+          label="Effective from"
+          optional
+          value={form.effectiveFrom}
+          onChange={(value) => setForm({ ...form, effectiveFrom: value })}
+        />
+        <DateField
+          id="rule-effective-until"
+          name="effectiveUntil"
+          label="Effective until"
+          optional
+          value={form.effectiveUntil}
+          onChange={(value) => setForm({ ...form, effectiveUntil: value })}
+        />
+        <DateField
+          id="rule-accredited-after"
+          name="accreditedOnOrAfter"
+          label="Accredited on/after"
+          optional
+          value={form.accreditedOnOrAfter}
+          onChange={(value) => setForm({ ...form, accreditedOnOrAfter: value })}
+        />
         <Button disabled={!valid || create.isPending} onClick={() => create.mutate()}>
           {editingId ? 'Save changes' : 'Add rule'}
         </Button>

@@ -9,9 +9,8 @@
  * swapped for real AFhomes photography before production.
  */
 
-import goldCard from "../assets/uploads/gold-card.webp";
-import silverCard from "../assets/uploads/silver-card.webp";
-import bronzeCard from "../assets/uploads/bronze-card.webp";
+import { tierArtwork } from '@afhomes/ui';
+
 import logo from "../assets/logo.png";
 
 export type ImageKey = string;
@@ -125,10 +124,10 @@ export const PLACEHOLDER = {
     "Close detail of a small electronic sensor module",
   ),
 
-  /* Official VIP membership card artwork (real brand assets) */
-  "vip-card-gold": spec(goldCard, "Gold VIP membership card"),
-  "vip-card-silver": spec(silverCard, "Silver VIP membership card"),
-  "vip-card-bronze": spec(bronzeCard, "Bronze VIP membership card"),
+  /* Official VIP membership card artwork (real brand assets, via the shared tier map) */
+  "vip-card-gold": spec(tierArtwork("GOLD").src, "Gold VIP membership card"),
+  "vip-card-silver": spec(tierArtwork("SILVER").src, "Silver VIP membership card"),
+  "vip-card-bronze": spec(tierArtwork("BRONZE").src, "Bronze VIP membership card"),
 } as const;
 
 export type PlaceholderKey = keyof typeof PLACEHOLDER;

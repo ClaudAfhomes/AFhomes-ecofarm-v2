@@ -266,8 +266,10 @@ describe('Phase 29 role dashboard', () => {
     });
     render();
     // The Sales Overview owns its data: an all-zero qualifying series shows
-    // its empty state instead of a fake flat line.
-    expect(await screen.findByText('No qualifying sales yet')).toBeInTheDocument();
+    // its empty state instead of a fake flat line. The chart library loads on
+    // demand, so the first render waits past the default timeout for the chunk.
+    expect(await screen.findByText('No qualifying sales yet', {}, { timeout: 5000 }))
+      .toBeInTheDocument();
     expect(screen.queryByText('Card Plans')).toBeNull();
   });
 
@@ -447,7 +449,7 @@ describe('Phase 29 role dashboard', () => {
     const scope = within(screen.getByRole('group', { name: 'Data scope' }));
     expect(scope.getByText('Finance')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Scope:\s*finance/);
-    expect(scope.getByText(/to\s*10\/1\/2026/)).toBeInTheDocument();
+    expect(scope.getByText(/to\s*Oct 1, 2026/)).toBeInTheDocument();
     expect(scope.getByText('As of today')).toBeInTheDocument();
   });
 

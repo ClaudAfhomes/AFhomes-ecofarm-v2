@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -13,6 +14,7 @@ import {
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { downloadExport, exportAudit, getAudit, humanizeReportLabel } from './services';
+import styles from './AuditPage.module.css';
 
 const PAGE_SIZE = 50;
 
@@ -90,21 +92,25 @@ export function AuditPage() {
                 setEntityType(value);
               }}
             />
-            <input
-              aria-label="From"
-              type="date"
+            <DateField
+              id="audit-from"
+              name="from"
+              label="From"
+              optional
               value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
+              onChange={(value) => {
+                setFrom(value);
                 resetPage();
               }}
             />
-            <input
-              aria-label="To"
-              type="date"
+            <DateField
+              id="audit-to"
+              name="to"
+              label="To"
+              optional
               value={to}
-              onChange={(e) => {
-                setTo(e.target.value);
+              onChange={(value) => {
+                setTo(value);
                 resetPage();
               }}
             />
@@ -119,7 +125,7 @@ export function AuditPage() {
 
       {query.isPending ? (
         <div
-          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          className={styles.loadingGrid}
           role="status"
           aria-label="Loading audit events"
         >
@@ -167,7 +173,7 @@ export function AuditPage() {
               </tbody>
             </table>
           </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <div className={styles.actionsRow}>
             <Button
               variant="secondary"
               disabled={offset === 0}
@@ -191,7 +197,7 @@ export function AuditPage() {
       )}
 
       {openId !== null && query.data ? (
-        <div style={{ marginTop: 16 }}>
+        <div className={styles.detailSection}>
           <h2>Event metadata (redacted)</h2>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {JSON.stringify(

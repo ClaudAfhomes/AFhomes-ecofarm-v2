@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip, TextField } from '@afhomes/ui';
 import { createAfHomesDepartment, getAfHomesDepartments } from './services';
 
 export function AfHomesDepartmentsPage() {
@@ -9,7 +10,7 @@ export function AfHomesDepartmentsPage() {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const create = useMutation({
+  const create = useBusinessMutation({
     mutationFn: () => createAfHomesDepartment({ code: code.toUpperCase(), name }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'departments'] });
@@ -74,17 +75,22 @@ export function AfHomesDepartmentsPage() {
         }
       >
         <div style={{ display: 'grid', gap: 12 }}>
-          <label>
-            Code
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/[^A-Za-z0-9_]/g, ''))}
-            />
-          </label>
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
+          <TextField
+            id="department-code"
+            name="code"
+            label="Code"
+            optional
+            value={code}
+            onChange={(value) => setCode(value.replace(/[^A-Za-z0-9_]/g, ''))}
+          />
+          <TextField
+            id="department-name"
+            name="name"
+            label="Name"
+            optional
+            value={name}
+            onChange={setName}
+          />
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
       </Dialog>

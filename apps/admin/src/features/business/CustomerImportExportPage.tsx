@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
 import { CUSTOMER_CATEGORY_LABELS, customerSellerOptionSchema } from '@afhomes/contracts';
 import type { CustomerImportParseResponse } from '@afhomes/contracts';
@@ -7,6 +8,7 @@ import {
   Alert,
   Button,
   ConfirmDialog,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -17,6 +19,7 @@ import {
   Tabs,
 } from '@afhomes/ui';
 import { requestList } from '../../lib/api/client';
+import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import {
   cancelCustomerImport,
@@ -26,6 +29,7 @@ import {
   getCustomerImportTemplate,
   parseCustomerImport,
 } from './services';
+import { applicationKeys, businessKeys, sharedScopes } from './queryKeys';
 import styles from './CustomerImportExportPage.module.css';
 
 const toBase64 = (file: File): Promise<string> =>
@@ -53,11 +57,6 @@ type FeedbackTone = 'info' | 'success' | 'danger';
 const PREVIEW_PAGE_SIZE = 10;
 
 const TAB_BASE_ID = 'customer-import-export';
-
-const formatDateTime = (value: string) => {
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? new Date(time).toLocaleString() : value;
-};
 
 const renderRowErrors = (errors: CustomerImportParseResponse['rows'][number]['errors']) => {
   if (errors.length === 0) return '✓';
@@ -121,7 +120,7 @@ export function CustomerImportExportPage() {
   };
 
   const jobs = useQuery({
-    queryKey: ['business', 'customer-import-jobs'],
+    queryKey: businessKeys.customerImportJobs,
     queryFn: () => getCustomerImportJobs(),
     // Import jobs progress server-side: poll so parse/commit/cancel status
     // advances without reload (mutations still invalidate instantly).
@@ -129,11 +128,11 @@ export function CustomerImportExportPage() {
   });
 
   const sellers = useQuery({
-    queryKey: ['customer-seller-options'],
+    queryKey: applicationKeys.sellerOptions,
     enabled: mayImport,
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
-  const parse = useMutation({
+  const parse = useBusinessMutation({
     mutationFn: (input: {
       source: 'excel' | 'csv' | 'google_sheets';
       contentBase64?: string;
@@ -147,22 +146,22 @@ export function CustomerImportExportPage() {
         `Preview ready: ${result.job.validRows} valid, ${result.job.invalidRows} invalid of ${result.job.totalRows} rows. Nothing is written until Confirm Import.`,
         result.job.invalidRows > 0 ? 'info' : 'success',
       );
-      void client.invalidateQueries({ queryKey: ['business', 'customer-import-jobs'] });
+      void client.invalidateQueries({ queryKey: businessKeys.customerImportJobs });
     },
     onError: (error) =>
       say(error instanceof Error ? error.message : 'Import preview failed.', 'danger'),
   });
 
-  const cancel = useMutation({
+  const cancel = useBusinessMutation({
     mutationFn: (id: string) => cancelCustomerImport(id),
     onSuccess: () => {
       say('Job cancelled.', 'success');
-      void client.invalidateQueries({ queryKey: ['business', 'customer-import-jobs'] });
+      void client.invalidateQueries({ queryKey: businessKeys.customerImportJobs });
     },
     onError: (error) => say(error instanceof Error ? error.message : 'Cancel failed.', 'danger'),
   });
 
-  const confirm = useMutation({
+  const confirm = useBusinessMutation({
     mutationFn: (jobId: string) => confirmCustomerImport(jobId),
     onSuccess: (result) => {
       setConfirming(false);
@@ -172,12 +171,12 @@ export function CustomerImportExportPage() {
       );
       setPreview(null);
       setPreviewPage(0);
-      void client.invalidateQueries({ queryKey: ['business', 'customer-import-jobs'] });
-      void client.invalidateQueries({ queryKey: ['business', 'customers'] });
-      void client.invalidateQueries({ queryKey: ['memberships'] });
-      void client.invalidateQueries({ queryKey: ['member-lookup'] });
-      void client.invalidateQueries({ queryKey: ['analytics'] });
-      void client.invalidateQueries({ queryKey: ['reports'] });
+      void client.invalidateQueries({ queryKey: businessKeys.customerImportJobs });
+      void client.invalidateQueries({ queryKey: businessKeys.customersScope });
+      void client.invalidateQueries({ queryKey: sharedScopes.memberships });
+      void client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
+      void client.invalidateQueries({ queryKey: sharedScopes.analytics });
+      void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
     onError: (error) => {
       setConfirming(false);
@@ -576,24 +575,22 @@ export function CustomerImportExportPage() {
                       ]}
                     />
                   </label>
-                  <label className={styles.filterLabel}>
-                    From
-                    <input
-                      aria-label="From date"
-                      type="date"
-                      value={filters.from}
-                      onChange={(e) => setFilters({ ...filters, from: e.target.value })}
-                    />
-                  </label>
-                  <label className={styles.filterLabel}>
-                    To
-                    <input
-                      aria-label="To date"
-                      type="date"
-                      value={filters.to}
-                      onChange={(e) => setFilters({ ...filters, to: e.target.value })}
-                    />
-                  </label>
+                  <DateField
+                    id="import-from"
+                    name="from"
+                    label="From date"
+                    optional
+                    value={filters.from}
+                    onChange={(value) => setFilters({ ...filters, from: value })}
+                  />
+                  <DateField
+                    id="import-to"
+                    name="to"
+                    label="To date"
+                    optional
+                    value={filters.to}
+                    onChange={(value) => setFilters({ ...filters, to: value })}
+                  />
                 </>
               }
             />

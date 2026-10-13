@@ -1,11 +1,22 @@
 import { useState } from 'react';
 import { useSession } from '../../lib/session';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useParams } from 'react-router';
-import { Button, ConfirmDialog, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import {
+  Button,
+  ConfirmDialog,
+  DateField,
+  ErrorState,
+  FileField,
+  PageHeader,
+  StatusChip,
+  TextAreaField,
+} from '@afhomes/ui';
 import { ostMemberSchema } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
+import styles from './OstApplicationDetailPage.module.css';
 import {
   approveOstApplication,
   getOstApplication,
@@ -50,7 +61,7 @@ export function OstApplicationDetailPage() {
   const [reason, setReason] = useState('');
   const [signedOn, setSignedOn] = useState('');
   const [applicantSignedOn, setApplicantSignedOn] = useState('');
-  const signatures = useMutation({
+  const signatures = useBusinessMutation({
     mutationFn: () => confirmAccreditationSignatures(id, applicantSignedOn, signedOn),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['ost'] });
@@ -66,7 +77,7 @@ export function OstApplicationDetailPage() {
     queryFn: () => getAccreditation('applications', id),
   });
   const official = Boolean(records.data?.registration);
-  const endorsement = useMutation({
+  const endorsement = useBusinessMutation({
     mutationFn: () => endorseAccreditation(id, signedOn),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['ost'] });
@@ -74,7 +85,7 @@ export function OstApplicationDetailPage() {
     },
   });
 
-  const approve = useMutation({
+  const approve = useBusinessMutation({
     mutationFn: () =>
       official ? approveAccreditation(id, startsOn, expiresOn) : approveOstApplication(id),
     onSuccess: (member) => {
@@ -89,7 +100,7 @@ export function OstApplicationDetailPage() {
     onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Approval failed.'),
   });
 
-  const reject = useMutation({
+  const reject = useBusinessMutation({
     mutationFn: () =>
       official
         ? reviewAccreditation(id, 'reject', reason.trim())
@@ -102,7 +113,7 @@ export function OstApplicationDetailPage() {
     onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Rejection failed.'),
   });
 
-  const requestChanges = useMutation({
+  const requestChanges = useBusinessMutation({
     mutationFn: () =>
       official
         ? reviewAccreditation(id, 'request-changes', reason.trim())
@@ -130,13 +141,7 @@ export function OstApplicationDetailPage() {
       <p>
         <Link to="/admin/ost/applications">← Back to applications</Link>
       </p>
-      <dl
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 12,
-        }}
-      >
+      <dl className={styles.factsGrid}>
         <div>
           <dt>Email</dt>
           <dd>{app.email}</dd>
@@ -185,7 +190,7 @@ export function OstApplicationDetailPage() {
       </dl>
 
       {reviewable ? (
-        <div style={{ marginTop: 24, display: 'grid', gap: 12, maxWidth: 560 }}>
+        <div className={styles.reviewSection}>
           {official && (
             <>
               <h2>Official accreditation review</h2>
@@ -195,24 +200,24 @@ export function OstApplicationDetailPage() {
                 {records.data?.registration?.referrer_signature_status}. Endorsement:{' '}
                 {records.data?.registration?.endorsed_at ? 'Received' : 'Pending'}.
               </p>
-              <label>
-                Actual referrer signature date
-                <input
-                  type="date"
-                  max={new Date().toISOString().slice(0, 10)}
-                  value={signedOn}
-                  onChange={(e) => setSignedOn(e.target.value)}
-                />
-              </label>
-              <label>
-                Actual applicant signature date
-                <input
-                  type="date"
-                  max={new Date().toISOString().slice(0, 10)}
-                  value={applicantSignedOn}
-                  onChange={(e) => setApplicantSignedOn(e.target.value)}
-                />
-              </label>
+              <DateField
+                id="signatures-referrer-date"
+                name="referrerSignedOn"
+                label="Actual referrer signature date"
+                optional
+                max={new Date().toISOString().slice(0, 10)}
+                value={signedOn}
+                onChange={setSignedOn}
+              />
+              <DateField
+                id="signatures-applicant-date"
+                name="applicantSignedOn"
+                label="Actual applicant signature date"
+                optional
+                max={new Date().toISOString().slice(0, 10)}
+                value={applicantSignedOn}
+                onChange={setApplicantSignedOn}
+              />
               <Button
                 variant="secondary"
                 disabled={
@@ -239,25 +244,21 @@ export function OstApplicationDetailPage() {
               >
                 Endorse as sponsoring Sales Manager
               </Button>
-              <label>
-                Management-approved start
-                <input
-                  type="date"
-                  required
-                  value={startsOn}
-                  onChange={(e) => setStartsOn(e.target.value)}
-                />
-              </label>
-              <label>
-                Management-approved expiry
-                <input
-                  type="date"
-                  required
-                  min={startsOn}
-                  value={expiresOn}
-                  onChange={(e) => setExpiresOn(e.target.value)}
-                />
-              </label>
+              <DateField
+                id="term-starts-on"
+                name="startsOn"
+                label="Management-approved start"
+                value={startsOn}
+                onChange={setStartsOn}
+              />
+              <DateField
+                id="term-expires-on"
+                name="expiresOn"
+                label="Management-approved expiry"
+                min={startsOn}
+                value={expiresOn}
+                onChange={setExpiresOn}
+              />
               <p>No default accreditation duration is configured. Use management-approved dates.</p>
               {endorsement.isError && <p role="alert">{endorsement.error.message}</p>}
               {signatures.isError && <p role="alert">{signatures.error.message}</p>}
@@ -291,15 +292,15 @@ export function OstApplicationDetailPage() {
             cancelLabel="Cancel"
             confirmLoading={approve.isPending}
           />
-          <label>
-            Review notes (required for rejection or requested changes, min 5 characters)
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              style={{ width: '100%' }}
-            />
-          </label>
+          <TextAreaField
+            id="application-review-notes"
+            name="reviewNotes"
+            label="Review notes (required for rejection or requested changes, min 5 characters)"
+            optional
+            value={reason}
+            onChange={setReason}
+            rows={3}
+          />
           <Button
             variant="secondary"
             onClick={() => {
@@ -335,12 +336,12 @@ export function OstApplicationDetailPage() {
           </Button>
         </div>
       ) : (
-        <p style={{ marginTop: 24 }}>
+        <p className={styles.noteSpaced}>
           This application is {app.status.replace(/_/g, ' ')} and can no longer be reviewed.
         </p>
       )}
       {outcome ? (
-        <p role="status" style={{ marginTop: 16 }}>
+        <p role="status" className={styles.outcome}>
           {outcome}
         </p>
       ) : null}
@@ -364,7 +365,7 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
     queryFn: () => getDocuments({ subjectType: 'ost_application', subjectId: applicationId }),
   });
 
-  const upload = useMutation({
+  const upload = useBusinessMutation({
     mutationFn: async () => {
       setError(null);
       if (!file) throw new Error('Choose a file first.');
@@ -392,7 +393,7 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
   });
 
   return (
-    <div style={{ marginTop: 32 }}>
+    <div className={styles.documentsSection}>
       <h2>Identity documents</h2>
       {docs.isPending ? (
         <p role="status">Loading documents…</p>
@@ -410,21 +411,21 @@ function ApplicationDocuments({ applicationId }: { applicationId: string }) {
           ))}
         </ul>
       )}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'end', marginTop: 12, flexWrap: 'wrap' }}>
-        <label>
-          Attach an ID scan (JPEG, PNG or PDF, max 10 MiB)
-          <input
-            type="file"
-            accept={ACCEPTED_MIME.join(',')}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
+      <div className={styles.uploadRow}>
+        <FileField
+          id="application-id-scan"
+          name="idScan"
+          label="Attach an ID scan (JPEG, PNG or PDF, max 10 MiB)"
+          optional
+          accept={ACCEPTED_MIME.join(',')}
+          onSelect={(file) => setFile(file)}
+        />
         <Button onClick={() => upload.mutate()} disabled={upload.isPending || !file}>
           {upload.isPending ? 'Uploading…' : 'Upload scan'}
         </Button>
       </div>
       {error ? (
-        <p role="alert" style={{ color: 'var(--color-danger)' }}>
+        <p role="alert" className={styles.inlineError}>
           {error}
         </p>
       ) : null}

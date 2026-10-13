@@ -62,6 +62,16 @@ export function formatMoney(value: string): string {
 }
 
 /**
+ * Nullable display wrapper around {@link formatMoney} (single implementation).
+ * Nullish reads as an em-dash placeholder; any present value stays fail-loud,
+ * so a malformed figure is still a data bug, never a silently formatted one.
+ */
+export function formatMoneyOrDash(value: string | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return formatMoney(value);
+}
+
+/**
  * Compare two exact-decimal money strings (returns -1, 0, or 1). Exact-decimal
  * comparison - never converts to a float.
  */

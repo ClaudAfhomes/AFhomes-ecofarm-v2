@@ -198,7 +198,7 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-email">
             Email
           </label>
-          <input
+          <NormalizedInput
             id="ost-email"
             className={authStyles.input}
             type="email"
@@ -211,7 +211,7 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-phone">
             Phone
           </label>
-          <input
+          <NormalizedInput
             id="ost-phone"
             className={authStyles.input}
             value={form.phone}
@@ -224,7 +224,7 @@ export function OstRegisterPage() {
           <label className={authStyles.label} htmlFor="ost-dob">
             Date of birth
           </label>
-          <input
+          <NormalizedInput
             id="ost-dob"
             className={authStyles.input}
             type="date"

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useSession } from '../../lib/session';
 import { Link, useParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   manualOstAccreditationSchema,
   ostIdentitySchema,
@@ -9,7 +10,7 @@ import {
   parseOfficialOstFields,
   submitOstRenewalSchema,
 } from '@afhomes/contracts';
-import { Button, ErrorState, OstOfficialFields, PageHeader, StatusChip } from '@afhomes/ui';
+import { Button, DateField, ErrorState, FileField, OstOfficialFields, PageHeader, Select, StatusChip, TextAreaField } from '@afhomes/ui';
 import {
   getOstSponsors,
   registerOfficialOst,
@@ -30,7 +31,7 @@ export function OstManualRegistrationPage() {
   const [requestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const sponsors = useQuery({ queryKey: ['ost', 'sponsors'], queryFn: getOstSponsors });
-  const save = useMutation({ mutationFn: registerOfficialOst });
+  const save = useBusinessMutation({ mutationFn: registerOfficialOst });
   const submit = () => {
     const parsedForm = parseOfficialOstFields(official);
     if (!parsedForm.success) {
@@ -109,20 +110,17 @@ export function OstManualRegistrationPage() {
           ))}
           <label>
             Sales Manager
-            <select
+            <Select
               required
               value={fields.sponsorStaffId ?? ''}
               onChange={(e) =>
                 setFields((current) => ({ ...current, sponsorStaffId: e.target.value }))
               }
-            >
-              <option value="">Choose an active Sales Manager</option>
-              {sponsors.data?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'Choose an active Sales Manager' },
+                ...(sponsors.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+              ]}
+            />
           </label>
           {sponsors.isError && <ErrorState error={sponsors.error} onRetry={sponsors.refetch} />}
           <OstOfficialFields
@@ -173,7 +171,7 @@ export function OstAccreditationHistoryPage() {
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['ost'] });
   };
-  const renewal = useMutation({
+  const renewal = useBusinessMutation({
     mutationFn: () => {
       const parsed = submitOstRenewalSchema.safeParse({
         ...dates,
@@ -193,7 +191,7 @@ export function OstAccreditationHistoryPage() {
       refresh();
     },
   });
-  const decision = useMutation({
+  const decision = useBusinessMutation({
     mutationFn: ({
       renewalId,
       action,
@@ -249,21 +247,20 @@ export function OstAccreditationHistoryPage() {
                 forward from the approved application.
               </p>
               {(['dateOfRenewal', 'requestedStart', 'requestedEnd'] as const).map((name) => (
-                <label key={name}>
-                  {name.replace(/([A-Z])/g, ' $1')}
-                  <input
-                    type="date"
-                    required
-                    value={dates[name]}
-                    onChange={(e) =>
-                      setDates((current) => ({ ...current, [name]: e.target.value }))
-                    }
-                  />
-                </label>
+                <DateField
+                  key={name}
+                  id={`renewal-${name}`}
+                  name={name}
+                  label={name.replace(/([A-Z])/g, ' $1')}
+                  value={dates[name]}
+                  onChange={(value) =>
+                    setDates((current) => ({ ...current, [name]: value }))
+                  }
+                />
               ))}
               <label>
                 Proposed new referrer (optional)
-                <select
+                <Select
                   value={dates.proposedNewSponsorStaffId}
                   onChange={(e) =>
                     setDates((current) => ({
@@ -271,38 +268,37 @@ export function OstAccreditationHistoryPage() {
                       proposedNewSponsorStaffId: e.target.value,
                     }))
                   }
-                >
-                  <option value="">Keep current Sales Manager</option>
-                  {sponsors.data
-                    ?.filter((s) => s.id !== member?.sponsorStaffId)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                Reason for referrer change
-                <textarea
-                  value={dates.reasonForReferrerChange}
-                  onChange={(e) =>
-                    setDates((current) => ({ ...current, reasonForReferrerChange: e.target.value }))
-                  }
+                  options={[
+                    { value: '', label: 'Keep current Sales Manager' },
+                    ...(sponsors.data
+                      ?.filter((s) => s.id !== member?.sponsorStaffId)
+                      .map((s) => ({ value: s.id, label: s.name })) ?? []),
+                  ]}
                 />
               </label>
+              <TextAreaField
+                id="renewal-referrer-reason"
+                name="reasonForReferrerChange"
+                label="Reason for referrer change"
+                optional
+                value={dates.reasonForReferrerChange}
+                onChange={(value) =>
+                  setDates((current) => ({ ...current, reasonForReferrerChange: value }))
+                }
+              />
               {(['applicantSignatureStatus', 'referrerSignatureStatus'] as const).map((name) => (
                 <label key={name}>
                   {name.replace(/([A-Z])/g, ' $1')}
-                  <select
+                  <Select
                     value={dates[name]}
                     onChange={(e) =>
                       setDates((current) => ({ ...current, [name]: e.target.value }))
                     }
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="received">Received</option>
-                  </select>
+                    options={[
+                      { value: 'pending', label: 'Pending' },
+                      { value: 'received', label: 'Received' },
+                    ]}
+                  />
                 </label>
               ))}
               <Button disabled={renewal.isPending} type="submit">
@@ -311,10 +307,14 @@ export function OstAccreditationHistoryPage() {
             </form>
           )}
           <h2>Renewal review history</h2>
-          <label>
-            Review notes
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </label>
+          <TextAreaField
+            id="renewal-review-notes"
+            name="reviewNotes"
+            label="Review notes"
+            optional
+            value={notes}
+            onChange={setNotes}
+          />
           {records.data.renewals.map((r) => (
             <article key={r.id}>
               <h3>{r.renewal_number}</h3>
@@ -379,7 +379,7 @@ export function OstImportExportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [sheetUrl, setSheetUrl] = useState('');
   const [message, setMessage] = useState('');
-  const parse = useMutation({
+  const parse = useBusinessMutation({
     mutationFn: async () => {
       if (sheetUrl)
         return parseOstImport({
@@ -403,7 +403,7 @@ export function OstImportExportPage() {
       });
     },
   });
-  const confirm = useMutation({
+  const confirm = useBusinessMutation({
     mutationFn: () => {
       if (!parse.data) throw new Error('Preview the import first.');
       return confirmOstImport(parse.data.job.id);
@@ -413,7 +413,7 @@ export function OstImportExportPage() {
         'Valid rows created pending accreditation applications. No accounts or terms were activated.',
       ),
   });
-  const download = useMutation({
+  const download = useBusinessMutation({
     mutationFn: async ({
       kind,
       format = 'csv',
@@ -442,18 +442,19 @@ export function OstImportExportPage() {
           </Button>
         </span>
       ))}
-      <label>
-        CSV or XLSX
-        <input
-          type="file"
-          accept=".csv,.xlsx"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
-            parse.reset();
-            confirm.reset();
-          }}
-        />
-      </label>
+      <FileField
+        id="ost-import-file"
+        name="importFile"
+        label="CSV or XLSX"
+        optional
+        accept=".csv,.xlsx"
+        status={file ? <p>Selected: {file.name}</p> : null}
+        onSelect={(selected) => {
+          setFile(selected);
+          parse.reset();
+          confirm.reset();
+        }}
+      />
       <label>
         Public Viewer Google Sheet
         <input

@@ -1,6 +1,7 @@
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   EmptyState,
@@ -8,6 +9,7 @@ import {
   PageHeader,
   QrCode,
   SearchField,
+  Select,
   StatusChip,
 } from '@afhomes/ui';
 import { buildOstRegistrationUrl } from '@afhomes/contracts';
@@ -21,6 +23,7 @@ import {
   getOstSponsors,
 } from './services';
 import { useSession } from '../../lib/session';
+import styles from './OstReferralCodesPage.module.css';
 
 /**
  * The Sales Manager self-service screen: my referral codes with their QR,
@@ -73,7 +76,7 @@ export function OstReferralCodesPage() {
     codes.data?.some((c) => c.isActive && Date.parse(c.expiresAt) > now && c.useCount < c.maxUses),
   );
 
-  const issue = useMutation({
+  const issue = useBusinessMutation({
     onMutate: () => {
       setIssued(null);
       setCopied(false);
@@ -117,15 +120,7 @@ export function OstReferralCodesPage() {
       />
 
       {issued ? (
-        <div
-          style={{
-            border: '1px solid currentColor',
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 24,
-            maxWidth: 560,
-          }}
-        >
+        <div className={styles.issuedPanel}>
           <h2>New code issued (shown once)</h2>
           <p>Save this code now. It cannot be viewed again.</p>
           <p>
@@ -136,7 +131,7 @@ export function OstReferralCodesPage() {
             alt={`OST registration QR for ${issued.code}`}
             size={160}
           />
-          <p style={{ overflowWrap: 'anywhere' }}>
+          <p className={styles.wrapAnywhere}>
             {buildOstRegistrationUrl(issued.code, webBase)}
           </p>
           <Button
@@ -159,13 +154,11 @@ export function OstReferralCodesPage() {
         </div>
       ) : null}
 
-      <div
-        style={{ display: 'flex', gap: 12, alignItems: 'end', marginBottom: 24, flexWrap: 'wrap' }}
-      >
+      <div className={styles.filtersRow}>
         {onBehalf && (
           <label>
             Issue on behalf of Sales Manager
-            <select
+            <Select
               value={sponsorStaffId}
               disabled={issue.isPending}
               onChange={(e) => {
@@ -173,14 +166,11 @@ export function OstReferralCodesPage() {
                 setIssued(null);
                 issue.reset();
               }}
-            >
-              <option value="">Choose an active Sales Manager</option>
-              {sponsors.data?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'Choose an active Sales Manager' },
+                ...(sponsors.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+              ]}
+            />
           </label>
         )}
         <label>
@@ -293,7 +283,7 @@ export function OstReferralCodesPage() {
           </p>
         </div>
       )}
-      <h2 style={{ marginTop: 32 }}>Applications under me</h2>
+      <h2 className={styles.sectionTitle}>Applications under me</h2>
       {applications.isPending ? (
         <p role="status">Loading applications…</p>
       ) : applications.isError ? (

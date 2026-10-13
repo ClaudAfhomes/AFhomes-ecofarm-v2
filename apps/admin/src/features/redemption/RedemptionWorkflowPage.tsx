@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   Dialog,
   EmptyState,
   ErrorState,
   PageHeader,
+  SearchField,
+  Select,
   Skeleton,
   StatusChip,
   notifyConfirm,
@@ -30,7 +33,7 @@ export function RedemptionWorkflowPage({ history = false }: { history?: boolean 
     queryFn: listClaims,
     refetchInterval: 15_000,
   });
-  const rotation = useMutation({
+  const rotation = useBusinessMutation({
     mutationFn: reissueEarningClaim,
     retry: false,
     onSuccess: (data) => {
@@ -76,23 +79,22 @@ export function RedemptionWorkflowPage({ history = false }: { history?: boolean 
         <Link to="/admin/redemption/legacy-history">Legacy points transactions</Link>
       </nav>
       <div className={styles.filters}>
-        <label>
-          Search claims
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Claim, purchase, member or service"
-          />
-        </label>
+        <SearchField
+          label="Search claims"
+          value={search}
+          onChange={setSearch}
+          placeholder="Claim, purchase, member or service"
+        />
         <label>
           Claim status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            {['all', 'available', 'claimed', 'expired', 'reversed'].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            options={['all', 'available', 'claimed', 'expired', 'reversed'].map((value) => ({
+              value,
+              label: value,
+            }))}
+          />
         </label>
       </div>
       {claims.isPending ? (

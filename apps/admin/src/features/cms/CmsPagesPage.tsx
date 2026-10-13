@@ -1,6 +1,16 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  TextAreaField,
+  TextField,
+} from '@afhomes/ui';
 import type { CmsPage } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 import { createCmsPage, getCmsPages, publishCmsPage, updateCmsPage } from './services';
@@ -16,7 +26,7 @@ export function CmsPagesPage() {
     user?.afHomesPermissions.some((p) => p.moduleKey === 'cms.pages' && p.canCreate) === true;
   const canUpdate =
     user?.afHomesPermissions.some((p) => p.moduleKey === 'cms.pages' && p.canUpdate) === true;
-  const publication = useMutation({
+  const publication = useBusinessMutation({
     mutationFn: ({ id, publish }: { id: string; publish: boolean }) => publishCmsPage(id, publish),
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'pages'] }),
   });
@@ -127,7 +137,7 @@ function PageEditor({ page, onClose }: { page: CmsPage | null; onClose: () => vo
   const [sections, setSections] = useState(JSON.stringify(page?.sections ?? [], null, 2));
   const [summary, setSummary] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       const body = {
         title,
@@ -149,22 +159,39 @@ function PageEditor({ page, onClose }: { page: CmsPage | null; onClose: () => vo
   return (
     <section className={styles.panel}>
       <h2>{page ? `Edit ${page.title}` : 'New custom page'}</h2>
-      <label>
-        Title
-        <input value={title} onChange={(e) => setTitle(e.target.value)} />
-      </label>
-      <label>
-        Slug
-        <input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} />
-      </label>
-      <label>
-        Sections (JSON array)
-        <textarea rows={18} value={sections} onChange={(e) => setSections(e.target.value)} />
-      </label>
-      <label>
-        Change summary
-        <input value={summary} onChange={(e) => setSummary(e.target.value)} />
-      </label>
+      <TextField
+        id="cms-page-title"
+        name="title"
+        label="Title"
+        optional
+        value={title}
+        onChange={setTitle}
+      />
+      <TextField
+        id="cms-page-slug"
+        name="slug"
+        label="Slug"
+        optional
+        value={slug}
+        onChange={(value) => setSlug(value.toLowerCase())}
+      />
+      <TextAreaField
+        id="cms-page-sections"
+        name="sections"
+        label="Sections (JSON array)"
+        optional
+        rows={18}
+        value={sections}
+        onChange={setSections}
+      />
+      <TextField
+        id="cms-page-summary"
+        name="summary"
+        label="Change summary"
+        optional
+        value={summary}
+        onChange={setSummary}
+      />
       {error && <p role="alert">{error}</p>}
       <div className={styles.actions}>
         <Button

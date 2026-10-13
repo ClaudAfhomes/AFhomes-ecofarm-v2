@@ -122,7 +122,7 @@ describe('spending promotions', () => {
   it('lists the configured rate, tiers, window and reference', async () => {
     renderWithProviders(<PointsRulesPage />, { user: admin });
     expect(await screen.findByText('TEP-2026')).toBeInTheDocument();
-    expect(screen.getByText('₱1 / point')).toBeInTheDocument();
+    expect(screen.getByText('₱1.00 / point')).toBeInTheDocument();
   });
 
   it('refuses to save without both dates and a reviewable reference', async () => {

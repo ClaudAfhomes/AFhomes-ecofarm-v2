@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   ConfirmDialog,
@@ -8,6 +9,7 @@ import {
   ErrorState,
   FilterBar,
   Icon,
+  DateField,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -15,11 +17,13 @@ import {
   Select,
   Skeleton,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
 import { customerSellerOptionSchema } from '@afhomes/contracts';
 
 import { requestList } from '../../lib/api/client';
+import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useNavigate } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -33,6 +37,7 @@ import {
   getCustomersPage,
   issueCustomerAccountActivation,
 } from './services';
+import { applicationKeys, businessKeys } from './queryKeys';
 
 /**
  * Customer registration and card application.
@@ -78,7 +83,7 @@ export function BusinessCustomersPage() {
     setPage(0);
   };
   const customers = useQuery({
-    queryKey: ['business', 'customers', applied, filters, page],
+    queryKey: businessKeys.customers(applied, filters, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -105,7 +110,7 @@ export function BusinessCustomersPage() {
   const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
   const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const sellers = useQuery({
-    queryKey: ['customer-seller-options'],
+    queryKey: applicationKeys.sellerOptions,
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
   const canIssueActivation =
@@ -126,7 +131,7 @@ export function BusinessCustomersPage() {
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [activationCustomerId, setActivationCustomerId] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState('');
-  const changeAccount = useMutation({
+  const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteCustomer(accountAction.customer.id);
       else if (accountAction?.kind === 'anonymize')
@@ -134,12 +139,12 @@ export function BusinessCustomersPage() {
       else await deactivateCustomer(accountAction!.customer.id);
     },
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['business', 'customers'] });
+      await client.invalidateQueries({ queryKey: businessKeys.customersScope });
       setAccountAction(null);
       setConfirmation('');
     },
   });
-  const issueActivation = useMutation({
+  const issueActivation = useBusinessMutation({
     mutationFn: (customerId: string) => issueCustomerAccountActivation(customerId),
     onMutate: (customerId) => {
       setActivationCustomerId(customerId);
@@ -273,24 +278,22 @@ export function BusinessCustomersPage() {
                 ]}
               />
             </label>
-            <label className={styles.filterLabel}>
-              From
-              <input
-                aria-label="From date"
-                type="date"
-                value={filters.from}
-                onChange={(e) => patchFilters({ from: e.target.value })}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              To
-              <input
-                aria-label="To date"
-                type="date"
-                value={filters.to}
-                onChange={(e) => patchFilters({ to: e.target.value })}
-              />
-            </label>
+            <DateField
+              id="customers-from"
+              name="from"
+              label="From date"
+              optional
+              value={filters.from}
+              onChange={(value) => patchFilters({ from: value })}
+            />
+            <DateField
+              id="customers-to"
+              name="to"
+              label="To date"
+              optional
+              value={filters.to}
+              onChange={(value) => patchFilters({ to: value })}
+            />
           </>
         }
       />
@@ -448,16 +451,16 @@ export function BusinessCustomersPage() {
               <dt>Email</dt>
               <dd>{activationResult.email}</dd>
               <dt>Expires</dt>
-              <dd>{new Date(activationResult.expiresAt).toLocaleString()}</dd>
+              <dd>{formatDateTime(activationResult.expiresAt)}</dd>
             </dl>
-            <label>
-              Activation link
-              <input
-                aria-label="Customer activation link"
-                readOnly
-                value={activationResult.activationUrl}
-              />
-            </label>
+            <TextField
+              id="customer-activation-link"
+              name="activationLink"
+              label="Customer activation link"
+              value={activationResult.activationUrl}
+              onChange={() => {}}
+              readOnly
+            />
             <Button
               variant="secondary"
               onClick={async () => {
@@ -502,14 +505,13 @@ export function BusinessCustomersPage() {
                   : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
             </p>
             {accountAction?.kind !== 'deactivate' ? (
-              <label>
-                Type DELETE to confirm
-                <input
-                  aria-label="Type DELETE to confirm customer action"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </label>
+              <TextField
+                id="customer-account-confirm"
+                name="accountConfirm"
+                label="Type DELETE to confirm customer action"
+                value={confirmation}
+                onChange={setConfirmation}
+              />
             ) : null}
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>

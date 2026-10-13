@@ -7,7 +7,7 @@ import {
   ostMutationResultSchema,
   submitOstRenewalSchema,
 } from '@afhomes/contracts';
-import { Button, ErrorState, PageHeader } from '@afhomes/ui';
+import { Button, DateField, ErrorState, PageHeader, Select, TextAreaField } from '@afhomes/ui';
 import { useCustomerSession } from '../../lib/customer-session';
 import { request, requestList } from '../../lib/api/client';
 import { getOstMe } from './services';
@@ -108,41 +108,38 @@ export function OstRenewalPage() {
             carry forward.
           </p>
           {(['dateOfRenewal', 'requestedStart', 'requestedEnd'] as const).map((name) => (
-            <label key={name}>
-              {name.replace(/([A-Z])/g, ' $1')}
-              <input
-                type="date"
-                required
-                value={fields[name]}
-                onChange={(e) => setFields((f) => ({ ...f, [name]: e.target.value }))}
-              />
-            </label>
+            <DateField
+              key={name}
+              id={`renewal-${name}`}
+              name={name}
+              label={name.replace(/([A-Z])/g, ' $1')}
+              value={fields[name]}
+              onChange={(value) => setFields((f) => ({ ...f, [name]: value }))}
+            />
           ))}
           <label>
             Referrer change
-            <select
+            <Select
               value={fields.proposedNewSponsorStaffId}
               onChange={(e) =>
                 setFields((f) => ({ ...f, proposedNewSponsorStaffId: e.target.value }))
               }
-            >
-              <option value="">None — retain current referrer</option>
-              {sponsors.data?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Reason for proposed change
-            <textarea
-              value={fields.reasonForReferrerChange}
-              onChange={(e) =>
-                setFields((f) => ({ ...f, reasonForReferrerChange: e.target.value }))
-              }
+              options={[
+                { value: '', label: 'None — retain current referrer' },
+                ...(sponsors.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+              ]}
             />
           </label>
+          <TextAreaField
+            id="renewal-change-reason"
+            name="reasonForReferrerChange"
+            label="Reason for proposed change"
+            optional
+            value={fields.reasonForReferrerChange}
+            onChange={(value) =>
+              setFields((f) => ({ ...f, reasonForReferrerChange: value }))
+            }
+          />
           <p>
             Signature status refers to the signed official renewal form. Submission does not change
             your sponsor or validity.
@@ -150,13 +147,14 @@ export function OstRenewalPage() {
           {(['applicantSignatureStatus', 'referrerSignatureStatus'] as const).map((name) => (
             <label key={name}>
               {name.replace(/([A-Z])/g, ' $1')}
-              <select
+              <Select
                 value={fields[name]}
                 onChange={(e) => setFields((f) => ({ ...f, [name]: e.target.value }))}
-              >
-                <option value="pending">Pending</option>
-                <option value="received">Received</option>
-              </select>
+                options={[
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'received', label: 'Received' },
+                ]}
+              />
             </label>
           ))}
           <Button type="submit" disabled={save.isPending}>

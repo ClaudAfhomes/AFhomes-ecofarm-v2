@@ -10,7 +10,7 @@ import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
+import { tierArtwork } from '@afhomes/ui';
 
 /**
  * Customer Lookup for the GSD / Employee desk.

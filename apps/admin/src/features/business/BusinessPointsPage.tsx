@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   Dialog,
   EmptyState,
   ErrorState,
   PageHeader,
+  Select,
   Skeleton,
+  TextField,
   notifySuccess,
 } from '@afhomes/ui';
-import { formatMoney } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import styles from './points.module.css';
 import { useQrScanner } from '../redemption/useQrScanner';
@@ -41,6 +44,7 @@ import {
   recordPurchase,
   reversePurchasePoints,
 } from './points-services';
+import { earningKeys } from './queryKeys';
 
 /**
  * Staff points-earning screen: record a purchase, then issue the member a claim.
@@ -63,7 +67,7 @@ export function BusinessPointsPage() {
     useSession().user?.afHomesPermissions?.some(
       (p) => p.moduleKey === 'operations.redemption' && p.canUpdate,
     ) === true;
-  const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
+  const services = useQuery({ queryKey: earningKeys.services, queryFn: listServices });
 
   const [member, setMember] = useState<ResolvedMember | null>(null);
   const [manualCode, setManualCode] = useState('');
@@ -90,7 +94,7 @@ export function BusinessPointsPage() {
    * valid. Scanning is only ever a way of TYPING the code faster - it grants
    * nothing extra.
    */
-  const identify = useMutation({
+  const identify = useBusinessMutation({
     // Wrapped, not passed by reference: TanStack Query hands `mutationFn` a
     // second context argument, and a service function must never be handed one.
     mutationFn: (code: string) => resolveMemberIdentifier(code),
@@ -140,17 +144,17 @@ export function BusinessPointsPage() {
       ],
     });
 
-  const record = useMutation({
+  const record = useBusinessMutation({
     mutationFn: recordPurchaseFor,
   });
-  const complete = useMutation({
+  const complete = useBusinessMutation({
     mutationFn: (purchaseId: string) => completePurchase(purchaseId),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['earning'] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: earningKeys.all }),
   });
   /** Re-reads settlement from the server after a state change. */
-  const refresh = () => client.invalidateQueries({ queryKey: ['earning'] });
+  const refresh = () => client.invalidateQueries({ queryKey: earningKeys.all });
 
-  const claim = useMutation({
+  const claim = useBusinessMutation({
     mutationFn: (purchaseId: string) => issueEarningClaim(purchaseId),
     onSuccess: (result) => {
       // The whole issued claim, so the dialog can render the QR. Component state
@@ -165,12 +169,12 @@ export function BusinessPointsPage() {
       });
       setError(null);
       notifySuccess({ title: `Claim ${result.claimNumber} issued` });
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
 
   const ownPurchases = useQuery({
-    queryKey: ['earning', 'own-purchases'],
+    queryKey: earningKeys.ownPurchases,
     queryFn: listOwnPurchases,
 
     refetchInterval: 15_000,
@@ -201,7 +205,7 @@ export function BusinessPointsPage() {
    * table privileges to subscribe with.
    */
   const settlement = useQuery({
-    queryKey: ['earning', 'settlement', lastPurchase],
+    queryKey: earningKeys.settlement(lastPurchase),
     queryFn: () => getSettlement(lastPurchase as string),
     enabled: Boolean(lastPurchase),
     refetchInterval: 15_000,
@@ -226,7 +230,7 @@ export function BusinessPointsPage() {
    */
   const receiptReference = `${reference}-rcpt`;
 
-  const receipt = useMutation({
+  const receipt = useBusinessMutation({
     mutationFn: (args: { purchaseId: string; amount: string }) =>
       recordPurchaseReceipt({
         purchaseId: args.purchaseId,
@@ -236,17 +240,17 @@ export function BusinessPointsPage() {
       }),
     onSuccess: () => {
       notifySuccess({ title: 'Receipt recorded, pending Finance verification' });
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
 
-  const reverse = useMutation({
+  const reverse = useBusinessMutation({
     mutationFn: (reason: string) =>
       reversePurchasePoints({ purchaseId: lastPurchase ?? '', reason }),
     onSuccess: () => {
       notifySuccess({ title: 'Purchase points reversed' });
       setLastPurchase(null);
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
   const [reverseOpen, setReverseOpen] = useState(false);
@@ -292,7 +296,7 @@ export function BusinessPointsPage() {
           {resumable.length > 0 && (
             <>
               <label htmlFor="earning-resume">Resume an existing sale</label>
-              <select
+              <Select
                 id="earning-resume"
                 value={lastPurchase ?? ''}
                 onChange={(event) => {
@@ -308,14 +312,14 @@ export function BusinessPointsPage() {
                     netAmount: purchase.netAmount,
                   });
                 }}
-              >
-                <option value="">Choose a sale</option>
-                {resumable.map((purchase) => (
-                  <option key={purchase.id} value={purchase.id}>
-                    {purchase.purchaseNumber} — {formatMoney(purchase.netAmount)}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: '', label: 'Choose a sale' },
+                  ...resumable.map((purchase) => ({
+                    value: purchase.id,
+                    label: `${purchase.purchaseNumber} — ${formatMoneyOrDash(purchase.netAmount)}`,
+                  })),
+                ]}
+              />
             </>
           )}
         </section>
@@ -328,11 +332,13 @@ export function BusinessPointsPage() {
         <video ref={videoRef} className={styles.scanVideo} data-scanning={scanStatus === 'scanning'} aria-label="Card scanner" />
         {scanMessage && <p role="status">{scanMessage}</p>}
 
-        <label htmlFor="earning-manual">Or type the member code</label>
-        <input
+        <TextField
           id="earning-manual"
+          name="manualCode"
+          label="Or type the member code"
+          optional
           value={manualCode}
-          onChange={(event) => setManualCode(event.target.value)}
+          onChange={setManualCode}
           disabled={identify.isPending}
         />
         <Button
@@ -396,20 +402,20 @@ export function BusinessPointsPage() {
           {services.data && services.data.length > 0 && (
             <>
               <label htmlFor="earning-service">Service</label>
-              <select
+              <Select
                 id="earning-service"
                 value={serviceId}
                 onChange={(event) => setServiceId(event.target.value)}
-              >
-                <option value="">Choose a service</option>
-                {services.data
-                  .filter((service) => service.isActive && service.availability === 'available')
-                  .map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name} ({formatMoney(service.basePrice)})
-                    </option>
-                  ))}
-              </select>
+                options={[
+                  { value: '', label: 'Choose a service' },
+                  ...services.data
+                    .filter((service) => service.isActive && service.availability === 'available')
+                    .map((service) => ({
+                      value: service.id,
+                      label: `${service.name} (${formatMoneyOrDash(service.basePrice)})`,
+                    })),
+                ]}
+              />
 
               {services.data.find((service) => service.id === serviceId) && (
                 <p>
@@ -475,21 +481,21 @@ export function BusinessPointsPage() {
           <h2>4. What the member pays</h2>
           <dl>
             <dt>Gross</dt>
-            <dd>{formatMoney(priced.grossAmount)}</dd>
+            <dd>{formatMoneyOrDash(priced.grossAmount)}</dd>
             <dt>VIP tier discount</dt>
             <dd>
               {priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
-                ? `- ${formatMoney(priced.tierDiscountAmount)}`
+                ? `- ${formatMoneyOrDash(priced.tierDiscountAmount)}`
                 : 'No tier discount applies'}
             </dd>
             <dt>Points discount</dt>
             <dd>
               {priced.pointsDiscountAmount && priced.pointsDiscountAmount !== '0.00'
-                ? `- ${formatMoney(priced.pointsDiscountAmount)}`
+                ? `- ${formatMoneyOrDash(priced.pointsDiscountAmount)}`
                 : 'No points discount applies'}
             </dd>
             <dt>Amount due</dt>
-            <dd>{formatMoney(priced.netAmount)}</dd>
+            <dd>{formatMoneyOrDash(priced.netAmount)}</dd>
           </dl>
 
           <div aria-busy={receipt.isPending}>
@@ -530,7 +536,7 @@ export function BusinessPointsPage() {
           </p>
           <Button
             variant="secondary"
-            onClick={() => client.invalidateQueries({ queryKey: ['earning', 'settlement'] })}
+            onClick={() => client.invalidateQueries({ queryKey: earningKeys.settlementScope })}
             loading={settlement.isFetching}
             loadingLabel="Refreshing…"
           >
@@ -576,11 +582,11 @@ export function BusinessPointsPage() {
             <dt>Status</dt>
             <dd>{settlement.data.status}</dd>
             <dt>Recorded</dt>
-            <dd>{formatMoney(settlement.data.recordedTotal)}</dd>
+            <dd>{formatMoneyOrDash(settlement.data.recordedTotal)}</dd>
             <dt>Verified (money received)</dt>
-            <dd>{formatMoney(settlement.data.verifiedTotal)}</dd>
+            <dd>{formatMoneyOrDash(settlement.data.verifiedTotal)}</dd>
             <dt>Outstanding</dt>
-            <dd>{formatMoney(settlement.data.remainingAmount)}</dd>
+            <dd>{formatMoneyOrDash(settlement.data.remainingAmount)}</dd>
             <dt>Claim</dt>
             <dd>
               {settlement.data.claimable
@@ -630,7 +636,7 @@ export function BusinessPointsPage() {
           onSaved={() => {
             setAdjustOpen(false);
             notifySuccess({ title: 'Adjustment recorded' });
-            client.invalidateQueries({ queryKey: ['earning'] });
+            client.invalidateQueries({ queryKey: earningKeys.all });
           }}
         />
       )}
@@ -675,7 +681,7 @@ function AdjustDialog({
 }) {
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
-  const adjust = useMutation({
+  const adjust = useBusinessMutation({
     mutationFn: () => adjustPoints({ membershipId, amount: Number(amount), reason }),
     onSuccess: onSaved,
   });
@@ -709,11 +715,13 @@ function AdjustDialog({
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
         />
-        <label htmlFor="adjust-reason">Reason</label>
-        <input
+        <TextField
           id="adjust-reason"
+          name="adjustReason"
+          label="Reason"
+          optional
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={setReason}
         />
         {adjust.isError && <ErrorState title="Not saved" message={message(adjust.error)} />}
       </div>
@@ -752,11 +760,13 @@ function ReverseDialog({
       }
     >
       <div aria-busy={pending}>
-        <label htmlFor="reverse-reason">Reason</label>
-        <input
+        <TextField
           id="reverse-reason"
+          name="reverseReason"
+          label="Reason"
+          optional
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={setReason}
         />
         <p>
           If the member had already moved the points, the shortfall becomes reversal debt rather

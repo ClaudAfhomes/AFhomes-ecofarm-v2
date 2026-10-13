@@ -23,10 +23,9 @@ import { RequireRole } from '../../app/RequireRole';
 import {
   SALE_STATUS_LABEL,
   SPOT_CASH_LABEL,
-  formatMoney,
-  formatPoints,
   formatRate,
 } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 
 const view = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({
   moduleKey,
@@ -177,21 +176,21 @@ describe('a direct URL cannot bypass nav permission filtering (Invariant E)', ()
 
 describe('business value formatting', () => {
   it('formats exact-decimal money without float arithmetic', () => {
-    expect(formatMoney('60000.00')).toBe('₱60,000.00');
-    expect(formatMoney('30000')).toBe('₱30,000.00');
-    expect(formatMoney('1000000.5')).toBe('₱1,000,000.50');
-    expect(formatMoney('0.07')).toBe('₱0.07');
+    expect(formatMoneyOrDash('60000.00')).toBe('₱60,000.00');
+    expect(formatMoneyOrDash('30000')).toBe('₱30,000.00');
+    expect(formatMoneyOrDash('1000000.5')).toBe('₱1,000,000.50');
+    expect(formatMoneyOrDash('0.07')).toBe('₱0.07');
   });
 
   it('never produces a float artefact for values that break float math', () => {
     // 0.1 + 0.2 !== 0.3 in binary floating point. The string is authoritative.
-    expect(formatMoney('0.30')).toBe('₱0.30');
-    expect(formatMoney('1234567.89')).toBe('₱1,234,567.89');
+    expect(formatMoneyOrDash('0.30')).toBe('₱0.30');
+    expect(formatMoneyOrDash('1234567.89')).toBe('₱1,234,567.89');
   });
 
   it('renders an absent money value as a dash rather than a zero', () => {
-    expect(formatMoney(null)).toBe('—');
-    expect(formatMoney(undefined)).toBe('—');
+    expect(formatMoneyOrDash(null)).toBe('—');
+    expect(formatMoneyOrDash(undefined)).toBe('—');
   });
 
   it('renders a commission rate as a percentage', () => {
@@ -203,8 +202,8 @@ describe('business value formatting', () => {
   });
 
   it('groups points for readability', () => {
-    expect(formatPoints(25000)).toBe('25,000');
-    expect(formatPoints(null)).toBe('—');
+    expect(formatCountOrDash(25000)).toBe('25,000');
+    expect(formatCountOrDash(null)).toBe('—');
   });
 
   it('labels every spot-cash state, including the derived expired one', () => {

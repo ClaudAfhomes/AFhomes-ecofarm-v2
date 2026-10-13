@@ -650,7 +650,7 @@ describe('payment exact-decimal input UX', () => {
     await openRecordDialog(user);
     expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Amount'), '1000.00');
-    await user.type(screen.getByLabelText('Payment reference'), 'QA-REF');
+    await user.type(screen.getByLabelText('Payment reference(Optional)'), 'QA-REF');
 
     // Clicking Record must NOT write yet: a confirmation comes first.
     await user.click(screen.getByRole('button', { name: /^Record$/ }));
@@ -753,7 +753,7 @@ describe('payment exact-decimal input UX', () => {
       await openRecordDialog(user);
       await user.type(screen.getByLabelText('Amount'), amount);
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
-      await user.clear(screen.getByLabelText('Method'));
+      await user.clear(screen.getByLabelText('Method(Optional)'));
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
     },
   );

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { z } from 'zod';
 import { serviceCatalogItemSchema, serviceCatalogItemInputSchema } from '@afhomes/contracts';
 import {
@@ -7,8 +7,12 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  FileField,
+  Select,
   Skeleton,
   StatusChip,
+  TextAreaField,
+  TextField,
   notifySuccess,
   notifyConfirm,
 } from '@afhomes/ui';
@@ -19,7 +23,7 @@ import {
   manageServicePhoto,
 } from './points-services';
 import { useSession } from '../../lib/session';
-import { formatMoney } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import styles from './services.module.css';
 
 type Service = z.infer<typeof serviceCatalogItemSchema>;
@@ -71,7 +75,7 @@ export function ServiceCatalogEditor({
               )}
               <h3>{service.name}</h3>
               <p>{service.description ?? 'No description yet.'}</p>
-              <strong>{formatMoney(service.basePrice)}</strong>
+              <strong>{formatMoneyOrDash(service.basePrice)}</strong>
               <div className={styles.header}>
                 <StatusChip label={service.availability} />
                 <StatusChip label={service.published ? 'Published' : 'Internal'} />
@@ -180,7 +184,7 @@ function ServiceEditor({
     setValidation(null);
     onSaved();
   };
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       const parsed = serviceCatalogItemInputSchema.safeParse({
         name,
@@ -209,7 +213,7 @@ function ServiceEditor({
       notifySuccess({ title: 'Service saved' });
     },
   });
-  const upload = useMutation({
+  const upload = useBusinessMutation({
     mutationFn: async () => {
       if (!current || !file || !alt.trim())
         throw new Error('Choose an image and enter descriptive text.');
@@ -242,7 +246,7 @@ function ServiceEditor({
       notifySuccess({ title: 'Service photo saved' });
     },
   });
-  const photoChange = useMutation({
+  const photoChange = useBusinessMutation({
     mutationFn: async ({ id, operation }: { id: string; operation: 'remove' | 'cover' }) => {
       if (!current) throw new Error('Save the service first.');
       if (
@@ -280,47 +284,49 @@ function ServiceEditor({
           if (!busy) save.mutate();
         }}
       >
-        <label>
-          Service name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-            maxLength={120}
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Short summary
-          <textarea
-            value={summary}
-            onChange={(event) => setSummary(event.target.value)}
-            maxLength={300}
-            rows={2}
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Category
-          <input
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-            maxLength={80}
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Location
-          <input
-            value={location}
-            onChange={(event) => setLocation(event.target.value)}
-            maxLength={160}
-            disabled={busy}
-          />
-        </label>
+        <TextField
+          id="service-name"
+          name="serviceName"
+          label="Service name"
+          value={name}
+          onChange={setName}
+          maxLength={120}
+          disabled={busy}
+        />
+        <TextAreaField
+          id="service-summary"
+          name="summary"
+          label="Short summary"
+          optional
+          value={summary}
+          onChange={setSummary}
+          maxLength={300}
+          rows={2}
+          disabled={busy}
+        />
+        <TextField
+          id="service-category"
+          name="category"
+          label="Category"
+          optional
+          value={category}
+          onChange={setCategory}
+          maxLength={80}
+          disabled={busy}
+        />
+        <TextField
+          id="service-location"
+          name="location"
+          label="Location"
+          optional
+          value={location}
+          onChange={setLocation}
+          maxLength={160}
+          disabled={busy}
+        />
         <label>
           Pricing unit
-          <select
+          <Select
             value={pricingUnit}
             onChange={(event) => {
               const value = event.target.value;
@@ -334,47 +340,49 @@ function ServiceEditor({
                 setPricingUnit(value);
             }}
             disabled={busy}
-          >
-            <option value="unit">Per unit</option>
-            <option value="person">Per person / head</option>
-            <option value="session">Per session</option>
-            <option value="night">Per night</option>
-            <option value="booking">Per booking</option>
-          </select>
-        </label>
-        <label>
-          Features / highlights (one per line)
-          <textarea
-            value={highlights}
-            onChange={(event) => setHighlights(event.target.value)}
-            rows={4}
-            disabled={busy}
+            options={[
+              { value: 'unit', label: 'Per unit' },
+              { value: 'person', label: 'Per person / head' },
+              { value: 'session', label: 'Per session' },
+              { value: 'night', label: 'Per night' },
+              { value: 'booking', label: 'Per booking' },
+            ]}
           />
         </label>
-        <label>
-          Description
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            maxLength={5000}
-            rows={5}
-            disabled={busy}
-          />
-        </label>
-        <label>
-          Base price
-          <input
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-            inputMode="decimal"
-            placeholder="1500.00"
-            required
-            disabled={busy}
-          />
-        </label>
+        <TextAreaField
+          id="service-highlights"
+          name="highlights"
+          label="Features / highlights (one per line)"
+          optional
+          value={highlights}
+          onChange={setHighlights}
+          rows={4}
+          disabled={busy}
+        />
+        <TextAreaField
+          id="service-description"
+          name="description"
+          label="Description"
+          optional
+          value={description}
+          onChange={setDescription}
+          maxLength={5000}
+          rows={5}
+          disabled={busy}
+        />
+        <TextField
+          id="service-base-price"
+          name="basePrice"
+          label="Base price"
+          inputMode="decimal"
+          placeholder="1500.00"
+          value={price}
+          onChange={setPrice}
+          disabled={busy}
+        />
         <label>
           Availability
-          <select
+          <Select
             value={availability}
             onChange={(event) =>
               setAvailability(
@@ -386,11 +394,12 @@ function ServiceEditor({
               )
             }
             disabled={busy}
-          >
-            <option value="available">Available</option>
-            <option value="unavailable">Unavailable</option>
-            <option value="coming_soon">Coming soon</option>
-          </select>
+            options={[
+              { value: 'available', label: 'Available' },
+              { value: 'unavailable', label: 'Unavailable' },
+              { value: 'coming_soon', label: 'Coming soon' },
+            ]}
+          />
         </label>
         <label>
           <input
@@ -478,30 +487,29 @@ function ServiceEditor({
               </div>
             ))}
           </div>
-          <label>
-            Image file
-            <input
-              key={current.photos.length}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(event) => {
-                const chosen = event.target.files?.[0] ?? null;
-                setFile(chosen);
-                chooseFile(chosen);
-                // Reported here rather than only on submit, so a rejected file is
-                // explained before anyone waits on an upload that cannot succeed.
-                setValidation(
-                  !chosen
-                    ? null
-                    : !['image/jpeg', 'image/png', 'image/webp'].includes(chosen.type) ||
-                        chosen.size > 3 * 1024 * 1024
-                      ? 'Choose a JPEG, PNG or WebP image no larger than 3 MB.'
-                      : null,
-                );
-              }}
-              disabled={busy || (current.photos.length >= 6 && !replacePhotoId)}
-            />
-          </label>
+          <FileField
+            key={current.photos.length}
+            id="service-photo"
+            name="photo"
+            label="Image file"
+            optional
+            accept="image/jpeg,image/png,image/webp"
+            disabled={busy || (current.photos.length >= 6 && !replacePhotoId)}
+            onSelect={(chosen) => {
+              setFile(chosen);
+              chooseFile(chosen);
+              // Reported here rather than only on submit, so a rejected file is
+              // explained before anyone waits on an upload that cannot succeed.
+              setValidation(
+                !chosen
+                  ? null
+                  : !['image/jpeg', 'image/png', 'image/webp'].includes(chosen.type) ||
+                      chosen.size > 3 * 1024 * 1024
+                    ? 'Choose a JPEG, PNG or WebP image no larger than 3 MB.'
+                    : null,
+              );
+            }}
+          />
           {/* The preview is what the admin is about to upload, shown BEFORE the
               upload so a wrong image is caught here rather than after it has been
               stored. It is a revoked blob URL, never the persisted reference. */}
@@ -511,15 +519,16 @@ function ServiceEditor({
               <figcaption>Preview — not uploaded yet.</figcaption>
             </figure>
           )}
-          <label>
-            Image description
-            <input
-              value={alt}
-              onChange={(event) => setAlt(event.target.value)}
-              maxLength={200}
-              disabled={busy}
-            />
-          </label>
+          <TextField
+            id="service-photo-alt"
+            name="photoAlt"
+            label="Image description"
+            optional
+            value={alt}
+            onChange={setAlt}
+            maxLength={200}
+            disabled={busy}
+          />
           <p>
             Up to six images, 3 MB each. Photos become public only with a published, active service.
           </p>

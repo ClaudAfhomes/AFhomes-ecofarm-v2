@@ -2,7 +2,8 @@ import type { Payment } from '@afhomes/contracts';
 import { StatusChip } from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
-import { formatMoney, formatPaymentMethod, formatPaymentType } from './format';
+import { formatPaymentMethod, formatPaymentType } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 
 /**
  * Read-only payment history for one sale, shared by the payment dialog and
@@ -36,7 +37,7 @@ export function SalePaymentList({ payments }: { payments: Payment[] }) {
         <tbody>
           {payments.map((payment) => (
             <tr key={payment.id}>
-              <td>{formatMoney(payment.amount)}</td>
+              <td>{formatMoneyOrDash(payment.amount)}</td>
               <td>{formatPaymentType(payment.paymentType)}</td>
               <td>{formatPaymentMethod(payment.method)}</td>
               <td

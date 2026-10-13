@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useLocation, useParams } from 'react-router';
 import { Button, ErrorState, QrCode, StatusChip } from '@afhomes/ui';
 
@@ -35,7 +36,7 @@ export function MembershipCardPrintPage() {
     };
   }, []);
 
-  const markPrinted = useMutation({
+  const markPrinted = useBusinessMutation({
     mutationFn: () => markMembershipPrinted(id),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['memberships', id] });

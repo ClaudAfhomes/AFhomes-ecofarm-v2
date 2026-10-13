@@ -21,6 +21,7 @@ import { useState } from 'react';
 import { Button, QrCode, downloadQrImage } from '@afhomes/ui';
 
 import { webBase } from '../../lib/portal';
+import { formatDateTime } from '../../lib/format';
 import styles from './points.module.css';
 
 /**
@@ -67,7 +68,7 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
         <dt>Typed code</dt>
         <dd className={styles.mono}>{claim.fallbackCode}</dd>
         <dt>Expires</dt>
-        <dd>{new Date(claim.expiresAt).toLocaleString('en-PH')}</dd>
+        <dd>{formatDateTime(claim.expiresAt)}</dd>
       </dl>
 
       <div className={styles.claimQrActions}>

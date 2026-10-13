@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, PageHeader, Skeleton } from '@afhomes/ui';
 import { getCmsHistory } from './services';
+import { formatDateTime } from '../../lib/format';
 import styles from './cms.module.css';
 export function CmsHistoryPage() {
   const history = useQuery({ queryKey: ['cms', 'history'], queryFn: getCmsHistory });
@@ -50,7 +51,7 @@ export function CmsHistoryPage() {
             <tbody>
               {history.data.map((item) => (
                 <tr key={item.id}>
-                  <td>{new Date(item.createdAt).toLocaleString()}</td>
+                  <td>{formatDateTime(item.createdAt)}</td>
                   <td>
                     {item.entityType}: {item.entityId}
                   </td>

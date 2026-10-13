@@ -181,9 +181,9 @@ describe('Phase 28 CMS page editing', () => {
     render('/admin/cms/pages');
     await screen.findByText('Visit Us');
     await user.click(screen.getByRole('button', { name: 'New page' }));
-    await user.type(screen.getByLabelText('Title'), 'Harvest');
-    await user.type(screen.getByLabelText('Slug'), 'harvest');
-    await user.type(screen.getByLabelText('Change summary'), 'Announce the harvest.');
+    await user.type(screen.getByLabelText('Title(Optional)'), 'Harvest');
+    await user.type(screen.getByLabelText('Slug(Optional)'), 'harvest');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Announce the harvest.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     await waitFor(() => {
       const post = requests.find((r) => r.method === 'POST' && r.path === '/cms/pages');
@@ -202,13 +202,13 @@ describe('Phase 28 CMS page editing', () => {
     render('/admin/cms/pages');
     await screen.findByText('Visit Us');
     await user.click(screen.getByRole('button', { name: 'New page' }));
-    await user.type(screen.getByLabelText('Title'), 'Copy');
-    await user.type(screen.getByLabelText('Slug'), 'visit-us');
-    await user.type(screen.getByLabelText('Change summary'), 'Duplicate the slug.');
+    await user.type(screen.getByLabelText('Title(Optional)'), 'Copy');
+    await user.type(screen.getByLabelText('Slug(Optional)'), 'visit-us');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Duplicate the slug.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     expect(await screen.findByText('That slug or media path already exists.')).toBeInTheDocument();
     // The editor stays open for correction.
-    expect(screen.getByLabelText('Slug')).toBeInTheDocument();
+    expect(screen.getByLabelText('Slug(Optional)')).toBeInTheDocument();
   });
 
   it('toggles publish state per row and sends no duplicate save', async () => {
@@ -259,7 +259,7 @@ describe('Phase 28 CMS document editing', () => {
     });
     render('/admin/cms/stories');
     expect(await screen.findByRole('heading', { name: 'Stories' })).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Change summary'), 'Refresh the stories.');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Refresh the stories.');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Draft saved.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Publish draft' }));
@@ -270,11 +270,11 @@ describe('Phase 28 CMS document editing', () => {
     const user = userEvent.setup();
     render('/admin/cms/stories');
     await screen.findByRole('heading', { name: 'Stories' });
-    const editor = screen.getByLabelText('Structured content (JSON)');
+    const editor = screen.getByLabelText('Structured content (JSON)(Optional)');
     await user.clear(editor);
     // fireEvent: userEvent.type would parse `{` as a keyboard descriptor.
     fireEvent.change(editor, { target: { value: '{not json' } });
-    await user.type(screen.getByLabelText('Change summary'), 'Broken edit.');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Broken edit.');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Content must be valid JSON.')).toBeInTheDocument();
     expect(requests.filter((r) => r.method === 'PATCH')).toHaveLength(0);

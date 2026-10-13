@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -15,6 +16,7 @@ import {
   PageHeader,
   Select,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import type { AfHomesDepartment, AfHomesRole, AfHomesStaff } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
@@ -28,12 +30,7 @@ import {
   updateAfHomesStaff,
   type AfHomesAuditEvent,
 } from './services';
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
+import { formatDateTime } from '../../lib/format';
 
 export function AfHomesStaffDetailPage() {
   const { id } = useParams();
@@ -107,7 +104,7 @@ function StaffDetailForm({
     await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
   };
 
-  const assignment = useMutation({
+  const assignment = useBusinessMutation({
     mutationFn: () =>
       updateAfHomesStaff(member.id, {
         roleId: roleId !== member.roleId ? roleId : undefined,
@@ -119,7 +116,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const standing = useMutation({
+  const standing = useBusinessMutation({
     mutationFn: () =>
       updateAfHomesStaff(member.id, {
         status: status as 'active' | 'inactive' | 'suspended',
@@ -129,7 +126,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const deactivate = useMutation({
+  const deactivate = useBusinessMutation({
     mutationFn: () => deactivateAfHomesStaff(member.id),
     onSuccess: async () => {
       setConfirmDeactivate(false);
@@ -137,7 +134,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const remove = useMutation({
+  const remove = useBusinessMutation({
     mutationFn: () => deleteAfHomesStaff(member.id),
     onSuccess: async () => {
       await invalidate();
@@ -363,14 +360,13 @@ function StaffDetailForm({
               This action permanently removes the login/account if no protected business records
               exist. This cannot be undone.
             </p>
-            <label>
-              Type DELETE to confirm
-              <input
-                aria-label="Type DELETE to confirm staff deletion"
-                value={deleteConfirmation}
-                onChange={(event) => setDeleteConfirmation(event.target.value)}
-              />
-            </label>
+            <TextField
+              id="staff-delete-confirm"
+              name="deleteConfirm"
+              label="Type DELETE to confirm staff deletion"
+              value={deleteConfirmation}
+              onChange={setDeleteConfirmation}
+            />
           </div>
         }
         danger

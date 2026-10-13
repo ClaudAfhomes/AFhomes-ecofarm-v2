@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link } from 'react-router';
 import {
   Alert,
@@ -7,6 +8,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  FileField,
   PageHeader,
   SearchField,
   Select,
@@ -47,7 +49,7 @@ export function DocumentsPage() {
       getDocuments(appliedId ? { subjectType, subjectId: appliedId } : { subjectType }),
   });
 
-  const upload = useMutation({
+  const upload = useBusinessMutation({
     mutationFn: async () => {
       setError(null);
       setUploadedId(null);
@@ -78,7 +80,7 @@ export function DocumentsPage() {
     onError: (cause) => setError(cause instanceof Error ? cause.message : 'Upload failed.'),
   });
 
-  const ocr = useMutation({
+  const ocr = useBusinessMutation({
     mutationFn: (id: string) => runDocumentOcr(id),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['documents'] });
@@ -133,14 +135,14 @@ export function DocumentsPage() {
       <div
         style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'end' }}
       >
-        <label>
-          Scan to upload (JPEG, PNG or PDF, max 10 MiB)
-          <input
-            type="file"
-            accept={ACCEPTED_MIME.join(',')}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
+        <FileField
+          id="document-scan"
+          name="scan"
+          label="Scan to upload (JPEG, PNG or PDF, max 10 MiB)"
+          optional
+          accept={ACCEPTED_MIME.join(',')}
+          onSelect={(file) => setFile(file)}
+        />
         <Button onClick={() => upload.mutate()} disabled={upload.isPending || !file}>
           {upload.isPending ? 'Uploading…' : 'Upload scan'}
         </Button>

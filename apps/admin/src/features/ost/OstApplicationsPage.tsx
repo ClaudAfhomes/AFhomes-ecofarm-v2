@@ -15,6 +15,7 @@ import {
 
 import { formatDateTime } from '../../lib/format';
 import { getOstApplications } from './services';
+import styles from './OstApplicationsPage.module.css';
 
 const STATUSES = [
   '',
@@ -61,7 +62,7 @@ export function OstApplicationsPage() {
       <FilterBar
         search={<SearchField label="Search OST applications" value={search} onChange={setSearch} />}
         filters={
-          <label style={{ display: 'grid', gap: 4, fontSize: 14, fontWeight: 600 }}>
+          <label className={styles.filterLabel}>
             Status
             <Select
               aria-label="Status"

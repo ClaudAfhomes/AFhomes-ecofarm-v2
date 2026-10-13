@@ -1,11 +1,23 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  StatusChip,
+  TextField,
+  notifySuccess,
+} from '@afhomes/ui';
 import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
-import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';
+import { SPOT_CASH_LABEL, SPOT_CASH_TONE } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { activateSale, getActivationQueue } from './services';
+import { businessKeys, sharedScopes } from './queryKeys';
 
 /**
  * Activation queue.
@@ -21,7 +33,7 @@ import { activateSale, getActivationQueue } from './services';
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
   const queue = useQuery({
-    queryKey: ['business', 'queue', 'activation'],
+    queryKey: businessKeys.activationQueue,
     queryFn: getActivationQueue,
     // Activations and payments land from other sessions: poll the queue
     // (same-session writes invalidate instantly).
@@ -31,15 +43,15 @@ export function BusinessActivationQueuePage() {
   const [result, setResult] = useState<ActivationResult | null>(null);
 
   const refresh = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'queue', 'activation'] });
+    await client.invalidateQueries({ queryKey: businessKeys.activationQueue });
     // Activation changes what member lookup, memberships and the activation
     // report show: refresh them in this session without reload.
-    await client.invalidateQueries({ queryKey: ['member-lookup'] });
-    await client.invalidateQueries({ queryKey: ['memberships'] });
-    await client.invalidateQueries({ queryKey: ['reports'] });
+    await client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
+    await client.invalidateQueries({ queryKey: sharedScopes.memberships });
+    await client.invalidateQueries({ queryKey: sharedScopes.reports });
     // The activated sale is no longer pending activation, and its commission
     // moves on to qualification in Commissions.
-    await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
+    await client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
   };
 
   return (
@@ -82,9 +94,9 @@ export function BusinessActivationQueuePage() {
                   <td>{item.customerName}</td>
                   <td>{item.productName}</td>
                   <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                  <td>{formatMoney(item.cashPrice)}</td>
-                  <td>{formatMoney(item.verifiedTotal)}</td>
-                  <td>{formatMoney(item.remainingBalance)}</td>
+                  <td>{formatMoneyOrDash(item.cashPrice)}</td>
+                  <td>{formatMoneyOrDash(item.verifiedTotal)}</td>
+                  <td>{formatMoneyOrDash(item.remainingBalance)}</td>
                   <td>
                     {item.validityMonths
                       ? `${item.validityMonths} mo${item.validityMonths % 12 === 0 ? ` (${item.validityMonths / 12}y)` : ''}`
@@ -161,7 +173,7 @@ function ActivateDialog({
   // editable 12-month default.
   const frozen = item.validityMonths;
   const [months, setMonths] = useState(frozen ? String(frozen) : '12');
-  const activate = useMutation({
+  const activate = useBusinessMutation({
     mutationFn: () => activateSale(item.saleId, Number(months)),
     onSuccess: onDone,
   });
@@ -201,7 +213,7 @@ function ActivateDialog({
           </div>
           <div>
             <dt>Frozen total</dt>
-            <dd>{formatMoney(item.cashPrice)}</dd>
+            <dd>{formatMoneyOrDash(item.cashPrice)}</dd>
           </div>
         </dl>
         {frozen ? (
@@ -210,14 +222,15 @@ function ActivateDialog({
             {frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''} — frozen from the sale.
           </p>
         ) : (
-          <label>
-            Validity (months)
-            <input
-              value={months}
-              onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
-              inputMode="numeric"
-            />
-          </label>
+          <TextField
+            id="activation-validity-months"
+            name="validityMonths"
+            label="Validity (months)"
+            optional
+            inputMode="numeric"
+            value={months}
+            onChange={(value) => setMonths(value.replace(/\D/g, ''))}
+          />
         )}
         {activate.error ? <p role="alert">{activate.error.message}</p> : null}
       </div>
@@ -255,7 +268,7 @@ export function IdentifiersDialog({
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
           Membership <strong>{result.membershipNumber}</strong> is active with{' '}
-          {formatPoints(result.pointsAllocated)} yearly points allocated.
+          {formatCountOrDash(result.pointsAllocated)} yearly points allocated.
         </p>
         {result.fallbackCode ? (
           <p>
@@ -302,12 +315,13 @@ export function IdentifiersDialog({
 
         {result.onboarding.token ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="customer-onboarding-token">Customer activation code</label>
-            <input
+            <TextField
               id="customer-onboarding-token"
+              name="onboardingToken"
+              label="Customer activation code"
               value={result.onboarding.token}
+              onChange={() => {}}
               readOnly
-              spellCheck={false}
             />
             <Button variant="secondary" onClick={() => copy('token', result.onboarding.token!)}>
               {copied === 'token' ? 'Activation code copied' : 'Copy activation code'}
@@ -316,12 +330,13 @@ export function IdentifiersDialog({
         ) : null}
         {result.onboarding.activationUrl ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="customer-activation-link">Customer activation link</label>
-            <input
+            <TextField
               id="customer-activation-link"
+              name="activationLink"
+              label="Customer activation link"
               value={result.onboarding.activationUrl}
+              onChange={() => {}}
               readOnly
-              spellCheck={false}
             />
             <Button
               variant="secondary"

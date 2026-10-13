@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link } from 'react-router';
 import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
 import type { AfHomesRole } from '@afhomes/contracts';
@@ -17,7 +18,7 @@ export function AfHomesRolesPage() {
   const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
   const [editing, setEditing] = useState<AfHomesRole | null>(null);
   const [creating, setCreating] = useState(false);
-  const mutation = useMutation({
+  const mutation = useBusinessMutation({
     mutationFn: async (input: RoleFormInput) =>
       editing
         ? updateAfHomesRole(editing.id, input)

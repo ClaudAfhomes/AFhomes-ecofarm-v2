@@ -428,16 +428,16 @@ describe('Card Plans states', () => {
     await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Jade' } });
-    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'JADE' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Jade' } });
+    fireEvent.change(screen.getByLabelText('Code(Optional)'), { target: { value: 'JADE' } });
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '80000.00' } });
-    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), { target: { value: '80000.00' } });
+    fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '100000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), { target: { value: '80000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create plan' }));
 
     await waitFor(() => expect(mockedCreateCardProduct).toHaveBeenCalled());
@@ -456,16 +456,16 @@ describe('Card Plans states', () => {
     await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad' } });
-    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'BAD' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Bad' } });
+    fireEvent.change(screen.getByLabelText('Code(Optional)'), { target: { value: 'BAD' } });
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '5000.00' } });
-    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), { target: { value: '5000.00' } });
+    fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '12000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), { target: { value: '80000' } });
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Reservation fee cannot exceed the spot cash price',
     );
@@ -522,8 +522,8 @@ describe('Categories tab', () => {
     await screen.findByText('membership');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Category' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'VIP Cards' } });
-    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'vip-cards' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'VIP Cards' } });
+    fireEvent.change(screen.getByLabelText('Slug(Optional)'), { target: { value: 'vip-cards' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create category' }));
 
     await waitFor(() => expect(mockedCreateCardCategory).toHaveBeenCalled());
@@ -541,8 +541,8 @@ describe('Categories tab', () => {
     await screen.findByText('membership');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Category' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad' } });
-    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'not a slug!' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Bad' } });
+    fireEvent.change(screen.getByLabelText('Slug(Optional)'), { target: { value: 'not a slug!' } });
     expect(screen.getByRole('alert')).toHaveTextContent('Slug must start with a letter');
     expect(mockedCreateCardCategory).not.toHaveBeenCalled();
   });

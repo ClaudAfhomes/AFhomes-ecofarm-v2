@@ -1,0 +1,23 @@
+.issuedPanel {
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+  max-width: 560px;
+}
+
+.wrapAnywhere {
+  overflow-wrap: anywhere;
+}
+
+.filtersRow {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  margin-top: 32px;
+}

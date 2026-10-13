@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   Dialog,
@@ -10,6 +11,7 @@ import {
   SearchField,
   Select,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import type { Commission } from '@afhomes/contracts';
 
@@ -17,8 +19,10 @@ import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { canViewModule } from '../../app/navigation';
-import { formatMoney, formatRate } from './format';
+import { formatRate } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import { getCommissions, markCommissionPaid, qualifyCommission } from './services';
+import { businessKeys } from './queryKeys';
 
 const STATUSES = [
   '',
@@ -87,7 +91,7 @@ export function BusinessCommissionsPage() {
     canViewModule(user?.afHomesPermissions, 'finance.card_activation');
 
   const query = useQuery({
-    queryKey: ['business', 'commissions', applied],
+    queryKey: businessKeys.commissions(applied),
     queryFn: () => getCommissions(applied),
     // Qualification and payout decisions land from review screens and other
     // sessions; the Apply-time snapshot refreshes without reload.
@@ -98,7 +102,7 @@ export function BusinessCommissionsPage() {
   const [paying, setPaying] = useState<Commission | null>(null);
 
   const refresh = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
+    await client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
   };
 
   return (
@@ -200,9 +204,9 @@ export function BusinessCommissionsPage() {
                   <td>{commission.commissionNumber ?? '—'}</td>
                   <td>{commission.saleNumber}</td>
                   <td>{commission.beneficiaryName}</td>
-                  <td>{formatMoney(commission.basisAmount)}</td>
+                  <td>{formatMoneyOrDash(commission.basisAmount)}</td>
                   <td>{formatRate(commission.rate)}</td>
-                  <td>{formatMoney(commission.amount)}</td>
+                  <td>{formatMoneyOrDash(commission.amount)}</td>
                   <td>
                     <StatusChip
                       label={STATUS_LABEL[commission.status] ?? commission.status}
@@ -287,7 +291,7 @@ function QualifyDialog({
 }) {
   const [notes, setNotes] = useState('');
   const [decision, setDecision] = useState<'earned' | 'cancelled'>('earned');
-  const decide = useMutation({
+  const decide = useBusinessMutation({
     mutationFn: () => qualifyCommission(commission.id, { decision, notes }),
     onSuccess: onDone,
   });
@@ -313,24 +317,29 @@ function QualifyDialog({
     >
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
-          Sale <strong>{commission.saleNumber}</strong> · {formatMoney(commission.amount)} to{' '}
+          Sale <strong>{commission.saleNumber}</strong> · {formatMoneyOrDash(commission.amount)} to{' '}
           {commission.beneficiaryName}. This is the only way a commission becomes earned, and it is
           recorded with your notes and identity. The amount and attribution do not change.
         </p>
         <label>
           Decision
-          <select
+          <Select
             value={decision}
             onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
-          >
-            <option value="earned">Qualify — commission earned</option>
-            <option value="cancelled">Cancel — commission cancelled</option>
-          </select>
+            options={[
+              { value: 'earned', label: 'Qualify — commission earned' },
+              { value: 'cancelled', label: 'Cancel — commission cancelled' },
+            ]}
+          />
         </label>
-        <label>
-          Notes (required)
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
+        <TextField
+          id="commission-decision-notes"
+          name="decisionNotes"
+          label="Notes"
+          hint="At least 5 characters. Recorded with your identity."
+          value={notes}
+          onChange={setNotes}
+        />
         {decide.error ? <p role="alert">{decide.error.message}</p> : null}
       </div>
     </Dialog>
@@ -347,7 +356,7 @@ function MarkPaidDialog({
   onDone: () => Promise<void>;
 }) {
   const [reference, setReference] = useState('');
-  const pay = useMutation({
+  const pay = useBusinessMutation({
     mutationFn: () =>
       markCommissionPaid(commission.id, reference.trim() ? { reference: reference.trim() } : {}),
     onSuccess: onDone,
@@ -371,14 +380,18 @@ function MarkPaidDialog({
     >
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
-          Sale <strong>{commission.saleNumber}</strong> · {formatMoney(commission.amount)} to{' '}
+          Sale <strong>{commission.saleNumber}</strong> · {formatMoneyOrDash(commission.amount)} to{' '}
           {commission.beneficiaryName}. Only an earned commission can be marked paid. The amount and
           attribution do not change; this records when and by whom it was paid.
         </p>
-        <label>
-          Payment reference (optional)
-          <input value={reference} onChange={(e) => setReference(e.target.value)} />
-        </label>
+        <TextField
+          id="commission-payment-reference"
+          name="paymentReference"
+          label="Payment reference"
+          optional
+          value={reference}
+          onChange={setReference}
+        />
         {pay.error ? <p role="alert">{pay.error.message}</p> : null}
       </div>
     </Dialog>

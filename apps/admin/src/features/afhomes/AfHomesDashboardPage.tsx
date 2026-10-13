@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
 import { paymentSchemeLabel } from '@afhomes/contracts';
+<<<<<<< Updated upstream
 import { compareMoney, formatCount, formatMoney } from '@afhomes/shared';
+=======
+import { compareMoney, formatMoney } from '@afhomes/shared';
+import { formatDate } from '../../lib/format';
+>>>>>>> Stashed changes
 import {
   EmptyState,
   ErrorState,
@@ -19,7 +24,7 @@ import {
   TableRow,
 } from '@afhomes/ui';
 import type { IconName } from '@afhomes/ui';
-import { AfHomesTrendChart, TrendChartSkeleton } from './AfHomesTrendChart';
+import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 import { getAnalyticsOverview } from './services';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
@@ -289,8 +294,18 @@ function ShareCell({
 }
 
 function Trend() {
-  return <AfHomesTrendChart />;
+  return (
+    <Suspense fallback={<TrendChartSkeleton />}>
+      <AfHomesTrendChart />
+    </Suspense>
+  );
 }
+
+// The charting library is the heaviest dependency on this screen, so it loads
+// on demand behind the same skeleton the pending state uses.
+const AfHomesTrendChart = lazy(() =>
+  import('./AfHomesTrendChart').then((m) => ({ default: m.AfHomesTrendChart })),
+);
 
 export function AfHomesDashboardPage() {
   const [period, setPeriod] = useState<AnalyticsPeriod>('month');
@@ -346,8 +361,7 @@ export function AfHomesDashboardPage() {
               {SCOPE_LABEL[query.data.scope.kind]}
             </span>
             <span className={styles.heroWindow}>
-              {new Date(query.data.window.from).toLocaleDateString()} →{' '}
-              {new Date(query.data.window.to).toLocaleDateString()}
+              {formatDate(query.data.window.from)} → {formatDate(query.data.window.to)}
             </span>
           </div>
         ) : null}
@@ -390,8 +404,7 @@ export function AfHomesDashboardPage() {
             </span>
             <span className={styles.scopeDivider} aria-hidden="true" />
             <span className={styles.scopeChip}>
-              {new Date(query.data.window.from).toLocaleDateString()} to{' '}
-              {new Date(query.data.window.to).toLocaleDateString()}
+              {formatDate(query.data.window.from)} to {formatDate(query.data.window.to)}
             </span>
             <span className={styles.scopeDivider} aria-hidden="true" />
             <span className={styles.scopeChip}>As of today</span>

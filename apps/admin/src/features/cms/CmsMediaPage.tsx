@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton } from '@afhomes/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { Button, EmptyState, ErrorState, FileField, PageHeader, Skeleton, TextField } from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import { deleteCmsMedia, getCmsMedia, uploadCmsMedia } from './services';
 import styles from './cms.module.css';
@@ -16,7 +17,7 @@ export function CmsMediaPage() {
     user?.afHomesPermissions.some((p) => p.moduleKey === 'cms.media' && p.canCreate) === true;
   const canDelete =
     user?.afHomesPermissions.some((p) => p.moduleKey === 'cms.media' && p.canDelete) === true;
-  const upload = useMutation({
+  const upload = useBusinessMutation({
     mutationFn: async () => {
       if (!file) throw new Error('Choose a file.');
       const dataBase64 = await new Promise<string>((resolve, reject) => {
@@ -41,7 +42,7 @@ export function CmsMediaPage() {
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Upload failed.'),
   });
-  const remove = useMutation({
+  const remove = useBusinessMutation({
     mutationFn: deleteCmsMedia,
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'media'] }),
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Delete failed.'),
@@ -74,18 +75,22 @@ export function CmsMediaPage() {
       />
       {canCreate && (
         <section className={styles.panel}>
-          <label>
-            File
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif,video/mp4"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <label>
-            Alternative text
-            <input value={alt} onChange={(e) => setAlt(e.target.value)} />
-          </label>
+          <FileField
+            id="cms-media-file"
+            name="mediaFile"
+            label="File"
+            optional
+            accept="image/jpeg,image/png,image/webp,image/gif,video/mp4"
+            onSelect={setFile}
+          />
+          <TextField
+            id="cms-media-alt"
+            name="alt"
+            label="Alternative text"
+            optional
+            value={alt}
+            onChange={setAlt}
+          />
           <Button disabled={!file || upload.isPending} onClick={() => upload.mutate()}>
             Upload
           </Button>

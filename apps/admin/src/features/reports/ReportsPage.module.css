@@ -21,3 +21,33 @@
   color: var(--color-text-secondary);
   font-size: var(--text-body-s);
 }
+
+.muted {
+  opacity: 0.8;
+}
+
+.loadingGrid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+.detailSection {
+  margin-top: 16px;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.actionsRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}

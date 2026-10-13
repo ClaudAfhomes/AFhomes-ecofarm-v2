@@ -1,6 +1,7 @@
 /** Staff prepare a quote; only the customer portal can authorize points. */
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 
 import {
   Button,
@@ -13,15 +14,16 @@ import {
   StatusChip,
 } from '@afhomes/ui';
 import { webBase } from '../../lib/portal';
-import { formatMoney } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import styles from './points.module.css';
 
 import { getPurchaseSummary, listOwnPurchases, quotePointDiscount } from './points-services';
 import type { PurchaseRow, PurchaseSummaryRow } from './points-services';
+import { earningKeys } from './queryKeys';
 
 export function UseVipPointsPage() {
   const purchases = useQuery({
-    queryKey: ['earning', 'pos', 'purchases'],
+    queryKey: earningKeys.posPurchases,
     queryFn: listOwnPurchases,
     refetchInterval: 15_000,
   });
@@ -83,9 +85,9 @@ export function UseVipPointsPage() {
                 <tr key={row.id}>
                   <td>{row.purchaseNumber}</td>
                   <td>{row.customerName ?? row.customerId}</td>
-                  <td>{formatMoney(row.grossAmount)}</td>
-                  <td>{formatMoney(row.tierDiscountAmount ?? '0.00')}</td>
-                  <td>{formatMoney(row.netAmount)}</td>
+                  <td>{formatMoneyOrDash(row.grossAmount)}</td>
+                  <td>{formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}</td>
+                  <td>{formatMoneyOrDash(row.netAmount)}</td>
                   <td>
                     <StatusChip tone="neutral" label={row.status} />
                   </td>
@@ -116,12 +118,12 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
   } | null>(null);
 
   const summary = useQuery({
-    queryKey: ['earning', 'purchase', purchase.id, 'summary'],
+    queryKey: earningKeys.purchaseSummary(purchase.id),
     queryFn: () => getPurchaseSummary(purchase.id),
     enabled: open,
   });
 
-  const ask = useMutation({
+  const ask = useBusinessMutation({
     mutationFn: () => quotePointDiscount(purchase.id, Number(points)),
     // The typed amount is PRESERVED on failure, so a member who was interrupted
     // does not have to retype it.
@@ -191,7 +193,7 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
               <>
                 <p role="status">
                   {quote.pointsRequested.toLocaleString('en-PH')} points are worth{' '}
-                  <strong>{formatMoney(quote.pesoValue)}</strong> off this purchase.
+                  <strong>{formatMoneyOrDash(quote.pesoValue)}</strong> off this purchase.
                 </p>
                 <QrCode
                   value={webBase().replace(/\/$/, '') + '/customer/points'}
@@ -251,23 +253,23 @@ function PurchaseFigures({
     <dl className={styles.figures}>
       <div>
         <dt>Gross service value</dt>
-        <dd>{formatMoney(summary.grossAmount)}</dd>
+        <dd>{formatMoneyOrDash(summary.grossAmount)}</dd>
       </div>
       <div>
         <dt>VIP tier discount</dt>
-        <dd>{formatMoney(summary.tierDiscountAmount ?? '0.00')}</dd>
+        <dd>{formatMoneyOrDash(summary.tierDiscountAmount ?? '0.00')}</dd>
       </div>
       <div>
         <dt>Points discount so far</dt>
-        <dd>{formatMoney(summary.pointsDiscountAmount)}</dd>
+        <dd>{formatMoneyOrDash(summary.pointsDiscountAmount)}</dd>
       </div>
       <div>
         <dt>Amount due</dt>
-        <dd>{formatMoney(summary.netAmount)}</dd>
+        <dd>{formatMoneyOrDash(summary.netAmount)}</dd>
       </div>
       <div>
         <dt>Verified receipts</dt>
-        <dd>{formatMoney(summary.verifiedTotal)}</dd>
+        <dd>{formatMoneyOrDash(summary.verifiedTotal)}</dd>
       </div>
     </dl>
   );

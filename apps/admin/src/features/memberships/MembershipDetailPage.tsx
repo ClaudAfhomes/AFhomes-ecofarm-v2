@@ -1,8 +1,18 @@
 import styles from '../business/WorkflowCards.module.css';
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Button, ConfirmDialog, Dialog, ErrorState, PageHeader, QrCode, StatusChip } from '@afhomes/ui';
+import {
+  Button,
+  ConfirmDialog,
+  Dialog,
+  ErrorState,
+  PageHeader,
+  QrCode,
+  StatusChip,
+  TextAreaField,
+} from '@afhomes/ui';
 import type { ReissuedMembershipCard } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
@@ -52,7 +62,7 @@ export function MembershipDetailPage() {
     retry: false,
   });
 
-  const reissue = useMutation({
+  const reissue = useBusinessMutation({
     mutationFn: () => reissueMembershipCard(id, reason.trim()),
     onSuccess: (next) => {
       // Plaintext lives in state until the dialog closes: never stored,
@@ -65,7 +75,7 @@ export function MembershipDetailPage() {
     onError: (cause) => setOutcome(cause instanceof Error ? cause.message : 'Reissue failed.'),
   });
 
-  const markPrinted = useMutation({
+  const markPrinted = useBusinessMutation({
     mutationFn: () => markMembershipPrinted(id),
     onSuccess: (next) => {
       setOutcome(
@@ -209,15 +219,15 @@ export function MembershipDetailPage() {
                 Balances and identity are unchanged. Do this for a lost, damaged or compromised card
                 — not for a reprint.
               </p>
-              <label>
-                Reason (required, min 5 characters)
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  rows={3}
-                  style={{ width: '100%' }}
-                />
-              </label>
+              <TextAreaField
+                id="membership-rotate-reason"
+                name="rotateReason"
+                label="Reason (required, min 5 characters)"
+                optional
+                value={reason}
+                onChange={setReason}
+                rows={3}
+              />
               <Button
                 onClick={() => {
                   setOutcome(null);

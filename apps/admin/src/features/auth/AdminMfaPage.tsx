@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
-import { AuthLayout, Button, ErrorState } from '@afhomes/ui';
+import { AuthLayout, Button, ErrorState, TextField } from '@afhomes/ui';
 import { getSupabaseClient } from '../../lib/supabase';
 import { useSession } from '../../lib/session';
 
@@ -19,7 +20,7 @@ export function AdminMfaPage() {
       return result.data.totp;
     },
   });
-  const enrollment = useMutation({
+  const enrollment = useBusinessMutation({
     mutationFn: async () => {
       if (!client) throw new Error('Authentication is not configured.');
       const result = await client.auth.mfa.enroll({
@@ -31,7 +32,7 @@ export function AdminMfaPage() {
     },
   });
   const factorId = enrollment.data?.id ?? factors.data?.[0]?.id;
-  const verify = useMutation({
+  const verify = useBusinessMutation({
     mutationFn: async () => {
       if (!client || !factorId || !/^\d{6}$/.test(code))
         throw new Error('Enter the six-digit authenticator code.');
@@ -79,17 +80,16 @@ export function AdminMfaPage() {
             verify.mutate();
           }}
         >
-          <label>
-            Authenticator code
-            <input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              required
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-          </label>
+          <TextField
+            id="mfa-code"
+            name="code"
+            label="Authenticator code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={setCode}
+          />
           <Button type="submit" disabled={verify.isPending}>
             Verify
           </Button>

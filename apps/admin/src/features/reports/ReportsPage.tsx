@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -165,21 +166,25 @@ export function ReportsPage() {
               }}
               options={defs.map((d) => ({ value: d.type, label: d.label }))}
             />
-            <input
-              aria-label="From"
-              type="date"
+            <DateField
+              id="reports-from"
+              name="from"
+              label="From"
+              optional
               value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
+              onChange={(value) => {
+                setFrom(value);
                 resetPage();
               }}
             />
-            <input
-              aria-label="To"
-              type="date"
+            <DateField
+              id="reports-to"
+              name="to"
+              label="To"
+              optional
               value={to}
-              onChange={(e) => {
-                setTo(e.target.value);
+              onChange={(value) => {
+                setTo(value);
                 resetPage();
               }}
             />
@@ -250,11 +255,11 @@ export function ReportsPage() {
         }
       />
 
-      <p style={{ opacity: 0.8 }}>{def.description}</p>
+      <p className={styles.muted}>{def.description}</p>
 
       {query.isPending ? (
         <div
-          style={{ display: 'grid', gap: 'var(--space-3)' }}
+          className={styles.loadingGrid}
           role="status"
           aria-label="Loading report"
         >
@@ -316,7 +321,7 @@ export function ReportsPage() {
               ))}
             </dl>
           )}
-          <p style={{ opacity: 0.8 }}>
+          <p className={styles.muted}>
             Scope: {query.data.scope.label} · {query.data.meta.total} rows
           </p>
           <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
@@ -340,7 +345,7 @@ export function ReportsPage() {
                       onClick={() =>
                         setSelected(selected?.referenceNumber === reference ? null : record)
                       }
-                      style={{ cursor: 'pointer' }}
+                      className={styles.clickableRow}
                     >
                       {def.columns.map((col) => (
                         <td key={col.key}>{formatCell(col.key, record[col.key])}</td>
@@ -352,15 +357,9 @@ export function ReportsPage() {
             </table>
           </div>
           {selected ? (
-            <section aria-label="Transaction detail" style={{ marginTop: 16 }}>
+            <section aria-label="Transaction detail" className={styles.detailSection}>
               <h3>Transaction {String(selected.referenceNumber ?? '')}</h3>
-              <dl
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: 12,
-                }}
-              >
+              <dl className={styles.detailGrid}>
                 {(
                   [
                     ['customer', 'Customer'],
@@ -391,7 +390,7 @@ export function ReportsPage() {
               </Button>
             </section>
           ) : null}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <div className={styles.actionsRow}>
             <Button
               variant="secondary"
               disabled={offset === 0}

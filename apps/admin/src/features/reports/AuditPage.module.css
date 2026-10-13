@@ -1,0 +1,15 @@
+.loadingGrid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.actionsRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.detailSection {
+  margin-top: 16px;
+}

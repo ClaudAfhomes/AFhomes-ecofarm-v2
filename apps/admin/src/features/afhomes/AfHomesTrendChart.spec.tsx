@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesTrendReport } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
-import { AfHomesTrendChart, TrendChartSkeleton, periodLabel } from './AfHomesTrendChart';
+import { AfHomesTrendChart, periodLabel } from './AfHomesTrendChart';
+import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 
 const getTrend = vi.hoisted(() => vi.fn());
 vi.mock('./services', async (importOriginal) => {

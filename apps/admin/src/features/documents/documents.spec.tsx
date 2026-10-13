@@ -299,7 +299,7 @@ describe('Phase 27 document review', () => {
       await screen.findByText('No fields were extracted. Enter the values manually below.'),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Review and edit' }));
-    await user.type(screen.getByLabelText('Add a field'), 'firstName');
+    await user.type(screen.getByLabelText('Add a field(Optional)'), 'firstName');
     await user.click(screen.getByRole('button', { name: 'Add' }));
     await user.type(screen.getByLabelText(/firstName \(editable copy/), 'Manual Ana');
     await user.click(screen.getByRole('button', { name: 'Confirm reviewed values' }));

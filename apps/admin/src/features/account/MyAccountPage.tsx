@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -16,6 +16,7 @@ import {
 import { useSession } from '../../lib/session';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
+import styles from './MyAccountPage.module.css';
 
 /**
  * My Account (AF Homes pattern, `/admin/profile`): the signed-in staff
@@ -37,13 +38,13 @@ export function MyAccountPage() {
   const passwordsMatch = newPassword === confirmPassword;
   const passwordValid = currentPassword.length > 0 && newPassword.length >= 8 && passwordsMatch;
 
-  const profile = useMutation({
+  const profile = useBusinessMutation({
     mutationFn: () => updateAfHomesStaffProfile({ name: displayName.trim() }),
     onSuccess: async () => {
       await revalidate();
     },
   });
-  const password = useMutation({
+  const password = useBusinessMutation({
     mutationFn: () => changeAfHomesStaffPassword({ currentPassword, newPassword }),
     onSuccess: async () => {
       // Capture the gate BEFORE the refresh: a forced change that cleared the
@@ -68,7 +69,7 @@ export function MyAccountPage() {
           password below — the rest of the admin panel unlocks once it is changed.
         </Alert>
       ) : null}
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className={styles.stack}>
         <DetailCard>
           <DetailCardTitle>Profile</DetailCardTitle>
           <DetailFieldGrid>
@@ -77,7 +78,7 @@ export function MyAccountPage() {
               <StatusChip label={user?.roleName ?? '—'} tone="neutral" />
             </DetailField>
           </DetailFieldGrid>
-          <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+          <div className={styles.formGrid}>
             <TextField
               id="account-display-name"
               name="account-display-name"
@@ -109,7 +110,7 @@ export function MyAccountPage() {
           <DetailCardTitle>
             {mustChangePassword ? 'Set a new password' : 'Change password'}
           </DetailCardTitle>
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className={styles.section}>
             <PasswordField
               id="account-current-password"
               label="Current password"

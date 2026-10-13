@@ -20,7 +20,8 @@ import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts
 import { formatDate, formatDateTime } from '../../lib/format';
 import { ApiError } from '../../lib/api/errors';
 import { getCustomerById, getSalePayments, getSales } from './services';
-import { formatMoney } from './format';
+import { businessKeys } from './queryKeys';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
@@ -42,7 +43,7 @@ import styles from './CustomerDetailPage.module.css';
 export function CustomerDetailPage() {
   const { id } = useParams();
   const customer = useQuery({
-    queryKey: ['business', 'customer', id],
+    queryKey: businessKeys.customer(id),
     queryFn: () => getCustomerById(id ?? ''),
     enabled: Boolean(id),
   });
@@ -51,7 +52,7 @@ export function CustomerDetailPage() {
   // sales/finance pages. A viewer can hold the customers grant without the
   // card-sales scope, so 403 hides the card instead of breaking the page.
   const sales = useQuery({
-    queryKey: ['business', 'customer-sales', id],
+    queryKey: businessKeys.customerSales(id),
     queryFn: () => getSales({ customerId: id ?? '' }),
     enabled: Boolean(id),
   });
@@ -212,7 +213,7 @@ export function CustomerDetailPage() {
  */
 function CustomerSaleCard({ sale }: { sale: Sale }) {
   const payments = useQuery({
-    queryKey: ['business', 'sale-payments', sale.id],
+    queryKey: businessKeys.salePayments(sale.id),
     queryFn: () => getSalePayments(sale.id),
   });
   return (
@@ -228,9 +229,9 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
         <DetailField label="Activation status">
           {sale.activatedAt ? 'Active' : 'Not activated'}
         </DetailField>
-        <DetailField label="Total">{formatMoney(sale.cashPrice)}</DetailField>
-        <DetailField label="Paid">{formatMoney(sale.paidAmount)}</DetailField>
-        <DetailField label="Balance">{formatMoney(sale.balance)}</DetailField>
+        <DetailField label="Total">{formatMoneyOrDash(sale.cashPrice)}</DetailField>
+        <DetailField label="Paid">{formatMoneyOrDash(sale.paidAmount)}</DetailField>
+        <DetailField label="Balance">{formatMoneyOrDash(sale.balance)}</DetailField>
         <DetailField label="Payment Status">
           <SettlementBadge total={sale.cashPrice} paid={sale.paidAmount} balance={sale.balance} />
         </DetailField>

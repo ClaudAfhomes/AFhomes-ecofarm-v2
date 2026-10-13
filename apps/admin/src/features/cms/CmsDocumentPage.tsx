@@ -1,6 +1,16 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  TextAreaField,
+  TextField,
+} from '@afhomes/ui';
 import type { CmsDocument, CmsDocumentKey } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
@@ -71,7 +81,7 @@ function DocumentEditor({
   const [value, setValue] = useState(() => JSON.stringify(document?.draftValue ?? {}, null, 2));
   const [summary, setSummary] = useState('');
   const [message, setMessage] = useState<string | null>(null);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       let parsed: unknown;
       try {
@@ -88,7 +98,7 @@ function DocumentEditor({
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : 'Could not save.'),
   });
-  const publish = useMutation({
+  const publish = useBusinessMutation({
     mutationFn: (next: boolean) => publishCmsDocument(documentKey, next),
     onSuccess: async () => {
       setMessage('Publication state updated.');
@@ -117,24 +127,26 @@ function DocumentEditor({
         />
       )}
       <div className={styles.editor}>
-        <label>
-          Structured content (JSON)
-          <textarea
-            rows={24}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            disabled={!canUpdate}
-          />
-        </label>
-        <label>
-          Change summary
-          <input
-            value={summary}
-            maxLength={500}
-            onChange={(event) => setSummary(event.target.value)}
-            disabled={!canUpdate}
-          />
-        </label>
+        <TextAreaField
+          id="cms-document-content"
+          name="content"
+          label="Structured content (JSON)"
+          optional
+          rows={24}
+          value={value}
+          onChange={setValue}
+          disabled={!canUpdate}
+        />
+        <TextField
+          id="cms-document-summary"
+          name="summary"
+          label="Change summary"
+          optional
+          value={summary}
+          maxLength={500}
+          onChange={setSummary}
+          disabled={!canUpdate}
+        />
         {message && <p role="status">{message}</p>}
         {canUpdate && (
           <div className={styles.actions}>

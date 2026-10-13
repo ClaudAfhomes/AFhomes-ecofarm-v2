@@ -1,9 +1,10 @@
 import styles from './BusinessProductsPage.module.css';
-import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
+import { tierArtwork } from '@afhomes/ui';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { CardCategory, CardProduct } from '@afhomes/contracts';
 import {
   Button,
@@ -16,9 +17,12 @@ import {
   Select,
   Skeleton,
   StatusChip,
+  TextAreaField,
+  TextField,
 } from '@afhomes/ui';
 
-import { formatMoney, formatPoints, formatRate } from './format';
+import { formatRate } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import {
   createCardCategory,
   createCardProduct,
@@ -28,6 +32,7 @@ import {
   updateCardProduct,
   type CardPlanVisibility,
 } from './services';
+import { businessKeys } from './queryKeys';
 
 const MONEY_RE = /^\d+(\.\d{1,2})?$/;
 const RATE_RE = /^\d+(\.\d{1,4})?$/;
@@ -276,7 +281,7 @@ export function BusinessProductsPage() {
    * blanking, and `busy` tells the operator the list is being updated.
    */
   const plans = useQuery({
-    queryKey: ['business', 'card-products', appliedSearch, visibility],
+    queryKey: businessKeys.cardProducts(appliedSearch, visibility),
     queryFn: () =>
       getCardProducts({
         search: appliedSearch || undefined,
@@ -285,17 +290,17 @@ export function BusinessProductsPage() {
     placeholderData: keepPreviousData,
   });
   const categories = useQuery({
-    queryKey: ['business', 'card-categories'],
+    queryKey: businessKeys.cardCategories,
     queryFn: () => getCardCategories({ active: 'all' }),
     placeholderData: keepPreviousData,
   });
   const activeCategories = (categories.data ?? []).filter((c) => c.isActive);
 
   const invalidatePlans = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'card-products'] });
+    await client.invalidateQueries({ queryKey: businessKeys.cardProductsScope });
   };
   const invalidateCategories = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'card-categories'] });
+    await client.invalidateQueries({ queryKey: businessKeys.cardCategories });
   };
 
   const closePlanDialogs = () => {
@@ -309,7 +314,7 @@ export function BusinessProductsPage() {
     setCategoryForm(EMPTY_CATEGORY_FORM);
   };
 
-  const createPlan = useMutation({
+  const createPlan = useBusinessMutation({
     mutationFn: () =>
       createCardProduct({
         name: planForm.name.trim(),
@@ -336,7 +341,7 @@ export function BusinessProductsPage() {
     },
   });
 
-  const savePlan = useMutation({
+  const savePlan = useBusinessMutation({
     mutationFn: () =>
       updateCardProduct(editingPlan!.id, {
         name: planForm.name.trim(),
@@ -362,13 +367,13 @@ export function BusinessProductsPage() {
     },
   });
 
-  const togglePlan = useMutation({
+  const togglePlan = useBusinessMutation({
     mutationFn: (input: { id: string; isActive: boolean }) =>
       updateCardProduct(input.id, { isActive: input.isActive }),
     onSuccess: invalidatePlans,
   });
 
-  const createCategory = useMutation({
+  const createCategory = useBusinessMutation({
     mutationFn: () =>
       createCardCategory({
         name: categoryForm.name.trim(),
@@ -383,7 +388,7 @@ export function BusinessProductsPage() {
     },
   });
 
-  const saveCategory = useMutation({
+  const saveCategory = useBusinessMutation({
     mutationFn: () =>
       updateCardCategory(editingCategory!.id, {
         name: categoryForm.name.trim(),
@@ -397,7 +402,7 @@ export function BusinessProductsPage() {
     },
   });
 
-  const toggleCategory = useMutation({
+  const toggleCategory = useBusinessMutation({
     mutationFn: (input: { id: string; isActive: boolean }) =>
       updateCardCategory(input.id, { isActive: input.isActive }),
     onSuccess: async () => {
@@ -558,15 +563,15 @@ export function BusinessProductsPage() {
             <dl className={styles.facts}>
               <div>
                 <dt>Spot Cash</dt>
-                <dd>{formatMoney(detailPlan.cashPrice)}</dd>
+                <dd>{formatMoneyOrDash(detailPlan.cashPrice)}</dd>
               </div>
               <div>
                 <dt>Installment</dt>
-                <dd>{formatMoney(detailPlan.installmentPrice)}</dd>
+                <dd>{formatMoneyOrDash(detailPlan.installmentPrice)}</dd>
               </div>
               <div>
                 <dt>Reservation</dt>
-                <dd>{formatMoney(detailPlan.reservationFee)}</dd>
+                <dd>{formatMoneyOrDash(detailPlan.reservationFee)}</dd>
               </div>
             </dl>
           </section>
@@ -587,12 +592,12 @@ export function BusinessProductsPage() {
               <div>
                 <dt>Yearly points</dt>
                 <dd>
-                  {formatPoints(detailPlan.yearlyPoints)} × {detailPlan.annualPointsTranches}
+                  {formatCountOrDash(detailPlan.yearlyPoints)} × {detailPlan.annualPointsTranches}
                 </dd>
               </div>
               <div>
                 <dt>Total loyalty value</dt>
-                <dd>{formatMoney(detailPlan.totalLoyaltyValue)}</dd>
+                <dd>{formatMoneyOrDash(detailPlan.totalLoyaltyValue)}</dd>
               </div>
             </dl>
           </section>
@@ -700,11 +705,11 @@ export function BusinessProductsPage() {
                     <dl className={styles.facts}>
                       <div>
                         <dt>Spot Cash</dt>
-                        <dd>{formatMoney(product.cashPrice)}</dd>
+                        <dd>{formatMoneyOrDash(product.cashPrice)}</dd>
                       </div>
                       <div>
                         <dt>Installment</dt>
-                        <dd>{formatMoney(product.installmentPrice)}</dd>
+                        <dd>{formatMoneyOrDash(product.installmentPrice)}</dd>
                       </div>
                       <div>
                         <dt>Discount</dt>
@@ -712,7 +717,7 @@ export function BusinessProductsPage() {
                       </div>
                       <div>
                         <dt>Points / Year</dt>
-                        <dd>{formatPoints(product.yearlyPoints)}</dd>
+                        <dd>{formatCountOrDash(product.yearlyPoints)}</dd>
                       </div>
                       <div>
                         <dt>Validity</dt>
@@ -837,38 +842,44 @@ export function BusinessProductsPage() {
             Benefit edits require Admin/Super Admin, are audited before/after, and apply
             prospectively only.
           </p>
-          <label className={styles.field}>
-            Name
-            <input
-              value={planForm.name}
-              onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
-            />
-          </label>
-          <label className={styles.field}>
-            Code
-            <input
-              value={planForm.code}
-              onChange={(e) => setPlanForm({ ...planForm, code: e.target.value })}
-            />
-          </label>
+          <TextField
+            id="plan-name"
+            name="planName"
+            label="Name"
+            optional
+            value={planForm.name}
+            onChange={(value) => setPlanForm({ ...planForm, name: value })}
+          />
+          <TextField
+            id="plan-code"
+            name="planCode"
+            label="Code"
+            optional
+            value={planForm.code}
+            onChange={(value) => setPlanForm({ ...planForm, code: value })}
+          />
           <label className={styles.field}>
             Category
-            <select
+            <Select
               value={planForm.categoryId}
               onChange={(e) => setPlanForm({ ...planForm, categoryId: e.target.value })}
-            >
-              <option value="">Select a category</option>
-              {activeCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-              {planCategoryInactive ? (
-                <option value={planForm.categoryId} disabled>
-                  {editingPlan?.categoryName ?? 'Inactive category'} (inactive)
-                </option>
-              ) : null}
-            </select>
+              options={[
+                { value: '', label: 'Select a category' },
+                ...activeCategories.map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                })),
+                ...(planCategoryInactive
+                  ? [
+                      {
+                        value: planForm.categoryId,
+                        label: `${editingPlan?.categoryName ?? 'Inactive category'} (inactive)`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
           </label>
           {planCategoryInactive ? (
             <p role="note" className={styles.formNote}>
@@ -876,68 +887,75 @@ export function BusinessProductsPage() {
               plans into it.
             </p>
           ) : null}
-          <label className={`${styles.field} ${styles.fieldWide}`}>
-            Description
-            <textarea
-              rows={3}
-              value={planForm.description}
-              onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
-            />
-          </label>
-          <label className={styles.field}>
-            Spot cash price
-            <input
-              value={planForm.price}
-              onChange={(e) => setPlanForm({ ...planForm, price: e.target.value })}
-              inputMode="decimal"
-            />
-          </label>
-          <label className={styles.field}>
-            4-month installment price
-            <input
-              value={planForm.installment}
-              onChange={(e) => setPlanForm({ ...planForm, installment: e.target.value })}
-              inputMode="decimal"
-            />
-          </label>
-          <label className={styles.field}>
-            Reservation fee (included in every total)
-            <input
-              value={planForm.reservation}
-              onChange={(e) => setPlanForm({ ...planForm, reservation: e.target.value })}
-              inputMode="decimal"
-            />
-          </label>
-          <label className={styles.field}>
-            Spot cash days
-            <input
-              value={planForm.spotDays}
-              onChange={(e) =>
-                setPlanForm({ ...planForm, spotDays: e.target.value.replace(/\D/g, '') })
-              }
-              inputMode="numeric"
-            />
-          </label>
-          <label className={styles.field}>
-            Standard installment months
-            <input
-              value={planForm.installMonths}
-              onChange={(e) =>
-                setPlanForm({ ...planForm, installMonths: e.target.value.replace(/\D/g, '') })
-              }
-              inputMode="numeric"
-            />
-          </label>
-          <label className={styles.field}>
-            Validity years
-            <input
-              value={planForm.validityYears}
-              onChange={(e) =>
-                setPlanForm({ ...planForm, validityYears: e.target.value.replace(/\D/g, '') })
-              }
-              inputMode="numeric"
-            />
-          </label>
+          <TextAreaField
+            id="plan-description"
+            name="planDescription"
+            label="Description"
+            optional
+            rows={3}
+            value={planForm.description}
+            onChange={(value) => setPlanForm({ ...planForm, description: value })}
+          />
+          <TextField
+            id="plan-price"
+            name="price"
+            label="Spot cash price"
+            optional
+            inputMode="decimal"
+            value={planForm.price}
+            onChange={(value) => setPlanForm({ ...planForm, price: value })}
+          />
+          <TextField
+            id="plan-installment"
+            name="installment"
+            label="4-month installment price"
+            optional
+            inputMode="decimal"
+            value={planForm.installment}
+            onChange={(value) => setPlanForm({ ...planForm, installment: value })}
+          />
+          <TextField
+            id="plan-reservation"
+            name="reservation"
+            label="Reservation fee (included in every total)"
+            optional
+            inputMode="decimal"
+            value={planForm.reservation}
+            onChange={(value) => setPlanForm({ ...planForm, reservation: value })}
+          />
+          <TextField
+            id="plan-spot-days"
+            name="spotDays"
+            label="Spot cash days"
+            optional
+            inputMode="numeric"
+            value={planForm.spotDays}
+            onChange={(value) =>
+              setPlanForm({ ...planForm, spotDays: value.replace(/\D/g, '') })
+            }
+          />
+          <TextField
+            id="plan-install-months"
+            name="installMonths"
+            label="Standard installment months"
+            optional
+            inputMode="numeric"
+            value={planForm.installMonths}
+            onChange={(value) =>
+              setPlanForm({ ...planForm, installMonths: value.replace(/\D/g, '') })
+            }
+          />
+          <TextField
+            id="plan-validity-years"
+            name="validityYears"
+            label="Validity years"
+            optional
+            inputMode="numeric"
+            value={planForm.validityYears}
+            onChange={(value) =>
+              setPlanForm({ ...planForm, validityYears: value.replace(/\D/g, '') })
+            }
+          />
           <fieldset className={styles.formSection}>
             <legend>Allowed internal moves</legend>
             <label className={styles.checkRow}>
@@ -965,34 +983,37 @@ export function BusinessProductsPage() {
               Move B2: 25% DP + 12 months
             </label>
           </fieldset>
-          <label className={styles.field}>
-            Yearly points
-            <input
-              value={planForm.points}
-              onChange={(e) =>
-                setPlanForm({ ...planForm, points: e.target.value.replace(/\D/g, '') })
-              }
-              inputMode="numeric"
-            />
-          </label>
-          <label className={styles.field}>
-            Commission rate (0.04 = 4%)
-            <input
-              value={planForm.rate}
-              onChange={(e) => setPlanForm({ ...planForm, rate: e.target.value })}
-              inputMode="decimal"
-            />
-          </label>
-          <label className={styles.field}>
-            Display order
-            <input
-              value={planForm.sortOrder}
-              onChange={(e) =>
-                setPlanForm({ ...planForm, sortOrder: e.target.value.replace(/[^0-9-]/g, '') })
-              }
-              inputMode="numeric"
-            />
-          </label>
+          <TextField
+            id="plan-points"
+            name="yearlyPoints"
+            label="Yearly points"
+            optional
+            inputMode="numeric"
+            value={planForm.points}
+            onChange={(value) =>
+              setPlanForm({ ...planForm, points: value.replace(/\D/g, '') })
+            }
+          />
+          <TextField
+            id="plan-rate"
+            name="commissionRate"
+            label="Commission rate (0.04 = 4%)"
+            optional
+            inputMode="decimal"
+            value={planForm.rate}
+            onChange={(value) => setPlanForm({ ...planForm, rate: value })}
+          />
+          <TextField
+            id="plan-sort-order"
+            name="planSortOrder"
+            label="Display order"
+            optional
+            inputMode="numeric"
+            value={planForm.sortOrder}
+            onChange={(value) =>
+              setPlanForm({ ...planForm, sortOrder: value.replace(/[^0-9-]/g, '') })
+            }
+          />
           {creatingPlan ? (
             <label className={`${styles.checkRow} ${styles.fieldWide}`}>
               <input
@@ -1039,41 +1060,45 @@ export function BusinessProductsPage() {
             Categories organise plans. Deactivating a category removes its plans from new
             applications but never deletes plans, sales or history.
           </p>
-          <label className={styles.field}>
-            Name
-            <input
-              value={categoryForm.name}
-              onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
-            />
-          </label>
-          <label className={styles.field}>
-            Slug
-            <input
-              value={categoryForm.slug}
-              onChange={(e) => setCategoryForm({ ...categoryForm, slug: e.target.value })}
-            />
-          </label>
-          <label className={`${styles.field} ${styles.fieldWide}`}>
-            Description
-            <textarea
-              rows={3}
-              value={categoryForm.description}
-              onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
-            />
-          </label>
-          <label className={styles.field}>
-            Sort order
-            <input
-              value={categoryForm.sortOrder}
-              onChange={(e) =>
-                setCategoryForm({
-                  ...categoryForm,
-                  sortOrder: e.target.value.replace(/[^0-9-]/g, ''),
-                })
-              }
-              inputMode="numeric"
-            />
-          </label>
+          <TextField
+            id="category-name"
+            name="categoryName"
+            label="Name"
+            optional
+            value={categoryForm.name}
+            onChange={(value) => setCategoryForm({ ...categoryForm, name: value })}
+          />
+          <TextField
+            id="category-slug"
+            name="categorySlug"
+            label="Slug"
+            optional
+            value={categoryForm.slug}
+            onChange={(value) => setCategoryForm({ ...categoryForm, slug: value })}
+          />
+          <TextAreaField
+            id="category-description"
+            name="categoryDescription"
+            label="Description"
+            optional
+            rows={3}
+            value={categoryForm.description}
+            onChange={(value) => setCategoryForm({ ...categoryForm, description: value })}
+          />
+          <TextField
+            id="category-sort-order"
+            name="categorySortOrder"
+            label="Sort order"
+            optional
+            inputMode="numeric"
+            value={categoryForm.sortOrder}
+            onChange={(value) =>
+              setCategoryForm({
+                ...categoryForm,
+                sortOrder: value.replace(/[^0-9-]/g, ''),
+              })
+            }
+          />
           {creatingCategory ? (
             <label className={`${styles.checkRow} ${styles.fieldWide}`}>
               <input

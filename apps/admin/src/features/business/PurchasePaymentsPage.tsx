@@ -36,7 +36,8 @@ import { ServiceRefundPanel } from './ServiceRefundPanel';
  */
 import { PointRefundReview } from './PointRefundReview';
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 
 import {
   Button,
@@ -44,12 +45,14 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Select,
   Skeleton,
   StatusChip,
+  TextField,
   notifySuccess,
 } from '@afhomes/ui';
 
-import { formatMoney } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import styles from './points.module.css';
 import {
@@ -60,6 +63,7 @@ import {
   listReceipts,
   recordReceipt,
 } from './points-services';
+import { earningKeys } from './queryKeys';
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   verified: 'success',
@@ -70,7 +74,7 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
 
 export function PurchasePaymentsPage() {
   const purchases = useQuery({
-    queryKey: ['earning', 'finance', 'purchases'],
+    queryKey: earningKeys.financePurchases,
     queryFn: listFinancePurchases,
     refetchInterval: 15_000,
   });
@@ -113,16 +117,17 @@ export function PurchasePaymentsPage() {
       {purchases.data && purchases.data.length > 0 && (
         <section aria-label="Sales records">
           <label htmlFor="sales-status-filter">Status</label>
-          <select
+          <Select
             id="sales-status-filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-          >
-            <option value="all">All</option>
-            <option value="draft">Pending</option>
-            <option value="completed">Completed</option>
-            <option value="reversed">Reversed</option>
-          </select>
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'draft', label: 'Pending' },
+              { value: 'completed', label: 'Completed' },
+              { value: 'reversed', label: 'Reversed' },
+            ]}
+          />
 
           {rows.length === 0 ? (
             <EmptyState title="No sales with that status" />
@@ -164,20 +169,20 @@ export function PurchasePaymentsPage() {
                       <td>{purchase.createdAt ? purchase.createdAt.slice(0, 10) : '-'}</td>
                       <td>
                         {purchase.lines
-                          .map((l) => `${l.quantity} x ${formatMoney(l.unitAmount)}`)
+                          .map((l) => `${l.quantity} x ${formatMoneyOrDash(l.unitAmount)}`)
                           .join(', ') || '-'}
                       </td>
                       <td>{purchase.customerName ?? '-'}</td>
                       <td>{purchase.createdByName ?? '-'}</td>
                       <td>{purchase.tierSnapshot ?? '-'}</td>
-                      <td>{formatMoney(purchase.grossAmount)}</td>
+                      <td>{formatMoneyOrDash(purchase.grossAmount)}</td>
                       <td>
                         {purchase.tierDiscountAmount !== '0.00'
-                          ? `- ${formatMoney(purchase.tierDiscountAmount)}`
+                          ? `- ${formatMoneyOrDash(purchase.tierDiscountAmount)}`
                           : '-'}
                       </td>
-                      <td>{formatMoney(purchase.netAmount)}</td>
-                      <td>{formatMoney(purchase.verifiedTotal)}</td>
+                      <td>{formatMoneyOrDash(purchase.netAmount)}</td>
+                      <td>{formatMoneyOrDash(purchase.verifiedTotal)}</td>
                       <td>
                         <StatusChip
                           tone={
@@ -241,19 +246,19 @@ function PurchasePaymentRow({
   // been received, and leaving a stale figure on screen is how a purchase gets
   // marked settled when no cash arrived.
   const summary = useQuery({
-    queryKey: ['earning', 'purchase', purchaseId, 'summary'],
+    queryKey: earningKeys.purchaseSummary(purchaseId),
     queryFn: () => getPurchaseSummary(purchaseId),
   });
   const receipts = useQuery({
-    queryKey: ['earning', 'purchase', purchaseId, 'receipts'],
+    queryKey: earningKeys.purchaseReceipts(purchaseId),
     queryFn: () => listReceipts(purchaseId),
   });
 
   const refresh = () => {
-    void client.invalidateQueries({ queryKey: ['earning', 'purchase', purchaseId] });
-    void client.invalidateQueries({ queryKey: ['earning', 'purchases'] });
-    void client.invalidateQueries({ queryKey: ['earning', 'finance', 'purchases'] });
-    void client.invalidateQueries({ queryKey: ['earning', 'settlement'] });
+    void client.invalidateQueries({ queryKey: earningKeys.purchase(purchaseId) });
+    void client.invalidateQueries({ queryKey: earningKeys.purchasesScope });
+    void client.invalidateQueries({ queryKey: earningKeys.financePurchases });
+    void client.invalidateQueries({ queryKey: earningKeys.settlementScope });
   };
 
   /**
@@ -265,14 +270,14 @@ function PurchasePaymentRow({
    * actually decides it, and the disagreement would always favour settling.
    */
   const settlement = useQuery({
-    queryKey: ['earning', 'settlement', purchaseId],
+    queryKey: earningKeys.settlement(purchaseId),
     queryFn: () => getSettlement(purchaseId),
   });
 
   return (
     <section aria-label={`Receipts for ${purchaseNumber}`}>
       <h2>{purchaseNumber}</h2>
-      <p className={styles.hint}>Amount due {formatMoney(netAmount)}</p>
+      <p className={styles.hint}>Amount due {formatMoneyOrDash(netAmount)}</p>
 
       {/* The single settlement answer, so Finance and the seller are never
           looking at different versions of the truth. */}
@@ -283,7 +288,7 @@ function PurchasePaymentRow({
               tone={settlement.data.status === 'completed' ? 'success' : 'warning'}
               label={settlement.data.status}
             />{' '}
-            Outstanding {formatMoney(settlement.data.remainingAmount)}
+            Outstanding {formatMoneyOrDash(settlement.data.remainingAmount)}
             {settlement.data.pendingReceipts > 0 &&
               ` - ${settlement.data.pendingReceipts} receipt(s) awaiting verification`}
             {settlement.data.rejectedReceipts > 0 &&
@@ -294,8 +299,8 @@ function PurchasePaymentRow({
             {settlement.data.claimable
               ? 'claimable'
               : (settlement.data.claimStatus ?? 'not issued yet')}
-            . Verified receipts {formatMoney(settlement.data.verifiedTotal)} of{' '}
-            {formatMoney(settlement.data.netAmount)} due.
+            . Verified receipts {formatMoneyOrDash(settlement.data.verifiedTotal)} of{' '}
+            {formatMoneyOrDash(settlement.data.netAmount)} due.
           </p>
           <Button
             variant="secondary"
@@ -330,13 +335,13 @@ function PurchasePaymentRow({
                 figure is how a discount gets mistaken for cash. */}
             <tr>
               <th scope="row">Gross service value</th>
-              <td>{formatMoney(summary.data.grossAmount)}</td>
+              <td>{formatMoneyOrDash(summary.data.grossAmount)}</td>
             </tr>
             <tr>
               <th scope="row">VIP tier discount</th>
               <td>
                 {summary.data.tierDiscountAmount && summary.data.tierDiscountAmount !== '0.00'
-                  ? `- ${formatMoney(summary.data.tierDiscountAmount)}`
+                  ? `- ${formatMoneyOrDash(summary.data.tierDiscountAmount)}`
                   : 'None'}
               </td>
             </tr>
@@ -344,22 +349,22 @@ function PurchasePaymentRow({
               <th scope="row">Points discount</th>
               <td>
                 {summary.data.pointsDiscountAmount !== '0.00'
-                  ? `- ${formatMoney(summary.data.pointsDiscountAmount)}`
+                  ? `- ${formatMoneyOrDash(summary.data.pointsDiscountAmount)}`
                   : 'None'}
               </td>
             </tr>
             <tr>
               <th scope="row">Amount due</th>
-              <td>{formatMoney(summary.data.netAmount)}</td>
+              <td>{formatMoneyOrDash(summary.data.netAmount)}</td>
             </tr>
             <tr>
               <th scope="row">Verified received</th>
-              <td>{formatMoney(summary.data.verifiedTotal)}</td>
+              <td>{formatMoneyOrDash(summary.data.verifiedTotal)}</td>
             </tr>
             <tr>
               <th scope="row">Still due</th>
               <td>
-                {formatMoney(summary.data.remainingBalance)}{' '}
+                {formatMoneyOrDash(summary.data.remainingBalance)}{' '}
                 <StatusChip
                   tone={summary.data.fullyPaid ? 'success' : 'warning'}
                   label={summary.data.fullyPaid ? 'Settled' : 'Outstanding'}
@@ -403,7 +408,7 @@ function PurchasePaymentRow({
               {receipts.data.map((receipt) => (
                 <tr key={receipt.id}>
                   <td>{receipt.paymentNumber}</td>
-                  <td>{formatMoney(receipt.amount)}</td>
+                  <td>{formatMoneyOrDash(receipt.amount)}</td>
                   <td>{receipt.method}</td>
                   <td>
                     <StatusChip
@@ -463,7 +468,7 @@ function VerifyActions({ paymentId, onDone }: { paymentId: string; onDone: () =>
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const decide = useMutation({
+  const decide = useBusinessMutation({
     mutationFn: (input: { decision: 'verified' | 'rejected'; rejectionReason: string | null }) =>
       decideReceipt(paymentId, input),
     onSuccess: (result) => {
@@ -474,7 +479,7 @@ function VerifyActions({ paymentId, onDone }: { paymentId: string; onDone: () =>
         title: result.status === 'verified' ? 'Payment verified' : 'Payment rejected',
         message:
           result.status === 'verified'
-            ? `${formatMoney(result.verifiedTotal)} is now verified against this purchase.`
+            ? `${formatMoneyOrDash(result.verifiedTotal)} is now verified against this purchase.`
             : 'This payment no longer counts as received money.',
       });
       onDone();
@@ -489,11 +494,13 @@ function VerifyActions({ paymentId, onDone }: { paymentId: string; onDone: () =>
   if (rejecting) {
     return (
       <div className={styles.inlineActions} aria-busy={decide.isPending}>
-        <label htmlFor={`reason-${paymentId}`}>Reason for rejecting</label>
-        <input
+        <TextField
           id={`reason-${paymentId}`}
+          name="rejectReason"
+          label="Reason for rejecting"
+          optional
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={setReason}
           disabled={decide.isPending}
         />
         <Button
@@ -572,7 +579,7 @@ function RecordDialog({
   const [reference, setReference] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: () =>
       recordReceipt(purchaseId, {
         amount,
@@ -614,33 +621,38 @@ function RecordDialog({
       }
     >
       <div aria-busy={save.isPending}>
-        <label htmlFor={`amount-${purchaseId}`}>Amount</label>
-        <input
+        <TextField
           id={`amount-${purchaseId}`}
+          name="amount"
+          label="Amount"
+          optional
           inputMode="decimal"
           value={amount}
-          onChange={(event) => setAmount(event.target.value)}
+          onChange={setAmount}
           disabled={save.isPending}
         />
 
         <label htmlFor={`method-${purchaseId}`}>Method</label>
-        <select
+        <Select
           id={`method-${purchaseId}`}
           value={method}
           onChange={(event) => setMethod(event.target.value)}
           disabled={save.isPending}
-        >
-          <option value="cash">Cash</option>
-          <option value="bank_transfer">Bank transfer</option>
-          <option value="card">Card</option>
-          <option value="cheque">Cheque</option>
-        </select>
+          options={[
+            { value: 'cash', label: 'Cash' },
+            { value: 'bank_transfer', label: 'Bank transfer' },
+            { value: 'card', label: 'Card' },
+            { value: 'cheque', label: 'Cheque' },
+          ]}
+        />
 
-        <label htmlFor={`reference-${purchaseId}`}>Reference (optional)</label>
-        <input
+        <TextField
           id={`reference-${purchaseId}`}
+          name="reference"
+          label="Reference"
+          optional
           value={reference}
-          onChange={(event) => setReference(event.target.value)}
+          onChange={setReference}
           disabled={save.isPending}
         />
 

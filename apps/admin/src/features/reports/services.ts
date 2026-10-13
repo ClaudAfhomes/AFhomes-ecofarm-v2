@@ -15,7 +15,7 @@ import {
 } from '@afhomes/contracts';
 import { protectedRequest as request } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
-import { formatMoney, formatPoints } from '../business/format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 
 export type ReportFilters = {
   from?: string;
@@ -77,7 +77,7 @@ export function formatCell(key: string, value: unknown): string {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'number') {
     if (/points|spent|balance|count|qty|descendants|downline|sales|entries/i.test(key)) {
-      return formatPoints(value);
+      return formatCountOrDash(value);
     }
     return String(value);
   }
@@ -91,7 +91,7 @@ export function formatCell(key: string, value: unknown): string {
     /^(0|[1-9][0-9]*)\.\d{2}$/.test(value) &&
     /price|paid|remaining|value|amount|total|fee|down|monthly/i.test(key)
   ) {
-    return formatMoney(value);
+    return formatMoneyOrDash(value);
   }
   if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return formatDateTime(value);
   return value;

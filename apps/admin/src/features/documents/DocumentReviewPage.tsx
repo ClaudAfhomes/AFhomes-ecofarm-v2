@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useParams } from 'react-router';
 import {
   Button,
   ErrorState,
   PageHeader,
   StatusChip,
+  TextAreaField,
+  TextField,
   notifySuccess,
   notifyError,
 } from '@afhomes/ui';
@@ -39,7 +42,7 @@ export function DocumentReviewPage() {
     void client.invalidateQueries({ queryKey: ['documents'] });
   };
 
-  const ocr = useMutation({
+  const ocr = useBusinessMutation({
     mutationFn: () => runDocumentOcr(id, true),
     onSuccess: (next) => {
       client.setQueryData(['documents', id], next);
@@ -59,7 +62,7 @@ export function DocumentReviewPage() {
     staleTime: 45_000,
   });
 
-  const decide = useMutation({
+  const decide = useBusinessMutation({
     mutationFn: (decision: 'confirmed' | 'rejected') => {
       const payload = {
         decision,
@@ -248,15 +251,15 @@ export function DocumentReviewPage() {
             <p>No suggested fields — add the values manually:</p>
           ) : null}
           <WorkingCopyFields working={working} onChange={setDraft} />
-          <label>
-            Reviewer notes (optional)
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              style={{ width: '100%' }}
-            />
-          </label>
+          <TextAreaField
+            id="document-reviewer-notes"
+            name="reviewerNotes"
+            label="Reviewer notes"
+            optional
+            value={notes}
+            onChange={setNotes}
+            rows={2}
+          />
           <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
             <Button
               onClick={() => {
@@ -317,20 +320,26 @@ function WorkingCopyFields({
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       {Object.entries(working).map(([key, value]) => (
-        <label key={key} style={{ display: 'grid', gap: 4 }}>
-          {key} (editable copy — the suggestion above is unchanged)
-          <input value={value} onChange={(e) => onChange({ ...working, [key]: e.target.value })} />
-        </label>
+        <TextField
+          key={key}
+          id={`working-copy-${key}`}
+          name={key}
+          label={`${key} (editable copy — the suggestion above is unchanged)`}
+          optional
+          value={value}
+          onChange={(next) => onChange({ ...working, [key]: next })}
+        />
       ))}
       <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
-        <label>
-          Add a field
-          <input
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
-            placeholder="middleName"
-          />
-        </label>
+        <TextField
+          id="working-copy-new-key"
+          name="newKey"
+          label="Add a field"
+          optional
+          value={newKey}
+          onChange={setNewKey}
+          placeholder="middleName"
+        />
         <Button
           variant="secondary"
           onClick={() => {

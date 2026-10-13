@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
-import { formatMoney } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import styles from './points.module.css';
 import {
   listClaimsPage,
@@ -10,12 +10,13 @@ import {
   type PurchaseRow,
 } from './points-services';
 import { useSession } from '../../lib/session';
+import { earningKeys } from './queryKeys';
 
 export function SalesRecordsPage() {
   const [purchasePage, setPurchasePage] = useState(0);
   const [claimPage, setClaimPage] = useState(0);
   const purchases = useQuery({
-    queryKey: ['earning', 'purchases', purchasePage],
+    queryKey: earningKeys.purchases(purchasePage),
     queryFn: () => listPurchasesPage(purchasePage),
     refetchInterval: 15000,
   });
@@ -24,7 +25,7 @@ export function SalesRecordsPage() {
       (p) => p.moduleKey === 'operations.redemption' && p.canView,
     ) === true;
   const claims = useQuery({
-    queryKey: ['earning', 'claims', claimPage],
+    queryKey: earningKeys.claims(claimPage),
     queryFn: () => listClaimsPage(claimPage),
     refetchInterval: 15000,
     enabled: mayViewClaims,
@@ -156,11 +157,11 @@ function PointsHistory({ purchases, claims }: { purchases: PurchaseRow[]; claims
                         label={row.status}
                       />
                     </td>
-                    <td>{formatMoney(row.grossAmount)}</td>
-                    <td>{formatMoney(row.tierDiscountAmount ?? '0.00')}</td>
-                    <td>{formatMoney(row.pointsDiscountAmount)}</td>
-                    <td>{formatMoney(row.recordedTotal)}</td>
-                    <td>{formatMoney(row.verifiedTotal)}</td>
+                    <td>{formatMoneyOrDash(row.grossAmount)}</td>
+                    <td>{formatMoneyOrDash(row.tierDiscountAmount ?? '0.00')}</td>
+                    <td>{formatMoneyOrDash(row.pointsDiscountAmount)}</td>
+                    <td>{formatMoneyOrDash(row.recordedTotal)}</td>
+                    <td>{formatMoneyOrDash(row.verifiedTotal)}</td>
                     <td>
                       {row.customerName ?? row.customerId}
                       <br />
@@ -171,7 +172,7 @@ function PointsHistory({ purchases, claims }: { purchases: PurchaseRow[]; claims
                         .map((line) => `${line.serviceName ?? 'Service'} x ${line.quantity}`)
                         .join(', ')}
                     </td>
-                    <td>{formatMoney(row.netAmount)}</td>
+                    <td>{formatMoneyOrDash(row.netAmount)}</td>
                     <td>
                       {row.completedAt
                         ? new Date(row.completedAt).toLocaleDateString('en-PH')

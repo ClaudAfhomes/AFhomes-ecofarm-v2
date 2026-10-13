@@ -1,12 +1,17 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { formatMoneyOrDash } from '@afhomes/shared';
 import {
   Button,
   Dialog,
   EmptyState,
   ErrorState,
   PageHeader,
+  DateField,
+  Select,
   Skeleton,
+  TextField,
   notifySuccess,
   notifyConfirm,
 } from '@afhomes/ui';
@@ -25,6 +30,7 @@ import {
   createRedemptionRule,
   updateRedemptionRule,
 } from './points-services';
+import { earningKeys } from './queryKeys';
 
 /** The three VIP tiers. Narrow, not `string`, so a typo cannot reach the API. */
 type Tier = 'BRONZE' | 'SILVER' | 'GOLD';
@@ -74,18 +80,18 @@ export function PointsRulesPage() {
   const mayDelete =
     useSession().user?.afHomesPermissions?.find((p) => p.moduleKey === 'operations.catalog')
       ?.canDelete === true;
-  const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
-  const rules = useQuery({ queryKey: ['earning', 'rules'], queryFn: listEarningRules });
+  const services = useQuery({ queryKey: earningKeys.services, queryFn: listServices });
+  const rules = useQuery({ queryKey: earningKeys.rules, queryFn: listEarningRules });
   const tierDiscounts = useQuery({
-    queryKey: ['earning', 'tier-discounts'],
+    queryKey: earningKeys.tierDiscounts,
     queryFn: listTierDiscounts,
   });
   const promotions = useQuery({
-    queryKey: ['earning', 'redemption-rules'],
+    queryKey: earningKeys.redemptionRules,
     queryFn: listRedemptionRules,
   });
 
-  const invalidate = () => client.invalidateQueries({ queryKey: ['earning'] });
+  const invalidate = () => client.invalidateQueries({ queryKey: earningKeys.all });
   const serviceName = (id: string) =>
     (services.data ?? []).find((service) => service.id === id)?.name ?? 'Unknown service';
 
@@ -316,7 +322,7 @@ export function PointsRulesPage() {
                 {promotions.data.map((rule) => (
                   <tr key={rule.id}>
                     <td>{serviceName(rule.serviceId)}</td>
-                    <td>₱{rule.pesoValuePerPoint} / point</td>
+                    <td>{formatMoneyOrDash(rule.pesoValuePerPoint)} / point</td>
                     <td>{rule.eligibleTiers.join(', ')}</td>
                     <td>
                       {rule.minPoints}
@@ -379,7 +385,7 @@ function PolicyStatusButton({
   active: boolean;
   onSaved: () => void;
 }) {
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: () => setServicePolicyActive(kind, id, !active),
     retry: false,
     onSuccess: () => {
@@ -428,7 +434,7 @@ function NewTierDiscountForm({
   const [end, setEnd] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createTierDiscount({
@@ -484,15 +490,16 @@ function NewTierDiscountForm({
       </select>
 
       <label htmlFor="tier-tier">VIP tier</label>
-      <select
+      <Select
         id="tier-tier"
         value={tier}
         onChange={(e) => setTier(e.target.value as 'BRONZE' | 'SILVER' | 'GOLD')}
-      >
-        <option value="BRONZE">Bronze</option>
-        <option value="SILVER">Silver</option>
-        <option value="GOLD">Gold</option>
-      </select>
+        options={[
+          { value: 'BRONZE', label: 'Bronze' },
+          { value: 'SILVER', label: 'Silver' },
+          { value: 'GOLD', label: 'Gold' },
+        ]}
+      />
 
       <label htmlFor="tier-rate">Discount percent</label>
       <input
@@ -505,11 +512,16 @@ function NewTierDiscountForm({
         onChange={(e) => setRate(e.target.value)}
       />
 
-      <label htmlFor="tier-start">Effective from</label>
-      <input id="tier-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+      <DateField
+        id="tier-start"
+        name="tierStart"
+        label="Effective from"
+        optional
+        value={start}
+        onChange={setStart}
+      />
 
-      <label htmlFor="tier-end">Effective to</label>
-      <input id="tier-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <DateField id="tier-end" name="tierEnd" label="Effective to" optional value={end} onChange={setEnd} />
 
       <Button
         disabled={disabled || serviceIds.length === 0 || !rateValid || !datesOrdered}
@@ -549,7 +561,7 @@ function NewRuleForm({
   const [maximum, setMaximum] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createEarningRule({
@@ -636,19 +648,21 @@ function NewRuleForm({
       <p>
         Every award counts toward that tier&apos;s annual limit. There is no exemption from the cap.
       </p>
-      <label htmlFor="rule-start">Effective from</label>
-      <input
+      <DateField
         id="rule-start"
-        type="date"
+        name="ruleStart"
+        label="Effective from"
+        optional
         value={start}
-        onChange={(event) => setStart(event.target.value)}
+        onChange={setStart}
       />
-      <label htmlFor="rule-end">Effective to (exclusive)</label>
-      <input
+      <DateField
         id="rule-end"
-        type="date"
+        name="ruleEnd"
+        label="Effective to (exclusive)"
+        optional
         value={end}
-        onChange={(event) => setEnd(event.target.value)}
+        onChange={setEnd}
       />
       <label htmlFor="rule-minimum">Minimum quantity</label>
       <input
@@ -708,7 +722,7 @@ function PromotionStatusButton({
   active: boolean;
   onSaved: () => void;
 }) {
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: () => updateRedemptionRule(id, { isActive: !active }),
     retry: false,
     onSuccess: () => {
@@ -760,7 +774,7 @@ function NewPromotionForm({
   const [stacking, setStacking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createRedemptionRule({
@@ -805,16 +819,17 @@ function NewPromotionForm({
         never expires, names nothing, or cannot be reviewed cannot be created.
       </p>
       <label htmlFor="promo-kind">Redemption rule type</label>
-      <select
+      <Select
         id="promo-kind"
         value={ruleKind}
         onChange={(event) =>
           setRuleKind(event.target.value === 'accommodation' ? 'accommodation' : 'promotion')
         }
-      >
-        <option value="promotion">Service spending promotion</option>
-        <option value="accommodation">Accommodation conversion rule</option>
-      </select>
+        options={[
+          { value: 'promotion', label: 'Service spending promotion' },
+          { value: 'accommodation', label: 'Accommodation conversion rule' },
+        ]}
+      />
       <label htmlFor="promo-service">Service</label>
       <select
         id="promo-service"
@@ -840,12 +855,14 @@ function NewPromotionForm({
           ))}
       </select>
 
-      <label htmlFor="promo-rate">Pesos per point (for example 1, or 0.5)</label>
-      <input
+      <TextField
         id="promo-rate"
+        name="promoRate"
+        label="Pesos per point (for example 1, or 0.5)"
+        optional
         inputMode="decimal"
         value={rate}
-        onChange={(e) => setRate(e.target.value)}
+        onChange={setRate}
       />
 
       <fieldset>
@@ -880,25 +897,28 @@ function NewPromotionForm({
         value={maximum}
         onChange={(event) => setMaximum(event.target.value)}
       />
-      <label htmlFor="promo-start">Effective from</label>
-      <input
+      <DateField
         id="promo-start"
-        type="date"
+        name="promoStart"
+        label="Effective from"
+        optional
         value={start}
-        onChange={(event) => setStart(event.target.value)}
+        onChange={setStart}
       />
-      <label htmlFor="promo-end">Effective to (exclusive)</label>
-      <input
+      <DateField
         id="promo-end"
-        type="date"
+        name="promoEnd"
+        label="Effective to (exclusive)"
+        optional
         value={end}
-        onChange={(event) => setEnd(event.target.value)}
+        onChange={setEnd}
       />
-      <label htmlFor="promo-reference">Promotion reference (required)</label>
-      <input
+      <TextField
         id="promo-reference"
+        name="promoReference"
+        label="Promotion reference"
         value={reference}
-        onChange={(event) => setReference(event.target.value)}
+        onChange={setReference}
         maxLength={200}
         placeholder="e.g. TEP-VALENTINES-2026"
       />
@@ -961,7 +981,7 @@ function PolicyManagement({
 }) {
   const [editing, setEditing] = useState(false);
   const [fields, setFields] = useState(values);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: (patch: Record<string, unknown> | undefined) =>
       manageServicePolicy(kind, id, patch),
     retry: false,

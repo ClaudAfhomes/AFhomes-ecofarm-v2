@@ -1,40 +1,224 @@
-import { CustomerLookupPage } from '../features/memberships/CustomerLookupPage';
-import { MemberLookupPage } from '../features/memberships/MemberLookupPage';
+import { lazy } from 'react';
+
+// Route pages load on demand: one chunk per feature module.
+// Auth screens, layout, and guards stay eager for first paint.
+const CustomerLookupPage = lazy(() =>
+  import('../features/memberships/CustomerLookupPage').then((m) => ({
+    default: m.CustomerLookupPage,
+  })),
+);
+const MemberLookupPage = lazy(() =>
+  import('../features/memberships/MemberLookupPage').then((m) => ({ default: m.MemberLookupPage })),
+);
+const AfHomesDashboardPage = lazy(() =>
+  import('../features/afhomes/AfHomesDashboardPage').then((m) => ({
+    default: m.AfHomesDashboardPage,
+  })),
+);
+const AfHomesDepartmentsPage = lazy(() =>
+  import('../features/afhomes/AfHomesDepartmentsPage').then((m) => ({
+    default: m.AfHomesDepartmentsPage,
+  })),
+);
+const AfHomesRoleDetailPage = lazy(() =>
+  import('../features/afhomes/AfHomesRoleDetailPage').then((m) => ({
+    default: m.AfHomesRoleDetailPage,
+  })),
+);
+const AfHomesRolesPage = lazy(() =>
+  import('../features/afhomes/AfHomesRolesPage').then((m) => ({ default: m.AfHomesRolesPage })),
+);
+const AfHomesStaffDetailPage = lazy(() =>
+  import('../features/afhomes/AfHomesStaffDetailPage').then((m) => ({
+    default: m.AfHomesStaffDetailPage,
+  })),
+);
+const AfHomesStaffPage = lazy(() =>
+  import('../features/afhomes/AfHomesStaffPage').then((m) => ({ default: m.AfHomesStaffPage })),
+);
+const BusinessActivationQueuePage = lazy(() =>
+  import('../features/business/BusinessActivationQueuePage').then((m) => ({
+    default: m.BusinessActivationQueuePage,
+  })),
+);
+const BusinessCommissionsPage = lazy(() =>
+  import('../features/business/BusinessCommissionsPage').then((m) => ({
+    default: m.BusinessCommissionsPage,
+  })),
+);
+const CommissionSettingsPage = lazy(() =>
+  import('../features/business/CommissionSettingsPage').then((m) => ({
+    default: m.CommissionSettingsPage,
+  })),
+);
+const BusinessCustomersPage = lazy(() =>
+  import('../features/business/BusinessCustomersPage').then((m) => ({
+    default: m.BusinessCustomersPage,
+  })),
+);
+const CustomerDetailPage = lazy(() =>
+  import('../features/business/CustomerDetailPage').then((m) => ({
+    default: m.CustomerDetailPage,
+  })),
+);
+const CustomerImportExportPage = lazy(() =>
+  import('../features/business/CustomerImportExportPage').then((m) => ({
+    default: m.CustomerImportExportPage,
+  })),
+);
+const BusinessFinanceQueuePage = lazy(() =>
+  import('../features/business/BusinessFinanceQueuePage').then((m) => ({
+    default: m.BusinessFinanceQueuePage,
+  })),
+);
+const BusinessPointsPage = lazy(() =>
+  import('../features/business/BusinessPointsPage').then((m) => ({
+    default: m.BusinessPointsPage,
+  })),
+);
+const UseVipPointsPage = lazy(() =>
+  import('../features/business/UseVipPointsPage').then((m) => ({ default: m.UseVipPointsPage })),
+);
+const PointsRulesPage = lazy(() =>
+  import('../features/business/PointsRulesPage').then((m) => ({ default: m.PointsRulesPage })),
+);
+const SalesRecordsPage = lazy(() =>
+  import('../features/business/SalesRecordsPage').then((m) => ({ default: m.SalesRecordsPage })),
+);
+const PurchasePaymentsPage = lazy(() =>
+  import('../features/business/PurchasePaymentsPage').then((m) => ({
+    default: m.PurchasePaymentsPage,
+  })),
+);
+const BusinessProductsPage = lazy(() =>
+  import('../features/business/BusinessProductsPage').then((m) => ({
+    default: m.BusinessProductsPage,
+  })),
+);
+const PaymentSchemeGuidePage = lazy(() =>
+  import('../features/business/PaymentSchemeGuidePage').then((m) => ({
+    default: m.PaymentSchemeGuidePage,
+  })),
+);
+const CustomerApplicationEditorPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.CustomerApplicationEditorPage,
+  })),
+);
+const CustomerApplicationsPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.CustomerApplicationsPage,
+  })),
+);
+const ReservationAgreementEditorPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.ReservationAgreementEditorPage,
+  })),
+);
+const ReservationAgreementsPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.ReservationAgreementsPage,
+  })),
+);
+const LegacyRedemptionHistoryPage = lazy(() =>
+  import('../features/redemption/LegacyRedemptionHistoryPage').then((m) => ({
+    default: m.LegacyRedemptionHistoryPage,
+  })),
+);
+const RedemptionHistoryPage = lazy(() =>
+  import('../features/redemption/RedemptionHistoryPage').then((m) => ({
+    default: m.RedemptionHistoryPage,
+  })),
+);
+const RedemptionWorkflowPage = lazy(() =>
+  import('../features/redemption/RedemptionWorkflowPage').then((m) => ({
+    default: m.RedemptionWorkflowPage,
+  })),
+);
+const MyAccountPage = lazy(() =>
+  import('../features/account/MyAccountPage').then((m) => ({ default: m.MyAccountPage })),
+);
+const CmsDocumentPage = lazy(() =>
+  import('../features/cms/CmsDocumentPage').then((m) => ({ default: m.CmsDocumentPage })),
+);
+const CmsHistoryPage = lazy(() =>
+  import('../features/cms/CmsHistoryPage').then((m) => ({ default: m.CmsHistoryPage })),
+);
+const CmsMediaPage = lazy(() =>
+  import('../features/cms/CmsMediaPage').then((m) => ({ default: m.CmsMediaPage })),
+);
+const CmsPagesPage = lazy(() =>
+  import('../features/cms/CmsPagesPage').then((m) => ({ default: m.CmsPagesPage })),
+);
+const GenealogyPage = lazy(() =>
+  import('../features/genealogy/GenealogyPage').then((m) => ({ default: m.GenealogyPage })),
+);
+const GenealogyDetailsPage = lazy(() =>
+  import('../features/genealogy/GenealogyDetailsPage').then((m) => ({
+    default: m.GenealogyDetailsPage,
+  })),
+);
+const DocumentsPage = lazy(() =>
+  import('../features/documents/DocumentsPage').then((m) => ({ default: m.DocumentsPage })),
+);
+const DocumentReviewPage = lazy(() =>
+  import('../features/documents/DocumentReviewPage').then((m) => ({
+    default: m.DocumentReviewPage,
+  })),
+);
+const MembershipCardPrintPage = lazy(() =>
+  import('../features/memberships/MembershipCardPrintPage').then((m) => ({
+    default: m.MembershipCardPrintPage,
+  })),
+);
+const MembershipDetailPage = lazy(() =>
+  import('../features/memberships/MembershipDetailPage').then((m) => ({
+    default: m.MembershipDetailPage,
+  })),
+);
+const MembershipsPage = lazy(() =>
+  import('../features/memberships/MembershipsPage').then((m) => ({ default: m.MembershipsPage })),
+);
+const OstApplicationDetailPage = lazy(() =>
+  import('../features/ost/OstApplicationDetailPage').then((m) => ({
+    default: m.OstApplicationDetailPage,
+  })),
+);
+const OstApplicationsPage = lazy(() =>
+  import('../features/ost/OstApplicationsPage').then((m) => ({ default: m.OstApplicationsPage })),
+);
+const OstMembersPage = lazy(() =>
+  import('../features/ost/OstMembersPage').then((m) => ({ default: m.OstMembersPage })),
+);
+const OstManualRegistrationPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({
+    default: m.OstManualRegistrationPage,
+  })),
+);
+const OstAccreditationHistoryPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({
+    default: m.OstAccreditationHistoryPage,
+  })),
+);
+const OstImportExportPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({ default: m.OstImportExportPage })),
+);
+const OstReferralCodesPage = lazy(() =>
+  import('../features/ost/OstReferralCodesPage').then((m) => ({ default: m.OstReferralCodesPage })),
+);
+const AuditPage = lazy(() =>
+  import('../features/reports/AuditPage').then((m) => ({ default: m.AuditPage })),
+);
+const ReportsPage = lazy(() =>
+  import('../features/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })),
+);
+
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
 import { NotFound } from '@afhomes/ui';
-import { AfHomesDashboardPage } from '../features/afhomes/AfHomesDashboardPage';
-import { AfHomesDepartmentsPage } from '../features/afhomes/AfHomesDepartmentsPage';
-import { AfHomesRoleDetailPage } from '../features/afhomes/AfHomesRoleDetailPage';
-import { AfHomesRolesPage } from '../features/afhomes/AfHomesRolesPage';
-import { AfHomesStaffDetailPage } from '../features/afhomes/AfHomesStaffDetailPage';
-import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
-import { BusinessActivationQueuePage } from '../features/business/BusinessActivationQueuePage';
-import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
-import { CommissionSettingsPage } from '../features/business/CommissionSettingsPage';
-import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
-import { CustomerDetailPage } from '../features/business/CustomerDetailPage';
-import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
-import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
-import { BusinessPointsPage } from '../features/business/BusinessPointsPage';
-import { UseVipPointsPage } from '../features/business/UseVipPointsPage';
-import { PointsRulesPage } from '../features/business/PointsRulesPage';
-import { SalesRecordsPage } from '../features/business/SalesRecordsPage';
-import { PurchasePaymentsPage } from '../features/business/PurchasePaymentsPage';
-import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
-import {
-  CustomerApplicationEditorPage,
-  CustomerApplicationsPage,
-  ReservationAgreementEditorPage,
-  ReservationAgreementsPage,
-} from '../features/business/OfficialFormsPages';
-import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
-import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
-import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
 import {
   AdminForgotPasswordPage,
   StaffForgotPasswordPage,
@@ -46,29 +230,6 @@ import {
   AdminResetPasswordPage,
   StaffResetPasswordPage,
 } from '../features/auth/AdminResetPasswordPage';
-import { MyAccountPage } from '../features/account/MyAccountPage';
-import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
-import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
-import { CmsMediaPage } from '../features/cms/CmsMediaPage';
-import { CmsPagesPage } from '../features/cms/CmsPagesPage';
-import { GenealogyPage } from '../features/genealogy/GenealogyPage';
-import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
-import { DocumentsPage } from '../features/documents/DocumentsPage';
-import { DocumentReviewPage } from '../features/documents/DocumentReviewPage';
-import { MembershipCardPrintPage } from '../features/memberships/MembershipCardPrintPage';
-import { MembershipDetailPage } from '../features/memberships/MembershipDetailPage';
-import { MembershipsPage } from '../features/memberships/MembershipsPage';
-import { OstApplicationDetailPage } from '../features/ost/OstApplicationDetailPage';
-import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
-import { OstMembersPage } from '../features/ost/OstMembersPage';
-import {
-  OstManualRegistrationPage,
-  OstAccreditationHistoryPage,
-  OstImportExportPage,
-} from '../features/ost/OstAccreditationPages';
-import { OstReferralCodesPage } from '../features/ost/OstReferralCodesPage';
-import { AuditPage } from '../features/reports/AuditPage';
-import { ReportsPage } from '../features/reports/ReportsPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';

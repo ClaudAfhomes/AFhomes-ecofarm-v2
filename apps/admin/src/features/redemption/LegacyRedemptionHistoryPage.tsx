@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -104,17 +105,21 @@ export function LegacyRedemptionHistoryPage() {
                   ...(items.data ?? []).map((item) => ({ value: item.id, label: item.name })),
                 ]}
               />
-              <input
-                aria-label="From"
-                type="date"
+              <DateField
+                id="legacy-from"
+                name="from"
+                label="From"
+                optional
                 value={from}
-                onChange={(event) => setFrom(event.target.value)}
+                onChange={setFrom}
               />
-              <input
-                aria-label="To"
-                type="date"
+              <DateField
+                id="legacy-to"
+                name="to"
+                label="To"
+                optional
                 value={to}
-                onChange={(event) => setTo(event.target.value)}
+                onChange={setTo}
               />
             </>
           }

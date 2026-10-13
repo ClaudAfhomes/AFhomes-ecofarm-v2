@@ -11,7 +11,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+<<<<<<< Updated upstream
 import { addMoney, formatCount, formatMoney } from '@afhomes/shared';
+=======
+import { addMoney, formatCompactMoney, formatMoney } from '@afhomes/shared';
+>>>>>>> Stashed changes
 import type { SalesTrendGranularity } from '@afhomes/contracts';
 import { EmptyState, ErrorState, Icon, Skeleton } from '@afhomes/ui';
 
@@ -43,12 +47,10 @@ export function periodLabel(key: string): string {
 
 /**
  * Axis abbreviation - display geometry only; money math stays string-based.
- * Same treatment as the AF Homes sales-trend axis.
+ * Centralized in `@afhomes/shared` so every chart abbreviates identically.
  */
 function abbreviateMoney(value: number): string {
-  if (Math.abs(value) >= 1_000_000) return `₱${(value / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(value) >= 1_000) return `₱${Math.round(value / 1_000)}K`;
-  return `₱${value}`;
+  return formatCompactMoney(value);
 }
 
 type Metric = 'value' | 'count';
@@ -442,6 +444,7 @@ export function AfHomesTrendChart() {
     </section>
   );
 }
+<<<<<<< Updated upstream
 
 export function TrendChartSkeleton() {
   return (
@@ -479,3 +482,5 @@ export function TrendChartSkeleton() {
     </section>
   );
 }
+=======
+>>>>>>> Stashed changes

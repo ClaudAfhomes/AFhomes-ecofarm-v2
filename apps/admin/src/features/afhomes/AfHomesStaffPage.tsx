@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -20,6 +21,7 @@ import {
 } from '@afhomes/ui';
 import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
+import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
@@ -109,7 +111,7 @@ export function AfHomesStaffPage() {
     temporaryPassword.length >= 8 &&
     temporaryPassword === confirmPassword;
 
-  const create = useMutation({
+  const create = useBusinessMutation({
     mutationFn: () =>
       createAfHomesStaff({
         fullName: fullName.trim(),
@@ -128,14 +130,14 @@ export function AfHomesStaffPage() {
       });
     },
   });
-  const update = useMutation({
+  const update = useBusinessMutation({
     mutationFn: () => updateAfHomesStaff(editing!.id, { restrictions }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
       setEditing(null);
     },
   });
-  const changeAccount = useMutation({
+  const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteAfHomesStaff(accountAction.staff.id);
       else await deactivateAfHomesStaff(accountAction!.staff.id);
@@ -146,7 +148,7 @@ export function AfHomesStaffPage() {
       setConfirmation('');
     },
   });
-  const purgeTestAccount = useMutation({
+  const purgeTestAccount = useBusinessMutation({
     mutationFn: () => purgeTestAfHomesStaff(purgeTarget!.id),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
@@ -323,9 +325,7 @@ export function AfHomesStaffPage() {
                       <StatusChip label={item.status} tone={statusTone(item.status)} />
                     </td>
                     <td>
-                      <small>
-                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
-                      </small>
+                      <small>{item.createdAt ? formatDate(item.createdAt) : '—'}</small>
                     </td>
                     <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                       <Button size="sm" variant="secondary" onClick={() => openRestrictions(item)}>
@@ -529,14 +529,13 @@ export function AfHomesStaffPage() {
                 : 'This user will no longer be able to access the AF Homes staff system. Historical records will remain.'}
             </p>
             {accountAction?.kind === 'delete' ? (
-              <label>
-                Type DELETE to confirm
-                <input
-                  aria-label="Type DELETE to confirm staff deletion"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </label>
+              <TextField
+                id="staff-delete-confirm"
+                name="deleteConfirm"
+                label="Type DELETE to confirm staff deletion"
+                value={confirmation}
+                onChange={setConfirmation}
+              />
             ) : null}
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>
@@ -562,14 +561,13 @@ export function AfHomesStaffPage() {
               cannot be undone. Real business data is never purged: anything shared or non-test
               blocks the purge instead.
             </p>
-            <label>
-              Type PURGE to confirm
-              <input
-                aria-label="Type PURGE to confirm test account purge"
-                value={purgeConfirmation}
-                onChange={(event) => setPurgeConfirmation(event.target.value)}
-              />
-            </label>
+            <TextField
+              id="staff-purge-confirm"
+              name="purgeConfirm"
+              label="Type PURGE to confirm test account purge"
+              value={purgeConfirmation}
+              onChange={setPurgeConfirmation}
+            />
             {purgeTestAccount.error ? <p role="alert">{purgeTestAccount.error.message}</p> : null}
           </div>
         }

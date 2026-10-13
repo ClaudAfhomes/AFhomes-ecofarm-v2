@@ -1,0 +1,36 @@
+.factsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.reviewSection {
+  margin-top: 24px;
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.noteSpaced {
+  margin-top: 24px;
+}
+
+.outcome {
+  margin-top: 16px;
+}
+
+.documentsSection {
+  margin-top: 32px;
+}
+
+.uploadRow {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.inlineError {
+  color: var(--color-danger);
+}

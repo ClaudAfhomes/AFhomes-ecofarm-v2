@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   DetailCard,
@@ -25,6 +26,7 @@ import {
   type RoleFormInput,
 } from './AfHomesRoleFormDialog';
 import { useSession } from '../../lib/session';
+import { formatDateTime } from '../../lib/format';
 
 export function AfHomesRoleDetailPage() {
   const { user } = useSession();
@@ -43,7 +45,7 @@ export function AfHomesRoleDetailPage() {
     enabled: Boolean(id),
   });
   const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
-  const mutation = useMutation({
+  const mutation = useBusinessMutation({
     mutationFn: (input: RoleFormInput) => updateAfHomesRole(id!, input),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
@@ -166,7 +168,7 @@ export function AfHomesRoleDetailPage() {
             <ul>
               {history.data.map((event) => (
                 <li key={String(event.id)}>
-                  {event.action} · {new Date(event.created_at).toLocaleString()}
+                  {event.action} · {formatDateTime(event.created_at)}
                 </li>
               ))}
             </ul>
