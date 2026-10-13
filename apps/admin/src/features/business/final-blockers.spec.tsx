@@ -272,6 +272,10 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   ).toBeUndefined();
   await user.click(await screen.findByRole('button', { name: 'OK' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  // SweetAlert removes the dialog before its delayed focus restoration completes.
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Create Reservation Agreement' })).toHaveFocus(),
+  );
   // An application-origin payload carries no vipTier by design, so this asserts
   // the stronger, real property: a tier can only ever be a value the schema
   // accepts, and clearing it never emits an empty or invented tier.

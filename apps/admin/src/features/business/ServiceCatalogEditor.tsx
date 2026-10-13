@@ -75,6 +75,7 @@ export function ServiceCatalogEditor({
               <div className={styles.header}>
                 <StatusChip label={service.availability} />
                 <StatusChip label={service.published ? 'Published' : 'Internal'} />
+                {service.isStaycationEligible && <StatusChip label="Points-eligible stay" />}
               </div>
               {permission?.canUpdate && (
                 <Button variant="secondary" onClick={() => setEditing(service)}>
@@ -122,6 +123,9 @@ function ServiceEditor({
   const [replacePhotoId, setReplacePhotoId] = useState('');
   const [price, setPrice] = useState(service?.basePrice ?? '');
   const [active, setActive] = useState(service?.isActive ?? true);
+  const [staycationEligible, setStaycationEligible] = useState(
+    service?.isStaycationEligible ?? false,
+  );
   const [published, setPublished] = useState(service?.published ?? false);
   const [availability, setAvailability] = useState<Service['availability']>(
     service?.availability ?? 'available',
@@ -191,6 +195,7 @@ function ServiceEditor({
         description: description || null,
         basePrice: price,
         isActive: active,
+        isStaycationEligible: staycationEligible,
         published,
         availability,
       });
@@ -395,6 +400,15 @@ function ServiceEditor({
             disabled={busy}
           />
           Active service
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={staycationEligible}
+            onChange={(event) => setStaycationEligible(event.target.checked)}
+            disabled={busy}
+          />
+          Staycation or hotel accommodation — usable with VIP points without a promotion
         </label>
         <label>
           <input

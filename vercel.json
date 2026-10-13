@@ -48,5 +48,8 @@
     { "source": "/compliance", "destination": "/compliance/index.html" },
     { "source": "/contact", "destination": "/contact/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": { "claud/develop": true }
+  }
 }

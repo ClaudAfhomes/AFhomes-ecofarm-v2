@@ -14,7 +14,7 @@ beforeEach(() => {
 describe('points spending retirement', () => {
   it('offers earning claims without member lookup or catalog spending controls', async () => {
     renderWithProviders(<RedemptionWorkflowPage />);
-    await screen.findByRole('heading', { name: 'Redeem Points' });
+    await screen.findByRole('heading', { name: 'Earned Points Claims' });
     expect(screen.queryByLabelText('Member code')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /look up|redeem|spend|use points/i }),

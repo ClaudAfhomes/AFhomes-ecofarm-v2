@@ -1,0 +1,148 @@
+{
+  "excluded": [
+    "20261030000001_afhomes_customer_directory_id_filter.sql",
+    "20261031000001_afhomes_customer_directory_payment_filter.sql"
+  ],
+  "allowlist": [
+    {
+      "file": "20261102000001_afhomes_customer_directory_workflow_filter.sql",
+      "transactionEnvelope": "none",
+      "sha256": "83febc3181f3cb52ba74c86a08b42ea05be9fce1d17b8779bee6604d03ff526e"
+    },
+    {
+      "file": "20261103000001_afhomes_application_psgc_address.sql",
+      "transactionEnvelope": "none",
+      "sha256": "c70ec5cc26d860c9012e96fcd3f39630ddfb72cf315dc724b024ce79ee0a0f43"
+    },
+    {
+      "file": "20261104000001_afhomes_points_rebuild.sql",
+      "transactionEnvelope": "none",
+      "sha256": "34315a9e861665b1bb3cbff923ce4288901fce3e1e37a35d1db8ea068ba3c517"
+    },
+    {
+      "file": "20261105000001_afhomes_service_tier_discounts.sql",
+      "transactionEnvelope": "none",
+      "sha256": "d1eedc20e51b821c5e0e1779fbc422fd0d3e1b5ae4c427ba028b1b560a521428"
+    },
+    {
+      "file": "20261106000001_afhomes_operational_service_payments.sql",
+      "transactionEnvelope": "none",
+      "sha256": "9edbe6681cf876747c26ec7d404b6b13af02348cd2d0e649fa5861a0440b6f47"
+    },
+    {
+      "file": "20261107000001_afhomes_operational_sale_idempotency.sql",
+      "transactionEnvelope": "none",
+      "sha256": "2016b20ecaebb9a14373ed540c244b6631f3ab612a64830118744b841b9a318e"
+    },
+    {
+      "file": "20261108000001_afhomes_retire_points_spending.sql",
+      "transactionEnvelope": "none",
+      "sha256": "8dc01f715817b8828753234f420d52b820aa5d3e34c0190e6fed89e080dd74ee"
+    },
+    {
+      "file": "20261109000001_afhomes_claim_rpc_authorization.sql",
+      "transactionEnvelope": "none",
+      "sha256": "b61b0b1bed0839a18dd389653d7c3ce3d705852116924e541c9a8528a6b37b2d"
+    },
+    {
+      "file": "20261110000001_afhomes_claim_lifecycle_repair.sql",
+      "transactionEnvelope": "none",
+      "sha256": "860f7595eb6cd653db47b8aa208b7326084f38b335082ab404b7bf26d986bb98"
+    },
+    {
+      "file": "20261111000000_afhomes_service_publication.sql",
+      "transactionEnvelope": "none",
+      "sha256": "5c4106bba8b75b129a9584696d5bf74217df244c694188686f16ffa5b426a9c6"
+    },
+    {
+      "file": "20261111000001_afhomes_server_service_prices.sql",
+      "transactionEnvelope": "none",
+      "sha256": "8bd3727c3add4fa497f41c15141006bbf81e82b2b4303c5a532f62c21eee55be"
+    },
+    {
+      "file": "20261112000001_afhomes_service_policy_status.sql",
+      "transactionEnvelope": "reviewed BEGIN/COMMIT replaced by the outer atomic transaction",
+      "sha256": "200c9cc45f68d728d3bf83570ce81ab89869a471270110e4a022d4f1bed00669"
+    },
+    {
+      "file": "20261112000002_afhomes_service_photo_management.sql",
+      "transactionEnvelope": "none",
+      "sha256": "13d535218ec7fc91a74640497032797ac4f3a5213594c5e9e54d96737b8e6c42"
+    },
+    {
+      "file": "20261113000001_afhomes_service_staycation_eligibility.sql",
+      "transactionEnvelope": "none",
+      "sha256": "a3f2db760c87d168c7c4e846e8653b1dc11200d3907411de203594c26a55e811"
+    },
+    {
+      "file": "20261114000001_afhomes_restore_points_spending.sql",
+      "transactionEnvelope": "none",
+      "sha256": "55dee5edf810ebd90a55b7e90e94639c0579a98304cfd99fc9f258fdb075b522"
+    },
+    {
+      "file": "20261115000001_afhomes_commit_keeps_tier_discount.sql",
+      "transactionEnvelope": "none",
+      "sha256": "db60b92fee62f6a3987aaa525a4a635a45236c33aa9613b8ae45cb8494e7d9dd"
+    },
+    {
+      "file": "20261115000002_afhomes_fix_customer_points_position.sql",
+      "transactionEnvelope": "none",
+      "sha256": "5cfa06b076d2db2eeeb97b6fcdb779a826a5e698f5296bdd7ae67104585ad8c4"
+    },
+    {
+      "file": "20261116000001_afhomes_promotion_stacking.sql",
+      "transactionEnvelope": "none",
+      "sha256": "5d1f6decb5ba741922206750b1babbe936545000af4ed0f15819b05abb707717"
+    },
+    {
+      "file": "20261116000002_afhomes_sale_tier_choice.sql",
+      "transactionEnvelope": "none",
+      "sha256": "1ca25b3bea9a3d87cac77b4b006586e48fa263ff5c4478368a68f1ed4de113f4"
+    },
+    {
+      "file": "20261117000001_afhomes_customer_redemption_approval.sql",
+      "transactionEnvelope": "none",
+      "sha256": "e570efd552fc7d636f6367500677bda7c0f2308cf024d84571df7b4c60ccb748"
+    },
+    {
+      "file": "20261118000001_afhomes_reserved_point_settlement.sql",
+      "transactionEnvelope": "none",
+      "sha256": "572b81dfcc9db11eb93f9943adb847c5f9da62ba946926ed03fb1b4c5f0ceda1"
+    },
+    {
+      "file": "20261119000001_afhomes_point_refund_compensation.sql",
+      "transactionEnvelope": "none",
+      "sha256": "69c4cf88af63001c879481b49b040c8ea2943210d64212d470369db08de70607"
+    },
+    {
+      "file": "20261120000001_afhomes_refund_earning_consistency.sql",
+      "transactionEnvelope": "none",
+      "sha256": "59f7a8bc7ffe454c051cce22e879736d2f60a11e2d7baed7708620f363250b38"
+    },
+    {
+      "file": "20261121000001_afhomes_external_service_refunds.sql",
+      "transactionEnvelope": "none",
+      "sha256": "c2e1f9f98bbb3206a37b8fb26a8e628a616765f271a326e85437cfb5bb78f6be"
+    },
+    {
+      "file": "20261122000001_afhomes_readonly_auth_recovery.sql",
+      "transactionEnvelope": "none",
+      "sha256": "6952a3b3005582af6adb3f9af99e7c1a698d1d2cb9f86fab7c6e3390c3566756"
+    },
+    {
+      "file": "20261123000001_afhomes_preserve_legacy_points.sql",
+      "transactionEnvelope": "none",
+      "sha256": "a7864bc69af0945d8633fac3f9bb7ad6fd38859dc0fc6ac6da3afa09255b1566"
+    },
+    {
+      "file": "20261124000001_afhomes_points_position_service_acl.sql",
+      "transactionEnvelope": "none",
+      "sha256": "36debcf3b1033a2443ce8b212320df729e7a370a1113b6adf5c03b214b68ae9e"
+    },
+    {
+      "file": "20261125000001_afhomes_preview_caller_wrappers.sql",
+      "transactionEnvelope": "none",
+      "sha256": "eb57fd06a4cd67e18834d16103acae3f29c1319d63a60c08cbb3233a2fc97aa3"
+    }
+  ]
+}

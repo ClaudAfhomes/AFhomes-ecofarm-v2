@@ -87,6 +87,10 @@ export const reservationAgreementStatusSchema = z.enum([
 export type ReservationAgreementStatus = z.infer<typeof reservationAgreementStatusSchema>;
 
 export const pointsEntryTypeSchema = z.enum([
+  'earned',
+  'annual_reset',
+  'promotional_bonus',
+  'cutover_baseline',
   'annual_allocation',
   'redemption',
   'adjustment',

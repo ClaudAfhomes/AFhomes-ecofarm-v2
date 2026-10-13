@@ -1,3 +1,4 @@
+import { ServiceRefundPanel } from './ServiceRefundPanel';
 /**
  * Finance: recording and verifying purchase receipts.
  *
@@ -33,6 +34,7 @@
  * admits only 'sale' and 'reservation', so an operational receipt cannot appear
  * on one even by accident.
  */
+import { PointRefundReview } from './PointRefundReview';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -196,6 +198,14 @@ export function PurchasePaymentsPage() {
             </div>
           )}
 
+          {rows
+            .filter((purchase) => purchase.status === 'draft')
+            .map((purchase) => (
+              <PointRefundReview key={purchase.id} purchase={purchase} />
+            ))}
+          {rows.map((purchase) => (
+            <ServiceRefundPanel key={purchase.id} purchase={purchase} />
+          ))}
           {/* One receipt panel per sale, so a reviewer can accept or reject a
               specific receipt. */}
           {rows.map((purchase) => (

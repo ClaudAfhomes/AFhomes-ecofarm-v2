@@ -1,3 +1,11 @@
+import { serviceRefundReceiptSchema } from '@afhomes/contracts';
+import {
+  serviceRefundIdSchema,
+  serviceRefundReconciliationResultSchema,
+  serviceRefundRowSchema,
+  type ServiceRefundRequest,
+  type ServiceRefundRepayment,
+} from '@afhomes/contracts';
 /**
  * Staff points-earning API client.
  *
@@ -9,10 +17,18 @@
  * fired from a refetch, and the queries below mark them accordingly.
  */
 import {
+  pointRefundResultSchema,
+  pointRefundRowSchema,
+  pointPurchaseCancellationResultSchema,
   adjustedPointsSchema,
+  appliedPointsDiscountSchema,
   purchaseRowSchema,
   servicePolicyStatusSchema,
+  servicePolicyManagementResultSchema,
+  committedPointDiscountSchema,
   completedPurchaseSchema,
+  pointDiscountQuoteSchema,
+  pointRedemptionRuleSchema,
   purchaseFinancialSummarySchema,
   issuedEarningClaimSchema,
   pointEarningRuleSchema,
@@ -30,6 +46,8 @@ import {
   type AdjustPointsInput,
   type CreatePurchaseInput,
   type PointEarningRuleInput,
+  type PointRedemptionRuleInput,
+  type PointRedemptionRulePatch,
   type ReversePurchaseInput,
 } from '@afhomes/contracts';
 
@@ -64,6 +82,7 @@ export const recordPurchase = (input: CreatePurchaseInput) =>
  */
 export type PricedPurchase = z.infer<typeof recordedPurchaseSchema> & {
   tierDiscountAmount?: string;
+  pointsDiscountAmount?: string;
 };
 
 /**
@@ -86,7 +105,7 @@ export const recordPurchaseReceipt = (input: {
   method: string;
   reference?: string;
 }) =>
-  post(`/earning/purchases/${input.purchaseId}/payments`, purchaseReceiptSchema, {
+  post(`/earning/purchases/${input.purchaseId}/payments`, purchaseReceiptWriteSchema, {
     amount: input.amount,
     method: input.method,
     ...(input.reference ? { reference: input.reference } : {}),
@@ -111,6 +130,7 @@ export const purchaseReceiptDecisionResultSchema = z.object({
   verifiedTotal: exactDecimalStringSchema,
 });
 
+export const listOwnPurchases = () => requestList('/earning/pos/purchases', purchaseRowSchema);
 export const listPurchases = () => requestList('/earning/purchases', purchaseRowSchema);
 export const setServicePolicyActive = (
   kind: 'rules' | 'tier-discounts',
@@ -150,6 +170,8 @@ export const decideReceipt = (
 export type PurchaseSummaryRow = {
   purchaseId: string;
   grossAmount: string;
+  /** The VIP tier discount, kept separate from any points discount. */
+  tierDiscountAmount?: string;
   pointsDiscountAmount: string;
   netAmount: string;
   recordedTotal: string;
@@ -243,19 +265,61 @@ export const getSettlement = (purchaseId: string) =>
   request(`/earning/purchases/${purchaseId}/settlement`, operationalSettlementSchema);
 
 /**
+ * Price a discount WITHOUT spending anything.
+ *
+ * A quote is cheap and re-runnable, but the typed amount must survive a
+ * failure so staff do not retype it. The peso value is the server's, from the
+ * staycation default or the matched promotion - never computed here.
+ */
+export const quotePointDiscount = (purchaseId: string, pointsRequested: number) =>
+  post(`/earning/purchases/${purchaseId}/quote`, pointDiscountQuoteSchema, { pointsRequested });
+
+/**
+ * Spend the quoted points.
+ *
+ * NOT retried automatically: a commit is a single-use quote and a money
+ * movement. A retried commit would be refused as an already-used quote and
+ * would read like a failure for an action that actually succeeded.
+ */
+export const commitPointDiscount = (quoteId: string) =>
+  post(`/earning/quotes/${quoteId}/commit`, committedPointDiscountSchema, undefined);
+
+/**
  * Spend a member's points at the till, in one authorized step.
  *
- * REMOVED with the rest of points SPENDING. The routes are gone and the database
- * has revoked EXECUTE on the functions behind them; this note exists so nobody
- * re-adds the button and believes it works.
+ * Only a points figure and a POS reference are sent. The peso value comes from
+ * the staycation default or the configured promotion, so nothing here can
+ * influence what the member pays. `reference` is the idempotency key: a retry
+ * returns the original figures instead of spending the points twice.
  */
+export const applyPointsDiscount = (
+  purchaseId: string,
+  pointsRequested: number,
+  reference: string,
+) =>
+  post(`/earning/purchases/${purchaseId}/points-discount`, appliedPointsDiscountSchema, {
+    pointsRequested,
+    reference,
+  });
 
 /**
  * Promotions: what makes a NON-staycation service discountable by points.
  *
- * RETIRED with points spending. `point_redemption_rules` rows stay readable for
- * audit; nothing creates or activates one any more.
+ * One service per promotion, both dates mandatory, every award still counting
+ * toward the cap. Readable by anyone who may sell; writable only through the
+ * authorized catalog routes. There is no browser table privilege anywhere in
+ * this flow.
  */
+export const listRedemptionRules = () =>
+  requestList('/earning/redemption-rules', pointRedemptionRuleSchema);
+
+export const createRedemptionRule = (input: PointRedemptionRuleInput) =>
+  post('/earning/redemption-rules', pointRedemptionRuleSchema, input);
+
+/** Activate, deactivate or correct a promotion. There is no delete: a promotion
+ * whose window has passed simply grants nothing, and its row stays as audit. */
+export const updateRedemptionRule = (id: string, input: PointRedemptionRulePatch) =>
+  patch(`/earning/redemption-rules/${id}`, pointRedemptionRuleSchema, input);
 
 export const createTierDiscount = (input: {
   serviceId: string;
@@ -286,3 +350,78 @@ export const manageServicePhoto = (
     serviceCatalogItemSchema,
     { method: operation === 'cover' ? 'PATCH' : 'DELETE' },
   );
+
+export const listPointRefunds = (purchaseId: string) =>
+  requestList('/earning/purchases/' + purchaseId + '/point-refunds', pointRefundRowSchema);
+export const refundPurchasePoints = (
+  purchaseId: string,
+  input: { serviceValue: string; reference: string; reason: string; serviceReviewConfirmed: true },
+) => post('/earning/purchases/' + purchaseId + '/point-refunds', pointRefundResultSchema, input);
+export const cancelPointPurchase = (purchaseId: string, reason: string) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/cancel-point-reservation',
+    pointPurchaseCancellationResultSchema,
+    { reason },
+  );
+
+export const listPurchasesPage = (page: number) =>
+  requestList('/earning/purchases?page=' + page, purchaseRowSchema);
+export const listClaimsPage = (page: number) =>
+  requestList('/earning/claims?page=' + page, claimRowSchema);
+
+export const listServiceRefunds = (purchaseId: string) =>
+  requestList('/earning/purchases/' + purchaseId + '/refunds', serviceRefundRowSchema);
+export const requestServiceRefund = (purchaseId: string, body: ServiceRefundRequest) =>
+  post('/earning/purchases/' + purchaseId + '/refunds', serviceRefundIdSchema, body);
+export const decideServiceRefund = (
+  purchaseId: string,
+  refundId: string,
+  decision: 'approve' | 'reject' | 'cancel',
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/decision',
+    serviceRefundIdSchema,
+    { decision, serviceReviewConfirmed: true },
+  );
+export const recordServiceRefundRepayment = (
+  purchaseId: string,
+  refundId: string,
+  body: ServiceRefundRepayment,
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/repayments',
+    serviceRefundIdSchema,
+    body,
+  );
+
+export const getServiceRefundReceipt = (
+  purchaseId: string,
+  refundId: string,
+  repaymentId: string,
+) =>
+  request(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/receipts/' + repaymentId,
+    serviceRefundReceiptSchema,
+  );
+
+export const reconcileServiceRefundReceipt = (
+  purchaseId: string,
+  refundId: string,
+  uploadAuditId: string,
+  reason: string,
+) =>
+  post(
+    '/earning/purchases/' + purchaseId + '/refunds/' + refundId + '/reconcile-receipt',
+    serviceRefundReconciliationResultSchema,
+    { uploadAuditId, reason },
+  );
+
+export const manageServicePolicy = (
+  kind: 'rules' | 'tier-discounts' | 'redemption-rules',
+  id: string,
+  patch?: Record<string, unknown>,
+) =>
+  request('/earning/' + kind + '/' + id, servicePolicyManagementResultSchema, {
+    method: patch ? 'PUT' : 'DELETE',
+    ...(patch ? { body: JSON.stringify(patch) } : {}),
+  });

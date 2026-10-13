@@ -14,11 +14,19 @@ import { renderWithProviders } from '../../test/utils';
 import { BusinessPointsPage } from './BusinessPointsPage';
 import {
   listServices,
+  listOwnPurchases,
+  getSettlement,
+  completePurchase,
+  recordPurchase,
+  issueEarningClaim,
   resolveMemberIdentifier,
 } from './points-services';
 
 vi.mock('./points-services', async () => ({
   listServices: vi.fn(),
+  listOwnPurchases: vi.fn(),
+  getSettlement: vi.fn(),
+  recordPurchaseReceipt: vi.fn(),
   resolveMemberIdentifier: vi.fn(),
   recordPurchase: vi.fn(),
   completePurchase: vi.fn(),
@@ -62,6 +70,7 @@ const render = () => renderWithProviders(<BusinessPointsPage />);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(listOwnPurchases).mockResolvedValue([]);
   services.mockResolvedValue(SERVICES as never);
   resolved.mockResolvedValue(RESOLVED as never);
   // jsdom has no camera. The scanner reports that and points staff at the typed
@@ -70,6 +79,77 @@ beforeEach(() => {
 });
 
 describe('earn points: identify', () => {
+  it('reopens an existing verified sale without recording another purchase', async () => {
+    const user = userEvent.setup();
+    const id = 'aaaaaaaa-0000-4000-8000-000000000001';
+    vi.mocked(listOwnPurchases).mockResolvedValue([
+      {
+        id,
+        purchaseNumber: 'AF-TXN-EXISTING',
+        membershipId: RESOLVED.membershipId,
+        status: 'draft',
+        grossAmount: '2000.00',
+        tierDiscountAmount: '0.00',
+        netAmount: '1499.90',
+        claimStatus: null,
+        pointsDiscountAmount: '500.10',
+      },
+    ] as never);
+    vi.mocked(getSettlement).mockResolvedValue({
+      status: 'draft',
+      fullyPaid: true,
+      recordedTotal: '2000.00',
+      verifiedTotal: '2000.00',
+      remainingAmount: '0.00',
+      claimable: false,
+    } as never);
+    render();
+
+    await user.selectOptions(await screen.findByLabelText('Resume an existing sale'), id);
+    await user.click(await screen.findByRole('button', { name: 'Complete the sale' }));
+    expect(completePurchase).toHaveBeenCalledWith(id);
+    expect(recordPurchase).not.toHaveBeenCalled();
+    expect(screen.getByText('- ₱500.10')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /record the receipt/i }).hasAttribute('disabled'),
+    ).toBe(true);
+  });
+  it('allows initial claim issuance only for a completed verified sale without an existing claim', async () => {
+    const user = userEvent.setup();
+    const id = 'aaaaaaaa-0000-4000-8000-000000000002';
+    vi.mocked(listOwnPurchases).mockResolvedValue([
+      {
+        id,
+        purchaseNumber: 'AF-TXN-COMPLETE',
+        membershipId: RESOLVED.membershipId,
+        status: 'completed',
+        grossAmount: '2000.00',
+        tierDiscountAmount: '0.00',
+        netAmount: '1499.90',
+        claimStatus: null,
+        pointsDiscountAmount: '500.10',
+      },
+    ] as never);
+    vi.mocked(getSettlement).mockResolvedValue({
+      status: 'completed',
+      fullyPaid: true,
+      recordedTotal: '0.00',
+      verifiedTotal: '2000.00',
+      remainingAmount: '0.00',
+      claimable: false,
+      claimStatus: null,
+    } as never);
+    vi.mocked(issueEarningClaim).mockResolvedValue({
+      claimNumber: 'AF-EARN-QA',
+      expiresAt: '2026-10-13T00:00:00Z',
+    } as never);
+    render();
+    await user.type(await screen.findByLabelText(/member code/i), 'MBS-000777');
+    await user.click(screen.getByRole('button', { name: /find member/i }));
+    await user.selectOptions(await screen.findByLabelText('Resume an existing sale'), id);
+    await user.click(await screen.findByRole('button', { name: /issue the member/i }));
+    expect(issueEarningClaim).toHaveBeenCalledWith(id);
+  });
   it('does not identify anyone on its own', async () => {
     render();
     await screen.findByRole('button', { name: /scan the member/i });
@@ -174,9 +254,9 @@ describe('earn points: identify', () => {
 
     expect(await screen.findByLabelText(/^service$/i)).toBeTruthy();
     // Not yet: a service must be chosen before anything can be recorded.
-    expect((await screen.findByRole('button', { name: /record the sale/i })).hasAttribute('disabled')).toBe(
-      true,
-    );
+    expect(
+      (await screen.findByRole('button', { name: /record the sale/i })).hasAttribute('disabled'),
+    ).toBe(true);
   });
 
   /**

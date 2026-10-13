@@ -130,21 +130,24 @@ import { getOstApplications } from './features/ost/services';
 import {
   getPurchaseSummary,
   getSettlement,
-  listClaims,
+  listClaimsPage,
   listFinancePurchases,
-  listPurchases,
+  listPurchasesPage,
   listReceipts,
 } from './features/business/points-services';
 
-vi.mock('./features/business/points-services', async (original) => ({
+vi.mock('./features/business/points-services', async (original) => {
+const purchases=vi.fn();const claims=vi.fn();return ({
   ...(await original<typeof import('./features/business/points-services')>()),
-  listPurchases: vi.fn(),
+  listPurchasesPage: purchases,
+  listPurchases: purchases,
   listFinancePurchases: vi.fn(),
-  listClaims: vi.fn(),
+  listClaimsPage: claims,
+  listClaims: claims,
   listReceipts: vi.fn(),
   getPurchaseSummary: vi.fn(),
   getSettlement: vi.fn(),
-}));
+});});
 
 const view = (moduleKey: string) => ({
   moduleKey: moduleKey as never,
@@ -438,9 +441,9 @@ function install() {
   vi.mocked(getReport).mockResolvedValue(REPORT_ROW as never);
   // The operational-services pages read through points-services, which is mocked
   // below rather than stubbed over the network.
-  vi.mocked(listPurchases).mockResolvedValue([OPERATIONAL_PURCHASE] as never);
+  vi.mocked(listPurchasesPage).mockResolvedValue([OPERATIONAL_PURCHASE] as never);
   vi.mocked(listFinancePurchases).mockResolvedValue([OPERATIONAL_PURCHASE] as never);
-  vi.mocked(listClaims).mockResolvedValue([OPERATIONAL_CLAIM] as never);
+  vi.mocked(listClaimsPage).mockResolvedValue([OPERATIONAL_CLAIM] as never);
   vi.mocked(getPurchaseSummary).mockResolvedValue({
     purchaseId: OPERATIONAL_PURCHASE.id,
     grossAmount: '100000.00',
@@ -575,7 +578,7 @@ describe('Phase 33 forms stack and dialogs fit', () => {
   it('retired catalog opens the claim queue at 320px', async () => {
     atWidth(320, false);
     renderApp('/admin/redemption/items');
-    expect(await screen.findByRole('heading', { name: 'Redeem Points' })).not.toBeNull();
+    expect(await screen.findByRole('heading', { name: 'Earned Points Claims' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: /add item/i })).toBeNull();
   });
 

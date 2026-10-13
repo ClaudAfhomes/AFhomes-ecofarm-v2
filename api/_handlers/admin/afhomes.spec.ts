@@ -11,10 +11,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { baseTables, baseTokens, TOKEN, UUID, moduleId } from '../../_lib/testing/fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../../_lib/testing/supabase-fake.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown }));
+const holder = vi.hoisted(() => ({ db: null as unknown, svcNull: false, userDb: null as unknown }));
 
 vi.mock('../../_lib/rest.js', () => ({
-  serviceClient: () => holder.db,
+  serviceClient: () => (holder.svcNull ? null : holder.db),
+  userClient: () => holder.userDb,
   anonClient: () => holder.db,
   requireService: (res: { status: (c: number) => { json: (b: unknown) => void } }) => {
     if (!holder.db) {
@@ -92,6 +93,8 @@ function install(
     signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   } = {},
 ) {
+  holder.svcNull = false;
+  holder.userDb = null;
   holder.db = new FakeSupabase({
     tables: baseTables(options.tables as never),
     tokens: { ...baseTokens(), ...options.tokens },
@@ -2380,5 +2383,25 @@ describe('handler surface', () => {
     } finally {
       process.env.AFHOMES_ADMIN_URL = saved;
     }
+  });
+});
+
+
+describe('read-only staff session HTTP boundary', () => {
+  afterEach(() => { holder.svcNull = false; holder.userDb = null; });
+  it('serves an authenticated self session while keeping staff writes blocked', async () => {
+    install();
+    const full = await call({ afPath: 'session', token: TOKEN.admin });
+    expect(full.status).toBe(200);
+    holder.svcNull = true;
+    holder.userDb = new FakeSupabase({ rpcs: [{ fn: 'afhomes_self_session', result: full.body }] });
+    const session = await call({ afPath: 'session', token: TOKEN.admin });
+    expect(session.status).toBe(200);
+    expect((session.body as Json).id).toBe(UUID.adminStaff);
+    const write = await call({ afPath: 'staff', method: 'POST', token: TOKEN.admin, body: {} });
+    // Mutations stay service-only: without a service key the write is refused
+    // before any insert reaches the database.
+    expect(write.status).toBe(503);
+    expect((holder.userDb as FakeSupabase).calls.filter(c => c.op === 'insert')).toHaveLength(0);
   });
 });

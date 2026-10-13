@@ -178,6 +178,8 @@ export const customerPointsEntrySchema = z.object({
   balanceAfter: z.number().int().nonnegative(),
   reason: z.string().nullable(),
   occurredAt: z.string(),
+  // Customer-owned earning claims, purchase quotes and compensating refunds.
+  referenceNumber: z.string().optional(),
   redemptionNumber: z.string().optional(),
   itemName: z.string().optional(),
   itemCode: z.string().optional(),
@@ -185,7 +187,15 @@ export const customerPointsEntrySchema = z.object({
 });
 export type CustomerPointsEntry = z.infer<typeof customerPointsEntrySchema>;
 
-export const customerPointsLedgerSchema = listResponseSchema(customerPointsEntrySchema);
+export const customerLedgerCursorSchema = z
+  .object({
+    occurredAt: z.string().datetime({ offset: true }),
+    id: z.string().regex(/^[1-9][0-9]{0,18}$/),
+  })
+  .strict();
+export const customerPointsLedgerSchema = listResponseSchema(customerPointsEntrySchema).extend({
+  meta: z.object({ nextCursor: z.string().nullable().optional() }).passthrough().optional(),
+});
 
 /* ================================================================== */
 /* Payment history (read only)                                          */

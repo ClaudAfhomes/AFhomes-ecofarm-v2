@@ -663,9 +663,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // source of truth; unknown or removed staff read as null upstream.
       const actorIds = [
         ...new Set(
-          rows.flatMap((row) => [row.recorded_by, row.verified_by]).filter(
-            (id): id is string => typeof id === 'string' && id.length > 0,
-          ),
+          rows
+            .flatMap((row) => [row.recorded_by, row.verified_by])
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
         ),
       ];
       let names = new Map<string, string>();
@@ -1050,12 +1050,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (commissionsError) throw commissionsError;
       if ((commissions ?? []).length > 0)
         return fail(res, 'CONFLICT', 'Sale has commissions and cannot be cancelled', 409);
-      const { error: cancelError } = await db
+      const { data: cancelled, error: cancelError } = await db
         .from('card_sales')
         .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('status', 'draft')
+        .select('id')
+        .maybeSingle();
       if (cancelError) throw cancelError;
-      await audit(db, auth.userId, 'SALE_CANCELLED', 'sale', id, { status }, { status: 'cancelled' });
+      if (!cancelled)
+        return fail(
+          res,
+          'CONFLICT',
+          'Sale changed during cancellation. Refresh and try again.',
+          409,
+        );
+      await audit(
+        db,
+        auth.userId,
+        'SALE_CANCELLED',
+        'sale',
+        id,
+        { status },
+        { status: 'cancelled' },
+      );
       const view = await loadSaleView(db, id);
       if (!view) return fail(res, 'INTERNAL', 'Sale was cancelled but could not be read back', 500);
       const money = await moneyBySale(db, [view]);

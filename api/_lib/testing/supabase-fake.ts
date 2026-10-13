@@ -226,7 +226,9 @@ function matches(row: FakeRow, ops: Op[]): boolean {
       case 'lte': {
         const a = row[op.col];
         if (a === undefined || a === null) return false;
-        return String(a) <= String(op.val);
+        return op.col === 'id' && /^\d+$/.test(String(a)) && /^\d+$/.test(String(op.val))
+          ? BigInt(String(a)) <= BigInt(String(op.val))
+          : String(a) <= String(op.val);
       }
       default:
         return true;
@@ -698,7 +700,14 @@ export class FakeSupabase {
             const av = a[order.col];
             const bv = b[order.col];
             if (av === bv) continue;
-            const cmp = av! > bv! ? 1 : -1;
+            const cmp =
+              order.col === 'id' && /^\d+$/.test(String(av)) && /^\d+$/.test(String(bv))
+                ? BigInt(String(av)) > BigInt(String(bv))
+                  ? 1
+                  : -1
+                : av! > bv!
+                  ? 1
+                  : -1;
             return order.asc ? cmp : -cmp;
           }
           return 0;

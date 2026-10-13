@@ -96,7 +96,10 @@ export async function audit(
  * Map a Postgres RPC error onto a client error. The raw driver message is
  * logged server-side only - it can name relations, columns, and constraints.
  */
-export function mapRpcError(res: VercelResponse, error: { message?: string } | null): void {
+export function mapRpcError(
+  res: VercelResponse,
+  error: { message?: string; code?: string } | null,
+): void {
   const message = String(error?.message ?? '');
   const [code] = message.split(':');
 
@@ -153,6 +156,7 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
     RESERVATION_ALREADY_FINALIZED: ['CONFLICT', 409],
     APPLICATION_ALREADY_FINALIZED: ['CONFLICT', 409],
     SALE_ALREADY_EXISTS: ['CONFLICT', 409],
+    SALE_REFERENCE_CONFLICT: ['CONFLICT', 409],
     PURCHASE_TERMS_IDENTITY_INVALID: ['CONFLICT', 409],
     // The partial unique index is the guard, so the domain answer comes from the
     // constraint name Postgres reports rather than from a second check in SQL.

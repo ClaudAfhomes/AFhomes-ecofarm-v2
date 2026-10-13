@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 /**
@@ -14,7 +15,7 @@ import {
   getCustomerMembership,
   getCustomerPayments,
   getCustomerPoints,
-  getCustomerPointsLedger,
+  getCustomerPointsLedgerPage,
   getCustomerPointsPosition,
   getCustomerProfile,
   reissueCardCredentials,
@@ -61,13 +62,27 @@ export const useCustomerPointsPositionQuery = (enabled = true) =>
     refetchInterval: 30_000,
   });
 
-export const useCustomerLedgerQuery = (enabled = true) =>
-  useQuery({
-    queryKey: ['customer', 'points', 'ledger'],
-    queryFn: getCustomerPointsLedger,
+export const useCustomerLedgerQuery = (enabled = true, redemptionsOnly = false) => {
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const query = useQuery({
+    queryKey: ['customer', 'points', 'ledger', redemptionsOnly, cursor],
+    queryFn: () => getCustomerPointsLedgerPage(cursor, redemptionsOnly),
     enabled,
     refetchInterval: 30_000,
   });
+  const nextCursor = query.data?.meta?.nextCursor;
+  return {
+    ...query,
+    data: query.data?.data,
+    hasPrevious: cursors.length > 0,
+    hasNext: Boolean(nextCursor),
+    previousPage: () => setCursors((previous) => previous.slice(0, -1)),
+    nextPage: () => {
+      if (nextCursor) setCursors((previous) => [...previous, nextCursor]);
+    },
+  };
+};
 
 export const useCustomerPaymentsQuery = (enabled = true) =>
   useQuery({

@@ -1,14 +1,17 @@
+import { serviceRefundRowSchema } from '@afhomes/contracts';
 /**
  * Customer portal API calls. Every function is thin: the path, the HTTP verb and
  * the contract schema, nothing else. No business rule and no authorization
  * decision lives in the browser.
  */
 import {
+  pointApprovalSchema,
+  pointApprovalDecisionResultSchema,
   customerActivationResultSchema,
   customerCredentialsSchema,
   customerMembershipSchema,
   customerPaymentSchema,
-  customerPointsEntrySchema,
+  customerPointsLedgerSchema,
   pointsBalanceSummarySchema,
   customerPointsSummarySchema,
   customerProfileSchema,
@@ -67,8 +70,17 @@ export const getCustomerPoints = (): Promise<CustomerPointsSummary> =>
 export const getCustomerPointsPosition = (): Promise<PointsBalanceSummary> =>
   request('/customer/points/position', pointsBalanceSummarySchema);
 
-export const getCustomerPointsLedger = (): Promise<CustomerPointsEntry[]> =>
-  requestList('/customer/points/ledger', customerPointsEntrySchema);
+export const getCustomerPointsLedgerPage = (cursor?: string, redemptionsOnly = false) => {
+  const params = new URLSearchParams();
+  if (cursor) params.set('cursor', cursor);
+  if (redemptionsOnly) params.set('entryType', 'redemption');
+  return request(
+    '/customer/points/ledger' + (params.size ? '?' + params.toString() : ''),
+    customerPointsLedgerSchema,
+  );
+};
+export const getCustomerPointsLedger = async (): Promise<CustomerPointsEntry[]> =>
+  (await getCustomerPointsLedgerPage()).data;
 
 export const getCustomerPayments = (): Promise<CustomerPayment[]> =>
   requestList('/customer/payments', customerPaymentSchema);
@@ -114,3 +126,12 @@ export type {
   CustomerPayment,
   CustomerCredentials,
 };
+
+export const getPointApprovals = () => requestList('/earning/approvals', pointApprovalSchema);
+export const decidePointApproval = (quoteId: string, approve: boolean) =>
+  request('/earning/approvals/' + quoteId + '/decision', pointApprovalDecisionResultSchema, {
+    method: 'POST',
+    body: JSON.stringify({ approve }),
+  });
+
+export const getCustomerRefunds = () => requestList('/customer/refunds', serviceRefundRowSchema);

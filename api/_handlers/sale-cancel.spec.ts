@@ -174,3 +174,29 @@ describe('POST /sales/:id/cancel', () => {
     expect(state.status).toBe(404);
   });
 });
+
+it('does not overwrite a payment that advances the draft before cancellation commits', async () => {
+  const db = install();
+  const from = db.from.bind(db);
+  vi.spyOn(db, 'from').mockImplementation((table) => {
+    const query = from(table);
+    if (table === 'card_sales') {
+      const update = query.update.bind(query);
+      query.update = (patch) => {
+        db.tables.card_sales![0]!.status = 'payment_in_progress';
+        db.tables.payments!.push({
+          id: 'concurrent-payment',
+          sale_id: DRAFT_SALE,
+          status: 'recorded',
+          amount: '5000.00',
+        });
+        return update(patch);
+      };
+    }
+    return query;
+  });
+  const state = await call(DRAFT_SALE, TOKEN.superAdmin);
+  expect(state.status).toBe(409);
+  expect(db.tables.card_sales![0]!.status).toBe('payment_in_progress');
+  expect(db.tables.audit_events?.some((row) => row.action === 'SALE_CANCELLED')).toBe(false);
+});

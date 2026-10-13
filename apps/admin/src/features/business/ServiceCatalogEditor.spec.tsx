@@ -23,6 +23,7 @@ const service = {
   description: 'Per head dining',
   basePrice: '2000.00',
   isActive: true,
+  isStaycationEligible: false,
   published: false,
   availability: 'available' as const,
   photos: [],
@@ -72,6 +73,7 @@ describe('service catalog editing', () => {
         description: 'Per head dining',
         basePrice: '2000.00',
         isActive: true,
+        isStaycationEligible: false,
         published: true,
         availability: 'available',
         summary: null,
@@ -83,6 +85,24 @@ describe('service catalog editing', () => {
     );
     expect(await screen.findByLabelText('Image file')).toBeInTheDocument();
     expect(onSaved).toHaveBeenCalled();
+  });
+  it('marks a staycation service eligible for points spending without a promotion', async () => {
+    vi.mocked(createService).mockResolvedValue({ ...service, isStaycationEligible: true });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ServiceCatalogEditor services={[]} loading={false} error={null} onSaved={vi.fn()} />,
+      { user: admin },
+    );
+    await user.click(screen.getByRole('button', { name: 'Add service' }));
+    await user.type(screen.getByLabelText('Service name'), 'Resort Stay');
+    await user.type(screen.getByLabelText('Base price'), '5000.00');
+    await user.click(screen.getByLabelText(/staycation or hotel accommodation/i));
+    await user.click(screen.getByRole('button', { name: 'Save service' }));
+    await waitFor(() =>
+      expect(createService).toHaveBeenCalledWith(
+        expect.objectContaining({ isStaycationEligible: true }),
+      ),
+    );
   });
   it('preserves edited details after a failed save', async () => {
     vi.mocked(updateService).mockRejectedValue(new Error('Save unavailable'));

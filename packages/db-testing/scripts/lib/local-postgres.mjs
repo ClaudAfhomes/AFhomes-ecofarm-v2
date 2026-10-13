@@ -42,10 +42,10 @@ export function listMigrations() {
 
 /**
  * Boot a disposable PostgreSQL, install the shim, and apply every migration.
- * @param {{ beforeMigration?: string }} [options] Exclusive baseline migration boundary.
+ * @param {{ beforeMigration?: string, excludedMigrations?: string[] }} [options] Exclusive baseline migration boundary.
  * @returns {{ url: string, applied: string[], client: import('pg').Client, stop: () => Promise<void> }}
  */
-export async function startDisposablePostgres({ beforeMigration } = {}) {
+export async function startDisposablePostgres({ beforeMigration, excludedMigrations = [] } = {}) {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 
   const server = new EmbeddedPostgres({
@@ -55,8 +55,11 @@ export async function startDisposablePostgres({ beforeMigration } = {}) {
     database: 'afhomes',
     port: PORT,
     persistent: true,
-    // Windows I/O workers can outlive this disposable cluster and stall the next initdb.
-    initdbFlags: process.platform === 'win32' ? ['-c', 'io_method=sync'] : [],
+    // Migrations are UTF-8 (one carries a leading BOM, covered byte-for-byte by
+    // the release allowlist hashes, so the file itself must not be edited).
+    // Force a UTF-8 cluster: a Windows-locale WIN1252 initdb cannot load them.
+    // ponytail: encoding-only override; locale left at platform default.
+    initdbFlags: process.platform === 'win32' ? ['-c', 'io_method=sync', '-E', 'UTF8'] : [],
     postgresFlags: process.platform === 'win32' ? ['-c', 'io_method=sync'] : [],
     onLog: () => {},
     onError: () => {},
@@ -87,14 +90,23 @@ export async function startDisposablePostgres({ beforeMigration } = {}) {
   await client.query(fs.readFileSync(SHIM, 'utf8'));
 
   const migrations = listMigrations();
-  if (beforeMigration && !migrations.includes(beforeMigration)) {
+  if (
+    (beforeMigration && !migrations.includes(beforeMigration)) ||
+    excludedMigrations.some((file) => !migrations.includes(file))
+  ) {
     await client.end();
     await server.stop();
     throw new Error('Unknown baseline migration boundary');
   }
   const applied = [];
-  for (const file of migrations.filter((file) => !beforeMigration || file < beforeMigration)) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+  for (const file of migrations.filter(
+    (file) => (!beforeMigration || file < beforeMigration) && !excludedMigrations.includes(file),
+  )) {
+    // Same leading-BOM tolerance as the preservation batch's sql() helper:
+    // one allowlisted file carries a BOM pinned by its release hash, so the
+    // byte is stripped at load, never from the file. Hashes still cover raw
+    // bytes; shared psql-based apply skips a leading BOM the same way.
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').replace(/^\uFEFF/, '');
     try {
       await client.query(sql);
       applied.push(file);

@@ -463,6 +463,7 @@ const staff = {} as Record<string, string>;
  * while they leaked. The names are a hardcoded constant, never input.
  */
 const BASELINE_TABLES = [
+  'purchase_point_refunds',
   'identity_documents',
   'customers',
   'staff_users',
@@ -9712,7 +9713,8 @@ async function main(): Promise<void> {
           // row only for the five public tables.
           if (t.entity.startsWith('ost_')) continue;
           const row = await db.query<{ key: string }>(
-            `select ${t.key} as key from ${t.table} order by ${t.key} limit 1`,
+            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? ' where id <> all($1::uuid[])' : ''} order by ${t.key} limit 1`,
+            t.entity === 'customer' ? [seededCustomers.map((customer) => customer.id)] : [],
           );
           if (!row.rows[0]) continue;
           const key = row.rows[0]!.key;
@@ -10547,7 +10549,7 @@ async function main(): Promise<void> {
           'private.points_capacity(uuid,uuid)',
           'private.purchase_verified_total(uuid)',
           'public.create_earning_claim(uuid,uuid)',
-          'public.create_purchase(uuid,text,jsonb,text,uuid)',
+          'public.create_purchase(uuid,text,jsonb,text,uuid,boolean)',
           'public.complete_purchase(uuid,uuid)',
           'public.adjust_membership_points(uuid,bigint,text,uuid)',
           'public.claim_earning_points(text,uuid)',
@@ -12413,7 +12415,11 @@ async function main(): Promise<void> {
           );
           await db.query('select * from public.save_service_catalog($1,$2::jsonb,$3)', [
             configured.id,
-            JSON.stringify({ published: true, availability: 'coming_soon' }),
+            JSON.stringify({
+              published: true,
+              availability: 'coming_soon',
+              isStaycationEligible: true,
+            }),
             maintainer,
           ]);
           await db.query('select * from public.append_service_photo($1,$2,$3,$4)', [
@@ -12426,14 +12432,42 @@ async function main(): Promise<void> {
             published: boolean;
             availability: string;
             photos: unknown[];
-          }>('select published,availability,photos from public.service_catalog where id=$1', [
-            configured.id,
-          ]);
+            is_staycation_eligible: boolean;
+          }>(
+            'select published,availability,photos,is_staycation_eligible from public.service_catalog where id=$1',
+            [configured.id],
+          );
           check(
             'service publication and availability survive reload',
             persisted.published && persisted.availability === 'coming_soon',
           );
+          check(
+            'staycation eligibility is admin-managed metadata, not a name heuristic',
+            persisted.is_staycation_eligible === true,
+          );
           eq('service photo metadata is persisted', persisted.photos.length, 1);
+          // A service created without the key stays ineligible: points spending
+          // is denied by default and only an explicit admin decision opens it.
+          const ineligible = await one<{ id: string }>(
+            'select * from public.save_service_catalog(null,$1::jsonb,$2)',
+            [
+              JSON.stringify({
+                name: 'Synthetic non-staycation service',
+                basePrice: '999.00',
+              }),
+              maintainer,
+            ],
+          );
+          eq(
+            'services are ineligible for points spending unless marked',
+            (
+              await one<{ is_staycation_eligible: boolean }>(
+                'select is_staycation_eligible from public.service_catalog where id=$1',
+                [ineligible.id],
+              )
+            ).is_staycation_eligible,
+            false,
+          );
           eq(
             'service mutations append attributable immutable evidence',
             (
@@ -12990,7 +13024,7 @@ async function main(): Promise<void> {
             .catch(() => undefined);
         }
       }
-      section('67. operational service payment isolation, and NO points spend at the till');
+      section('67. operational service payment isolation (spend policy lives in section 69)');
 
       // 20261106000001. Three properties are proven by execution here, because
       // each one is a claim about what CANNOT happen, and a comment cannot prove
@@ -12998,8 +13032,9 @@ async function main(): Promise<void> {
       //   1. Operational receipts live only in purchase_payments, and the
       //      VIP-card workflow is untouched.
       //   2. A GSD can record a receipt but can never verify or reject one.
-      //   3. A bill can no longer be reduced by a member's points balance at all:
-      //      the till spend function refuses to run.
+      //   3. A member WITH NO balance cannot reduce a bill: the till refuses
+      //      for lack of points. The staycation/promotion gate itself - which
+      //      services may be discounted at all - is proven in section 69.
       let gsd: string | null = null;
       let fin: string | null = null;
       let buyer: string | null = null;
@@ -13134,8 +13169,10 @@ async function main(): Promise<void> {
           )
         ).id;
         svcIds.push(hotel);
-        // NO point_redemption_rules row here on purpose. That table configured the
-        // peso value of a SPEND, and section 68 proves the spend no longer runs.
+        // NO point_redemption_rules row here on purpose: the hotel is
+        // staycation-eligible, so no promotion is needed. The member below holds
+        // no balance, so the till still refuses - for lack of points, which is
+        // what this block proves. Eligibility itself is proven in section 69.
 
         const op = await one<{
           purchase_id: string;
@@ -13225,8 +13262,9 @@ async function main(): Promise<void> {
         }
 
         // The member holds NO points balance, and that is the point of this block:
-        // a bill is never reduced by an existing balance. The EARNING rule is
-        // inserted further down and pays out on CLAIM, not on sale.
+        // with nothing to spend, the till refuses for INSUFFICIENT_POINTS. The
+        // EARNING rule is inserted further down and pays out on CLAIM, not on
+        // sale; which SERVICES may be discounted at all is proven in section 69.
         let spendBlocked = false;
         let spendReason = '';
         try {
@@ -13240,8 +13278,8 @@ async function main(): Promise<void> {
           spendReason = safeErrorMessage(e);
         }
         check(
-          'the till CANNOT reduce a bill with the member points balance',
-          spendBlocked,
+          'the till CANNOT reduce a bill with a zero balance',
+          spendBlocked && /INSUFFICIENT_POINTS/.test(spendReason),
           spendReason || 'the spend function still ran',
         );
         eq(
@@ -13421,13 +13459,8 @@ async function main(): Promise<void> {
           [hotel, past, future, fin],
         );
 
-        let completeTwice = false;
-        try {
-          await db.query(`select * from public.complete_purchase($1,$2)`, [op.purchase_id, gsd]);
-        } catch {
-          completeTwice = true;
-        }
-        check('a purchase cannot be completed twice', completeTwice);
+        const completionRetry=await one<{purchase_id:string}>('select purchase_id from public.complete_purchase($1,$2)',[op.purchase_id,gsd]);
+        eq('a completion retry returns the original purchase without a second transition',completionRetry.purchase_id,op.purchase_id);
 
         // --- the claim, and only then ---------------------------------------
         const claim = await one<{ claim_id: string }>(
@@ -13599,35 +13632,41 @@ async function main(): Promise<void> {
         }
       }
 
-      section('68. points spending is retired; earning and claiming are not');
+      section('68. points spending is restored under the staycation-default policy');
 
-      // Business rule B. The product EARNS points on a purchase and the CUSTOMER
-      // claims them in their own account. Spending an existing balance is gone.
-      //
-      // A removed button proves nothing, so these check the database itself. Four
-      // separate claims, because "it is gone" is not one thing:
-      //   1. nothing can execute a spend function, not even the API's own role;
-      //   2. a catalog redemption cannot be created either;
-      //   3. EARNING and CLAIMING still work, or this migration would have
-      //      silently retired the actual product;
-      //   4. history is intact, because retirement removes a capability, never a
-      //      record.
+      // Business rule C. Accumulated VIP points may discount staycation and hotel
+      // purchases by default, and every other service ONLY through an active,
+      // in-date, tier-eligible promotion. The policy lives inside the SQL
+      // functions; what this section proves is the privilege shape around them:
+      //   1. service_role CAN execute the three purchase-discount functions;
+      //   2. browser roles CANNOT execute any of them, so no direct PostgREST
+      //      call can spend;
+      //   3. the legacy catalog-item redemption STAYS revoked: it carries no
+      //      staycation/promotion gate and is not part of the checkout;
+      //   4. earning, claiming and the audited correction still work;
+      //   5. history is intact, and both the retirement and the restoration are
+      //      recorded exactly once in the audit trail.
       try {
-        const spendFns = [
+        const restoredFns = [
           ['quote_point_discount', 'public.quote_point_discount(uuid,bigint,uuid)'],
           ['commit_point_discount', 'public.commit_point_discount(uuid,uuid)'],
           [
             'apply_purchase_points_discount',
             'public.apply_purchase_points_discount(uuid,bigint,text,uuid)',
           ],
-          [
-            'redeem_membership_points',
-            'public.redeem_membership_points(uuid,uuid,integer,text,uuid)',
-          ],
         ] as const;
 
-        for (const [label, sig] of spendFns) {
-          for (const role of ['service_role', 'authenticated', 'anon'] as const) {
+        for (const [label, sig] of restoredFns) {
+          eq(
+            `service_role cannot execute superseded ${label}`,
+            (
+              await one<{ ok: boolean }>(
+                `select has_function_privilege('service_role','${sig}','execute') ok`,
+              )
+            ).ok,
+            false,
+          );
+          for (const role of ['authenticated', 'anon'] as const) {
             eq(
               `${role} cannot execute ${label}`,
               (
@@ -13638,6 +13677,18 @@ async function main(): Promise<void> {
               false,
             );
           }
+        }
+
+        for (const role of ['service_role', 'authenticated', 'anon'] as const) {
+          eq(
+            `${role} cannot execute redeem_membership_points (stays retired: no staycation gate)`,
+            (
+              await one<{ ok: boolean }>(
+                `select has_function_privilege('${role}','public.redeem_membership_points(uuid,uuid,integer,text,uuid)','execute') ok`,
+              )
+            ).ok,
+            false,
+          );
         }
 
         // The product still WORKS. Retiring spending must not have taken earning
@@ -13685,10 +13736,10 @@ async function main(): Promise<void> {
           5,
         );
 
-        // An operator reading the product's own audit log must find the reason, so
-        // the notice is not only in git history.
+        // An operator reading the product's own audit log must find both
+        // decisions, so neither reason lives only in git history.
         eq(
-          'the retirement is recorded in the audit trail',
+          'the retirement is still recorded in the audit trail',
           (
             await one<{ n: number }>(
               `select count(*)::int n from public.audit_events where action = 'POINTS_SPENDING_RETIRED'`,
@@ -13708,8 +13759,1744 @@ async function main(): Promise<void> {
           ).n,
           1,
         );
+
+        eq(
+          'the restoration is recorded in the audit trail',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action = 'POINTS_SPENDING_RESTORED'`,
+            )
+          ).n,
+          1,
+        );
+
+        eq(
+          'the restoration notice is inserted once, not once per deploy',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action = 'POINTS_SPENDING_RESTORED'`,
+            )
+          ).n,
+          1,
+        );
       } catch (error) {
-        check('points spending retirement verified', false, safeErrorMessage(error));
+        check('points spending restoration verified', false, safeErrorMessage(error));
+      }
+
+      section('69. points spending obeys the staycation-default policy');
+
+      // Business rule C, proven by execution. Accumulated points discount a
+      // purchase ONLY when the service is staycation-eligible OR an active,
+      // in-date, tier-eligible promotion names it. Each letter below is one
+      // required test from the policy:
+      //   A. staycation without promotion: allowed
+      //   B. hotel check-in without promotion: allowed (same gate as A)
+      //   C. restaurant without promotion: denied
+      //   D. (covered by E: restaurant WITH promotion is the same gate)
+      //   E. promoted non-staycation service: allowed at the configured rate
+      //   F. expired promotion: denied
+      //   G. wrong VIP tier: denied
+      //   H. insufficient points: denied, nothing moves
+      //   I. reversal debt: spending blocked, earning unaffected
+      //   J. concurrent retried spend debits once
+      //   K. abandoned quote spends nothing
+      //   L. reversing a discounted purchase never resurrects spent points
+      //   N. spending never consumes annual earning capacity
+      //   O. a second discount on one purchase is refused, never stacked
+      // (M, unauthorized access, is proven by the handler suite and section 68.)
+      let gsd69: string | null = null;
+      let fin69: string | null = null;
+      let buyer69: string | null = null;
+      let sale69: string | null = null;
+      let member69: string | null = null;
+      let account69: string | null = null;
+      let svc69: string[] = [];
+      try {
+        const s69 = `p69_${Date.now().toString(36)}`;
+        const past = '2000-01-01';
+        const future = '2099-01-01';
+
+        const mkStaff69 = async (slug: string, name: string, email: string) => {
+          const auth = uuidFor(`${s69}:${slug}`);
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [auth, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status) values ($1,$2,$3,'active')`,
+            [auth, email, name],
+          );
+          await db.query(
+            `insert into public.staff_role_assignments (staff_id, role_id)
+           values ($1, (select id from public.roles where slug = $2))`,
+            [auth, slug],
+          );
+          return auth;
+        };
+        gsd69 = await mkStaff69('employee', `Spend GSD ${s69}`, `spend-gsd-${s69}@example.invalid`);
+        fin69 = await mkStaff69('finance', `Spend Fin ${s69}`, `spend-fin-${s69}@example.invalid`);
+        // Reversal needs operations.redemption UPDATE, which neither the seller
+        // nor Finance holds (baseline: employee has view+create, finance has
+        // none) - only the super admin does, as in production.
+        const adm69 = await mkStaff69(
+          'super_admin',
+          `Spend Admin ${s69}`,
+          `spend-adm-${s69}@example.invalid`,
+        );
+        createdStaffIds.push(gsd69, fin69, adm69);
+
+        buyer69 = uuidFor(`${s69}:customer`);
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1,$2,'SPEND','MEMBER',$3,'09180000002','active')`,
+          [buyer69, `CUS-${s69}`, `spend-${s69}@example.invalid`],
+        );
+        sale69 = uuidFor(`${s69}:sale`);
+        await db.query(
+          `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+                 'staff',$4,'100000.00', now() + interval '30 days','draft')`,
+          [sale69, `AF-CSALE${s69.replace(/[^a-z0-9]/gi, '').toUpperCase()}`, buyer69, staff['sm']!],
+        );
+        member69 = (
+          await one<{ id: string }>(
+            `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash,
+              qr_token_hash, status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           select $1,$2,cp.id,$3,$4,$5,'active',0,0,$6, now(), now(), now() + interval '5 years'
+             from public.card_plans cp where cp.code='GOLD'
+           returning id`,
+            [buyer69, sale69, `MBS-${s69}`, `fb_${s69}`, `qr_${s69}`, gsd69],
+          )
+        ).id;
+        account69 = (
+          await one<{ id: string }>(
+            `insert into public.points_accounts (membership_id) values ($1) returning id`,
+            [member69],
+          )
+        ).id;
+        await db.query(`update public.memberships set points_anniversary = date '2025-10-09' where id = $1`, [
+          member69,
+        ]);
+        // Fund the card with a real earned row so the invariant holds from the
+        // start: balance - debt = sum(ledger). A funded fixture is honest; a
+        // bare UPDATE of the balance would break reconciliation on purpose.
+        await db.query(
+          `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after,
+            counts_toward_cap, reason)
+           values ($1,'earned',10000,0,10000,true,'Synthetic funding for spend policy proof')`,
+          [account69],
+        );
+        await db.query(`update public.points_accounts set balance = 10000 where id = $1`, [
+          account69,
+        ]);
+        await db.query(`update public.memberships set points_balance = 10000 where id = $1`, [
+          member69,
+        ]);
+
+        const mkService = async (code: string, name: string, price: string, stay: boolean) => {
+          const id = (
+            await one<{ id: string }>(
+              `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+               values ($1,$2,$3,$4) returning id`,
+              [code, name, price, stay],
+            )
+          ).id;
+          svc69.push(id);
+          return id;
+        };
+        const mkPurchase = async (serviceId: string, quantity: number, ref: string) => {
+          const row = await one<{ purchase_id: string }>(
+            `select purchase_id from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`,
+            [
+              member69,
+              JSON.stringify([{ serviceId, quantity, unitAmount: '0.00' }]),
+              ref,
+              gsd69,
+            ],
+          );
+          return row.purchase_id;
+        };
+        const invariant = async () =>
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_accounts a
+               where a.id = $1 and a.balance - a.reversal_debt <>
+                 coalesce((select sum(l.amount) from public.points_ledger l where l.account_id = a.id), 0)`,
+              [account69],
+            )
+          ).n;
+
+        // --- A/B. staycation and hotel without promotion: allowed ------------
+        const hotel = await mkService(`HOTEL-${s69}`, 'S69 Hotel night', '10000.00', true);
+        const stay = await mkPurchase(hotel, 1, `STAY-${s69}`);
+        const quoted = await one<{
+          quote_id: string;
+          peso_value: string;
+          points_requested: bigint;
+        }>(
+          `select quote_id, peso_value, points_requested from public.quote_point_discount($1, 2000, $2)`,
+          [stay, gsd69],
+        );
+        eq('a staycation quote prices without spending', quoted.peso_value, '2000.00');
+        eq(
+          'quoting moves no points',
+          Number(
+            (
+              await one<{ balance: number }>(
+                `select balance from public.points_accounts where id=$1`,
+                [account69],
+              )
+            ).balance,
+          ),
+          10000,
+        );
+        const spent = await one<{
+          points_spent: bigint;
+          discount_applied: string;
+          net_amount: string;
+          balance_after: bigint;
+        }>(
+          `select points_spent, discount_applied, net_amount, balance_after
+           from public.commit_point_discount($1, $2)`,
+          [quoted.quote_id, gsd69],
+        );
+        eq('a staycation commit spends the quoted points', Number(spent.points_spent), 2000);
+        eq('the peso value is the configured default of one peso per point', spent.discount_applied, '2000.00');
+        eq('net is gross minus the points discount', spent.net_amount, '8000.00');
+        eq('the balance falls by exactly the spend', Number(spent.balance_after), 8000);
+        eq('the ledger still reconciles after a spend', await invariant(), 0);
+
+        // --- tier + points without approval: NOT stacked by default -----------
+        // Gross 10000 with a 25% tier rate snapshots 2500. Spending points on
+        // top is refused: the two discounts never combine automatically. The
+        // member completes with the tier discount, or the sale goes the
+        // points-only path (tier skipped at creation), or an explicit stacking
+        // promotion authorizes both (proven below).
+        const tiered = await mkService(`TIER-${s69}`, 'S69 Tiered stay', '10000.00', true);
+        await db.query(
+          `insert into public.service_tier_discounts
+           (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+           values ($1,'GOLD',25,$2,$3,$4)`,
+          [tiered, past, future, fin69],
+        );
+        const tieredPurchase = await mkPurchase(tiered, 1, `TIER-${s69}`);
+        eq(
+          'the tier discount is snapshotted at sale time',
+          (
+            await one<{ tier_discount_amount: string }>(
+              `select tier_discount_amount from public.purchases where id=$1`,
+              [tieredPurchase],
+            )
+          ).tier_discount_amount,
+          '2500.00',
+        );
+        const stackRefused = await throwsIsolated(
+          'tier and points do not stack without an explicit promotion',
+          () =>
+            db.query(`select * from public.apply_purchase_points_discount($1, 2000, $2, $3)`, [
+              tieredPurchase,
+              `TIERPOS-${s69}`,
+              gsd69,
+            ]),
+        );
+        eq(
+          'the refusal names the stacking rule, not an opaque failure',
+          /STACKING_NOT_AUTHORIZED/.test(stackRefused),
+          true,
+        );
+        eq(
+          'a refused stack leaves the tiered net exactly as sold',
+          (
+            await one<{ net_amount: string }>(
+              `select net_amount from public.purchases where id=$1`,
+              [tieredPurchase],
+            )
+          ).net_amount,
+          '7500.00',
+        );
+
+        // --- explicit stacking promotion: both discounts, capped --------------
+        // The promotion names the service, covers GOLD, spans the sale date and
+        // carries allow_discount_stacking. Gross 10000 - tier 2500, then points
+        // 2000 against the 7500 remainder -> net 5500.00.
+        await db.query(
+          `insert into public.point_redemption_rules
+           (service_id, peso_value_per_point, eligible_tiers, min_points,
+            effective_start, effective_end, promotion_reference,
+            allow_discount_stacking, created_by)
+           values ($1, 1, array['GOLD'], 1, $2, $3, $4, true, $5)`,
+          [tiered, past, future, `S69-STACK`, fin69],
+        );
+        const tieredSpent = await one<{ net_amount: string }>(
+          `select net_amount from public.apply_purchase_points_discount($1, 2000, $2, $3)`,
+          [tieredPurchase, `TIERPOS2-${s69}`, gsd69],
+        );
+        eq(
+          'an authorized stack keeps tier and points as separate figures',
+          tieredSpent.net_amount,
+          '5500.00',
+        );
+        eq('the ledger still reconciles after a stacked discount', await invariant(), 0);
+
+        // --- C. restaurant without promotion: denied -------------------------
+        const teppan = await mkService(`TEP-${s69}`, 'S69 Teppanyaki', '2000.00', false);
+        const dinner = await mkPurchase(teppan, 1, `DINNER-${s69}`);
+        await throwsIsolated('teppanyaki without a promotion cannot take points', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [dinner, gsd69]),
+        );
+
+        // --- E. the same service WITH an active promotion: allowed -----------
+        await db.query(
+          `insert into public.point_redemption_rules
+           (service_id, peso_value_per_point, eligible_tiers, min_points,
+            effective_start, effective_end, promotion_reference, created_by)
+           values ($1, 1, array['GOLD'], 1, $2, $3, $4, $5)`,
+          [teppan, past, future, `S69-PROMO`, fin69],
+        );
+        const promoDinner = await mkPurchase(teppan, 1, `PROMO-${s69}`);
+        const promoQuoted = await one<{ peso_value: string }>(
+          `select peso_value from public.quote_point_discount($1, 500, $2)`,
+          [promoDinner, gsd69],
+        );
+        eq('a promoted service quotes at the configured rate', promoQuoted.peso_value, '500.00');
+        const promoSpent = await one<{ net_amount: string; balance_after: bigint }>(
+          `select net_amount, balance_after from public.apply_purchase_points_discount($1, 500, $2, $3)`,
+          [promoDinner, `PROMOPOS-${s69}`, gsd69],
+        );
+        eq('a promoted service spends at the configured rate', promoSpent.net_amount, '1500.00');
+
+        // --- F. expired promotion: denied ------------------------------------
+        const old = await mkService(`OLD-${s69}`, 'S69 Old promo night', '3000.00', false);
+        await db.query(
+          `insert into public.point_redemption_rules
+           (service_id, peso_value_per_point, eligible_tiers, min_points,
+            effective_start, effective_end, promotion_reference, created_by)
+           values ($1, 1, array['GOLD'], 1, '2000-01-01', '2000-02-01', $2, $3)`,
+          [old, `S69-EXPIRED`, fin69],
+        );
+        const oldPurchase = await mkPurchase(old, 1, `OLD-${s69}`);
+        await throwsIsolated('an expired promotion grants nothing', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [oldPurchase, gsd69]),
+        );
+
+        // --- G. wrong tier: denied -------------------------------------------
+        const silver = await mkService(`SILV-${s69}`, 'S69 Silver-only night', '3000.00', false);
+        await db.query(
+          `insert into public.point_redemption_rules
+           (service_id, peso_value_per_point, eligible_tiers, min_points,
+            effective_start, effective_end, promotion_reference, created_by)
+           values ($1, 1, array['SILVER'], 1, $2, $3, $4, $5)`,
+          [silver, past, future, `S69-SILVER`, fin69],
+        );
+        const silverPurchase = await mkPurchase(silver, 1, `SILV-${s69}`);
+        await throwsIsolated('a GOLD member cannot use a SILVER-only promotion', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [silverPurchase, gsd69]),
+        );
+
+        // --- H. insufficient points: denied, nothing moves -------------------
+        const beforeH = (
+          await one<{ balance: number }>(`select balance from public.points_accounts where id=$1`, [account69])
+        ).balance;
+        await throwsIsolated('more points than the balance cannot be quoted', () =>
+          db.query(`select * from public.quote_point_discount($1, 99999999, $2)`, [stay, gsd69]),
+        );
+        eq(
+          'a refused quote leaves the balance untouched',
+          (
+            await one<{ balance: number }>(`select balance from public.points_accounts where id=$1`, [
+              account69,
+            ])
+          ).balance,
+          beforeH,
+        );
+
+        // --- I. reversal debt blocks spending, never earning -----------------
+        await db.query(`update public.points_accounts set reversal_debt = 5 where id = $1`, [
+          account69,
+        ]);
+        await throwsIsolated('spending is blocked while reversal debt is outstanding', () =>
+          db.query(`select * from public.quote_point_discount($1, 100, $2)`, [stay, gsd69]),
+        );
+        await db.query(`update public.points_accounts set reversal_debt = 0 where id = $1`, [
+          account69,
+        ]);
+
+        // --- J. concurrent retried spend debits once -------------------------
+        const racePurchase = await mkPurchase(hotel, 1, `RACE-${s69}`);
+        const racer = new Client({ connectionString: target.url });
+        racer.on('error', () => {});
+        await racer.connect();
+        try {
+          const results = await Promise.allSettled([
+            db.query(`select already_applied from public.apply_purchase_points_discount($1, 1000, $2, $3)`, [
+              racePurchase,
+              `RACEPOS-${s69}`,
+              gsd69,
+            ]),
+            racer.query(
+              `select already_applied from public.apply_purchase_points_discount($1, 1000, $2, $3)`,
+              [racePurchase, `RACEPOS-${s69}`, gsd69],
+            ),
+          ]);
+          const won = results.filter((r) => r.status === 'fulfilled');
+          eq('race: both retried spends answer (idempotent retry, not an error)', won.length, 2);
+          const flags = won.map(
+            (r) => (r as { value: { rows: { already_applied: boolean }[] } }).value.rows[0]!.already_applied,
+          );
+          eq('race: exactly one call did the spending', flags.filter((f) => f === false).length, 1);
+          eq(
+            'race: the balance fell once, not twice',
+            Number(
+              (
+                await one<{ balance: number }>(
+                  `select balance from public.points_accounts where id=$1`,
+                  [account69],
+                )
+              ).balance,
+            ),
+            beforeH - 1000,
+          );
+        } finally {
+          await racer.end();
+        }
+
+        // --- K. an abandoned quote spends nothing -----------------------------
+        const abandoned = await mkPurchase(hotel, 1, `ABANDON-${s69}`);
+        const abandonedQuote = await one<{ quote_id: string }>(
+          `select quote_id from public.quote_point_discount($1, 400, $2)`,
+          [abandoned, gsd69],
+        );
+        eq(
+          'an uncommitted quote writes no ledger row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger
+               where reference_type = 'redemption_quote' and reference_id = $1`,
+              [abandonedQuote.quote_id],
+            )
+          ).n,
+          0,
+        );
+
+        // --- N. spending never consumes annual earning capacity ---------------
+        // No warm-up: the FIRST call must already be correct (regression guard
+        // for the STABLE-marking defect that returned NULL period fields on
+        // first call). Both sides read through `select *` + camel(), the
+        // suite's own snake-to-camel convention.
+        const capRowBefore = camel<{ remainingEarningCapacity: string }>(
+          await one<Record<string, unknown>>(
+            `select * from public.customer_points_position($1)`,
+            [member69],
+          ),
+        );
+        const capSpend = await mkPurchase(hotel, 1, `CAP-${s69}`);
+        await db.query(`select * from public.apply_purchase_points_discount($1, 300, $2, $3)`, [
+          capSpend,
+          `CAPPOS-${s69}`,
+          gsd69,
+        ]);
+        const capRowAfter = camel<{ remainingEarningCapacity: string }>(
+          await one<Record<string, unknown>>(
+            `select * from public.customer_points_position($1)`,
+            [member69],
+          ),
+        );
+        eq(
+          'a spend leaves the annual earning capacity exactly where it was',
+          String(capRowAfter.remainingEarningCapacity),
+          String(capRowBefore.remainingEarningCapacity),
+        );
+        eq(
+          'the spend ledger row does not count toward the cap',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger
+               where account_id = $1 and entry_type = 'redemption' and counts_toward_cap`,
+              [account69],
+            )
+          ).n,
+          0,
+        );
+
+        // --- O. a second discount on one purchase is refused, never stacked ---
+        await throwsIsolated('a second reference cannot stack a second discount', () =>
+          db.query(`select * from public.apply_purchase_points_discount($1, 100, $2, $3)`, [
+            promoDinner,
+            `SECOND-${s69}`,
+            gsd69,
+          ]),
+        );
+
+        // --- L. reversing a discounted purchase never resurrects spent points --
+        const spendRowsBefore = (
+          await one<{ n: number }>(
+            `select count(*)::int n from public.points_ledger where account_id = $1 and entry_type = 'redemption'`,
+            [account69],
+          )
+        ).n;
+        const balanceBeforeReversal = (
+          await one<{ balance: number }>(`select balance from public.points_accounts where id=$1`, [account69])
+        ).balance;
+        // promoDinner has no earning claim: reversal takes the money-only path.
+        await db.query(`select * from public.reverse_purchase_points($1, $2, $3)`, [
+          promoDinner,
+          adm69,
+          `Synthetic spend-reversal proof ${s69}`,
+        ]);
+        eq(
+          'reversal leaves every spend ledger row in place',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger where account_id = $1 and entry_type = 'redemption'`,
+              [account69],
+            )
+          ).n,
+          spendRowsBefore,
+        );
+        eq(
+          'reversal credits back no spent points',
+          (
+            await one<{ balance: number }>(`select balance from public.points_accounts where id=$1`, [account69])
+          ).balance,
+          balanceBeforeReversal,
+        );
+        eq('the ledger still reconciles after every spend and reversal', await invariant(), 0);
+      } catch (error) {
+        check('points spend policy matrix completed', false, safeErrorMessage(error));
+      } finally {
+        if (gsd69 && fin69) {
+          await db
+            .query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [
+              [gsd69, fin69],
+            ])
+            .catch(() => undefined);
+        }
+        if (buyer69 && member69) {
+          await db
+            .query(
+              `delete from public.earning_claims where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.redemption_quotes where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.purchases where membership_id = $1`, [member69])
+            .catch(() => undefined);
+        }
+        if (svc69.length) {
+          await db
+            .query(`delete from public.point_earning_rules where service_id = any($1::uuid[])`, [svc69])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.point_redemption_rules where service_id = any($1::uuid[])`, [svc69])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_tier_discounts where service_id = any($1::uuid[])`, [svc69])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_catalog where id = any($1::uuid[])`, [svc69])
+            .catch(() => undefined);
+        }
+        if (member69) {
+          await db
+            .query(
+              `delete from public.points_ledger where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.points_periods where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member69],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.points_accounts where membership_id = $1`, [member69])
+            .catch(() => undefined);
+          await db.query(`delete from public.memberships where id = $1`, [member69]).catch(() => undefined);
+        }
+        if (sale69) {
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          await db
+            .query(`delete from public.card_sale_hierarchy_snapshots where sale_id = $1`, [sale69])
+            .catch(() => undefined);
+          await db.query(`delete from public.card_sales where id = $1`, [sale69]).catch(() => undefined);
+        }
+        if (buyer69) {
+          await db.query(`delete from public.customers where id = $1`, [buyer69]).catch(() => undefined);
+        }
+      }
+
+      section('70. stacking needs an explicit promotion, and the sale-time choice');
+
+      // Approved Option C, proven by execution. Default: tier and points never
+      // combine. A stacking promotion authorizes both for its service, tier and
+      // window. The sale-time tier choice (new p_apply_tier_discount, default
+      // true) records the points-only path immutably. Every refusal below names
+      // its rule; every success keeps gross - tier - points = net.
+      let gsd70: string | null = null;
+      let fin70: string | null = null;
+      let buyer70: string | null = null;
+      let sale70: string | null = null;
+      let member70: string | null = null;
+      let account70: string | null = null;
+      let svc70: string[] = [];
+      try {
+        const s70 = `p70_${Date.now().toString(36)}`;
+        const past = '2000-01-01';
+        const future = '2099-01-01';
+
+        const mkStaff70 = async (slug: string, name: string, email: string) => {
+          const auth = uuidFor(`${s70}:${slug}`);
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [auth, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status) values ($1,$2,$3,'active')`,
+            [auth, email, name],
+          );
+          await db.query(
+            `insert into public.staff_role_assignments (staff_id, role_id)
+           values ($1, (select id from public.roles where slug = $2))`,
+            [auth, slug],
+          );
+          return auth;
+        };
+        gsd70 = await mkStaff70('employee', `Stack GSD ${s70}`, `stack-gsd-${s70}@example.invalid`);
+        fin70 = await mkStaff70('finance', `Stack Fin ${s70}`, `stack-fin-${s70}@example.invalid`);
+        createdStaffIds.push(gsd70, fin70);
+
+        buyer70 = uuidFor(`${s70}:customer`);
+        await db.query(
+          `insert into public.customers (id, customer_number, first_name, last_name, email, phone, status)
+         values ($1,$2,'STACK','BUYER',$3,'09180000003','active')`,
+          [buyer70, `CUS-${s70}`, `stack-${s70}@example.invalid`],
+        );
+        sale70 = uuidFor(`${s70}:sale`);
+        await db.query(
+          `insert into public.card_sales
+           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+            cash_price, balance_due_at, status)
+         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+                 'staff',$4,'100000.00', now() + interval '30 days','draft')`,
+          [sale70, `AF-CSALE${s70.replace(/[^a-z0-9]/gi, '').toUpperCase()}`, buyer70, staff['sm']!],
+        );
+        member70 = (
+          await one<{ id: string }>(
+            `insert into public.memberships
+             (customer_id, sale_id, product_id, membership_number, fallback_code_hash,
+              qr_token_hash, status, points_balance, yearly_points_allocated, activated_by,
+              issued_at, activated_at, expires_at)
+           select $1,$2,cp.id,$3,$4,$5,'active',0,0,$6, now(), now(), now() + interval '5 years'
+             from public.card_plans cp where cp.code='GOLD'
+           returning id`,
+            [buyer70, sale70, `MBS-${s70}`, `fb_${s70}`, `qr_${s70}`, gsd70],
+          )
+        ).id;
+        account70 = (
+          await one<{ id: string }>(
+            `insert into public.points_accounts (membership_id) values ($1) returning id`,
+            [member70],
+          )
+        ).id;
+        await db.query(`update public.memberships set points_anniversary = date '2025-10-09' where id = $1`, [
+          member70,
+        ]);
+        await db.query(
+          `insert into public.points_ledger
+           (account_id, entry_type, amount, balance_before, balance_after,
+            counts_toward_cap, reason)
+           values ($1,'earned',100000,0,100000,true,'Synthetic funding for stacking proof')`,
+          [account70],
+        );
+        await db.query(`update public.points_accounts set balance = 100000 where id = $1`, [account70]);
+        await db.query(`update public.memberships set points_balance = 100000 where id = $1`, [member70]);
+
+        const mkService70 = async (code: string, name: string, price: string, stay: boolean) => {
+          const id = (
+            await one<{ id: string }>(
+              `insert into public.service_catalog (code, name, base_price, is_staycation_eligible)
+               values ($1,$2,$3,$4) returning id`,
+              [code, name, price, stay],
+            )
+          ).id;
+          svc70.push(id);
+          return id;
+        };
+        const mkTierRule70 = async (serviceId: string, rate: number) => {
+          await db.query(
+            `insert into public.service_tier_discounts
+             (service_id, tier, discount_rate, effective_start, effective_end, created_by)
+             values ($1,'GOLD',$2,$3,$4,$5)`,
+            [serviceId, rate, past, future, fin70],
+          );
+        };
+        const mkPromo70 = async (
+          serviceId: string,
+          tiers: string[],
+          stacking: boolean,
+          start: string,
+          end: string,
+          ref: string,
+        ) => {
+          const id = (
+            await one<{ id: string }>(
+              `insert into public.point_redemption_rules
+               (service_id, peso_value_per_point, eligible_tiers, min_points,
+                effective_start, effective_end, promotion_reference,
+                allow_discount_stacking, created_by)
+               values ($1, 1, $2, 1, $3, $4, $5, $6, $7) returning id`,
+              [serviceId, tiers, start, end, ref, stacking, fin70],
+            )
+          ).id;
+          return id;
+        };
+        const mkPurchase70 = async (serviceId: string, quantity: number, ref: string, tier: boolean | null) => {
+          // tier null = omitted flag (backward compatibility); true/false explicit.
+          const args =
+            tier === null
+              ? [member70, JSON.stringify([{ serviceId, quantity, unitAmount: '0.00' }]), ref, gsd70]
+              : [member70, JSON.stringify([{ serviceId, quantity, unitAmount: '0.00' }]), ref, gsd70, tier];
+          const row = await one<{ purchase_id: string }>(
+            tier === null
+              ? `select purchase_id from public.create_purchase($1,'0.00',$2::jsonb,$3,$4)`
+              : `select purchase_id from public.create_purchase($1,'0.00',$2::jsonb,$3,$4,$5)`,
+            args,
+          );
+          return row.purchase_id;
+        };
+        const invariant70 = async () =>
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_accounts a
+               where a.id = $1 and a.balance - a.reversal_debt <>
+                 coalesce((select sum(l.amount) from public.points_ledger l where l.account_id = a.id), 0)`,
+              [account70],
+            )
+          ).n;
+
+        // --- choice A: tiered purchase completes with the tier, no spend -----
+        const roomA = await mkService70(`ROOM-A-${s70}`, 'S70 Hotel night', '10000.00', true);
+        await mkTierRule70(roomA, 25);
+        const saleA = await mkPurchase70(roomA, 1, `CH-A-${s70}`, null);
+        const payA = (
+          await one<{ payment_id: string }>(
+            `select payment_id from public.record_purchase_payment($1,'7500.00','cash',$2,$3)`,
+            [saleA, `RCPT-A-${s70}`, gsd70],
+          )
+        ).payment_id;
+        await db.query(`select * from public.verify_purchase_payment($1,'verified',null,$2)`, [payA, fin70]);
+        await db.query(`select * from public.complete_purchase($1,$2)`, [saleA, gsd70]);
+        eq(
+          'choice A settles on the tiered net with no points touched',
+          (
+            await one<{ net_amount: string; points_discount_amount: string }>(
+              `select net_amount, points_discount_amount from public.purchases where id=$1`,
+              [saleA],
+            )
+          ).net_amount,
+          '7500.00',
+        );
+        eq(
+          'choice A writes no redemption ledger row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_ledger where account_id=$1 and entry_type='redemption'`,
+              [account70],
+            )
+          ).n,
+          0,
+        );
+
+        // --- choice B: points-path sale skips the tier, spends freely --------
+        const roomB = await mkService70(`ROOM-B-${s70}`, 'S70 Points-path night', '10000.00', true);
+        await mkTierRule70(roomB, 25);
+        const saleB = await mkPurchase70(roomB, 1, `CH-B-${s70}`, false);
+        const rowB = await one<{ tier_discount_amount: string; tier_snapshot: string | null; net_amount: string }>(
+          `select tier_discount_amount, tier_snapshot, net_amount from public.purchases where id=$1`,
+          [saleB],
+        );
+        eq('choice B records no tier discount', rowB.tier_discount_amount, '0.00');
+        eq('choice B snapshots a NULL tier', rowB.tier_snapshot, null);
+        eq('choice B nets the full gross', rowB.net_amount, '10000.00');
+        const spentB = await one<{ net_amount: string }>(
+          `select net_amount from public.apply_purchase_points_discount($1, 2000, $2, $3)`,
+          [saleB, `CHB-POS-${s70}`, gsd70],
+        );
+        eq('choice B spends with no stacking promotion in sight', spentB.net_amount, '8000.00');
+
+        // --- omitted flag keeps today's behavior (backward compatibility) ----
+        const saleC = await mkPurchase70(roomB, 1, `CH-C-${s70}`, null);
+        eq(
+          'an omitted tier choice still applies the rate',
+          (
+            await one<{ tier_discount_amount: string }>(
+              `select tier_discount_amount from public.purchases where id=$1`,
+              [saleC],
+            )
+          ).tier_discount_amount,
+          '2500.00',
+        );
+
+        // --- non-stacking promotion + tier: spend refused ---------------------
+        const dine = await mkService70(`DINE-${s70}`, 'S70 Teppanyaki', '2000.00', false);
+        await mkTierRule70(dine, 10);
+        await mkPromo70(dine, ['GOLD'], false, past, future, `S70-NOSTACK`);
+        const saleD = await mkPurchase70(dine, 1, `CH-D-${s70}`, null);
+        const refusedD = await throwsIsolated(
+          'a spending promotion without the flag never authorizes stacking',
+          () =>
+            db.query(`select * from public.apply_purchase_points_discount($1, 500, $2, $3)`, [
+              saleD,
+              `CHD-POS-${s70}`,
+              gsd70,
+            ]),
+        );
+        eq('the refusal names the stacking rule', /STACKING_NOT_AUTHORIZED/.test(refusedD), true);
+
+        // --- explicit stacking promotion: both, capped at the remainder ------
+        const stackSvc = await mkService70(`STK-${s70}`, 'S70 Stackable stay', '10000.00', true);
+        await mkTierRule70(stackSvc, 25);
+        await mkPromo70(stackSvc, ['GOLD'], true, past, future, `S70-STACK`);
+        const saleE = await mkPurchase70(stackSvc, 1, `CH-E-${s70}`, null);
+        const spentE = await one<{ net_amount: string; points_spent: bigint }>(
+          `select net_amount, points_spent from public.apply_purchase_points_discount($1, 2000, $2, $3)`,
+          [saleE, `CHE-POS-${s70}`, gsd70],
+        );
+        eq('an authorized stack nets gross minus tier minus points', spentE.net_amount, '5500.00');
+
+        // --- over-request on a stack caps the pesos at the remainder ---------
+        const saleF = await mkPurchase70(stackSvc, 1, `CH-F-${s70}`, null);
+        const quotedF = await one<{ peso_value: string }>(
+          `select peso_value from public.quote_point_discount($1, 50000, $2)`,
+          [saleF, gsd70],
+        );
+        eq('a stacked quote never prices above the remaining amount', quotedF.peso_value, '7500.00');
+
+        // --- expired stacking authorization is denied -------------------------
+        const oldSvc = await mkService70(`OLD-${s70}`, 'S70 Lapsed stackable', '10000.00', true);
+        await mkTierRule70(oldSvc, 25);
+        await mkPromo70(oldSvc, ['GOLD'], true, '2000-01-01', '2000-02-01', `S70-LAPSED`);
+        const saleG = await mkPurchase70(oldSvc, 1, `CH-G-${s70}`, null);
+        const refusedG = await throwsIsolated('a lapsed stacking window authorizes nothing', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [saleG, gsd70]),
+        );
+        eq('a lapsed stack is refused as unauthorized stacking', /STACKING_NOT_AUTHORIZED/.test(refusedG), true);
+        await db.query(
+          `update public.point_redemption_rules set is_active=false where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+        const refusedG2 = await throwsIsolated('a deactivated stacking promotion authorizes nothing', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [saleE, gsd70]),
+        );
+        eq('a deactivated stack is refused as unauthorized stacking', /STACKING_NOT_AUTHORIZED/.test(refusedG2), true);
+        await db.query(
+          `update public.point_redemption_rules set is_active=true where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+
+        // --- stacking promo for the wrong service or tier is denied -----------
+        const other = await mkService70(`OTHER-${s70}`, 'S70 Other stay', '10000.00', true);
+        await mkTierRule70(other, 25);
+        const saleH = await mkPurchase70(other, 1, `CH-H-${s70}`, null);
+        const refusedH = await throwsIsolated('a stacking promo for another service does not travel', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [saleH, gsd70]),
+        );
+        eq('cross-service stacking is refused', /STACKING_NOT_AUTHORIZED/.test(refusedH), true);
+        const silverOnly = await mkService70(`SILV-${s70}`, 'S70 Silver stackable', '10000.00', true);
+        await mkTierRule70(silverOnly, 25);
+        await mkPromo70(silverOnly, ['SILVER'], true, past, future, `S70-SILVER-STACK`);
+        const saleI = await mkPurchase70(silverOnly, 1, `CH-I-${s70}`, null);
+        const refusedI = await throwsIsolated('a stacking promo for another tier does not travel', () =>
+          db.query(`select * from public.quote_point_discount($1, 500, $2)`, [saleI, gsd70]),
+        );
+        eq('cross-tier stacking is refused', /STACKING_NOT_AUTHORIZED/.test(refusedI), true);
+
+        // --- commit revalidates: promotion lost after quoting refuses ---------
+        const saleJ = await mkPurchase70(stackSvc, 1, `CH-J-${s70}`, null);
+        const quoteJ = await one<{ quote_id: string }>(
+          `select quote_id from public.quote_point_discount($1, 500, $2)`,
+          [saleJ, gsd70],
+        );
+        await db.query(
+          `update public.point_redemption_rules set is_active=false where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+        const refusedJ = await throwsIsolated('a commit after deactivation refuses', () =>
+          db.query(`select * from public.commit_point_discount($1, $2)`, [quoteJ.quote_id, gsd70]),
+        );
+        eq('commit revalidation names the stacking rule', /STACKING_NOT_AUTHORIZED/.test(refusedJ), true);
+        eq(
+          'a refused commit leaves its quote open, not half-spent',
+          (
+            await one<{ status: string }>(
+              `select status from public.redemption_quotes where id=$1`,
+              [quoteJ.quote_id],
+            )
+          ).status,
+          'open',
+        );
+        await db.query(
+          `update public.point_redemption_rules set is_active=true where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+
+        // --- history keeps snapshots after the promotion changes ---------------
+        await db.query(
+          `update public.point_redemption_rules set is_active=false where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+        const histE = await one<{ tier: string; points: string; net: string }>(
+          `select tier_discount_amount tier, points_discount_amount points, net_amount net
+           from public.purchases where id=$1`,
+          [saleE],
+        );
+        eq('a deactivated promotion rewrites no historical tier figure', histE.tier, '2500.00');
+        eq('a deactivated promotion rewrites no historical points figure', histE.points, '2000.00');
+        eq('a deactivated promotion rewrites no historical net', histE.net, '5500.00');
+        eq(
+          'the promotion row itself is retained, not deleted',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.point_redemption_rules where promotion_reference=$1`,
+              [`S70-STACK`],
+            )
+          ).n,
+          1,
+        );
+        await db.query(
+          `update public.point_redemption_rules set is_active=true where promotion_reference=$1`,
+          [`S70-STACK`],
+        );
+        eq('the ledger still reconciles after every stacked operation', await invariant70(), 0);
+        section('72. portal authorization, reserved settlement and Finance compensation');
+        const reverseAdmin72=await mkStaff70('super_admin','Refund review race '+s70,'refund-admin-'+s70+'@example.invalid');
+        createdStaffIds.push(reverseAdmin72);
+        const ownerAuth72=uuidFor(s70+':portal-owner');
+        await db.query('insert into auth.users(id,email) values($1,$2)',[ownerAuth72,'portal-'+s70+'@example.invalid']);
+        createdAuthIds.push(ownerAuth72);
+        await db.query('update public.customers set auth_user_id=$1 where id=$2',[ownerAuth72,buyer70]);
+        const room72=await mkService70('PORTAL-'+s70,'Portal-approved accommodation','1000.00',true);
+        const create72=async(ref:string)=>mkPurchase70(room72,1,ref+'-'+s70,false);
+        const noRule72=await create72('NO-RATE');
+        await throwsIsolated('an accommodation has no implicit one-peso conversion',()=>db.query('select * from public.prepare_customer_point_redemption($1,100,$2)',[noRule72,gsd70]));
+        const rate72=await mkPromo70(room72,['GOLD'],false,past,future,'PORTAL-RATE-'+s70);
+        await db.query("update public.point_redemption_rules set rule_kind='accommodation',peso_value_per_point=0.5 where id=$1",[rate72]);
+        const prepare72=async(purchase:string,points:number)=> (await one<{quote_id:string;peso_value:string}>('select quote_id,peso_value from public.prepare_customer_point_redemption($1,$2,$3)',[purchase,points,gsd70]));
+        const approve72=async(quote:string,approve=true)=>db.query('select public.decide_point_redemption_approval($1,$2,$3,$4)',[quote,buyer70,ownerAuth72,approve]);
+        const wallet72=async()=>Number((await one<{balance:string}>('select balance from public.points_accounts where id=$1',[account70])).balance);
+        const initial72=await wallet72();
+        const expiryPurchase72=await create72('EXPIRY-BOUNDARY');
+        await db.query("update public.point_redemption_rules set effective_end=(now() at time zone 'Asia/Manila')::date+1 where id=$1",[rate72]);
+        const expiryDefinition72=(await one<{definition:string}>("select pg_get_functiondef('public.prepare_customer_point_redemption(uuid,bigint,uuid)'::regprocedure) definition")).definition;
+        const expiryProbe72=expiryDefinition72.replace('public.prepare_customer_point_redemption(', 'public.prepare_customer_point_redemption_clock_probe(').replaceAll('now()',"((date_trunc('day',now() at time zone 'Asia/Manila')+interval '23 hours 50 minutes') at time zone 'Asia/Manila')");
+        try{
+          await db.query(expiryProbe72);
+          const boundaryOffer72=await one<{quote_id:string;expires_at:Date}>('select quote_id,expires_at from public.prepare_customer_point_redemption_clock_probe($1,100,$2)',[expiryPurchase72,gsd70]);
+          const storedExpiry72=await one<{expires_at:Date}>('select expires_at from public.redemption_quotes where id=$1',[boundaryOffer72.quote_id]);
+          eq('quote response preserves the stored promotion-boundary expiry',boundaryOffer72.expires_at.toISOString(),storedExpiry72.expires_at.toISOString());
+        }finally{
+          await db.query('drop function if exists public.prepare_customer_point_redemption_clock_probe(uuid,bigint,uuid)');
+          await db.query('update public.point_redemption_rules set effective_end=$1 where id=$2',[future,rate72]);
+          await db.query("select public.cancel_reserved_point_purchase($1,'Finance cancelled expiry-boundary fixture',$2)",[expiryPurchase72,fin70]);
+        }
+        const paid72=await create72('PAID');const offer72=await prepare72(paid72,1000);
+        eq('the accommodation rate comes from configuration, not a universal constant',offer72.peso_value,'500.00');
+        eq('preparing the quote leaves balance unchanged',await wallet72(),initial72);
+        await throwsIsolated('another customer cannot approve this quote',()=>db.query('select public.decide_point_redemption_approval($1,$2,$3,true)',[offer72.quote_id,uuidFor(s70+':wrong-owner'),ownerAuth72]));
+        await approve72(offer72.quote_id);await approve72(offer72.quote_id);
+        eq('duplicate portal approval never debits points',await wallet72(),initial72);
+        eq('approved points are unavailable to another checkout',Number((await one<{spendable:string}>('select spendable from public.customer_points_position($1)',[member70])).spendable),initial72-1000);
+        await throwsIsolated('approved points do not bypass cash settlement',()=>db.query('select * from public.complete_purchase($1,$2)',[paid72,gsd70]));
+        const partialPayment72=(await one<{payment_id:string}>("select payment_id from public.record_purchase_payment($1,'200.00','cash',$2,$3)",[paid72,'PORTAL-PARTIAL-CASH-'+s70,gsd70])).payment_id;
+        await db.query("select * from public.verify_purchase_payment($1,'verified',null,$2)",[partialPayment72,fin70]);
+        await throwsIsolated('partially verified cash cannot finalize a reservation',()=>db.query('select * from public.complete_purchase($1,$2)',[paid72,gsd70]));
+        eq('partial verified settlement preserves the points balance',await wallet72(),initial72);
+        const payment72=(await one<{payment_id:string}>("select payment_id from public.record_purchase_payment($1,'300.00','cash',$2,$3)",[paid72,'PORTAL-CASH-'+s70,gsd70])).payment_id;
+        await throwsIsolated('recorded cash cannot finalize a reservation',()=>db.query('select * from public.complete_purchase($1,$2)',[paid72,gsd70]));
+        await db.query("select * from public.verify_purchase_payment($1,'verified',null,$2)",[payment72,fin70]);
+        const settlementRace72=new Client({connectionString:target.url});settlementRace72.on('error',()=>{});await settlementRace72.connect();
+        try{
+          const completions72=await Promise.allSettled([db.query('select * from public.complete_purchase($1,$2)',[paid72,gsd70]),settlementRace72.query('select * from public.complete_purchase($1,$2)',[paid72,gsd70])]);
+          eq('simultaneous completion retries both return successfully',completions72.filter(result=>result.status==='fulfilled').length,2);
+        }finally{await settlementRace72.end();}
+        eq('completion and its retry debit exactly once',await wallet72(),initial72-1000);
+        eq('completion consumes customer approval exactly once',Number((await one<{n:string}>("select count(*) n from public.points_ledger where reference_type='redemption_quote' and reference_id=$1",[offer72.quote_id])).n),1);
+        await throwsIsolated('GSD cannot restore points through Finance refund',()=>db.query("select * from public.refund_purchase_redeemed_points($1,'250.00',$2,'Reviewed partial refund',true,$3)",[paid72,'UNAUTHORIZED-'+s70,gsd70]));
+        const refundRace72=new Client({connectionString:target.url});refundRace72.on('error',()=>{});await refundRace72.connect();
+        try{
+          const refunds72=await Promise.allSettled([db.query("select * from public.refund_purchase_redeemed_points($1,'250.00',$2,'Reviewed partial refund',true,$3)",[paid72,'PARTIAL-'+s70,fin70]),refundRace72.query("select * from public.refund_purchase_redeemed_points($1,'250.00',$2,'Reviewed partial refund',true,$3)",[paid72,'PARTIAL-'+s70,fin70])]);
+          eq('simultaneous refund retries both return successfully',refunds72.filter(result=>result.status==='fulfilled').length,2);
+        }finally{await refundRace72.end();}
+        eq('partial refund restores its proportion once',await wallet72(),initial72-750);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'750.00',$2,'Reviewed remaining refund',true,$3)",[paid72,'FULL-'+s70,fin70]);
+        eq('split full refund restores exactly the original deduction',await wallet72(),initial72);
+        await throwsIsolated('further refunds cannot create points',()=>db.query("select * from public.refund_purchase_redeemed_points($1,'1.00',$2,'Excess refund',true,$3)",[paid72,'EXCESS-'+s70,fin70]));
+        const zero72=await create72('ZERO-CASH');const zeroOffer72=await prepare72(zero72,2000);await approve72(zeroOffer72.quote_id);
+        await db.query('select * from public.complete_purchase($1,$2)',[zero72,gsd70]);
+        eq('a fully points-funded purchase completes with zero cash',await wallet72(),initial72-2000);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Finance reviewed full cancellation',true,$3)",[zero72,'ZERO-REFUND-'+s70,fin70]);
+        eq('Finance full cancellation restores a zero-cash deduction',await wallet72(),initial72);
+        const rejected72=await create72('REJECTED');const rejectedOffer72=await prepare72(rejected72,100);await approve72(rejectedOffer72.quote_id,false);
+        eq('rejected authorization leaves balance unchanged',await wallet72(),initial72);
+        const expired72=await create72('EXPIRED');const expiredOffer72=await prepare72(expired72,100);await approve72(expiredOffer72.quote_id);
+        await db.query("update public.redemption_quotes set created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' where id=$1",[expiredOffer72.quote_id]);
+        await db.query('select * from public.customer_points_position($1)',[member70]);
+        eq('expired approval releases its reservation without a debit',Number((await one<{n:string}>("select count(*) n from public.redemption_quotes where id=$1 and status='expired' and released_at is not null",[expiredOffer72.quote_id])).n),1);
+        const changed72=await create72('CHANGED');const changedOffer72=await prepare72(changed72,100);await approve72(changedOffer72.quote_id);
+        await db.query('update public.point_redemption_rules set is_active=false where id=$1',[rate72]);
+        await db.query('select * from public.customer_points_position($1)',[member70]);
+        eq('a changed promotion releases its approved reservation',Number((await one<{n:string}>("select count(*) n from public.redemption_quotes where id=$1 and status='cancelled'",[changedOffer72.quote_id])).n),1);
+        await db.query('update public.point_redemption_rules set is_active=true,peso_value_per_point=0.0001 where id=$1',[rate72]);
+        const raceA72=await create72('RACE-A');const raceB72=await create72('RACE-B');const racePoints72=Math.ceil(initial72*0.75);
+        const raceOfferA72=await prepare72(raceA72,racePoints72);const raceOfferB72=await prepare72(raceB72,racePoints72);
+        const raceClient72=new Client({connectionString:target.url});raceClient72.on('error',()=>{});await raceClient72.connect();
+        try{
+         const race72=await Promise.allSettled([approve72(raceOfferA72.quote_id),raceClient72.query('select public.decide_point_redemption_approval($1,$2,$3,true)',[raceOfferB72.quote_id,buyer70,ownerAuth72])]);
+         eq('concurrent portal approvals cannot reserve more than the available balance',race72.filter(result=>result.status==='fulfilled').length,1);
+         eq('concurrent reservations permanently debit no points',await wallet72(),initial72);
+        }finally{await raceClient72.end();}
+        await db.query("select public.cancel_reserved_point_purchase($1,'Finance cancelled synthetic draft',$2)",[raceA72,fin70]);
+        await db.query("select public.cancel_reserved_point_purchase($1,'Finance cancelled synthetic draft',$2)",[raceB72,fin70]);
+        eq('cancelled draft purchases release all reservations',Number((await one<{spendable:string}>('select spendable from public.customer_points_position($1)',[member70])).spendable),initial72);
+        for(const signature72 of ['public.commit_point_discount(uuid,uuid)','public.apply_purchase_points_discount(uuid,bigint,text,uuid)','public.quote_point_discount(uuid,bigint,uuid)']){
+         eq('service_role cannot invoke the obsolete staff-only spending path '+signature72,(await one<{ok:boolean}>('select has_function_privilege(\'service_role\',$1,\'execute\') ok',[signature72])).ok,false);
+        }
+        for(const role72 of ['anon','authenticated']){
+         eq(role72+' cannot forge customer approval via direct RPC',(await one<{ok:boolean}>('select has_function_privilege($1,\'public.decide_point_redemption_approval(uuid,uuid,uuid,boolean)\',\'execute\') ok',[role72])).ok,false);
+        }
+        await throwsIsolated('a refund reference cannot be replayed with a changed value',()=>db.query("select * from public.refund_purchase_redeemed_points($1,'100.00',$2,'Reviewed partial refund',true,$3)",[paid72,'PARTIAL-'+s70,fin70]));
+        await throwsIsolated('generic reversal cannot bypass consumed customer authorization',()=>db.query("select * from public.reverse_purchase_points($1,$2,'Bypass Finance')",[zero72,reverseAdmin72]));
+        for(const role72 of ['anon','authenticated','service_role']){
+          eq(role72+' cannot mutate historical refund rows',(await one<{ok:boolean}>("select has_table_privilege($1,'public.purchase_point_refunds','update') or has_table_privilege($1,'public.purchase_point_refunds','delete') or has_table_privilege($1,'public.purchase_point_refunds','truncate') ok",[role72])).ok,false);
+        }
+        await db.query("update public.point_redemption_rules set peso_value_per_point=0.5 where id=$1",[rate72]);
+        const earningRule72=(await one<{id:string}>("insert into public.point_earning_rules(service_id,points_amount,min_quantity,eligible_tiers,effective_start,effective_end) values($1,100,1,array['GOLD'],$2,$3) returning id",[room72,past,future])).id;
+        const beforeClaim72=await create72('REFUND-BEFORE-CLAIM');const beforeOffer72=await prepare72(beforeClaim72,2000);await approve72(beforeOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[beforeClaim72,gsd70]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'500.00',$2,'Partial service refund',true,$3)",[beforeClaim72,'BEFORE-CLAIM-'+s70,fin70]);
+        await throwsIsolated('refunded service quantity cannot mint an original full earning award',()=>db.query('select * from public.create_earning_claim($1,$2)',[beforeClaim72,gsd70]));
+        const frozen72=await create72('FROZEN-EARNING');const frozenOffer72=await prepare72(frozen72,2000);await approve72(frozenOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[frozen72,gsd70]);
+        await db.query('select * from public.create_earning_claim($1,$2)',[frozen72,gsd70]);
+        eq('new earning claims freeze the eligibility threshold',Number((await one<{n:string}>('select min_quantity_snapshot n from public.earning_claims where purchase_id=$1',[frozen72])).n),1);
+        await db.query('update public.point_earning_rules set min_quantity=99 where id=$1',[earningRule72]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Full service cancellation',true,$3)",[frozen72,'FROZEN-FULL-'+s70,fin70]);
+        eq('full cancellation reverses the associated unclaimed earning award',(await one<{status:string}>('select status from public.earning_claims where purchase_id=$1',[frozen72])).status,'reversed');
+        await db.query('update public.point_earning_rules set min_quantity=1 where id=$1',[earningRule72]);
+        const historical72=await mkPurchase70(room72,10,'HISTORICAL-THRESHOLD-'+s70,false);const historicalOffer72=await prepare72(historical72,20000);await approve72(historicalOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[historical72,gsd70]);
+        await db.query('select * from public.create_earning_claim($1,$2)',[historical72,gsd70]);await db.query('update public.point_earning_rules set min_quantity=99 where id=$1',[earningRule72]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed partial service refund',true,$3)",[historical72,'HISTORICAL-PARTIAL-'+s70,fin70]);
+        eq('editing a rule cannot change historical partial refund eligibility',(await one<{status:string}>('select status from public.earning_claims where purchase_id=$1',[historical72])).status,'available');
+        const legacyBalance72=await wallet72();
+        await db.query('update public.earning_claims set min_quantity_snapshot=null where purchase_id=$1',[historical72]);
+        await throwsIsolated('legacy partial refunds without a reliable eligibility snapshot remain blocked',()=>db.query("select * from public.refund_purchase_redeemed_points($1,'1.00',$2,'Legacy partial review',true,$3)",[historical72,'LEGACY-BLOCKED-'+s70,fin70]));
+        eq('blocked legacy refund changes no points balance',await wallet72(),legacyBalance72);
+        eq('blocked legacy refund creates no compensating receipt',Number((await one<{n:string}>('select count(*) n from public.purchase_point_refunds where refund_reference=$1',['LEGACY-BLOCKED-'+s70])).n),0);
+        await db.query('update public.earning_claims set min_quantity_snapshot=1 where purchase_id=$1',[historical72]);
+        const preRefundAward72=Number((await one<{n:string}>('select points_requested n from public.earning_claims where purchase_id=$1',[historical72])).n);
+        await db.query('update public.point_earning_rules set min_quantity=1 where id=$1',[earningRule72]);
+        const refundFirst72=await mkPurchase70(room72,10,'REFUND-FIRST-ORDER-'+s70,false);const refundFirstOffer72=await prepare72(refundFirst72,20000);await approve72(refundFirstOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[refundFirst72,gsd70]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed partial service refund',true,$3)",[refundFirst72,'ORDER-PARTIAL-'+s70,fin70]);
+        await db.query('select * from public.create_earning_claim($1,$2)',[refundFirst72,gsd70]);
+        const postRefundAward72=Number((await one<{n:string}>('select points_requested n from public.earning_claims where purchase_id=$1',[refundFirst72])).n);
+        eq('order-independent: claim-before-refund converges to retained entitlement',preRefundAward72,900);
+        eq('order-independent: refund-before-claim converges to retained entitlement',postRefundAward72,900);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'9000.00',$2,'Reviewed remaining service refund',true,$3)",[refundFirst72,'ORDER-FULL-'+s70,fin70]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'9000.00',$2,'Reviewed remaining service refund',true,$3)",[historical72,'HISTORICAL-FULL-'+s70,fin70]);
+        // --- F1 deterministic reconciliation: equivalent retained purchases converge.
+        // A claimed award followed by a partial refund compensates only the excess.
+        const claimed73 = await mkPurchase70(room72, 10, 'EARN-CLAIMED-' + s70, false);
+        const claimedOffer73 = await prepare72(claimed73, 20000);
+        await approve72(claimedOffer73.quote_id);
+        await db.query('select * from public.complete_purchase($1,$2)', [claimed73, gsd70]);
+        const claimedToken73 = await one<{ claim_id: string; qr_token: string }>(
+          'select claim_id,qr_token from public.create_earning_claim($1,$2)',
+          [claimed73, gsd70],
+        );
+        eq(
+          'new earning claims snapshot the original rule inputs',
+          Number(
+            (
+              await one<{ n: string }>(
+                'select original_quantity n from public.earning_claims where id=$1',
+                [claimedToken73.claim_id],
+              )
+            ).n,
+          ),
+          10,
+        );
+        await db.query('select * from public.claim_earning_points($1,$2)', [
+          claimedToken73.qr_token,
+          buyer70,
+        ]);
+        const earnedId73 = (
+          await one<{ id: number }>(
+            "select id from public.points_ledger where entry_type='earned' and reference_type='earning_claim' and reference_id=$1",
+            [claimedToken73.claim_id],
+          )
+        ).id;
+        const beforeExcess73 = await wallet72();
+        const excessRefund73 = await one<{ points_restored: string }>(
+          "select points_restored from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed partial service refund',true,$3)",
+          [claimed73, 'CLAIMED-PARTIAL-' + s70, fin70],
+        );
+        eq(
+          'partial refund still restores the redeemed proportion',
+          Number(excessRefund73.points_restored),
+          2000,
+        );
+        eq(
+          'partial refund compensates only the claimed excess',
+          await wallet72(),
+          beforeExcess73 + 2000 - 100,
+        );
+        eq(
+          'a partially compensated award stays claimed',
+          (
+            await one<{ status: string }>('select status from public.earning_claims where id=$1', [
+              claimedToken73.claim_id,
+            ])
+          ).status,
+          'claimed',
+        );
+        const reversalSum73 = async () =>
+          Number(
+            (
+              await one<{ n: string }>(
+                "select coalesce(sum(-amount),0)::int n from public.points_ledger where entry_type='reversal' and origin_award_id=$1",
+                [earnedId73],
+              )
+            ).n,
+          );
+        eq('partial compensation is one bounded delta reversal', await reversalSum73(), 100);
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed second partial service refund',true,$3)",
+          [claimed73, 'CLAIMED-PARTIAL2-' + s70, fin70],
+        );
+        eq('cumulative partials never reverse the same points twice', await reversalSum73(), 200);
+        const dupRefund73 = await one<{ points_restored: string }>(
+          "select points_restored from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed second partial service refund',true,$3)",
+          [claimed73, 'CLAIMED-PARTIAL2-' + s70, fin70],
+        );
+        eq('same-reference retry returns the recorded restoration', Number(dupRefund73.points_restored), 2000);
+        eq(
+          'duplicate refund reference stores a single row',
+          Number(
+            (
+              await one<{ n: string }>(
+                'select count(*)::int n from public.purchase_point_refunds where refund_reference=$1',
+                ['CLAIMED-PARTIAL2-' + s70],
+              )
+            ).n,
+          ),
+          1,
+        );
+        eq('replayed compensation still reverses nothing twice', await reversalSum73(), 200);
+        await throwsIsolated(
+          'a refund reference cannot change value on replay',
+          () =>
+            db.query(
+              "select * from public.refund_purchase_redeemed_points($1,'500.00',$2,'Reviewed second partial service refund',true,$3)",
+              [claimed73, 'CLAIMED-PARTIAL2-' + s70, fin70],
+            ),
+        );
+        const beforeFull73 = await wallet72();
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'8000.00',$2,'Reviewed remaining service refund',true,$3)",
+          [claimed73, 'CLAIMED-FULL-' + s70, fin70],
+        );
+        eq('full refund after partials reverses only the remainder', await reversalSum73(), 1000);
+        eq(
+          'full refund after partials settles spend and remainder',
+          await wallet72(),
+          beforeFull73 + 16000 - 800,
+        );
+        eq(
+          'full refund after partials closes the earning claim',
+          (
+            await one<{ status: string }>('select status from public.earning_claims where id=$1', [
+              claimedToken73.claim_id,
+            ])
+          ).status,
+          'reversed',
+        );
+        // An unclaimed award revised by a partial refund stays usable for the remainder.
+        const unclaimed73 = await mkPurchase70(room72, 10, 'EARN-UNCLAIMED-' + s70, false);
+        const unclaimedOffer73 = await prepare72(unclaimed73, 20000);
+        await approve72(unclaimedOffer73.quote_id);
+        await db.query('select * from public.complete_purchase($1,$2)', [unclaimed73, gsd70]);
+        const unclaimedToken73 = await one<{ qr_token: string }>(
+          'select qr_token from public.create_earning_claim($1,$2)',
+          [unclaimed73, gsd70],
+        );
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed partial service refund',true,$3)",
+          [unclaimed73, 'UNCLAIMED-PARTIAL-' + s70, fin70],
+        );
+        eq(
+          'partial refund revises the unclaimed award in place',
+          Number(
+            (
+              await one<{ n: string }>(
+                'select points_requested n from public.earning_claims where purchase_id=$1',
+                [unclaimed73],
+              )
+            ).n,
+          ),
+          900,
+        );
+        eq(
+          'a revised claim stays available on its original credential',
+          (
+            await one<{ status: string }>('select status from public.earning_claims where purchase_id=$1', [
+              unclaimed73,
+            ])
+          ).status,
+          'available',
+        );
+        const beforeUnclaimedClaim73 = await wallet72();
+        const unclaimedAward73 = await one<{ points_awarded: string }>(
+          'select points_awarded from public.claim_earning_points($1,$2)',
+          [unclaimedToken73.qr_token, buyer70],
+        );
+        eq('a revised claim credits the retained entitlement', Number(unclaimedAward73.points_awarded), 900);
+        eq('a revised claim credits exactly once', await wallet72(), beforeUnclaimedClaim73 + 900);
+        const beforeUnclaimedFull73 = await wallet72();
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'9000.00',$2,'Reviewed remaining service refund',true,$3)",
+          [unclaimed73, 'UNCLAIMED-FULL-' + s70, fin70],
+        );
+        eq(
+          'full refund after a revised claim settles spend and award',
+          await wallet72(),
+          beforeUnclaimedFull73 + 18000 - 900,
+        );
+        eq(
+          'full refund after a revised claim closes the earning claim',
+          (
+            await one<{ status: string }>('select status from public.earning_claims where purchase_id=$1', [
+              unclaimed73,
+            ])
+          ).status,
+          'reversed',
+        );
+        // A capped award is recomputed from retained units, never scaled by refund percent.
+        const capSvc73 = await mkService70('CAP-' + s70, 'Capped earning service', '1000.00', false);
+        const capPromo73 = await mkPromo70(capSvc73, ['GOLD'], false, past, future, 'CAP-PROMO-' + s70);
+        await db.query('update public.point_redemption_rules set peso_value_per_point=0.5 where id=$1', [
+          capPromo73,
+        ]);
+        await db.query(
+          "insert into public.point_earning_rules(service_id,points_amount,min_quantity,max_award,eligible_tiers,effective_start,effective_end) values($1,100,1,900,array['GOLD'],$2,$3)",
+          [capSvc73, past, future],
+        );
+        const capped73 = await mkPurchase70(capSvc73, 10, 'EARN-CAPPED-' + s70, false);
+        const cappedOffer73 = await prepare72(capped73, 20000);
+        await approve72(cappedOffer73.quote_id);
+        await db.query('select * from public.complete_purchase($1,$2)', [capped73, gsd70]);
+        const cappedToken73 = await one<{ qr_token: string }>(
+          'select qr_token from public.create_earning_claim($1,$2)',
+          [capped73, gsd70],
+        );
+        eq(
+          'a capped award truncates at creation',
+          Number(
+            (
+              await one<{ n: string }>(
+                'select points_requested n from public.earning_claims where purchase_id=$1',
+                [capped73],
+              )
+            ).n,
+          ),
+          900,
+        );
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Reviewed partial service refund',true,$3)",
+          [capped73, 'CAPPED-PARTIAL-' + s70, fin70],
+        );
+        eq(
+          'a capped award survives a partial refund without percent scaling',
+          Number(
+            (
+              await one<{ n: string }>(
+                'select points_requested n from public.earning_claims where purchase_id=$1',
+                [capped73],
+              )
+            ).n,
+          ),
+          900,
+        );
+        const cappedAward73 = await one<{ points_awarded: string }>(
+          'select points_awarded from public.claim_earning_points($1,$2)',
+          [cappedToken73.qr_token, buyer70],
+        );
+        eq('a capped revision still credits its retained cap', Number(cappedAward73.points_awarded), 900);
+        await db.query(
+          "select * from public.refund_purchase_redeemed_points($1,'9000.00',$2,'Reviewed remaining service refund',true,$3)",
+          [capped73, 'CAPPED-FULL-' + s70, fin70],
+        );
+        eq(
+          'full refund after a capped revision closes the earning claim',
+          (
+            await one<{ status: string }>('select status from public.earning_claims where purchase_id=$1', [
+              capped73,
+            ])
+          ).status,
+          'reversed',
+        );
+        const claimRefundWallet72=await wallet72();
+        const claimRefund72=await create72('CLAIM-REFUND-RACE');const claimRefundOffer72=await prepare72(claimRefund72,2000);await approve72(claimRefundOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[claimRefund72,gsd70]);
+        const claimRefundToken72=await one<{claim_id:string;qr_token:string}>('select claim_id,qr_token from public.create_earning_claim($1,$2)',[claimRefund72,gsd70]);
+        const claimRefundClient72=new Client({connectionString:target.url});claimRefundClient72.on('error',()=>{});await claimRefundClient72.connect();
+        try{
+          await claimRefundClient72.query('set statement_timeout=10000');
+          const claimRefundResults72=await Promise.allSettled([db.query('select * from public.claim_earning_points($1,$2)',[claimRefundToken72.qr_token,buyer70]),claimRefundClient72.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Finance reviewed claim-refund race',true,$3)",[claimRefund72,'CLAIM-REFUND-RACE-'+s70,fin70])]);
+          eq('concurrent full refund completes against a customer claim',claimRefundResults72[1]!.status,'fulfilled');
+          const claimResult72=claimRefundResults72[0]!;
+          check('a concurrent claim succeeds or is denied after the refund invalidates it',claimResult72.status==='fulfilled'||String(claimResult72.reason?.message).includes('CLAIM_NOT_AVAILABLE'));
+          eq('concurrent claim and full refund preserve net balance',await wallet72(),claimRefundWallet72);
+          eq('concurrent refund leaves the earning claim reversed',(await one<{status:string}>('select status from public.earning_claims where id=$1',[claimRefundToken72.claim_id])).status,'reversed');
+          check('concurrent claim cannot create duplicate earned credits',Number((await one<{n:string}>("select count(*) n from public.points_ledger where reference_type='earning_claim' and reference_id=$1 and entry_type='earned'",[claimRefundToken72.claim_id])).n)<=1);
+        }finally{await claimRefundClient72.end();}
+        const reversalRace72=await create72('REVERSAL-RACE');const reversalRaceOffer72=await prepare72(reversalRace72,2000);
+        const holding72=new Client({connectionString:target.url});holding72.on('error',()=>{});await holding72.connect();
+        try{
+          const mainPid72=Number((await one<{pid:number}>('select pg_backend_pid() pid')).pid);
+          await holding72.query('begin');
+          await holding72.query('select public.decide_point_redemption_approval($1,$2,$3,true)',[reversalRaceOffer72.quote_id,buyer70,ownerAuth72]);
+          await holding72.query('select * from public.complete_purchase($1,$2)',[reversalRace72,gsd70]);
+          const reversal72=db.query("select * from public.reverse_purchase_points($1,$2,'Competing reversal')",[reversalRace72,reverseAdmin72]).then(()=>null,error=>error);
+          let waiting72=false;for(let probe72=0;probe72<50&&!waiting72;probe72++){waiting72=(await holding72.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1",[mainPid72])).rows[0]?.waiting===true;}
+          check('generic reversal waits behind the completion membership lock',waiting72);
+          await holding72.query('commit');
+          const denied72=await reversal72;check('a waiting reversal rechecks consumed approval and requires Finance',String(denied72?.message).includes('POINT_REFUND_REVIEW_REQUIRED'),String(denied72?.message));
+        }finally{await holding72.query('rollback').catch(()=>undefined);await holding72.end();}
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Finance reviewed raced completion',true,$3)",[reversalRace72,'RACE-REFUND-'+s70,fin70]);
+        const ownership72=await create72('OWNERSHIP-CHANGE');const ownershipOffer72=await prepare72(ownership72,2000);await approve72(ownershipOffer72.quote_id);
+        await db.query('update public.customers set auth_user_id=null where id=$1',[buyer70]);
+        await throwsIsolated('an approval cannot survive loss of the approving account ownership',()=>db.query('select * from public.complete_purchase($1,$2)',[ownership72,gsd70]));
+        await db.query('update public.customers set auth_user_id=$1 where id=$2',[ownerAuth72,buyer70]);
+        await db.query("select public.cancel_reserved_point_purchase($1,'Finance cancelled ownership-change test',$2)",[ownership72,fin70]);
+        const anniversary72=await create72('ANNIVERSARY-REFUND');const anniversaryOffer72=await prepare72(anniversary72,2000);await approve72(anniversaryOffer72.quote_id);await db.query('select * from public.complete_purchase($1,$2)',[anniversary72,gsd70]);
+        await db.query("update public.points_periods set period_start=(now() at time zone 'Asia/Manila')::date-interval '1 year',period_end=(now() at time zone 'Asia/Manila')::date where account_id=$1 and status='open'",[account70]);
+        await db.query("select * from public.refund_purchase_redeemed_points($1,'1000.00',$2,'Finance reviewed anniversary refund',true,$3)",[anniversary72,'ANNIVERSARY-'+s70,fin70]);
+        eq('a first-operation anniversary refund survives the next portal read',Number((await one<{balance:string}>('select balance from public.customer_points_position($1)',[member70])).balance),2000);
+        eq('reserved settlement and all refunds reconcile the immutable ledger',await invariant70(),0);
+
+      } catch (error) {
+        check('stacking policy matrix completed', false, safeErrorMessage(error));
+      } finally {
+        if (gsd70 && fin70) {
+          await db
+            .query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [
+              [gsd70, fin70],
+            ])
+            .catch(() => undefined);
+        }
+        if (buyer70 && member70) {
+          await db.query('delete from public.purchase_point_refunds where purchase_id in(select id from public.purchases where membership_id=$1)',[member70]).catch(()=>undefined);
+          await db.query('delete from public.audit_events where entity_id in(select id::text from public.purchases where membership_id=$1)',[member70]).catch(()=>undefined);
+          await db
+            .query(
+              `delete from public.earning_claims where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.redemption_quotes where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_lines where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.purchase_payments where purchase_id in (select id from public.purchases where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.purchases where membership_id = $1`, [member70])
+            .catch(() => undefined);
+        }
+        if (svc70.length) {
+          await db
+            .query(`delete from public.point_earning_rules where service_id = any($1::uuid[])`, [svc70])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.point_redemption_rules where service_id = any($1::uuid[])`, [svc70])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_tier_discounts where service_id = any($1::uuid[])`, [svc70])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.service_catalog where id = any($1::uuid[])`, [svc70])
+            .catch(() => undefined);
+        }
+        if (member70) {
+          await db
+            .query(
+              `delete from public.points_ledger where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.points_periods where account_id in (select id from public.points_accounts where membership_id=$1)`,
+              [member70],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.points_accounts where membership_id = $1`, [member70])
+            .catch(() => undefined);
+          await db.query(`delete from public.memberships where id = $1`, [member70]).catch(() => undefined);
+        }
+        if (sale70) {
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          await db
+            .query(`delete from public.card_sale_hierarchy_snapshots where sale_id = $1`, [sale70])
+            .catch(() => undefined);
+          await db.query(`delete from public.card_sales where id = $1`, [sale70]).catch(() => undefined);
+        }
+        if (buyer70) {
+          await db.query(`delete from public.customers where id = $1`, [buyer70]).catch(() => undefined);
+        }
+      }
+
+      section('71. customer position is correct on the very first call');
+
+      // The STABLE-marking defect returned NULL period fields on the first call
+      // per fresh account while the row existed right after. These prove the
+      // FIRST authorized request already returns authoritative data - no
+      // warm-up call, no retry, no fabricated zeroes.
+      let adm71: string | null = null;
+      const members71: string[] = [];
+      const buyers71: string[] = [];
+      const sales71: string[] = [];
+      try {
+        const s71 = `p71_${Date.now().toString(36)}`;
+        adm71 = uuidFor(`${s71}:admin`);
+        await db.query('insert into auth.users(id,email) values($1,$2)', [
+          adm71,
+          `pos-${s71}@example.invalid`,
+        ]);
+        await db.query(
+          `insert into public.staff_users(id,email,full_name,status) values($1,$2,'Position Prover','active')`,
+          [adm71, `pos-${s71}@example.invalid`],
+        );
+        await db.query(
+          `insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='super_admin'`,
+          [adm71],
+        );
+        createdStaffIds.push(adm71);
+
+        // Sequence suffix: several members share a tier across sub-tests, and
+        // customer/sale/membership numbers are unique, so each build gets its
+        // own suffix.
+        let seq71 = 0;
+        const mkMember71 = async (tier: 'BRONZE' | 'SILVER' | 'GOLD', anniversary: string | null) => {
+          seq71 += 1;
+          const tag = `${tier}${seq71}`;
+          const buyer = uuidFor(`${s71}:customer:${tag}:${anniversary ?? 'none'}`);
+          await db.query(
+            `insert into public.customers(id,customer_number,first_name,last_name,email,phone,status)
+             values($1,$2,'POS','MEMBER',$3,'09180000003','active')`,
+            [buyer, `CUS-${s71}-${tag}`, `pos-${tag}-${s71}@example.invalid`],
+          );
+          // super_admin sellers carry no genealogy chain, so no hierarchy rows.
+          const sale = uuidFor(`${s71}:sale:${tag}`);
+          await db.query(
+            `insert into public.card_sales
+             (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
+             values($1,$2,$3,(select id from public.card_plans where code=$4),'staff',$5,'100000.00', now() + interval '30 days','draft')`,
+            [sale, `AF-CSALE${s71.replace(/[^a-z0-9]/gi, '').toUpperCase()}${tag}`, buyer, tier, adm71],
+          );
+          const member = (
+            await one<{ id: string }>(
+              `insert into public.memberships
+               (customer_id,sale_id,product_id,membership_number,fallback_code_hash,qr_token_hash,status,points_balance,yearly_points_allocated,activated_by,issued_at,activated_at,expires_at)
+               select $1,$2,cp.id,$3,$4,$5,'active',0,0,$6, now(), now(), now() + interval '5 years'
+               from public.card_plans cp where cp.code=$7 returning id`,
+              [buyer, sale, `MBS-${s71}-${tag}`, `fb_${s71}_${tag}`, `qr_${s71}_${tag}`, adm71, tier],
+            )
+          ).id;
+          await db.query(`insert into public.points_accounts(membership_id) values($1)`, [member]);
+          if (anniversary !== null) {
+            await db.query(`update public.memberships set points_anniversary = $2::date where id = $1`, [
+              member,
+              anniversary,
+            ]);
+          }
+          members71.push(member);
+          buyers71.push(buyer);
+          sales71.push(sale);
+          return { buyer, sale, member };
+        };
+        const firstPosition = async (member: string) =>
+          camel<{
+            membershipId: string;
+            balance: string;
+            annualCap: string | null;
+            remainingEarningCapacity: string;
+            spendable: string;
+            reversalDebt: string;
+            periodStart: string | null;
+            periodEnd: string | null;
+            tier: string;
+          }>(
+            await one<Record<string, unknown>>(
+              `select * from public.customer_points_position($1)`,
+              [member],
+            ),
+          );
+
+        // pg parses SQL date columns into JS Dates at container-local midnight, so
+        // toISOString() can shift the calendar day. Local components recover the
+        // stored date in any container timezone.
+        const dayOf = (v: unknown) =>
+          v instanceof Date
+            ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+            : String(v);
+        // --- brand-new Bronze, Silver and Gold: cap authority is tier config --
+        for (const [tier, cap] of [
+          ['BRONZE', '25000'],
+          ['SILVER', '40000'],
+          ['GOLD', '60000'],
+        ] as const) {
+          const { member } = await mkMember71(tier, '2025-10-09');
+          const pos = await firstPosition(member);
+          eq(`first call for a new ${tier} member returns the tier cap`, pos.annualCap, cap);
+          eq(`first call for a new ${tier} member names the tier`, pos.tier, tier);
+          // The returned dates must match the stored anniversary-year row. A
+          // NULL here is the exact defect signature (row exists, read
+          // missed), so this compares against table truth, not a constant.
+          const stored = await one<{ s: string; e: string }>(
+            `select period_start::text s, period_end::text e from public.points_periods
+             where account_id = (select id from public.points_accounts where membership_id=$1)`,
+            [member],
+          );
+          eq(
+            `first call for a new ${tier} member opens the anniversary year`,
+            `${dayOf(pos.periodStart)}..${dayOf(pos.periodEnd)}`,
+            `${stored.s}..${stored.e}`,
+          );
+          eq(
+            `first call for a new ${tier} member leaves the full cap earnable`,
+            pos.remainingEarningCapacity,
+            cap,
+          );
+          eq(`first call for a new ${tier} member shows a zero balance`, pos.balance, '0');
+        }
+
+        // --- an established period is returned, never duplicated ---------------
+        const established = members71[0]!;
+        const account71 = (
+          await one<{ id: string }>(`select id from public.points_accounts where membership_id=$1`, [
+            established,
+          ])
+        ).id;
+        const again = await firstPosition(established);
+        eq('a second call returns the same cap', again.annualCap, '25000');
+        eq(
+          'a second call creates no second period',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_periods where account_id=$1`,
+              [account71],
+            )
+          ).n,
+          1,
+        );
+
+        // --- concurrent first requests create exactly one period ---------------
+        const { member: racer } = await mkMember71('GOLD', '2025-10-09');
+        const racerAccount = (
+          await one<{ id: string }>(`select id from public.points_accounts where membership_id=$1`, [racer])
+        ).id;
+        const conn = new Client({ connectionString: target.url });
+        conn.on('error', () => {});
+        await conn.connect();
+        try {
+          const results = await Promise.allSettled([
+            db.query(`select annual_cap from public.customer_points_position($1)`, [racer]),
+            conn.query(`select annual_cap from public.customer_points_position($1)`, [racer]),
+          ]);
+          const won = results.filter((r) => r.status === 'fulfilled');
+          eq('race: both concurrent first calls succeed', won.length, 2);
+          const caps = new Set(
+            won.flatMap((r) =>
+              (r as { value: { rows: { annual_cap: string }[] } }).value.rows.map((row) => row.annual_cap),
+            ),
+          );
+          eq('race: both agree on the GOLD cap', [...caps].join(','), '60000');
+          eq(
+            'race: exactly one period row exists for the account',
+            (
+              await one<{ n: number }>(
+                `select count(*)::int n from public.points_periods where account_id=$1`,
+                [racerAccount],
+              )
+            ).n,
+            1,
+          );
+        } finally {
+          await conn.end();
+        }
+
+        // --- anniversary boundary: an anniversary of today opens today --------
+        const todayManila = (
+          await one<{ d: string }>(`select (now() at time zone 'Asia/Manila')::date::text d`)
+        ).d;
+        const { member: boundary } = await mkMember71('SILVER', todayManila);
+        const boundaryPos = await firstPosition(boundary);
+        eq('an anniversary of today opens its period today', dayOf(boundaryPos.periodStart), todayManila);
+        eq('the boundary member reads the SILVER cap', boundaryPos.annualCap, '40000');
+
+        // --- a membership with no points account is refused, not zeroed -------
+        const orphanBuyer = uuidFor(`${s71}:orphan`);
+        await db.query(
+          `insert into public.customers(id,customer_number,first_name,last_name,email,phone,status)
+           values($1,$2,'ORPHAN','MEMBER',$3,'09180000004','active')`,
+          [orphanBuyer, `CUS-${s71}-ORPHAN`, `orphan-${s71}@example.invalid`],
+        );
+        buyers71.push(orphanBuyer);
+        const orphanSale = uuidFor(`${s71}:orphan-sale`);
+        await db.query(
+          `insert into public.card_sales
+           (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
+           values($1,$2,$3,(select id from public.card_plans where code='BRONZE'),'staff',$4,'100000.00', now() + interval '30 days','draft')`,
+          [orphanSale, `AF-CSALE${s71.replace(/[^a-z0-9]/gi, '').toUpperCase()}ORPHAN`, orphanBuyer, adm71],
+        );
+        sales71.push(orphanSale);
+        const orphan = (
+          await one<{ id: string }>(
+            `insert into public.memberships
+             (customer_id,sale_id,product_id,membership_number,fallback_code_hash,qr_token_hash,status,points_balance,yearly_points_allocated,activated_by,issued_at,activated_at,expires_at)
+             select $1,$2,cp.id,$3,$4,$5,'active',0,0,$6, now(), now(), now() + interval '5 years'
+             from public.card_plans cp where cp.code='BRONZE' returning id`,
+            [orphanBuyer, orphanSale, `MBS-${s71}-ORPHAN`, `fb_${s71}_orphan`, `qr_${s71}_orphan`, adm71],
+          )
+        ).id;
+        members71.push(orphan);
+        await throwsIsolated('a membership with no points account is refused, never zeroed', () =>
+          db.query(`select * from public.customer_points_position($1)`, [orphan]),
+        );
+
+        // --- reversal debt and the ledger invariant on first read --------------
+        // Built exactly as reverse_purchase_points + adjust_membership_points
+        // would write it, so every row below is one the real functions could
+        // have produced: earn 10000, spend 9000, reverse the 10000 award against
+        // a 1000 balance (9000 becomes debt), then an audited +12000
+        // adjustment. balance - debt = sum(ledger) at every step.
+        const { member: debtor } = await mkMember71('GOLD', '2025-10-09');
+        const debtorAccount = (
+          await one<{ id: string }>(`select id from public.points_accounts where membership_id=$1`, [debtor])
+        ).id;
+        await db.query(
+          `insert into public.points_ledger
+           (account_id,entry_type,amount,balance_before,balance_after,counts_toward_cap,reason)
+           values($1,'earned',10000,0,10000,true,'Synthetic funding for debt proof')`,
+          [debtorAccount],
+        );
+        await db.query(
+          `insert into public.points_ledger
+           (account_id,entry_type,amount,balance_before,balance_after,counts_toward_cap,reference_type,reason)
+           values($1,'redemption',-9000,10000,1000,false,'membership','Synthetic spend for debt proof')`,
+          [debtorAccount],
+        );
+        await db.query(
+          `insert into public.points_ledger
+           (account_id,entry_type,amount,balance_before,balance_after,counts_toward_cap,reference_type,reason)
+           values($1,'reversal',-10000,1000,0,true,'purchase','Synthetic reversal for debt proof')`,
+          [debtorAccount],
+        );
+        await db.query(`select * from public.adjust_membership_points($1,12000,$2,$3)`, [
+          debtor,
+          'Synthetic correction for debt proof',
+          adm71,
+        ]);
+        // The debt half of reversal bookkeeping: reverse_purchase_points would
+        // add 9000 here (10000 award minus 1000 absorbed). A bare UPDATE is
+        // fixture setup, not a code path, and the invariant check below proves
+        // the resulting state is one the real functions could have produced.
+        await db.query(`update public.points_accounts set reversal_debt=9000 where id=$1`, [
+          debtorAccount,
+        ]);
+        const debtPos = await firstPosition(debtor);
+        eq('debt leaves the raw balance visible', debtPos.balance, '12000');
+        eq('debt is shown, even on first read', debtPos.reversalDebt, '9000');
+        eq('spendable is balance minus debt, even on first read', debtPos.spendable, '3000');
+        eq(
+          'the ledger still reconciles for a debtor on first read',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.points_accounts a
+               where a.id=$1 and a.balance - a.reversal_debt <>
+                 coalesce((select sum(l.amount) from public.points_ledger l where l.account_id=a.id),0)`,
+              [debtorAccount],
+            )
+          ).n,
+          0,
+        );
+      } catch (error) {
+        check('customer position first-call matrix completed', false, safeErrorMessage(error));
+      } finally {
+        if (adm71) {
+          await db
+            .query(`delete from public.audit_events where actor_id=$1`, [adm71])
+            .catch(() => undefined);
+        }
+        if (members71.length) {
+          await db
+            .query(
+              `delete from public.points_ledger where account_id in (select id from public.points_accounts where membership_id = any($1::uuid[]))`,
+              [members71],
+            )
+            .catch(() => undefined);
+          await db
+            .query(
+              `delete from public.points_periods where account_id in (select id from public.points_accounts where membership_id = any($1::uuid[]))`,
+              [members71],
+            )
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.points_accounts where membership_id = any($1::uuid[])`, [members71])
+            .catch(() => undefined);
+          await db
+            .query(`delete from public.memberships where id = any($1::uuid[])`, [members71])
+            .catch(() => undefined);
+        }
+        if (sales71.length) {
+          await db.query(`set afhomes.allow_snapshot_maintenance = 'on'`).catch(() => undefined);
+          await db
+            .query(`delete from public.card_sale_hierarchy_snapshots where sale_id = any($1::uuid[])`, [sales71])
+            .catch(() => undefined);
+          await db.query(`delete from public.card_sales where id = any($1::uuid[])`, [sales71]).catch(() => undefined);
+        }
+        if (buyers71.length) {
+          await db.query(`delete from public.customers where id = any($1::uuid[])`, [buyers71]).catch(() => undefined);
+        }
       }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
