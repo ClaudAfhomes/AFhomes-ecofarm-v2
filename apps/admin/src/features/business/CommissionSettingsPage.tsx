@@ -10,7 +10,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -168,29 +167,26 @@ export function CommissionSettingsPage() {
         <ErrorState error={rules.error} onRetry={rules.refetch} />
       ) : (
         <>
-          <ul className={styles.summary} aria-label="Commission rule summary">
+          <ul className={styles.badges} aria-label="Commission rule summary">
             <li>
-              <MetricCard
-                label="Active rules"
-                value={formatCountOrDash(summary.active)}
+              <StatusChip
+                label={`Active rules: ${formatCountOrDash(summary.active)}`}
+                tone="success"
                 icon="check"
-                description="Rates resolving for new sales"
               />
             </li>
             <li>
-              <MetricCard
-                label="Disabled rules"
-                value={formatCountOrDash(summary.disabled)}
+              <StatusChip
+                label={`Disabled rules: ${formatCountOrDash(summary.disabled)}`}
+                tone="neutral"
                 icon="close"
-                description="Kept for history, resolving nothing"
               />
             </li>
             <li>
-              <MetricCard
-                label="Total rules"
-                value={formatCountOrDash(summary.total)}
+              <StatusChip
+                label={`Total rules: ${formatCountOrDash(summary.total)}`}
+                tone="neutral"
                 icon="file-text"
-                description="Every rate row on record"
               />
             </li>
           </ul>

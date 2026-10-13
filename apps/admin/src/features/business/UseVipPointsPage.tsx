@@ -11,7 +11,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -115,21 +114,19 @@ export function UseVipPointsPage() {
         Scanning or quoting alone never spends points.
       </Alert>
 
-      <ul className={styles.metrics} aria-label="Discount queue summary">
+      <ul className={styles.badges} aria-label="Discount queue summary">
         <li>
-          <MetricCard
-            label="Draft purchases"
-            value={formatCountOrDash(filtered.length)}
+          <StatusChip
+            label={`Draft purchases: ${formatCountOrDash(filtered.length)}`}
+            tone="neutral"
             icon="file-text"
-            description="Unsettled sales that can take a discount"
           />
         </li>
         <li>
-          <MetricCard
-            label="Awaiting quote"
-            value={formatCountOrDash(visible.length)}
+          <StatusChip
+            label={`Awaiting quote: ${formatCountOrDash(visible.length)}`}
+            tone="warning"
             icon="clock"
-            description="Drafts on this page"
           />
         </li>
       </ul>

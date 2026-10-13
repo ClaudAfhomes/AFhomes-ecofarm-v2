@@ -8,7 +8,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   Pagination,
   QrCode,
@@ -228,24 +227,20 @@ export function OstReferralCodesPage() {
         </div>
       ) : null}
 
-      <div className={styles.metrics} aria-label="Referral summary">
-        <MetricCard
-          label="Active codes"
-          value={formatCountOrDash(activeCodes ?? 0)}
-          description="Usable codes that have not expired."
+      <div className={styles.badges} aria-label="Referral summary">
+        <StatusChip
+          label={`Active codes: ${formatCountOrDash(activeCodes ?? 0)}`}
+          tone="success"
           icon="grid"
-          chip={{ label: 'Active', tone: 'success' }}
         />
-        <MetricCard
-          label="Recorded uses"
-          value={formatCountOrDash(totalUses ?? 0)}
-          description="Registrations submitted with your codes."
+        <StatusChip
+          label={`Recorded uses: ${formatCountOrDash(totalUses ?? 0)}`}
+          tone="neutral"
           icon="check"
         />
-        <MetricCard
-          label="Sponsored applications"
-          value={formatCountOrDash(applicationTotal)}
-          description="Registrations submitted with your code."
+        <StatusChip
+          label={`Sponsored applications: ${formatCountOrDash(applicationTotal)}`}
+          tone="neutral"
           icon="clock"
         />
       </div>

@@ -192,7 +192,7 @@ describe('Phase 30 reports page', () => {
     install();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('SALE-000001')).toBeInTheDocument();
-    expect(screen.getByText('Gross Sales Value')).toBeInTheDocument();
+    expect(screen.getByText(/Gross Sales Value/)).toBeInTheDocument();
     expect(screen.queryByText('grossFrozenValue')).not.toBeInTheDocument();
     expect(screen.getAllByText('₱60,000.00').length).toBeGreaterThan(0);
   });

@@ -8,7 +8,6 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
-  MetricCard,
   PageHeader,
   DateField,
   Select,
@@ -156,37 +155,33 @@ export function PointsRulesPage() {
         a transaction that has already been recorded.
       </Alert>
 
-      <ul className={styles.metrics} aria-label="Rules summary">
+      <ul className={styles.badges} aria-label="Rules summary">
         <li>
-          <MetricCard
-            label="Services"
-            value={formatCountOrDash(services.data?.length ?? 0)}
+          <StatusChip
+            label={`Services: ${formatCountOrDash(services.data?.length ?? 0)}`}
+            tone="neutral"
             icon="grid"
-            description="Catalog entries rules can point at"
           />
         </li>
         <li>
-          <MetricCard
-            label="Earning rules"
-            value={formatCountOrDash(rules.data?.length ?? 0)}
+          <StatusChip
+            label={`Earning rules: ${formatCountOrDash(rules.data?.length ?? 0)}`}
+            tone="neutral"
             icon="file-text"
-            description="Points awarded per service"
           />
         </li>
         <li>
-          <MetricCard
-            label="Tier discounts"
-            value={formatCountOrDash(tierDiscounts.data?.length ?? 0)}
+          <StatusChip
+            label={`Tier discounts: ${formatCountOrDash(tierDiscounts.data?.length ?? 0)}`}
+            tone="success"
             icon="check"
-            description="VIP checkout rates"
           />
         </li>
         <li>
-          <MetricCard
-            label="Spending promotions"
-            value={formatCountOrDash(promotions.data?.length ?? 0)}
+          <StatusChip
+            label={`Spending promotions: ${formatCountOrDash(promotions.data?.length ?? 0)}`}
+            tone="neutral"
             icon="clock"
-            description="What points can discount"
           />
         </li>
       </ul>

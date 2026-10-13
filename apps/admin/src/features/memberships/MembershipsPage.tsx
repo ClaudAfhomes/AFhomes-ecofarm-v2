@@ -5,7 +5,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   SearchField,
@@ -103,9 +102,21 @@ export function MembershipsPage() {
       />
 
       <div className={styles.summary} aria-label="Membership summary">
-        <MetricCard label="Cards in view" value={formatCountOrDash(rows.length)} />
-        <MetricCard label="Active cards" value={formatCountOrDash(activeCount)} />
-        <MetricCard label="Points held" value={formatCountOrDash(pointsTotal)} />
+        <StatusChip
+          label={`Cards in view: ${formatCountOrDash(rows.length)}`}
+          tone="neutral"
+          icon="grid"
+        />
+        <StatusChip
+          label={`Active cards: ${formatCountOrDash(activeCount)}`}
+          tone="success"
+          icon="user-check"
+        />
+        <StatusChip
+          label={`Points held: ${formatCountOrDash(pointsTotal)}`}
+          tone="neutral"
+          icon="wallet"
+        />
       </div>
 
       <FilterBar

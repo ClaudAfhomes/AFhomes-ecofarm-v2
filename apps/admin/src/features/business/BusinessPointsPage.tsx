@@ -7,7 +7,6 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
-  MetricCard,
   PageHeader,
   Select,
   Skeleton,
@@ -403,24 +402,25 @@ export function BusinessPointsPage() {
         {member && (
           <div aria-busy={identify.isPending} className={styles.memberCard}>
             <h3 className={styles.memberName}>{member.customerDisplayName}</h3>
-            <ul className={styles.metrics} aria-label="Member summary">
+            <ul className={styles.badges} aria-label="Member summary">
               <li>
-                <MetricCard
-                  label="Membership"
-                  value={member.membershipNumber}
+                <StatusChip
+                  label={`Membership: ${member.membershipNumber}`}
+                  tone="neutral"
                   icon="user-check"
-                  chip={{
-                    label: member.expired ? 'Expired' : 'Active',
-                    tone: member.expired ? 'danger' : 'success',
-                  }}
                 />
               </li>
               <li>
-                <MetricCard
-                  label="Points balance"
-                  value={formatCountOrDash(member.pointsBalance)}
+                <StatusChip
+                  label={member.expired ? 'Expired' : 'Active'}
+                  tone={member.expired ? 'danger' : 'success'}
+                />
+              </li>
+              <li>
+                <StatusChip
+                  label={`Points balance: ${formatCountOrDash(member.pointsBalance)}`}
+                  tone="neutral"
                   icon="grid"
-                  description="Lifetime earning balance"
                 />
               </li>
             </ul>
@@ -545,29 +545,29 @@ export function BusinessPointsPage() {
          * ------------------------------------------------------------ */
         <section aria-label="Sale recorded" aria-live="polite" className={styles.section}>
           <h2 className={styles.sectionTitle}>4. What the member pays</h2>
-          <ul className={styles.metrics} aria-label="Sale figures">
+          <ul className={styles.badges} aria-label="Sale figures">
             <li>
-              <MetricCard
-                label="Gross"
-                value={formatMoneyOrDash(priced.grossAmount)}
+              <StatusChip
+                label={`Gross: ${formatMoneyOrDash(priced.grossAmount)}`}
+                tone="neutral"
                 icon="file-text"
               />
             </li>
             <li>
-              <MetricCard
-                label="VIP tier discount"
-                value={
+              <StatusChip
+                label={
                   priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
-                    ? `- ${formatMoneyOrDash(priced.tierDiscountAmount)}`
-                    : 'No tier discount applies'
+                    ? `VIP tier discount: - ${formatMoneyOrDash(priced.tierDiscountAmount)}`
+                    : 'VIP tier discount: None'
                 }
+                tone="neutral"
                 icon="grid"
               />
             </li>
             <li>
-              <MetricCard
-                label="Amount due"
-                value={formatMoneyOrDash(priced.netAmount)}
+              <StatusChip
+                label={`Amount due: ${formatMoneyOrDash(priced.netAmount)}`}
+                tone="success"
                 icon="check"
               />
             </li>

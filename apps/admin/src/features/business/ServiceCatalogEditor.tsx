@@ -10,7 +10,6 @@ import {
   ErrorState,
   FileField,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   SearchField,
   Select,
@@ -78,21 +77,19 @@ export function ServiceCatalogEditor({
         sale; it only affects future purchases.
       </Alert>
       {!loading && !error && services.length > 0 ? (
-        <ul className={catalogStyles.metrics} aria-label="Catalog summary">
+        <ul className={catalogStyles.badges} aria-label="Catalog summary">
           <li>
-            <MetricCard
-              label="Services"
-              value={formatCountOrDash(visible.length)}
+            <StatusChip
+              label={`Services: ${formatCountOrDash(visible.length)}`}
+              tone="neutral"
               icon="grid"
-              description="Catalog entries in view"
             />
           </li>
           <li>
-            <MetricCard
-              label="Active"
-              value={formatCountOrDash(activeCount)}
+            <StatusChip
+              label={`Active: ${formatCountOrDash(activeCount)}`}
+              tone="success"
               icon="check"
-              description="Available for new sales"
             />
           </li>
         </ul>

@@ -204,7 +204,8 @@ describe('Membership detail', () => {
     expect(await screen.findByText('Pedro Reyes')).toBeInTheDocument();
     expect(screen.getByText('Membership Cards')).toBeInTheDocument();
     expect(screen.getByText('Ops Admin')).toBeInTheDocument();
-    expect(screen.getAllByText('60,000')).toHaveLength(2);
+    expect(screen.getByText('Points balance: 60,000')).toBeInTheDocument();
+    expect(screen.getByText('Yearly entitlement: 60,000')).toBeInTheDocument();
     expect(await screen.findByText('History')).toBeInTheDocument();
     expect(screen.getByText(/MEMBERSHIP_CARD_PRINTED/)).toBeInTheDocument();
     expect(mockedGetAudit).toHaveBeenCalledWith(

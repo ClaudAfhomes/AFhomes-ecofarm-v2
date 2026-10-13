@@ -1,14 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  MetricCard,
-  PageHeader,
-  Skeleton,
-  StatusChip,
-} from '@afhomes/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
@@ -166,22 +158,26 @@ export function GenealogyDetailsPage() {
           />
         ) : summary.data.totalDirectDownline === 0 && summary.data.totalDescendants === 0 ? (
           <>
-            <div className={styles.summary}>
-              <MetricCard
-                label="Direct downline"
-                value={formatCountOrDash(summary.data.totalDirectDownline)}
+            <div className={styles.badges}>
+              <StatusChip
+                label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
+                tone="neutral"
+                icon="users"
               />
-              <MetricCard
-                label="Total descendants"
-                value={formatCountOrDash(summary.data.totalDescendants)}
+              <StatusChip
+                label={`Total descendants: ${formatCountOrDash(summary.data.totalDescendants)}`}
+                tone="neutral"
+                icon="users"
               />
-              <MetricCard
-                label="Active sellers"
-                value={formatCountOrDash(summary.data.activeSellerCount)}
+              <StatusChip
+                label={`Active sellers: ${formatCountOrDash(summary.data.activeSellerCount)}`}
+                tone="success"
+                icon="user-check"
               />
-              <MetricCard
-                label="Inactive sellers"
-                value={formatCountOrDash(summary.data.inactiveSellerCount)}
+              <StatusChip
+                label={`Inactive sellers: ${formatCountOrDash(summary.data.inactiveSellerCount)}`}
+                tone="neutral"
+                icon="user-x"
               />
             </div>
             <EmptyState
@@ -190,22 +186,26 @@ export function GenealogyDetailsPage() {
             />
           </>
         ) : (
-          <div className={styles.summary}>
-            <MetricCard
-              label="Direct downline"
-              value={formatCountOrDash(summary.data.totalDirectDownline)}
+          <div className={styles.badges}>
+            <StatusChip
+              label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
+              tone="neutral"
+              icon="users"
             />
-            <MetricCard
-              label="Total descendants"
-              value={formatCountOrDash(summary.data.totalDescendants)}
+            <StatusChip
+              label={`Total descendants: ${formatCountOrDash(summary.data.totalDescendants)}`}
+              tone="neutral"
+              icon="users"
             />
-            <MetricCard
-              label="Active sellers"
-              value={formatCountOrDash(summary.data.activeSellerCount)}
+            <StatusChip
+              label={`Active sellers: ${formatCountOrDash(summary.data.activeSellerCount)}`}
+              tone="success"
+              icon="user-check"
             />
-            <MetricCard
-              label="Inactive sellers"
-              value={formatCountOrDash(summary.data.inactiveSellerCount)}
+            <StatusChip
+              label={`Inactive sellers: ${formatCountOrDash(summary.data.inactiveSellerCount)}`}
+              tone="neutral"
+              icon="user-x"
             />
           </div>
         )}

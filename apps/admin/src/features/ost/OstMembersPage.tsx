@@ -6,7 +6,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -101,19 +100,16 @@ export function OstMembersPage() {
         description="Approved OST sellers and the Sales Manager each one serves under."
       />
 
-      <div className={styles.metrics} aria-label="Member summary">
-        <MetricCard
-          label="Listed members"
-          value={formatCountOrDash(total)}
-          description={settled ? 'Matching the current search.' : 'Approved OST sellers.'}
+      <div className={styles.badges} aria-label="Member summary">
+        <StatusChip
+          label={`Listed members: ${formatCountOrDash(total)}`}
+          tone="neutral"
           icon="grid"
         />
-        <MetricCard
-          label="Active members"
-          value={formatCountOrDash(active)}
-          description="Members with an active status in this list."
+        <StatusChip
+          label={`Active members: ${formatCountOrDash(active)}`}
+          tone="success"
           icon="check"
-          chip={{ label: 'Active', tone: 'success' }}
         />
       </div>
 

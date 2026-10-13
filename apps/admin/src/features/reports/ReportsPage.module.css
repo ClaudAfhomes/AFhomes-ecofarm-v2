@@ -100,24 +100,17 @@
   }
 }
 
-.summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
 }
-.summary > div {
-  padding: var(--space-4);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-control);
-  background: var(--color-bg-surface-raised);
+
+.badges > li {
   min-width: 0;
-  overflow-wrap: anywhere;
-}
-.summary dd {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-metric);
-  font-variant-numeric: tabular-nums;
 }
 .summaryLabel {
   color: var(--color-text-secondary);
