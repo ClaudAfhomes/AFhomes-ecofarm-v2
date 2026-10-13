@@ -8,12 +8,8 @@ export {
   subtractMoney,
   divideMoneyExact,
 } from './money.js';
-<<<<<<< Updated upstream
-export { formatCount } from './numbers.js';
-=======
 export { formatCount, formatCountOrDash, formatCompactMoney } from './numbers.js';
 export { formatUTCDate, formatUTCDateTime } from './dates.js';
->>>>>>> Stashed changes
 export {
   RECOVERY_PASSWORD_MIN_LENGTH,
   RECOVERY_SENT_MESSAGE,

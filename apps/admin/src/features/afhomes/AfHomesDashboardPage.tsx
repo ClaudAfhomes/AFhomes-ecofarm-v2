@@ -2,12 +2,8 @@ import { useState, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
 import { paymentSchemeLabel } from '@afhomes/contracts';
-<<<<<<< Updated upstream
 import { compareMoney, formatCount, formatMoney } from '@afhomes/shared';
-=======
-import { compareMoney, formatMoney } from '@afhomes/shared';
 import { formatDate } from '../../lib/format';
->>>>>>> Stashed changes
 import {
   EmptyState,
   ErrorState,

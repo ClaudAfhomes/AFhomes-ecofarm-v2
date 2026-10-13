@@ -2,6 +2,14 @@ import { compareMoney, subtractMoney } from '@afhomes/shared';
 
 /** Presentation helpers for AF Homes business values. */
 
+/** Format an exact-decimal money string for display. Never parses to a number. */
+export function formatMoney(exactDecimal: string | null | undefined): string {
+  if (exactDecimal === null || exactDecimal === undefined) return '—';
+  const [whole = '0', frac = ''] = exactDecimal.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `₱${grouped}.${(frac + '00').slice(0, 2)}`;
+}
+
 /**
  * Format an exact-decimal rate as a percentage: "0.04" and "0.0400" both mean
  * 4%, rendered as "4.00%".
@@ -17,7 +25,6 @@ export function formatRate(exactRate: string | null | undefined): string {
   return `${hundredths.slice(0, -2)}.${hundredths.slice(-2)}%`;
 }
 
-<<<<<<< Updated upstream
 /** Module-level so every count render reuses one formatter. */
 const countFormatter = new Intl.NumberFormat('en-PH', { maximumFractionDigits: 0 });
 
@@ -26,8 +33,6 @@ export const formatPoints = (points: number | null | undefined): string => {
   return countFormatter.format(points);
 };
 
-=======
->>>>>>> Stashed changes
 /**
  * Settlement label from exact-decimal figures (BigInt cents, never float).
  *

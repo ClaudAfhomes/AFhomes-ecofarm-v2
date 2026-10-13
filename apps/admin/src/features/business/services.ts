@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 /**
  * AF Homes Phase 2 business API client.
  *
@@ -792,20 +791,3 @@ export const verifyReservationPayment = (
   );
 export const updateApplicationReservation = (id: string, input: ReservationUpdate) =>
   patch(`/official-forms/reservations/${id}`, purchaseReservationSchema, input);
-=======
-/**
- * Business API client entry point.
- * 
- * Re-exports every domain module, so existing screens keep importing from
- * './services'. New code may import a domain module directly.
- * 
- * Dropped in the split: business getMemberships/getReferrals had zero importers
- * (memberships and genealogy own their modules) and were not carried over.
- */
-export * from './services-card-plans';
-export * from './services-customers';
-export * from './services-applications';
-export * from './services-reservations';
-export * from './services-sales';
-export * from './services-commissions';
->>>>>>> Stashed changes

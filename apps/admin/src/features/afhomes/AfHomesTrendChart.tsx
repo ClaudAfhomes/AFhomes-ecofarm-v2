@@ -11,11 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-<<<<<<< Updated upstream
-import { addMoney, formatCount, formatMoney } from '@afhomes/shared';
-=======
-import { addMoney, formatCompactMoney, formatMoney } from '@afhomes/shared';
->>>>>>> Stashed changes
+import { addMoney, formatCompactMoney, formatCount, formatMoney } from '@afhomes/shared';
 import type { SalesTrendGranularity } from '@afhomes/contracts';
 import { EmptyState, ErrorState, Icon, Skeleton } from '@afhomes/ui';
 
@@ -444,7 +440,6 @@ export function AfHomesTrendChart() {
     </section>
   );
 }
-<<<<<<< Updated upstream
 
 export function TrendChartSkeleton() {
   return (
@@ -482,5 +477,3 @@ export function TrendChartSkeleton() {
     </section>
   );
 }
-=======
->>>>>>> Stashed changes

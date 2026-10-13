@@ -4,12 +4,8 @@ import { useMemo, useState, type KeyboardEvent } from 'react';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
-<<<<<<< Updated upstream
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-=======
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
->>>>>>> Stashed changes
 import { paymentSchemeLabel, recordPaymentSchema } from '@afhomes/contracts';
 import {
   Table,
@@ -30,10 +26,7 @@ import {
   PageHeader,
   SearchField,
   Select,
-<<<<<<< Updated upstream
   Skeleton,
-=======
->>>>>>> Stashed changes
   StatusChip,
   TextField,
   notifyConfirm,
@@ -51,7 +44,6 @@ import type {
 
 import { formatDateTime } from '../../lib/format';
 import { downloadFile } from '../../lib/download';
-<<<<<<< Updated upstream
 import {
   SPOT_CASH_LABEL,
   SALE_STATUS_LABEL,
@@ -61,11 +53,8 @@ import {
   humanizeCode,
 } from './format';
 import { TierBadge } from './TierBadge';
-=======
-import { SPOT_CASH_LABEL } from './format';
 import { businessKeys, sharedScopes } from './queryKeys';
 import { formatMoneyOrDash } from '@afhomes/shared';
->>>>>>> Stashed changes
 import {
   exportPurchaseDocument,
   finalizeReservationPurchase,
@@ -226,20 +215,6 @@ function ReservationActions({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-<<<<<<< Updated upstream
-=======
-  const [paymentDialog, setPaymentDialog] = useState<'record' | 'verify' | null>(null);
-  const refresh = async () => {
-    await client.invalidateQueries({
-      queryKey: businessKeys.reservationPayments(item.reservationId),
-    });
-    await onDone();
-  };
-  const payments = useQuery({
-    queryKey: businessKeys.reservationPayments(item.reservationId),
-    queryFn: () => getReservationPayments(item.reservationId),
-  });
->>>>>>> Stashed changes
   const print = async (kind: PurchaseDocumentKind) => {
     setBusy(true);
     setError(null);
@@ -258,11 +233,6 @@ function ReservationActions({
     setError(null);
     try {
       await finalizeReservationPurchase(item.reservationId, crypto.randomUUID());
-<<<<<<< Updated upstream
-=======
-      await client.invalidateQueries({ queryKey: businessKeys.all });
-      await client.invalidateQueries({ queryKey: sharedScopes.reports });
->>>>>>> Stashed changes
       await onDone();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Finalization failed');
@@ -305,66 +275,9 @@ function ReservationActions({
   }
   return (
     <>
-<<<<<<< Updated upstream
       <span data-row-menu onClick={(event) => event.stopPropagation()}>
         <OverflowMenu label={`Actions for ${item.reservationNumber}`} items={menuItems} />
       </span>
-=======
-      <span>
-        {formatMoneyOrDash(item.verifiedTotal)} verified of {formatMoneyOrDash(item.totalPrice)} ·{' '}
-        {(payments.data ?? []).length} payment(s)
-      </span>{' '}
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={!canHandlePayments || busy}
-        onClick={() => print('reservation')}
-      >
-        Print reservation
-      </Button>{' '}
-      <Button
-        size="sm"
-        disabled={!canHandlePayments || busy}
-        onClick={() => setPaymentDialog('record')}
-      >
-        Record payment
-      </Button>{' '}
-      <Button
-        size="sm"
-        disabled={!canHandlePayments || busy}
-        onClick={() => setPaymentDialog('verify')}
-      >
-        Verify
-      </Button>{' '}
-      {paymentDialog === 'record' ? (
-        <RecordPaymentDialog
-          saleId={item.reservationId}
-          origin="reservation"
-          customerName={item.customerName}
-          recordLabel={item.reservationNumber}
-          onDone={refresh}
-          onClose={() => setPaymentDialog(null)}
-        />
-      ) : null}
-      {paymentDialog === 'verify' ? (
-        <VerifyDialog
-          saleId={item.reservationId}
-          origin="reservation"
-          onDone={refresh}
-          onClose={() => setPaymentDialog(null)}
-        />
-      ) : null}
-      {item.fullyPaid ? (
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={!canHandlePayments || busy}
-          onClick={finalize}
-        >
-          Finalize purchase
-        </Button>
-      ) : null}
->>>>>>> Stashed changes
       {error ? <p role="alert">{error}</p> : null}
     </>
   );
@@ -381,17 +294,12 @@ export function BusinessFinanceQueuePage() {
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
   const query = useQuery({
-<<<<<<< Updated upstream
     queryKey: ['business', 'queue', 'finance', settled, FINANCE_QUEUE_LIMIT],
     queryFn: () => getFinanceQueue(settled),
     // Keep the previous page on screen while the next search (or poll) lands:
     // refetches then feel instant and the skeleton only ever appears on the
     // very first load. `isPending` stays true only until the first page.
     placeholderData: keepPreviousData,
-=======
-    queryKey: businessKeys.financeQueue(settled),
-    queryFn: () => (settled ? getFinanceQueue(settled) : getFinanceQueue()),
->>>>>>> Stashed changes
     // Money moves from other sessions too: poll the queue (same-session
     // writes invalidate instantly).
     refetchInterval: 15_000,
@@ -511,7 +419,6 @@ export function BusinessFinanceQueuePage() {
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : (
-<<<<<<< Updated upstream
         <>
           <ul className={styles.summary} aria-label="Queue summary">
             <li>
@@ -712,88 +619,6 @@ export function BusinessFinanceQueuePage() {
             </div>
           )}
         </>
-=======
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Sale</TableHeaderCell>
-                <TableHeaderCell>Customer</TableHeaderCell>
-                <TableHeaderCell>Card</TableHeaderCell>
-                <TableHeaderCell>Scheme</TableHeaderCell>
-                <TableHeaderCell>Total</TableHeaderCell>
-                <TableHeaderCell>Verified</TableHeaderCell>
-                <TableHeaderCell>Balance</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell>Next Action</TableHeaderCell>
-                <TableHeaderCell>Actions</TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {query.data?.map((item) => (
-                <TableRow key={item.origin === 'sale' ? item.saleId : item.reservationId}>
-                  <TableCell label="Sale">
-                    {item.origin === 'sale' ? item.saleNumber : item.reservationNumber}
-                  </TableCell>
-                  <TableCell label="Customer">{item.customerName}</TableCell>
-                  <TableCell label="VIP">{item.productName}</TableCell>
-                  <TableCell label="Scheme">{paymentSchemeLabel(item.paymentScheme)}</TableCell>
-                  <TableCell label="Total">
-                    {formatMoneyOrDash(item.origin === 'sale' ? item.cashPrice : item.totalPrice)}
-                  </TableCell>
-                  <TableCell label="Verified">{formatMoneyOrDash(item.verifiedTotal)}</TableCell>
-                  <TableCell label="Balance">{formatMoneyOrDash(item.remainingBalance)}</TableCell>
-                  <TableCell label="Status">
-                    <StatusChip label={item.status} />
-                  </TableCell>
-                  <TableCell label="Next Action">
-                    {item.origin === 'reservation'
-                      ? item.fullyPaid
-                        ? 'Finalize purchase'
-                        : 'Handle payment'
-                      : item.activatable
-                        ? 'Activate membership'
-                        : item.fullyPaid
-                          ? 'Review activation'
-                          : 'Handle payment'}
-                  </TableCell>
-                  <TableCell label="Actions">
-                    {item.origin === 'reservation' ? (
-                      <ReservationActions
-                        item={item}
-                        canHandlePayments={canHandlePayments}
-                        onDone={refresh}
-                      />
-                    ) : (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => setDetail(item)}>
-                          View details
-                        </Button>{' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={!canHandlePayments}
-                          onClick={() => setPaying(item)}
-                        >
-                          Record payment
-                        </Button>{' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={!canHandlePayments}
-                          onClick={() => setReviewing(item.saleId)}
-                        >
-                          Verify
-                        </Button>
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
->>>>>>> Stashed changes
       )}
 
       {currentDetail && currentDetail.origin === 'sale' ? (
@@ -1078,7 +903,6 @@ export function RecordPaymentDialog({
                 ) : null}
               </div>
             </div>
-<<<<<<< Updated upstream
           ) : null}
           <div className={styles.formGrid}>
             <p className={styles.formNote}>
@@ -1178,86 +1002,6 @@ export function RecordPaymentDialog({
           </div>
         </>
       )}
-=======
-            <div>
-              <dt>Frozen total</dt>
-              <dd>{formatMoneyOrDash(summary.data.cashPrice)}</dd>
-            </div>
-            <div>
-              <dt>Reservation</dt>
-              <dd>{formatMoneyOrDash(summary.data.reservationFee)}</dd>
-            </div>
-            <div>
-              <dt>Required initial</dt>
-              <dd>{formatMoneyOrDash(summary.data.requiredInitial)}</dd>
-            </div>
-            <div>
-              <dt>Monthly target</dt>
-              <dd>
-                {summary.data.installmentMonths && summary.data.monthlyAmount
-                  ? `${formatMoneyOrDash(summary.data.monthlyAmount)} × ${summary.data.installmentMonths}`
-                  : '—'}
-              </dd>
-            </div>
-            <div>
-              <dt>Verified paid</dt>
-              <dd>{formatMoneyOrDash(summary.data.verifiedTotal)}</dd>
-            </div>
-            <div>
-              <dt>Remaining balance</dt>
-              <dd>{formatMoneyOrDash(summary.data.remainingBalance)}</dd>
-            </div>
-          </dl>
-        ) : null}
-        <TextField
-          id="record-payment-amount"
-          name="amount"
-          label="Amount"
-          type="text"
-          inputMode="decimal"
-          value={amount}
-          onChange={(value) => {
-            setAmount(value);
-            setAmountDirty(true);
-          }}
-          error={
-            amountDirty && !amountValid
-              ? 'Enter a valid amount greater than zero without letters or scientific notation.'
-              : undefined
-          }
-        />
-        <label>
-          Type
-          <Select
-            value={type}
-            onChange={(e) => setType(e.target.value as PaymentType)}
-            options={[
-              { value: 'down_payment', label: 'Down payment' },
-              { value: 'installment', label: 'Installment' },
-              { value: 'full', label: 'Full payment' },
-            ]}
-          />
-        </label>
-        <TextField
-          id="record-payment-method"
-          name="method"
-          label="Method"
-          optional
-          value={method}
-          onChange={setMethod}
-        />
-        <TextField
-          id="record-payment-reference"
-          name="reference"
-          label="Payment reference"
-          optional
-          value={reference}
-          onChange={setReference}
-          hint="Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya transaction, deposit slip, or official receipt."
-        />
-        {save.error ? <p role="alert">The payment was not recorded. {save.error.message}</p> : null}
-      </div>
->>>>>>> Stashed changes
     </Dialog>
   );
 }
@@ -1318,7 +1062,6 @@ export function VerifyDialog({
         </div>
       }
     >
-<<<<<<< Updated upstream
       <div className={styles.formGrid}>
         {decide.isSuccess ? (
           <p role="status" className={styles.formNote}>
@@ -1337,42 +1080,6 @@ export function VerifyDialog({
               <p className={styles.dialogHeroMeta}>
                 Verify to count the money toward the price, or reject it back for correction.
               </p>
-=======
-      <div style={{ display: 'grid', gap: 12 }}>
-        {decide.isSuccess ? <p role="status">Payment {decide.variables?.decision}.</p> : null}
-        {pending.length === 0 ? (
-          <p>No payment is awaiting verification.</p>
-        ) : (
-          pending.map((payment) => (
-            <div
-              key={payment.id}
-              style={{ borderTop: '1px solid var(--color-border, #ddd)', paddingTop: 8 }}
-            >
-              <strong>{formatMoneyOrDash(payment.amount)}</strong> — {payment.method}{' '}
-              {payment.reference ? `(${payment.reference})` : ''}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <Button
-                  onClick={() => decide.mutate({ paymentId: payment.id, decision: 'verified' })}
-                  loading={decide.isPending}
-                  loadingLabel="Verifying…"
-                >
-                  Verify
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() =>
-                    decide.mutate({
-                      paymentId: payment.id,
-                      decision: 'rejected',
-                      reason: reason || 'Rejected by Finance',
-                    })
-                  }
-                  disabled={decide.isPending}
-                >
-                  Reject
-                </Button>
-              </div>
->>>>>>> Stashed changes
             </div>
           </div>
         ) : null}
@@ -1416,7 +1123,6 @@ export function VerifyDialog({
             ))}
           </ul>
         )}
-<<<<<<< Updated upstream
         <label className={styles.field}>
           Reason (required to reject)
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -1426,18 +1132,6 @@ export function VerifyDialog({
             {decide.error.message}
           </p>
         ) : null}
-=======
-        <TextField
-          id="verify-reject-reason"
-          name="rejectReason"
-          label="Reason"
-          optional
-          hint="Required to reject. Approvals may leave it blank."
-          value={reason}
-          onChange={setReason}
-        />
-        {decide.error ? <p role="alert">{decide.error.message}</p> : null}
->>>>>>> Stashed changes
       </div>
     </Dialog>
   );
@@ -1621,10 +1315,6 @@ function PaymentDetails({
         <p className={styles.figureLine}>
           Total: <strong>{formatMoney(item.cashPrice)}</strong>
         </p>
-<<<<<<< Updated upstream
-=======
-        <p>Total: {formatMoneyOrDash(item.cashPrice)}</p>
->>>>>>> Stashed changes
       </section>
       <section className={styles.detailSection} aria-label="Payment progress">
         <h2 className={styles.detailTitle}>Payment progress</h2>
@@ -1675,7 +1365,6 @@ function PaymentDetails({
         ) : payments.data.length ? (
           <ol className={styles.timeline}>
             {payments.data.map((payment) => (
-<<<<<<< Updated upstream
               <li key={payment.id} className={styles.timelineItem}>
                 <div className={styles.timelineTop}>
                   <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
@@ -1685,11 +1374,6 @@ function PaymentDetails({
                   {payment.paymentType.replaceAll('_', ' ')} · {payment.method} ·{' '}
                   {payment.reference ?? 'No reference'}
                 </p>
-=======
-              <li key={payment.id}>
-                {payment.paymentType.replaceAll('_', ' ')} · {formatMoneyOrDash(payment.amount)} ·{' '}
-                <StatusChip label={payment.status} /> · {payment.reference ?? 'No reference'}
->>>>>>> Stashed changes
               </li>
             ))}
           </ol>

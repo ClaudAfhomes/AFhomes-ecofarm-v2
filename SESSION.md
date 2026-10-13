@@ -11,10 +11,13 @@ pnpm + Turborepo. `apps/web` (:5173, `/` + `/customer/**` + `/ost/**`) |
 `apps/admin` (:5174, `/admin/`) | single Vercel Function `api/router.ts` →
 `api/_lib/router.ts` → `api/_handlers/**` → Supabase Postgres + Auth.
 `packages/contracts` (Zod SSOT, `lifecycle.ts` owns all statuses) |
-`packages/shared` (BigInt money + canonical `formatMoney`, new `formatCount`) |
-`packages/config` (`VITE_`-only) | `packages/ui` (tokens + primitives).
-SSOT doc: `docs/AFHOMES-PHASE-1-PLAN.md` (`AGENTS.md` is stale past Phase 5).
-Branch: `orly/develop`. All session work UNCOMMITTED (see file list below).
+`packages/shared` (BigInt money, `formatMoney`/`formatMoneyOrDash`,
+`formatCount`/`formatCountOrDash`, `formatCompactMoney`, UTC date helpers) |
+`packages/config` (`VITE_`-only) | `packages/ui` (tokens + primitives +
+`DateField`/`TextAreaField`/`FileField`, tier artwork + assets).
+`docs/` was deleted in the working tree (unstaged); `AGENTS.md` is the
+authority and now documents frontend conventions too. Branch:
+`claud/develop`. All session work UNCOMMITTED.
 
 ## Standing user preferences (apply without asking)
 
@@ -23,16 +26,18 @@ Branch: `orly/develop`. All session work UNCOMMITTED (see file list below).
 - Primary actions green (`Button` default); secondary for alternates; destructive = `danger`.
 - Content loaders = `Skeleton`; button loaders = in-button `Spinner` (`loading` + `loadingLabel`). No standalone spinners on any worked surface.
 - First-load skeletons cover the WHOLE page (header, filters, table); refetches keep chrome mounted (see skeleton rule below).
-- Shared primitives over raw controls (`Select`, `SearchField`, `FilterBar`, `Pagination`, `StatusChip`, `Alert`, `Table` family, `OverflowMenu`, `TierBadge`, `MetricCard`).
+- Shared primitives over raw controls (`Select`, `TextField`, `DateField`, `TextAreaField`, `FileField`, `SearchField`, `FilterBar`, `Pagination`, `StatusChip`, `Alert`, `Table` family, `OverflowMenu`, `TierBadge`, `MetricCard`).
 - Dropdown options show names only (no IDs/numbers in labels).
-- Money/values ALWAYS grouped (`formatMoney`; counts via `formatPoints`/`formatCount`: `8000` → `8,000`); never raw `₱{…}` concat; never show a sale UUID.
+- Money/values ALWAYS grouped (`formatMoneyOrDash` for nullable display, fail-loud core; counts via `formatCountOrDash`); never raw `₱{…}`/`₱${…}` concat; never show a sale UUID.
+- Member-facing instants use shared UTC helpers (`formatUTCDate`); staff console stays browser-zone (`lib/format`, now null-tolerant). Never mix for one instant.
 - Closed enums are dropdowns, never free text (Imported Tier → Select); workbook imports sanitized to the closed set.
 - Field labels humanized (`Reservation Date`, `TIN Number`); never render raw state keys. Status badges capitalized (`payment_in_progress` → `Payment in progress` via `SALE_STATUS_LABEL`/`humanizeCode` + tone map; unknown codes fall back capitalized neutral, never snake_case).
+- Labeled primitives mark optional fields with "(Optional)": specs assert the MARKED name. `required` must mirror the original control; adding it where none existed hard-blocks submission via native validation (proven by ost.spec regression).
 - Headings are stable product titles, never role strings (`Operations Overview`, not `Super Admin Dashboard`); subtitles only when they add info the scope strip doesn't.
 - Status communicates with label + icon + tone, never color alone; cancelled = red + close icon. Tiers are metallic identity (`TierBadge`), never semantic tones.
 - Tables: header `--color-bg-surface`, body `--color-bg-surface-raised` (white); figures tabular-nums.
 - Server is the security boundary; nav/guards are UX-only.
-- CSS Modules per component; tokens from `@afhomes/ui`; Prettier (`semi/singleQuote/100/trailingComma`).
+- CSS Modules per component; tokens in `@afhomes/ui`; Prettier (`semi/singleQuote/100/trailingComma`). Repo files are CRLF: prettier `--check` fails repo-wide on endings alone (environmental); verify new-file formatting LF-normalized instead.
 - No unused vocabulary: dead code, dead CSS classes, dead exports are removed, not left.
 - A test that cannot fail is not a test: new guards are proven by revert-and-fail (temporarily restore the defect, watch the guard fire, restore).
 - Flake standard: pass-in-isolation is not proof; reproduce on clean tree via `git stash` before calling anything pre-existing.
@@ -42,6 +47,12 @@ Branch: `orly/develop`. All session work UNCOMMITTED (see file list below).
 ## Established patterns (follow in future tasks)
 
 - Paged lists: service `getXPage()` via `requestListEnvelope` → `{data,total}`; page state in queryKey, `placeholderData` previous, shrink-clamp, shared `Pagination` (`page={safePage+1}`), stacked footer (controls over range text).
+- Business query keys come ONLY from `features/business/queryKeys.ts` (pinned by `queryKeys.spec.ts`, incl. scope-prefix invariants); invalidation uses the matching scope, never a literal. Known quirk: `['business','activation-queue']` invalidation matches nothing (kept as-is, pending review).
+- Mutations use `useBusinessMutation` (`apps/admin/src/lib/`): same-payload double submits coalesce, different payloads run concurrently; `mutate`/`mutateAsync`/`on*` semantics unchanged. Manual `useSingleFlight` wrappers in FinanceQueue/OfficialForms left in place (harmless, money-path caution).
+- Services split per domain (`services-{card-plans,customers,applications,reservations,sales,commissions}.ts`, each with local `post`/`patch` per `points-services` precedent) + `services.ts` barrel. Dropped: business `getMemberships`/`getReferrals` (zero importers).
+- OfficialForms split: `official-forms-fields.tsx` (exported kit) + `-applications` + `-reservations` + barrel. Reservations imports `humanizeApplicationIssues` from applications (one-way).
+- Admin routes split per feature (`React.lazy` + `.then(m => ({default}))` in `App.tsx`; auth/layout/guards eager; shell-mounted `Suspense` + skeleton fallback at `AdminLayout` Outlet). Recharts loads behind its own skeleton (`AfHomesTrendChartSkeleton.tsx` split out). Dashboard chunk 392KB → 14KB.
+- Tier artwork lives in `@afhomes/ui` (`tier-artwork.ts` + assets); admin/web/marketing import from there. No cross-app `apps/**` source imports (only comments reference across).
 - Clickable rows: `tr[tabIndex=0][role=link]` + Enter/Space + plain-text first cell + `.clickable` hover + focus-visible outline. Row-menu wrapper stops propagation (`data-row-menu` + closest guard) so menu use never activates the row.
 - Row actions live in `OverflowMenu` (`Actions for {number}` trigger; `menuitem` roles; icons per action; disabled mirrors permission). Tests open the menu, then pick the `menuitem` (helpers: `openRowMenu`/`pickMenuItem`).
 - Read-only detail dialogs + actions in the menu (reservation details pattern): dialogs never mutate what they display; Record/Verify/Print/Finalize stay in row menus or dialog footers fed by parent state.
@@ -49,7 +60,8 @@ Branch: `orly/develop`. All session work UNCOMMITTED (see file list below).
 - `FilterBar` bottom-aligns so bare search inputs sit level with labeled controls. Search placeholders name the searchable fields (verified against the handler's `matchesSearch` list).
 - Invalid fields turn red via global `aria-invalid` rule in `apps/admin/src/styles/global.css` (stays AFTER base control rules — all `:where()`, source order decides).
 - Editor save/submit: `loading` + `loadingLabel`, disable-gates preserved (`loading` auto-disables); blocker lists render as inline warning Alerts; never silent grey buttons.
-- File inputs: hidden native input + `Button` trigger + `Selected: {name}` status; IST import uses `::file-selector-button` restyle + filename/size status + `aria-labelledby` to the visible title.
+- File inputs: hidden native input + `Button` trigger + `Selected: {name}` status (kept in CustomerImportExport, OfficialForms); IST import uses `::file-selector-button` restyle (kept); elsewhere `FileField` with `status` slot.
+- `Select` has no `multiple` and no label of its own: multi-selects stay native; outer `<label>` wrappers are REQUIRED (do not nest labeled primitives inside `<label>`, it doubles the accessible name).
 - Local image thumbnails via `URL.createObjectURL` in `useMemo` + cleanup-only revoke effect (never setState-in-effect; jsdom lacks it → guarded try/catch).
 - Editor error states branch per cause (401/403/404/parse/network) with actionable text; never render server internals or stored values.
 - **Skeletons must never replace live controls.** Re-keying a query flips `isPending`, which unmounts whatever the skeleton replaces — losing focus/caret mid-keystroke. First load may replace the screen; refetches must keep chrome (tabs, search, filters) mounted. Use `placeholderData: keepPreviousData` so `isPending` only ever means a genuine first load (`BusinessProductsPage.tsx` is the reference). Focus-preservation regression test included there.
@@ -67,42 +79,48 @@ Branch: `orly/develop`. All session work UNCOMMITTED (see file list below).
 - **`SearchField` combobox prop (additive):** optional `combobox: { controlsId, expanded, activeOptionId?, onKeyDown? }` turns the input into `role=combobox`. Consequence: spec queries switch `searchbox` → `combobox` for wired inputs; unwired inputs unchanged.
 - **TanStack v5 gotcha:** a DISABLED query reports `isPending: true` — gate skeletons/loaders on the debounced term too, not `isPending` alone.
 - **Spec hygiene:** this repo never clears mocks between tests — assert mock counts relative to a per-test baseline, or leftover `mockImplementationOnce` queues poison later tests. Prefer `findBy*` over sync queries after any debounce/fetch boundary (pending-state UI renders first). Sync queries right after `fireEvent` race the fetch; use `findBy*`.
+- **Specs vs lazy routes:** App-rendering specs must await the chunk (`findBy*`, never sync queries post-render; chart tests need longer timeouts for first-transform). Never stub the global `URL` constructor with a plain object: dynamic `import()` needs `new URL()` — subclass it (`reports-audit.spec.tsx` beforeEach is the reference).
 - **vi.stubGlobal mid-test anomaly (unexplained):** re-stubbing `fetch` mid-test provoked zero subsequent fetches in the finance queue suite (two independent reproductions); pre-installed conditional mocks work deterministically. For slow/hung-fetch tests, install the conditional behavior BEFORE render, never re-stub mid-test.
+- **CRLF repo:** the `edit` tool fights CRLF (verify every edited region; use node script repairs with `\r\n`-aware matching). Never `git stash` mid-build with hundreds of changed files (noisy, risky); bisect by reverting single files instead.
 - **Headless CSS debugging:** `playwright-core` (global) + system Chrome + `vite build` dist CSS + static HTML using real hashed classes; measure `scrollWidth` vs viewport per element. Caveats: CSS-module hashes rotate per build (name AND numeric suffix) — re-extract after every build; LightningCSS merges rules, strips attribute-selector quotes, and rewrites media queries (`width<=639px`) — grep loosely. Scratch lives in `AppData/Local/Temp/opencode/` (outside repo, never committed). `dist/` is gitignored.
 
-## This session's work (UNCOMMITTED on `orly/develop`)
+## This session's work (UNCOMMITTED on `claud/develop`)
 
-Files touched: `apps/admin` (RequireRole, dashboard ×4, business finance ×6 incl. new module CSS, memberships lookup ×3, responsive + filterbar specs), `api/_handlers/{queues,phase26-finance.spec}.ts`, `packages/shared` (new `numbers.ts` + spec + index export).
+Cleanup (user-verified list): deleted root junk (`C:Users…log`, `e staff invite…`, `tatus`), `legacy/` (680 files), `CHANGELOG.md`, `scripts/gen-phase5-reconciliation.mjs`, `AfHomesQueueCards.tsx` + spec. Updated `AGENTS.md` (authority rewritten for cleanup + frontend conventions) and `README.md` (legacy/docs refs removed). Description trims (5 words): activation queue, commissions.
 
-1. **Dashboard gating + formatting:** Sales Overview (chart, heading, scheme/plan tables, headline sales cards) hides without `sales.card_sales` view (`filterSalesMetrics`, `canViewModule` precedent from queue cards). New `@afhomes/shared` `formatCount` (`8000` → `8,000`, fail-loud like `formatMoney`) applied to headline cards, breakdown cells, trend KPIs/tooltips/axis, unattributed notice.
-2. **Dashboard skeleton-only:** hero text skeletonized during load; `Spinner` removed from `AfHomesTrendChart` (early `TrendChartSkeleton` return) and `RequireRole` gate (hero + card skeleton grid); trend/chart/panel skeletons re-spaced to loaded rhythm; specs pin absence of all static text + spinners during load.
-3. **Customer lookup skeletons:** spinners + loading lines removed (status `aria-label` announces); skeleton matched to card layout (32px fact-icon tiles, pill chip, 26px title, mirrored suggestion rows using real `suggestOption` layout); mobile art keeps 16/9; final count = **2 skeleton cards** per user call.
-4. **Finance payments redesign** (`BusinessFinanceQueuePage`, new dedicated module CSS): forest hero (readable light ink) + count chips; compact `MetricCard` strip; `FilterBar` (search guide placeholder verified against `matchesSearch` + client-side status filter + honest counts); 10→6 columns (Record pill, Name, TierBadge Plan, Balance + progress paint, Status, menu); clickable rows (role=link, keyboard, hover); all actions in `OverflowMenu`; capitalized toned badges (`SALE_STATUS_LABEL/TONE`, `humanizeCode` fallback); read-only `ReservationDetails` dialog; row click opens Record; Record/Verify dialogs redesigned (identity heroes, grouped sections); skeleton-only loading everywhere incl. dialog bodies/timelines.
-5. **Perf/correctness audit:** API capped the queue at 50 rows while the client dropped `meta.total` (silent tail loss) → client reads at `FINANCE_QUEUE_LIMIT=200` via envelope, shows "N of M" + `Queue capped` Alert; server `buildReservationQueue` now counts pre-slice (mirrors `buildQueue`); `keepPreviousData` kills search flashes; `formatPoints` formatter hoisted. Security pass clean (no `innerHTML`, server-authoritative mutations, no excess PII).
-6. **Revert-and-fail proofs done:** api `13b` (4-vs-6 on old code), `keepPreviousData` test (fails with option off), truncation + no-flash UI tests.
+Frontend best-practices build (all phases): shared `formatMoneyOrDash`/`formatCount[OrDash]`/`formatCompactMoney`/`formatUTCDate[Time]` + specs; 17-file importer migration; 9 raw-₱ sites fixed; `queryKeys.ts` + pinning spec with full business migration; `useBusinessMutation` + 35-file rollout; services 6-way split + barrel (export parity checked); OfficialForms 3-way split + barrel; ui `DateField`/`TextAreaField`/`FileField` + `Select` disabled options; ~100 control migrations (select/date/file/textarea/labeled-text) with required-mirroring + spec updates; admin lazy routes + chart split; ost/reports/account inline styles → modules; tierArtwork → `@afhomes/ui`; 6 ad-hoc admin date sites centralized.
+
+New files: `packages/shared/{numbers,dates}.ts` + specs, `business/queryKeys.ts` + spec, `business/services-{card-plans,customers,applications,reservations,sales,commissions}.ts`, `business/official-forms-{fields,applications,reservations}.tsx`, `lib/useBusinessMutation.ts` + spec, `ui/{tier-artwork,tier-artwork.spec}`, `ui/components/{DateField,TextAreaField,FileField,field-kit.spec}`, `AfHomesTrendChartSkeleton.tsx`, 5 CSS modules (MyAccount, Ost×3, AuditPage).
+
+Revert-and-fail proofs done: shared fail-loud guard, queryKeys pinning, required-default convention, URL-subclass necessity (plain object breaks lazy).
 
 ## Open threads (need user input or a follow-up task)
 
-- Full pagination UI for the finance queue (still capped at 200 with an alert, by design for now).
-- `AfHomesQueueCards` is exported + tested but rendered nowhere — delete it if it stays unused.
-- Interactive element nested in `role=link` rows (menu button inside clickable `tr`): works via propagation guards, but flagged as an a11y smell.
-- `SearchField` `busy` intentionally NOT passed on polling pages (would SR-announce every 15s poll).
-- Em-dash removal on reservation detail (from prior session, still pending).
+- Business-feature inline styles (~100 sites) remain native; convert per page when touched.
+- Checkboxes, number/url/datetime-local inputs, multi-selects, dynamic-type mapped inputs: no primitives, intentionally native (global styles cover).
+- Marketing CMS numbers stay `toLocaleString()` (content-driven resilience over strictness).
+- Customer portal claim/camera controls stay portal-styled (deliberate surface design).
+- Dead `['business','activation-queue']` invalidation (no-op, commented, pending review).
+- Full pagination UI for the finance queue (still capped by design).
+- `supabase/` operator half of `pnpm typecheck` not re-run (untouched); api suite not run (untouched).
+- Reservation-detail em-dash removal (prior session, still pending).
 
-## Known load-sensitive flakes (all pass in isolation; intermittent under parallel load)
+## Known load-sensitive flakes (all pass in isolation; sets rotate run to run)
 
-- `business/CustomerDetailPage.spec.tsx`, `business/reservation-detail-panel.spec.tsx`: reproduced on stashed trees; green solo.
-- `api/_lib/customer-import-security.spec.ts` (tiny-ZIP zip-bomb): reproduced on a FULLY stashed clean tree → pre-existing, unrelated.
-- `afhomes/role-access-review.spec.tsx`: one failure in a full run, clean on re-run.
+- `business/CustomerDetailPage.spec.tsx`, `business/final-blockers.spec.tsx`, `documents.spec.tsx` (35/37), `reports-audit.spec.tsx`, `reports-live.spec.tsx`, `responsive.spec.tsx`, `RequireRole.spec.tsx` (auth redirects), `staff-lifecycle.spec.tsx` (gating), `analytics-dashboard.spec.tsx` (chart-chunk timing; 39/40 has 5s timeout).
+- Pre-existing, unrelated: `api/_lib/customer-import-security.spec.ts` (tiny-ZIP zip-bomb).
 
 ## Verify (from root)
 
 ```sh
-pnpm --filter @afhomes/admin exec tsc --noEmit
-pnpm --filter @afhomes/admin exec eslint src/features/<dir>   # 0 errors expected
-pnpm --filter @afhomes/admin exec vitest run src/features/<dir>
-pnpm --filter @afhomes/admin test                             # full suite: 759/759 at handoff
-pnpm --filter api exec vitest run phase26-finance             # incl. 13b meta.total guard
-pnpm typecheck:deploy                                         # all 7 workspaces
+pnpm typecheck:deploy                                         # 7/7 at handoff
+pnpm --filter @afhomes/admin test                             # 775/775 at handoff
+pnpm --filter @afhomes/web test                               # 240/240 at handoff
+pnpm --filter @afhomes/ui test                                # 202/202 at handoff
+pnpm --filter @afhomes/shared test                            # 40/40 at handoff
+pnpm --filter @afhomes/contracts test                         # 226/226 at handoff
+pnpm --filter @afhomes/admin exec vite build                  # per-page chunks; dashboard 14KB
+pnpm --filter @afhomes/web exec vite build                    # card webp emits from ui assets
+pnpm --filter @afhomes/admin exec eslint src/features src/lib src/app  # 0 errors
 # For any new guard: revert the defect, watch it fail, restore.
 ```

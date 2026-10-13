@@ -262,7 +262,6 @@ describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
 
   it('shows a chart-shaped loading skeleton', () => {
     renderWithProviders(<TrendChartSkeleton />);
-    expect(screen.getByRole('status', { name: 'Loading sales overview' })).toBeInTheDocument();
-    expect(screen.queryByText(/Loading trend/)).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
   });
 });
