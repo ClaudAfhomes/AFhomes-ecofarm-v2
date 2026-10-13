@@ -1,0 +1,23 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
+.formGrid {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.section {
+  display: grid;
+  gap: 12px;
+}

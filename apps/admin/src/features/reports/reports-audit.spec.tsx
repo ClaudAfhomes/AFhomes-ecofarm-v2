@@ -148,11 +148,17 @@ beforeEach(() => {
   requests.length = 0;
   install();
   vi.stubGlobal('fetch', mockFetch());
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:mock'),
-    revokeObjectURL: vi.fn(),
-  });
+  // jsdom lacks object URLs. Subclass the real URL so the constructor survives:
+  // route pages load through dynamic import(), whose machinery calls `new URL()`,
+  // and a plain-object stub would break every lazily loaded route in this file.
+  const RealURL = URL;
+  vi.stubGlobal(
+    'URL',
+    class extends RealURL {
+      static override createObjectURL = vi.fn(() => 'blob:mock');
+      static override revokeObjectURL = vi.fn();
+    },
+  );
 });
 
 /* ================================================================== */

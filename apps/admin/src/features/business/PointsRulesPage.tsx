@@ -1,15 +1,32 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import {
+  Alert,
   Button,
   Dialog,
   EmptyState,
   ErrorState,
+  MetricCard,
   PageHeader,
+  DateField,
+  Select,
   Skeleton,
+  StatusChip,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  TextField,
   notifySuccess,
   notifyConfirm,
 } from '@afhomes/ui';
+import styles from './points.module.css';
+import { TierBadge } from './TierBadge';
 
 import { ServiceCatalogEditor } from './ServiceCatalogEditor';
 import { useSession } from '../../lib/session';
@@ -25,6 +42,7 @@ import {
   createRedemptionRule,
   updateRedemptionRule,
 } from './points-services';
+import { earningKeys } from './queryKeys';
 
 /** The three VIP tiers. Narrow, not `string`, so a typo cannot reach the API. */
 type Tier = 'BRONZE' | 'SILVER' | 'GOLD';
@@ -74,27 +92,104 @@ export function PointsRulesPage() {
   const mayDelete =
     useSession().user?.afHomesPermissions?.find((p) => p.moduleKey === 'operations.catalog')
       ?.canDelete === true;
-  const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
-  const rules = useQuery({ queryKey: ['earning', 'rules'], queryFn: listEarningRules });
+  const services = useQuery({
+    queryKey: earningKeys.services,
+    queryFn: listServices,
+    placeholderData: keepPreviousData,
+  });
+  const rules = useQuery({
+    queryKey: earningKeys.rules,
+    queryFn: listEarningRules,
+    placeholderData: keepPreviousData,
+  });
   const tierDiscounts = useQuery({
-    queryKey: ['earning', 'tier-discounts'],
+    queryKey: earningKeys.tierDiscounts,
     queryFn: listTierDiscounts,
+    placeholderData: keepPreviousData,
   });
   const promotions = useQuery({
-    queryKey: ['earning', 'redemption-rules'],
+    queryKey: earningKeys.redemptionRules,
     queryFn: listRedemptionRules,
+    placeholderData: keepPreviousData,
   });
 
-  const invalidate = () => client.invalidateQueries({ queryKey: ['earning'] });
+  const invalidate = () => client.invalidateQueries({ queryKey: earningKeys.all });
   const serviceName = (id: string) =>
     (services.data ?? []).find((service) => service.id === id)?.name ?? 'Unknown service';
 
+  // First load skeletonizes the whole page so no static content flashes before
+  // the data it describes. Refetches keep previous data visible via
+  // keepPreviousData and never reach this branch.
+  const firstLoad =
+    services.isPending && rules.isPending && tierDiscounts.isPending && promotions.isPending;
+  if (firstLoad)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading points rules"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 460 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+          <span className="sr-only">Loading points rules</span>
+        </div>
+      </section>
+    );
+
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="Points Rules"
         description="What a member earns per service, and which services exist."
       />
+
+      <Alert variant="info" title="Prospective changes only">
+        Rates and rules snapshot onto each sale when it is made. Changing anything here never alters
+        a transaction that has already been recorded.
+      </Alert>
+
+      <ul className={styles.metrics} aria-label="Rules summary">
+        <li>
+          <MetricCard
+            label="Services"
+            value={formatCountOrDash(services.data?.length ?? 0)}
+            icon="grid"
+            description="Catalog entries rules can point at"
+          />
+        </li>
+        <li>
+          <MetricCard
+            label="Earning rules"
+            value={formatCountOrDash(rules.data?.length ?? 0)}
+            icon="file-text"
+            description="Points awarded per service"
+          />
+        </li>
+        <li>
+          <MetricCard
+            label="Tier discounts"
+            value={formatCountOrDash(tierDiscounts.data?.length ?? 0)}
+            icon="check"
+            description="VIP checkout rates"
+          />
+        </li>
+        <li>
+          <MetricCard
+            label="Spending promotions"
+            value={formatCountOrDash(promotions.data?.length ?? 0)}
+            icon="clock"
+            description="What points can discount"
+          />
+        </li>
+      </ul>
 
       <ServiceCatalogEditor
         services={services.data ?? []}
@@ -102,9 +197,9 @@ export function PointsRulesPage() {
         error={services.error}
         onSaved={invalidate}
       />
-      <section aria-label="VIP tier discounts">
-        <h2>VIP tier discounts</h2>
-        <p>
+      <section aria-label="VIP tier discounts" className={styles.section}>
+        <h2 className={styles.sectionTitle}>VIP tier discounts</h2>
+        <p className={styles.hint}>
           The Operational Services discount a member receives at checkout, as a percentage of the
           service price. This is separate from a card purchase discount. A rate is snapshotted onto
           each sale when it is made, so changing a rate here never alters a transaction that has
@@ -118,8 +213,9 @@ export function PointsRulesPage() {
         )}
         {tierDiscounts.isError && (
           <ErrorState
+            error={tierDiscounts.error}
+            onRetry={() => void tierDiscounts.refetch()}
             title="Tier discounts unavailable"
-            message="The configured rates could not be loaded."
           />
         )}
         {tierDiscounts.data?.length === 0 && (
@@ -129,54 +225,69 @@ export function PointsRulesPage() {
           />
         )}
         {tierDiscounts.data && tierDiscounts.data.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Service</th>
-                <th scope="col">Tier</th>
-                <th scope="col">Discount</th>
-                <th scope="col">Window</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tierDiscounts.data.map((rule) => (
-                <tr key={rule.id}>
-                  <td>{serviceName(rule.serviceId)}</td>
-                  <td>{rule.tier}</td>
-                  <td>{rule.discountRate}%</td>
-                  <td>
-                    {rule.effectiveStart} to {rule.effectiveEnd}
-                  </td>
-                  <td>
-                    {rule.isActive ? 'Active' : 'Inactive'}
-                    {mayUpdate && (
-                      <>
-                        {' '}
-                        <PolicyStatusButton
-                          kind="tier-discounts"
-                          id={rule.id}
-                          active={rule.isActive}
-                          onSaved={invalidate}
-                        />{' '}
-                        <PolicyManagement
-                          kind="tier-discounts"
-                          id={rule.id}
-                          values={{
-                            discount_rate: rule.discountRate,
-                            effective_start: rule.effectiveStart,
-                            effective_end: rule.effectiveEnd,
-                          }}
-                          mayDelete={mayDelete}
-                          onSaved={invalidate}
-                        />
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div
+            role="region"
+            aria-label="Scrollable tier discounts"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
+            <Table>
+              <TableCaption>VIP checkout rates per service and tier.</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Service</TableHeaderCell>
+                  <TableHeaderCell>Tier</TableHeaderCell>
+                  <TableHeaderCell align="right">Discount</TableHeaderCell>
+                  <TableHeaderCell>Window</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {tierDiscounts.data.map((rule) => (
+                  <TableRow key={rule.id}>
+                    <TableCell label="Service">{serviceName(rule.serviceId)}</TableCell>
+                    <TableCell label="Tier">
+                      <TierBadge tier={rule.tier} />
+                    </TableCell>
+                    <TableCell label="Discount" align="right">
+                      {rule.discountRate}%
+                    </TableCell>
+                    <TableCell label="Window">
+                      {rule.effectiveStart} to {rule.effectiveEnd}
+                    </TableCell>
+                    <TableCell label="Status">
+                      <StatusChip
+                        label={rule.isActive ? 'Active' : 'Inactive'}
+                        tone={rule.isActive ? 'success' : 'neutral'}
+                      />
+                      {mayUpdate && (
+                        <>
+                          {' '}
+                          <PolicyStatusButton
+                            kind="tier-discounts"
+                            id={rule.id}
+                            active={rule.isActive}
+                            onSaved={invalidate}
+                          />{' '}
+                          <PolicyManagement
+                            kind="tier-discounts"
+                            id={rule.id}
+                            values={{
+                              discount_rate: rule.discountRate,
+                              effective_start: rule.effectiveStart,
+                              effective_end: rule.effectiveEnd,
+                            }}
+                            mayDelete={mayDelete}
+                            onSaved={invalidate}
+                          />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
         {mayAdminister && (
           <NewTierDiscountForm
@@ -187,8 +298,8 @@ export function PointsRulesPage() {
         )}
       </section>
 
-      <section aria-label="Earning rules">
-        <h2>Earning rules</h2>
+      <section aria-label="Earning rules" className={styles.section}>
+        <h2 className={styles.sectionTitle}>Earning rules</h2>
         {rules.isLoading && (
           <div role="status" aria-label="Loading earning rules" aria-busy="true">
             <Skeleton />
@@ -196,7 +307,11 @@ export function PointsRulesPage() {
           </div>
         )}
         {rules.isError && (
-          <ErrorState title="Rules unavailable" message="The earning rules could not be loaded." />
+          <ErrorState
+            error={rules.error}
+            onRetry={() => void rules.refetch()}
+            title="Rules unavailable"
+          />
         )}
         {rules.data?.length === 0 && (
           <EmptyState
@@ -205,69 +320,93 @@ export function PointsRulesPage() {
           />
         )}
         {rules.data && rules.data.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Service</th>
-                <th scope="col">Window</th>
-                <th scope="col">Points</th>
-                <th scope="col">Tiers</th>
-                <th scope="col">Min qty</th>
-                <th scope="col">Max award</th>
-                <th scope="col">Active</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.data.map((rule) => (
-                <tr key={rule.id}>
-                  <td>{serviceName(rule.serviceId)}</td>
-                  <td>
-                    {rule.effectiveStart} to {rule.effectiveEnd}
-                  </td>
-                  <td>{rule.pointsAmount}</td>
-                  <td>{rule.eligibleTiers.join(', ')}</td>
-                  <td>{rule.minQuantity}</td>
-                  <td>{rule.maxAward ?? 'No limit'}</td>
-                  <td>
-                    {rule.isActive ? 'Yes' : 'No'}
-                    {mayUpdate && (
-                      <>
-                        {' '}
-                        <PolicyStatusButton
-                          kind="rules"
-                          id={rule.id}
-                          active={rule.isActive}
-                          onSaved={invalidate}
-                        />{' '}
-                        <PolicyManagement
-                          kind="rules"
-                          id={rule.id}
-                          values={{
-                            points_amount: rule.pointsAmount,
-                            eligible_tiers: rule.eligibleTiers,
-                            min_quantity: rule.minQuantity,
-                            max_award: rule.maxAward,
-                            promotion_reference: rule.promotionReference,
-                            effective_start: rule.effectiveStart,
-                            effective_end: rule.effectiveEnd,
-                          }}
-                          mayDelete={mayDelete}
-                          onSaved={invalidate}
-                        />
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div
+            role="region"
+            aria-label="Scrollable earning rules"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
+            <Table>
+              <TableCaption>Points awarded per service, tier and window.</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Service</TableHeaderCell>
+                  <TableHeaderCell>Window</TableHeaderCell>
+                  <TableHeaderCell align="right">Points</TableHeaderCell>
+                  <TableHeaderCell>Tiers</TableHeaderCell>
+                  <TableHeaderCell align="right">Min qty</TableHeaderCell>
+                  <TableHeaderCell align="right">Max award</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rules.data.map((rule) => (
+                  <TableRow key={rule.id}>
+                    <TableCell label="Service">{serviceName(rule.serviceId)}</TableCell>
+                    <TableCell label="Window">
+                      {rule.effectiveStart} to {rule.effectiveEnd}
+                    </TableCell>
+                    <TableCell label="Points" align="right">
+                      {formatCountOrDash(rule.pointsAmount)}
+                    </TableCell>
+                    <TableCell label="Tiers">
+                      {rule.eligibleTiers.map((tier, index) => (
+                        <span key={tier}>
+                          {index > 0 ? ', ' : null}
+                          <TierBadge tier={tier} />
+                        </span>
+                      ))}
+                    </TableCell>
+                    <TableCell label="Min qty" align="right">
+                      {formatCountOrDash(rule.minQuantity)}
+                    </TableCell>
+                    <TableCell label="Max award" align="right">
+                      {rule.maxAward ?? 'No limit'}
+                    </TableCell>
+                    <TableCell label="Status">
+                      <StatusChip
+                        label={rule.isActive ? 'Active' : 'Inactive'}
+                        tone={rule.isActive ? 'success' : 'neutral'}
+                      />
+                      {mayUpdate && (
+                        <>
+                          {' '}
+                          <PolicyStatusButton
+                            kind="rules"
+                            id={rule.id}
+                            active={rule.isActive}
+                            onSaved={invalidate}
+                          />{' '}
+                          <PolicyManagement
+                            kind="rules"
+                            id={rule.id}
+                            values={{
+                              points_amount: rule.pointsAmount,
+                              eligible_tiers: rule.eligibleTiers,
+                              min_quantity: rule.minQuantity,
+                              max_award: rule.maxAward,
+                              promotion_reference: rule.promotionReference,
+                              effective_start: rule.effectiveStart,
+                              effective_end: rule.effectiveEnd,
+                            }}
+                            mayDelete={mayDelete}
+                            onSaved={invalidate}
+                          />
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
         {mayAdminister && <NewRuleForm services={services.data ?? []} onSaved={invalidate} />}
       </section>
 
-      <section aria-label="Points spending promotions">
-        <h2>Points spending promotions</h2>
-        <p>
+      <section aria-label="Points spending promotions" className={styles.section}>
+        <h2 className={styles.sectionTitle}>Points spending promotions</h2>
+        <p className={styles.hint}>
           What makes a NON-staycation service discountable by points, and at what conversion. A
           staycation or hotel service needs no promotion. Every other service refuses points
           spending unless an active promotion names it, covers the member&apos;s tier, and is inside
@@ -282,8 +421,9 @@ export function PointsRulesPage() {
         )}
         {promotions.isError && (
           <ErrorState
+            error={promotions.error}
+            onRetry={() => void promotions.refetch()}
             title="Promotions unavailable"
-            message="The spending promotions could not be loaded."
           />
         )}
         {promotions.data?.length === 0 && (
@@ -297,38 +437,56 @@ export function PointsRulesPage() {
             role="region"
             aria-label="Scrollable spending promotions"
             tabIndex={0}
-            className="table-scroll"
+            className={`table-scroll ${styles.tableWrap}`}
           >
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Service</th>
-                  <th scope="col">Rate</th>
-                  <th scope="col">Tiers</th>
-                  <th scope="col">Points range</th>
-                  <th scope="col">Window</th>
-                  <th scope="col">Reference</th>
-                  <th scope="col">Stacks with tier</th>
-                  <th scope="col">Active</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableCaption>Points spending promotions per service, tier and window.</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Service</TableHeaderCell>
+                  <TableHeaderCell align="right">Rate</TableHeaderCell>
+                  <TableHeaderCell>Tiers</TableHeaderCell>
+                  <TableHeaderCell align="right">Points range</TableHeaderCell>
+                  <TableHeaderCell>Window</TableHeaderCell>
+                  <TableHeaderCell>Reference</TableHeaderCell>
+                  <TableHeaderCell>Stacks with tier</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
                 {promotions.data.map((rule) => (
-                  <tr key={rule.id}>
-                    <td>{serviceName(rule.serviceId)}</td>
-                    <td>₱{rule.pesoValuePerPoint} / point</td>
-                    <td>{rule.eligibleTiers.join(', ')}</td>
-                    <td>
-                      {rule.minPoints}
-                      {rule.maxPoints === null ? '+' : `–${rule.maxPoints}`}
-                    </td>
-                    <td>
+                  <TableRow key={rule.id}>
+                    <TableCell label="Service">{serviceName(rule.serviceId)}</TableCell>
+                    <TableCell label="Rate" align="right">
+                      {formatMoneyOrDash(rule.pesoValuePerPoint)} / point
+                    </TableCell>
+                    <TableCell label="Tiers">
+                      {rule.eligibleTiers.map((tier, index) => (
+                        <span key={tier}>
+                          {index > 0 ? ', ' : null}
+                          <TierBadge tier={tier} />
+                        </span>
+                      ))}
+                    </TableCell>
+                    <TableCell label="Points range" align="right">
+                      {formatCountOrDash(rule.minPoints)}
+                      {rule.maxPoints === null ? '+' : `-${formatCountOrDash(rule.maxPoints)}`}
+                    </TableCell>
+                    <TableCell label="Window">
                       {rule.effectiveStart} to {rule.effectiveEnd}
-                    </td>
-                    <td>{rule.promotionReference ?? '—'}</td>
-                    <td>{rule.allowDiscountStacking ? 'Yes' : 'No'}</td>
-                    <td>
-                      {rule.isActive ? 'Yes' : 'No'}
+                    </TableCell>
+                    <TableCell label="Reference">{rule.promotionReference ?? '—'}</TableCell>
+                    <TableCell label="Stacks with tier">
+                      <StatusChip
+                        label={rule.allowDiscountStacking ? 'Yes' : 'No'}
+                        tone={rule.allowDiscountStacking ? 'warning' : 'neutral'}
+                      />
+                    </TableCell>
+                    <TableCell label="Status">
+                      <StatusChip
+                        label={rule.isActive ? 'Active' : 'Inactive'}
+                        tone={rule.isActive ? 'success' : 'neutral'}
+                      />
                       {mayUpdate && (
                         <>
                           {' '}
@@ -355,16 +513,16 @@ export function PointsRulesPage() {
                           />
                         </>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
         {mayAdminister && <NewPromotionForm services={services.data ?? []} onSaved={invalidate} />}
       </section>
-    </>
+    </section>
   );
 }
 
@@ -379,7 +537,7 @@ function PolicyStatusButton({
   active: boolean;
   onSaved: () => void;
 }) {
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: () => setServicePolicyActive(kind, id, !active),
     retry: false,
     onSuccess: () => {
@@ -428,7 +586,7 @@ function NewTierDiscountForm({
   const [end, setEnd] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createTierDiscount({
@@ -484,15 +642,16 @@ function NewTierDiscountForm({
       </select>
 
       <label htmlFor="tier-tier">VIP tier</label>
-      <select
+      <Select
         id="tier-tier"
         value={tier}
         onChange={(e) => setTier(e.target.value as 'BRONZE' | 'SILVER' | 'GOLD')}
-      >
-        <option value="BRONZE">Bronze</option>
-        <option value="SILVER">Silver</option>
-        <option value="GOLD">Gold</option>
-      </select>
+        options={[
+          { value: 'BRONZE', label: 'Bronze' },
+          { value: 'SILVER', label: 'Silver' },
+          { value: 'GOLD', label: 'Gold' },
+        ]}
+      />
 
       <label htmlFor="tier-rate">Discount percent</label>
       <input
@@ -505,11 +664,23 @@ function NewTierDiscountForm({
         onChange={(e) => setRate(e.target.value)}
       />
 
-      <label htmlFor="tier-start">Effective from</label>
-      <input id="tier-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+      <DateField
+        id="tier-start"
+        name="tierStart"
+        label="Effective from"
+        optional
+        value={start}
+        onChange={setStart}
+      />
 
-      <label htmlFor="tier-end">Effective to</label>
-      <input id="tier-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <DateField
+        id="tier-end"
+        name="tierEnd"
+        label="Effective to"
+        optional
+        value={end}
+        onChange={setEnd}
+      />
 
       <Button
         disabled={disabled || serviceIds.length === 0 || !rateValid || !datesOrdered}
@@ -549,7 +720,7 @@ function NewRuleForm({
   const [maximum, setMaximum] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createEarningRule({
@@ -636,19 +807,21 @@ function NewRuleForm({
       <p>
         Every award counts toward that tier&apos;s annual limit. There is no exemption from the cap.
       </p>
-      <label htmlFor="rule-start">Effective from</label>
-      <input
+      <DateField
         id="rule-start"
-        type="date"
+        name="ruleStart"
+        label="Effective from"
+        optional
         value={start}
-        onChange={(event) => setStart(event.target.value)}
+        onChange={setStart}
       />
-      <label htmlFor="rule-end">Effective to (exclusive)</label>
-      <input
+      <DateField
         id="rule-end"
-        type="date"
+        name="ruleEnd"
+        label="Effective to (exclusive)"
+        optional
         value={end}
-        onChange={(event) => setEnd(event.target.value)}
+        onChange={setEnd}
       />
       <label htmlFor="rule-minimum">Minimum quantity</label>
       <input
@@ -708,7 +881,7 @@ function PromotionStatusButton({
   active: boolean;
   onSaved: () => void;
 }) {
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: () => updateRedemptionRule(id, { isActive: !active }),
     retry: false,
     onSuccess: () => {
@@ -760,7 +933,7 @@ function NewPromotionForm({
   const [stacking, setStacking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       for (const serviceId of serviceIds) {
         await createRedemptionRule({
@@ -805,16 +978,17 @@ function NewPromotionForm({
         never expires, names nothing, or cannot be reviewed cannot be created.
       </p>
       <label htmlFor="promo-kind">Redemption rule type</label>
-      <select
+      <Select
         id="promo-kind"
         value={ruleKind}
         onChange={(event) =>
           setRuleKind(event.target.value === 'accommodation' ? 'accommodation' : 'promotion')
         }
-      >
-        <option value="promotion">Service spending promotion</option>
-        <option value="accommodation">Accommodation conversion rule</option>
-      </select>
+        options={[
+          { value: 'promotion', label: 'Service spending promotion' },
+          { value: 'accommodation', label: 'Accommodation conversion rule' },
+        ]}
+      />
       <label htmlFor="promo-service">Service</label>
       <select
         id="promo-service"
@@ -840,12 +1014,14 @@ function NewPromotionForm({
           ))}
       </select>
 
-      <label htmlFor="promo-rate">Pesos per point (for example 1, or 0.5)</label>
-      <input
+      <TextField
         id="promo-rate"
+        name="promoRate"
+        label="Pesos per point (for example 1, or 0.5)"
+        optional
         inputMode="decimal"
         value={rate}
-        onChange={(e) => setRate(e.target.value)}
+        onChange={setRate}
       />
 
       <fieldset>
@@ -880,25 +1056,28 @@ function NewPromotionForm({
         value={maximum}
         onChange={(event) => setMaximum(event.target.value)}
       />
-      <label htmlFor="promo-start">Effective from</label>
-      <input
+      <DateField
         id="promo-start"
-        type="date"
+        name="promoStart"
+        label="Effective from"
+        optional
         value={start}
-        onChange={(event) => setStart(event.target.value)}
+        onChange={setStart}
       />
-      <label htmlFor="promo-end">Effective to (exclusive)</label>
-      <input
+      <DateField
         id="promo-end"
-        type="date"
+        name="promoEnd"
+        label="Effective to (exclusive)"
+        optional
         value={end}
-        onChange={(event) => setEnd(event.target.value)}
+        onChange={setEnd}
       />
-      <label htmlFor="promo-reference">Promotion reference (required)</label>
-      <input
+      <TextField
         id="promo-reference"
+        name="promoReference"
+        label="Promotion reference"
         value={reference}
-        onChange={(event) => setReference(event.target.value)}
+        onChange={setReference}
         maxLength={200}
         placeholder="e.g. TEP-VALENTINES-2026"
       />
@@ -961,7 +1140,7 @@ function PolicyManagement({
 }) {
   const [editing, setEditing] = useState(false);
   const [fields, setFields] = useState(values);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: (patch: Record<string, unknown> | undefined) =>
       manageServicePolicy(kind, id, patch),
     retry: false,

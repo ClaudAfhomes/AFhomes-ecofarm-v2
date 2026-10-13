@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { Sale } from '@afhomes/contracts';
 import { useNavigate } from 'react-router';
 
 import { useSession } from '../../lib/session';
 import { cancelSale, getCustomerApplications } from './services';
+import { businessKeys, sharedScopes } from './queryKeys';
 
 /** Application statuses the sales Edit flow can still open for changes. */
 const EDITABLE_APPLICATION_STATUSES = ['draft', 'submitted'];
@@ -51,12 +53,12 @@ export function useSaleRowActions() {
 
   const refresh = async () => {
     await Promise.all([
-      client.invalidateQueries({ queryKey: ['business'] }),
-      client.invalidateQueries({ queryKey: ['reports'] }),
+      client.invalidateQueries({ queryKey: businessKeys.all }),
+      client.invalidateQueries({ queryKey: sharedScopes.reports }),
     ]);
   };
 
-  const cancel = useMutation({
+  const cancel = useBusinessMutation({
     mutationFn: (sale: Sale) => cancelSale(sale.id),
     onSuccess: async () => {
       await refresh();

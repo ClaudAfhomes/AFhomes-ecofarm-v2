@@ -51,6 +51,7 @@ vi.mock('./features/afhomes/services', () => ({
 }));
 
 vi.mock('./features/business/services', () => ({
+  FINANCE_QUEUE_LIMIT: 200,
   getSales: vi.fn(),
 
   getCustomerApplications: vi.fn(),
@@ -432,7 +433,7 @@ function install() {
   vi.mocked(getAnalyticsOverview).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesDashboardQueues).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesSalesTrend).mockRejectedValue(new Error('stub'));
-  vi.mocked(getFinanceQueue).mockResolvedValue([QUEUE_ROW] as never);
+  vi.mocked(getFinanceQueue).mockResolvedValue({ items: [QUEUE_ROW], total: 1 } as never);
   vi.mocked(getMemberships).mockResolvedValue([MEMBER_ROW] as never);
   vi.mocked(getCommissions).mockResolvedValue(COMMISSION_ROWS as never);
   vi.mocked(getRedemptionItems).mockResolvedValue([ITEM_ROW] as never);

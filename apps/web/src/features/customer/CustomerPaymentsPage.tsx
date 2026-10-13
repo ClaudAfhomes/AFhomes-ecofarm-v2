@@ -1,4 +1,5 @@
 import { ErrorState } from '@afhomes/ui';
+import { formatMoneyOrDash } from '@afhomes/shared';
 
 import { useCustomerPaymentsQuery } from './queries';
 import { isForbidden } from './http';
@@ -57,7 +58,7 @@ export function CustomerPaymentsPage() {
                   <td>{payment.method}</td>
                   <td className={styles.mono}>{payment.reference ?? '—'}</td>
                   <td>{payment.status}</td>
-                  <td className={styles.numeric}>₱{payment.amount}</td>
+                  <td className={styles.numeric}>{formatMoneyOrDash(payment.amount)}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,23 +1,16 @@
+import { formatUTCDate } from '@afhomes/shared';
+
 import styles from './portal.module.css';
 
 /**
  * Presentation helpers shared by the customer screens.
  *
- * `formatDate` is deliberately locale-fixed and timezone-free-ish: a member
- * seeing an activation or valid-until date should read the same date the server
- * recorded, not a value shifted by the browser's zone. A stored
- * `2026-03-01T00:00:00Z` therefore renders as the UTC calendar date.
+ * Dates delegate to the shared UTC formatter: a member seeing an activation
+ * or valid-until date reads the same date the server recorded, not a value
+ * shifted by the browser's zone.
  */
 export function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return '—';
-  return new Intl.DateTimeFormat('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  }).format(date);
+  return formatUTCDate(value);
 }
 
 export function Card({

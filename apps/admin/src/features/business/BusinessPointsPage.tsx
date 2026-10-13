@@ -1,17 +1,24 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
+  Alert,
   Button,
   Dialog,
   EmptyState,
   ErrorState,
+  MetricCard,
   PageHeader,
+  Select,
   Skeleton,
+  StatusChip,
+  TextField,
   notifySuccess,
 } from '@afhomes/ui';
-import { formatMoney } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import styles from './points.module.css';
+import { TierBadge } from './TierBadge';
 import { useQrScanner } from '../redemption/useQrScanner';
 import { ClaimQr, type IssuedClaim } from './ClaimQr';
 import {
@@ -41,6 +48,7 @@ import {
   recordPurchase,
   reversePurchasePoints,
 } from './points-services';
+import { earningKeys } from './queryKeys';
 
 /**
  * Staff points-earning screen: record a purchase, then issue the member a claim.
@@ -63,7 +71,11 @@ export function BusinessPointsPage() {
     useSession().user?.afHomesPermissions?.some(
       (p) => p.moduleKey === 'operations.redemption' && p.canUpdate,
     ) === true;
-  const services = useQuery({ queryKey: ['earning', 'services'], queryFn: listServices });
+  const services = useQuery({
+    queryKey: earningKeys.services,
+    queryFn: listServices,
+    placeholderData: keepPreviousData,
+  });
 
   const [member, setMember] = useState<ResolvedMember | null>(null);
   const [manualCode, setManualCode] = useState('');
@@ -90,7 +102,7 @@ export function BusinessPointsPage() {
    * valid. Scanning is only ever a way of TYPING the code faster - it grants
    * nothing extra.
    */
-  const identify = useMutation({
+  const identify = useBusinessMutation({
     // Wrapped, not passed by reference: TanStack Query hands `mutationFn` a
     // second context argument, and a service function must never be handed one.
     mutationFn: (code: string) => resolveMemberIdentifier(code),
@@ -140,17 +152,17 @@ export function BusinessPointsPage() {
       ],
     });
 
-  const record = useMutation({
+  const record = useBusinessMutation({
     mutationFn: recordPurchaseFor,
   });
-  const complete = useMutation({
+  const complete = useBusinessMutation({
     mutationFn: (purchaseId: string) => completePurchase(purchaseId),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['earning'] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: earningKeys.all }),
   });
   /** Re-reads settlement from the server after a state change. */
-  const refresh = () => client.invalidateQueries({ queryKey: ['earning'] });
+  const refresh = () => client.invalidateQueries({ queryKey: earningKeys.all });
 
-  const claim = useMutation({
+  const claim = useBusinessMutation({
     mutationFn: (purchaseId: string) => issueEarningClaim(purchaseId),
     onSuccess: (result) => {
       // The whole issued claim, so the dialog can render the QR. Component state
@@ -165,14 +177,14 @@ export function BusinessPointsPage() {
       });
       setError(null);
       notifySuccess({ title: `Claim ${result.claimNumber} issued` });
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
 
   const ownPurchases = useQuery({
-    queryKey: ['earning', 'own-purchases'],
+    queryKey: earningKeys.ownPurchases,
     queryFn: listOwnPurchases,
-
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const resumable = (ownPurchases.data ?? []).filter(
@@ -201,9 +213,10 @@ export function BusinessPointsPage() {
    * table privileges to subscribe with.
    */
   const settlement = useQuery({
-    queryKey: ['earning', 'settlement', lastPurchase],
+    queryKey: earningKeys.settlement(lastPurchase),
     queryFn: () => getSettlement(lastPurchase as string),
     enabled: Boolean(lastPurchase),
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
 
@@ -226,7 +239,7 @@ export function BusinessPointsPage() {
    */
   const receiptReference = `${reference}-rcpt`;
 
-  const receipt = useMutation({
+  const receipt = useBusinessMutation({
     mutationFn: (args: { purchaseId: string; amount: string }) =>
       recordPurchaseReceipt({
         purchaseId: args.purchaseId,
@@ -236,17 +249,17 @@ export function BusinessPointsPage() {
       }),
     onSuccess: () => {
       notifySuccess({ title: 'Receipt recorded, pending Finance verification' });
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
 
-  const reverse = useMutation({
+  const reverse = useBusinessMutation({
     mutationFn: (reason: string) =>
       reversePurchasePoints({ purchaseId: lastPurchase ?? '', reason }),
     onSuccess: () => {
       notifySuccess({ title: 'Purchase points reversed' });
       setLastPurchase(null);
-      client.invalidateQueries({ queryKey: ['earning'] });
+      client.invalidateQueries({ queryKey: earningKeys.all });
     },
   });
   const [reverseOpen, setReverseOpen] = useState(false);
@@ -277,62 +290,102 @@ export function BusinessPointsPage() {
     }
   };
 
+  // First load skeletonizes the whole page so no static content flashes
+  // before the data it describes. Refetches keep previous data visible via
+  // keepPreviousData and never reach this branch.
+  if (services.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading services"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 280 }} />
+            <Skeleton style={{ height: 16, maxWidth: 440 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+          <span className="sr-only">Loading services</span>
+        </div>
+      </section>
+    );
+
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="Elite Service Delivery"
         description="Scan the member's card, record the purchase, and issue their claim code."
       />
 
-        <section aria-label="Resume sale">
-          {ownPurchases.isLoading && <Skeleton />}
-          {ownPurchases.isError && (
-            <ErrorState error={ownPurchases.error} onRetry={() => void ownPurchases.refetch()} />
-          )}
-          {resumable.length > 0 && (
-            <>
-              <label htmlFor="earning-resume">Resume an existing sale</label>
-              <select
-                id="earning-resume"
-                value={lastPurchase ?? ''}
-                onChange={(event) => {
-                  const purchase = resumable.find((row) => row.id === event.target.value);
-                  if (!purchase) return;
-                  setLastPurchase(purchase.id);
-                  setPriced({
-                    purchaseId: purchase.id,
-                    purchaseNumber: purchase.purchaseNumber,
-                    grossAmount: purchase.grossAmount,
-                    tierDiscountAmount: purchase.tierDiscountAmount,
-                    pointsDiscountAmount: purchase.pointsDiscountAmount,
-                    netAmount: purchase.netAmount,
-                  });
-                }}
-              >
-                <option value="">Choose a sale</option>
-                {resumable.map((purchase) => (
-                  <option key={purchase.id} value={purchase.id}>
-                    {purchase.purchaseNumber} — {formatMoney(purchase.netAmount)}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </section>
-      <section aria-label="Identify the member">
-        <h2>1. Identify the member</h2>
+      <section aria-label="Resume sale" className={styles.section}>
+        {ownPurchases.isPending && (
+          <div role="status" aria-label="Loading sales" aria-busy="true">
+            <Skeleton />
+          </div>
+        )}
+        {ownPurchases.isError && (
+          <ErrorState error={ownPurchases.error} onRetry={() => void ownPurchases.refetch()} />
+        )}
+        {resumable.length > 0 && (
+          <>
+            <label htmlFor="earning-resume">Resume an existing sale</label>
+            <Select
+              id="earning-resume"
+              value={lastPurchase ?? ''}
+              onChange={(event) => {
+                const purchase = resumable.find((row) => row.id === event.target.value);
+                if (!purchase) return;
+                setLastPurchase(purchase.id);
+                setPriced({
+                  purchaseId: purchase.id,
+                  purchaseNumber: purchase.purchaseNumber,
+                  grossAmount: purchase.grossAmount,
+                  tierDiscountAmount: purchase.tierDiscountAmount,
+                  pointsDiscountAmount: purchase.pointsDiscountAmount,
+                  netAmount: purchase.netAmount,
+                });
+              }}
+              options={[
+                { value: '', label: 'Choose a sale' },
+                ...resumable.map((purchase) => ({
+                  value: purchase.id,
+                  label: `${purchase.purchaseNumber} - ${formatMoneyOrDash(purchase.netAmount)}`,
+                })),
+              ]}
+            />
+          </>
+        )}
+      </section>
+      <section aria-label="Identify the member" className={styles.section}>
+        <h2 className={styles.sectionTitle}>1. Identify the member</h2>
 
         <Button variant="secondary" onClick={() => startScan()}>
           Scan the member&apos;s card
         </Button>
-        <video ref={videoRef} className={styles.scanVideo} data-scanning={scanStatus === 'scanning'} aria-label="Card scanner" />
+        <video
+          ref={videoRef}
+          className={styles.scanVideo}
+          data-scanning={scanStatus === 'scanning'}
+          aria-label="Card scanner"
+        />
         {scanMessage && <p role="status">{scanMessage}</p>}
 
-        <label htmlFor="earning-manual">Or type the member code</label>
-        <input
+        <TextField
           id="earning-manual"
+          name="manualCode"
+          label="Or type the member code"
+          optional
           value={manualCode}
-          onChange={(event) => setManualCode(event.target.value)}
+          onChange={setManualCode}
           disabled={identify.isPending}
         />
         <Button
@@ -348,26 +401,44 @@ export function BusinessPointsPage() {
         {resolveError && <ErrorState title="Not recognised" message={resolveError} />}
 
         {member && (
-          <div aria-busy={identify.isPending}>
-            <h3>{member.customerDisplayName}</h3>
-            <dl>
-              <dt>Membership</dt>
-              <dd>{member.membershipNumber}</dd>
-              <dt>Tier</dt>
-              <dd>{member.productName ?? '—'}</dd>
-              <dt>Points balance</dt>
-              <dd>{member.pointsBalance.toLocaleString('en-PH')}</dd>
-            </dl>
+          <div aria-busy={identify.isPending} className={styles.memberCard}>
+            <h3 className={styles.memberName}>{member.customerDisplayName}</h3>
+            <ul className={styles.metrics} aria-label="Member summary">
+              <li>
+                <MetricCard
+                  label="Membership"
+                  value={member.membershipNumber}
+                  icon="user-check"
+                  chip={{
+                    label: member.expired ? 'Expired' : 'Active',
+                    tone: member.expired ? 'danger' : 'success',
+                  }}
+                />
+              </li>
+              <li>
+                <MetricCard
+                  label="Points balance"
+                  value={formatCountOrDash(member.pointsBalance)}
+                  icon="grid"
+                  description="Lifetime earning balance"
+                />
+              </li>
+            </ul>
+            <p className={styles.hint}>
+              Tier: <TierBadge tier={member.productName} />
+            </p>
             {member.expired && (
-              <p role="alert">This membership has expired. Points cannot be earned on it.</p>
+              <Alert variant="danger" title="Membership expired">
+                This membership has expired. Points cannot be earned on it.
+              </Alert>
             )}
           </div>
         )}
       </section>
 
       {member && !member.expired && (
-        <section aria-label="Record a purchase">
-          <h2>2. Record the purchase</h2>
+        <section aria-label="Record a purchase" className={styles.section}>
+          <h2 className={styles.sectionTitle}>2. Record the purchase</h2>
 
           {/* A Skeleton is aria-hidden, so the ANNOUNCEMENT lives on the region.
               This waits on `isLoading`, not `isPending`: the catalog query is not
@@ -381,8 +452,9 @@ export function BusinessPointsPage() {
           )}
           {services.isError && (
             <ErrorState
+              error={services.error}
+              onRetry={() => void services.refetch()}
               title="Services unavailable"
-              message="The service catalog could not be loaded, so a purchase cannot be recorded."
             />
           )}
 
@@ -396,20 +468,20 @@ export function BusinessPointsPage() {
           {services.data && services.data.length > 0 && (
             <>
               <label htmlFor="earning-service">Service</label>
-              <select
+              <Select
                 id="earning-service"
                 value={serviceId}
                 onChange={(event) => setServiceId(event.target.value)}
-              >
-                <option value="">Choose a service</option>
-                {services.data
-                  .filter((service) => service.isActive && service.availability === 'available')
-                  .map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name} ({formatMoney(service.basePrice)})
-                    </option>
-                  ))}
-              </select>
+                options={[
+                  { value: '', label: 'Choose a service' },
+                  ...services.data
+                    .filter((service) => service.isActive && service.availability === 'available')
+                    .map((service) => ({
+                      value: service.id,
+                      label: `${service.name} (${formatMoneyOrDash(service.basePrice)})`,
+                    })),
+                ]}
+              />
 
               {services.data.find((service) => service.id === serviceId) && (
                 <p>
@@ -471,25 +543,60 @@ export function BusinessPointsPage() {
          * earned them, and would hide that a points spend and a tier discount
          * are different things.
          * ------------------------------------------------------------ */
-        <section aria-label="Sale recorded" aria-live="polite">
-          <h2>4. What the member pays</h2>
-          <dl>
-            <dt>Gross</dt>
-            <dd>{formatMoney(priced.grossAmount)}</dd>
-            <dt>VIP tier discount</dt>
-            <dd>
-              {priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
-                ? `- ${formatMoney(priced.tierDiscountAmount)}`
-                : 'No tier discount applies'}
-            </dd>
-            <dt>Points discount</dt>
-            <dd>
-              {priced.pointsDiscountAmount && priced.pointsDiscountAmount !== '0.00'
-                ? `- ${formatMoney(priced.pointsDiscountAmount)}`
-                : 'No points discount applies'}
-            </dd>
-            <dt>Amount due</dt>
-            <dd>{formatMoney(priced.netAmount)}</dd>
+        <section aria-label="Sale recorded" aria-live="polite" className={styles.section}>
+          <h2 className={styles.sectionTitle}>4. What the member pays</h2>
+          <ul className={styles.metrics} aria-label="Sale figures">
+            <li>
+              <MetricCard
+                label="Gross"
+                value={formatMoneyOrDash(priced.grossAmount)}
+                icon="file-text"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="VIP tier discount"
+                value={
+                  priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
+                    ? `- ${formatMoneyOrDash(priced.tierDiscountAmount)}`
+                    : 'No tier discount applies'
+                }
+                icon="grid"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Amount due"
+                value={formatMoneyOrDash(priced.netAmount)}
+                icon="check"
+              />
+            </li>
+          </ul>
+          <dl className={styles.figures}>
+            <div>
+              <dt>Gross</dt>
+              <dd>{formatMoneyOrDash(priced.grossAmount)}</dd>
+            </div>
+            <div>
+              <dt>VIP tier discount</dt>
+              <dd>
+                {priced.tierDiscountAmount && priced.tierDiscountAmount !== '0.00'
+                  ? `- ${formatMoneyOrDash(priced.tierDiscountAmount)}`
+                  : 'No tier discount applies'}
+              </dd>
+            </div>
+            <div>
+              <dt>Points discount</dt>
+              <dd>
+                {priced.pointsDiscountAmount && priced.pointsDiscountAmount !== '0.00'
+                  ? `- ${formatMoneyOrDash(priced.pointsDiscountAmount)}`
+                  : 'No points discount applies'}
+              </dd>
+            </div>
+            <div>
+              <dt>Amount due</dt>
+              <dd>{formatMoneyOrDash(priced.netAmount)}</dd>
+            </div>
           </dl>
 
           <div aria-busy={receipt.isPending}>
@@ -523,14 +630,19 @@ export function BusinessPointsPage() {
               ? 'Verified payment covers the amount due.'
               : 'Pending Finance verification.'}
           </p>
-          <p>
+          <Alert
+            variant={settlement.data?.fullyPaid ? 'success' : 'warning'}
+            title={
+              settlement.data?.fullyPaid ? 'Settlement verified' : 'Pending Finance verification'
+            }
+          >
             A recorded receipt is not money received. Finance verifies it on the Operational
             Services Payments screen, and only then can this sale complete and the member&apos;s
             claim code be issued. You cannot verify your own receipt.
-          </p>
+          </Alert>
           <Button
             variant="secondary"
-            onClick={() => client.invalidateQueries({ queryKey: ['earning', 'settlement'] })}
+            onClick={() => client.invalidateQueries({ queryKey: earningKeys.settlementScope })}
             loading={settlement.isFetching}
             loadingLabel="Refreshing…"
           >
@@ -570,27 +682,39 @@ export function BusinessPointsPage() {
       )}
 
       {settlement.data && (
-        <section aria-label="Settlement status" aria-live="polite">
-          <h2>Settlement status</h2>
-          <dl>
-            <dt>Status</dt>
-            <dd>{settlement.data.status}</dd>
-            <dt>Recorded</dt>
-            <dd>{formatMoney(settlement.data.recordedTotal)}</dd>
-            <dt>Verified (money received)</dt>
-            <dd>{formatMoney(settlement.data.verifiedTotal)}</dd>
-            <dt>Outstanding</dt>
-            <dd>{formatMoney(settlement.data.remainingAmount)}</dd>
-            <dt>Claim</dt>
-            <dd>
-              {settlement.data.claimable
-                ? 'Claimable - issue the member their code below'
-                : settlement.data.claimStatus === 'claimed'
-                  ? 'Already claimed by the member'
-                  : settlement.data.claimStatus === 'rejected'
-                    ? 'Receipt rejected'
-                    : 'Not available yet'}
-            </dd>
+        <section aria-label="Settlement status" aria-live="polite" className={styles.section}>
+          <h2 className={styles.sectionTitle}>Settlement status</h2>
+          <dl className={styles.figures}>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <StatusChip label={settlement.data.status} />
+              </dd>
+            </div>
+            <div>
+              <dt>Recorded</dt>
+              <dd>{formatMoneyOrDash(settlement.data.recordedTotal)}</dd>
+            </div>
+            <div>
+              <dt>Verified (money received)</dt>
+              <dd>{formatMoneyOrDash(settlement.data.verifiedTotal)}</dd>
+            </div>
+            <div>
+              <dt>Outstanding</dt>
+              <dd>{formatMoneyOrDash(settlement.data.remainingAmount)}</dd>
+            </div>
+            <div>
+              <dt>Claim</dt>
+              <dd>
+                {settlement.data.claimable
+                  ? 'Claimable - issue the member their code below'
+                  : settlement.data.claimStatus === 'claimed'
+                    ? 'Already claimed by the member'
+                    : settlement.data.claimStatus === 'rejected'
+                      ? 'Receipt rejected'
+                      : 'Not available yet'}
+              </dd>
+            </div>
           </dl>
         </section>
       )}
@@ -611,12 +735,12 @@ export function BusinessPointsPage() {
       )}
 
       {mayCorrect && member && (
-        <section aria-label="Adjustments">
-          <h2>Manual adjustment</h2>
-          <p>
-            For a correction only. Every adjustment is permanent, audited, and never counts toward
-            the annual earning limit.
-          </p>
+        <section aria-label="Adjustments" className={styles.section}>
+          <h2 className={styles.sectionTitle}>Manual adjustment</h2>
+          <Alert variant="info" title="Correction only">
+            Every adjustment is permanent, audited, and never counts toward the annual earning
+            limit.
+          </Alert>
           <Button variant="secondary" onClick={() => setAdjustOpen(true)}>
             Adjust a member&apos;s points
           </Button>
@@ -630,18 +754,20 @@ export function BusinessPointsPage() {
           onSaved={() => {
             setAdjustOpen(false);
             notifySuccess({ title: 'Adjustment recorded' });
-            client.invalidateQueries({ queryKey: ['earning'] });
+            client.invalidateQueries({ queryKey: earningKeys.all });
           }}
         />
       )}
 
       {mayCorrect && lastPurchase && (
-        <section aria-label="Reverse a purchase">
-          <h2>Reverse the last purchase</h2>
+        <section aria-label="Reverse a purchase" className={styles.section}>
+          <h2 className={styles.sectionTitle}>Reverse the last purchase</h2>
           <Button variant="danger" onClick={() => setReverseOpen(true)}>
             Reverse points
           </Button>
-          <p>Reversal needs a written reason. The ledger row is never deleted.</p>
+          <p className={styles.hint}>
+            Reversal needs a written reason. The ledger row is never deleted.
+          </p>
         </section>
       )}
 
@@ -653,7 +779,7 @@ export function BusinessPointsPage() {
           onConfirm={(reason) => reverse.mutate(reason, { onSuccess: () => setReverseOpen(false) })}
         />
       )}
-    </>
+    </section>
   );
 }
 
@@ -675,7 +801,7 @@ function AdjustDialog({
 }) {
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
-  const adjust = useMutation({
+  const adjust = useBusinessMutation({
     mutationFn: () => adjustPoints({ membershipId, amount: Number(amount), reason }),
     onSuccess: onSaved,
   });
@@ -709,11 +835,13 @@ function AdjustDialog({
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
         />
-        <label htmlFor="adjust-reason">Reason</label>
-        <input
+        <TextField
           id="adjust-reason"
+          name="adjustReason"
+          label="Reason"
+          optional
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={setReason}
         />
         {adjust.isError && <ErrorState title="Not saved" message={message(adjust.error)} />}
       </div>
@@ -752,11 +880,13 @@ function ReverseDialog({
       }
     >
       <div aria-busy={pending}>
-        <label htmlFor="reverse-reason">Reason</label>
-        <input
+        <TextField
           id="reverse-reason"
+          name="reverseReason"
+          label="Reason"
+          optional
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={setReason}
         />
         <p>
           If the member had already moved the points, the shortfall becomes reversal debt rather

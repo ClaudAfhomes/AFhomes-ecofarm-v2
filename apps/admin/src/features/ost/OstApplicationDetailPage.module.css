@@ -1,0 +1,69 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+}
+
+.backRow {
+  margin: 0;
+}
+
+.backLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.factsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.reviewSection {
+  margin-top: 8px;
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.noteSpaced {
+  margin-top: 24px;
+}
+
+.outcome {
+  margin-top: 16px;
+}
+
+.documentsSection {
+  margin-top: 32px;
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.uploadRow {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.fileName {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.inlineError {
+  color: var(--color-danger);
+}

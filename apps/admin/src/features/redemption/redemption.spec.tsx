@@ -185,8 +185,8 @@ describe('redemption screens', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Membership number')).toBeInTheDocument();
     expect(screen.getByLabelText('Item')).toBeInTheDocument();
-    expect(screen.getByLabelText('From')).toBeInTheDocument();
-    expect(screen.getByLabelText('To')).toBeInTheDocument();
+    expect(screen.getByLabelText('From(Optional)')).toBeInTheDocument();
+    expect(screen.getByLabelText('To(Optional)')).toBeInTheDocument();
   });
 
   it('renders redemption rows with the item AS CHARGED', async () => {

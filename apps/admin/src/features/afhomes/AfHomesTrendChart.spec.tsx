@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesTrendReport } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
-import { AfHomesTrendChart, TrendChartSkeleton, periodLabel } from './AfHomesTrendChart';
+import { AfHomesTrendChart, periodLabel } from './AfHomesTrendChart';
+import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 
 const getTrend = vi.hoisted(() => vi.fn());
 vi.mock('./services', async (importOriginal) => {
@@ -88,7 +89,11 @@ const renderChart = () => renderWithProviders(<AfHomesTrendChart />);
  *  the line path carries the real scaled values, so a metric switch must
  *  change it while a refetch-free toggle keeps the fetch count at one. */
 const lineD = (container: HTMLElement) =>
-  (container.querySelector('.recharts-line path') as unknown as { getAttribute?: (n: string) => string } | null)?.getAttribute?.('d') ?? '';
+  (
+    container.querySelector('.recharts-line path') as unknown as {
+      getAttribute?: (n: string) => string;
+    } | null
+  )?.getAttribute?.('d') ?? '';
 
 describe('periodLabel (AF Homes grammar)', () => {
   it('7. labels monthly keys as "Sep \'26"', () => {
@@ -104,7 +109,8 @@ describe('periodLabel (AF Homes grammar)', () => {
 describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
   it('1. renders the "Sales Overview" title', async () => {
     const { container } = renderChart();
-    expect(screen.getByText('Sales Overview')).toBeInTheDocument();
+    // Loading is skeleton-only, so the title arrives with the series.
+    expect(await screen.findByText('Sales Overview')).toBeInTheDocument();
     expect(screen.getByLabelText('Sales overview')).toBeInTheDocument();
     await waitFor(() => {
       expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
@@ -209,10 +215,12 @@ describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
     expect(container.querySelector('svg.recharts-surface')).toBeNull();
   });
 
-  it('14. owns its loading state in the chart region', () => {
+  it('14. skeletonizes the whole chart region while loading (no spinner)', () => {
     getTrend.mockReturnValue(new Promise(() => {}));
     renderChart();
-    expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
+    expect(screen.getByRole('status', { name: 'Loading sales overview' })).toBeInTheDocument();
+    expect(screen.queryByText('Sales Overview')).toBeNull();
+    expect(screen.queryByText(/Loading trend/)).toBeNull();
   });
 
   it('15/17. surfaces API errors with retry and renders no figures until then', async () => {

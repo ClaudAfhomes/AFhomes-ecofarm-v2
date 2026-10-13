@@ -4,11 +4,11 @@ pnpm + Turborepo monorepo for the **AF Homes Ecofarm** platform (membership-card
 business). Stack: **React 19 + Vite 8 SPAs → TanStack Query → Vercel Functions
 REST API → Supabase Postgres + Supabase Auth**.
 
-> **This file is the authority for the AF Homes codebase.** The JAD Realty
-> documents under `docs/` (BUSINESS-RULES, API-SPECIFICATION, DATABASE-DESIGN,
-> CHANGELOG, SESSION.md) describe the **retired** JAD platform and are kept as
-> historical reference only. Do not implement from them. The current scope is
-> `docs/AFHOMES-PHASE-1-PLAN.md`.
+> **This file is the authority for the AF Homes codebase.** The retired JAD
+> Realty reference material (`docs/`, `legacy/`, `CHANGELOG.md`) was removed
+> from the repo during cleanup. Do not reintroduce it and do not implement from
+> JAD DTOs, table names, statuses, or permission models — they do not carry over
+> to the AF Homes schema.
 
 ## Current state (Phase 2 — business foundation delivered)
 
@@ -144,8 +144,8 @@ armed (must exit **non-zero**, must report the abort, and must **still** run
 `finally` cleanup). The flag is refused for any remote target, so it can never
 be aimed at a development or production database.
 
-Current readiness status, blockers, and the full production runbook:
-`docs/AFHOMES-PHASE-5-READINESS.md`. **Verdict: NOT READY** — there is no
+Prior readiness assessment (the `docs/` runbook was removed during cleanup, so
+re-verify before relying on this): **Verdict: NOT READY** — there is no
 development/staging Supabase project, so the managed stack (PostgREST, GoTrue,
 Storage) has never been executed.
 
@@ -163,11 +163,8 @@ Storage) has never been executed.
 - `packages/shared` - framework-free exact-decimal money helpers.
 - `packages/ui` - design tokens + shared primitives.
 - `supabase/` - migrations, reference seed, Super Admin bootstrap, RLS audit.
-- `legacy/` - the retired JAD application, migrations, and scripts. **Never
-  applied, never imported.** `supabase/apply-migrations.ts` hard-fails if a
-  non-`afhomes_` file appears in `supabase/migrations/`.
-- `docs/` - SSOT. `docs/AFHOMES-PHASE-1-PLAN.md` is current; the rest is JAD
-  history. Never reformat `docs/` (`.prettierignore`).
+  `supabase/apply-migrations.ts` hard-fails if a non-`afhomes_` file appears in
+  `supabase/migrations/`.
 
 ## Commands (from root)
 
@@ -178,7 +175,7 @@ pnpm test           # vitest run (all workspaces)
 pnpm typecheck      # tsc --noEmit (all workspaces + supabase/ scripts)
 pnpm lint           # eslint
 pnpm build          # turbo run build
-pnpm format         # prettier --write . (docs/ excluded)
+pnpm format         # prettier --write .
 pnpm check:env      # environment isolation guard (see "Environment")
 
 pnpm db:migrate                 # apply supabase/migrations (guarded)
@@ -415,6 +412,27 @@ works, and a test that cannot fail is not a test.** `pnpm test:db:local` and
   subscriptions: browser roles hold no table privileges to subscribe to, so
   polling the authorized service-role endpoints is the cross-session channel.
   Logout clears the whole QueryClient in both apps.
+- Money/count display has one implementation each (`@afhomes/shared`):
+  `formatMoney`/`formatCount` fail loud on malformed input;
+  `formatMoneyOrDash`/`formatCountOrDash` render nullish as a placeholder;
+  `formatCompactMoney` abbreviates chart axes. Never concat `₱{…}`.
+  Server instants shown to members use the shared UTC helpers; the staff
+  console stays browser-zone (`apps/admin/src/lib/format.ts`) on purpose.
+- Business query keys come from `features/business/queryKeys.ts` (pinned by
+  `queryKeys.spec.ts`); invalidation uses the matching scope, never a literal.
+- Mutations use `useBusinessMutation` (`apps/admin/src/lib/`), which coalesces
+  same-payload double submits and runs different payloads concurrently.
+- Form controls come from `@afhomes/ui` (`Select`, `TextField`, `DateField`,
+  `TextAreaField`, `FileField`, …). Labeled primitives mark optional fields
+  with "(Optional)", so specs assert the marked name. `required` mirrors the
+  original control: adding it where none existed hard-blocks submission
+  through native validation. Multi-selects, checkboxes, number/url inputs,
+  and hidden+Button file uploads keep sanctioned native patterns.
+- Admin routes split per feature (`React.lazy` in `App.tsx`, shell-mounted
+  `Suspense` in `AdminLayout`); the chart library loads behind its own
+  skeleton. Specs that render routes await the chunk (`findBy*`, longer
+  timeouts for first-transform). Never stub the global `URL` constructor with
+  a plain object: dynamic `import()` needs `new URL()` (subclass it).
 
 ## Authorization architecture
 

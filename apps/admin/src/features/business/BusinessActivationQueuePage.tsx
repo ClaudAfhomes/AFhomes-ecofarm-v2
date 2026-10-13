@@ -1,11 +1,48 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@afhomes/ui';
-import { paymentSchemeLabel, type ActivationResult, type FinanceQueueItem } from '@afhomes/contracts';
+import { useMemo, useState, type KeyboardEvent } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  MetricCard,
+  PageHeader,
+  SearchField,
+  Select,
+  Skeleton,
+  StatusChip,
+  TextField,
+  notifySuccess,
+} from '@afhomes/ui';
+import {
+  paymentSchemeLabel,
+  type ActivationResult,
+  type FinanceQueueItem,
+} from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
-import { SPOT_CASH_LABEL, SPOT_CASH_TONE, formatMoney, formatPoints } from './format';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { SPOT_CASH_LABEL, SPOT_CASH_TONE } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { activateSale, getActivationQueue } from './services';
+import { businessKeys, sharedScopes } from './queryKeys';
+import { TierBadge } from './TierBadge';
+import styles from './BusinessActivationQueuePage.module.css';
+
+/**
+ * Tier from a card plan name, using the same uppercase-substring rule the
+ * dashboard uses to read tiers off published names. Unrecognized plans pass
+ * through to TierBadge's neutral treatment with the name intact.
+ */
+function tierFromProductName(productName: string): string {
+  const upper = productName.toUpperCase();
+  if (upper.includes('GOLD')) return 'GOLD';
+  if (upper.includes('SILVER')) return 'SILVER';
+  if (upper.includes('BRONZE')) return 'BRONZE';
+  return productName;
+}
 
 /**
  * Activation queue.
@@ -21,108 +58,276 @@ import { activateSale, getActivationQueue } from './services';
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
   const queue = useQuery({
-    queryKey: ['business', 'queue', 'activation'],
+    queryKey: businessKeys.activationQueue,
     queryFn: getActivationQueue,
+    // Keep the previous page on screen while the next poll lands: refetches
+    // then feel instant and the skeleton only ever appears on first load.
+    placeholderData: keepPreviousData,
     // Activations and payments land from other sessions: poll the queue
     // (same-session writes invalidate instantly).
     refetchInterval: 15_000,
   });
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
+  const [eligibility, setEligibility] = useState<'all' | 'eligible' | 'not'>('all');
   const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
 
-  const refresh = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'queue', 'activation'] });
-    // Activation changes what member lookup, memberships and the activation
-    // report show: refresh them in this session without reload.
-    await client.invalidateQueries({ queryKey: ['member-lookup'] });
-    await client.invalidateQueries({ queryKey: ['memberships'] });
-    await client.invalidateQueries({ queryKey: ['reports'] });
-    // The activated sale is no longer pending activation, and its commission
-    // moves on to qualification in Commissions.
-    await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
+  const rows = useMemo(() => queue.data ?? [], [queue.data]);
+  // Headline counts from the loaded rows.
+  const summary = useMemo(() => {
+    const eligible = rows.filter((item) => item.activatable).length;
+    return { total: rows.length, eligible, notEligible: rows.length - eligible };
+  }, [rows]);
+  // Client-side search and eligibility filter over the loaded queue rows.
+  const visible = useMemo(() => {
+    const term = settled.toLowerCase();
+    return rows.filter((item) => {
+      if (eligibility === 'eligible' && !item.activatable) return false;
+      if (eligibility === 'not' && item.activatable) return false;
+      if (!term) return true;
+      return [item.saleNumber, item.customerName, item.productName]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(term));
+    });
+  }, [rows, settled, eligibility]);
+
+  const openActivate = (item: FinanceQueueItem) => {
+    if (!item.activatable) return;
+    setActivating(item);
+    setResult(null);
+  };
+  const onRowKeyDown = (event: KeyboardEvent, item: FinanceQueueItem) => {
+    if ((event.target as HTMLElement).closest('[data-row-actions]')) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openActivate(item);
+    }
   };
 
-  return (
-    <section>
-      <PageHeader
-        title="Activation Queue"
-        description="Fully paid applications awaiting activation. Activation requires confirmed full payment and is performed by the server, not the browser."
-      />
+  const refresh = async () => {
+    await client.invalidateQueries({ queryKey: businessKeys.activationQueue });
+    // Activation changes what member lookup, memberships and the activation
+    // report show: refresh them in this session without reload.
+    await client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
+    await client.invalidateQueries({ queryKey: sharedScopes.memberships });
+    await client.invalidateQueries({ queryKey: sharedScopes.reports });
+    // The activated sale is no longer pending activation, and its commission
+    // moves on to qualification in Commissions.
+    await client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
+  };
 
-      {queue.isPending ? (
-        <p role="status">Loading queue…</p>
-      ) : queue.isError ? (
-        <ErrorState error={queue.error} onRetry={queue.refetch} />
-      ) : queue.data?.length === 0 ? (
-        <EmptyState title="Nothing to activate" description="No application is fully paid yet." />
-      ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Sale</th>
-                <th>Customer</th>
-                <th>Card</th>
-                <th>Scheme</th>
-                <th>Total</th>
-                <th>Verified</th>
-                <th>Balance</th>
-                <th>Validity</th>
-                <th>First verified</th>
-                <th>Spot cash</th>
-                <th>Deadline</th>
-                <th>Ready</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {queue.data?.map((item) => (
-                <tr key={item.saleId}>
-                  <td>{item.saleNumber}</td>
-                  <td>{item.customerName}</td>
-                  <td>{item.productName}</td>
-                  <td>{paymentSchemeLabel(item.paymentScheme)}</td>
-                  <td>{formatMoney(item.cashPrice)}</td>
-                  <td>{formatMoney(item.verifiedTotal)}</td>
-                  <td>{formatMoney(item.remainingBalance)}</td>
-                  <td>
-                    {item.validityMonths
-                      ? `${item.validityMonths} mo${item.validityMonths % 12 === 0 ? ` (${item.validityMonths / 12}y)` : ''}`
-                      : '—'}
-                  </td>
-                  <td>
-                    {item.firstVerifiedPayment ? formatDateTime(item.firstVerifiedPayment) : '—'}
-                  </td>
-                  <td>
-                    <StatusChip
-                      label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
-                      tone={SPOT_CASH_TONE[item.spotCashState] ?? 'neutral'}
-                    />
-                  </td>
-                  <td>{item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}</td>
-                  <td>
-                    <StatusChip
-                      label={item.activatable ? 'Eligible' : 'Not eligible'}
-                      tone={item.activatable ? 'success' : 'warning'}
-                    />
-                  </td>
-                  <td>
-                    <Button
-                      size="sm"
-                      disabled={!item.activatable}
-                      onClick={() => {
-                        setActivating(item);
-                        setResult(null);
-                      }}
-                    >
-                      Activate
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  // First load skeletonizes the whole page: header, summary, filters and
+  // table. Refetches keep the previous page visible via placeholderData and
+  // never reach this branch.
+  if (queue.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading activation queue"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
         </div>
+      </section>
+    );
+
+  return (
+    <section className={styles.page}>
+      <PageHeader title="Activation Queue" description="Fully paid sales awaiting activation" />
+
+      {queue.isError ? (
+        <ErrorState error={queue.error} onRetry={queue.refetch} />
+      ) : (
+        <>
+          <ul className={styles.summary} aria-label="Activation summary">
+            <li>
+              <MetricCard
+                label="Ready to activate"
+                value={formatCountOrDash(summary.eligible)}
+                icon="check"
+                description="Fully paid and ready to activate"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Still short"
+                value={formatCountOrDash(summary.notEligible)}
+                icon="clock"
+                description="Still short of the frozen total"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Queue records"
+                value={formatCountOrDash(summary.total)}
+                icon="file-text"
+                description="Sales pending activation review"
+              />
+            </li>
+          </ul>
+
+          <FilterBar
+            filtersToggleLabel="Expand Filters"
+            search={
+              <SearchField
+                label="Search activation queue"
+                placeholder="Sale number, customer, or card"
+                value={search}
+                onChange={(value) => setSearch(value)}
+                busy={queue.isFetching}
+              />
+            }
+            filters={
+              <label className={styles.filterLabel}>
+                Eligibility
+                <Select
+                  aria-label="Filter by eligibility"
+                  value={eligibility}
+                  onChange={(e) => setEligibility(e.target.value as typeof eligibility)}
+                  options={[
+                    { value: 'all', label: 'All records' },
+                    { value: 'eligible', label: 'Eligible only' },
+                    { value: 'not', label: 'Not eligible' },
+                  ]}
+                />
+              </label>
+            }
+            actions={
+              <p className={styles.resultCount}>
+                {settled || eligibility !== 'all'
+                  ? `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`
+                  : `${formatCountOrDash(visible.length)} records`}
+              </p>
+            }
+          />
+
+          {visible.length === 0 ? (
+            <EmptyState
+              title={
+                settled || eligibility !== 'all' ? 'No matching records.' : 'Nothing to activate'
+              }
+              description="No application is fully paid yet."
+            />
+          ) : (
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className={`table-scroll ${styles.tableWrap} ${styles.queueCard}`}
+            >
+              <table className={styles.queueTable}>
+                <thead>
+                  <tr>
+                    <th>Sale</th>
+                    <th>Customer</th>
+                    <th>Plan</th>
+                    <th>Scheme</th>
+                    <th>Total</th>
+                    <th>Verified</th>
+                    <th>Balance</th>
+                    <th>Validity</th>
+                    <th>First verified</th>
+                    <th>Spot cash</th>
+                    <th>Deadline</th>
+                    <th>Ready</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((item) => (
+                    <tr
+                      key={item.saleId}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Activate membership for ${item.saleNumber}`}
+                      onClick={() => openActivate(item)}
+                      onKeyDown={(event) => onRowKeyDown(event, item)}
+                      className={styles.clickable}
+                    >
+                      <td data-label="Sale">
+                        <span className={styles.recordRef}>
+                          <span className={styles.recordRefDot} aria-hidden="true" />
+                          {item.saleNumber}
+                        </span>
+                      </td>
+                      <td data-label="Customer">{item.customerName}</td>
+                      <td data-label="Plan">
+                        <TierBadge tier={tierFromProductName(item.productName)} />
+                      </td>
+                      <td data-label="Scheme">{paymentSchemeLabel(item.paymentScheme)}</td>
+                      <td data-label="Total" className={styles.numeric}>
+                        {formatMoneyOrDash(item.cashPrice)}
+                      </td>
+                      <td data-label="Verified" className={styles.numeric}>
+                        {formatMoneyOrDash(item.verifiedTotal)}
+                      </td>
+                      <td data-label="Balance" className={styles.numeric}>
+                        {formatMoneyOrDash(item.remainingBalance)}
+                      </td>
+                      <td data-label="Validity">
+                        {item.validityMonths
+                          ? `${item.validityMonths} mo${item.validityMonths % 12 === 0 ? ` (${item.validityMonths / 12}y)` : ''}`
+                          : '—'}
+                      </td>
+                      <td data-label="First verified">
+                        {item.firstVerifiedPayment
+                          ? formatDateTime(item.firstVerifiedPayment)
+                          : '—'}
+                      </td>
+                      <td data-label="Spot cash">
+                        <StatusChip
+                          label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
+                          tone={SPOT_CASH_TONE[item.spotCashState] ?? 'neutral'}
+                        />
+                      </td>
+                      <td data-label="Deadline">
+                        {item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}
+                      </td>
+                      <td data-label="Ready">
+                        <StatusChip
+                          label={item.activatable ? 'Eligible' : 'Not eligible'}
+                          tone={item.activatable ? 'success' : 'warning'}
+                        />
+                      </td>
+                      <td
+                        data-label="Actions"
+                        data-row-actions
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+                        }}
+                      >
+                        <Button
+                          size="sm"
+                          disabled={!item.activatable}
+                          onClick={() => openActivate(item)}
+                        >
+                          Activate
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {activating ? (
@@ -161,7 +366,7 @@ function ActivateDialog({
   // editable 12-month default.
   const frozen = item.validityMonths;
   const [months, setMonths] = useState(frozen ? String(frozen) : '12');
-  const activate = useMutation({
+  const activate = useBusinessMutation({
     mutationFn: () => activateSale(item.saleId, Number(months)),
     onSuccess: onDone,
   });
@@ -201,23 +406,24 @@ function ActivateDialog({
           </div>
           <div>
             <dt>Frozen total</dt>
-            <dd>{formatMoney(item.cashPrice)}</dd>
+            <dd>{formatMoneyOrDash(item.cashPrice)}</dd>
           </div>
         </dl>
         {frozen ? (
           <p>
             Membership validity: <strong>{frozen} months</strong>
-            {frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''} — frozen from the sale.
+            {frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''}, frozen from the sale.
           </p>
         ) : (
-          <label>
-            Validity (months)
-            <input
-              value={months}
-              onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
-              inputMode="numeric"
-            />
-          </label>
+          <TextField
+            id="activation-validity-months"
+            name="validityMonths"
+            label="Validity (months)"
+            optional
+            inputMode="numeric"
+            value={months}
+            onChange={(value) => setMonths(value.replace(/\D/g, ''))}
+          />
         )}
         {activate.error ? <p role="alert">{activate.error.message}</p> : null}
       </div>
@@ -255,7 +461,7 @@ export function IdentifiersDialog({
       <div style={{ display: 'grid', gap: 12 }}>
         <p>
           Membership <strong>{result.membershipNumber}</strong> is active with{' '}
-          {formatPoints(result.pointsAllocated)} yearly points allocated.
+          {formatCountOrDash(result.pointsAllocated)} yearly points allocated.
         </p>
         {result.fallbackCode ? (
           <p>
@@ -302,12 +508,13 @@ export function IdentifiersDialog({
 
         {result.onboarding.token ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="customer-onboarding-token">Customer activation code</label>
-            <input
+            <TextField
               id="customer-onboarding-token"
+              name="onboardingToken"
+              label="Customer activation code"
               value={result.onboarding.token}
+              onChange={() => {}}
               readOnly
-              spellCheck={false}
             />
             <Button variant="secondary" onClick={() => copy('token', result.onboarding.token!)}>
               {copied === 'token' ? 'Activation code copied' : 'Copy activation code'}
@@ -316,12 +523,13 @@ export function IdentifiersDialog({
         ) : null}
         {result.onboarding.activationUrl ? (
           <div style={{ display: 'grid', gap: 6 }}>
-            <label htmlFor="customer-activation-link">Customer activation link</label>
-            <input
+            <TextField
               id="customer-activation-link"
+              name="activationLink"
+              label="Customer activation link"
               value={result.onboarding.activationUrl}
+              onChange={() => {}}
               readOnly
-              spellCheck={false}
             />
             <Button
               variant="secondary"

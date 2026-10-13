@@ -1,7 +1,19 @@
 import { useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addMoney, subtractMoney } from '@afhomes/shared';
-import { Button, Dialog, ErrorState, Skeleton, notifyConfirm, notifySuccess } from '@afhomes/ui';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { addMoney, formatCountOrDash, formatMoneyOrDash, subtractMoney } from '@afhomes/shared';
+import {
+  Alert,
+  Button,
+  Dialog,
+  ErrorState,
+  Skeleton,
+  StatusChip,
+  TextAreaField,
+  TextField,
+  notifyConfirm,
+  notifySuccess,
+} from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import {
   cancelPointPurchase,
@@ -9,7 +21,7 @@ import {
   refundPurchasePoints,
   type PurchaseRow,
 } from './points-services';
-import { formatMoney } from './format';
+import { earningKeys } from './queryKeys';
 
 export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
   const permissions = useSession().user?.afHomesPermissions ?? [];
@@ -25,9 +37,10 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
   const reference = useRef<string | null>(null);
   const client = useQueryClient();
   const refunds = useQuery({
-    queryKey: ['earning', 'point-refunds', purchase.id],
+    queryKey: earningKeys.pointRefunds(purchase.id),
     queryFn: () => listPointRefunds(purchase.id),
     enabled: open,
+    placeholderData: keepPreviousData,
   });
   const originalValue = subtractMoney(purchase.grossAmount, purchase.tierDiscountAmount ?? '0.00');
   const refundedValue = (refunds.data ?? []).reduce(
@@ -35,7 +48,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
     '0.00',
   );
   const remainingValue = subtractMoney(originalValue, refundedValue);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       if (purchase.status === 'draft') return cancelPointPurchase(purchase.id, reason.trim());
       reference.current ??= crypto.randomUUID();
@@ -51,7 +64,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
       notifySuccess({
         title: purchase.status === 'draft' ? 'Reservation released' : 'Point refund recorded',
       });
-      void client.invalidateQueries({ queryKey: ['earning'] });
+      void client.invalidateQueries({ queryKey: earningKeys.all });
       setOpen(false);
       setValue('');
       setReason('');
@@ -74,9 +87,13 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
             if (!save.isPending) setOpen(false);
           }}
         >
-          <p>
+          <Alert variant="info" title="Points only">
             Review service delivery and cancellation/refund eligibility. This restores points only;
             it does not pay cash or alter recorded receipts.
+          </Alert>
+          <p>
+            <StatusChip label={purchase.status} /> Original service value before points:{' '}
+            {formatMoneyOrDash(originalValue)}.
           </p>
           {purchase.status !== 'draft' && (
             <>
@@ -87,42 +104,41 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
               )}
               {refunds.isError && (
                 <ErrorState
+                  error={refunds.error}
+                  onRetry={() => void refunds.refetch()}
                   title="Refund history unavailable"
-                  message="Existing refunds must be checked before another restoration."
-                  onRetry={refunds.refetch}
                 />
               )}
-              <p>
-                Original service value before points: {formatMoney(originalValue)}. Remaining
-                attributable value: {formatMoney(remainingValue)}.
-              </p>
-              <label htmlFor={'point-refund-value-' + purchase.id}>
-                Service value being refunded, before the points discount
-              </label>
-              <input
+              <p>Remaining attributable value: {formatMoneyOrDash(remainingValue)}.</p>
+              <TextField
                 id={'point-refund-value-' + purchase.id}
+                name="refundValue"
+                label="Service value being refunded, before the points discount"
+                optional
                 inputMode="decimal"
                 value={value}
-                onChange={(event) => {
-                  setValue(event.target.value);
+                onChange={(next) => {
+                  setValue(next);
                   reference.current = null;
                 }}
                 disabled={save.isPending || confirmationOpen}
               />
               {refunds.data?.map((refund) => (
                 <p key={refund.id}>
-                  {refund.reviewedAt.slice(0, 10)}: {formatMoney(refund.serviceValue)},{' '}
-                  {refund.pointsRestored.toLocaleString('en-PH')} points restored. {refund.reason}
+                  {refund.reviewedAt.slice(0, 10)}: {formatMoneyOrDash(refund.serviceValue)},{' '}
+                  {formatCountOrDash(refund.pointsRestored)} points restored. {refund.reason}
                 </p>
               ))}
             </>
           )}
-          <label htmlFor={'point-refund-reason-' + purchase.id}>Finance review and reason</label>
-          <textarea
+          <TextAreaField
             id={'point-refund-reason-' + purchase.id}
+            name="refundReason"
+            label="Finance review and reason"
+            optional
             value={reason}
-            onChange={(event) => {
-              setReason(event.target.value);
+            onChange={(value) => {
+              setReason(value);
               reference.current = null;
             }}
             disabled={save.isPending || confirmationOpen}
@@ -136,12 +152,7 @@ export function PointRefundReview({ purchase }: { purchase: PurchaseRow }) {
             />
             I reviewed service delivery, refund eligibility and the attributable service value.
           </label>
-          {save.isError && (
-            <ErrorState
-              title="Not recorded"
-              message="The review could not be recorded. Check existing history before retrying."
-            />
-          )}
+          {save.isError && <ErrorState error={save.error} title="Not recorded" />}
           <Button
             loading={save.isPending}
             loadingLabel="Recording…"

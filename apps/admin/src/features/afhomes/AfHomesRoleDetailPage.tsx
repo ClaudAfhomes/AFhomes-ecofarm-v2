@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   DetailCard,
@@ -11,6 +12,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Skeleton,
   StatusChip,
 } from '@afhomes/ui';
 import {
@@ -25,6 +27,7 @@ import {
   type RoleFormInput,
 } from './AfHomesRoleFormDialog';
 import { useSession } from '../../lib/session';
+import { formatDateTime } from '../../lib/format';
 
 export function AfHomesRoleDetailPage() {
   const { user } = useSession();
@@ -43,7 +46,7 @@ export function AfHomesRoleDetailPage() {
     enabled: Boolean(id),
   });
   const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
-  const mutation = useMutation({
+  const mutation = useBusinessMutation({
     mutationFn: (input: RoleFormInput) => updateAfHomesRole(id!, input),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
@@ -52,7 +55,25 @@ export function AfHomesRoleDetailPage() {
     },
   });
 
-  if (role.isPending) return <p role="status">Loading role…</p>;
+  // First load skeletonizes the whole page - header and detail cards - so no
+  // static content flashes before the data it describes.
+  if (role.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading role"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <Skeleton style={{ height: 160 }} />
+          <Skeleton style={{ height: 120 }} />
+        </div>
+      </section>
+    );
   if (role.isError) return <ErrorState error={role.error} onRetry={role.refetch} />;
   const record = role.data;
   const assigned = staff.data?.filter((s) => s.roleId === record.id) ?? [];
@@ -64,11 +85,11 @@ export function AfHomesRoleDetailPage() {
         description="Role definition, assignments, and change history"
         actions={
           <>
-            {(
+            {
               <Button variant="ghost" onClick={() => setEditing(true)}>
                 {isRoleAccessProtected(record, user?.roleSlug) ? 'View access' : 'Edit role'}
               </Button>
-            )}{' '}
+            }{' '}
             <Button variant="secondary" onClick={() => navigate('/admin/roles')}>
               Back to roles
             </Button>
@@ -83,7 +104,7 @@ export function AfHomesRoleDetailPage() {
               <DetailMono>{record.id}</DetailMono>
             </DetailField>
             <DetailField label="Name">{record.name}</DetailField>
-            <DetailField label="Description">{record.description ?? '—'}</DetailField>
+            <DetailField label="Description">{record.description ?? '-'}</DetailField>
             <DetailField label="Type">
               <StatusChip
                 label={record.isSystem ? 'System' : 'Custom'}
@@ -105,7 +126,7 @@ export function AfHomesRoleDetailPage() {
         <DetailCard>
           <DetailCardTitle>Permissions</DetailCardTitle>
           {record.isSystem && record.slug === 'super_admin' ? (
-            <p>All modules — granted by slug, not by row.</p>
+            <p>All modules - granted by slug, not by row.</p>
           ) : (
             <div
               role="region"
@@ -126,11 +147,11 @@ export function AfHomesRoleDetailPage() {
                 <tbody>
                   {record.permissions.map((p) => (
                     <tr key={p.moduleKey}>
-                      <td>{p.moduleKey}</td>
-                      <td>{p.canView ? 'Yes' : '—'}</td>
-                      <td>{p.canCreate ? 'Yes' : '—'}</td>
-                      <td>{p.canUpdate ? 'Yes' : '—'}</td>
-                      <td>{p.canDelete ? 'Yes' : '—'}</td>
+                      <td data-label="Module">{p.moduleKey}</td>
+                      <td data-label="View">{p.canView ? 'Yes' : '-'}</td>
+                      <td data-label="Create">{p.canCreate ? 'Yes' : '-'}</td>
+                      <td data-label="Update">{p.canUpdate ? 'Yes' : '-'}</td>
+                      <td data-label="Delete">{p.canDelete ? 'Yes' : '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -142,7 +163,10 @@ export function AfHomesRoleDetailPage() {
         <DetailCard>
           <DetailCardTitle>Assigned staff ({record.assignedCount})</DetailCardTitle>
           {staff.isPending ? (
-            <p role="status">Loading assigned staff…</p>
+            <div role="status" aria-label="Loading assigned staff">
+              <Skeleton style={{ height: 44 }} />
+              <Skeleton style={{ height: 44 }} />
+            </div>
           ) : assigned.length === 0 ? (
             <EmptyState title="No staff assigned" description="No staff hold this role." />
           ) : (
@@ -159,14 +183,17 @@ export function AfHomesRoleDetailPage() {
         <DetailCard>
           <DetailCardTitle>Audit history</DetailCardTitle>
           {history.isPending ? (
-            <p role="status">Loading audit history…</p>
+            <div role="status" aria-label="Loading audit history">
+              <Skeleton style={{ height: 44 }} />
+              <Skeleton style={{ height: 44 }} />
+            </div>
           ) : history.isError ? (
             <ErrorState error={history.error} onRetry={history.refetch} />
           ) : history.data?.length ? (
             <ul>
               {history.data.map((event) => (
                 <li key={String(event.id)}>
-                  {event.action} · {new Date(event.created_at).toLocaleString()}
+                  {event.action} · {formatDateTime(event.created_at)}
                 </li>
               ))}
             </ul>

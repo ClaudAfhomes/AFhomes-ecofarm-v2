@@ -25,8 +25,13 @@ export function formatRate(exactRate: string | null | undefined): string {
   return `${hundredths.slice(0, -2)}.${hundredths.slice(-2)}%`;
 }
 
-export const formatPoints = (points: number | null | undefined): string =>
-  points === null || points === undefined ? '—' : new Intl.NumberFormat('en-PH').format(points);
+/** Module-level so every count render reuses one formatter. */
+const countFormatter = new Intl.NumberFormat('en-PH', { maximumFractionDigits: 0 });
+
+export const formatPoints = (points: number | null | undefined): string => {
+  if (points === null || points === undefined) return '—';
+  return countFormatter.format(points);
+};
 
 /**
  * Settlement label from exact-decimal figures (BigInt cents, never float).

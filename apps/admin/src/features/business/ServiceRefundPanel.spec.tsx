@@ -93,9 +93,9 @@ describe('Finance external repayment UI', () => {
     );
     await user.click(screen.getByRole('button', { name: /Manage refunds/ }));
     await screen.findByText('No refund requests yet.');
-    await user.type(screen.getByLabelText('Eligible service value'), '1000.00');
-    await user.type(screen.getByLabelText('Cash repayment requested'), '1000.00');
-    await user.type(screen.getByLabelText('Refund reason'), 'Reviewed cash-only cancellation');
+    await user.type(screen.getByLabelText('Eligible service value(Optional)'), '1000.00');
+    await user.type(screen.getByLabelText('Cash repayment requested(Optional)'), '1000.00');
+    await user.type(screen.getByLabelText('Refund reason(Optional)'), 'Reviewed cash-only cancellation');
     expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
@@ -121,8 +121,8 @@ describe('Finance external repayment UI', () => {
     expect(screen.getByText('Cash repaid')).toBeInTheDocument();
     expect(screen.getByText('Points restored')).toBeInTheDocument();
     expect(screen.getByText('Earned points adjusted')).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Amount actually repaid'), '200.00');
-    await user.type(screen.getByLabelText('External transaction reference'), 'EXTERNAL-PAID');
+    await user.type(screen.getByLabelText('Amount actually repaid(Optional)'), '200.00');
+    await user.type(screen.getByLabelText('External transaction reference(Optional)'), 'EXTERNAL-PAID');
     await user.type(screen.getByLabelText('Actual repayment date'), '2026-10-01T10:00');
     await user.click(screen.getByRole('button', { name: 'Record external repayment' }));
     await waitFor(() =>
@@ -157,7 +157,7 @@ it('requires a Finance review note and confirmation for targeted receipt reconci
   const button = await screen.findByRole('button', { name: 'Reconcile receipt attempt' });
   expect(button).toBeDisabled();
   await user.type(
-    screen.getByLabelText('Receipt reconciliation review note'),
+    screen.getByLabelText('Receipt reconciliation review note(Optional)'),
     'Finance checked uncertain repayment',
   );
   await user.click(button);

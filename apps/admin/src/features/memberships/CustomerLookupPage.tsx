@@ -5,20 +5,16 @@ import {
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
 } from '@afhomes/contracts';
-import {
-  PageHeader,
-  SearchField,
-  ErrorState,
-  EmptyState,
-  StatusChip,
-  Icon,
-  Spinner,
-} from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
 import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
+import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { tierArtwork } from '../../../../web/src/features/customer/tierArtwork';
+import { humanizeCode } from '../business/format';
+import { membershipKeys } from '../business/queryKeys';
+import { TierBadge } from '../business/TierBadge';
+import { tierArtwork } from '@afhomes/ui';
 
 /**
  * Customer Lookup for the GSD / Employee desk.
@@ -141,7 +137,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             <div className={styles.factText}>
               <dt>{FACT_ICONS[0]!.label}</dt>
               <dd>
-                <StatusChip label={customer.customerStatus} />
+                <StatusChip label={humanizeCode(customer.customerStatus)} />
               </dd>
             </div>
           </div>
@@ -153,7 +149,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
               <dt>{FACT_ICONS[1]!.label}</dt>
               <dd>
                 {customer.membershipStatus ? (
-                  <StatusChip label={customer.membershipStatus} />
+                  <StatusChip label={humanizeCode(customer.membershipStatus)} />
                 ) : (
                   'None'
                 )}
@@ -166,7 +162,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             </span>
             <div className={styles.factText}>
               <dt>{FACT_ICONS[2]!.label}</dt>
-              <dd>{customer.tier ?? 'None'}</dd>
+              <dd>{customer.tier ? <TierBadge tier={customer.tier} /> : 'None'}</dd>
             </div>
           </div>
           <div className={styles.fact}>
@@ -185,6 +181,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
 }
 
 function LookupSkeleton() {
+  // Two placeholder cards while the ≥2-character search resolves.
   return (
     <div
       className={styles.results}
@@ -192,23 +189,23 @@ function LookupSkeleton() {
       aria-label="Looking for Customer"
       aria-busy="true"
     >
-      <p className={styles.loadingLine}>
-        <Spinner size="sm" />
-        <span>Looking for Customer…</span>
-      </p>
-      {[0, 1, 2].map((index) => (
+      {[0, 1].map((index) => (
         <div className={styles.member} data-tier="NONE" aria-hidden="true" key={index}>
           <div className={styles.artWrap}>
             <div className={styles.artSkeleton} />
           </div>
           <div className={styles.cardBody}>
-            <span className={styles.skeletonLine} style={{ width: '8rem' }} />
+            <span className={styles.skeletonChip} style={{ width: '8rem' }} />
             <span className={styles.skeletonTitle} style={{ width: '14rem' }} />
             <span className={styles.skeletonLine} style={{ width: '11rem' }} />
             <div className={styles.details}>
               {[0, 1, 2, 3].map((fact) => (
                 <div className={styles.fact} key={fact}>
-                  <span className={styles.skeletonLine} style={{ width: '100%' }} />
+                  <span className={styles.factSkeletonIcon} />
+                  <div className={styles.factText}>
+                    <span className={styles.skeletonLine} style={{ width: '60%' }} />
+                    <span className={styles.skeletonLine} style={{ width: '90%' }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -224,7 +221,7 @@ export function CustomerLookupPage() {
   const debouncedTerm = useDebouncedValue(search.trim());
   const activeTerm = debouncedTerm.length >= 2 ? debouncedTerm : '';
   const customers = useQuery({
-    queryKey: ['customer-lookup', activeTerm],
+    queryKey: membershipKeys.customerLookup(activeTerm),
     enabled: activeTerm.length >= 2,
     queryFn: () =>
       requestList(
@@ -312,10 +309,7 @@ export function CustomerLookupPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader
-        title="Membership Lookup"
-        description="Find any customer or member."
-      />
+      <PageHeader title="Membership Lookup" description="Find any customer or member." />
       <div className={styles.search}>
         <div
           className={styles.suggestWrap}
@@ -351,12 +345,24 @@ export function CustomerLookupPage() {
             }}
           />
           {dropdownVisible ? (
-            <ul className={styles.suggestList} id={listId} role="listbox" aria-label="Name suggestions">
+            <ul
+              className={styles.suggestList}
+              id={listId}
+              role="listbox"
+              aria-label="Name suggestions"
+            >
               {customers.isPending && suggestions.length === 0 ? (
-                <li className={styles.suggestHint} role="presentation">
-                  <Spinner size="sm" />
-                  <span>Searching for matches…</span>
-                </li>
+                [0, 1, 2].map((index) => (
+                  <li
+                    className={styles.suggestOption}
+                    role="presentation"
+                    aria-hidden="true"
+                    key={index}
+                  >
+                    <span className={styles.skeletonLine} style={{ width: '55%', height: 18 }} />
+                    <span className={styles.skeletonLine} style={{ width: '5rem' }} />
+                  </li>
+                ))
               ) : suggestions.length === 0 ? (
                 <li className={styles.suggestHint} role="presentation">
                   Customer does not exist
@@ -400,7 +406,12 @@ export function CustomerLookupPage() {
       ) : !hasSearched ? null : customers.isPending ? (
         <LookupSkeleton />
       ) : customers.isError ? (
-        <ErrorState error={customers.error} onRetry={customers.refetch} />
+        <ErrorState
+          error={customers.error}
+          title="Customer lookup is unavailable right now"
+          message={describeCustomerLookupError(customers.error)}
+          onRetry={() => void customers.refetch()}
+        />
       ) : customers.data?.length === 0 ? (
         <EmptyState
           title="Customer does not exist"
@@ -411,4 +422,19 @@ export function CustomerLookupPage() {
       )}
     </section>
   );
+}
+
+/**
+ * Actionable lookup-load guidance per failure cause. Raw server internals are
+ * never rendered (see `ErrorState`); each branch names the next step instead.
+ * Returns `undefined` for unknown errors so the shared generic message applies.
+ */
+function describeCustomerLookupError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError)
+    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+  if (error instanceof ApiError && error.status === 401)
+    return 'Your session has expired. Sign in again, then retry.';
+  if (error instanceof ApiError && error.status === 403)
+    return 'Your account cannot look up customers right now. Contact an administrator.';
+  return undefined;
 }

@@ -9,7 +9,7 @@ import {
 } from './queries';
 import { isForbidden, isNotFound } from './http';
 import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
-import { tierArtwork, tierLabel } from './tierArtwork';
+import { tierArtwork, tierLabel } from '@afhomes/ui';
 import type { CustomerCredentials } from './services';
 
 /**

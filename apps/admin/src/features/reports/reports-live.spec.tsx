@@ -83,7 +83,8 @@ beforeEach(() => {
 
 async function openRedemptionsReport(user: ReturnType<typeof userEvent.setup>) {
   renderWithProviders(<App />, { route: '/admin/reports', user: EMPLOYEE });
-  await user.selectOptions(screen.getByLabelText('Report'), 'redemptions');
+  // Route pages load on demand: wait for the chunk before touching its controls.
+  await user.selectOptions(await screen.findByLabelText('Report'), 'redemptions');
   await waitFor(() => {
     expect(reportCalls.some((url) => url.startsWith('/api/v1/reports/redemptions'))).toBe(true);
   });

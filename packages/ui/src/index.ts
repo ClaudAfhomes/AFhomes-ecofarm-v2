@@ -57,6 +57,12 @@ export { FormField, FieldError } from './components/FormField.js';
 export type { FormFieldProps, FieldErrorProps } from './components/FormField.js';
 export { TextField } from './components/TextField.js';
 export type { TextFieldProps } from './components/TextField.js';
+export { TextAreaField } from './components/TextAreaField.js';
+export type { TextAreaFieldProps } from './components/TextAreaField.js';
+export { DateField } from './components/DateField.js';
+export type { DateFieldProps } from './components/DateField.js';
+export { FileField } from './components/FileField.js';
+export type { FileFieldProps } from './components/FileField.js';
 export { PasswordField } from './components/PasswordField.js';
 export type { PasswordFieldProps } from './components/PasswordField.js';
 export { PasswordChecklist } from './components/PasswordChecklist.js';
@@ -88,6 +94,8 @@ export { Combobox } from './components/Combobox.js';
 export type { ComboboxOption, ComboboxProps } from './components/Combobox.js';
 export { rankOptions, normalizeForMatch, RANK } from './combobox-rank.js';
 export type { Rankable } from './combobox-rank.js';
+export { tierArtwork, tierLabel } from './tier-artwork.js';
+export type { VipTier } from './tier-artwork.js';
 export {
   DetailGrid,
   DetailCard,

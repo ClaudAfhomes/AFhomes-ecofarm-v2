@@ -578,12 +578,27 @@ export const activateSale = (saleId: string, validityMonths = 12): Promise<Activ
  * EXECUTED application-origin reservation that has no card sale yet. The union
  * is what makes the UI honest - a reservation row has no sale id to act on, and
  * acting on one anyway would be a second, invisible sale.
+ *
+ * The API caps pages at 200 rows, so the queue is read at the cap and the
+ * server's `meta.total` travels with it: the screen must say "200 of 231"
+ * rather than silently dropping the tail.
  */
-export const getFinanceQueue = (search = ''): Promise<FinanceCollectionQueueItem[]> =>
-  requestList(
-    '/queues/finance' + (search ? '?search=' + encodeURIComponent(search) : ''),
+export const FINANCE_QUEUE_LIMIT = 200;
+
+export const getFinanceQueue = (
+  search = '',
+  limit = FINANCE_QUEUE_LIMIT,
+): Promise<{ items: FinanceCollectionQueueItem[]; total: number }> => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (search) query.set('search', search);
+  return requestListEnvelope(
+    `/queues/finance?${query.toString()}`,
     financeCollectionQueueItemSchema,
-  );
+  ).then(({ data, meta }) => ({
+    items: data,
+    total: typeof meta.total === 'number' ? meta.total : data.length,
+  }));
+};
 
 export const getActivationQueue = (): Promise<FinanceQueueItem[]> =>
   requestList('/queues/activation', financeQueueItemSchema);

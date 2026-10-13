@@ -1,8 +1,9 @@
 import type { Payment } from '@afhomes/contracts';
-import { StatusChip } from '@afhomes/ui';
+import { EmptyState, StatusChip } from '@afhomes/ui';
 
 import { formatDateTime } from '../../lib/format';
-import { formatMoney, formatPaymentMethod, formatPaymentType } from './format';
+import { formatPaymentMethod, formatPaymentType } from './format';
+import { formatMoneyOrDash } from '@afhomes/shared';
 
 /**
  * Read-only payment history for one sale, shared by the payment dialog and
@@ -10,7 +11,13 @@ import { formatMoney, formatPaymentMethod, formatPaymentType } from './format';
  * verify actions live with the callers.
  */
 export function SalePaymentList({ payments }: { payments: Payment[] }) {
-  if (payments.length === 0) return <p>No payments recorded.</p>;
+  if (payments.length === 0)
+    return (
+      <EmptyState
+        title="No payments recorded."
+        description="Record the first payment to start the ledger."
+      />
+    );
   return (
     <div
       role="region"
@@ -36,10 +43,11 @@ export function SalePaymentList({ payments }: { payments: Payment[] }) {
         <tbody>
           {payments.map((payment) => (
             <tr key={payment.id}>
-              <td>{formatMoney(payment.amount)}</td>
-              <td>{formatPaymentType(payment.paymentType)}</td>
-              <td>{formatPaymentMethod(payment.method)}</td>
+              <td data-label="Amount">{formatMoneyOrDash(payment.amount)}</td>
+              <td data-label="Type">{formatPaymentType(payment.paymentType)}</td>
+              <td data-label="Method">{formatPaymentMethod(payment.method)}</td>
               <td
+                data-label="Reference"
                 title={
                   payment.reference && payment.reference !== payment.paymentNumber
                     ? payment.reference
@@ -48,7 +56,7 @@ export function SalePaymentList({ payments }: { payments: Payment[] }) {
               >
                 {payment.paymentNumber ?? payment.reference ?? '—'}
               </td>
-              <td>
+              <td data-label="Status">
                 <StatusChip
                   label={payment.status}
                   tone={
@@ -63,10 +71,12 @@ export function SalePaymentList({ payments }: { payments: Payment[] }) {
                   <div style={{ fontSize: 12, opacity: 0.75 }}>{payment.rejectionReason}</div>
                 ) : null}
               </td>
-              <td>{formatDateTime(payment.recordedAt)}</td>
-              <td>{payment.verifiedAt ? formatDateTime(payment.verifiedAt) : '—'}</td>
-              <td>{payment.recordedByName ?? '—'}</td>
-              <td>{payment.verifiedByName ?? '—'}</td>
+              <td data-label="Recorded">{formatDateTime(payment.recordedAt)}</td>
+              <td data-label="Verified">
+                {payment.verifiedAt ? formatDateTime(payment.verifiedAt) : '—'}
+              </td>
+              <td data-label="Recorded by">{payment.recordedByName ?? '—'}</td>
+              <td data-label="Verified by">{payment.verifiedByName ?? '—'}</td>
             </tr>
           ))}
         </tbody>

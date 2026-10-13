@@ -132,7 +132,7 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
             error={emailError ?? undefined}
           />
           <div className={styles.submitRow}>
-            <Button type="submit" loading={pending} disabled={pending}>
+            <Button type="submit" loading={pending} loadingLabel="Sending…" disabled={pending}>
               Send reset link
             </Button>
           </div>

@@ -288,9 +288,9 @@ it('dispatches submitted decisions and reopen', async () => {
 it('shows the server-authoritative offer with no editable price', async () => {
   await show('draft');
   const panel = await screen.findByRole('region', { name: 'Purchase terms offer' });
-  expect(panel).toHaveTextContent('₱54000.00');
+  expect(panel).toHaveTextContent('₱54,000.00');
   // The included reservation amount is shown as its own labelled figure.
-  expect(panel).toHaveTextContent('₱10000.00');
+  expect(panel).toHaveTextContent('₱10,000.00');
   // The offer is read-only: nothing on this screen can authoritatively price it.
   expect(screen.queryByLabelText(/^Total purchase amount$/)).toBeNull();
 });

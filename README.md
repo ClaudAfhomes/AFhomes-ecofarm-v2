@@ -16,8 +16,6 @@ operations, and staff administration. pnpm workspaces + Turborepo.
 - `packages/shared` - framework-free exact-decimal money helpers.
 - `packages/ui` - design tokens and shared components.
 - `supabase/` - migrations, reference seed, Super Admin bootstrap, RLS audit.
-- `legacy/` - the retired JAD Realty application, kept for reference only.
-  Never applied, never imported.
 
 ## Commands
 
@@ -39,6 +37,6 @@ pnpm exec tsx api/dev-server.ts   # local API on :3000
 ## Conventions
 
 Engineering conventions and invariants live in `AGENTS.md` — read it before
-changing authorization, RLS, migrations, or money handling. Current scope is
-`docs/AFHOMES-PHASE-1-PLAN.md`; the other documents under `docs/` describe the
-retired JAD platform and are historical reference only.
+changing authorization, RLS, migrations, or money handling. `AGENTS.md` is the
+authority for the current scope; the retired JAD reference material was removed
+from the repo during cleanup.

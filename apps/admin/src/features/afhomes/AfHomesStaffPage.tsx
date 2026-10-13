@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -15,13 +16,16 @@ import {
   PasswordField,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
   TextField,
 } from '@afhomes/ui';
 import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
+import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import styles from './AfHomesStaffPage.module.css';
 import {
   createAfHomesStaff,
   deactivateAfHomesStaff,
@@ -46,11 +50,21 @@ export function AfHomesStaffPage() {
   const client = useQueryClient();
   const navigate = useNavigate();
   const { user } = useSession();
-  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
-  const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
+  const staff = useQuery({
+    queryKey: ['afhomes', 'staff'],
+    queryFn: getAfHomesStaff,
+    // Refetches keep the previous directory visible instead of blanking it.
+    placeholderData: keepPreviousData,
+  });
+  const roles = useQuery({
+    queryKey: ['afhomes', 'roles'],
+    queryFn: getAfHomesRoles,
+    placeholderData: keepPreviousData,
+  });
   const departments = useQuery({
     queryKey: ['afhomes', 'departments'],
     queryFn: getAfHomesDepartments,
+    placeholderData: keepPreviousData,
   });
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
@@ -109,7 +123,7 @@ export function AfHomesStaffPage() {
     temporaryPassword.length >= 8 &&
     temporaryPassword === confirmPassword;
 
-  const create = useMutation({
+  const create = useBusinessMutation({
     mutationFn: () =>
       createAfHomesStaff({
         fullName: fullName.trim(),
@@ -128,14 +142,14 @@ export function AfHomesStaffPage() {
       });
     },
   });
-  const update = useMutation({
+  const update = useBusinessMutation({
     mutationFn: () => updateAfHomesStaff(editing!.id, { restrictions }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
       setEditing(null);
     },
   });
-  const changeAccount = useMutation({
+  const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteAfHomesStaff(accountAction.staff.id);
       else await deactivateAfHomesStaff(accountAction!.staff.id);
@@ -146,7 +160,7 @@ export function AfHomesStaffPage() {
       setConfirmation('');
     },
   });
-  const purgeTestAccount = useMutation({
+  const purgeTestAccount = useBusinessMutation({
     mutationFn: () => purgeTestAfHomesStaff(purgeTarget!.id),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
@@ -200,7 +214,7 @@ export function AfHomesStaffPage() {
     setPage(1);
   };
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Staff"
         description="Admin users and their roles (role changes are audited)"
@@ -226,6 +240,7 @@ export function AfHomesStaffPage() {
               setSearch(value);
               setPage(1);
             }}
+            busy={staff.isFetching && !staff.isPending}
           />
         }
         filters={
@@ -263,7 +278,15 @@ export function AfHomesStaffPage() {
         }
       />
       {staff.isPending ? (
-        <p role="status">Loading staff…</p>
+        <div role="status" aria-label="Loading staff" className={styles.tableWrap}>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }} aria-hidden="true">
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
       ) : staff.isError ? (
         <ErrorState error={staff.error} onRetry={staff.refetch} />
       ) : filtered.length === 0 ? (
@@ -275,7 +298,12 @@ export function AfHomesStaffPage() {
         />
       ) : (
         <>
-          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <div
+            role="region"
+            aria-label="Scrollable records"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
             <table>
               <thead>
                 <tr>
@@ -283,7 +311,7 @@ export function AfHomesStaffPage() {
                   <th>Role</th>
                   <th>Status</th>
                   <th>Added</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,37 +325,39 @@ export function AfHomesStaffPage() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') navigate(`/admin/staff/${item.id}`);
                     }}
-                    style={{ cursor: 'pointer' }}
+                    className={styles.clickable}
                   >
-                    <td>
-                      <strong>{item.fullName}</strong>
-                      <br />
-                      <small>{item.email}</small>
-                      {item.employeeNumber ? (
-                        <>
-                          <br />
-                          <small>{item.employeeNumber}</small>
-                        </>
-                      ) : null}
-                      {item.salesNumber ? (
-                        <>
-                          <br />
-                          <small>{item.salesNumber}</small>
-                        </>
-                      ) : null}
+                    <td data-label="Name">
+                      <span className={styles.identityCell}>
+                        <span className={styles.identityAvatar} aria-hidden="true">
+                          {(item.fullName.trim().charAt(0) || '-').toUpperCase()}
+                        </span>
+                        <span>
+                          <span className={styles.identityName}>{item.fullName}</span>
+                          <small className={styles.identityMeta}>{item.email}</small>
+                          {item.employeeNumber ? (
+                            <small className={styles.identityMeta}>{item.employeeNumber}</small>
+                          ) : null}
+                          {item.salesNumber ? (
+                            <small className={styles.identityMeta}>{item.salesNumber}</small>
+                          ) : null}
+                        </span>
+                      </span>
                     </td>
-                    <td>
+                    <td data-label="Role">
                       <StatusChip label={item.roleName} tone="neutral" />
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StatusChip label={item.status} tone={statusTone(item.status)} />
                     </td>
-                    <td>
-                      <small>
-                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
-                      </small>
+                    <td data-label="Added">
+                      <small>{item.createdAt ? formatDate(item.createdAt) : '-'}</small>
                     </td>
-                    <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <td
+                      data-label="Actions"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
                       <Button size="sm" variant="secondary" onClick={() => openRestrictions(item)}>
                         Restrictions
                       </Button>
@@ -369,12 +399,18 @@ export function AfHomesStaffPage() {
               </tbody>
             </table>
           </div>
-          <p role="status">
-            {filtered.length} staff member(s) · page {safePage} of {pageCount}
-          </p>
-          {pageCount > 1 ? (
-            <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
-          ) : null}
+          <div className={styles.pagination}>
+            <Pagination
+              page={safePage}
+              pageCount={pageCount}
+              onChange={setPage}
+              label="Staff pagination"
+            />
+            <p role="status" aria-label="Staff record range" className={styles.paginationRange}>
+              Showing {(safePage - 1) * PAGE_SIZE + 1}-
+              {Math.min(filtered.length, safePage * PAGE_SIZE)} of {filtered.length} staff member(s)
+            </p>
+          </div>
         </>
       )}
       <Dialog
@@ -441,7 +477,7 @@ export function AfHomesStaffPage() {
             value={temporaryPassword}
             onChange={setTemporaryPassword}
             autoComplete="new-password"
-            hint="At least 8 characters. Share it with the new member directly — it is never emailed or stored."
+            hint="At least 8 characters. Share it with the new member directly - it is never emailed or stored."
             error={createErrors.temporaryPassword}
           />
           <PasswordField
@@ -529,14 +565,13 @@ export function AfHomesStaffPage() {
                 : 'This user will no longer be able to access the AF Homes staff system. Historical records will remain.'}
             </p>
             {accountAction?.kind === 'delete' ? (
-              <label>
-                Type DELETE to confirm
-                <input
-                  aria-label="Type DELETE to confirm staff deletion"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </label>
+              <TextField
+                id="staff-delete-confirm"
+                name="deleteConfirm"
+                label="Type DELETE to confirm staff deletion"
+                value={confirmation}
+                onChange={setConfirmation}
+              />
             ) : null}
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>
@@ -562,14 +597,13 @@ export function AfHomesStaffPage() {
               cannot be undone. Real business data is never purged: anything shared or non-test
               blocks the purge instead.
             </p>
-            <label>
-              Type PURGE to confirm
-              <input
-                aria-label="Type PURGE to confirm test account purge"
-                value={purgeConfirmation}
-                onChange={(event) => setPurgeConfirmation(event.target.value)}
-              />
-            </label>
+            <TextField
+              id="staff-purge-confirm"
+              name="purgeConfirm"
+              label="Type PURGE to confirm test account purge"
+              value={purgeConfirmation}
+              onChange={setPurgeConfirmation}
+            />
             {purgeTestAccount.error ? <p role="alert">{purgeTestAccount.error.message}</p> : null}
           </div>
         }

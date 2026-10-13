@@ -1,6 +1,16 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  TextAreaField,
+  TextField,
+} from '@afhomes/ui';
 import type { CmsDocument, CmsDocumentKey } from '@afhomes/contracts';
 
 import { useSession } from '../../lib/session';
@@ -17,40 +27,62 @@ export function CmsDocumentPage({
   documentKey: CmsDocumentKey;
 }) {
   const { user } = useSession();
-  const documents = useQuery({ queryKey: ['cms', 'documents'], queryFn: getCmsDocuments });
+  const documents = useQuery({
+    queryKey: ['cms', 'documents'],
+    queryFn: getCmsDocuments,
+    // Refetches keep the previous draft visible instead of blanking the editor.
+    placeholderData: keepPreviousData,
+  });
   const document = useMemo(
     () => documents.data?.find((item) => item.key === documentKey),
     [documents.data, documentKey],
   );
-  if (documents.isLoading)
+  // First load skeletonizes the whole page - header and editor - so no static
+  // content flashes before the data it describes. Refetches keep the previous
+  // draft visible via placeholderData and never reach this branch.
+  if (documents.isPending)
     return (
-      <div style={{ display: 'grid', gap: 'var(--space-3)' }} role="status" aria-label="Loading CMS content">
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-        <Skeleton style={{ height: 48 }} />
-      </div>
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading CMS content"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <Skeleton style={{ height: 320 }} />
+          <Skeleton style={{ height: 40, maxWidth: 320 }} />
+        </div>
+      </section>
     );
   if (documents.isError)
     return (
-      <ErrorState
-        title="CMS content could not be loaded"
-        error={documents.error}
-        onRetry={() => void documents.refetch()}
-      />
+      <section className={styles.page}>
+        <PageHeader title={title} description={description} />
+        <ErrorState
+          title="CMS content could not be loaded"
+          error={documents.error}
+          onRetry={() => void documents.refetch()}
+        />
+      </section>
     );
   const permission = documentKey === 'site' ? 'cms.settings' : 'cms.pages';
   const canUpdate =
     user?.afHomesPermissions.some((item) => item.moduleKey === permission && item.canUpdate) ===
     true;
   return (
-    <DocumentEditor
-      key={`${documentKey}-${document?.version ?? 'new'}`}
-      title={title}
-      description={description}
-      documentKey={documentKey}
-      document={document}
-      canUpdate={canUpdate}
-    />
+    <section className={styles.page}>
+      <DocumentEditor
+        key={`${documentKey}-${document?.version ?? 'new'}`}
+        title={title}
+        description={description}
+        documentKey={documentKey}
+        document={document}
+        canUpdate={canUpdate}
+      />
+    </section>
   );
 }
 
@@ -71,7 +103,7 @@ function DocumentEditor({
   const [value, setValue] = useState(() => JSON.stringify(document?.draftValue ?? {}, null, 2));
   const [summary, setSummary] = useState('');
   const [message, setMessage] = useState<string | null>(null);
-  const save = useMutation({
+  const save = useBusinessMutation({
     mutationFn: async () => {
       let parsed: unknown;
       try {
@@ -88,7 +120,7 @@ function DocumentEditor({
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : 'Could not save.'),
   });
-  const publish = useMutation({
+  const publish = useBusinessMutation({
     mutationFn: (next: boolean) => publishCmsDocument(documentKey, next),
     onSuccess: async () => {
       setMessage('Publication state updated.');
@@ -117,25 +149,29 @@ function DocumentEditor({
         />
       )}
       <div className={styles.editor}>
-        <label>
-          Structured content (JSON)
-          <textarea
-            rows={24}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            disabled={!canUpdate}
-          />
-        </label>
-        <label>
-          Change summary
-          <input
-            value={summary}
-            maxLength={500}
-            onChange={(event) => setSummary(event.target.value)}
-            disabled={!canUpdate}
-          />
-        </label>
-        {message && <p role="status">{message}</p>}
+        <TextAreaField
+          id="cms-document-content"
+          name="content"
+          label="Structured content (JSON)"
+          optional
+          rows={24}
+          value={value}
+          onChange={setValue}
+          disabled={!canUpdate}
+        />
+        <TextField
+          id="cms-document-summary"
+          name="summary"
+          label="Change summary"
+          optional
+          value={summary}
+          maxLength={500}
+          onChange={setSummary}
+          disabled={!canUpdate}
+        />
+        {message && !save.isError && !publish.isError ? <p role="status">{message}</p> : null}
+        {save.isError ? <p role="alert">{save.error.message}</p> : null}
+        {publish.isError ? <p role="alert">{publish.error.message}</p> : null}
         {canUpdate && (
           <div className={styles.actions}>
             <Button

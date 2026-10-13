@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { divideMoneyExact, formatMoney, multiplyMoney, subtractMoney } from '@afhomes/shared';
 
 import { getCardProducts } from './services';
+import { businessKeys } from './queryKeys';
 import styles from './PaymentSchemeGuidePage.module.css';
 
 /**
@@ -104,7 +105,7 @@ function GuideSkeleton() {
 
 export function PaymentSchemeGuidePage() {
   const plans = useQuery({
-    queryKey: ['business', 'card-products'],
+    queryKey: businessKeys.cardProductsScope,
     queryFn: () => getCardProducts(),
   });
   const active = (plans.data ?? []).filter((p) => p.isActive && p.categoryIsActive);

@@ -213,6 +213,23 @@ function install(over: Record<string, Route> = {}) {
 const render = (route: string, user: SessionUser = FINANCE_USER) =>
   renderWithProviders(<App />, { route, user });
 
+/**
+ * Row actions live behind the three-dots menu: open it, then pick an item.
+ * Every queue row is also clickable — clicking opens its details directly.
+ */
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, recordNumber: string) {
+  await user.click(await screen.findByRole('button', { name: `Actions for ${recordNumber}` }));
+}
+
+async function pickMenuItem(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
+
+async function openRecordDialog(user: ReturnType<typeof userEvent.setup>) {
+  await openRowMenu(user, QUEUE_ITEM.saleNumber);
+  await pickMenuItem(user, 'Record payment');
+}
+
 beforeEach(() => {
   requests.length = 0;
   install();
@@ -225,6 +242,7 @@ beforeEach(() => {
 
 describe('Phase 26 finance queue states', () => {
   it('keeps payment mutations disabled for a view-only finance principal', async () => {
+    const user = userEvent.setup();
     render('/admin/finance/payments', {
       ...FINANCE_USER,
       afHomesPermissions: FINANCE_USER.afHomesPermissions.map((permission) => ({
@@ -233,27 +251,101 @@ describe('Phase 26 finance queue states', () => {
       })),
     });
     await screen.findByText(QUEUE_ITEM.saleNumber);
-    expect(screen.getByRole('button', { name: 'Record payment' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    expect(screen.getByRole('menuitem', { name: 'Record payment' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Verify' })).toBeDisabled();
+    await pickMenuItem(user, 'View details');
     const detail = within(screen.getByRole('dialog'));
     expect(detail.getByRole('button', { name: 'Verify payment' })).toBeDisabled();
     expect(detail.getByRole('button', { name: 'Record payment' })).toBeDisabled();
     expect(requests.some((request) => request.method !== 'GET')).toBe(false);
   });
-  it('41. shows a loading state while the queue is pending', async () => {
+  it('41. shows a skeleton loading state while the queue is pending', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise(() => {})),
     );
     render('/admin/finance/payments');
-    expect(await screen.findByText('Loading queue…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Loading payment queue')).toBeInTheDocument();
+    expect(screen.queryByText('Loading queue…')).toBeNull();
+    // Even the table headers stay skeleton until the rows arrive.
+    expect(screen.queryByRole('columnheader')).toBeNull();
+    expect(screen.queryByText('Record')).toBeNull();
   });
 
   it('42. shows an empty state when nothing awaits payment', async () => {
     install({ 'GET /queues/finance': list([]) });
     render('/admin/finance/payments');
     expect(await screen.findByText('Nothing to handle')).toBeInTheDocument();
+  });
+
+  it('says "N of M" with a cap notice when the queue exceeds the page', async () => {
+    install({
+      'GET /queues/finance': {
+        status: 200,
+        body: { data: [QUEUE_ITEM], meta: { total: 3, limit: 200, offset: 0 } },
+      },
+    });
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    expect(screen.getByText('1 of 3 records')).toBeInTheDocument();
+    expect(screen.getByText('Queue capped')).toBeInTheDocument();
+  });
+
+  it('keeps the loaded rows on screen while the next search resolves', async () => {
+    const user = userEvent.setup();
+    // Slow searches, instant initial load: the settled search takes 800ms to
+    // answer empty, so the previous page must cover the gap.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const [bare, query = ''] = url
+          .replace(/^https?:\/\/[^/]+/, '')
+          .replace(/^\/api\/v1/, '')
+          .split('?');
+        const method = init?.method ?? 'GET';
+        requests.push({
+          path: bare!,
+          method,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          query,
+        });
+        if (bare === '/queues/finance' && query.includes('search=')) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return new Response(
+            JSON.stringify({ data: [], meta: { total: 0, limit: 200, offset: 0 } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        const route = routes.get(`${method} ${bare}`);
+        if (!route) {
+          return new Response(
+            JSON.stringify({ error: { code: 'NOT_FOUND', message: 'unstubbed' } }),
+            { status: 404, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify(route.body), {
+          status: route.status ?? 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    await user.type(screen.getByLabelText('Search payments'), 'ZZZ');
+    await waitFor(() => {
+      expect(requests.some((r) => r.path === '/queues/finance' && r.query.includes('ZZZ'))).toBe(
+        true,
+      );
+    });
+    // While the slow search is in flight, the previous page stays — no skeleton.
+    expect(screen.getByText('SALE-260001')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Loading payment queue')).toBeNull();
+    // And the empty search result still lands afterwards.
+    expect(
+      await screen.findByText('No matching records.', undefined, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it('43. shows an error with retry and recovers', async () => {
@@ -272,22 +364,90 @@ describe('Phase 26 finance queue states', () => {
   });
 
   it('46. renders real backend money (no mock figures)', async () => {
+    const user = userEvent.setup();
     render('/admin/finance/payments');
     // The server-sent exact-decimal strings, formatted without float math.
     expect(await screen.findByText('SALE-260001')).toBeInTheDocument();
-    expect(screen.getByText('₱60,000.00')).toBeInTheDocument();
-    expect(screen.getAllByText('₱20,000.00')).toHaveLength(1);
+    // The row carries the outstanding balance; frozen total and verified paid
+    // live in the payment details.
     expect(screen.getByText('₱40,000.00')).toBeInTheDocument();
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    await pickMenuItem(user, 'View details');
+    const detail = within(screen.getByRole('dialog'));
+    expect(detail.getByText('₱60,000.00')).toBeInTheDocument();
+    expect(detail.getAllByText('₱20,000.00').length).toBeGreaterThan(0);
     const get = requests.find((r) => r.method === 'GET' && r.path === '/queues/finance');
     expect(get).toBeDefined();
   });
 
-  it('shows first verified payment and deadline status from the server', async () => {
+  it('badges queue statuses capitalized, never snake_case', async () => {
     render('/admin/finance/payments');
     await screen.findByText('SALE-260001');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'View details' }));
+    expect(screen.getByText('Payment in progress')).toBeInTheDocument();
+    expect(screen.queryByText('payment_in_progress')).toBeNull();
+  });
+
+  it('opens Record payment by clicking the row', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/payments');
+    const row = await screen.findByRole('link', {
+      name: 'Record a payment for SALE-260001',
+    });
+    await user.click(row);
+    expect(await screen.findByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
+  });
+
+  it('opens payment details from the row menu', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    await pickMenuItem(user, 'View details');
+    expect(await screen.findByText('Within 7 days')).toBeInTheDocument();
+  });
+
+  it('shows first verified payment and deadline status from the server', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    await pickMenuItem(user, 'View details');
     // First verified instant and the derived 7-day state are displayed.
     expect(screen.getByText('Within 7 days')).toBeInTheDocument();
+  });
+
+  it('skeletonizes the payment timeline while ledger rows load', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    // Hang every fetch from here on: the loaded queue and its figures stay,
+    // but the ledger the timeline needs never resolves.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    await pickMenuItem(user, 'View details');
+    expect(await screen.findByText('Payment timeline')).toBeInTheDocument();
+    expect(await screen.findByRole('status', { name: 'Loading payments' })).toBeInTheDocument();
+    expect(screen.queryByText('No payments recorded.')).toBeNull();
+  });
+
+  it('skeletonizes the record dialog while sale figures load', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/payments');
+    await screen.findByText('SALE-260001');
+    // Hang every fetch from here on: the loaded queue stays, but the sale
+    // summary the dialog needs never resolves.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    await openRecordDialog(user);
+    expect(await screen.findByRole('status', { name: 'Loading payment form' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Amount')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });
 
@@ -487,10 +647,10 @@ describe('payment exact-decimal input UX', () => {
       },
     });
     render('/admin/finance/payments');
-    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    await openRecordDialog(user);
     expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Amount'), '1000.00');
-    await user.type(screen.getByLabelText('Payment reference'), 'QA-REF');
+    await user.type(screen.getByLabelText('Payment reference(Optional)'), 'QA-REF');
 
     // Clicking Record must NOT write yet: a confirmation comes first.
     await user.click(screen.getByRole('button', { name: /^Record$/ }));
@@ -509,10 +669,10 @@ describe('payment exact-decimal input UX', () => {
       1,
     );
     // Figures come from the server's own row, not from the typed form. The detail
-// block is one <br>-joined element, so match on it as a whole.
-expect(screen.getByText(/Payment ID: AF-PAY-0001/)).toBeInTheDocument();
-expect(screen.getByText(/Current payment status: recorded/)).toBeInTheDocument();
-expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
+    // block is one <br>-joined element, so match on it as a whole.
+    expect(screen.getByText(/Payment ID: AF-PAY-0001/)).toBeInTheDocument();
+    expect(screen.getByText(/Current payment status: recorded/)).toBeInTheDocument();
+    expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
     expect(screen.getByText(/Customer: Ana R Reyes/)).toBeInTheDocument();
     expect(screen.getByText(/Sale: SALE-260001/)).toBeInTheDocument();
   });
@@ -531,7 +691,7 @@ expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
       },
     });
     render('/admin/finance/payments');
-    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    await openRecordDialog(user);
     await user.type(screen.getByLabelText('Amount'), '1000.00');
     await user.click(screen.getByRole('button', { name: /^Record$/ }));
     await screen.findByText('Record this payment?');
@@ -557,7 +717,7 @@ expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
       },
     });
     render('/admin/finance/payments');
-    await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+    await openRecordDialog(user);
     await user.type(screen.getByLabelText('Amount'), '1000.00');
     await user.click(screen.getByRole('button', { name: /^Record$/ }));
     await user.click(await screen.findByRole('button', { name: 'Record Payment' }));
@@ -569,7 +729,7 @@ expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
     async (amount) => {
       const user = userEvent.setup();
       render('/admin/finance/payments');
-      await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+      await openRecordDialog(user);
       const input = screen.getByLabelText('Amount');
       await user.type(input, amount || '1');
       if (!amount) await user.clear(input);
@@ -590,10 +750,10 @@ expect(screen.getByText(/Reference: QA-REF/)).toBeInTheDocument();
     async (amount) => {
       const user = userEvent.setup();
       render('/admin/finance/payments');
-      await user.click(await screen.findByRole('button', { name: 'Record payment' }));
+      await openRecordDialog(user);
       await user.type(screen.getByLabelText('Amount'), amount);
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
-      await user.clear(screen.getByLabelText('Method'));
+      await user.clear(screen.getByLabelText('Method(Optional)'));
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
     },
   );

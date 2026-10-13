@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { Customer, CustomerOnboardingRecovery, Sale } from '@afhomes/contracts';
 import {
+  Alert,
   Button,
   ConfirmDialog,
   DetailCard,
@@ -9,10 +11,12 @@ import {
   Dialog,
   Select,
   Spinner,
+  TextField,
 } from '@afhomes/ui';
 import { useNavigate } from 'react-router';
 
 import { useSession } from '../../lib/session';
+import { formatDateTime } from '../../lib/format';
 import styles from './CustomerDetailPage.module.css';
 import {
   anonymizeCustomer,
@@ -22,6 +26,7 @@ import {
   updateCustomerStatus,
 } from './services';
 import { RecordPaymentDialog, VerifyDialog } from './BusinessFinanceQueuePage';
+import { businessKeys } from './queryKeys';
 import { useSaleRowActions } from './useSaleRowActions';
 
 /**
@@ -61,11 +66,11 @@ export function CustomerRecordActions({
   const [copyStatus, setCopyStatus] = useState('');
 
   const refresh = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'customer'] });
+    await client.invalidateQueries({ queryKey: businessKeys.customerScope });
     onChanged();
   };
 
-  const changeAccount = useMutation({
+  const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction === 'delete') await deleteCustomer(customer.id);
       else if (accountAction === 'anonymize') await anonymizeCustomer(customer.id);
@@ -82,7 +87,7 @@ export function CustomerRecordActions({
     },
   });
 
-  const issueActivation = useMutation({
+  const issueActivation = useBusinessMutation({
     mutationFn: () => issueCustomerAccountActivation(customer.id),
     onMutate: () => {
       setIssuing(true);
@@ -112,7 +117,7 @@ export function CustomerRecordActions({
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
 
-  const statusMutation = useMutation({
+  const statusMutation = useBusinessMutation({
     mutationFn: (status: 'prospect' | 'active' | 'suspended') =>
       updateCustomerStatus(customer.id, status),
     onSuccess: async () => {
@@ -124,11 +129,18 @@ export function CustomerRecordActions({
     sales.length > 0 && (saleActions.canRecord || saleActions.canEdit || saleActions.canCancel);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
+  const deactivationBlocked = customer.status === 'suspended' || customer.status === 'cancelled';
 
   return (
     <>
       <DetailCard>
         <DetailCardTitle>Actions</DetailCardTitle>
+        {deactivationBlocked ? (
+          <Alert variant="warning">
+            Deactivation is unavailable while this account is {customer.status}. Only active or
+            prospect accounts can be deactivated.
+          </Alert>
+        ) : null}
         {sales.length > 1 && showSaleActions && selectedSale ? (
           <label className={styles.filterLabel}>
             Sale
@@ -177,7 +189,7 @@ export function CustomerRecordActions({
           <Button
             variant="secondary"
             className={styles.toneInfo}
-            disabled={customer.status === 'suspended' || customer.status === 'cancelled'}
+            disabled={deactivationBlocked}
             onClick={() => {
               setAccountAction('deactivate');
               setConfirmation('');
@@ -239,9 +251,11 @@ export function CustomerRecordActions({
             </span>
           ) : null}
         </div>
-        {statusMutation.error ? <p role="alert">{statusMutation.error.message}</p> : null}
+        {statusMutation.error ? (
+          <Alert variant="danger">{statusMutation.error.message}</Alert>
+        ) : null}
         {issueActivation.error && !activationResult ? (
-          <p role="alert">{issueActivation.error.message}</p>
+          <Alert variant="danger">{issueActivation.error.message}</Alert>
         ) : null}
       </DetailCard>
       {saleActions.paymentDialog?.kind === 'record' ? (
@@ -279,16 +293,16 @@ export function CustomerRecordActions({
               <dt>Email</dt>
               <dd>{activationResult.email}</dd>
               <dt>Expires</dt>
-              <dd>{new Date(activationResult.expiresAt).toLocaleString()}</dd>
+              <dd>{formatDateTime(activationResult.expiresAt)}</dd>
             </dl>
-            <label>
-              Activation link
-              <input
-                aria-label="Customer activation link"
-                readOnly
-                value={activationResult.activationUrl}
-              />
-            </label>
+            <TextField
+              id="record-activation-link"
+              name="activationLink"
+              label="Customer activation link"
+              value={activationResult.activationUrl}
+              onChange={() => {}}
+              readOnly
+            />
             <Button
               variant="secondary"
               onClick={async () => {
@@ -330,14 +344,13 @@ export function CustomerRecordActions({
                   : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
             </p>
             {accountAction !== 'deactivate' ? (
-              <label>
-                Type DELETE to confirm
-                <input
-                  aria-label="Type DELETE to confirm customer action"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </label>
+              <TextField
+                id="record-account-confirm"
+                name="accountConfirm"
+                label="Type DELETE to confirm customer action"
+                value={confirmation}
+                onChange={setConfirmation}
+              />
             ) : null}
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>

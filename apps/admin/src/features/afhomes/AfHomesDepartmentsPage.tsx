@@ -1,15 +1,31 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Dialog, EmptyState, ErrorState, PageHeader, StatusChip } from '@afhomes/ui';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  TextField,
+} from '@afhomes/ui';
 import { createAfHomesDepartment, getAfHomesDepartments } from './services';
+import styles from './AfHomesDepartmentsPage.module.css';
 
 export function AfHomesDepartmentsPage() {
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ['afhomes', 'departments'], queryFn: getAfHomesDepartments });
+  const query = useQuery({
+    queryKey: ['afhomes', 'departments'],
+    queryFn: getAfHomesDepartments,
+    // Refetches keep the previous rows visible instead of blanking the table.
+    placeholderData: keepPreviousData,
+  });
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const create = useMutation({
+  const create = useBusinessMutation({
     mutationFn: () => createAfHomesDepartment({ code: code.toUpperCase(), name }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'departments'] });
@@ -17,20 +33,32 @@ export function AfHomesDepartmentsPage() {
     },
   });
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Departments"
         description="Active organization units used for staff assignment"
         actions={<Button onClick={() => setOpen(true)}>New department</Button>}
       />
       {query.isPending ? (
-        <p role="status">Loading departments…</p>
+        <div role="status" aria-label="Loading departments">
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }} aria-hidden="true">
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : query.data?.length === 0 ? (
         <EmptyState title="No departments" description="Create an organization department." />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+        <div
+          role="region"
+          aria-label="Scrollable records"
+          tabIndex={0}
+          className={`table-scroll ${styles.tableWrap}`}
+        >
           <table>
             <thead>
               <tr>
@@ -43,10 +71,10 @@ export function AfHomesDepartmentsPage() {
             <tbody>
               {query.data?.map((d) => (
                 <tr key={d.id}>
-                  <td>{d.code}</td>
-                  <td>{d.name}</td>
-                  <td>{d.staffCount}</td>
-                  <td>
+                  <td data-label="Code">{d.code}</td>
+                  <td data-label="Name">{d.name}</td>
+                  <td data-label="Staff">{d.staffCount}</td>
+                  <td data-label="Status">
                     <StatusChip
                       label={d.isActive ? 'Active' : 'Inactive'}
                       tone={d.isActive ? 'success' : 'neutral'}
@@ -74,17 +102,22 @@ export function AfHomesDepartmentsPage() {
         }
       >
         <div style={{ display: 'grid', gap: 12 }}>
-          <label>
-            Code
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/[^A-Za-z0-9_]/g, ''))}
-            />
-          </label>
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
+          <TextField
+            id="department-code"
+            name="code"
+            label="Code"
+            optional
+            value={code}
+            onChange={(value) => setCode(value.replace(/[^A-Za-z0-9_]/g, ''))}
+          />
+          <TextField
+            id="department-name"
+            name="name"
+            label="Name"
+            optional
+            value={name}
+            onChange={setName}
+          />
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
       </Dialog>

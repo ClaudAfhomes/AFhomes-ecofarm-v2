@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Dialog } from '@afhomes/ui';
+import { Button, Dialog, TextAreaField, TextField } from '@afhomes/ui';
 import { afHomesModuleKeySchema, type AfHomesPermission, type AfHomesRole } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
 
@@ -126,14 +126,22 @@ export function AfHomesRoleFormDialog({
       <fieldset disabled={protectedAccess || saving}>
         <legend>{protectedAccess ? 'Protected access — read only' : 'Role access'}</legend>
         <div style={{ display: 'grid', gap: 12 }}>
-          <label>
-            {titleEditable ? 'Display title' : 'Name'}
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label>
-            Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-          </label>
+          <TextField
+            id="role-name"
+            name="roleName"
+            label={titleEditable ? 'Display title' : 'Name'}
+            optional
+            value={name}
+            onChange={setName}
+          />
+          <TextAreaField
+            id="role-description"
+            name="description"
+            label="Description"
+            optional
+            value={description}
+            onChange={setDescription}
+          />
           <label>
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />{' '}
             Active

@@ -1,14 +1,24 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ErrorState, StatusChip } from '@afhomes/ui';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { Alert, ErrorState, MetricCard, Skeleton, StatusChip } from '@afhomes/ui';
 import type { AfHomesPermission } from '@afhomes/contracts';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
 import { getReport } from '../reports/services';
-import { formatMoney, formatPaymentType } from '../business/format';
+import { formatPaymentType, humanizeCode } from '../business/format';
+import { businessKeys, membershipKeys } from '../business/queryKeys';
+import { sharedScopes } from '../business/queryKeys';
 import { formatDateTime } from '../../lib/format';
+import styles from './MembershipActivity.module.css';
 
-/** Lazy, permission-scoped sections reuse existing authorized read APIs. */
+/**
+ * Permission-scoped activity panels for one membership card.
+ *
+ * Lazy, read-only sections that reuse the existing authorized read APIs: the
+ * points account and its ledger, the originating sale's payments, and the
+ * member's service transactions. Nothing here spends, moves, or edits.
+ */
 export function MembershipActivity({
   id,
   number,
@@ -27,105 +37,167 @@ export function MembershipActivity({
   const paymentsAllowed = can('finance.payment_verification');
   const transactionsAllowed = can('operations.redemption');
   const membership = useQuery({
-    queryKey: ['memberships', id],
+    queryKey: membershipKeys.record(id),
     queryFn: () => getMembership(id),
     enabled: paymentsAllowed && paymentsOpen,
+    placeholderData: keepPreviousData,
   });
   const account = useQuery({
-    queryKey: ['memberships', id, 'points'],
+    queryKey: membershipKeys.points(id),
     queryFn: () => getMembershipPoints(id),
     enabled: pointsAllowed && pointsOpen,
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const ledger = useQuery({
-    queryKey: ['memberships', id, 'ledger', account.data?.id],
+    queryKey: membershipKeys.ledger(id, account.data?.id),
     queryFn: () => getMembershipLedger(account.data!.id),
     enabled: pointsAllowed && pointsOpen && Boolean(account.data),
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const payments = useQuery({
-    queryKey: ['business', 'sale-payments', membership.data?.saleId],
+    // Mirrors the sales-domain key so finance invalidations reach this panel.
+    queryKey: businessKeys.salePayments(membership.data?.saleId ?? 'unknown'),
     queryFn: () => getSalePayments(membership.data!.saleId),
     enabled: paymentsAllowed && paymentsOpen && Boolean(membership.data),
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
   const transactions = useQuery({
-    queryKey: ['reports', 'redemptions', number],
+    queryKey: [...sharedScopes.reports, 'redemptions', number],
     queryFn: () => getReport('redemptions', { search: number, limit: 50 }),
     enabled: transactionsAllowed && transactionsOpen,
+    placeholderData: keepPreviousData,
     refetchInterval: 30_000,
   });
   return (
-    <>
+    <div className={styles.stack}>
       {pointsAllowed ? (
-        <details onToggle={(e) => setPointsOpen(e.currentTarget.open)}>
-          <summary>Points</summary>
+        <details className={styles.group} onToggle={(e) => setPointsOpen(e.currentTarget.open)}>
+          <summary className={styles.groupTitle}>Points</summary>
           {account.isPending ? (
-            <p role="status">Loading points…</p>
-          ) : account.isError ? (
-            <ErrorState error={account.error} onRetry={account.refetch} />
-          ) : (
-            <p>
-              Balance: {account.data.balance.toLocaleString('en-PH')} · Lifetime allocated:{' '}
-              {account.data.lifetimeAllocated.toLocaleString('en-PH')} · Redeemed:{' '}
-              {account.data.lifetimeRedeemed.toLocaleString('en-PH')}
+            <p role="status">
+              <Skeleton style={{ height: 64 }} />
+              <span className="sr-only">Loading points…</span>
             </p>
+          ) : account.isError ? (
+            <ErrorState
+              error={account.error}
+              title="Points could not be loaded"
+              onRetry={() => void account.refetch()}
+            />
+          ) : (
+            <>
+              <p className={styles.groupNote}>
+                Balance: {formatCountOrDash(account.data.balance)} · Lifetime allocated:{' '}
+                {formatCountOrDash(account.data.lifetimeAllocated)} · Redeemed:{' '}
+                {formatCountOrDash(account.data.lifetimeRedeemed)}
+              </p>
+              <div className={styles.metrics}>
+                <MetricCard label="Balance" value={formatCountOrDash(account.data.balance)} />
+                <MetricCard
+                  label="Lifetime allocated"
+                  value={formatCountOrDash(account.data.lifetimeAllocated)}
+                />
+                <MetricCard
+                  label="Lifetime redeemed"
+                  value={formatCountOrDash(account.data.lifetimeRedeemed)}
+                />
+              </div>
+            </>
           )}
           {account.data ? (
             ledger.isPending ? (
-              <p role="status">Loading points history…</p>
+              <p role="status">
+                <Skeleton style={{ height: 48 }} />
+                <span className="sr-only">Loading points history…</span>
+              </p>
             ) : ledger.isError ? (
-              <ErrorState error={ledger.error} onRetry={ledger.refetch} />
+              <ErrorState
+                error={ledger.error}
+                title="Points history could not be loaded"
+                onRetry={() => void ledger.refetch()}
+              />
             ) : ledger.data.length ? (
-              <ol>
+              <ol className={styles.entries}>
                 {ledger.data.map((entry) => (
                   <li key={entry.id}>
-                    {entry.entryType.replaceAll('_', ' ')} · {entry.amount.toLocaleString('en-PH')}{' '}
-                    · {formatDateTime(entry.createdAt)}
+                    <StatusChip label={humanizeCode(entry.entryType)} />
+                    <span className={styles.entryMeta}>
+                      {formatCountOrDash(entry.amount)} · {formatDateTime(entry.createdAt)}
+                    </span>
                   </li>
                 ))}
               </ol>
             ) : (
-              <p>No points entries.</p>
+              <p className={styles.groupNote}>No points entries.</p>
             )
           ) : null}
         </details>
       ) : null}
       {paymentsAllowed ? (
-        <details onToggle={(e) => setPaymentsOpen(e.currentTarget.open)}>
-          <summary>Payments</summary>
+        <details className={styles.group} onToggle={(e) => setPaymentsOpen(e.currentTarget.open)}>
+          <summary className={styles.groupTitle}>Payments</summary>
           {membership.isError ? (
-            <ErrorState error={membership.error} onRetry={membership.refetch} />
+            <ErrorState
+              error={membership.error}
+              title="Membership could not be loaded"
+              onRetry={() => void membership.refetch()}
+            />
           ) : payments.isPending ? (
-            <p role="status">Loading membership payments…</p>
+            <p role="status">
+              <Skeleton style={{ height: 48 }} />
+              <span className="sr-only">Loading membership payments…</span>
+            </p>
           ) : payments.isError ? (
-            <ErrorState error={payments.error} onRetry={payments.refetch} />
+            <ErrorState
+              error={payments.error}
+              title="Payments could not be loaded"
+              onRetry={() => void payments.refetch()}
+            />
           ) : payments.data.length ? (
-            <ol>
+            <ol className={styles.entries}>
               {payments.data.map((payment) => (
                 <li key={payment.id}>
-                  {payment.paymentNumber ? `${payment.paymentNumber} · ` : null}
-                  {formatMoney(payment.amount)} · {formatPaymentType(payment.paymentType)} ·{' '}
-                  <StatusChip label={payment.status} /> · {formatDateTime(payment.recordedAt)}
+                  {payment.paymentNumber ? (
+                    <span className={styles.entryMeta}>{payment.paymentNumber}</span>
+                  ) : null}
+                  <span className={styles.entryMeta}>{formatMoneyOrDash(payment.amount)}</span>
+                  <span className={styles.entryMeta}>{formatPaymentType(payment.paymentType)}</span>
+                  <StatusChip label={humanizeCode(payment.status)} />
+                  <span className={styles.entryMeta}>{formatDateTime(payment.recordedAt)}</span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p>No payments recorded.</p>
+            <p className={styles.groupNote}>No payments recorded.</p>
           )}
         </details>
       ) : null}
       {transactionsAllowed ? (
-        <details onToggle={(e) => setTransactionsOpen(e.currentTarget.open)}>
-          <summary>Transactions</summary>
+        <details
+          className={styles.group}
+          onToggle={(e) => setTransactionsOpen(e.currentTarget.open)}
+        >
+          <summary className={styles.groupTitle}>Transactions</summary>
           {transactions.isPending ? (
-            <p role="status">Loading service transactions…</p>
+            <p role="status">
+              <Skeleton style={{ height: 48 }} />
+              <span className="sr-only">Loading service transactions…</span>
+            </p>
           ) : transactions.isError ? (
-            <ErrorState error={transactions.error} onRetry={transactions.refetch} />
+            <ErrorState
+              error={transactions.error}
+              title="Service transactions could not be loaded"
+              onRetry={() => void transactions.refetch()}
+            />
           ) : (
             <>
-              <p>Authorized service history · latest 50 matching records.</p>
-              <ul>
+              <p className={styles.groupNote}>
+                Authorized service history · latest 50 matching records.
+              </p>
+              <ul className={styles.entries}>
                 {transactions.data.data
                   .filter((row) => row.membershipNumber === number)
                   .map((row) => (
@@ -140,6 +212,12 @@ export function MembershipActivity({
           )}
         </details>
       ) : null}
-    </>
+      {!pointsAllowed && !paymentsAllowed && !transactionsAllowed ? (
+        <Alert variant="info" title="No activity access">
+          This account holds no activity permission for this card. The server still enforces every
+          check.
+        </Alert>
+      ) : null}
+    </div>
   );
 }

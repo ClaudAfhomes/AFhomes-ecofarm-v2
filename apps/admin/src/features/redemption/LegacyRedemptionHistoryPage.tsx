@@ -1,13 +1,16 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { formatCountOrDash } from '@afhomes/shared';
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
   PageHeader,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
   Table,
   TableBody,
@@ -19,7 +22,11 @@ import {
 
 import { getRedemptionItems, getRedemptions } from './services';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { formatDateTime } from '../../lib/format';
 import styles from './RedemptionHistory.module.css';
+
+const capitalize = (value: string) =>
+  value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
 
 /**
  * Redemption history.
@@ -31,6 +38,10 @@ import styles from './RedemptionHistory.module.css';
  * This is a read-only view. There is no void or reversal control, because the
  * authorization and accounting rule for a void is an unresolved business
  * decision, and inventing one here would quietly create the policy.
+ *
+ * Resolving a member (scanning or typing a code) is a read and never deducts
+ * anything. Points move only inside the server redemption transaction; the
+ * identifier authorizes nothing on its own.
  */
 export function LegacyRedemptionHistoryPage() {
   const [membershipNumber, setMembershipNumber] = useState('');
@@ -57,6 +68,9 @@ export function LegacyRedemptionHistoryPage() {
         ...(to ? { to: new Date(`${to}T23:59:59`).toISOString() } : {}),
         limit: 100,
       }),
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every filter change.
+    placeholderData: keepPreviousData,
     // Operational freshness: a redemption completed on another terminal
     // appears here without reload (same-session writes invalidate instantly).
     refetchInterval: 15_000,
@@ -70,8 +84,42 @@ export function LegacyRedemptionHistoryPage() {
     setTo('');
   };
 
+  const rows = history.data ?? [];
+
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous list visible via placeholderData and never reach this branch.
+  if (history.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading redemptions"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 300 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
-    <>
+    <section className={styles.page}>
       <PageHeader
         title="Legacy Points Transactions"
         description="Every points redemption, with the item name and price as they were at the time."
@@ -84,6 +132,7 @@ export function LegacyRedemptionHistoryPage() {
         }}
       >
         <FilterBar
+          filtersToggleLabel="Expand Filters"
           search={
             <SearchField
               id="filter-membership"
@@ -91,6 +140,7 @@ export function LegacyRedemptionHistoryPage() {
               placeholder="MBS-…"
               value={membershipNumber}
               onChange={setMembershipNumber}
+              busy={history.isFetching}
             />
           }
           filters={
@@ -104,24 +154,21 @@ export function LegacyRedemptionHistoryPage() {
                   ...(items.data ?? []).map((item) => ({ value: item.id, label: item.name })),
                 ]}
               />
-              <input
-                aria-label="From"
-                type="date"
+              <DateField
+                id="legacy-from"
+                name="from"
+                label="From"
+                optional
                 value={from}
-                onChange={(event) => setFrom(event.target.value)}
+                onChange={setFrom}
               />
-              <input
-                aria-label="To"
-                type="date"
-                value={to}
-                onChange={(event) => setTo(event.target.value)}
-              />
+              <DateField id="legacy-to" name="to" label="To" optional value={to} onChange={setTo} />
             </>
           }
           actions={
             <>
               <Button type="submit">Apply</Button>
-              <Button variant="ghost" onClick={clear}>
+              <Button variant="secondary" onClick={clear}>
                 Clear
               </Button>
             </>
@@ -129,14 +176,15 @@ export function LegacyRedemptionHistoryPage() {
         />
       </form>
 
-      {history.isLoading && <p role="status">Loading redemptions…</p>}
-      {history.isError && <ErrorState title="The history could not be loaded" />}
-
-      {history.data && history.data.length === 0 && (
+      {history.isError ? (
+        <ErrorState
+          title="The history could not be loaded"
+          error={history.error}
+          onRetry={history.refetch}
+        />
+      ) : rows.length === 0 ? (
         <EmptyState title="No redemptions match" description="Adjust the filters and try again." />
-      )}
-
-      {history.data && history.data.length > 0 && (
+      ) : (
         <Table>
           <TableHead>
             <TableRow>
@@ -152,31 +200,30 @@ export function LegacyRedemptionHistoryPage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {history.data.map((row) => (
+            {rows.map((row) => (
               <TableRow key={row.id}>
-                <TableCell>
+                <TableCell label="Redemption">
                   <span className={styles.mono}>{row.redemptionNumber}</span>
                 </TableCell>
-                <TableCell>{new Date(row.completedAt).toLocaleString('en-PH')}</TableCell>
-                <TableCell>{row.customerDisplayName}</TableCell>
-                <TableCell>
+                <TableCell label="When">{formatDateTime(row.completedAt)}</TableCell>
+                <TableCell label="Member">{row.customerDisplayName}</TableCell>
+                <TableCell label="Membership">
                   <span className={styles.mono}>{row.membershipNumber}</span>
                 </TableCell>
-                <TableCell>
+                <TableCell label="Item (as charged)">
                   {row.itemNameSnapshot}
                   {row.quantity > 1 && <span className={styles.muted}> × {row.quantity}</span>}
                   <span className={styles.muted}> ({row.itemCodeSnapshot})</span>
                 </TableCell>
-                <TableCell align="right">{row.totalPoints.toLocaleString('en-PH')}</TableCell>
-                <TableCell align="right">
-                  {row.balanceAfterSnapshot.toLocaleString('en-PH')}
+                <TableCell label="Points" align="right">
+                  {formatCountOrDash(row.totalPoints)}
                 </TableCell>
-                <TableCell>{row.redeemedByName}</TableCell>
-                <TableCell>
-                  <StatusChip
-                    label={row.status}
-                    tone={row.status === 'completed' ? 'success' : 'neutral'}
-                  />
+                <TableCell label="Balance after" align="right">
+                  {formatCountOrDash(row.balanceAfterSnapshot)}
+                </TableCell>
+                <TableCell label="Served by">{row.redeemedByName}</TableCell>
+                <TableCell label="Status">
+                  <StatusChip label={capitalize(row.status)} />
                 </TableCell>
               </TableRow>
             ))}
@@ -184,11 +231,11 @@ export function LegacyRedemptionHistoryPage() {
         </Table>
       )}
 
-      {history.data && history.data.length > 0 && (
+      {!history.isError && rows.length > 0 && (
         <p className={styles.footnote}>
-          Showing the most recent {history.data.length} redemptions matching these filters.
+          Showing the most recent {rows.length} redemptions matching these filters.
         </p>
       )}
-    </>
+    </section>
   );
 }

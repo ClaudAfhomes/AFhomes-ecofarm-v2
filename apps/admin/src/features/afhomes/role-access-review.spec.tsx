@@ -75,7 +75,7 @@ it('hides Customer and opens protected access read-only without a mutation path'
   expect(screen.getByRole('dialog', { name: 'Edit Employee access' })).toBeInTheDocument();
   // A Super Admin editing a system role relabels the field, so only the display
   // title is theirs to change - the slug and the grants are not.
-  expect(screen.getByLabelText('Display title')).toBeEnabled();
+  expect(screen.getByLabelText('Display title(Optional)')).toBeEnabled();
 });
 
 it('offers View access - never a dead Edit access button - to a non-Super-Admin', async () => {
@@ -102,7 +102,7 @@ it('offers View access - never a dead Edit access button - to a non-Super-Admin'
     expect(within(row).queryByRole('button', { name: 'Edit access' })).toBeNull();
     fireEvent.click(within(row).getByRole('button', { name: 'View access' }));
     expect(screen.getByRole('dialog', { name: `View ${slug} access` })).toBeInTheDocument();
-    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByLabelText('Name(Optional)')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save role' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   }
@@ -137,6 +137,6 @@ it('keeps the existing custom-role permission editor usable', async () => {
   ]);
   renderWithProviders(<AfHomesRolesPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit access' }));
-  expect(screen.getByLabelText('Name')).toBeEnabled();
+  expect(screen.getByLabelText('Name(Optional)')).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Save role' })).toBeEnabled();
 });

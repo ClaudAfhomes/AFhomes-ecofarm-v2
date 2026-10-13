@@ -71,11 +71,11 @@ describe('Finance point refund review', () => {
     await user.click(screen.getByRole('button', { name: 'Review point refund' }));
     await screen.findByText(/Remaining attributable value/);
     await user.type(
-      screen.getByLabelText('Service value being refunded, before the points discount'),
+      screen.getByLabelText('Service value being refunded, before the points discount(Optional)'),
       '750.00',
     );
     await user.type(
-      screen.getByLabelText('Finance review and reason'),
+      screen.getByLabelText('Finance review and reason(Optional)'),
       'Reviewed partial cancellation',
     );
     expect(screen.getByRole('button', { name: 'Record Finance review' })).toBeDisabled();
@@ -95,7 +95,7 @@ describe('Finance point refund review', () => {
     const user = userEvent.setup();
     renderWithProviders(<PointRefundReview purchase={{ ...PURCHASE, status: 'draft' }} />);
     await user.click(screen.getByRole('button', { name: 'Cancel purchase reservation' }));
-    await user.type(screen.getByLabelText('Finance review and reason'), 'Reviewed cancellation');
+    await user.type(screen.getByLabelText('Finance review and reason(Optional)'), 'Reviewed cancellation');
     await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: 'Record Finance review' }));
     expect(cancelPointPurchase).not.toHaveBeenCalled();

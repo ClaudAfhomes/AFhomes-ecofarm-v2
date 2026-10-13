@@ -1,0 +1,62 @@
+/* Membership activity: permission-scoped lazy panels for points,
+   payments, and service transactions. */
+
+.stack {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.group {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+}
+
+.groupNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.entries {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.entries li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  font-size: var(--text-body-s);
+  overflow-wrap: anywhere;
+}
+
+.entryMeta {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}

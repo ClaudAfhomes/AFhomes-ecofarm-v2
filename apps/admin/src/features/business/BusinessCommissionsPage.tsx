@@ -1,15 +1,19 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
   Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
+  MetricCard,
   PageHeader,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import type { Commission } from '@afhomes/contracts';
 
@@ -17,8 +21,11 @@ import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { canViewModule } from '../../app/navigation';
-import { formatMoney, formatRate } from './format';
+import { formatRate } from './format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { getCommissions, markCommissionPaid, qualifyCommission } from './services';
+import { businessKeys } from './queryKeys';
+import styles from './BusinessCommissionsPage.module.css';
 
 const STATUSES = [
   '',
@@ -87,8 +94,11 @@ export function BusinessCommissionsPage() {
     canViewModule(user?.afHomesPermissions, 'finance.card_activation');
 
   const query = useQuery({
-    queryKey: ['business', 'commissions', applied],
+    queryKey: businessKeys.commissions(applied),
     queryFn: () => getCommissions(applied),
+    // Keep the previous page on screen while the next filter lands: refetches
+    // then feel instant and the skeleton only ever appears on first load.
+    placeholderData: keepPreviousData,
     // Qualification and payout decisions land from review screens and other
     // sessions; the Apply-time snapshot refreshes without reload.
     refetchInterval: 30_000,
@@ -97,159 +107,252 @@ export function BusinessCommissionsPage() {
   const [qualifying, setQualifying] = useState<Commission | null>(null);
   const [paying, setPaying] = useState<Commission | null>(null);
 
+  const rows = useMemo(() => query.data ?? [], [query.data]);
+  // Headline counts from the loaded rows.
+  const summary = useMemo(() => {
+    const awaiting = rows.filter((c) => c.status === 'final_qualification_pending').length;
+    const earned = rows.filter((c) => c.status === 'earned').length;
+    const paid = rows.filter((c) => c.status === 'paid').length;
+    return { total: rows.length, awaiting, earned, paid };
+  }, [rows]);
+
   const refresh = async () => {
-    await client.invalidateQueries({ queryKey: ['business', 'commissions'] });
+    await client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
   };
 
-  return (
-    <section>
-      <PageHeader
-        title="Commissions"
-        description="Single-level commissions from frozen sale snapshots. Account rules override role rules; no matching rule means 0%. Qualification and payout remain explicit audited decisions."
-      />
-
-      <FilterBar
-        search={
-          <SearchField
-            label="Search commissions"
-            placeholder="SALE-000001 or seller name"
-            value={search}
-            onChange={setSearch}
-          />
-        }
-        filters={
-          <>
-            <Select
-              aria-label="Filter by status"
-              value={status}
-              onChange={(e) => {
-                const next = e.target.value;
-                setStatus(next);
-                applyFilters({ status: next, search: search.trim(), seller: seller.trim() });
-              }}
-              options={[
-                { value: '', label: 'All statuses' },
-                ...STATUSES.filter(Boolean).map((value) => ({
-                  value,
-                  label: STATUS_LABEL[value] ?? value,
-                })),
-              ]}
-            />
-            {mayFilterBySeller ? (
-              <SearchField
-                label="Filter by seller"
-                placeholder="Staff or OST id"
-                value={seller}
-                onChange={setSeller}
-              />
-            ) : null}
-          </>
-        }
-        actions={
-          <>
-            <Button
-              variant="secondary"
-              onClick={() => applyFilters({ status, search: search.trim(), seller: seller.trim() })}
-            >
-              Apply
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setSearch('');
-                setStatus('');
-                setSeller('');
-                setApplied({});
-              }}
-            >
-              Clear
-            </Button>
-          </>
-        }
-      />
-
-      {query.isPending ? (
-        <p role="status">Loading commissions…</p>
-      ) : query.isError ? (
-        <ErrorState error={query.error} onRetry={query.refetch} />
-      ) : query.data?.length === 0 ? (
-        <EmptyState
-          title={applied.search ? 'No matching records.' : 'No commissions'}
-          description="No commission matches the current filters."
-        />
-      ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Commission</th>
-                <th>Sale</th>
-                <th>Beneficiary</th>
-                <th>Basis</th>
-                <th>Rate</th>
-                <th>Commission</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Qualified / Earned / Paid</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {query.data?.map((commission) => (
-                <tr key={commission.id}>
-                  <td>{commission.commissionNumber ?? '—'}</td>
-                  <td>{commission.saleNumber}</td>
-                  <td>{commission.beneficiaryName}</td>
-                  <td>{formatMoney(commission.basisAmount)}</td>
-                  <td>{formatRate(commission.rate)}</td>
-                  <td>{formatMoney(commission.amount)}</td>
-                  <td>
-                    <StatusChip
-                      label={STATUS_LABEL[commission.status] ?? commission.status}
-                      tone={
-                        commission.status === 'paid'
-                          ? 'success'
-                          : commission.status === 'earned'
-                            ? 'success'
-                            : commission.status === 'cancelled'
-                              ? 'neutral'
-                              : commission.status === 'final_qualification_pending'
-                                ? 'warning'
-                                : commission.status === 'payment_verified'
-                                  ? 'info'
-                                  : 'warning'
-                      }
-                    />
-                  </td>
-                  <td>{formatDateTime(commission.createdAt)}</td>
-                  <td>
-                    {[commission.qualifiedAt, commission.earnedAt, commission.paidAt]
-                      .filter(Boolean)
-                      .map((value) => formatDateTime(value!))
-                      .join(' · ') || '—'}
-                  </td>
-                  <td>
-                    {commission.status === 'final_qualification_pending' && mayMutate ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setQualifying(commission)}
-                      >
-                        Decide
-                      </Button>
-                    ) : commission.status === 'earned' && mayMutate ? (
-                      <Button size="sm" variant="secondary" onClick={() => setPaying(commission)}>
-                        Mark Paid
-                      </Button>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  // First load skeletonizes the whole page: header, summary, filters and
+  // table. Refetches keep the previous page visible via placeholderData and
+  // never reach this branch.
+  if (query.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading commissions"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 360 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
         </div>
+      </section>
+    );
+
+  return (
+    <section className={styles.page}>
+      <PageHeader title="Commissions" description="Commissions from frozen sale snapshots" />
+
+      {query.isError ? (
+        <ErrorState error={query.error} onRetry={query.refetch} />
+      ) : (
+        <>
+          <ul className={styles.summary} aria-label="Commission summary">
+            <li>
+              <MetricCard
+                label="Pending decision"
+                value={formatCountOrDash(summary.awaiting)}
+                icon="clock"
+                description="Commissions needing final qualification"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Qualified (earned)"
+                value={formatCountOrDash(summary.earned)}
+                icon="check"
+                description="Qualified, ready to mark paid"
+              />
+            </li>
+            <li>
+              <MetricCard
+                label="Paid out"
+                value={formatCountOrDash(summary.paid)}
+                icon="dollar-sign"
+                description="Payouts recorded"
+              />
+            </li>
+          </ul>
+
+          <FilterBar
+            filtersToggleLabel="Expand Filters"
+            search={
+              <SearchField
+                label="Search commissions"
+                placeholder="SALE-000001 or seller name"
+                value={search}
+                onChange={setSearch}
+                busy={query.isFetching}
+              />
+            }
+            filters={
+              <>
+                <label className={styles.filterLabel}>
+                  Status
+                  <Select
+                    aria-label="Filter by status"
+                    value={status}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setStatus(next);
+                      applyFilters({ status: next, search: search.trim(), seller: seller.trim() });
+                    }}
+                    options={[
+                      { value: '', label: 'All statuses' },
+                      ...STATUSES.filter(Boolean).map((value) => ({
+                        value,
+                        label: STATUS_LABEL[value] ?? value,
+                      })),
+                    ]}
+                  />
+                </label>
+                {mayFilterBySeller ? (
+                  <SearchField
+                    label="Filter by seller"
+                    placeholder="Staff or OST id"
+                    value={seller}
+                    onChange={setSeller}
+                  />
+                ) : null}
+              </>
+            }
+            actions={
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    applyFilters({ status, search: search.trim(), seller: seller.trim() })
+                  }
+                >
+                  Apply
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setSearch('');
+                    setStatus('');
+                    setSeller('');
+                    setApplied({});
+                  }}
+                >
+                  Clear
+                </Button>
+              </>
+            }
+          />
+
+          {rows.length === 0 ? (
+            <EmptyState
+              title={applied.search ? 'No matching records.' : 'No commissions'}
+              description="No commission matches the current filters."
+            />
+          ) : (
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className={`table-scroll ${styles.tableWrap} ${styles.queueCard}`}
+            >
+              <table className={styles.queueTable}>
+                <thead>
+                  <tr>
+                    <th>Commission</th>
+                    <th>Sale</th>
+                    <th>Beneficiary</th>
+                    <th>Basis</th>
+                    <th>Rate</th>
+                    <th>Commission</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Qualified / Earned / Paid</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((commission) => (
+                    <tr key={commission.id}>
+                      <td data-label="Commission">
+                        <span className={styles.recordRef}>
+                          <span className={styles.recordRefDot} aria-hidden="true" />
+                          {commission.commissionNumber ?? '—'}
+                        </span>
+                      </td>
+                      <td data-label="Sale">{commission.saleNumber}</td>
+                      <td data-label="Beneficiary">{commission.beneficiaryName}</td>
+                      <td data-label="Basis" className={styles.numeric}>
+                        {formatMoneyOrDash(commission.basisAmount)}
+                      </td>
+                      <td data-label="Rate" className={styles.numeric}>
+                        {formatRate(commission.rate)}
+                      </td>
+                      <td data-label="Commission" className={styles.numeric}>
+                        {formatMoneyOrDash(commission.amount)}
+                      </td>
+                      <td data-label="Status">
+                        <StatusChip
+                          label={STATUS_LABEL[commission.status] ?? commission.status}
+                          tone={
+                            commission.status === 'paid'
+                              ? 'success'
+                              : commission.status === 'earned'
+                                ? 'success'
+                                : commission.status === 'cancelled'
+                                  ? 'danger'
+                                  : commission.status === 'final_qualification_pending'
+                                    ? 'warning'
+                                    : commission.status === 'payment_verified'
+                                      ? 'info'
+                                      : 'warning'
+                          }
+                          icon={commission.status === 'cancelled' ? 'close' : undefined}
+                        />
+                      </td>
+                      <td data-label="Created">{formatDateTime(commission.createdAt)}</td>
+                      <td data-label="Qualified / Earned / Paid">
+                        {[commission.qualifiedAt, commission.earnedAt, commission.paidAt]
+                          .filter(Boolean)
+                          .map((value) => formatDateTime(value!))
+                          .join(' · ') || '—'}
+                      </td>
+                      <td data-label="Actions">
+                        {commission.status === 'final_qualification_pending' && mayMutate ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setQualifying(commission)}
+                          >
+                            Decide
+                          </Button>
+                        ) : commission.status === 'earned' && mayMutate ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setPaying(commission)}
+                          >
+                            Mark Paid
+                          </Button>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {qualifying ? (
@@ -287,7 +390,7 @@ function QualifyDialog({
 }) {
   const [notes, setNotes] = useState('');
   const [decision, setDecision] = useState<'earned' | 'cancelled'>('earned');
-  const decide = useMutation({
+  const decide = useBusinessMutation({
     mutationFn: () => qualifyCommission(commission.id, { decision, notes }),
     onSuccess: onDone,
   });
@@ -311,27 +414,37 @@ function QualifyDialog({
         </>
       }
     >
-      <div style={{ display: 'grid', gap: 12 }}>
-        <p>
-          Sale <strong>{commission.saleNumber}</strong> · {formatMoney(commission.amount)} to{' '}
+      <div className={styles.formGrid}>
+        <p className={styles.formNote}>
+          Sale <strong>{commission.saleNumber}</strong> · {formatMoneyOrDash(commission.amount)} to{' '}
           {commission.beneficiaryName}. This is the only way a commission becomes earned, and it is
           recorded with your notes and identity. The amount and attribution do not change.
         </p>
-        <label>
+        <label className={styles.filterLabel}>
           Decision
-          <select
+          <Select
+            aria-label="Decision"
             value={decision}
             onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
-          >
-            <option value="earned">Qualify — commission earned</option>
-            <option value="cancelled">Cancel — commission cancelled</option>
-          </select>
+            options={[
+              { value: 'earned', label: 'Qualify: commission earned' },
+              { value: 'cancelled', label: 'Cancel: commission cancelled' },
+            ]}
+          />
         </label>
-        <label>
-          Notes (required)
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
-        {decide.error ? <p role="alert">{decide.error.message}</p> : null}
+        <TextField
+          id="commission-decision-notes"
+          name="decisionNotes"
+          label="Notes"
+          hint="At least 5 characters. Recorded with your identity."
+          value={notes}
+          onChange={setNotes}
+        />
+        {decide.error ? (
+          <p role="alert" className={styles.formAlert}>
+            {decide.error.message}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );
@@ -347,7 +460,7 @@ function MarkPaidDialog({
   onDone: () => Promise<void>;
 }) {
   const [reference, setReference] = useState('');
-  const pay = useMutation({
+  const pay = useBusinessMutation({
     mutationFn: () =>
       markCommissionPaid(commission.id, reference.trim() ? { reference: reference.trim() } : {}),
     onSuccess: onDone,
@@ -369,17 +482,25 @@ function MarkPaidDialog({
         </>
       }
     >
-      <div style={{ display: 'grid', gap: 12 }}>
-        <p>
-          Sale <strong>{commission.saleNumber}</strong> · {formatMoney(commission.amount)} to{' '}
+      <div className={styles.formGrid}>
+        <p className={styles.formNote}>
+          Sale <strong>{commission.saleNumber}</strong> · {formatMoneyOrDash(commission.amount)} to{' '}
           {commission.beneficiaryName}. Only an earned commission can be marked paid. The amount and
           attribution do not change; this records when and by whom it was paid.
         </p>
-        <label>
-          Payment reference (optional)
-          <input value={reference} onChange={(e) => setReference(e.target.value)} />
-        </label>
-        {pay.error ? <p role="alert">{pay.error.message}</p> : null}
+        <TextField
+          id="commission-payment-reference"
+          name="paymentReference"
+          label="Payment reference"
+          optional
+          value={reference}
+          onChange={setReference}
+        />
+        {pay.error ? (
+          <p role="alert" className={styles.formAlert}>
+            {pay.error.message}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );

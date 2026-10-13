@@ -213,7 +213,7 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
       .order('executed_at', { ascending: true })
       .order('id'),
   );
-  const data = (
+  const filtered = (
     await Promise.all(
       rows.map(async (raw) => {
         const row = raw as Record<string, unknown>;
@@ -299,7 +299,10 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
       }),
     )
   ).filter((row): row is NonNullable<typeof row> => row !== null);
-  return { data, meta: { total: data.length, limit, offset } };
+  // `total` counts every match, not just this page: the finance screen reads
+  // it to say "200 of 231" instead of silently dropping the tail.
+  const data = filtered.slice(offset, offset + limit);
+  return { data, meta: { total: filtered.length, limit, offset } };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { validateRecoveryPassword } from '@afhomes/shared';
-import { Alert, AuthLayout, Button, PasswordField } from '@afhomes/ui';
+import { Alert, AuthLayout, Button, PasswordField, Skeleton } from '@afhomes/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
 import styles from './AdminLoginPage.module.css';
@@ -140,9 +140,11 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
           </p>
         </div>
       ) : phase === 'checking' ? (
-        <p className={styles.prompt} role="status">
-          Checking your recovery link…
-        </p>
+        <div role="status" aria-label="Checking your recovery link">
+          <Skeleton style={{ height: 40 }} />
+          <Skeleton style={{ height: 40 }} />
+          <span className="sr-only">Checking your recovery link…</span>
+        </div>
       ) : phase === 'ready' ? (
         <form onSubmit={onSubmit} className={styles.form} noValidate>
           {serverError && (
@@ -175,7 +177,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
           </p>
           <div className={styles.submitRow}>
-            <Button type="submit" loading={pending} disabled={pending}>
+            <Button type="submit" loading={pending} loadingLabel="Updating…" disabled={pending}>
               Update password
             </Button>
           </div>

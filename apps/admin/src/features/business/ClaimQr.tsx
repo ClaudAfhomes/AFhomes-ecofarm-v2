@@ -21,6 +21,7 @@ import { useState } from 'react';
 import { Button, QrCode, downloadQrImage } from '@afhomes/ui';
 
 import { webBase } from '../../lib/portal';
+import { formatDateTime } from '../../lib/format';
 import styles from './points.module.css';
 
 /**
@@ -42,14 +43,17 @@ export type IssuedClaim = {
 
 export function ClaimQr({ claim }: { claim: IssuedClaim }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const url = claimUrl(claim.qrToken);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      setCopyFailed(false);
     } catch {
       setCopied(false);
+      setCopyFailed(true);
     }
   };
 
@@ -67,7 +71,7 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
         <dt>Typed code</dt>
         <dd className={styles.mono}>{claim.fallbackCode}</dd>
         <dt>Expires</dt>
-        <dd>{new Date(claim.expiresAt).toLocaleString('en-PH')}</dd>
+        <dd>{formatDateTime(claim.expiresAt)}</dd>
       </dl>
 
       <div className={styles.claimQrActions}>
@@ -85,7 +89,11 @@ export function ClaimQr({ claim }: { claim: IssuedClaim }) {
 
       {/* Spoken by a screen reader; the image alone conveys nothing useful. */}
       <p role="status" aria-live="polite">
-        {copied ? 'Claim link copied to the clipboard.' : ''}
+        {copied
+          ? 'Claim link copied to the clipboard.'
+          : copyFailed
+            ? 'Copy failed. Select and copy the link manually.'
+            : ''}
       </p>
     </div>
   );

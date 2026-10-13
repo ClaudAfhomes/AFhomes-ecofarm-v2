@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { settlementStatus } from './format';
+import { formatPoints, settlementStatus } from './format';
 
 describe('settlementStatus', () => {
   it('reads Fully Paid when Total equals Paid and Balance is zero', () => {
@@ -25,5 +25,17 @@ describe('settlementStatus', () => {
     expect(settlementStatus(null, '0.00', '0.00')).toBe('Unsettled');
     expect(settlementStatus('60000.00', null, '60000.00')).toBe('Unsettled');
     expect(settlementStatus('much', '0.00', 'much')).toBe('Unsettled');
+  });
+});
+
+describe('formatPoints', () => {
+  it('groups thousands separators (8000 -> 8,000)', () => {
+    expect(formatPoints(8000)).toBe('8,000');
+    expect(formatPoints(4)).toBe('4');
+  });
+
+  it('renders an em dash for missing counts', () => {
+    expect(formatPoints(null)).toBe('—');
+    expect(formatPoints(undefined)).toBe('—');
   });
 });

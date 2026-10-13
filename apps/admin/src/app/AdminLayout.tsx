@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@afhomes/ui';
+import { AppShell, Breadcrumbs, ConfirmDialog, Skeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
@@ -67,7 +67,19 @@ export function AdminLayout() {
       >
         <div className={styles.content}>
           {crumbs ? <Breadcrumbs items={crumbs} /> : null}
-          <Outlet />
+          {/* Route pages load on demand: the shell stays mounted while the
+          page chunk loads, so navigation never blanks. */}
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading page">
+                <Skeleton />
+                <Skeleton />
+                <Skeleton />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </AppShell>
       <ConfirmDialog

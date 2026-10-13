@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -14,7 +15,9 @@ import {
   ErrorState,
   PageHeader,
   Select,
+  Skeleton,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import type { AfHomesDepartment, AfHomesRole, AfHomesStaff } from '@afhomes/contracts';
 import { useSession } from '../../lib/session';
@@ -28,12 +31,7 @@ import {
   updateAfHomesStaff,
   type AfHomesAuditEvent,
 } from './services';
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
+import { formatDateTime } from '../../lib/format';
 
 export function AfHomesStaffDetailPage() {
   const { id } = useParams();
@@ -53,7 +51,26 @@ export function AfHomesStaffDetailPage() {
     enabled: Boolean(id),
   });
 
-  if (staff.isPending) return <p role="status">Loading staff member…</p>;
+  // First load skeletonizes the whole page - header and detail cards - so no
+  // static content flashes before the data it describes.
+  if (staff.isPending)
+    return (
+      <section>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading staff member"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <Skeleton style={{ height: 160 }} />
+          <Skeleton style={{ height: 120 }} />
+          <Skeleton style={{ height: 120 }} />
+        </div>
+      </section>
+    );
   if (staff.isError) return <ErrorState error={staff.error} onRetry={staff.refetch} />;
   return (
     <StaffDetailForm
@@ -107,7 +124,7 @@ function StaffDetailForm({
     await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
   };
 
-  const assignment = useMutation({
+  const assignment = useBusinessMutation({
     mutationFn: () =>
       updateAfHomesStaff(member.id, {
         roleId: roleId !== member.roleId ? roleId : undefined,
@@ -119,7 +136,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const standing = useMutation({
+  const standing = useBusinessMutation({
     mutationFn: () =>
       updateAfHomesStaff(member.id, {
         status: status as 'active' | 'inactive' | 'suspended',
@@ -129,7 +146,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const deactivate = useMutation({
+  const deactivate = useBusinessMutation({
     mutationFn: () => deactivateAfHomesStaff(member.id),
     onSuccess: async () => {
       setConfirmDeactivate(false);
@@ -137,7 +154,7 @@ function StaffDetailForm({
       await onChanged();
     },
   });
-  const remove = useMutation({
+  const remove = useBusinessMutation({
     mutationFn: () => deleteAfHomesStaff(member.id),
     onSuccess: async () => {
       await invalidate();
@@ -195,7 +212,7 @@ function StaffDetailForm({
           <DetailCardTitle>Account state</DetailCardTitle>
           <DetailFieldGrid>
             <DetailField label="Temporary password">
-              {member.mustChangePassword ? 'Change required — panel locked' : 'Changed'}
+              {member.mustChangePassword ? 'Change required - panel locked' : 'Changed'}
             </DetailField>
             <DetailField label="Invited">{formatDateTime(member.invitedAt)}</DetailField>
             <DetailField label="Activated">{formatDateTime(member.activatedAt)}</DetailField>
@@ -300,7 +317,10 @@ function StaffDetailForm({
         <DetailCard>
           <DetailCardTitle>Audit history</DetailCardTitle>
           {historyPending ? (
-            <p role="status">Loading audit history…</p>
+            <div role="status" aria-label="Loading audit history">
+              <Skeleton style={{ height: 44 }} />
+              <Skeleton style={{ height: 44 }} />
+            </div>
           ) : historyError ? (
             <ErrorState error={historyError} onRetry={onRetryHistory} />
           ) : history?.length ? (
@@ -363,14 +383,13 @@ function StaffDetailForm({
               This action permanently removes the login/account if no protected business records
               exist. This cannot be undone.
             </p>
-            <label>
-              Type DELETE to confirm
-              <input
-                aria-label="Type DELETE to confirm staff deletion"
-                value={deleteConfirmation}
-                onChange={(event) => setDeleteConfirmation(event.target.value)}
-              />
-            </label>
+            <TextField
+              id="staff-delete-confirm"
+              name="deleteConfirm"
+              label="Type DELETE to confirm staff deletion"
+              value={deleteConfirmation}
+              onChange={setDeleteConfirmation}
+            />
           </div>
         }
         danger

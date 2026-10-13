@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalyticsOverview } from '@afhomes/contracts';
-import { dashboardMetrics } from './AfHomesDashboardPage';
+import { dashboardMetrics, filterSalesMetrics } from './AfHomesDashboardPage';
 
 const overview = (kind: AnalyticsOverview['scope']['kind']): AnalyticsOverview => ({
   period: 'month',
@@ -81,11 +81,33 @@ describe('Phase 25 role dashboard presentation', () => {
    * stays the ranking `dashboardMetrics` already defines.
    */
   it('ranks the headline metrics so the first four survive the dashboard cap', () => {
-    expect(dashboardMetrics(overview('finance')).slice(0, 4).map(([label]) => label)).toEqual([
-      'Total Customers',
-      'New Applications',
-      'Card Sales',
-      'Total Sales',
-    ]);
+    expect(
+      dashboardMetrics(overview('finance'))
+        .slice(0, 4)
+        .map(([label]) => label),
+    ).toEqual(['Total Customers', 'New Applications', 'Card Sales', 'Total Sales']);
+  });
+});
+
+describe('dashboard sales gating (sales.card_sales view)', () => {
+  it('keeps every headline card for staff with Sales access', () => {
+    expect(
+      filterSalesMetrics(dashboardMetrics(overview('finance')), true).map(([label]) => label),
+    ).toEqual(['Total Customers', 'New Applications', 'Card Sales', 'Total Sales']);
+  });
+
+  it('strips only the sales headline cards for staff without Sales access', () => {
+    expect(
+      filterSalesMetrics(dashboardMetrics(overview('finance')), false).map(([label]) => label),
+    ).toEqual(['Total Customers', 'New Applications']);
+  });
+
+  it('leaves the organization and redemption metric sets untouched', () => {
+    expect(
+      filterSalesMetrics(dashboardMetrics(overview('organization')), false).map(([label]) => label),
+    ).toContain('Total staff');
+    expect(
+      filterSalesMetrics(dashboardMetrics(overview('redemption')), false).map(([label]) => label),
+    ).toEqual(['Redemptions', 'Points redeemed']);
   });
 });

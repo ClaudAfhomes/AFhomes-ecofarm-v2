@@ -63,7 +63,7 @@ describe('service catalog editing', () => {
     await user.click(screen.getByRole('button', { name: 'Add service' }));
     expect(screen.queryByLabelText(/product code/i)).toBeNull();
     await user.type(screen.getByLabelText('Service name'), 'Teppanyaki');
-    await user.type(screen.getByLabelText('Description'), 'Per head dining');
+    await user.type(screen.getByLabelText('Description(Optional)'), 'Per head dining');
     await user.type(screen.getByLabelText('Base price'), '2000.00');
     await user.click(screen.getByLabelText('Publish on Experiences'));
     await user.click(screen.getByRole('button', { name: 'Save service' }));
@@ -83,7 +83,7 @@ describe('service catalog editing', () => {
         highlights: [],
       }),
     );
-    expect(await screen.findByLabelText('Image file')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Image file(Optional)')).toBeInTheDocument();
     expect(onSaved).toHaveBeenCalled();
   });
   it('marks a staycation service eligible for points spending without a promotion', async () => {

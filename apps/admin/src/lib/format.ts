@@ -1,5 +1,15 @@
+/**
+ * Staff-console date display (browser-zone, en-PH).
+ *
+ * Staff consoles run on Philippine time alongside the servers, so these
+ * helpers intentionally render in the browser's zone. Anything shown to a
+ * MEMBER (portal, QR receipts, onboarding) must use the UTC-pinned helpers in
+ * `@afhomes/shared` instead, so the date never shifts with the member's zone.
+ */
+
 /** Format an ISO-8601 date string to a human-readable short date. */
-export function formatDate(iso: string): string {
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const date = new Date(iso);
   return date.toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -9,7 +19,8 @@ export function formatDate(iso: string): string {
 }
 
 /** Format an ISO-8601 date string to a human-readable datetime. */
-export function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const date = new Date(iso);
   return date.toLocaleDateString('en-PH', {
     year: 'numeric',

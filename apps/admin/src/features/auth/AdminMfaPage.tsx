@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
-import { AuthLayout, Button, ErrorState } from '@afhomes/ui';
+import { AuthLayout, Alert, Button, ErrorState, Skeleton, TextField } from '@afhomes/ui';
 import { getSupabaseClient } from '../../lib/supabase';
 import { useSession } from '../../lib/session';
 
@@ -19,7 +20,7 @@ export function AdminMfaPage() {
       return result.data.totp;
     },
   });
-  const enrollment = useMutation({
+  const enrollment = useBusinessMutation({
     mutationFn: async () => {
       if (!client) throw new Error('Authentication is not configured.');
       const result = await client.auth.mfa.enroll({
@@ -31,7 +32,7 @@ export function AdminMfaPage() {
     },
   });
   const factorId = enrollment.data?.id ?? factors.data?.[0]?.id;
-  const verify = useMutation({
+  const verify = useBusinessMutation({
     mutationFn: async () => {
       if (!client || !factorId || !/^\d{6}$/.test(code))
         throw new Error('Enter the six-digit authenticator code.');
@@ -49,10 +50,20 @@ export function AdminMfaPage() {
       brandTitle="Secure access to AF Homes."
       lead="Admin and Super Admin verification uses Supabase TOTP."
     >
-      {factors.isPending && <p role="status">Loading authenticator setup…</p>}
+      {factors.isPending && (
+        <div role="status" aria-label="Loading authenticator setup">
+          <Skeleton style={{ height: 40 }} />
+          <Skeleton style={{ height: 40 }} />
+          <span className="sr-only">Loading authenticator setup…</span>
+        </div>
+      )}
       {factors.isError && <ErrorState error={factors.error} onRetry={factors.refetch} />}
       {factors.data && !factorId && (
-        <Button onClick={() => enrollment.mutate()} disabled={enrollment.isPending}>
+        <Button
+          onClick={() => enrollment.mutate()}
+          loading={enrollment.isPending}
+          loadingLabel="Setting up…"
+        >
           Set up authenticator
         </Button>
       )}
@@ -79,26 +90,31 @@ export function AdminMfaPage() {
             verify.mutate();
           }}
         >
-          <label>
-            Authenticator code
-            <input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              required
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-          </label>
-          <Button type="submit" disabled={verify.isPending}>
+          <TextField
+            id="mfa-code"
+            name="code"
+            label="Authenticator code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={setCode}
+          />
+          <Button type="submit" loading={verify.isPending} loadingLabel="Verifying…">
             Verify
           </Button>
         </form>
       )}
       {enrollment.isError && (
-        <p role="alert">Unable to enroll an authenticator. Retry or contact the account owner.</p>
+        <Alert variant="danger" title="Authenticator setup failed">
+          Unable to enroll an authenticator. Retry or contact the account owner.
+        </Alert>
       )}
-      {verify.isError && <p role="alert">{verify.error.message}</p>}
+      {verify.isError && (
+        <Alert variant="danger" title="Verification failed">
+          {verify.error.message}
+        </Alert>
+      )}
     </AuthLayout>
   );
 }
