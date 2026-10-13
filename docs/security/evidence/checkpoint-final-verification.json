@@ -1,0 +1,34 @@
+{
+  "observedAt": "2026-10-13T06:33:53.653Z",
+  "state": {
+    "admin_mfa_required": false,
+    "policy_rows": 1,
+    "history_count": 71,
+    "auth_count": 1,
+    "vip_codes": [
+      "BRONZE",
+      "GOLD",
+      "SILVER"
+    ]
+  },
+  "rawColumnDenialProbes": [
+    {
+      "column": "extracted_data",
+      "code": "42501"
+    },
+    {
+      "column": "reviewed_data",
+      "code": "42501"
+    },
+    {
+      "column": "sha256",
+      "code": "42501"
+    }
+  ],
+  "productionHealth": {
+    "status": 200,
+    "ok": true,
+    "db": "ok"
+  },
+  "verifiedTls": true
+}
