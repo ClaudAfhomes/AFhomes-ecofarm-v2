@@ -15860,6 +15860,75 @@ async function main(): Promise<void> {
             [ids],
           );
         }
+        // Sale-team accreditation and the OST member graph reference synthetic
+        // staff, applications and members with ON DELETE RESTRICT, so the
+        // newest tables go before the application/member/staff deletes below.
+        // Predicates reuse the same synthetic sets: staff by recorded union,
+        // applications by synthetic sponsor, members by synthetic application
+        // or run email.
+        await db?.query(
+          `delete from private.sale_team_accreditations
+           where staff_id = any($1::uuid[]) or approved_by = any($1::uuid[])
+             or revoked_by = any($1::uuid[])`,
+          [staffSet],
+        );
+        await db?.query(
+          `delete from public.commissions
+           where ost_id in (select id from public.ost_members where email like $1)
+              or beneficiary_ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from public.identity_documents
+           where ost_application_id in
+            (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        // Terms and renewals reference each other; renewal_id is nullable so
+        // it is cleared first, then renewals (whose prior_term chain dies with
+        // them), then terms. Only renewal-linked terms (application_id null;
+        // exactly one side is set) may be nulled, or the CHECK fails.
+        await db?.query(
+          `update private.ost_accreditation_terms set renewal_id = null
+           where application_id is null
+             and ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from private.ost_accreditation_renewals
+           where ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from private.ost_accreditation_terms
+           where ost_id in (select id from public.ost_members where email like $1)
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($2::uuid[]))`,
+          [`${RUN}-%`, staffSet],
+        );
+        await db?.query(
+          `delete from private.ost_registration_details
+           where application_id in
+            (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        await db?.query(
+          `delete from private.ost_import_rows
+           where job_id in (select id from private.ost_import_jobs where created_by = any($1::uuid[]))
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        await db?.query('delete from private.ost_import_jobs where created_by = any($1::uuid[])', [
+          staffSet,
+        ]);
+        await db?.query(
+          `delete from public.ost_members
+           where email like $1
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($2::uuid[]))`,
+          [`${RUN}-%`, staffSet],
+        );
         await db?.query(
           'delete from public.ost_applications where sponsor_staff_id = any($1::uuid[])',
           [staffSet],
