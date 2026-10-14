@@ -33,7 +33,7 @@ const MONTH_LABELS = [
   'Dec',
 ];
 
-/** `2026-09` -> "Sep '26"; `2026` -> "2026". AF Homes `periodLabel` grammar. */
+/** `2026-09` -> "Sep '26"; `2026` -> "2026". AFHomes `periodLabel` grammar. */
 export function periodLabel(key: string): string {
   if (key.length === 4) return key;
   const year = key.slice(0, 4);
@@ -158,7 +158,7 @@ export function buildCenteredSeries(
 }
 
 /**
- * Sales Overview: AF Homes sales-trend behavior over AF Homes qualifying card
+ * Sales Overview: AFHomes sales-trend behavior over AFHomes qualifying card
  * sales (status `active` - fully paid and activated). Only qualifying sales
  * feed the series; pipeline and cancelled sales are not recognized sales. The
  * exact-decimal totals are only converted to Number for SVG geometry.

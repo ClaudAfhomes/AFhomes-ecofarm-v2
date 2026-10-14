@@ -1,5 +1,5 @@
 /**
- * AF Homes referral / upline relationships (VD -> SSM -> SM -> OST).
+ * AFHomes referral / upline relationships (VD -> SSM -> SM -> OST).
  *
  * Once a relationship is authoritative the subject can no longer move
  * themselves: the create and correct paths both require `sales.uplines`, a

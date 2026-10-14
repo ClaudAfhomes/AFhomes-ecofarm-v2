@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 26 finance UI.
+ * AFHomes Phase 26 finance UI.
  *
  * Proves the Finance queues and the Commission management screen render real
  * backend state (never mocks), with loading/empty/error handling, search and
@@ -279,7 +279,7 @@ describe('Phase 26 finance queue states', () => {
     expect(await screen.findByText('Nothing to handle')).toBeInTheDocument();
   });
 
-  it('says "N of M" with a cap notice when the queue exceeds the page', async () => {
+  it('shows a cap notice when the queue exceeds the page', async () => {
     install({
       'GET /queues/finance': {
         status: 200,
@@ -288,7 +288,6 @@ describe('Phase 26 finance queue states', () => {
     });
     render('/admin/finance/payments');
     await screen.findByText('SALE-260001');
-    expect(screen.getByText('1 of 3 records')).toBeInTheDocument();
     expect(screen.getByText('Queue capped')).toBeInTheDocument();
   });
 

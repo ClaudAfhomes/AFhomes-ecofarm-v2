@@ -100,8 +100,8 @@ export function AfHomesRoleDetailPage() {
         <DetailCard>
           <DetailCardTitle>Role</DetailCardTitle>
           <DetailFieldGrid>
-            <DetailField label="ID">
-              <DetailMono>{record.id}</DetailMono>
+            <DetailField label="Key">
+              <DetailMono>{record.slug}</DetailMono>
             </DetailField>
             <DetailField label="Name">{record.name}</DetailField>
             <DetailField label="Description">{record.description ?? '-'}</DetailField>

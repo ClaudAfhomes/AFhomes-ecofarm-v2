@@ -199,7 +199,7 @@ describe('GET /auth/portals', () => {
     });
   });
 
-  it('reports all null for valid Auth with no AF Homes identity', async () => {
+  it('reports all null for valid Auth with no AFHomes identity', async () => {
     install();
     const s = await call('tok-none');
     expect(s.status).toBe(200);

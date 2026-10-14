@@ -1,6 +1,6 @@
 import { commissionSchema, financeQueueItemSchema } from '@afhomes/contracts';
 /**
- * AF Homes Phase 2 - business API coverage.
+ * AFHomes Phase 2 - business API coverage.
  *
  * Drives the real handlers, the real authorization resolver, and the real Zod
  * schemas against the in-memory Supabase fake. The transactional RPCs are

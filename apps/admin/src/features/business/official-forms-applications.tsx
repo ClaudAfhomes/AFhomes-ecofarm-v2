@@ -1,8 +1,13 @@
-/**
- * Customer-application pages.
- *
- * Transaction headers for the paper-form flow: the queue and the editor.
- */
+/**
+
+ * Customer-application pages.
+
+ *
+
+ * Transaction headers for the paper-form flow: the queue and the editor.
+
+ */
+
 import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -10,7 +15,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
-import { createCustomerApplicationSchema, canTransitionCustomerApplication, registerCustomerApplicationSchema, optionalContactNumberSchema, paymentSchemeLabel, governmentIdTypeSchema, optionalLandlineSchema } from '@afhomes/contracts';
+import {
+  createCustomerApplicationSchema,
+  canTransitionCustomerApplication,
+  registerCustomerApplicationSchema,
+  optionalContactNumberSchema,
+  paymentSchemeLabel,
+  governmentIdTypeSchema,
+  optionalLandlineSchema,
+} from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
@@ -54,17 +67,36 @@ import {
   requestUploadGrant,
   runDocumentOcr,
 } from '../documents/services';
-import { createCustomerApplication, registerCustomerApplication, decideCustomerApplication, exportCustomerApplication, getCardProducts, getCustomerApplication, getCustomerApplicationsPage, getCustomerById, getCustomersPage, getOfficialFormTemplate, getPurchaseTermsProposal, getReservationAgreements, previewOfficialFormImport, reopenCustomerApplication, reviewApplicationPurchaseTerms, submitCustomerApplication, updateCustomerApplication } from './services';
-import {
-  today,
-  emptyHolder,
-  asBase64,
-  HolderFields,
-  QUEUE_PAGE_SIZE,
-  APPLICATION_STATUS_TONES,
-  RecommenderFields,
-} from './official-forms-fields';
-
+import {
+  createCustomerApplication,
+  registerCustomerApplication,
+  decideCustomerApplication,
+  exportCustomerApplication,
+  getCardProducts,
+  getCustomerApplication,
+  getCustomerApplicationsPage,
+  getCustomerById,
+  getCustomersPage,
+  getOfficialFormTemplate,
+  getPurchaseTermsProposal,
+  getReservationAgreements,
+  previewOfficialFormImport,
+  reopenCustomerApplication,
+  reviewApplicationPurchaseTerms,
+  submitCustomerApplication,
+  updateCustomerApplication,
+} from './services';
+
+import {
+  today,
+  emptyHolder,
+  asBase64,
+  HolderFields,
+  QUEUE_PAGE_SIZE,
+  APPLICATION_STATUS_TONES,
+  RecommenderFields,
+} from './official-forms-fields';
+
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
@@ -123,8 +155,6 @@ export function CustomerApplicationsPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
   // First load skeletonizes the whole page - header, filters, and table - so
   // no static content flashes before the data it describes. Refetches keep the
   // previous list visible and never reach this branch.
@@ -325,13 +355,6 @@ export function CustomerApplicationsPage() {
             onChange={(next) => setPage(next - 1)}
             label="Customer applications pagination"
           />
-          <span
-            role="status"
-            aria-label="Application record range"
-            className={styles.paginationRange}
-          >
-            Showing {rangeFrom}–{rangeTo} of {total}
-          </span>
         </div>
       ) : null}
     </section>
@@ -366,7 +389,7 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
  */
 function describeApplicationLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)
@@ -1068,8 +1091,8 @@ export function CustomerApplicationEditorPage() {
                 <>
                   <dt>Installments</dt>
                   <dd>
-                    {formatMoneyOrDash(proposal.data.terms.monthlyAmount)} × {proposal.data.terms.installmentMonths}{' '}
-                    months
+                    {formatMoneyOrDash(proposal.data.terms.monthlyAmount)} ×{' '}
+                    {proposal.data.terms.installmentMonths} months
                   </dd>
                 </>
               ) : null}
@@ -1081,7 +1104,8 @@ export function CustomerApplicationEditorPage() {
               <dd>{proposal.data.terms.validityMonths} months</dd>
               <dt>Commission</dt>
               <dd>
-                {proposal.data.terms.commissionRate} on {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
+                {proposal.data.terms.commissionRate} on{' '}
+                {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
                 {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
               </dd>
               <dt>Offer as of</dt>
@@ -1657,4 +1681,3 @@ export function CustomerApplicationEditorPage() {
     </HumanInputValidity.Provider>
   );
 }
-

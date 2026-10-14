@@ -9,7 +9,7 @@ export interface AlertProps {
 }
 
 /**
- * Inline notification (AF Homes alert pattern). Always conveys state with
+ * Inline notification (AFHomes alert pattern). Always conveys state with
  * icon + text + color, never color alone. `role="alert"` (assertive) for
  * danger, `role="status"` (polite) for everything else.
  */

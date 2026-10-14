@@ -40,7 +40,7 @@ function renderDetails() {
     { route: `/admin/genealogy/${node.staffId}` },
   );
 }
-it('renders the returned upperline in an ordered list and the scoped summary cards', async () => {
+it('renders the returned upperline in an ordered list and the scoped summary badges', async () => {
   vi.mocked(getGenealogyUpline).mockResolvedValue([
     {
       ...node,
@@ -55,7 +55,7 @@ it('renders the returned upperline in an ordered list and the scoped summary car
     '/admin/genealogy/22222222-2222-4222-8222-222222222222',
   );
   expect(screen.getByRole('list').tagName).toBe('OL');
-  expect(await screen.findByRole('article', { name: 'Total descendants: 3' })).toBeInTheDocument();
+  expect(await screen.findByText('Total descendants: 3')).toBeInTheDocument();
 });
 it('shows a retryable upperline error instead of claiming the seller is top-level', async () => {
   vi.mocked(getGenealogyUpline).mockRejectedValue(new Error('Private SQL'));

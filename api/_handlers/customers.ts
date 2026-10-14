@@ -1,6 +1,6 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
 /**
- * AF Homes customer master records.
+ * AFHomes customer master records.
  *
  * Sensitive fields are write-only: `governmentIdNumber` is accepted on create
  * and update, stored, and NEVER returned. The read model exposes a mask.
@@ -136,7 +136,7 @@ const parseListQuery = (req: VercelRequest) => listQuerySchema.safeParse(req.que
  * Customer/card-sale referrer validation.
  *
  * The registering seller is the referrer of record, so they must hold a role
- * allowed to register and sell AF Homes VIP cards (VD, SSM, SM, OST, Admin,
+ * allowed to register and sell AFHomes VIP cards (VD, SSM, SM, OST, Admin,
  * Super Admin - see `SELLING_ROLES` in `commerce.ts`). This is deliberately
  * NOT the OST sponsorship check: an OST referral code requires an active
  * Sales Manager, while a customer referral requires a seller of record.
@@ -220,7 +220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Customer/card-sale referrer validation. The registering seller is the
       // referrer of record, so they must hold a role allowed to register and
-      // sell AF Homes VIP cards (VD, SSM, SM, OST, Admin, Super Admin). This
+      // sell AFHomes VIP cards (VD, SSM, SM, OST, Admin, Super Admin). This
       // is deliberately NOT the OST sponsorship check: an OST referral code
       // requires an active Sales Manager, while a customer referral requires
       // a seller of record. Never route this flow through `validateOstSponsor`.

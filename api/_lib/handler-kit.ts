@@ -1,5 +1,5 @@
 /**
- * Shared plumbing for the AF Homes API handlers.
+ * Shared plumbing for the AFHomes API handlers.
  *
  * Keeps the sub-path dispatch, error envelope, audit insert, and JSON body
  * reading in one place so every Phase 2 handler behaves identically: same error

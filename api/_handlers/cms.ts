@@ -1,4 +1,4 @@
-/** Phase 6 CMS API. Public reads expose published values only; all writes use AF Homes staff auth. */
+/** Phase 6 CMS API. Public reads expose published values only; all writes use AFHomes staff auth. */
 import {
   cmsDocumentKeySchema,
   createCmsMediaSchema,

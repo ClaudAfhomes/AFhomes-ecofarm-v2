@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 8 OST onboarding API client.
+ * AFHomes Phase 8 OST onboarding API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
  * against `@afhomes/contracts`. The browser never names a sponsor: submission

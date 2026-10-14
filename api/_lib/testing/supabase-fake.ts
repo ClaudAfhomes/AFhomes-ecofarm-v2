@@ -4,7 +4,7 @@ import { addMoney } from '@afhomes/shared';
 /**
  * In-memory Supabase client fake for API handler tests.
  *
- * The AF Homes handlers drive supabase-js with the fluent query builder
+ * The AFHomes handlers drive supabase-js with the fluent query builder
  * (`from().select().eq().maybeSingle()`, `insert().select().single()`, …).
  * This fake implements exactly the surface those handlers use, backed by plain
  * arrays, so tests can assert on authorization outcomes and emitted queries
@@ -650,7 +650,7 @@ export class FakeSupabase {
           for (const [col, value] of Object.entries(defaults)) {
             if (filled[col] === undefined) filled[col] = value;
           }
-          // Every AF Homes business table declares `default gen_random_uuid()`.
+          // Every AFHomes business table declares `default gen_random_uuid()`.
           // Mirroring it keeps a row inserted without an explicit `id` readable
           // straight back, exactly as it is against Postgres.
           if (filled.id === undefined) filled.id = randomUUID();

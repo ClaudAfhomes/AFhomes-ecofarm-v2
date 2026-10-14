@@ -132,7 +132,7 @@ describe('resolvePortalDestination', () => {
     ).toBe('chooser-customer-admin');
   });
 
-  it('valid Auth with no AF Homes identity has no portal', () => {
+  it('valid Auth with no AFHomes identity has no portal', () => {
     expect(resolvePortalDestination(base)).toBe('no-portal');
   });
 });

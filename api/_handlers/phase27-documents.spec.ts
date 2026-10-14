@@ -1,6 +1,6 @@
 import { installDocumentReviewRpc } from '../_lib/testing/document-review-rpc.js';
 /**
- * AF Homes Phase 27 - OCR + document processing completion.
+ * AFHomes Phase 27 - OCR + document processing completion.
  *
  * Drives the REAL documents handler, the REAL staff principal resolver, the
  * REAL contracts and the REAL OCR abstraction against the in-memory Supabase

@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 10 membership card-management API client.
+ * AFHomes Phase 10 membership card-management API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
  * against `@afhomes/contracts`. The browser never sees a credential hash, and

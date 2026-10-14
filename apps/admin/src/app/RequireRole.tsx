@@ -31,7 +31,7 @@ export function RequireRole({ children }: { children: ReactNode }) {
       <Navigate to={loginPathFor(entryPortal())} replace state={{ from: location.pathname }} />
     );
   }
-  // AF Homes pattern: a session still on its temporary password can only visit
+  // AFHomes pattern: a session still on its temporary password can only visit
   // My Account until the forced change completes (the server 403s every
   // module-guarded endpoint in the meantime).
   if (user?.mustChangePassword === true && operationsPath(location.pathname) !== '/admin/profile') {

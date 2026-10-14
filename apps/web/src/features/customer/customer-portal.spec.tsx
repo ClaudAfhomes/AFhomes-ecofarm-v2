@@ -57,7 +57,7 @@ const MEMBERSHIP = {
   validityYears: 1,
   credentialsAvailable: false as const,
   credentialsNote:
-    'Your member code and QR below never change - show them at any AF Homes Ecofarm desk.',
+    'Your member code and QR below never change - show them at any AFHomes Ecofarm desk.',
   memberCode: 'MBS-000777',
   qrPayload: 'AFHOMES:MBS-000777',
 };

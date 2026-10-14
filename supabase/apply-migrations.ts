@@ -1,12 +1,12 @@
 /**
- * AF Homes-only migration runner.
+ * AFHomes-only migration runner.
  *
  * Safety properties (do not weaken):
  *  - Refuses to run unless AFHOMES_TARGET_PROJECT_REF equals the expected ref
  *    AND the DATABASE_URL actually points at that project. A matching env var
  *    with a foreign connection string is refused, not trusted.
  *  - Applies ONLY files in supabase/migrations, and refuses the whole run if
- *    any of them is not an AF Homes migration. The retired JAD migrations under
+ *    any of them is not an AFHomes migration. The retired JAD migrations under
  *    legacy/ can never reach this path.
  *  - Each migration runs in its own transaction together with its history row,
  *    so a failure leaves no partial schema and no phantom history entry.
@@ -58,7 +58,7 @@ type Target = {
   connectionString: string;
   migrationsDir: string;
   files: string[];
-  /** Every AF Homes migration on disk, unfiltered, so `--only` can report what it skips. */
+  /** Every AFHomes migration on disk, unfiltered, so `--only` can report what it skips. */
   allFiles: string[];
   problems: string[];
 };
@@ -148,7 +148,7 @@ function readTarget(): Target {
     .sort();
   if (files.some((file) => !file.includes('afhomes_')))
     problems.push(
-      'Non-AF Homes migration found in active path. The retired JAD set must stay out.',
+      'Non-AFHomes migration found in active path. The retired JAD set must stay out.',
     );
 
   const allFiles = files;

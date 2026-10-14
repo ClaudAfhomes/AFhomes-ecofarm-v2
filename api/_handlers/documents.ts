@@ -1,5 +1,5 @@
 ﻿/**
- * AF Homes Phase 12 - identity document intake, OCR-assisted extraction, and
+ * AFHomes Phase 12 - identity document intake, OCR-assisted extraction, and
  * human-confirmed review.
  *
  * Two rules this handler exists to enforce:

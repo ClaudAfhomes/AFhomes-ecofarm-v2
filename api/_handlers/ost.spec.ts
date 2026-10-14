@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 8 - OST registration and approval handler tests.
+ * AFHomes Phase 8 - OST registration and approval handler tests.
  *
  * Drives the REAL handler, the REAL staff principal resolver, the REAL
  * contracts and the REAL code hashing against the in-memory Supabase fake.

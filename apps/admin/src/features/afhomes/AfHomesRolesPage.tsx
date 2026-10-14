@@ -51,7 +51,7 @@ export function AfHomesRolesPage() {
     <section className={styles.page}>
       <PageHeader
         title="Roles & Permissions"
-        description="Server-enforced AF Homes module permissions and protected system roles"
+        description="Server-enforced AFHomes module permissions and protected system roles"
         actions={<Button onClick={() => setCreating(true)}>New custom role</Button>}
       />
       {roles.isPending ? (

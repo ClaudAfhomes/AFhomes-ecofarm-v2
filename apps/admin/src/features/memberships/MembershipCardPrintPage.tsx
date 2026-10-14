@@ -129,11 +129,11 @@ export function MembershipCardPrintPage() {
       <div
         className={styles.card}
         role="img"
-        aria-label={`AF Homes membership card for ${data.memberName}`}
+        aria-label={`AFHomes membership card for ${data.memberName}`}
       >
         <div className={styles.cardHead}>
           <div>
-            <p className={styles.brand}>AF Homes Ecofarm</p>
+            <p className={styles.brand}>AFHomes Ecofarm</p>
             <p className={styles.tier}>
               {data.tierName}
               {data.categoryName ? ` · ${data.categoryName}` : ''}
@@ -158,7 +158,7 @@ export function MembershipCardPrintPage() {
             </>
           ) : (
             <p className={styles.noCodes}>
-              Present this card with a valid ID at any AF Homes Ecofarm desk.
+              Present this card with a valid ID at any AFHomes Ecofarm desk.
             </p>
           )}
         </div>
@@ -181,7 +181,7 @@ export function MembershipCardPrintPage() {
  */
 function describePrintLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

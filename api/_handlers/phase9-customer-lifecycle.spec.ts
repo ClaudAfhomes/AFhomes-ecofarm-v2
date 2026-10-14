@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 9 - end-to-end customer onboarding lifecycle.
+ * AFHomes Phase 9 - end-to-end customer onboarding lifecycle.
  *
  * Drives the real handlers, the real authorization resolver and the real Zod
  * schemas against the in-memory Supabase fake. The transactional RPCs are

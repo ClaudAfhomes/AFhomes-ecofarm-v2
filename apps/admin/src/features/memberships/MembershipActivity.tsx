@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Alert, ErrorState, MetricCard, Skeleton, StatusChip } from '@afhomes/ui';
+import { Alert, ErrorState, Skeleton, StatusChip } from '@afhomes/ui';
 import type { AfHomesPermission } from '@afhomes/contracts';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
@@ -89,20 +89,21 @@ export function MembershipActivity({
             />
           ) : (
             <>
-              <p className={styles.groupNote}>
-                Balance: {formatCountOrDash(account.data.balance)} · Lifetime allocated:{' '}
-                {formatCountOrDash(account.data.lifetimeAllocated)} · Redeemed:{' '}
-                {formatCountOrDash(account.data.lifetimeRedeemed)}
-              </p>
               <div className={styles.metrics}>
-                <MetricCard label="Balance" value={formatCountOrDash(account.data.balance)} />
-                <MetricCard
-                  label="Lifetime allocated"
-                  value={formatCountOrDash(account.data.lifetimeAllocated)}
+                <StatusChip
+                  label={`Balance: ${formatCountOrDash(account.data.balance)}`}
+                  tone="neutral"
+                  icon="wallet"
                 />
-                <MetricCard
-                  label="Lifetime redeemed"
-                  value={formatCountOrDash(account.data.lifetimeRedeemed)}
+                <StatusChip
+                  label={`Lifetime allocated: ${formatCountOrDash(account.data.lifetimeAllocated)}`}
+                  tone="neutral"
+                  icon="plus"
+                />
+                <StatusChip
+                  label={`Lifetime redeemed: ${formatCountOrDash(account.data.lifetimeRedeemed)}`}
+                  tone="neutral"
+                  icon="check"
                 />
               </div>
             </>
@@ -202,7 +203,7 @@ export function MembershipActivity({
                   .filter((row) => row.membershipNumber === number)
                   .map((row) => (
                     <li key={String(row.referenceNumber ?? row.id)}>
-                      {String(row.referenceNumber ?? row.id ?? 'Redemption')} ·{' '}
+                      {String(row.referenceNumber ?? 'Redemption')} ·{' '}
                       {String(row.serviceItem ?? 'Service transaction')} ·{' '}
                       {String(row.pointsUsed ?? '')}
                     </li>

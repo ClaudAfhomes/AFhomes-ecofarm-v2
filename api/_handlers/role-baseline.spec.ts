@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - default role permission baseline.
+ * AFHomes Phase 2 - default role permission baseline.
  *
  * Proves the matrix in `@afhomes/contracts` (`role-baseline.ts`, the authority),
  * the migration SQL carrying it, and the enforced behaviour agree:

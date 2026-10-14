@@ -202,10 +202,6 @@
   color: var(--color-text-secondary);
 }
 
-.paginationRange {
-  margin-right: auto;
-}
-
 /* Export filter labels match the shared Customers-page pattern. */
 .filterLabel {
   display: grid;

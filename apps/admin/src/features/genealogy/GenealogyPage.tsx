@@ -5,7 +5,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -98,10 +97,22 @@ export function GenealogyPage() {
         description="Authorized VD to SSM to SM to OST genealogy. Historical sales attribution is unchanged."
       />
 
-      <div className={styles.summary} aria-label="Network summary">
-        <MetricCard label="Sellers in view" value={formatCountOrDash(rows.length)} />
-        <MetricCard label="Active sellers" value={formatCountOrDash(activeCount)} />
-        <MetricCard label="Total sellers" value={formatCountOrDash(sellerCount)} />
+      <div className={styles.badges} aria-label="Network summary">
+        <StatusChip
+          label={`Sellers in view: ${formatCountOrDash(rows.length)}`}
+          tone="neutral"
+          icon="users"
+        />
+        <StatusChip
+          label={`Active sellers: ${formatCountOrDash(activeCount)}`}
+          tone="success"
+          icon="user-check"
+        />
+        <StatusChip
+          label={`Total sellers: ${formatCountOrDash(sellerCount)}`}
+          tone="neutral"
+          icon="users"
+        />
       </div>
 
       <FilterBar
@@ -202,7 +213,7 @@ export function GenealogyPage() {
  */
 function describeGenealogyLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

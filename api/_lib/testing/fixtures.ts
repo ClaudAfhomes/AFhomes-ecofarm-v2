@@ -1,5 +1,5 @@
 /**
- * Canonical AF Homes fixtures for handler tests.
+ * Canonical AFHomes fixtures for handler tests.
  *
  * Mirrors the shape produced by `supabase/migrations/20260926023325_afhomes_phase1_foundation.sql`:
  * 22 modules, 10 system roles, 5 departments, and the `staff_users` /

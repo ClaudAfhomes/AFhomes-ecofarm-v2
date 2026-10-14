@@ -92,7 +92,7 @@ export function CustomerActivatePage() {
   if (recovered) {
     return (
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFHomes Ecofarm"
         title="Account linked"
         lead="Your membership is ready."
         brandTitle="Your farm membership, in your pocket."
@@ -119,7 +119,7 @@ export function CustomerActivatePage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Activate your account"
       lead="Use your branch activation code."
       brandTitle="Your farm membership, in your pocket."

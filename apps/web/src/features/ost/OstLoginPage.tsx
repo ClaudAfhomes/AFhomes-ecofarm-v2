@@ -74,7 +74,7 @@ export function OstLoginPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="OST Login"
       lead="Sellers approved under a Sales Manager sign in here."
       brandTitle="Sell the farm you believe in."

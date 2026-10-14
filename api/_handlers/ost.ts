@@ -2,7 +2,7 @@ import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
 import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
- * AF Homes Phase 8 - OST registration and approval (SM -> OST).
+ * AFHomes Phase 8 - OST registration and approval (SM -> OST).
  *
  * The public surface carries a referral CODE, never a sponsor id. The sponsor
  * is resolved server-side from the code hash and frozen into the application;

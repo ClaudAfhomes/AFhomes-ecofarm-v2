@@ -123,3 +123,52 @@
     max-width: 38vw;
   }
 }
+
+/* Sidebar footer sign-out. Pinned to the bottom of the rail by the shell's
+   footer slot (below the nav, above nothing): full-width ghost action with
+   the same icon + label grammar as the links above. The text span carries the
+   global `sidebar-footer-label` class so the design system hides it when the
+   rail collapses to icons; the button keeps its accessible name throughout. */
+.logoutButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.logoutButton:hover {
+  background-color: var(--color-bg-surface);
+  color: var(--color-danger);
+}
+
+.logoutButton:hover .logoutIcon {
+  transform: translateX(2px);
+}
+
+.logoutButton:active {
+  background-color: var(--color-brand-soft);
+  color: var(--color-danger);
+}
+
+.logoutButton:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.logoutIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}

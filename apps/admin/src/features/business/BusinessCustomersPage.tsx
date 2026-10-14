@@ -107,8 +107,6 @@ export function BusinessCustomersPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const sellers = useQuery({
     queryKey: applicationKeys.sellerOptions,
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
@@ -424,9 +422,6 @@ export function BusinessCustomersPage() {
             onChange={(next) => setPage(next - 1)}
             label="Customers pagination"
           />
-          <span role="status" aria-label="Customer record range" className={styles.paginationRange}>
-            Showing {rangeFrom}–{rangeTo} of {total}
-          </span>
         </div>
       ) : null}
 

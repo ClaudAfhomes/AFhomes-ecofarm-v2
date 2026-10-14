@@ -199,7 +199,7 @@ function formatAvailablePoints(value: string): string {
  */
 function describeMemberLookupError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

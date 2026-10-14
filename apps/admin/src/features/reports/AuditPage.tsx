@@ -213,10 +213,6 @@ export function AuditPage() {
             >
               Previous
             </Button>
-            <span>
-              {offset + 1}–{Math.min(offset + PAGE_SIZE, query.data.meta.total)} of{' '}
-              {query.data.meta.total}
-            </span>
             <Button
               variant="secondary"
               disabled={offset + PAGE_SIZE >= query.data.meta.total}

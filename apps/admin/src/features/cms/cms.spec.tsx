@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 28 CMS admin surface.
+ * AFHomes Phase 28 CMS admin surface.
  *
  * Proves the Website CMS screens render real backend state (never mocks):
  * list loading/empty/error-with-retry, create/edit with server validation

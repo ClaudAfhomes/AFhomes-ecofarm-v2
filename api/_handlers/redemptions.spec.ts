@@ -1,5 +1,5 @@
 /**
- * AF Homes staff redemption - handler tests.
+ * AFHomes staff redemption - handler tests.
  *
  * These drive the REAL handler, the REAL staff principal resolver, the REAL
  * contracts and the REAL identifier resolution against the in-memory Supabase

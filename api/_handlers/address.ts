@@ -1,5 +1,5 @@
 /**
- * AF Homes geographic address lookup.
+ * AFHomes geographic address lookup.
  *
  * Three read-only routes that let a client walk the official Philippine
  * hierarchy without ever learning where the data came from:
@@ -8,7 +8,7 @@
  *   GET provinces/{provinceCode}/localities
  *   GET localities/{localityCode}/barangays
  *
- * The browser never calls the provider directly. It talks to AF Homes, gets
+ * The browser never calls the provider directly. It talks to AFHomes, gets
  * normalized `{ code, name }` (plus `type` for localities), and the provider URL,
  * its field names and its failure modes stay on the server.
  *

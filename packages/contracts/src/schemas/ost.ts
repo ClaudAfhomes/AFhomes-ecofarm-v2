@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 8 - OST registration and approval workflow.
+ * AFHomes Phase 8 - OST registration and approval workflow.
  *
  * Reuses the Phase 1 tables (`referral_codes`, `ost_applications`,
  * `ost_members`) and the Phase 7 genealogy model. No new status vocabulary

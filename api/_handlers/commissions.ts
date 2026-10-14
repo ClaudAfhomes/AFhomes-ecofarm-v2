@@ -1,6 +1,6 @@
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 /**
- * AF Homes commissions - the 4% single-level sale commission.
+ * AFHomes commissions - the 4% single-level sale commission.
  *
  * Lifecycle: pending -> payment_verified -> final_qualification_pending ->
  * earned -> paid.

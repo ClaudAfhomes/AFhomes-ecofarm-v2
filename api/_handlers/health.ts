@@ -13,7 +13,7 @@ import { serviceClient } from '../_lib/rest.js';
  * unavailable returns 503, so an uptime check cannot mistake a broken database
  * for a healthy service.
  *
- * The probe reads `modules`: a small, always-present AF Homes table the whole
+ * The probe reads `modules`: a small, always-present AFHomes table the whole
  * permission model depends on, so a failure means the schema is genuinely
  * unusable rather than one optional table being absent.
  *

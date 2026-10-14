@@ -1,5 +1,5 @@
 /**
- * AF Homes card sales, payments, and activation.
+ * AFHomes card sales, payments, and activation.
  *
  * Three rules this handler exists to enforce:
  *  1. Seller identity comes from the resolved principal. `sellerStaffId` in the

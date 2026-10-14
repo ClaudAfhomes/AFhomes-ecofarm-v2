@@ -7,7 +7,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -92,8 +91,6 @@ export function OstApplicationsPage() {
   }
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const needsReview = rows.filter((app) =>
     ['submitted', 'under_review', 'changes_requested'].includes(app.status),
   ).length;
@@ -151,26 +148,21 @@ export function OstApplicationsPage() {
         }
       />
 
-      <div className={styles.metrics} aria-label="Application summary">
-        <MetricCard
-          label="Listed applications"
-          value={formatCountOrDash(total)}
-          description={settled || status ? 'Matching the current filters.' : 'In this queue.'}
+      <div className={styles.badges} aria-label="Application summary">
+        <StatusChip
+          label={`Listed applications: ${formatCountOrDash(total)}`}
+          tone="neutral"
           icon="grid"
         />
-        <MetricCard
-          label="Needs review"
-          value={formatCountOrDash(needsReview)}
-          description="Submitted, under review, or changes requested."
+        <StatusChip
+          label={`Needs review: ${formatCountOrDash(needsReview)}`}
+          tone="warning"
           icon="clock"
-          chip={{ label: 'Needs review', tone: 'warning' }}
         />
-        <MetricCard
-          label="Approved"
-          value={formatCountOrDash(approved)}
-          description="Approved applications in this queue."
+        <StatusChip
+          label={`Approved: ${formatCountOrDash(approved)}`}
+          tone="success"
           icon="check"
-          chip={{ label: 'Approved', tone: 'success' }}
         />
       </div>
 
@@ -288,9 +280,6 @@ export function OstApplicationsPage() {
             onChange={(next) => setPage(next - 1)}
             label="OST applications pagination"
           />
-          <span role="status" aria-label="Application record range" className={styles.range}>
-            Showing {rangeFrom} to {rangeTo} of {total}
-          </span>
         </div>
       ) : null}
     </section>

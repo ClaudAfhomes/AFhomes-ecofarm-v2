@@ -21,7 +21,6 @@ import {
   ErrorState,
   FilterBar,
   Icon,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   SearchField,
@@ -127,20 +126,17 @@ function tierFromProductName(productName: string): string {
   return productName;
 }
 /**
- * Loading placeholder: hero chips, summary cards and table rows shaped like
+ * Loading placeholder: hero chips, summary badges and table rows shaped like
  * the loaded queue, so nothing pops in and reflows once the data lands. The
  * search stays mounted and usable while loading (it is a control, not data).
  */
 function QueueSkeleton() {
   return (
     <div role="status" aria-label="Loading payment queue" className={styles.skeletonShell}>
-      <ul className={styles.skeletonSummary} aria-hidden="true">
+      <ul className={styles.skeletonBadges} aria-hidden="true">
         {[0, 1, 2].map((index) => (
-          <li key={index} className={styles.skMetric}>
-            <Skeleton className={styles.skTile} />
-            <Skeleton style={{ height: 28, width: '55%' }} />
-            <Skeleton style={{ height: 14, width: '75%' }} />
-            <Skeleton style={{ height: 12, width: '90%' }} />
+          <li key={index}>
+            <Skeleton style={{ height: 24, width: '10rem', borderRadius: '999px' }} />
           </li>
         ))}
       </ul>
@@ -435,29 +431,26 @@ export function BusinessFinanceQueuePage() {
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : (
         <>
-          <ul className={styles.summary} aria-label="Queue summary">
+          <ul className={styles.badges} aria-label="Queue summary">
             <li>
-              <MetricCard
-                label="Awaiting payment"
-                value={formatCountOrDash(summary.awaiting)}
+              <StatusChip
+                label={`Awaiting payment: ${formatCountOrDash(summary.awaiting)}`}
+                tone="warning"
                 icon="clock"
-                description="Records with a remaining balance"
               />
             </li>
             <li>
-              <MetricCard
-                label="Fully paid"
-                value={formatCountOrDash(summary.paid)}
+              <StatusChip
+                label={`Fully paid: ${formatCountOrDash(summary.paid)}`}
+                tone="success"
                 icon="check"
-                description="Ready for activation review"
               />
             </li>
             <li>
-              <MetricCard
-                label="Queue records"
-                value={formatCountOrDash(summary.total)}
+              <StatusChip
+                label={`Queue records: ${formatCountOrDash(summary.total)}`}
+                tone="neutral"
                 icon="file-text"
-                description="Sales and reservations in scope"
               />
             </li>
           </ul>
@@ -481,13 +474,6 @@ export function BusinessFinanceQueuePage() {
                   options={[...STATUS_OPTIONS]}
                 />
               </label>
-            }
-            actions={
-              <p className={styles.resultCount}>
-                {statusFilter === 'all' && !settled && !truncated
-                  ? `${formatCountOrDash(visible.length)} records`
-                  : `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`}
-              </p>
             }
           />
 
@@ -858,7 +844,7 @@ export function RecordPaymentDialog({
         detail: [
           `Amount: ${formatMoneyOrDash(stored?.amount ?? recorded.input.amount)}`,
           `Reference: ${stored?.reference ?? recorded.input.reference ?? '—'}`,
-          `Payment ID: ${stored?.paymentNumber ?? stored?.id ?? '—'}`,
+          `Payment ID: ${stored?.paymentNumber ?? '—'}`,
           customerName ? `Customer: ${customerName}` : null,
           recordLabel
             ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`

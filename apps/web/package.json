@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "AF Homes Ecofarm public site frontend (React + Vite SPA).",
+  "description": "AFHomes Ecofarm public site frontend (React + Vite SPA).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node ./scripts/prerender.mjs",

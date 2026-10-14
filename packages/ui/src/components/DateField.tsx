@@ -17,7 +17,7 @@ export interface DateFieldProps {
 }
 
 /**
- * Date input (AF Homes form-field pattern). Renders inside `FormField` with
+ * Date input (AFHomes form-field pattern). Renders inside `FormField` with
  * shared input styling and label association, so filter and editor dates read
  * and behave like every other field.
  */

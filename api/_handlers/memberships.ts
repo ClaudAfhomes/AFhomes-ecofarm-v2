@@ -1,7 +1,7 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
 import { customerLookupFromDirectory, memberLookupFromDirectory } from '../_lib/member-lookup.js';
 /**
- * AF Homes memberships (cards), identifier resolution, and the points ledger.
+ * AFHomes memberships (cards), identifier resolution, and the points ledger.
  *
  * An identifier NEVER authorizes anything. `GET /memberships/resolve` is the one
  * place a scanned QR token or a typed fallback code becomes a membership row,
@@ -180,7 +180,7 @@ const toCard = (
         .filter((p) => typeof p === 'string' && p)
         .join(' ') || 'Unknown customer',
     customerStatus: (customer.status as string | null) ?? null,
-    tierName: typeof product.name === 'string' && product.name ? product.name : 'AF Homes card',
+    tierName: typeof product.name === 'string' && product.name ? product.name : 'AFHomes card',
     tierCode: typeof product.code === 'string' ? product.code : '',
     categoryName: categories.get(String(product.category_id ?? ''))?.name ?? null,
     status: row.status,

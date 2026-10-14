@@ -1,5 +1,5 @@
 /**
- * AF Homes customer detail read (`GET /customers/:id`).
+ * AFHomes customer detail read (`GET /customers/:id`).
  *
  * Drives the real handler, the real authorization resolver and the real Zod
  * schemas against the in-memory Supabase fake. The `customer_directory` RPC

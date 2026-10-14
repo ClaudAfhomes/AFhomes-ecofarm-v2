@@ -6,7 +6,6 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -126,30 +125,27 @@ export function SalesRecordsPage() {
         adjustment.
       </Alert>
 
-      <ul className={styles.metrics} aria-label="Records summary">
+      <ul className={styles.badges} aria-label="Records summary">
         <li>
-          <MetricCard
-            label="Purchases loaded"
-            value={formatCountOrDash(purchaseRows.length)}
+          <StatusChip
+            label={`Purchases loaded: ${formatCountOrDash(purchaseRows.length)}`}
+            tone="neutral"
             icon="file-text"
-            description="Permanent purchase evidence on this page"
           />
         </li>
         <li>
-          <MetricCard
-            label="Completed"
-            value={formatCountOrDash(completed)}
+          <StatusChip
+            label={`Completed: ${formatCountOrDash(completed)}`}
+            tone="success"
             icon="check"
-            description="Settled purchases in this page"
           />
         </li>
         {mayViewClaims ? (
           <li>
-            <MetricCard
-              label="Claims loaded"
-              value={formatCountOrDash(claimRows.length)}
+            <StatusChip
+              label={`Claims loaded: ${formatCountOrDash(claimRows.length)}`}
+              tone="neutral"
               icon="grid"
-              description="Issued earning claims on this page"
             />
           </li>
         ) : null}

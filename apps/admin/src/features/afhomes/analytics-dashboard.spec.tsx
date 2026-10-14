@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 29 dashboard presentation.
+ * AFHomes Phase 29 dashboard presentation.
  *
  * Renders the REAL role dashboard through the REAL router against a mocked
  * `/analytics` endpoint: loading skeletons, populated finance facts, empty
@@ -12,6 +12,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+// Load the real chart during collection; assertions should not race worker import latency.
+import './AfHomesTrendChart';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
 
@@ -239,7 +241,7 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByLabelText('Loading dashboard')).toBeInTheDocument();
     // Even static headings stay skeleton until the data arrives.
     expect(screen.queryByRole('heading', { name: 'Operations Overview' })).toBeNull();
-    expect(screen.queryByText('AF Homes · Staff console')).toBeNull();
+    expect(screen.queryByText('AFHomes · Staff console')).toBeNull();
     expect(screen.queryByText('Key metrics')).toBeNull();
     expect(screen.queryByText('Sales Overview')).toBeNull();
     expect(screen.queryByText(/Loading trend/)).toBeNull();

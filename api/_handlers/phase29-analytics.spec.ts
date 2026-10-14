@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 29 - analytics completion.
+ * AFHomes Phase 29 - analytics completion.
  *
  * Drives the REAL analytics handler (plus the REAL reports handler for the
  * OST-status and genealogy-performance proofs) against a two-team fixture

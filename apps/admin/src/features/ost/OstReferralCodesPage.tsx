@@ -8,7 +8,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   Pagination,
   QrCode,
@@ -228,24 +227,20 @@ export function OstReferralCodesPage() {
         </div>
       ) : null}
 
-      <div className={styles.metrics} aria-label="Referral summary">
-        <MetricCard
-          label="Active codes"
-          value={formatCountOrDash(activeCodes ?? 0)}
-          description="Usable codes that have not expired."
+      <div className={styles.badges} aria-label="Referral summary">
+        <StatusChip
+          label={`Active codes: ${formatCountOrDash(activeCodes ?? 0)}`}
+          tone="success"
           icon="grid"
-          chip={{ label: 'Active', tone: 'success' }}
         />
-        <MetricCard
-          label="Recorded uses"
-          value={formatCountOrDash(totalUses ?? 0)}
-          description="Registrations submitted with your codes."
+        <StatusChip
+          label={`Recorded uses: ${formatCountOrDash(totalUses ?? 0)}`}
+          tone="neutral"
           icon="check"
         />
-        <MetricCard
-          label="Sponsored applications"
-          value={formatCountOrDash(applicationTotal)}
-          description="Registrations submitted with your code."
+        <StatusChip
+          label={`Sponsored applications: ${formatCountOrDash(applicationTotal)}`}
+          tone="neutral"
           icon="clock"
         />
       </div>
@@ -411,10 +406,6 @@ export function OstReferralCodesPage() {
                 onChange={(next) => setCodePage(next - 1)}
                 label="Referral codes pagination"
               />
-              <span role="status" aria-label="Referral code range" className={styles.range}>
-                Showing {safeCodePage * CODE_PAGE_SIZE + 1} to{' '}
-                {Math.min(codeTotal, (safeCodePage + 1) * CODE_PAGE_SIZE)} of {codeTotal}
-              </span>
             </div>
           ) : null}
         </>
@@ -476,11 +467,6 @@ export function OstReferralCodesPage() {
                 onChange={(next) => setApplicationPage(next - 1)}
                 label="Sponsored applications pagination"
               />
-              <span role="status" aria-label="Application range" className={styles.range}>
-                Showing {safeApplicationPage * APPLICATION_PAGE_SIZE + 1} to{' '}
-                {Math.min(applicationTotal, (safeApplicationPage + 1) * APPLICATION_PAGE_SIZE)} of{' '}
-                {applicationTotal}
-              </span>
             </div>
           ) : null}
         </>

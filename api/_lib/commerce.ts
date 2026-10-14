@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - pure commerce rules.
+ * AFHomes Phase 2 - pure commerce rules.
  *
  * Every function here is deterministic and side-effect free so the financial
  * rules can be tested without a database, a server, or a browser. The database

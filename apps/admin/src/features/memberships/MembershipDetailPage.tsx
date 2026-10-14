@@ -8,7 +8,6 @@ import {
   ConfirmDialog,
   Dialog,
   ErrorState,
-  MetricCard,
   PageHeader,
   QrCode,
   Skeleton,
@@ -165,12 +164,17 @@ export function MembershipDetailPage() {
       <section className={styles.panel} aria-label="Membership summary">
         <h2 className={styles.panelTitle}>{data.memberName}</h2>
         <div className={styles.summary}>
-          <MetricCard label="Points balance" value={formatCountOrDash(data.pointsBalance)} />
-          <MetricCard
-            label="Yearly entitlement"
-            value={formatCountOrDash(data.yearlyPointsAllocated)}
+          <StatusChip
+            label={`Points balance: ${formatCountOrDash(data.pointsBalance)}`}
+            tone="neutral"
+            icon="grid"
           />
-          <MetricCard label="Status" value={<StatusChip label={humanizeCode(data.status)} />} />
+          <StatusChip
+            label={`Yearly entitlement: ${formatCountOrDash(data.yearlyPointsAllocated)}`}
+            tone="neutral"
+            icon="file-text"
+          />
+          <StatusChip label={humanizeCode(data.status)} />
         </div>
         <dl className={styles.facts}>
           <div>
@@ -390,7 +394,7 @@ export function MembershipDetailPage() {
  */
 function describeCardLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AF Homes support.';
+    return 'Check your connection and try again. If this continues, contact AFHomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

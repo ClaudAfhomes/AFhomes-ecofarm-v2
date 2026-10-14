@@ -49,12 +49,12 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
  *   the old ones immediately, and returns the new plaintext exactly once.
  */
 const CREDENTIALS_NOTE =
-  'Your member code and QR below never change - show them at any AF Homes Ecofarm desk. ' +
+  'Your member code and QR below never change - show them at any AFHomes Ecofarm desk. ' +
   'Only a SHA-256 hash of the separate one-time card secret is stored, so that secret cannot be displayed again; ' +
   'request a new one only if the printed secret is lost, and the previous secret stops working immediately.';
 
 const CREDENTIALS_NEED_REASON =
-  'Your member code and QR below never change - show them at any AF Homes Ecofarm desk. ' +
+  'Your member code and QR below never change - show them at any AFHomes Ecofarm desk. ' +
   'The separate one-time card secret is shown once at issuance; request a new pair only if it is lost.';
 
 const activeMembershipOf = async (db: Db, customerId: string) => {
@@ -233,7 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }
@@ -271,7 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }
@@ -325,7 +325,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }
@@ -394,7 +394,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }
@@ -623,7 +623,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }
@@ -670,7 +670,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(
           res,
           'FORBIDDEN',
-          `Your account is ${principal.status}. Contact AF Homes Ecofarm to restore access.`,
+          `Your account is ${principal.status}. Contact AFHomes Ecofarm to restore access.`,
           403,
         );
       }

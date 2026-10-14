@@ -22,7 +22,7 @@ export interface FilterBarProps {
 }
 
 /**
- * Canonical filter toolbar (AF Homes toolbar pattern): one consistent row of
+ * Canonical filter toolbar (AFHomes toolbar pattern): one consistent row of
  * search + filters + actions with fixed height, alignment, gaps, and
  * responsive wrapping. Presentation only - state lives in the caller.
  */

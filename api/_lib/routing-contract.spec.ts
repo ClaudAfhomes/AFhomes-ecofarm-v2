@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 13 - router -> loader -> handler contract proofs.
+ * AFHomes Phase 13 - router -> loader -> handler contract proofs.
  *
  * CANONICAL ROUTING CONTRACT (proven here, not assumed): the router strips
  * `/api/v1/<family>/` before dispatch, so every handler receives the STRIPPED

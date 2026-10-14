@@ -6,7 +6,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -63,8 +62,6 @@ export function OstMembersPage() {
   }
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
   const active = rows.filter((member) => member.status === 'active').length;
 
   // First load skeletonizes the whole page so no static content flashes before
@@ -103,19 +100,16 @@ export function OstMembersPage() {
         description="Approved OST sellers and the Sales Manager each one serves under."
       />
 
-      <div className={styles.metrics} aria-label="Member summary">
-        <MetricCard
-          label="Listed members"
-          value={formatCountOrDash(total)}
-          description={settled ? 'Matching the current search.' : 'Approved OST sellers.'}
+      <div className={styles.badges} aria-label="Member summary">
+        <StatusChip
+          label={`Listed members: ${formatCountOrDash(total)}`}
+          tone="neutral"
           icon="grid"
         />
-        <MetricCard
-          label="Active members"
-          value={formatCountOrDash(active)}
-          description="Members with an active status in this list."
+        <StatusChip
+          label={`Active members: ${formatCountOrDash(active)}`}
+          tone="success"
           icon="check"
-          chip={{ label: 'Active', tone: 'success' }}
         />
       </div>
 
@@ -226,9 +220,6 @@ export function OstMembersPage() {
             onChange={(next) => setPage(next - 1)}
             label="OST members pagination"
           />
-          <span role="status" aria-label="Member record range" className={styles.range}>
-            Showing {rangeFrom} to {rangeTo} of {total}
-          </span>
         </div>
       ) : null}
     </section>

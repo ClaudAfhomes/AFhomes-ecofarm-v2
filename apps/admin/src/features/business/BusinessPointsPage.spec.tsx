@@ -164,8 +164,8 @@ describe('earn points: identify', () => {
     await user.click(screen.getByRole('button', { name: /find member/i }));
 
     expect(await screen.findByText('Ana R Buyer')).toBeTruthy();
-    expect(screen.getByText('MBS-000777')).toBeTruthy();
-    expect(screen.getByText('60,000')).toBeTruthy();
+    expect(screen.getByText('Membership: MBS-000777')).toBeTruthy();
+    expect(screen.getByText('Points balance: 60,000')).toBeTruthy();
     expect(resolved).toHaveBeenCalledWith('MBS-000777');
   });
 

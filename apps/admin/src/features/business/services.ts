@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 business API client.
+ * AFHomes Phase 2 business API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
  * against `@afhomes/contracts`. No ad-hoc `fetch`, and no `any`.

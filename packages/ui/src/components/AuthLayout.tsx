@@ -18,12 +18,12 @@ export interface AuthLayoutProps {
 }
 
 /**
- * Editorial split shell for the AF Homes auth screens.
+ * Editorial split shell for the AFHomes auth screens.
  *
- * AF Homes structure (AuthLayout): mobile masthead + desktop two-column
+ * AFHomes structure (AuthLayout): mobile masthead + desktop two-column
  * split with a sticky full-height brand panel beside the form column.
- * AF Homes brand mapping: deep forest-green panel with a harvest-gold rule
- * and the AF Homes Ecofarm wordmark (text, never a predecessor logo or realty
+ * AFHomes brand mapping: deep forest-green panel with a harvest-gold rule
+ * and the AFHomes Ecofarm wordmark (text, never a predecessor logo or realty
  * imagery). Business logic lives in the consuming pages; this is
  * presentation only.
  */
@@ -65,7 +65,7 @@ export function AuthLayout({
         <aside className={styles.brandPanel} aria-hidden="true">
           <div className={styles.scrim} />
           <div className={styles.brandContent}>
-            <p className={styles.brandWordmark}>AF Homes Ecofarm</p>
+            <p className={styles.brandWordmark}>AFHomes Ecofarm</p>
             <p className={styles.brandEyebrow}>{eyebrow}</p>
             <p className={styles.brandTitle}>{brandTitle}</p>
             {brandLead ? <p className={styles.brandLead}>{brandLead}</p> : null}

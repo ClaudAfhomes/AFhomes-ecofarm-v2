@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 30 - reports, exports, and audit completion.
+ * AFHomes Phase 30 - reports, exports, and audit completion.
  *
  * Drives the REAL reports handler (real gates, real scope helpers, real
  * renderers, real CSV/XLSX/PDF writers) against focused fixtures. Phase 15
@@ -335,7 +335,7 @@ describe('Phase 30 exports', () => {
     expect(xlsx).toContain('TRF-1');
     const pdf = pdfText(await get('payments', TOKEN.superAdmin, { status: 'verified', format: 'pdf' }));
     expect(pdf.startsWith('%PDF-1.4')).toBe(true);
-    expect(pdf).toContain('AF Homes - payments report');
+    expect(pdf).toContain('AFHomes - payments report');
     for (const ref of ids) expect(pdf).toContain(ref);
   });
 

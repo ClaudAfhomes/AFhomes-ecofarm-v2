@@ -1,5 +1,5 @@
 /**
- * AF Homes customer principal resolver.
+ * AFHomes customer principal resolver.
  *
  * This is DELIBERATELY SEPARATE from `afhomes-access.ts`. A customer principal
  * is derived from ownership, never from the staff permission model:

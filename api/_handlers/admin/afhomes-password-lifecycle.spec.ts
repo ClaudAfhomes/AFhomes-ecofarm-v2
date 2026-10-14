@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 1 (AF Homes pattern) - temporary-password staff lifecycle.
+ * AFHomes Phase 1 (AFHomes pattern) - temporary-password staff lifecycle.
  *
  * Covers the behavior the invite-only flow could never express: server-set
  * temporary passwords via `auth.admin.createUser`, the `mustChangePassword`

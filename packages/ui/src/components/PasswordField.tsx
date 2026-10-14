@@ -66,7 +66,7 @@ const EYE_OFF_ICON = (
 );
 
 /**
- * Password input with an accessible show/hide toggle (AF Homes password-field
+ * Password input with an accessible show/hide toggle (AFHomes password-field
  * pattern). The toggle is a 40px canonical button (`aria-pressed` + labelled)
  * that switches the input type; the input keeps `autoComplete` semantics
  * for password managers and `type="password"` by default.

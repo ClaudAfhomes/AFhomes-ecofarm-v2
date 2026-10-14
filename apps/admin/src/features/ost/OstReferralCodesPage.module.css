@@ -16,10 +16,10 @@
   }
 }
 
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: var(--space-3);
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .issuedPanel {
@@ -77,10 +77,6 @@
   margin-top: var(--space-3);
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
-}
-
-.range {
-  margin: 0;
 }
 
 @media (max-width: 639px) {

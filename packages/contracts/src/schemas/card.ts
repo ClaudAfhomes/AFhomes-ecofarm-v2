@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 10 - membership card management.
+ * AFHomes Phase 10 - membership card management.
  *
  * Hash-only credential storage (Phase 3) is the constraint this file is
  * designed around: the QR token and fallback code can never be recovered for

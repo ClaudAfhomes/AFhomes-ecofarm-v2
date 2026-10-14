@@ -1,6 +1,6 @@
 import { handleServiceRefunds } from './_service-refunds.js';
 /**
- * AF Homes points: purchases, earning claims, and the customer's QR claim.
+ * AFHomes points: purchases, earning claims, and the customer's QR claim.
  *
  * Authorization, and it is the EXISTING vocabulary - no new module keys:
  *
@@ -257,7 +257,7 @@ function refuse(res: VercelResponse, error: { message?: string } | null): void {
  *
  * Fields are PICKED, never spread. A spread would emit whatever the driver
  * returned, which turns a future column addition into a silent leak; picking
- * also keeps the response camelCase, matching every other AF Homes handler and
+ * also keeps the response camelCase, matching every other AFHomes handler and
  * the contracts the client validates against.
  */
 // Money is summed as exact decimals in SQL-free code by integer minor units,

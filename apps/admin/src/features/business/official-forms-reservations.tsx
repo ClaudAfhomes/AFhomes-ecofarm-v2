@@ -1,14 +1,25 @@
-/**
- * Reservation-agreement pages.
- *
- * IST contracts: the queue, the editor, and the origin/membership panels.
- */
+/**
+
+ * Reservation-agreement pages.
+
+ *
+
+ * IST contracts: the queue, the editor, and the origin/membership panels.
+
+ */
+
 import { downloadFile as saveFile } from '../../lib/download';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { ActivationResult, ApplicationHolder, PurchaseDocumentKind, PurchaseReservation, ReservationFinanceSummary } from '@afhomes/contracts';
+import type {
+  ActivationResult,
+  ApplicationHolder,
+  PurchaseDocumentKind,
+  PurchaseReservation,
+  ReservationFinanceSummary,
+} from '@afhomes/contracts';
 import { createReservationAgreementSchema, paymentSchemeLabel } from '@afhomes/contracts';
 import { formatDateTime } from '../../lib/format';
 import { useSingleFlight } from '../../lib/useSingleFlight';
@@ -17,26 +28,65 @@ import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
-import { notifySuccess, notifyWarning, Alert, Button, EmptyState, ErrorState, FilterBar, PageHeader, Pagination, SearchField, Select, Skeleton, StatusChip } from '@afhomes/ui';
+import {
+  notifySuccess,
+  notifyWarning,
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  Pagination,
+  SearchField,
+  Select,
+  Skeleton,
+  StatusChip,
+} from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
 import { ReservationStatusBadge } from './ReservationStatusBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { normalizeLiveHumanField } from '../../lib/normalize';
-import { createReservationAgreement, decideReservationAgreement, exportReservationAgreement, getCardProducts, getCustomerApplication, getCustomerApplications, getOfficialFormTemplate, getPurchaseTermsProposal, getReservationPayments, getReservationFinance, activateSale, exportPurchaseDocument, finalizeReservationPurchase, getReservationAgreement, getReservationAgreementsPage, getSaleSummary, getSales, previewOfficialFormImport, reopenReservationAgreement, submitReservationAgreement, updateReservationAgreement, updateApplicationReservation } from './services';
-import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
-import { humanizeApplicationIssues } from './official-forms-applications';
-import {
-  today,
-  asBase64,
-  formatFileSize,
-  fieldLabel,
-  VIP_TIER_FIELD_OPTIONS,
-  isVipTier,
-  Field,
-  QUEUE_PAGE_SIZE,
-} from './official-forms-fields';
-
+import {
+  createReservationAgreement,
+  decideReservationAgreement,
+  exportReservationAgreement,
+  getCardProducts,
+  getCustomerApplication,
+  getCustomerApplications,
+  getOfficialFormTemplate,
+  getPurchaseTermsProposal,
+  getReservationPayments,
+  getReservationFinance,
+  activateSale,
+  exportPurchaseDocument,
+  finalizeReservationPurchase,
+  getReservationAgreement,
+  getReservationAgreementsPage,
+  getSaleSummary,
+  getSales,
+  previewOfficialFormImport,
+  reopenReservationAgreement,
+  submitReservationAgreement,
+  updateReservationAgreement,
+  updateApplicationReservation,
+} from './services';
+import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
+
+import { humanizeApplicationIssues } from './official-forms-applications';
+
+import {
+  today,
+  asBase64,
+  formatFileSize,
+  fieldLabel,
+  VIP_TIER_FIELD_OPTIONS,
+  isVipTier,
+  Field,
+  QUEUE_PAGE_SIZE,
+} from './official-forms-fields';
+
 export function ReservationAgreementsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('');
@@ -84,8 +134,6 @@ export function ReservationAgreementsPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  const rangeFrom = total === 0 ? 0 : safePage * QUEUE_PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * QUEUE_PAGE_SIZE);
   // First load skeletonizes the whole page - header, filters, and table - so
   // no static content flashes before the data it describes. Refetches keep the
   // previous list visible and never reach this branch.
@@ -293,13 +341,6 @@ export function ReservationAgreementsPage() {
             onChange={(next) => setPage(next - 1)}
             label="Reservation agreements pagination"
           />
-          <span
-            role="status"
-            aria-label="Reservation record range"
-            className={styles.paginationRange}
-          >
-            Showing {rangeFrom}–{rangeTo} of {total}
-          </span>
         </div>
       ) : null}
     </section>
@@ -707,7 +748,9 @@ export function ReservationAgreementEditorPage() {
             {formatMoneyOrDash(summary.data.verifiedTotal)}, balance{' '}
             {formatMoneyOrDash(summary.data.remainingBalance)}.
           </span>
-          <span>Schedule rows below are obligations only — actual cash lives in the payments table.</span>
+          <span>
+            Schedule rows below are obligations only — actual cash lives in the payments table.
+          </span>
         </p>
       ) : null}
       {salePlan ? (
@@ -860,9 +903,7 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-dates-heading" className={styles.panelTitle}>
             2. Agreement dates
           </h2>
-          <p className={styles.panelNote}>
-            Effective dates that bound this reservation agreement.
-          </p>
+          <p className={styles.panelNote}>Effective dates that bound this reservation agreement.</p>
           <div className={styles.editorGrid}>
             {Object.entries(dates).map(([key, value]) => (
               <Field
@@ -1299,7 +1340,7 @@ function ApplicationOriginAgreementPanel({
             <tbody>
               {payments.data.map((payment) => (
                 <tr key={payment.id}>
-                  <td data-label="AF-PAY">{payment.paymentNumber ?? payment.id}</td>
+                  <td data-label="AF-PAY">{payment.paymentNumber ?? '—'}</td>
                   <td data-label="Amount" className={styles.ledgerAmount}>
                     {formatMoneyOrDash(payment.amount)}
                   </td>
@@ -1409,9 +1450,7 @@ function MembershipConfirmation({
             </div>
             <div className={styles.snapshotField}>
               <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
-              <dd>
-                {formatCountOrDash(result?.pointsAllocated ?? persisted?.pointsBalance)}
-              </dd>
+              <dd>{formatCountOrDash(result?.pointsAllocated ?? persisted?.pointsBalance)}</dd>
             </div>
             <div className={styles.snapshotField}>
               <dt>Card Sale</dt>
@@ -1459,4 +1498,4 @@ function PrintActivationConfirmation({ membershipId }: { membershipId: string })
       {error ? <span role="alert"> {error}</span> : null}
     </div>
   );
-}
+}

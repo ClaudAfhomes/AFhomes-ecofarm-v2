@@ -7,7 +7,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -158,29 +157,26 @@ export function BusinessCommissionsPage() {
         <ErrorState error={query.error} onRetry={query.refetch} />
       ) : (
         <>
-          <ul className={styles.summary} aria-label="Commission summary">
+          <ul className={styles.badges} aria-label="Commission summary">
             <li>
-              <MetricCard
-                label="Pending decision"
-                value={formatCountOrDash(summary.awaiting)}
+              <StatusChip
+                label={`Pending decision: ${formatCountOrDash(summary.awaiting)}`}
+                tone="warning"
                 icon="clock"
-                description="Commissions needing final qualification"
               />
             </li>
             <li>
-              <MetricCard
-                label="Qualified (earned)"
-                value={formatCountOrDash(summary.earned)}
+              <StatusChip
+                label={`Qualified (earned): ${formatCountOrDash(summary.earned)}`}
+                tone="success"
                 icon="check"
-                description="Qualified, ready to mark paid"
               />
             </li>
             <li>
-              <MetricCard
-                label="Paid out"
-                value={formatCountOrDash(summary.paid)}
+              <StatusChip
+                label={`Paid out: ${formatCountOrDash(summary.paid)}`}
+                tone="success"
                 icon="dollar-sign"
-                description="Payouts recorded"
               />
             </li>
           </ul>

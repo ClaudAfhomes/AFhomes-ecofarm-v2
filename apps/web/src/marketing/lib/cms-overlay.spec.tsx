@@ -73,9 +73,9 @@ beforeEach(() => {
 describe('Phase 28 CMS overlay', () => {
   it('26. live CMS overrides the fallback when present', async () => {
     const cms = await freshCms({
-      site: { ...siteConfig, businessName: 'AF Homes CMS Edition' },
+      site: { ...siteConfig, businessName: 'AFHomes CMS Edition' },
     });
-    expect(cms.cmsRepository.getSiteConfig().businessName).toBe('AF Homes CMS Edition');
+    expect(cms.cmsRepository.getSiteConfig().businessName).toBe('AFHomes CMS Edition');
     // Keys the CMS did not publish keep their repository values.
     expect(cms.cmsRepository.getStories().length).toBeGreaterThan(0);
   });

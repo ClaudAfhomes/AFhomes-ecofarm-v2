@@ -1,5 +1,5 @@
 /**
- * AF Homes Ecofarm shared contracts - the single source of truth for every
+ * AFHomes Ecofarm shared contracts - the single source of truth for every
  * request/response shape exchanged over the REST API and validated at the
  * browser boundary.
  *
@@ -44,7 +44,7 @@ export { errorEnvelopeSchema, apiErrorCodeSchema } from './schemas/error.js';
 export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
 
 /* ---- Cross-portal identity (portal routing + OST self-service) ----
-   `GET /auth/portals` answers which AF Homes identities the bearer's own
+   `GET /auth/portals` answers which AFHomes identities the bearer's own
    Auth user holds. Login screens route on it; it authorizes nothing. */
 export { authPortalsSchema, ostMeSchema } from './schemas/auth.js';
 export type { AuthPortals, OstMe } from './schemas/auth.js';
@@ -469,7 +469,7 @@ export type {
   SalesTrendReport,
 } from './schemas/analytics.js';
 
-/* ---- Phase 2B: operational dashboard queue cards (AF Homes queue-card pattern) ----
+/* ---- Phase 2B: operational dashboard queue cards (AFHomes queue-card pattern) ----
    Three server-side counts (null when unauthorized); no withdrawals until the
    payout workflow exists. */
 export { dashboardQueuesSchema } from './schemas/queues.js';

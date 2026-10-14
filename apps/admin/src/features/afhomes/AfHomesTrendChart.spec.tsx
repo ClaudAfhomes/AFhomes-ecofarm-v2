@@ -95,7 +95,7 @@ const lineD = (container: HTMLElement) =>
     } | null
   )?.getAttribute?.('d') ?? '';
 
-describe('periodLabel (AF Homes grammar)', () => {
+describe('periodLabel (AFHomes grammar)', () => {
   it('7. labels monthly keys as "Sep \'26"', () => {
     expect(periodLabel('2026-09')).toBe("Sep '26");
     expect(periodLabel('2026-01')).toBe("Jan '26");
@@ -106,7 +106,7 @@ describe('periodLabel (AF Homes grammar)', () => {
   });
 });
 
-describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
+describe('AfHomesTrendChart (AFHomes Sales Overview pattern)', () => {
   it('1. renders the "Sales Overview" title', async () => {
     const { container } = renderChart();
     // Loading is skeleton-only, so the title arrives with the series.
@@ -148,7 +148,7 @@ describe('AfHomesTrendChart (AF Homes Sales Overview pattern)', () => {
       expect(lineD(container)).toBe(valueGeometry);
     });
     expect(getTrend).toHaveBeenCalledTimes(1);
-    // AF Homes KPIs stay money/count aggregates regardless of the plotted metric.
+    // AFHomes KPIs stay money/count aggregates regardless of the plotted metric.
     expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
   });
 

@@ -7,8 +7,8 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
+  Pagination,
   SearchField,
   Select,
   Skeleton,
@@ -55,6 +55,10 @@ function tierFromProductName(productName: string): string {
  * The fallback member code and QR token are shown exactly once here. Only
  * their hashes are stored, so they cannot be displayed again.
  */
+
+/** Fixed queue page size: the table shows one page, the pager turns them. */
+const PAGE_SIZE = 10;
+
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
   const queue = useQuery({
@@ -70,6 +74,7 @@ export function BusinessActivationQueuePage() {
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
   const [eligibility, setEligibility] = useState<'all' | 'eligible' | 'not'>('all');
+  const [page, setPage] = useState(0);
   const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
 
@@ -91,6 +96,24 @@ export function BusinessActivationQueuePage() {
         .some((value) => value.toLowerCase().includes(term));
     });
   }, [rows, settled, eligibility]);
+  // A new search term or filter restarts at the first page. The settled term
+  // only changes once the user stops typing, so turning pages never resets.
+  const [prevSettled, setPrevSettled] = useState(settled);
+  if (prevSettled !== settled) {
+    setPrevSettled(settled);
+    setPage(0);
+  }
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  // A shrunken result (e.g. an activation elsewhere) can leave the page past
+  // the last one. Correct during render on a page change (the documented
+  // previous-value pattern, not an effect); display clamps meanwhile.
+  const [prevPageCount, setPrevPageCount] = useState(pageCount);
+  if (prevPageCount !== pageCount) {
+    setPrevPageCount(pageCount);
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }
+  const safePage = Math.min(page, pageCount - 1);
+  const paged = visible.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   const openActivate = (item: FinanceQueueItem) => {
     if (!item.activatable) return;
@@ -155,29 +178,28 @@ export function BusinessActivationQueuePage() {
         <ErrorState error={queue.error} onRetry={queue.refetch} />
       ) : (
         <>
-          <ul className={styles.summary} aria-label="Activation summary">
+          {/* Compact summary badges: counts only, no cards. Label + icon +
+          tone on every badge, never color alone. */}
+          <ul className={styles.badges} aria-label="Activation summary">
             <li>
-              <MetricCard
-                label="Ready to activate"
-                value={formatCountOrDash(summary.eligible)}
+              <StatusChip
+                label={`Eligible: ${formatCountOrDash(summary.eligible)}`}
+                tone="success"
                 icon="check"
-                description="Fully paid and ready to activate"
               />
             </li>
             <li>
-              <MetricCard
-                label="Still short"
-                value={formatCountOrDash(summary.notEligible)}
+              <StatusChip
+                label={`Short: ${formatCountOrDash(summary.notEligible)}`}
+                tone="warning"
                 icon="clock"
-                description="Still short of the frozen total"
               />
             </li>
             <li>
-              <MetricCard
-                label="Queue records"
-                value={formatCountOrDash(summary.total)}
+              <StatusChip
+                label={`Total: ${formatCountOrDash(summary.total)}`}
+                tone="neutral"
                 icon="file-text"
-                description="Sales pending activation review"
               />
             </li>
           </ul>
@@ -199,7 +221,10 @@ export function BusinessActivationQueuePage() {
                 <Select
                   aria-label="Filter by eligibility"
                   value={eligibility}
-                  onChange={(e) => setEligibility(e.target.value as typeof eligibility)}
+                  onChange={(e) => {
+                    setEligibility(e.target.value as typeof eligibility);
+                    setPage(0);
+                  }}
                   options={[
                     { value: 'all', label: 'All records' },
                     { value: 'eligible', label: 'Eligible only' },
@@ -207,13 +232,6 @@ export function BusinessActivationQueuePage() {
                   ]}
                 />
               </label>
-            }
-            actions={
-              <p className={styles.resultCount}>
-                {settled || eligibility !== 'all'
-                  ? `${formatCountOrDash(visible.length)} of ${formatCountOrDash(summary.total)} records`
-                  : `${formatCountOrDash(visible.length)} records`}
-              </p>
             }
           />
 
@@ -250,7 +268,7 @@ export function BusinessActivationQueuePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((item) => (
+                  {paged.map((item) => (
                     <tr
                       key={item.saleId}
                       tabIndex={0}
@@ -327,6 +345,17 @@ export function BusinessActivationQueuePage() {
               </table>
             </div>
           )}
+
+          {pageCount > 1 ? (
+            <div className={styles.pagination}>
+              <Pagination
+                page={safePage + 1}
+                pageCount={pageCount}
+                onChange={(next) => setPage(next - 1)}
+                label="Activation queue pagination"
+              />
+            </div>
+          ) : null}
         </>
       )}
 

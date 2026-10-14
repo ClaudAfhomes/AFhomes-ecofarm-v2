@@ -54,7 +54,7 @@ export function CustomerMembershipPage() {
         title="Card unavailable"
         message={
           isForbidden(membership.error)
-            ? 'Your account is not active, so your card is not available. Contact AF Homes Ecofarm to restore access.'
+            ? 'Your account is not active, so your card is not available. Contact AFHomes Ecofarm to restore access.'
             : isNotFound(membership.error)
               ? 'You do not have an active membership yet.'
               : 'We could not load your card. Please try again in a moment.'
@@ -119,7 +119,7 @@ export function CustomerMembershipPage() {
           {showQr ? (
             <QrCode
               value={card.qrPayload}
-              alt="Your AF Homes Ecofarm member QR code"
+              alt="Your AFHomes Ecofarm member QR code"
               size={160}
             />
           ) : (
@@ -132,7 +132,7 @@ export function CustomerMembershipPage() {
                 "Membership Code". It used to be repeated here as "Member Code"
                 with the same value, which read as two different credentials. */}
             <p className={styles.notice}>
-              Show this QR or code at any AF Homes Ecofarm desk. It never changes, and viewing
+              Show this QR or code at any AFHomes Ecofarm desk. It never changes, and viewing
               it never invalidates anything.
             </p>
             <div className={styles.digitalActions}>
@@ -149,7 +149,7 @@ export function CustomerMembershipPage() {
 
       <Card title="Membership details">
         <FieldList>
-          <Field label="Product" value={card.productName ?? 'AF Homes card'} />
+          <Field label="Product" value={card.productName ?? 'AFHomes card'} />
           {/* The member's OWN agreed scheme - never the internal move playbook. */}
           <Field label="Payment scheme" value={paymentSchemeLabel(card.paymentScheme)} />
           <Field label="Activated" value={formatDate(card.activatedAt)} />
@@ -203,7 +203,7 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
   return (
     <div className={styles.credentialBox}>
       {/* The payload is the opaque token alone - no PII is encoded. */}
-      <QrCode value={credentials.qrToken} alt="Your AF Homes Ecofarm member QR code" size={160} />
+      <QrCode value={credentials.qrToken} alt="Your AFHomes Ecofarm member QR code" size={160} />
       <div className={styles.credentialText}>
         <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
           Shown once. Close this and the secret cannot be displayed again — request a new pair
@@ -212,7 +212,7 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
         <p className={styles.fieldLabel}>Fallback member code</p>
         <p className={styles.credentialCode}>{credentials.fallbackCode}</p>
         <p className={styles.notice}>
-          Show this at any AF Homes Ecofarm desk, in case the QR code cannot be scanned. Staff
+          Show this at any AFHomes Ecofarm desk, in case the QR code cannot be scanned. Staff
           enter it by hand.
         </p>
         <p className={styles.notice}>

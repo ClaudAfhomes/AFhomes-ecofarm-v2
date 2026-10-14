@@ -11,7 +11,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -75,8 +74,6 @@ export function UseVipPointsPage() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const rangeFrom = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
-  const rangeTo = Math.min(total, (safePage + 1) * PAGE_SIZE);
 
   const [detail, setDetail] = useState<PurchaseRow | null>(null);
 
@@ -117,21 +114,19 @@ export function UseVipPointsPage() {
         Scanning or quoting alone never spends points.
       </Alert>
 
-      <ul className={styles.metrics} aria-label="Discount queue summary">
+      <ul className={styles.badges} aria-label="Discount queue summary">
         <li>
-          <MetricCard
-            label="Draft purchases"
-            value={formatCountOrDash(filtered.length)}
+          <StatusChip
+            label={`Draft purchases: ${formatCountOrDash(filtered.length)}`}
+            tone="neutral"
             icon="file-text"
-            description="Unsettled sales that can take a discount"
           />
         </li>
         <li>
-          <MetricCard
-            label="Awaiting quote"
-            value={formatCountOrDash(visible.length)}
+          <StatusChip
+            label={`Awaiting quote: ${formatCountOrDash(visible.length)}`}
+            tone="warning"
             icon="clock"
-            description="Drafts on this page"
           />
         </li>
       </ul>
@@ -232,9 +227,6 @@ export function UseVipPointsPage() {
             onChange={(next) => setPage(next - 1)}
             label="Draft purchases pagination"
           />
-          <span role="status" className={styles.paginationRange}>
-            Showing {rangeFrom}-{rangeTo} of {total}
-          </span>
         </div>
       ) : null}
 

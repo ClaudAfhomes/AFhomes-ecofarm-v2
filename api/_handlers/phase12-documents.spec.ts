@@ -1,6 +1,6 @@
 import { installDocumentReviewRpc } from '../_lib/testing/document-review-rpc.js';
 /**
- * AF Homes Phase 12 - identity documents and OCR-assisted extraction.
+ * AFHomes Phase 12 - identity documents and OCR-assisted extraction.
  *
  * Drives the REAL documents handler, the REAL staff principal resolver, the
  * REAL contracts and the REAL OCR abstraction against the in-memory Supabase

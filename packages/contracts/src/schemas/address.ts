@@ -1,7 +1,7 @@
 /**
  * Normalized Philippine address vocabulary.
  *
- * These types are the AF Homes contract, deliberately NOT a mirror of any
+ * These types are the AFHomes contract, deliberately NOT a mirror of any
  * provider's response shape. A provider adapter owns every source-specific
  * field name; application code sees only `code`/`name`/`type`.
  *

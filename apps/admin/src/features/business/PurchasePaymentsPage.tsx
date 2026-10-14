@@ -46,7 +46,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -174,29 +173,26 @@ export function PurchasePaymentsPage() {
         />
       ) : (
         <>
-          <ul className={styles.summary} aria-label="Purchase summary">
+          <ul className={styles.badges} aria-label="Purchase summary">
             <li>
-              <MetricCard
-                label="Open drafts"
-                value={formatCountOrDash(summary.draft)}
+              <StatusChip
+                label={`Open drafts: ${formatCountOrDash(summary.draft)}`}
+                tone="warning"
                 icon="clock"
-                description="Draft purchases awaiting settlement"
               />
             </li>
             <li>
-              <MetricCard
-                label="Completed sales"
-                value={formatCountOrDash(summary.completed)}
+              <StatusChip
+                label={`Completed sales: ${formatCountOrDash(summary.completed)}`}
+                tone="success"
                 icon="check"
-                description="Settled purchases"
               />
             </li>
             <li>
-              <MetricCard
-                label="Reversed sales"
-                value={formatCountOrDash(summary.reversed)}
+              <StatusChip
+                label={`Reversed sales: ${formatCountOrDash(summary.reversed)}`}
+                tone="danger"
                 icon="close"
-                description="Reversed purchases"
               />
             </li>
           </ul>
@@ -227,13 +223,6 @@ export function PurchasePaymentsPage() {
                   ]}
                 />
               </label>
-            }
-            actions={
-              <p className={styles.resultCount}>
-                {settled || statusFilter !== 'all'
-                  ? `${formatCountOrDash(rows.length)} of ${formatCountOrDash(summary.total)} purchases`
-                  : `${formatCountOrDash(rows.length)} purchases`}
-              </p>
             }
           />
 

@@ -19,7 +19,7 @@ import {
   MIGRATION_SEEDED_GRANTS,
 } from '../packages/contracts/src/schemas/role-baseline.js';
 /**
- * AF Homes Phase 2 - DATABASE INTEGRATION SUITE.
+ * AFHomes Phase 2 - DATABASE INTEGRATION SUITE.
  *
  * This executes the real SQL against a real PostgreSQL server. The migrations
  * are not inspected as text and the handlers are not involved: the point is to

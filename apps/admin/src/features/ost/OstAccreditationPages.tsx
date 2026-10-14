@@ -22,7 +22,6 @@ import {
   EmptyState,
   ErrorState,
   FileField,
-  MetricCard,
   OstOfficialFields,
   OverflowMenu,
   PageHeader,
@@ -375,24 +374,20 @@ export function OstAccreditationHistoryPage() {
       />
 
       {['admin', 'super_admin'].includes(user?.roleSlug ?? '') ? <SaleTeamAccreditationCard staffId={id} kind="OST" /> : null}
-      <div className={styles.metrics} aria-label="Accreditation summary">
-        <MetricCard
-          label="Recorded terms"
-          value={formatCountOrDash(terms.length)}
-          description="Approved accreditation terms on file."
+      <div className={styles.badges} aria-label="Accreditation summary">
+        <StatusChip
+          label={`Recorded terms: ${formatCountOrDash(terms.length)}`}
+          tone="neutral"
           icon="grid"
         />
-        <MetricCard
-          label="Pending renewals"
-          value={formatCountOrDash(pendingRenewals)}
-          description="Renewals waiting for endorsement or decision."
+        <StatusChip
+          label={`Pending renewals: ${formatCountOrDash(pendingRenewals)}`}
+          tone="warning"
           icon="clock"
-          chip={{ label: 'Pending', tone: 'warning' }}
         />
-        <MetricCard
-          label="Total renewals"
-          value={formatCountOrDash(renewals.length)}
-          description="Every renewal request ever filed."
+        <StatusChip
+          label={`Total renewals: ${formatCountOrDash(renewals.length)}`}
+          tone="neutral"
           icon="check"
         />
       </div>
@@ -811,20 +806,16 @@ export function OstImportExportPage() {
           <h2 id="ost-preview-heading" className={styles.panelTitle}>
             Preview
           </h2>
-          <div className={styles.metrics} aria-label="Import summary">
-            <MetricCard
-              label="Valid rows"
-              value={formatCountOrDash(validRows)}
-              description="Rows ready for pending applications."
+          <div className={styles.badges} aria-label="Import summary">
+            <StatusChip
+              label={`Valid rows: ${formatCountOrDash(validRows)}`}
+              tone="success"
               icon="check"
-              chip={{ label: 'Valid', tone: 'success' }}
             />
-            <MetricCard
-              label="Invalid rows"
-              value={formatCountOrDash(invalidRows)}
-              description="Rows that need correction in the source."
+            <StatusChip
+              label={`Invalid rows: ${formatCountOrDash(invalidRows)}`}
+              tone="danger"
               icon="alert"
-              chip={{ label: 'Invalid', tone: 'danger' }}
             />
           </div>
           <p>
@@ -882,10 +873,6 @@ export function OstImportExportPage() {
                 onChange={(next) => setPage(next - 1)}
                 label="Import preview pagination"
               />
-              <span role="status" aria-label="Preview row range" className={styles.range}>
-                Showing {safePage * IMPORT_PAGE_SIZE + 1} to{' '}
-                {Math.min(rowTotal, (safePage + 1) * IMPORT_PAGE_SIZE)} of {rowTotal}
-              </span>
             </div>
           ) : null}
           <div className={styles.actions}>

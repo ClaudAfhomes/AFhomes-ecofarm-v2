@@ -210,7 +210,3 @@
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
-
-.paginationRange {
-  margin: 0;
-}

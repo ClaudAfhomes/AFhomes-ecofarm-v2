@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 27 document UI.
+ * AFHomes Phase 27 document UI.
  *
  * Proves the ID Documents screens render real backend state (never mocks):
  * intake with client-side validation, list loading/empty/error handling, OCR

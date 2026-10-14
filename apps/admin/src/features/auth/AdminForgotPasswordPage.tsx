@@ -92,7 +92,7 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Reset your password"
       lead="Enter your staff email and we will send you a link to choose a new password."
       brandTitle="Grow with the farm you own a card in."

@@ -1,5 +1,5 @@
 /**
- * AF Homes lifecycle states and their legal transitions.
+ * AFHomes lifecycle states and their legal transitions.
  *
  * Single source of truth for every status string in the system. Handlers,
  * contracts, and tests all import from here so a state can never be spelled two

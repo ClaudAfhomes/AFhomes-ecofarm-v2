@@ -2,7 +2,7 @@
  * Cross-portal identity contracts.
  *
  * `GET /auth/portals` answers one question for the bearer's OWN Auth user:
- * which AF Homes identities exist (staff row, customer row, OST row). It is
+ * which AFHomes identities exist (staff row, customer row, OST row). It is
  * read-only, session-scoped (never parameterized by user id), and carries no
  * PII beyond what each portal already shows its own member. Login screens use
  * it to route to the right portal and to name the wrong-portal message; it

@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 12 - identity documents and OCR-assisted extraction.
+ * AFHomes Phase 12 - identity documents and OCR-assisted extraction.
  *
  * OCR output is SUGGESTION data, never authoritative data. Nothing extracted
  * ever reaches a customer or application record without explicit human review

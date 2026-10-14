@@ -12,6 +12,7 @@ import {
   SearchField,
   Select,
   Skeleton,
+  StatusChip,
 } from '@afhomes/ui';
 
 import { useSession } from '../../lib/session';
@@ -140,6 +141,12 @@ export function ReportsPage() {
     if (typeof value === 'number') return formatCountOrDash(value);
     if (value === null || value === undefined || value === '') return '-';
     return String(value);
+  };
+  const summaryKeyLabel = (key: string): string => {
+    if (key === 'grossFrozenValue') return 'Gross Sales Value';
+    if (key === 'verifiedPaid') return 'Verified Paid';
+    if (key === 'remaining') return 'Remaining Balance';
+    return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
   };
 
   // First load skeletonizes the whole page - header, filters, and table - so
@@ -308,7 +315,7 @@ export function ReportsPage() {
       ) : (
         <>
           {type === 'redemptions' && summary ? (
-            <dl className={styles.summary} aria-label="Personal service summary">
+            <ul className={styles.badges} aria-label="Personal service summary">
               {(
                 [
                   ['customersServed', 'Customers served'],
@@ -318,35 +325,27 @@ export function ReportsPage() {
                   ['monthTransactions', "This month's transactions"],
                 ] as const
               ).map(([key, label]) => (
-                <div key={key}>
-                  <dt className={styles.summaryLabel}>{label}</dt>
-                  <dd>
-                    <strong>{summaryNumber(key)}</strong>
-                  </dd>
-                </div>
+                <li key={key}>
+                  <StatusChip
+                    label={`${label}: ${summaryNumber(key)}`}
+                    tone="neutral"
+                    icon="file-text"
+                  />
+                </li>
               ))}
-            </dl>
+            </ul>
           ) : (
-            <dl className={styles.summary}>
+            <ul className={styles.badges} aria-label="Report summary">
               {Object.entries(query.data.summary).map(([key, value]) => (
-                <div key={key}>
-                  <dt className={styles.summaryLabel}>
-                    {key === 'grossFrozenValue'
-                      ? 'Gross Sales Value'
-                      : key === 'verifiedPaid'
-                        ? 'Verified Paid'
-                        : key === 'remaining'
-                          ? 'Remaining Balance'
-                          : key
-                              .replace(/([a-z])([A-Z])/g, '$1 $2')
-                              .replace(/^./, (c) => c.toUpperCase())}
-                  </dt>
-                  <dd>
-                    <strong>{formatCell(key, value)}</strong>
-                  </dd>
-                </div>
+                <li key={key}>
+                  <StatusChip
+                    label={`${summaryKeyLabel(key)}: ${formatCell(key, value)}`}
+                    tone="neutral"
+                    icon="file-text"
+                  />
+                </li>
               ))}
-            </dl>
+            </ul>
           )}
           <p className={styles.muted}>
             Scope: {query.data.scope.label} · {query.data.meta.total} rows
@@ -432,10 +431,6 @@ export function ReportsPage() {
             >
               Previous
             </Button>
-            <span>
-              {offset + 1}–{Math.min(offset + PAGE_SIZE, query.data.meta.total)} of{' '}
-              {query.data.meta.total}
-            </span>
             <Button
               variant="secondary"
               disabled={offset + PAGE_SIZE >= query.data.meta.total}

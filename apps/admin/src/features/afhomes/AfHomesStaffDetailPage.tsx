@@ -193,8 +193,8 @@ function StaffDetailForm({
         <DetailCard>
           <DetailCardTitle>Staff information</DetailCardTitle>
           <DetailFieldGrid>
-            <DetailField label="ID">
-              <DetailMono>{member.id}</DetailMono>
+            <DetailField label="Employee No.">
+              <DetailMono>{member.employeeNumber ?? '—'}</DetailMono>
             </DetailField>
             <DetailField label="Name">{member.fullName}</DetailField>
             <DetailField label="Email">{member.email}</DetailField>
@@ -367,7 +367,7 @@ function StaffDetailForm({
         onCancel={() => setConfirmDeactivate(false)}
         onConfirm={() => deactivate.mutate()}
         title="Deactivate Staff Account"
-        message="This user will no longer be able to access the AF Homes staff system. Historical records will remain."
+        message="This user will no longer be able to access the AFHomes staff system. Historical records will remain."
         danger
         confirmLabel="Confirm"
         confirmLoading={deactivate.isPending}

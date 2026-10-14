@@ -18,22 +18,22 @@ import {
 
 const renderWithRouter = (ui: ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
-describe('AuthLayout (AF Homes auth shell)', () => {
+describe('AuthLayout (AFHomes auth shell)', () => {
   it('renders the mobile masthead, brand panel, and a single h1', () => {
     render(
-      <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFHomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
     expect(screen.getByRole('heading', { level: 1, name: 'Staff sign in' })).toBeInTheDocument();
     // Mobile masthead + desktop brand panel + form eyebrow share the eyebrow text.
-    expect(screen.getAllByText('AF Homes Ecofarm').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('AFHomes Ecofarm').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Grow.')).toBeInTheDocument();
   });
 
   it('marks every auth screen noindex, nofollow', () => {
     render(
-      <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFHomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
@@ -46,7 +46,7 @@ describe('AuthLayout (AF Homes auth shell)', () => {
   it('supports the wide form panel and lead text', () => {
     const { container } = render(
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFHomes Ecofarm"
         title="Activate your account"
         lead="Use your code."
         brandTitle="Brand."
@@ -62,7 +62,7 @@ describe('AuthLayout (AF Homes auth shell)', () => {
   it('renders the breadcrumb slot at the very top of the form card', () => {
     render(
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFHomes Ecofarm"
         title="Staff sign in"
         brandTitle="Grow."
         breadcrumb={
@@ -152,7 +152,7 @@ describe('Alert', () => {
   });
 });
 
-describe('MetricCard (AF Homes queue-card pattern)', () => {
+describe('MetricCard (AFHomes queue-card pattern)', () => {
   it('renders icon, value, label, and description', () => {
     renderWithRouter(
       <MetricCard label="Pending payments" value={7} icon="clock" description="Awaiting review" />,

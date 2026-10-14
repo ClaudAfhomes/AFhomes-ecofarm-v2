@@ -1,5 +1,5 @@
 /**
- * AF Homes redemption API client (staff side).
+ * AFHomes redemption API client (staff side).
  *
  * Every call goes through `lib/api/client`, which validates the response against
  * `@afhomes/contracts`. No ad-hoc `fetch`, and no `any`.

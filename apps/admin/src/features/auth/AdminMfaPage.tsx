@@ -25,7 +25,7 @@ export function AdminMfaPage() {
       if (!client) throw new Error('Authentication is not configured.');
       const result = await client.auth.mfa.enroll({
         factorType: 'totp',
-        friendlyName: 'AF Homes administrator',
+        friendlyName: 'AFHomes administrator',
       });
       if (result.error) throw result.error;
       return result.data;
@@ -45,9 +45,9 @@ export function AdminMfaPage() {
   const qr = enrollment.data?.totp.qr_code;
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Authenticator verification"
-      brandTitle="Secure access to AF Homes."
+      brandTitle="Secure access to AFHomes."
       lead="Admin and Super Admin verification uses Supabase TOTP."
     >
       {factors.isPending && (

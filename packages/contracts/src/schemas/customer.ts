@@ -1,5 +1,5 @@
 /**
- * AF Homes Customer Portal contracts.
+ * AFHomes Customer Portal contracts.
  *
  * Customer authorization is ownership-based (`auth.uid()` -> `customers`), never
  * permission-based, so nothing in this file is derived from the staff module

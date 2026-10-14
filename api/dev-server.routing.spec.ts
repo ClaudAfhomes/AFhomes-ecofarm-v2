@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 13 - real HTTP routing verification through the dev server.
+ * AFHomes Phase 13 - real HTTP routing verification through the dev server.
  *
  * Unit tests prove handlers against simulated sub-paths; this spec proves the
  * FULL path a browser request travels: TCP -> api/dev-server.ts -> the shared

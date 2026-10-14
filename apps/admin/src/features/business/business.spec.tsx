@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 admin surface.
+ * AFHomes Phase 2 admin surface.
  *
  * Proves the two frontend halves that must hold for the new business screens:
  *

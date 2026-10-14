@@ -99,43 +99,18 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Summary strip: three headline counts above the queue. */
-.summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: var(--space-3);
+/* Summary badges: one compact strip instead of cards. Counts only. */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.summary > li {
+.badges > li {
   min-width: 0;
-}
-
-/* Compact summary: smaller cards than the default MetricCard — tighter
-   padding, smaller icon tile and stepped-down type. Scoped to this strip, so
-   no other surface moves. */
-.summary > li :global(article) {
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-4);
-}
-
-.summary > li :global(article) > div:first-child > span:first-child {
-  width: 30px;
-  height: 30px;
-}
-
-.summary > li :global(article) > span:nth-of-type(1) {
-  font-size: var(--text-h3);
-}
-
-.summary > li :global(article) > span:nth-of-type(2) {
-  font-size: var(--text-body-s);
-}
-
-.summary > li :global(article) > span:nth-of-type(3) {
-  font-size: var(--text-caption);
 }
 
 /* Status filter label, matching the reservations/applications toolbar. */
@@ -146,15 +121,6 @@
   font-weight: 600;
   min-width: 0;
   max-width: 100%;
-}
-
-/* Toolbar result count, trailing the search + filter controls. */
-.resultCount {
-  margin: 0;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Queue table: the page's working surface, wrapped in an elevated panel
@@ -572,32 +538,21 @@
   min-width: min(100%, 30rem);
 }
 
-.skeletonSummary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: var(--space-3);
+.skeletonBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-/* Summary placeholders mirror a compact MetricCard: icon tile, figure,
-   label and hint stacked with the same rhythm. Geometry only — the shimmer
-   itself comes from the shared Skeleton. */
-.skMetric {
-  display: grid;
-  gap: var(--space-1);
-  align-content: start;
-  min-height: 116px;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background-color: var(--color-bg-surface-raised);
+.skeletonBadges > li {
+  min-width: 0;
 }
 
-.skTile {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-}
-
+/* Badge placeholders mirror the summary StatusChips: pill geometry only —
+   the shimmer itself comes from the shared Skeleton. */
 .skPill {
   height: 26px;
   border-radius: var(--radius-pill);

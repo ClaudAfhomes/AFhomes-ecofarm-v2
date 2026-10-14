@@ -11,7 +11,7 @@ import { CtaBanner } from '../../marketing/components/home/CtaBanner';
 import { Hero } from '../../marketing/components/home/Hero';
 
 /**
- * The root URL: the pure AF Homes marketing homepage. Member sign-in lives
+ * The root URL: the pure AFHomes marketing homepage. Member sign-in lives
  * behind the navbar Login entry (`/customer/login`, which keeps the
  * hero + login split) — the landing hero itself carries no form.
  */

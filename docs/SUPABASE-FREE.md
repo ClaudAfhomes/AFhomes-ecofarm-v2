@@ -127,7 +127,9 @@ Regression coverage includes seller ownership/cross-owner denial, preserved deta
 
 Still unverified: live authenticated Preview UI, deployed request latency, representative concurrent load, actual billing-cycle egress/log meters and total monthly savings. This change performs no new SQL migration, Storage cleanup, quota monitor, image compression or MongoDB implementation. On 2026-10-13 the user authorized committing and pushing this implementation to `claud/develop` for Vercel Preview; verify the resulting commit and deployment through Git/Vercel. Production promotion remains outside this release. A client timeout cannot prove whether a server-side mutation committed; inspect saved state before repeating it.
 
-## Public AA verification (local implementation, not deployed)
+## Public AA verification
+
+Migration `20261130000001_afhomes_sale_team_accreditation.sql` was applied to `ikaevepedpqygdlipsei` on 2026-10-14 after explicit approval. Executed SHA-256: `6c85fd2e0018b1f267a396397f8dfd4a0530a1977f6bc5630020e7bccf57b844`. Verification passed for the five function definitions/ACLs, private-table RLS/grants, approval trigger, optional MFA singleton/getter and six RLS invariants. History contains 72 applied versions; the new AA table contained zero rows after execution. Protected account, VIP plan, sales, payment, membership, points and audit row counts were unchanged. No test accounts or accreditation records were created. Managed PostgREST service-role lookup returned HTTP 200/null; anonymous direct RPC and private-schema reads were denied. Application deployment must follow this migration.
 
 `/sale-team-search` submits an exact AA lookup through `/sale-team/search`; no directory, substring search, autocomplete or polling. One unique AA index narrows the database lookup, and one service-only RPC returns only the approved public name, IST/OST classification, AA number, current status and validity dates. Public searches return only currently accredited records. Responses use `Cache-Control: no-store` so new lookups observe revocation; searches do not append business audit rows or store per-search counters in Postgres.
 

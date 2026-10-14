@@ -114,12 +114,12 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
     const labels = declared.join(' | ');
 
     // Selling is the GSD's job.
-    expect(labels).toContain('New Service Sale');
+    expect(labels).toContain('New Sale');
     // `employee` holds `operations.catalog` VIEW, because it needs the catalog to
     // sell from and redeem against, so the Products & Services screen stays
     // readable: read is enough to explain a sale. It is WITHHELD at the write
     // controls instead, and the server refuses those writes regardless.
-    expect(labels).toContain('Products & Services');
+    expect(labels).toContain('Catalog');
     // Verification is never the seller's, on its own key the GSD does not hold.
     expect(labels).not.toContain('Sales Records & Verification');
   });

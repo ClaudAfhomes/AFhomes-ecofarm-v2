@@ -1,5 +1,5 @@
 /**
- * AF Homes customer directory list filters (`GET /customers`).
+ * AFHomes customer directory list filters (`GET /customers`).
  *
  * Pins the status/payment query contract: valid values reach the
  * `customer_directory` RPC untouched, and an unknown payment state is

@@ -34,5 +34,5 @@ export function tierLabel(
   if (tier === 'GOLD' || tier === 'SILVER' || tier === 'BRONZE') {
     return `${tier.charAt(0)}${tier.slice(1).toLowerCase()} VIP`;
   }
-  return 'AF Homes VIP';
+  return 'AFHomes VIP';
 }

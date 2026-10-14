@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 33 - web responsive completion (portal + public site).
+ * AFHomes Phase 33 - web responsive completion (portal + public site).
  *
  * Renders the REAL portal and marketing routes at mobile widths against a
  * deny-by-default fetch stub. Assertions pin mobile-first usability without

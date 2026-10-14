@@ -20,16 +20,16 @@
   }
 }
 
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-3);
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.metrics > li {
+.badges > li {
   min-width: 0;
 }
 
@@ -127,10 +127,6 @@
   margin-top: var(--space-3);
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
-}
-
-.paginationRange {
-  margin: 0;
 }
 
 .filterLabel {

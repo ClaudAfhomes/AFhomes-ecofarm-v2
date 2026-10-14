@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 12 - provider-neutral OCR abstraction.
+ * AFHomes Phase 12 - provider-neutral OCR abstraction.
  *
  * Core application code depends ONLY on this module, never on a provider SDK:
  * a future provider is a new `OcrProvider` implementation plus one selection

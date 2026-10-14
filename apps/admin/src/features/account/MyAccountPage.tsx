@@ -20,7 +20,7 @@ import styles from './MyAccountPage.module.css';
 import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
 
 /**
- * My Account (AF Homes pattern, `/admin/profile`): the signed-in staff
+ * My Account (AFHomes pattern, `/admin/profile`): the signed-in staff
  * member's identity plus the display-name and password workflows. While
  * `mustChangePassword` is set the rest of the admin panel stays locked and
  * this page is the only destination, so the password card is the forced

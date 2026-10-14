@@ -229,7 +229,7 @@ describe('required API authentication', () => {
   });
 });
 
-describe('AF Homes staff services require authentication', () => {
+describe('AFHomes staff services require authentication', () => {
   it('sends staff deletion as an authenticated DELETE', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ deleted: true }));
     vi.stubGlobal('fetch', fetchMock);

@@ -100,7 +100,7 @@ export function OstResetPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFHomes Ecofarm"
       title="Choose a new password"
       brandTitle="Sell the farm you believe in."
       brandLead="Your pipeline, your referral code, and your network."
