@@ -339,9 +339,14 @@ export default function App() {
                 element={protectedPage(<PurchasePaymentsPage />)}
               />
               <Route path="/admin/points" element={protectedPage(<BusinessPointsPage />)} />
+              {/* Canonical Commission Settings live at /admin/commissions/settings
+              (the Finance sidebar entry). This /finance/ twin exists only so
+              old bookmarks keep working; it redirects instead of rendering so
+              the sidebar guard and breadcrumb resolve the canonical entry and
+              its `network.commissions` key - never the Finance parent prefix. */}
               <Route
                 path="/admin/finance/commissions/settings"
-                element={protectedPage(<CommissionSettingsPage />)}
+                element={protectedPage(<Navigate replace to="/admin/commissions/settings" />)}
               />
               <Route
                 path="/admin/commissions/settings"
