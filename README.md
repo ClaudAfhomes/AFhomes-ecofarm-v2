@@ -5,10 +5,14 @@ operations, and staff administration. pnpm workspaces + Turborepo.
 
 ## Layout
 
-- `apps/web` - public site SPA (React + Vite). Phase 1 ships a placeholder
-  shell; public pages land in a later phase.
-- `apps/admin` - staff operations console (React + Vite). Dashboard, Staff,
-  Departments, Roles & Permissions.
+- `apps/web` - public SPA (React + Vite): marketing site, customer portal
+  (`/customer/**`: login, activate, dashboard, card, points, profile), and
+  OST/staff surfaces. Production base `/`.
+- `apps/admin` - staff operations console (React + Vite): dashboard, staff,
+  departments, roles & permissions, plus business (products, sales, payments,
+  activation), redemption, documents, genealogy, memberships, OST, CMS and
+  reports. Production base `/admin/` (also `/staff`, `/employee`, `/finance`,
+  `/hr`, `/sales`).
 - `api/` - REST API as a single Vercel Function, backed by Supabase Postgres +
   Supabase Auth.
 - `packages/contracts` - Zod request/response contracts (single source).
@@ -16,6 +20,9 @@ operations, and staff administration. pnpm workspaces + Turborepo.
 - `packages/shared` - framework-free exact-decimal money helpers.
 - `packages/ui` - design tokens and shared components.
 - `supabase/` - migrations, reference seed, Super Admin bootstrap, RLS audit.
+- `docs/supabase/` - Supabase Free capacity SSOT (`SUPABASE-FREE.md`) plus
+  phased implementation plans (`solutions/`: egress, database, MAU, storage,
+  log ingestion, log query).
 
 ## Commands
 
@@ -26,10 +33,16 @@ pnpm test         # vitest run
 pnpm typecheck    # tsc --noEmit
 pnpm lint
 pnpm build
+pnpm format       # prettier --write .
+pnpm check:env    # environment isolation guard
 
 pnpm db:migrate               # apply supabase/migrations
 pnpm seed                     # reference plans only
+pnpm seed:demo                # preview-only; refuses the production project
 pnpm bootstrap:superadmin     # one-time invite-based Super Admin bootstrap
+
+pnpm test:db:local            # DB suite against a disposable local PostgreSQL
+pnpm test:db                  # …against an approved dev DB URL
 
 pnpm exec tsx api/dev-server.ts   # local API on :3000
 ```
