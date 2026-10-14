@@ -7,6 +7,7 @@ import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath } from '@afhomes/contracts';
 import { useProfilePhoto } from '../features/account/profile-photo';
+import logo from '../assets/logo.png';
 
 export function AdminLayout() {
   const photo = useProfilePhoto();
@@ -29,9 +30,10 @@ export function AdminLayout() {
       <AppShell
         brand={
           <div className={styles.brandBlock}>
+            <img src={logo} alt="AFHomes logo" />
             <div className={styles.brandTextBlock}>
               <span className={styles.brandName}>AFHomes</span>
-              <span className={styles.brandText}>Ecofarm Operations</span>
+              <span className={styles.brandText}>Operations</span>
             </div>
           </div>
         }

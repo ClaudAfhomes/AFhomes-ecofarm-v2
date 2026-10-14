@@ -104,7 +104,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   {
     to: '/admin/points',
     label: 'Services',
-    icon: 'dollar-sign',
+    // Selling-desk group: must not share Finance's 'dollar-sign' icon.
+    icon: 'grid',
     module: 'operations.sales',
     dropdown: [
       // The GSD screen. `operations.sales` view+create is what a seller holds;
@@ -258,8 +259,8 @@ export function canAccessNavTarget(
  * Does `pathname` fall under this nav target?
  *
  * The LONGEST matching target wins. Prefix matching alone is wrong once a
- * dropdown holds both a parent route and a nested child: `/admin/redemption/items`
- * starts with `/admin/redemption/`, so a first-match search resolves the catalog
+ * group holds both a parent route and a nested child: `/admin/points/rules`
+ * starts with `/admin/points/`, so a first-match search resolves the catalog
  * screen to the WORKFLOW's module key and checks the wrong permission. Choosing
  * the most specific match keeps a nested screen gated on its OWN module.
  */
