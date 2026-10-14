@@ -145,7 +145,7 @@ try {
   const legacyIssued = await manage(db, legacy);
   assert.match(legacyIssued.aaNumber, /^AA-[A-Z0-9]{12}$/);
   const numberingMigration = fs.readFileSync(
-    'supabase/migrations/20261203000001_afhomes_official_aa_numbering.sql',
+    'supabase/migrations/20261203000002_afhomes_official_aa_numbering.sql',
     'utf8',
   );
   await db.query(numberingMigration);
