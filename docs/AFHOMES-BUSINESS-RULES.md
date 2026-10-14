@@ -15,7 +15,7 @@ The specification below is retained verbatim. Its `[SOURCE]` verification claims
 - JA&D/IGP material below is supplied cross-company numbering reference only. It does not reactivate retired JAD code, create an IGP product, adopt compensation rates, or change AF Homes roles and permissions. No NFC is introduced.
 - This addition changes documentation only: no generator, schema, account, commission, financial record or issued ID is changed. Implementation and any live migration require their own reviewed scope and authorization.
 
-Related operational context: [Supabase Free and release constraints](SUPABASE-FREE.md). Profile-photo readiness is recorded there separately; it does not approve an identifier rollout.
+Related operational context: [Supabase Free and release constraints](supabase/SUPABASE-FREE.md). Profile-photo readiness is recorded there separately; it does not approve an identifier rollout.
 
 ## Supplied membership and numbering specification
 
