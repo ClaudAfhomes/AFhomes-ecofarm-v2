@@ -15,16 +15,19 @@ import {
   MAX_IMPORT_ROWS,
   customerExportCsv,
   customerExportXlsx,
-  customerImportTemplateCsv,
-  customerImportTemplateXlsx,
   fetchGoogleSheetCsv,
+  isCompanyMembershipTemplate,
   matrixToRecords,
+  membershipTemplateCsv,
+  membershipTemplateXlsx,
   parseCsvMatrix,
   parseXlsxMatrix,
+  remapCompanyTemplateMatrix,
   validateImportRow,
   type ImportContext,
   type ValidatedImportRow,
 } from '../_lib/customer-import.js';
+import { COMPANY_IMPORT_EXTRA_COLUMNS } from '@afhomes/contracts';
 import {
   audit,
   deny,
@@ -217,9 +220,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return deny(res, auth);
       return sendFile(
         res,
-        'afhomes-customer-import-template.xlsx',
+        'membership-template.xlsx',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        customerImportTemplateXlsx(),
+        membershipTemplateXlsx(),
       );
     }
     if (method(req) === 'GET' && path === 'template/csv') {
@@ -227,9 +230,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return deny(res, auth);
       return sendFile(
         res,
-        'afhomes-customer-import-template.csv',
+        'membership-template.csv',
         'text/csv',
-        new TextEncoder().encode(customerImportTemplateCsv()),
+        new TextEncoder().encode(membershipTemplateCsv()),
       );
     }
 
@@ -270,10 +273,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       let records: { rowNumber: number; fields: Record<string, string> }[];
       let unknownHeaders: string[];
+      // Company membership template (45 exact columns) is remapped by POSITION
+      // onto import columns; anything else keeps the established name-based
+      // behavior. Dropped company headers are reported by exact name below.
+      let droppedCompanyHeaders: { index: number; header: string }[] = [];
+      let companyTemplate = false;
       try {
-        const converted = matrixToRecords(matrix);
+        if (isCompanyMembershipTemplate(matrix[0] ?? [])) {
+          const remapped = remapCompanyTemplateMatrix(matrix);
+          matrix = remapped.matrix;
+          droppedCompanyHeaders = remapped.dropped;
+          companyTemplate = true;
+        }
+        const converted = matrixToRecords(
+          matrix,
+          // Remapped company keys live outside the established template
+          // columns; every other file keeps strict known headers.
+          companyTemplate ? [...COMPANY_IMPORT_EXTRA_COLUMNS] : [],
+        );
         records = converted.rows;
-        unknownHeaders = converted.unknownHeaders;
+        unknownHeaders = converted.unknownHeaders.filter(
+          (h) => !h.startsWith('__company_ignored_'),
+        );
       } catch (error) {
         return fail(
           res,
@@ -301,6 +322,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const v = validateImportRow(r.rowNumber, r.fields, ctx, today);
         for (const h of unknownHeaders)
           v.warnings.push({ field: h, message: 'Unknown column: ignored' });
+        for (const dropped of droppedCompanyHeaders)
+          v.warnings.push({
+            field: dropped.header || `column ${dropped.index + 1}`,
+            message: 'Company template column has no v2 import target and was ignored',
+          });
         if (v.errors.length === 0 && v.warnings.length > 0) v.validation = 'warning';
         return v;
       });

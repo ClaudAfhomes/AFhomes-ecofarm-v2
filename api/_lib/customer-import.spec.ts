@@ -12,9 +12,9 @@ import {
   MAX_IMPORT_ROWS,
   customerExportCsv,
   customerExportXlsx,
-  customerImportTemplateCsv,
-  customerImportTemplateXlsx,
   matrixToRecords,
+  membershipTemplateCsv,
+  membershipTemplateXlsx,
   neutralizeFormula,
   parseCsvMatrix,
   parseOpeningBalance,
@@ -22,7 +22,7 @@ import {
   validateImportRow,
   type ImportContext,
 } from './customer-import.js';
-import { CUSTOMER_IMPORT_COLUMNS } from '@afhomes/contracts';
+import { MEMBERSHIP_TEMPLATE_COLUMNS } from '@afhomes/contracts';
 import { toXlsx } from './report-export.js';
 
 const ctx = (overrides: Partial<ImportContext> = {}): ImportContext => ({
@@ -238,12 +238,12 @@ describe('CSV matrix reader', () => {
 
 describe('template and headers', () => {
   it('emits every template column in the XLSX template', () => {
-    const matrix = parseXlsxMatrix(customerImportTemplateXlsx());
-    expect(matrix[0]).toEqual([...CUSTOMER_IMPORT_COLUMNS]);
+    const matrix = parseXlsxMatrix(membershipTemplateXlsx());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
   it('emits the same columns in the CSV template', () => {
-    const matrix = parseCsvMatrix(customerImportTemplateCsv());
-    expect(matrix[0]).toEqual([...CUSTOMER_IMPORT_COLUMNS]);
+    const matrix = parseCsvMatrix(membershipTemplateCsv());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
   it('flags unknown columns without failing the file', () => {
     const { unknownHeaders, rows } = matrixToRecords([

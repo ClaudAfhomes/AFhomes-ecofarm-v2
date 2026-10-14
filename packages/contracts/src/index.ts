@@ -379,6 +379,9 @@ export {
 export {
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_EXPORT_COLUMNS,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  COMPANY_IMPORT_EXTRA_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
   importSourceSchema,
   importJobStatusSchema,
@@ -402,6 +405,7 @@ export {
 export type {
   CustomerImportColumn,
   CustomerExportRow,
+  MembershipTemplateColumn,
   ImportSource,
   ImportJobStatus,
   ImportRowAction,

@@ -138,6 +138,29 @@ export function CustomerDetailPage() {
     );
 
   const record = customer.data;
+  // Company-stated age is never stored (it goes stale); both AGE fields derive
+  // from the stored birthdays so the display can never disagree with them.
+  const ageOn = (iso: string | null | undefined): string => {
+    if (!iso) return '—';
+    const born = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(born.valueOf())) return '—';
+    const now = new Date();
+    let age = now.getFullYear() - born.getFullYear();
+    if (
+      now.getMonth() < born.getMonth() ||
+      (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())
+    )
+      age -= 1;
+    return age < 0 ? '—' : String(age);
+  };
+  const addressOf = (address: unknown): string => {
+    if (!address || typeof address !== 'object') return '—';
+    const parts = address as Record<string, unknown>;
+    const text = [parts.line1, parts.line2, parts.city, parts.province, parts.countryCode]
+      .filter((part) => typeof part === 'string' && part.trim().length > 0)
+      .join(', ');
+    return text || '—';
+  };
   const groups: Array<{ title: string; fields: Array<[string, ReactNode]>; columns?: 2 }> = [
     {
       title: 'Customer',
@@ -175,6 +198,82 @@ export function CustomerDetailPage() {
         ['ID type', record.governmentIdType ?? '—'],
         // Only ever the masked form; the API never returns the number.
         ['Government ID', record.governmentIdMasked ?? '—'],
+      ],
+    },
+    {
+      // Company-stated primary-member facts (45-column template §1). STATUS
+      // here is the verbatim company value; lifecycle state stays under
+      // Customer above. TIN is masked like the government ID.
+      title: 'Primary Member',
+      columns: 2,
+      fields: [
+        ['RA NO', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
+        ['STATUS', record.companyStatus ?? '—'],
+        ['FULL NAME', record.fullName],
+        ['ADDRESS', addressOf(record.address)],
+        ['BIRTHDAY', record.dateOfBirth ?? '—'],
+        ['AGE', ageOn(record.dateOfBirth)],
+        ['GENDER', record.gender ?? '—'],
+        ['CITIZENSHIP', record.citizenship ?? '—'],
+        ['CIVIL STATUS', record.civilStatus ?? '—'],
+        ['TIN NO.', record.tinNumberMasked ?? '—'],
+        ['MOBILE NO.', record.phone],
+        ['EMAIL ADDRESS', record.email],
+        ['OCCUPATION / BUSINESS NAME', record.occupationBusinessName ?? '—'],
+        ['OFFICE / BUSINESS ADDRESS', record.officeBusinessAddress ?? '—'],
+        ['EMPLOYED POSITION', record.employedPosition ?? '—'],
+      ],
+    },
+    {
+      title: 'Supplementary Member',
+      columns: 2,
+      fields: [
+        ['SUPPLEMENTARY FULL NAME', record.supplementaryFullName ?? '—'],
+        ['ADDRESS', record.supplementaryAddress ?? '—'],
+        ['BIRTHDAY', record.supplementaryBirthday ?? '—'],
+        ['AGE', ageOn(record.supplementaryBirthday)],
+        ['GENDER', record.supplementaryGender ?? '—'],
+        ['CITIZENSHIP', record.supplementaryCitizenship ?? '—'],
+        ['CIVIL STATUS', record.supplementaryCivilStatus ?? '—'],
+        ['TIN NO.', record.supplementaryTinNumberMasked ?? '—'],
+        ['MOBILE NO.', record.supplementaryMobile ?? '—'],
+        ['EMAIL ADDRESS', record.supplementaryEmail ?? '—'],
+        ['OCCUPATION / BUSINESS NAME', record.supplementaryOccupationBusinessName ?? '—'],
+        ['OFFICE / BUSINESS ADDRESS', record.supplementaryOfficeAddress ?? '—'],
+        ['EMPLOYED POSITION', record.supplementaryPosition ?? '—'],
+      ],
+    },
+    {
+      // Stored verbatim as stated. These names do not assert reporting lines;
+      // referral_relationships remains the only genealogy authority.
+      title: 'Related Persons and Referral',
+      columns: 2,
+      fields: [
+        ['OST/IST NAME', record.ostIstName ?? '—'],
+        ['SVD', record.svdName ?? '—'],
+        ['SSM', record.ssmName ?? '—'],
+        ['SM', record.smName ?? '—'],
+        ['REFERRER', record.referrerName ?? '—'],
+        ['VIP RECOMMENDER', record.vipRecommenderName ?? '—'],
+        ['CONTACT NO.', record.relatedContactNo ?? '—'],
+        ['EMAIL ADDRESS', record.relatedEmail ?? '—'],
+      ],
+    },
+    {
+      // Company-stated figures, verbatim. Server-computed money (verified
+      // payments, snapshots, commissions) never reads these columns.
+      title: 'Package and Payment — company stated',
+      columns: 2,
+      fields: [
+        ['VIP PACKAGE', record.statedVipPackage ?? '—'],
+        ['PAYMENT TERMS', record.statedPaymentTerms ?? '—'],
+        ['REGULAR PRICE', record.statedRegularPrice ?? '—'],
+        ['DISCOUNT', record.statedDiscount ?? '—'],
+        ['TOTAL AMOUNT', record.statedTotalAmount ?? '—'],
+        ['RF', record.statedRf ?? '—'],
+        ['PAYMENT TYPE', record.statedPaymentType ?? '—'],
+        ['REF NO', record.statedRefNo ?? '—'],
+        ['DATE', record.statedPaymentDate ?? '—'],
       ],
     },
     {

@@ -2,6 +2,8 @@ import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
   PERSON_NAME_RE,
   dateOfBirthSchema,
   emailSchema,
@@ -101,12 +103,15 @@ export function parseCsvMatrix(text: string): string[][] {
 
 export type ImportFieldRow = { rowNumber: number; fields: Record<string, string> };
 
-export function matrixToRecords(matrix: string[][]): {
+export function matrixToRecords(
+  matrix: string[][],
+  extraKnown: readonly string[] = [],
+): {
   headers: string[];
   unknownHeaders: string[];
   rows: ImportFieldRow[];
 } {
-  const known = new Set<string>(CUSTOMER_IMPORT_COLUMNS);
+  const known = new Set<string>([...CUSTOMER_IMPORT_COLUMNS, ...extraKnown]);
   const headers = (matrix[0] ?? []).map((h) => h.trim().toLowerCase());
   if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
   const unknownHeaders = headers.filter((h) => h !== '' && !known.has(h));
@@ -235,6 +240,8 @@ export type NormalizedImportRow = {
   tier: string | null;
   customerStatus: string;
   person: Record<string, string | null>;
+  /** Company-stated verbatim fields (see migration 20261130000001). All nullable; never computed. */
+  company: Record<string, string | null>;
   payment: { amount: string; date: string | null; method: string; reference: string | null } | null;
   historicalSaleTotal: string | null;
   paymentScheme: string | null;
@@ -360,6 +367,70 @@ export function validateImportRow(
     !dateOfBirthSchema.safeParse(get('secondary_birth_date')).success
   )
     err('secondary_birth_date', 'Use a real past birth date within 120 years');
+
+  // Company-template verbatim fields: trimmed hygiene caps only, reusing the
+  // established validators where one exists. Values are stored exactly as
+  // stated; nothing here interprets business meaning (no tier/scheme/status
+  // translation, no money coherence beyond the historical rules above).
+  const capped = (key: string, max: number) => {
+    if (get(key).length > max) err(key, `Keep to ${max} characters or fewer`);
+  };
+  for (const key of ['ra_number'] as const) capped(key, 120);
+  for (const key of [
+    'citizenship',
+    'civil_status',
+    'employed_position',
+    'supplementary_citizenship',
+    'supplementary_civil_status',
+    'supplementary_position',
+  ] as const)
+    capped(key, 100);
+  for (const key of ['tin_number', 'supplementary_tin_number'] as const) capped(key, 40);
+  for (const key of [
+    'occupation_business_name',
+    'office_business_address',
+    'supplementary_address',
+    'supplementary_occupation_business_name',
+    'supplementary_office_address',
+  ] as const)
+    capped(key, 200);
+  for (const key of [
+    'supplementary_full_name',
+    'ost_ist_name',
+    'svd_name',
+    'ssm_name',
+    'sm_name',
+    'referrer_name',
+    'vip_recommender_name',
+  ] as const) {
+    if (nonEmpty(get(key)) && !personNameSchema.safeParse(get(key)).success)
+      err(key, 'Use letters, spaces, apostrophes and hyphens only');
+    else capped(key, 120);
+  }
+  for (const key of [
+    'stated_regular_price',
+    'stated_discount',
+    'stated_total_amount',
+    'stated_rf',
+  ] as const)
+    capped(key, 120);
+  if (
+    nonEmpty(get('supplementary_birthday')) &&
+    !dateOfBirthSchema.safeParse(get('supplementary_birthday')).success
+  )
+    err('supplementary_birthday', 'Use a real past birth date within 120 years');
+  if (nonEmpty(get('supplementary_gender'))) {
+    // Mirror the established sex handling below: unrecognized values resolve
+    // to null in normalization rather than failing the row.
+    const g = get('supplementary_gender').toLowerCase();
+    if (g !== 'male' && g !== 'female' && g !== 'other' && g !== 'undisclosed')
+      warn('supplementary_gender', 'Unrecognized gender resolves to no value');
+  }
+  const relatedContactRaw = get('related_contact_no');
+  if (relatedContactRaw && normalizePhilippinePhone(relatedContactRaw) === null)
+    err('related_contact_no', 'Invalid phone');
+  if (nonEmpty(get('related_email')) && !emailSchema.safeParse(get('related_email')).success)
+    err('related_email', 'Invalid email');
 
   const balance = parseOpeningBalance(get('current_points_balance'));
   if (balance === null) err('current_points_balance', 'Must be a whole non-negative number');
@@ -591,6 +662,47 @@ export function validateImportRow(
             .filter(Boolean)
             .join(' · ') || null
         : null,
+    company: {
+      raNumber: get('ra_number') || null,
+      // Raw echo of the stated status; lifecycle mapping stays in customerStatus.
+      companyStatus: get('source_status') || null,
+      citizenship: get('citizenship') || null,
+      civilStatus: get('civil_status') || null,
+      tinNumber: get('tin_number') || null,
+      occupationBusinessName: get('occupation_business_name') || null,
+      officeBusinessAddress: get('office_business_address') || null,
+      employedPosition: get('employed_position') || null,
+      supplementaryFullName: get('supplementary_full_name') || null,
+      supplementaryAddress: get('supplementary_address') || null,
+      supplementaryBirthday: get('supplementary_birthday') || null,
+      supplementaryGender: ((): string | null => {
+        const g = get('supplementary_gender').toLowerCase();
+        return g === 'male' || g === 'female' || g === 'other' || g === 'undisclosed' ? g : null;
+      })(),
+      supplementaryCitizenship: get('supplementary_citizenship') || null,
+      supplementaryCivilStatus: get('supplementary_civil_status') || null,
+      supplementaryTinNumber: get('supplementary_tin_number') || null,
+      supplementaryOccupationBusinessName: get('supplementary_occupation_business_name') || null,
+      supplementaryOfficeAddress: get('supplementary_office_address') || null,
+      supplementaryPosition: get('supplementary_position') || null,
+      ostIstName: get('ost_ist_name') || null,
+      svdName: get('svd_name') || null,
+      ssmName: get('ssm_name') || null,
+      smName: get('sm_name') || null,
+      referrerName: get('referrer_name') || null,
+      vipRecommenderName: get('vip_recommender_name') || null,
+      relatedContactNo: get('related_contact_no') || null,
+      relatedEmail: get('related_email') || null,
+      statedVipPackage: get('vip_tier') || null,
+      statedPaymentTerms: get('payment_scheme') || null,
+      statedRegularPrice: get('stated_regular_price') || null,
+      statedDiscount: get('stated_discount') || null,
+      statedTotalAmount: get('stated_total_amount') || null,
+      statedRf: get('stated_rf') || null,
+      statedPaymentType: get('payment_method') || null,
+      statedRefNo: get('payment_reference') || null,
+      statedPaymentDate: get('payment_date') || null,
+    },
   };
   if (tier && !hasSecondary && nonEmpty(get('vip_tier')) && category !== 'ACTIVE_VIP')
     warn('vip_tier', 'Tier is informational without a membership or payment intent');
@@ -659,17 +771,58 @@ export const customerExportCsv = (rows: CustomerExportRow[]): string =>
     rows.map((row) => CUSTOMER_EXPORT_COLUMNS.map((h) => row[h] ?? '')),
   );
 
-/** Stable machine-readable template: one header row, no data rows. */
-export const customerImportTemplateXlsx = () =>
-  toXlsx(
-    'Customer Import',
-    CUSTOMER_IMPORT_COLUMNS.map((label) => ({
-      label,
-      type: 'text' as const,
-      width: Math.min(36, Math.max(16, label.length + 2)),
-    })),
-    [[]],
-  );
+/* ------------------------------------------------------------------ */
+/* Company membership template (45 columns) + positional import mapping */
+/* ------------------------------------------------------------------ */
 
-/** CSV twin of the template (same columns, same order). */
-export const customerImportTemplateCsv = (): string => toCsv([...CUSTOMER_IMPORT_COLUMNS], [[]]);
+const membershipTemplateColumns = (): XlsxColumn[] =>
+  MEMBERSHIP_TEMPLATE_COLUMNS.map((label) => ({
+    label,
+    type: 'text' as const,
+    width: Math.min(36, Math.max(16, label.length + 2)),
+  }));
+
+/** Stable machine-readable membership template: header row only, no data rows. */
+export const membershipTemplateXlsx = () =>
+  toXlsx('Membership Template', membershipTemplateColumns(), [[]]);
+
+/** CSV twin of the membership template (same 45 columns, same order). */
+export const membershipTemplateCsv = (): string => toCsv([...MEMBERSHIP_TEMPLATE_COLUMNS], [[]]);
+
+/**
+ * True when a spreadsheet header row is exactly the 45-column company
+ * membership template (compared trimmed + lowercased, order-sensitive).
+ * Duplicated headers (ADDRESS, EMAIL ADDRESS, …) make name-based matching
+ * ambiguous, so only an exact positional match qualifies for remapping.
+ */
+export function isCompanyMembershipTemplate(headers: string[]): boolean {
+  if (headers.length !== MEMBERSHIP_TEMPLATE_COLUMNS.length) return false;
+  return MEMBERSHIP_TEMPLATE_COLUMNS.every(
+    (column, index) => (headers[index] ?? '').trim().toLowerCase() === column.toLowerCase(),
+  );
+}
+
+export type CompanyTemplateRemap = {
+  matrix: string[][];
+  /** Company headers with no v2 target, in column order. */
+  dropped: { index: number; header: string }[];
+};
+
+/**
+ * Rewrite a company-template matrix onto import columns by POSITION.
+ * Mapped positions take their import column name; unmapped positions keep a
+ * marker header so they surface as ignored-column warnings naming the exact
+ * company header. Values are never transformed here - validation downstream
+ * decides what each value means.
+ */
+export function remapCompanyTemplateMatrix(matrix: string[][]): CompanyTemplateRemap {
+  const [headerRow = [], ...body] = matrix;
+  const dropped: { index: number; header: string }[] = [];
+  const headers = headerRow.map((header, index) => {
+    const target = MEMBERSHIP_TEMPLATE_POSITION_MAP[index] ?? null;
+    if (target) return target;
+    dropped.push({ index, header: (header ?? '').trim() });
+    return `__company_ignored_${index}`;
+  });
+  return { matrix: [headers, ...body], dropped };
+}
