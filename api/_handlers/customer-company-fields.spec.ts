@@ -150,4 +150,53 @@ describe('customer company-stated fields', () => {
       .map((r) => JSON.stringify(r));
     expect(audits.join('|')).not.toContain('999888777001');
   });
+
+  it('stores stated package/payment facts verbatim via manual create/update', async () => {
+    const db = install();
+    const { res, state } = makeRes();
+    await customers(
+      makeReq({
+        method: 'POST',
+        familyPath: '',
+        body: {
+          ...VALID_CUSTOMER,
+          email: 'stated.company@example.com',
+          statedVipPackage: 'GOLD VIP',
+          statedPaymentTerms: 'Spot Cash',
+          statedRegularPrice: '60000.00',
+          statedDiscount: '5000.00',
+          statedTotalAmount: '55000.00',
+          statedRf: 'RF-001',
+          statedPaymentType: 'Bank Transfer',
+          statedRefNo: 'REF-999',
+          statedPaymentDate: '2026-01-15',
+        },
+        token: TOKEN.admin,
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(201);
+    const row = db.rows('customers').find((r) => r.email === 'stated.company@example.com')!;
+    expect(row.stated_vip_package).toBe('GOLD VIP');
+    expect(row.stated_total_amount).toBe('55000.00');
+    expect(row.stated_payment_date).toBe('2026-01-15');
+    const body = state.body as Record<string, unknown>;
+    expect(body.statedVipPackage).toBe('GOLD VIP');
+    expect(body.statedPaymentDate).toBe('2026-01-15');
+
+    const patchRes = makeRes();
+    await customers(
+      makeReq({
+        method: 'PATCH',
+        familyPath: String(row.id),
+        body: { statedTotalAmount: null, statedRf: 'RF-002' },
+        token: TOKEN.admin,
+      }) as never,
+      patchRes.res as never,
+    );
+    expect(patchRes.state.status).toBe(200);
+    const updated = db.rows('customers').find((r) => r.id === row.id)!;
+    expect(updated.stated_total_amount).toBeNull();
+    expect(updated.stated_rf).toBe('RF-002');
+  });
 });

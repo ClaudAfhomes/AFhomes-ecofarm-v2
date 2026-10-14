@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MEMBERSHIP_TEMPLATE_COLUMNS } from '@afhomes/contracts';
 import { parseXlsxMatrix } from '../_lib/customer-import.js';
+import { toXlsxMulti } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown }));
 
@@ -249,5 +250,95 @@ describe('company membership template', () => {
     expect(row.errors.map((e) => e.field)).toEqual(
       expect.arrayContaining(['first_name', 'last_name']),
     );
+  });
+
+  it('parses sectioned entry tabs into the same fields as the single sheet', async () => {
+    install();
+    const row = companyRow();
+    const section = (from: number, to: number) => ({
+      headers: [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(from, to)],
+      values: row.slice(from, to),
+    });
+    const primary = section(0, 15);
+    const supplementary = section(15, 28);
+    const related = section(28, 36);
+    const pkg = section(36, 45);
+    const bytes = toXlsxMulti('Membership Template', [
+      {
+        name: 'README',
+        columns: [
+          { label: 'Section', type: 'text' as const },
+          { label: 'What to do', type: 'text' as const },
+        ],
+        rows: [['Primary', 'Fill it']],
+        headerTone: 'slate' as const,
+        filter: false,
+      },
+      {
+        name: 'Primary',
+        columns: primary.headers.map((label) => ({ label, type: 'text' as const })),
+        rows: [primary.values],
+        headerTone: 'blue' as const,
+      },
+      {
+        name: 'Supplementary',
+        columns: supplementary.headers.map((label) => ({ label, type: 'text' as const })),
+        rows: [supplementary.values],
+        headerTone: 'green' as const,
+      },
+      {
+        name: 'Related',
+        columns: related.headers.map((label) => ({ label, type: 'text' as const })),
+        rows: [related.values],
+        headerTone: 'amber' as const,
+      },
+      {
+        name: 'Package',
+        columns: pkg.headers.map((label) => ({ label, type: 'text' as const })),
+        rows: [pkg.values],
+        headerTone: 'purple' as const,
+      },
+    ]);
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'excel',
+        contentBase64: b64(bytes),
+        sourceName: 'members.xlsx',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as {
+      rows: { fields: Record<string, string>; warnings: { field: string }[] }[];
+    };
+    const parsed = body.rows[0]!;
+    expect(parsed.fields.email).toBe('juan@example.com');
+    expect(parsed.fields.secondary_email).toBe('maria@example.com');
+    expect(parsed.fields.ra_number).toBe('RA-001');
+    expect(parsed.fields.stated_rf).toBe('RF-001');
+    expect(parsed.warnings.map((w) => w.field)).toContain('FULL NAME');
+  });
+
+  it('rejects foreign multi-sheet workbooks instead of guessing a tab', async () => {
+    install();
+    const bytes = toXlsxMulti('Foreign', [
+      {
+        name: 'Tab A',
+        columns: [{ label: 'first_name', type: 'text' as const }],
+        rows: [['Juan']],
+      },
+      {
+        name: 'Tab B',
+        columns: [{ label: 'last_name', type: 'text' as const }],
+        rows: [['Cruz']],
+      },
+    ]);
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'excel', contentBase64: b64(bytes), sourceName: 'foreign.xlsx' },
+    });
+    expect(res.status).toBe(400);
   });
 });

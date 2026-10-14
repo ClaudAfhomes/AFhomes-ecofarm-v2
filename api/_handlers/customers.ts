@@ -372,6 +372,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? null
             : (normalizePhilippinePhone(input.relatedContactNo) ?? input.relatedContactNo),
         related_email: input.relatedEmail ?? null,
+        // Company-stated package/payment facts, verbatim. Never inputs to
+        // server-computed totals; activation and verification read payment
+        // rows only (migration 20261130000001).
+        stated_vip_package: input.statedVipPackage ?? null,
+        stated_payment_terms: input.statedPaymentTerms ?? null,
+        stated_regular_price: input.statedRegularPrice ?? null,
+        stated_discount: input.statedDiscount ?? null,
+        stated_total_amount: input.statedTotalAmount ?? null,
+        stated_rf: input.statedRf ?? null,
+        stated_payment_type: input.statedPaymentType ?? null,
+        stated_ref_no: input.statedRefNo ?? null,
+        stated_payment_date: input.statedPaymentDate ?? null,
         registration_source: 'seller_created',
         created_by: auth.userId,
         // The registering seller is the referrer of record. Server-resolved
@@ -504,6 +516,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? null
             : (normalizePhilippinePhone(p.relatedContactNo) ?? p.relatedContactNo);
       if (p.relatedEmail !== undefined) patch.related_email = p.relatedEmail;
+      if (p.statedVipPackage !== undefined) patch.stated_vip_package = p.statedVipPackage;
+      if (p.statedPaymentTerms !== undefined) patch.stated_payment_terms = p.statedPaymentTerms;
+      if (p.statedRegularPrice !== undefined) patch.stated_regular_price = p.statedRegularPrice;
+      if (p.statedDiscount !== undefined) patch.stated_discount = p.statedDiscount;
+      if (p.statedTotalAmount !== undefined) patch.stated_total_amount = p.statedTotalAmount;
+      if (p.statedRf !== undefined) patch.stated_rf = p.statedRf;
+      if (p.statedPaymentType !== undefined) patch.stated_payment_type = p.statedPaymentType;
+      if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
+      if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 

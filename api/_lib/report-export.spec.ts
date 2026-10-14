@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { escapeCsvCell, toCsv, toPdf, toXlsx } from './report-export.js';
+import { escapeCsvCell, toCsv, toPdf, toXlsx, toXlsxMulti } from './report-export.js';
 
 describe('CSV export', () => {
   it('emits stable headers, a BOM, and CRLF rows', () => {
@@ -82,6 +82,44 @@ describe('XLSX export', () => {
     const bytes = toXlsx('Empty', columns, []);
     const text = Buffer.from(bytes).toString('utf8');
     expect(text).toContain('dimension ref="A1:D1"');
+  });
+});
+
+describe('multi-sheet XLSX export', () => {
+  it('writes named tabs with per-sheet header tints, filters, and frozen panes', () => {
+    const bytes = toXlsxMulti('Template', [
+      {
+        name: 'Primary',
+        columns: [{ label: 'RA NO', type: 'text' }],
+        rows: [[]],
+        headerTone: 'blue',
+      },
+      {
+        name: 'Package',
+        columns: [{ label: 'RF', type: 'text' }],
+        rows: [[]],
+        headerTone: 'purple',
+      },
+    ]);
+    const text = Buffer.from(bytes).toString('utf8');
+    expect(text).toContain('name="Primary"');
+    expect(text).toContain('name="Package"');
+    expect(text).toContain('xl/worksheets/sheet2.xml');
+    // Section tints plus frozen panes plus auto-filters per tab.
+    expect(text).toContain('FFD9E2F3');
+    expect(text).toContain('FFE4DFEC');
+    expect(text).toContain('state="frozen"');
+    expect(text).toContain('<autoFilter ref="A1:A1"/>');
+  });
+
+  it('rejects duplicate sheet names and empty specs', () => {
+    const sheet = {
+      name: 'Primary',
+      columns: [{ label: 'RA NO', type: 'text' as const }],
+      rows: [[]] as unknown[][],
+    };
+    expect(() => toXlsxMulti('T', [sheet, { ...sheet }])).toThrow(/duplicate/i);
+    expect(() => toXlsxMulti('T', [])).toThrow(/1 to 16/);
   });
 });
 

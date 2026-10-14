@@ -10,20 +10,24 @@ import {
 } from '@afhomes/contracts';
 import {
   MAX_IMPORT_ROWS,
+  MEMBERSHIP_TEMPLATE_SECTIONS,
   customerExportCsv,
   customerExportXlsx,
   matrixToRecords,
   membershipTemplateCsv,
   membershipTemplateXlsx,
+  mergeSectionedTemplateSheets,
   neutralizeFormula,
   parseCsvMatrix,
   parseOpeningBalance,
   parseXlsxMatrix,
+  parseXlsxSheets,
+  remapCompanyTemplateMatrix,
   validateImportRow,
   type ImportContext,
 } from './customer-import.js';
 import { MEMBERSHIP_TEMPLATE_COLUMNS } from '@afhomes/contracts';
-import { toXlsx } from './report-export.js';
+import { toXlsx, toXlsxMulti } from './report-export.js';
 
 const ctx = (overrides: Partial<ImportContext> = {}): ImportContext => ({
   plansByTier: new Map([
@@ -237,7 +241,7 @@ describe('CSV matrix reader', () => {
 });
 
 describe('template and headers', () => {
-  it('emits every template column in the XLSX template', () => {
+  it('emits every template column in the single-sheet XLSX template', () => {
     const matrix = parseXlsxMatrix(membershipTemplateXlsx());
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
@@ -596,5 +600,104 @@ describe('limits and export safety', () => {
     ]);
     expect(csv).toContain("'=Juan");
     expect(customerExportXlsx([]).length).toBeGreaterThan(0);
+  });
+});
+
+describe('sectioned template merge', () => {
+  const primary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, 15)];
+  const supplementary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(15, 28)];
+  const related = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 36)];
+  const pkg = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(36, 45)];
+
+  it('merges entry tabs into canonical order regardless of column order', () => {
+    // Reordered columns within tabs still land on canonical positions.
+    const rev = (list: string[]) => [...list].reverse();
+    const pick = (headers: string[], row: string[], want: string) =>
+      row[headers.indexOf(want)] ?? '';
+    const pRow = primary.map((_, i) => `p${i}`);
+    const sRow = supplementary.map((_, i) => `s${i}`);
+    const rRow = related.map((_, i) => `r${i}`);
+    const kRow = pkg.map((_, i) => `k${i}`);
+    const { matrix } = mergeSectionedTemplateSheets([
+      { name: 'Primary', matrix: [rev(primary), rev(primary).map((h) => pick(primary, pRow, h))] },
+      { name: 'Supplementary', matrix: [rev(supplementary), rev(supplementary).map((h) => pick(supplementary, sRow, h))] },
+      { name: 'Related', matrix: [related, rRow] },
+      { name: 'Package', matrix: [pkg, kRow] },
+      { name: 'README', matrix: [['Section', 'What to do'], ['Primary', 'Fill it']] },
+    ]);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(matrix[1]).toEqual([...pRow, ...sRow, ...rRow, ...kRow]);
+  });
+
+  it('round-trips a sectioned workbook through merge and remap', () => {
+    const sheets = parseXlsxSheets(
+      toXlsxMulti(
+        'Sections',
+        MEMBERSHIP_TEMPLATE_SECTIONS.map((section) => ({
+          name: section.sheet,
+          columns: section.headers.map((label) => ({ label, type: 'text' as const })),
+          rows: [[]] as unknown[][],
+        })),
+      ),
+    );
+    const { matrix } = mergeSectionedTemplateSheets(sheets);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    // Header-only template merges to headers alone; the positional remap
+    // still classifies every column (dropped FULL NAME/AGE warn by name).
+    const remapped = remapCompanyTemplateMatrix(matrix);
+    expect(remapped.matrix[0]).toHaveLength(45);
+    expect(remapped.dropped.map((d) => d.header)).toContain('FULL NAME');
+  });
+
+  it('rejects mismatched row counts with the offending sheets named', () => {
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary, primary.map(() => 'x')] },
+        { name: 'Supplementary', matrix: [supplementary] },
+        { name: 'Related', matrix: [related] },
+        { name: 'Package', matrix: [pkg] },
+      ]),
+    ).toThrow(/Primary has 1, Supplementary has 0/);
+  });
+
+  it('rejects missing sheets, duplicate sections, and foreign workbooks', () => {
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary] },
+        { name: 'Related', matrix: [related] },
+        { name: 'Package', matrix: [pkg] },
+      ]),
+    ).toThrow(/missing sheets: Supplementary/);
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary] },
+        { name: 'Primary copy', matrix: [primary] },
+        { name: 'Related', matrix: [related] },
+        { name: 'Package', matrix: [pkg] },
+        { name: 'Supplementary', matrix: [supplementary] },
+      ]),
+    ).toThrow(/Duplicate/);
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Tab A', matrix: [['first_name'], ['Juan']] },
+        { name: 'Tab B', matrix: [['last_name'], ['Cruz']] },
+      ]),
+    ).toThrow(/does not match a template section/);
+  });
+
+  it('reads own single-sheet XLSX files by accurate column names', () => {
+    // Reordered machine-name headers parse by name, never by position.
+    const bytes = toXlsx(
+      'Mine',
+      ['email', 'last_name', 'first_name'].map((label) => ({ label, type: 'text' as const })),
+      [['juan@example.com', 'Cruz', 'Juan']],
+    );
+    expect(parseXlsxMatrix(bytes)[0]).toEqual(['email', 'last_name', 'first_name']);
+    const { rows } = matrixToRecords(parseXlsxMatrix(bytes));
+    expect(rows[0]!.fields).toMatchObject({
+      email: 'juan@example.com',
+      last_name: 'Cruz',
+      first_name: 'Juan',
+    });
   });
 });

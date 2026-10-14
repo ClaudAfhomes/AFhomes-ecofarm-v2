@@ -244,10 +244,11 @@ export function canAccessNavTarget(
   // Compatibility-only document routes remain protected after removing navigation.
   if (pathname === '/admin/documents' || pathname.startsWith('/admin/documents/'))
     return canViewModule(permissions, 'sales.id_documents');
-  // Customer import/export is reached from the Customers page action, not the
-  // sidebar, but the direct URL keeps its own permission gate so hiding the
-  // link and refusing the URL cannot disagree.
-  if (pathname === '/admin/customers/import-export')
+  // Customer bulk import/export lives under Applications (membership work),
+  // reached from the Applications list action, not the Customers directory.
+  // The direct URL keeps its own permission gate so hiding the link and
+  // refusing the URL cannot disagree.
+  if (pathname === '/admin/customers/applications/import-export')
     return canViewModule(permissions, 'governance.customer_import');
   const sub = findNavSubItem(pathname);
   const item = findNavItem(pathname);

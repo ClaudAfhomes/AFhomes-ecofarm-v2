@@ -359,6 +359,22 @@ export const createCustomerSchema = z.object({
   vipRecommenderName: z.string().trim().max(120).optional(),
   relatedContactNo: optionalPhoneSchema,
   relatedEmail: emailSchema.optional(),
+  // Company-stated package/payment facts, stored verbatim (migration
+  // 20261130000001). Never inputs to server-computed totals; the stated date
+  // is a calendar date only, never a birth-date plausibility check.
+  statedVipPackage: z.string().trim().max(120).optional(),
+  statedPaymentTerms: z.string().trim().max(120).optional(),
+  statedRegularPrice: z.string().trim().max(40).optional(),
+  statedDiscount: z.string().trim().max(40).optional(),
+  statedTotalAmount: z.string().trim().max(40).optional(),
+  statedRf: z.string().trim().max(120).optional(),
+  statedPaymentType: z.string().trim().max(120).optional(),
+  statedRefNo: z.string().trim().max(120).optional(),
+  statedPaymentDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
+    .optional(),
 });
 export type CreateCustomerRequest = z.infer<typeof createCustomerSchema>;
 
@@ -391,7 +407,7 @@ export const updateCustomerSchema = z
     supplementaryCitizenship: z.string().trim().max(100).nullable().optional(),
     supplementaryCivilStatus: z.string().trim().max(100).nullable().optional(),
     supplementaryTinNumber: z.string().trim().max(40).nullable().optional(),
-    supplementaryMobile: optionalPhoneSchema,
+    supplementaryMobile: optionalPhoneSchema.nullable().optional(),
     supplementaryEmail: emailSchema.nullable().optional(),
     supplementaryOccupationBusinessName: z.string().trim().max(200).nullable().optional(),
     supplementaryOfficeAddress: z.string().trim().max(200).nullable().optional(),
@@ -402,8 +418,22 @@ export const updateCustomerSchema = z
     smName: z.string().trim().max(120).nullable().optional(),
     referrerName: z.string().trim().max(120).nullable().optional(),
     vipRecommenderName: z.string().trim().max(120).nullable().optional(),
-    relatedContactNo: optionalPhoneSchema,
+    relatedContactNo: optionalPhoneSchema.nullable().optional(),
     relatedEmail: emailSchema.nullable().optional(),
+    statedVipPackage: z.string().trim().max(120).nullable().optional(),
+    statedPaymentTerms: z.string().trim().max(120).nullable().optional(),
+    statedRegularPrice: z.string().trim().max(40).nullable().optional(),
+    statedDiscount: z.string().trim().max(40).nullable().optional(),
+    statedTotalAmount: z.string().trim().max(40).nullable().optional(),
+    statedRf: z.string().trim().max(120).nullable().optional(),
+    statedPaymentType: z.string().trim().max(120).nullable().optional(),
+    statedRefNo: z.string().trim().max(120).nullable().optional(),
+    statedPaymentDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
+      .nullable()
+      .optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;

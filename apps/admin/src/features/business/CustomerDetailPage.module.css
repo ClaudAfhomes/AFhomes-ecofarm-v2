@@ -54,6 +54,18 @@
   margin-bottom: var(--space-2);
 }
 
+/* Company edit dialog: stacked sections, full-width fields. */
+.editGrid {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.editGrid h3 {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-body);
+}
+
 /* Status select pending state: the spinner docks inside the control's right
    edge (over the chevron spot) instead of sitting beside it, so the busy
    indicator reads as part of the control that triggered the update. */

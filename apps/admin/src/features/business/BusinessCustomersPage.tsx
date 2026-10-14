@@ -8,7 +8,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  Icon,
   DateField,
   OverflowMenu,
   PageHeader,
@@ -116,10 +115,6 @@ export function BusinessCustomersPage() {
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
-  const canSeeImportExport =
-    user?.afHomesPermissions.some(
-      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
-    ) === true;
 
   const [accountAction, setAccountAction] = useState<{
     kind: 'deactivate' | 'delete' | 'anonymize';
@@ -201,14 +196,6 @@ export function BusinessCustomersPage() {
       <PageHeader
         title="Customers"
         description="Customer directory and membership records."
-        actions={
-          canSeeImportExport ? (
-            <Button variant="primary" onClick={() => navigate('/admin/customers/import-export')}>
-              <Icon name="download" size={16} aria-hidden="true" />
-              Import/Export Data
-            </Button>
-          ) : undefined
-        }
       />
 
       <FilterBar

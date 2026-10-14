@@ -263,8 +263,11 @@ export function CustomerImportExportPage() {
           title="Customer Import / Export"
           description="Bulk customer migration is restricted to authorized Admin accounts."
           actions={
-            <Button variant="secondary" onClick={() => navigate('/admin/customers')}>
-              Back to customers
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/admin/customers/applications')}
+            >
+              Back to applications
             </Button>
           }
         />
@@ -309,18 +312,15 @@ export function CustomerImportExportPage() {
     <section className={styles.workspace}>
       <PageHeader
         title="Customer Import / Export"
-        description="Migrate existing customer records from Excel, CSV, or a link-readable Google Sheet. Valid rows are written only after explicit confirmation, one transaction per row."
+        description="Migrate customer records in bulk."
         actions={
-          <Button variant="secondary" onClick={() => navigate('/admin/customers')}>
-            Back to customers
+          <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+            Back to applications
           </Button>
         }
       />
       <Alert variant="warning" title="Historical data rules">
-        Active VIP imports require the actual historical sale total, payment amount, date, method
-        and scheme. Reservation and down-payment categories need their historical fee snapshots.
-        Only one historical payment per member is supported; use the normal payment workflow for
-        multiple payments. Secondary holder imported as legacy reference only.
+        History needs real payment facts.
       </Alert>
       {message ? <Alert variant={tone}>{message}</Alert> : null}
 
@@ -340,10 +340,8 @@ export function CustomerImportExportPage() {
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
                 <p className={styles.templateDesc}>
-                  Best for filling in Excel: frozen header row, sized columns, and text cells that
-                  keep leading zeros on IDs and reference numbers.
+                  Single sheet holds all. All names kept intact.
                 </p>
-                <p className={styles.templateMeta}>45 columns · header row only · no sample data</p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
                 </div>
@@ -351,10 +349,8 @@ export function CustomerImportExportPage() {
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Plain text (.csv)</h3>
                 <p className={styles.templateDesc}>
-                  Best for Google Sheets and quick edits: lightweight UTF-8 text with the same 45
-                  headers in the same order.
+                  Plain text for sheets. Same headers, same order.
                 </p>
-                <p className={styles.templateMeta}>45 columns · header row only · no sample data</p>
                 <div className={styles.actions}>
                   <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
                     Download CSV template
@@ -362,18 +358,14 @@ export function CustomerImportExportPage() {
                 </div>
               </div>
             </div>
-            <p className={styles.hint}>
-              Single 45-column company membership template: primary and supplementary members,
-              related persons and referral, package and payment. Unmapped columns are reported as
-              ignored warnings on preview; rows still require split first/last names.
-            </p>
           </section>
 
           <section className={styles.panel} aria-labelledby={`${TAB_BASE_ID}-upload-heading`}>
             <h2 id={`${TAB_BASE_ID}-upload-heading`} className={styles.panelTitle}>
-              2. Upload and preview (nothing is written yet)
+              2. Upload and preview
             </h2>
             <div className={styles.fileRow}>
+              <div className={styles.filePickers}>
               <div className={styles.filePicker}>
                 <input
                   ref={excelInput}
@@ -432,9 +424,10 @@ export function CustomerImportExportPage() {
                   </span>
                 ) : null}
               </div>
+              </div>
               <div className={styles.sheetRow}>
                 <label className={styles.sheetField}>
-                  Import Google Sheet (link-readable URL)
+                  Import Google Sheet
                   <input
                     value={sheetUrl}
                     placeholder="https://docs.google.com/spreadsheets/d/…"
@@ -455,10 +448,6 @@ export function CustomerImportExportPage() {
                 </Button>
               </div>
             </div>
-            <p className={styles.hint}>
-              Private sheets need Google OAuth/service credentials (not configured): only
-              link-readable sheets can be imported. No Google secrets belong in browser code.
-            </p>
           </section>
 
           {preview ? (
