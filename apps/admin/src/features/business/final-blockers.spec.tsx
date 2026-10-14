@@ -136,6 +136,13 @@ vi.mock('./services', async (original) => ({
     },
   }),
 }));
+vi.mock('../genealogy/services', () => ({
+  getGenealogy: async () => [],
+  getGenealogyNode: async () => null,
+  getGenealogyUpline: async () => [],
+  getGenealogyDownline: async () => [],
+  getGenealogySummary: async () => null,
+}));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   calls.application.mockReset().mockRejectedValue(new Error('QA save capture'));
@@ -294,21 +301,37 @@ it('actual IST address IME preserves the draft and commits once complete', async
   expect(input.value).toBe('ASSB');
   expect(input.selectionStart).toBe(3);
 });
-it('primary landline shows a field error and prevents save; empty clears the error', async () => {
+/**
+ * The single save-and-submit action renders its blockers as one visible list.
+ * Its text is read through the title paragraph's container.
+ */
+const blockersText = () =>
+  screen.queryByText('Cannot save and submit yet:')?.parentElement?.textContent ?? '';
+it('primary landline refuses letters and blocks save while the number is invalid', async () => {
   const { user } = mount(true);
-  const input = screen.getByLabelText('Landline');
+  const input = screen.getByLabelText<HTMLInputElement>('Landline');
   await user.type(input, '09ABC123456');
+  // Letters are refused at the keystroke: a landline can never hold them. The
+  // attempt still flags the field until a deliberate correction, so the
+  // operator knows a keystroke was rejected rather than silently dropped.
+  expect(input.value).toBe('09123456');
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+  await user.clear(input);
+  expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
+  await user.type(input, '123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
-  // Save lives in the header and the sticky footer alike; both share state.
-  expect(screen.getAllByRole('button', { name: 'Save draft' })).toHaveLength(2);
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  // Save & Submit lives in the header and the sticky footer alike; both share state.
+  expect(screen.getAllByRole('button', { name: 'Save & Submit' })).toHaveLength(2);
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
   expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
-    expect(save).toBeEnabled();
+  // Clearing the field removes its blocker; the remaining blockers are other,
+  // unrelated requirements.
+  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
 });
 it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);
@@ -318,10 +341,13 @@ it('supplementary landline gets its own frontend error', async () => {
     '00000000-0000-4000-8000-000000000001',
   );
   await user.click(screen.getByLabelText(/Add optional Gold secondary/));
-  const input = screen.getAllByLabelText('Landline')[1]!;
+  const input = screen.getAllByLabelText<HTMLInputElement>('Landline')[1]!;
   await user.type(input, 'PHONE123');
+  // The letters never land; the surviving digits are too short to be a number.
+  expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
@@ -330,13 +356,13 @@ it('recommender contact gets its own frontend error and valid formatting is allo
   const input = screen.getByLabelText('Recommender Contact');
   await user.type(input, '0917TEST');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   await user.clear(input);
   await user.type(input, '0917-123-4567');
   expect(input).not.toHaveAttribute('aria-invalid');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
-    expect(save).toBeEnabled();
+  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
 });
 
 it.each(['Silver', 'Bronze', 'Select plan'])(

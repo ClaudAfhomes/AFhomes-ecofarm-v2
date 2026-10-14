@@ -126,6 +126,12 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   // `finance.payment_verification`: the two payment workflows stay independent,
   // and `employee` is absent, so a GSD can never verify their own receipt.
   { moduleKey: 'operations.payments', roles: ['finance', 'admin'] },
+  // Customer Lookup for the GSD/Employee desk, seeded by 20261131000003. It
+  // replaces the earlier reuse of `operations.redemption` for a read-only
+  // search screen: `employee` keeps the till key for the redemption desk and
+  // gains this one for the lookup, and `admin` keeps oversight. View only -
+  // the screen has no mutating endpoint to authorize.
+  { moduleKey: 'operations.customer_lookup', roles: ['employee', 'admin'] },
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

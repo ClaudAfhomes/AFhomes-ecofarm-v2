@@ -340,7 +340,7 @@ export function CustomerImportExportPage() {
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
                 <p className={styles.templateDesc}>
-                  Single sheet holds all. All names kept intact.
+                  Four tabs guide entry. Same headers, same order.
                 </p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
@@ -349,7 +349,7 @@ export function CustomerImportExportPage() {
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Plain text (.csv)</h3>
                 <p className={styles.templateDesc}>
-                  Plain text for sheets. Same headers, same order.
+                  One file. Top row groups columns.
                 </p>
                 <div className={styles.actions}>
                   <Button variant="secondary" onClick={() => downloadTemplate('csv')}>

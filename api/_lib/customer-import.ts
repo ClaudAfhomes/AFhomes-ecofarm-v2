@@ -2,6 +2,8 @@ import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
   MEMBERSHIP_TEMPLATE_COLUMNS,
   MEMBERSHIP_TEMPLATE_POSITION_MAP,
   PERSON_NAME_RE,
@@ -23,7 +25,7 @@ import {
   type CustomerCategory,
   type CustomerExportRow,
 } from '@afhomes/contracts';
-import { escapeCsvCell, toCsv, toXlsx, type XlsxColumn } from './report-export.js';
+import { escapeCsvCell, toCsv, toXlsx, toXlsxMulti, type XlsxColumn } from './report-export.js';
 
 /* ------------------------------------------------------------------ */
 /* Upload envelope limits (mirror the official-forms import caps)      */
@@ -772,7 +774,7 @@ export const customerExportCsv = (rows: CustomerExportRow[]): string =>
   );
 
 /* ------------------------------------------------------------------ */
-/* Company membership template (45 columns) + positional import mapping */
+/* Company membership template (44 columns) + positional import mapping */
 /* ------------------------------------------------------------------ */
 
 export type MembershipTemplateSection = {
@@ -787,8 +789,8 @@ export type MembershipTemplateSection = {
 };
 
 /**
- * The 45 company columns grouped for guided entry: one tab per member
- * group instead of one 45-wide wall. Slices are positional views of
+ * The 44 company columns grouped for guided entry: one tab per member
+ * group instead of one 44-wide wall. Slices are positional views of
  * MEMBERSHIP_TEMPLATE_COLUMNS, so the single-sheet order, the duplicates
  * (ADDRESS x2, EMAIL ADDRESS x3, AGE x2, FULL NAME x2) and the positional
  * remap below stay the single source of truth - this list only decides
@@ -809,13 +811,13 @@ export const MEMBERSHIP_TEMPLATE_SECTIONS: readonly MembershipTemplateSection[] 
   },
   {
     sheet: 'Related',
-    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 36),
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 35),
     tone: 'amber',
     blurb: 'Referral chain and related-person contact, stated verbatim.',
   },
   {
     sheet: 'Package',
-    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(36, 45),
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(35, 44),
     tone: 'purple',
     blurb: 'Stated package and payment facts. Reference only, never totals.',
   },
@@ -835,11 +837,112 @@ const membershipTemplateColumns = (): XlsxColumn[] =>
 export const membershipTemplateXlsx = () =>
   toXlsx('Membership Template', membershipTemplateColumns(), [[]]);
 
-/** CSV twin of the membership template (same 45 columns, same order). */
-export const membershipTemplateCsv = (): string => toCsv([...MEMBERSHIP_TEMPLATE_COLUMNS], [[]]);
+/**
+ * Column width hints so a prepared grid reads like a form, not a wall of
+ * equal columns. Matched on the verbatim header text, never rewritten.
+ */
+const templateColumnWidth = (label: string): number => {
+  const h = label.toUpperCase();
+  if (h === 'AGE' || h === 'RF' || h === 'SM') return 10;
+  if (h === 'DATE' || h.includes('BIRTHDAY')) return 14;
+  if (h.includes('EMAIL')) return 30;
+  if (h.includes('ADDRESS')) return 32;
+  if (h.includes('NAME') || h.includes('REFERRER') || h.includes('RECOMMENDER')) return 26;
+  if (h.includes('PRICE') || h.includes('AMOUNT') || h.includes('DISCOUNT')) return 16;
+  if (h.includes('MOBILE') || h.includes('CONTACT') || h.includes('TIN')) return 16;
+  return Math.min(28, Math.max(12, label.length + 2));
+};
+
+/** Tab colors mirroring each section's saturated header fill. */
+const TEMPLATE_TAB_COLORS: Record<MembershipTemplateSection['tone'], string> = {
+  blue: 'FF4472C4',
+  green: 'FF548235',
+  amber: 'FFBF8F00',
+  purple: 'FF7030A0',
+};
+
+/** Prepared entry rows per section tab, so the form is fill-ready. */
+export const MEMBERSHIP_TEMPLATE_ENTRY_ROWS = 20;
 
 /**
- * True when a spreadsheet header row is exactly the 45-column company
+ * Sectioned membership template: README + Primary/Supplementary/
+ * Related/Package tabs. Same 45 headers, same order, split for entry.
+ * Rows merge by position on upload.
+ *
+ * Presentation only: tinted + bordered headers, a section tab color, and a
+ * prepared zebra grid of blank rows. No header text is added, changed or
+ * reordered - the positional remap sees the same 45 verbatim names.
+ */
+export const membershipTemplateSectionedXlsx = () =>
+  toXlsxMulti('Membership Template', [
+    {
+      name: 'README',
+      columns: [
+        { label: 'Tab', type: 'text' as const, width: 18 },
+        { label: 'Fill guide', type: 'text' as const, width: 44 },
+      ],
+      rows: [
+        ['Primary', 'Fill primary member facts.'],
+        ['Supplementary', 'Leave blank when none.'],
+        ['Related', 'Copy referral chain verbatim.'],
+        ['Package', 'State prices for reference.'],
+        ['Rows', 'Keep same order everywhere.'],
+        ['CSV', 'Top row groups columns.'],
+      ],
+      headerTone: 'slate' as const,
+      filter: false,
+      wrapBody: true,
+      tabColor: 'FF595959',
+    },
+    ...MEMBERSHIP_TEMPLATE_SECTIONS.map((section) => ({
+      name: section.sheet,
+      columns: section.headers.map((label) => ({
+        label,
+        type: 'text' as const,
+        width: templateColumnWidth(label),
+      })),
+      rows: Array.from({ length: MEMBERSHIP_TEMPLATE_ENTRY_ROWS }, () => [] as unknown[]),
+      headerTone: section.tone,
+      tabColor: TEMPLATE_TAB_COLORS[section.tone],
+      zebra: true,
+    })),
+  ]);
+
+/**
+ * Section band labels, one per company column: the group name repeated
+ * across each section's width. A single CSV file cannot hold tabs, so the
+ * band row groups the 44 columns inline instead.
+ */
+export const MEMBERSHIP_TEMPLATE_SECTION_BANDS: readonly string[] =
+  MEMBERSHIP_TEMPLATE_SECTIONS.flatMap((section) => section.headers.map(() => section.sheet));
+
+/**
+ * CSV template: the section band row plus the 44 verbatim headers. One
+ * file, no zip. Upload strips the band row, so a saved-and-refilled
+ * download parses exactly like the plain 44-column company file.
+ */
+export const membershipTemplateCsv = (): string =>
+  toCsv([...MEMBERSHIP_TEMPLATE_SECTION_BANDS], [[...MEMBERSHIP_TEMPLATE_COLUMNS]]);
+
+/**
+ * True when a CSV first row is the section band row: same width as the
+ * template, every non-empty cell naming its own section, and enough cells
+ * present that a couple of clears do not disable the strip.
+ */
+export function looksLikeSectionBandRow(cells: string[]): boolean {
+  if (cells.length !== MEMBERSHIP_TEMPLATE_COLUMNS.length) return false;
+  let matched = 0;
+  for (let i = 0; i < cells.length; i += 1) {
+    const value = (cells[i] ?? '').trim().toLowerCase();
+    if (value === '') continue;
+    if (value !== MEMBERSHIP_TEMPLATE_SECTION_BANDS[i]!.toLowerCase()) return false;
+    matched += 1;
+  }
+  return matched >= 15;
+}
+
+/**
+ * True when a spreadsheet header row is exactly the 44-column company
  * membership template (compared trimmed + lowercased, order-sensitive).
  * Duplicated headers (ADDRESS, EMAIL ADDRESS, …) make name-based matching
  * ambiguous, so only an exact positional match qualifies for remapping.
@@ -849,6 +952,27 @@ export function isCompanyMembershipTemplate(headers: string[]): boolean {
   return MEMBERSHIP_TEMPLATE_COLUMNS.every(
     (column, index) => (headers[index] ?? '').trim().toLowerCase() === column.toLowerCase(),
   );
+}
+
+/**
+ * True for the superseded 45-column single layout: the current 44 headers
+ * with the removed OST/IST NAME column still sitting at its old position.
+ * Downloads no longer emit it, but a file filled from an older download
+ * parses through LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP instead of failing
+ * as 45 unknown headers - its values still land on the existing customer-
+ * record pipeline.
+ */
+export function isLegacyCompanyMembershipTemplate(headers: string[]): boolean {
+  if (headers.length !== MEMBERSHIP_TEMPLATE_COLUMNS.length + 1) return false;
+  if (
+    (headers[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX] ?? '').trim().toLowerCase() !==
+    LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN.toLowerCase()
+  )
+    return false;
+  return MEMBERSHIP_TEMPLATE_COLUMNS.every((column, index) => {
+    const at = index < LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? index : index + 1;
+    return (headers[at] ?? '').trim().toLowerCase() === column.toLowerCase();
+  });
 }
 
 export type CompanyTemplateRemap = {
@@ -862,13 +986,18 @@ export type CompanyTemplateRemap = {
  * Mapped positions take their import column name; unmapped positions keep a
  * marker header so they surface as ignored-column warnings naming the exact
  * company header. Values are never transformed here - validation downstream
- * decides what each value means.
+ * decides what each value means. The map defaults to the current layout;
+ * pass LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP for superseded 45-column
+ * files (see isLegacyCompanyMembershipTemplate).
  */
-export function remapCompanyTemplateMatrix(matrix: string[][]): CompanyTemplateRemap {
+export function remapCompanyTemplateMatrix(
+  matrix: string[][],
+  positionMap: readonly (string | null)[] = MEMBERSHIP_TEMPLATE_POSITION_MAP,
+): CompanyTemplateRemap {
   const [headerRow = [], ...body] = matrix;
   const dropped: { index: number; header: string }[] = [];
   const headers = headerRow.map((header, index) => {
-    const target = MEMBERSHIP_TEMPLATE_POSITION_MAP[index] ?? null;
+    const target = positionMap[index] ?? null;
     if (target) return target;
     dropped.push({ index, header: (header ?? '').trim() });
     return `__company_ignored_${index}`;
@@ -877,7 +1006,7 @@ export function remapCompanyTemplateMatrix(matrix: string[][]): CompanyTemplateR
 }
 
 export type SectionedTemplateMerge = {
-  /** Canonical 45-column company matrix, ready for the positional remap. */
+  /** Canonical 44-column company matrix, ready for the positional remap. */
   matrix: string[][];
   /** Headers found on section tabs with no v2 meaning, for warnings. */
   unknownHeaders: string[];
@@ -885,7 +1014,7 @@ export type SectionedTemplateMerge = {
 
 /**
  * Merge a sectioned membership workbook (README + Primary/Supplementary/
- * Related/Package tabs) back into the canonical 45-column company matrix.
+ * Related/Package tabs) back into the canonical 44-column company matrix.
  *
  * Matching is by accurate column NAME within each tab's group, in any order:
  * every non-empty header must belong to exactly one section's verbatim set,
@@ -959,7 +1088,7 @@ export function mergeSectionedTemplateSheets(
         (section, si) => `${section.sheet} has ${counts[si]}`,
       ).join(', ')}). Keep the same row order across sheets.`,
     );
-  // Canonical positions per section: the sections are slices of the 45, so
+  // Canonical positions per section: the sections are slices of the 44, so
   // the k-th header of section si lives at offset[si] + k. Offsets (not
   // indexOf) break the verbatim duplicates across tabs: ADDRESS on the
   // Supplementary tab lands at 16, never at Primary's 3.

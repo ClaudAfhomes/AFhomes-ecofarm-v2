@@ -210,3 +210,170 @@
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
+
+.dialogBody {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.formSection {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.formSection > legend {
+  padding: 0 var(--space-2);
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-brand-primary);
+}
+
+.sectionTitle {
+  font-weight: 700;
+}
+
+.sectionHint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.formFields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.roleHint {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Page list inside the Restrict dialog: same shape as the role access one. */
+.moduleList {
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.groupBlock {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.groupToggleButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-brand-primary) 7%, transparent),
+    transparent 70%
+  );
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.groupToggleButton:hover {
+  background-color: var(--color-state-hover);
+}
+
+.groupToggleButton:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.groupName {
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.02em;
+  color: var(--color-brand-primary);
+}
+
+.chevron {
+  display: inline-flex;
+  color: var(--color-brand-secondary);
+  transition: transform var(--transition-fast);
+}
+
+.chevron[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+.groupCount,
+.groupCountOn {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-muted);
+}
+
+.groupCountOn {
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-weight: 700;
+}
+
+.moduleRows {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-3) var(--space-2) var(--space-5);
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.moduleRow {
+  display: flex;
+}
+
+.moduleCheck {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.moduleCheck:hover {
+  background-color: var(--color-state-hover);
+}
+
+.moduleCheck:has(input:focus-visible) {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.moduleName {
+  font-weight: 600;
+}

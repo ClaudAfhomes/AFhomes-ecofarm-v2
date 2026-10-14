@@ -14,7 +14,7 @@ import {
   type ReportResponse,
 } from '@afhomes/contracts';
 import { protectedRequest as request } from '../../lib/api/client';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTime, humanizeToken } from '../../lib/format';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 
 export type ReportFilters = {
@@ -98,11 +98,7 @@ export function formatCell(key: string, value: unknown): string {
 }
 
 export function humanizeReportLabel(value: string): string {
-  return value
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .toLowerCase()
-    .replace(/^./, (c) => c.toUpperCase());
+  return humanizeToken(value);
 }
 
 export { envelopeBlob as exportToBlob, downloadFile as downloadExport } from '../../lib/download';

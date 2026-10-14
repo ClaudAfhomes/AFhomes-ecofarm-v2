@@ -137,7 +137,7 @@ it.each(['employee', 'admin', 'super_admin'])(
           status: 'active',
           afHomesPermissions: [
             {
-              moduleKey: 'operations.redemption',
+              moduleKey: 'operations.customer_lookup',
               canView: true,
               canCreate: false,
               canUpdate: false,
@@ -151,6 +151,36 @@ it.each(['employee', 'admin', 'super_admin'])(
     expect(screen.queryByText('Customer Lookup')).not.toBeInTheDocument();
   },
 );
+it('refuses the direct lookup to a role holding only the till permission', async () => {
+  // The screen has its own module; the redemption till key must not open it.
+  renderWithProviders(
+    <RequireRole>
+      <CustomerLookupPage />
+    </RequireRole>,
+    {
+      route: '/admin/customer-lookup',
+      user: {
+        id: 'qa-till',
+        name: 'QA TILL',
+        email: 'till@example.test',
+        roleId: 'qa-role',
+        roleSlug: 'employee',
+        roleName: 'Employee',
+        status: 'active',
+        afHomesPermissions: [
+          {
+            moduleKey: 'operations.redemption',
+            canView: true,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: false,
+          },
+        ],
+      },
+    },
+  );
+  expect(screen.queryByRole('heading', { name: 'Membership Lookup' })).not.toBeInTheDocument();
+});
 it('denies the direct lookup to a customer without staff permissions', async () => {
   renderWithProviders(
     <RequireRole>

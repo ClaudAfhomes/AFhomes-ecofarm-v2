@@ -100,6 +100,8 @@ const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T =>
 const normalizeApplicationHeader = <
   T extends {
     salesManagerName?: string;
+    svdName?: string;
+    ssmName?: string;
     vipRecommenderName?: string;
     vipReferrer?: string;
   },
@@ -110,6 +112,8 @@ const normalizeApplicationHeader = <
   ...(header.salesManagerName
     ? { salesManagerName: normalizePersonName(header.salesManagerName) }
     : {}),
+  ...(header.svdName ? { svdName: normalizePersonName(header.svdName) } : {}),
+  ...(header.ssmName ? { ssmName: normalizePersonName(header.ssmName) } : {}),
   ...(header.vipRecommenderName
     ? { vipRecommenderName: normalizePersonName(header.vipRecommenderName) }
     : {}),
@@ -191,6 +195,14 @@ async function resolveHolderLocation(holder: HolderLocation): Promise<LocationRe
         provinceCode: check.hierarchy.province.code,
         cityMunicipalityCode: check.hierarchy.locality.code,
         barangayCode: check.hierarchy.barangay.code,
+        // The postal code belongs to the LOCALITY, so it is derived from the
+        // authority's own record whenever one is published - a value typed
+        // into the form can never contradict the chosen address. A locality
+        // with no published zip keeps whatever the client sent, which is
+        // normally blank.
+        ...(check.hierarchy.locality.postalCode
+          ? { postalCode: check.hierarchy.locality.postalCode }
+          : {}),
       },
     };
 
@@ -312,6 +324,12 @@ async function getApplication(db: Db, id: string) {
     primary: primary ? shapeApplicationHolder(primary) : null,
     secondary: secondary ? shapeApplicationHolder(secondary) : undefined,
     salesManagerName: row.sales_manager_name ?? undefined,
+    svdStaffId: row.svd_staff_id ?? undefined,
+    ssmStaffId: row.ssm_staff_id ?? undefined,
+    smStaffId: row.sm_staff_id ?? undefined,
+    referrerStaffId: row.referrer_staff_id ?? undefined,
+    svdName: row.svd_name ?? undefined,
+    ssmName: row.ssm_name ?? undefined,
     vipRecommenderName: row.vip_recommender_name ?? undefined,
     recommenderContact: row.recommender_contact ?? undefined,
     recommenderEmail: row.recommender_email ?? undefined,

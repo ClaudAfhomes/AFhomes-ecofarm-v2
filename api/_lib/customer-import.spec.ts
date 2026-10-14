@@ -11,12 +11,16 @@ import {
 import {
   MAX_IMPORT_ROWS,
   MEMBERSHIP_TEMPLATE_SECTIONS,
+  MEMBERSHIP_TEMPLATE_SECTION_BANDS,
   customerExportCsv,
   customerExportXlsx,
+  isLegacyCompanyMembershipTemplate,
   matrixToRecords,
   membershipTemplateCsv,
+  membershipTemplateSectionedXlsx,
   membershipTemplateXlsx,
   mergeSectionedTemplateSheets,
+  looksLikeSectionBandRow,
   neutralizeFormula,
   parseCsvMatrix,
   parseOpeningBalance,
@@ -26,7 +30,13 @@ import {
   validateImportRow,
   type ImportContext,
 } from './customer-import.js';
-import { MEMBERSHIP_TEMPLATE_COLUMNS } from '@afhomes/contracts';
+import {
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
+} from '@afhomes/contracts';
 import { toXlsx, toXlsxMulti } from './report-export.js';
 
 const ctx = (overrides: Partial<ImportContext> = {}): ImportContext => ({
@@ -245,9 +255,89 @@ describe('template and headers', () => {
     const matrix = parseXlsxMatrix(membershipTemplateXlsx());
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
-  it('emits the same columns in the CSV template', () => {
-    const matrix = parseCsvMatrix(membershipTemplateCsv());
+  it('emits README plus four section tabs in the sectioned XLSX template', () => {
+    const sheets = parseXlsxSheets(membershipTemplateSectionedXlsx());
+    expect(sheets.map((s) => s.name)).toEqual([
+      'README',
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+    ]);
+    const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
+    for (const section of MEMBERSHIP_TEMPLATE_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([...section.headers]);
+    const { matrix } = mergeSectionedTemplateSheets(sheets);
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+  });
+  it('emits the section band row above the 44 columns in the CSV template', () => {
+    const matrix = parseCsvMatrix(membershipTemplateCsv());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_SECTION_BANDS]);
+    expect(matrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(looksLikeSectionBandRow(matrix[0]!)).toBe(true);
+  });
+  it('recognizes only a true section band row', () => {
+    const bands = [...MEMBERSHIP_TEMPLATE_SECTION_BANDS];
+    expect(looksLikeSectionBandRow(bands)).toBe(true);
+    // A couple of cleared cells still strip; a wrong label never does.
+    const cleared = [...bands];
+    cleared[0] = '';
+    cleared[20] = '  ';
+    expect(looksLikeSectionBandRow(cleared)).toBe(true);
+    const edited = [...bands];
+    edited[5] = 'STATUS';
+    expect(looksLikeSectionBandRow(edited)).toBe(false);
+    expect(looksLikeSectionBandRow([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    expect(looksLikeSectionBandRow(['Primary'])).toBe(false);
+    expect(looksLikeSectionBandRow(Array(44).fill(''))).toBe(false);
+  });
+  it('recognizes the superseded 45-column layout and nothing else', () => {
+    const legacy = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    expect(legacy).toHaveLength(45);
+    expect(isLegacyCompanyMembershipTemplate(legacy)).toBe(true);
+    // The current 44 headers are the new layout, not the legacy one.
+    expect(isLegacyCompanyMembershipTemplate([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    // A wrong header at the old position is a foreign file, never legacy:
+    // its data must not land on ost_ist_name.
+    const impostor = [...legacy];
+    impostor[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX] = 'EXTRA NOTES';
+    expect(isLegacyCompanyMembershipTemplate(impostor)).toBe(false);
+    // So is any other width or a shuffled row.
+    expect(isLegacyCompanyMembershipTemplate([...legacy, 'EXTRA'])).toBe(false);
+    expect(isLegacyCompanyMembershipTemplate([...legacy].reverse())).toBe(false);
+  });
+  it('keeps the legacy position map aligned with the current one', () => {
+    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
+    expect(MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(44);
+    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(45);
+    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX]).toBe(
+      'ost_ist_name',
+    );
+    // Every other legacy position matches the current map exactly.
+    LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP.forEach((target, index) => {
+      if (index === LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX) return;
+      const current = index < LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? index : index - 1;
+      expect(target).toBe(MEMBERSHIP_TEMPLATE_POSITION_MAP[current]);
+    });
+    // And the legacy map remaps a full legacy row without dropping the column.
+    const legacyHeaders = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    const legacyRow = legacyHeaders.map((header, index) =>
+      index === LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? 'OST Name' : `v${index}`,
+    );
+    const remapped = remapCompanyTemplateMatrix(
+      [legacyHeaders, legacyRow],
+      LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+    );
+    expect(remapped.dropped.map((d) => d.header)).not.toContain('OST/IST NAME');
+    expect(remapped.matrix[0]).toContain('ost_ist_name');
   });
   it('flags unknown columns without failing the file', () => {
     const { unknownHeaders, rows } = matrixToRecords([
@@ -606,8 +696,8 @@ describe('limits and export safety', () => {
 describe('sectioned template merge', () => {
   const primary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, 15)];
   const supplementary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(15, 28)];
-  const related = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 36)];
-  const pkg = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(36, 45)];
+  const related = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 35)];
+  const pkg = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(35, 44)];
 
   it('merges entry tabs into canonical order regardless of column order', () => {
     // Reordered columns within tabs still land on canonical positions.
@@ -645,7 +735,7 @@ describe('sectioned template merge', () => {
     // Header-only template merges to headers alone; the positional remap
     // still classifies every column (dropped FULL NAME/AGE warn by name).
     const remapped = remapCompanyTemplateMatrix(matrix);
-    expect(remapped.matrix[0]).toHaveLength(45);
+    expect(remapped.matrix[0]).toHaveLength(44);
     expect(remapped.dropped.map((d) => d.header)).toContain('FULL NAME');
   });
 

@@ -39,6 +39,12 @@ export const localitySchema = z.object({
   name: z.string().trim().min(1),
   type: localityTypeSchema,
   provinceCode: geographicCodeSchema,
+  /**
+   * The locality's postal code, when the source publishes one. Absence is
+   * honest - several municipalities have no published zip - so a missing
+   * value is never defaulted or invented.
+   */
+  postalCode: z.string().trim().min(1).max(10).optional(),
 });
 export type Locality = z.infer<typeof localitySchema>;
 

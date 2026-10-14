@@ -31,7 +31,20 @@ import {
   updateAfHomesStaff,
   type AfHomesAuditEvent,
 } from './services';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTime, humanizeToken } from '../../lib/format';
+import styles from './AfHomesStaffDetailPage.module.css';
+
+const statusTone = (status: string): 'success' | 'danger' | 'neutral' =>
+  status === 'active' ? 'success' : status === 'suspended' ? 'danger' : 'neutral';
+
+const initialsOf = (name: string): string =>
+  name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join('') || '-';
 
 export function AfHomesStaffDetailPage() {
   const { id } = useParams();
@@ -175,7 +188,7 @@ function StaffDetailForm({
   const superAdminBlocked = targetIsSuperAdmin && !canGovernSuperAdmin;
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title={member.fullName}
         description="Staff identity, assignment, access, and history"
@@ -185,7 +198,24 @@ function StaffDetailForm({
           </Button>
         }
       />
-      <div style={{ display: 'grid', gap: 16 }}>
+      <section className={styles.hero} aria-label="Staff summary">
+        <span className={styles.heroAvatar} aria-hidden="true">
+          {initialsOf(member.fullName)}
+        </span>
+        <div className={styles.heroText}>
+          <h2 className={styles.heroName}>{member.fullName}</h2>
+          <p className={styles.heroMeta}>{member.email}</p>
+          {member.employeeNumber ? (
+            <p className={styles.heroMeta}>Employee No. {member.employeeNumber}</p>
+          ) : null}
+        </div>
+        <div className={styles.heroChips}>
+          <StatusChip label={member.roleName} tone="neutral" />
+          <StatusChip label={member.departmentName ?? 'Unassigned'} tone="neutral" />
+          <StatusChip label={member.status} tone={statusTone(member.status)} />
+        </div>
+      </section>
+      <div className={styles.cardStack}>
         <DetailCard>
           <DetailCardTitle>Staff information</DetailCardTitle>
           <DetailFieldGrid>
@@ -199,10 +229,7 @@ function StaffDetailForm({
               <StatusChip label={member.roleName} tone="neutral" />
             </DetailField>
             <DetailField label="Status">
-              <StatusChip
-                label={member.status}
-                tone={member.status === 'active' ? 'success' : 'neutral'}
-              />
+              <StatusChip label={member.status} tone={statusTone(member.status)} />
             </DetailField>
             <DetailField label="Added">{formatDateTime(member.createdAt)}</DetailField>
           </DetailFieldGrid>
@@ -236,29 +263,31 @@ function StaffDetailForm({
               Only a Super Admin can modify a Super Admin.
             </Alert>
           ) : (
-            <div style={{ display: 'grid', gap: 12 }}>
-              <label>
-                Role
-                <Select
-                  value={roleId}
-                  onChange={(e) => setRoleId(e.target.value)}
-                  options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
-                />
-              </label>
-              <label>
-                Department
-                <Select
-                  value={departmentId}
-                  onChange={(e) => setDepartmentId(e.target.value)}
-                  options={[
-                    { value: '', label: 'Unassigned' },
-                    ...(departments ?? [])
-                      .filter((d) => d.isActive)
-                      .map((d) => ({ value: d.id, label: d.name })),
-                  ]}
-                />
-              </label>
-              <div>
+            <>
+              <div className={styles.formGrid}>
+                <label className={styles.fieldLabel}>
+                  Role
+                  <Select
+                    value={roleId}
+                    onChange={(e) => setRoleId(e.target.value)}
+                    options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
+                  />
+                </label>
+                <label className={styles.fieldLabel}>
+                  Department
+                  <Select
+                    value={departmentId}
+                    onChange={(e) => setDepartmentId(e.target.value)}
+                    options={[
+                      { value: '', label: 'Unassigned' },
+                      ...(departments ?? [])
+                        .filter((d) => d.isActive)
+                        .map((d) => ({ value: d.id, label: d.name })),
+                    ]}
+                  />
+                </label>
+              </div>
+              <div className={styles.actionRow}>
                 <Button
                   disabled={!assignmentChanged || assignment.isPending}
                   onClick={() => assignment.mutate()}
@@ -266,9 +295,11 @@ function StaffDetailForm({
                   {assignment.isPending ? 'Saving…' : 'Save assignment'}
                 </Button>
               </div>
-              <p>Exactly one role per member. Assignment changes are audited.</p>
+              <p className={styles.cardHint}>
+                Exactly one role per member. Assignment changes are audited.
+              </p>
               {assignment.error ? <p role="alert">{assignment.error.message}</p> : null}
-            </div>
+            </>
           )}
         </DetailCard>
 
@@ -283,34 +314,38 @@ function StaffDetailForm({
               Only a Super Admin can change a Super Admin&apos;s access.
             </Alert>
           ) : (
-            <div style={{ display: 'grid', gap: 12 }}>
-              <label>
-                Status
-                <Select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  options={['active', 'inactive', 'suspended'].map((value) => ({
-                    value,
-                    label: value[0]!.toUpperCase() + value.slice(1),
-                  }))}
-                />
-              </label>
-              <div>
+            <>
+              <div className={styles.formGrid}>
+                <label className={styles.fieldLabel}>
+                  Status
+                  <Select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value)}
+                    options={['active', 'inactive', 'suspended'].map((value) => ({
+                      value,
+                      label: value[0]!.toUpperCase() + value.slice(1),
+                    }))}
+                  />
+                </label>
+              </div>
+              <div className={styles.actionRow}>
                 <Button
                   disabled={!statusChanged || standing.isPending}
                   onClick={() => standing.mutate()}
                 >
                   {standing.isPending ? 'Saving…' : 'Save status'}
-                </Button>{' '}
+                </Button>
                 {member.status === 'active' ? (
                   <Button variant="danger" onClick={() => setConfirmDeactivate(true)}>
                     Deactivate access
                   </Button>
                 ) : null}
               </div>
-              <p>Deactivation revokes access immediately and is audited.</p>
+              <p className={styles.cardHint}>
+                Deactivation revokes access immediately and is audited.
+              </p>
               {standing.error ? <p role="alert">{standing.error.message}</p> : null}
-            </div>
+            </>
           )}
         </DetailCard>
 
@@ -324,10 +359,13 @@ function StaffDetailForm({
           ) : historyError ? (
             <ErrorState error={historyError} onRetry={onRetryHistory} />
           ) : history?.length ? (
-            <ul>
+            <ul className={styles.historyList}>
               {history.map((event) => (
-                <li key={String(event.id)}>
-                  {event.action} · {formatDateTime(event.created_at)}
+                <li key={String(event.id)} className={styles.historyItem}>
+                  <span className={styles.historyAction} title={event.action}>
+                    {humanizeToken(event.action)}
+                  </span>
+                  <span className={styles.historyTime}>{formatDateTime(event.created_at)}</span>
                 </li>
               ))}
             </ul>
@@ -342,13 +380,15 @@ function StaffDetailForm({
         {canGovernSuperAdmin && !isSelf && !targetIsSuperAdmin ? (
           <DetailCard>
             <DetailCardTitle>Delete</DetailCardTitle>
-            <p>
+            <p className={styles.cardHint}>
               Permanent removal is only possible when the account has no protected business records.
               Deactivation is the safe default.
             </p>
-            <Button variant="danger" onClick={() => setConfirmDelete(true)}>
-              Delete permanently
-            </Button>
+            <div className={styles.actionRow}>
+              <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                Delete permanently
+              </Button>
+            </div>
             {remove.error ? <p role="alert">{remove.error.message}</p> : null}
           </DetailCard>
         ) : null}

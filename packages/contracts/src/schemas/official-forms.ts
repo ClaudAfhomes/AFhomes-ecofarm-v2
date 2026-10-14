@@ -5,11 +5,11 @@ import {
   normalizeAddressField,
   normalizeGeographicName,
   normalizePersonName,
-  optionalPersonNameSchema,
   optionalContactNumberSchema,
   optionalLandlineSchema,
   personNameSchema,
   phoneSchema,
+  toTitleCase,
   PERSON_NAME_RE,
 } from './input.js';
 import { geographicCodeSchema } from './address.js';
@@ -33,6 +33,56 @@ export const acquisitionChannelSchema = z.enum([
   'FB Ads',
 ]);
 
+/**
+ * Fixed pick-lists for the application holder. The values ARE the stored
+ * text, so a dropdown option and a saved record can never disagree.
+ * `undefined` (or a blank) is the honest "not provided" state.
+ */
+export const SUFFIX_OPTIONS = ['Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
+export const SEX_OPTIONS = ['Male', 'Female', 'Other'] as const;
+export const CITIZENSHIP_OPTIONS = ['Filipino', 'Dual Citizen', 'Foreign National'] as const;
+export const CIVIL_STATUS_OPTIONS = [
+  'Single',
+  'Married',
+  'Widowed',
+  'Separated',
+  'Annulled',
+] as const;
+export const suffixOptionSchema = z.enum(SUFFIX_OPTIONS);
+export const sexOptionSchema = z.enum(SEX_OPTIONS);
+export const citizenshipOptionSchema = z.enum(CITIZENSHIP_OPTIONS);
+export const civilStatusOptionSchema = z.enum(CIVIL_STATUS_OPTIONS);
+
+/** Blank pick-list values are "not provided", never an invalid choice. */
+const blankToUndefinedOption = (value: unknown) =>
+  typeof value === 'string' && !value.trim() ? undefined : value;
+
+/**
+ * A Philippine TIN: 9 digits (3-3-3), optionally with a branch suffix, dashes
+ * optional. Letters are never part of a TIN.
+ */
+export const tinNumberSchema = z.preprocess(
+  blankToUndefinedOption,
+  z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^\d{3}-?\d{3}-?\d{3}(-\d{3,5})?$/, 'Use a 9-digit TIN, for example 123-456-789')
+    .optional(),
+);
+
+/** Title-cased person-name part for application holders. */
+const holderName = personNameSchema.transform(toTitleCase);
+const optionalHolderName = z
+  .string()
+  .trim()
+  .max(80)
+  .refine((value) => value === '' || PERSON_NAME_RE.test(value), {
+    message: 'Use letters, spaces, apostrophes and hyphens only - no numbers',
+  })
+  .transform((value) => (value ? toTitleCase(value) : value))
+  .optional();
+
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 /**
@@ -48,24 +98,19 @@ const optionalUuid = z.preprocess(blankToUndefined, z.string().uuid().optional()
 
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  lastName: personNameSchema,
-  firstName: personNameSchema,
-  middleName: optionalPersonNameSchema,
+  lastName: holderName,
+  firstName: holderName,
+  middleName: optionalHolderName,
   suffix: z.preprocess(
     (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
-    optionalPersonNameSchema.refine((value) => value === undefined || value.length <= 20),
+    z.preprocess(blankToUndefinedOption, suffixOptionSchema.optional()),
   ),
   birthDate: birthDateSchema,
-  sex: z.string().trim().max(30).optional(),
-  citizenship: z.string().trim().max(80).optional(),
-  civilStatus: z.string().trim().max(40).optional(),
-  permanentAddressLine1: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .transform((v) => normalizeAddressField(v)),
-  permanentAddressLine2: z.string().trim().max(200).transform(normalizeAddressField).optional(),
+  sex: z.preprocess(blankToUndefinedOption, sexOptionSchema.optional()),
+  citizenship: z.preprocess(blankToUndefinedOption, citizenshipOptionSchema.optional()),
+  civilStatus: z.preprocess(blankToUndefinedOption, civilStatusOptionSchema.optional()),
+  permanentAddressLine1: z.string().trim().min(1).max(200).transform(toTitleCase),
+  permanentAddressLine2: z.string().trim().max(200).transform(toTitleCase).optional(),
   /**
    * The official geography. These three names come from the Philippine statistics
    * authority rather than from a person typing, so they keep the authority's
@@ -88,12 +133,12 @@ export const applicationHolderSchema = z.object({
   landline: optionalLandlineSchema,
   mobile: phoneSchema,
   email: emailSchema,
-  tinNumber: z.string().trim().max(40).optional(),
+  tinNumber: tinNumberSchema,
   occupationBusinessName: z.string().trim().max(160).transform(normalizeAddressField).optional(),
   officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
   employedPosition: z.string().trim().max(120).transform(normalizeAddressField).optional(),
-  printedName: z.string().trim().min(1).max(180).transform(normalizePersonName),
+  printedName: z.string().trim().min(1).max(180).transform(toTitleCase),
 });
 
 const customerApplicationInputSchema = z.object({
@@ -106,7 +151,22 @@ const customerApplicationInputSchema = z.object({
   paymentScheme: paymentSchemeSchema,
   primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
+  /** The Sales Manager of record (SM column on the paper form). */
   salesManagerName: z.string().trim().max(160).optional(),
+  /**
+   * The referral chain as Organization linkage, one id per level. Blank (or
+   * absent) is "not named". When an id is supplied the server resolves the
+   * matching *_name snapshot itself and ignores client text for it, so the
+   * snapshot can never disagree with the linkage; without an id the legacy
+   * text behavior applies.
+   */
+  svdStaffId: optionalUuid,
+  ssmStaffId: optionalUuid,
+  smStaffId: optionalUuid,
+  referrerStaffId: optionalUuid,
+  /** The referral chain above the seller: SVD, SSM, SM, Referrer. */
+  svdName: z.string().trim().max(160).optional(),
+  ssmName: z.string().trim().max(160).optional(),
   vipRecommenderName: z.string().trim().max(160).optional(),
   recommenderContact: optionalContactNumberSchema,
   recommenderEmail: z.preprocess(
@@ -190,32 +250,52 @@ export const registerCustomerApplicationSchema = customerApplicationInputSchema
   .superRefine(validateApplicationHolders);
 export type RegisterCustomerApplicationRequest = z.infer<typeof registerCustomerApplicationSchema>;
 
-export const customerApplicationSchema = createCustomerApplicationSchema.extend({
-  id: z.string().uuid(),
-  applicationNumber: z.string(),
-  vipAmount: exactDecimalStringSchema,
-  discountPercent: z.number().int().min(0).max(100),
-  validityYears: z.number().int().positive(),
-  yearlyPoints: z.number().int().nonnegative(),
-  annualPointsTranches: z.number().int().positive(),
-  holderLimit: z.number().int().min(1).max(2),
-  status: customerApplicationStatusSchema,
-  /**
-   * The exact frozen terms this application points at, or null before any terms
-   * were captured.
-   *
-   * An IDENTIFIER, not a figure: it tells the UI which record a reservation would
-   * be built from, and the server revalidates it against the immutable row before
-   * writing anything. Null is the honest "Purchase Terms Review Required" state.
-   */
-  purchaseTermsId: z.string().uuid().nullable().optional(),
-  createdBy: z.string().uuid().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  submittedAt: z.string().nullable(),
-  approvedAt: z.string().nullable(),
-  rejectedAt: z.string().nullable(),
+/**
+ * A holder AS STORED. The write schema above enforces today's pick-lists, but
+ * a record written before them (a free-text `M`, an undotted `Jr`) must still
+ * READ back: historical records are never rewritten, so the read schema drops
+ * only the pick-list and TIN constraints while keeping every structural one.
+ */
+export const storedApplicationHolderSchema = applicationHolderSchema.extend({
+  suffix: z.string().max(20).optional(),
+  sex: z.string().max(30).optional(),
+  citizenship: z.string().max(80).optional(),
+  civilStatus: z.string().max(40).optional(),
+  tinNumber: z.string().max(40).optional(),
 });
+
+export const customerApplicationSchema = customerApplicationInputSchema
+  .extend({
+    id: z.string().uuid(),
+    applicationNumber: z.string(),
+    primary: storedApplicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
+    secondary: storedApplicationHolderSchema
+      .extend({ holderType: z.literal('SECONDARY') })
+      .optional(),
+    vipAmount: exactDecimalStringSchema,
+    discountPercent: z.number().int().min(0).max(100),
+    validityYears: z.number().int().positive(),
+    yearlyPoints: z.number().int().nonnegative(),
+    annualPointsTranches: z.number().int().positive(),
+    holderLimit: z.number().int().min(1).max(2),
+    status: customerApplicationStatusSchema,
+    /**
+     * The exact frozen terms this application points at, or null before any terms
+     * were captured.
+     *
+     * An IDENTIFIER, not a figure: it tells the UI which record a reservation would
+     * be built from, and the server revalidates it against the immutable row before
+     * writing anything. Null is the honest "Purchase Terms Review Required" state.
+     */
+    purchaseTermsId: z.string().uuid().nullable().optional(),
+    createdBy: z.string().uuid().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    submittedAt: z.string().nullable(),
+    approvedAt: z.string().nullable(),
+    rejectedAt: z.string().nullable(),
+  })
+  .superRefine(validateApplicationHolders);
 
 /** Staff review decision. `approved`/`rejected` leave `submitted` only; `cancelled` is terminal. */
 export const customerApplicationDecisionSchema = z.object({
@@ -440,7 +520,16 @@ export const formImportPreviewSchema = z.object({
   requiresReview: z.literal(true),
 });
 
-export type ApplicationHolder = z.infer<typeof applicationHolderSchema>;
+/**
+ * The UI draft shape for an application holder.
+ *
+ * Deliberately the STORED (loosened) shape rather than the strict write
+ * schema's output: a form loads records written before today's pick-lists, so
+ * it must be able to hold `M` or an undotted `Jr` long enough to show them.
+ * Every write still parses through `createCustomerApplicationSchema`, which is
+ * where the pick-lists and the TIN rule are enforced.
+ */
+export type ApplicationHolder = z.infer<typeof storedApplicationHolderSchema>;
 export type CreateCustomerApplicationRequest = z.infer<typeof createCustomerApplicationSchema>;
 export type CustomerApplication = z.infer<typeof customerApplicationSchema>;
 export type CustomerApplicationDecision = z.infer<typeof customerApplicationDecisionSchema>;

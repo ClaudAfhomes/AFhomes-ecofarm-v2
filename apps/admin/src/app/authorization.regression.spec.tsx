@@ -100,7 +100,7 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
     ];
     // The declared navigation, which is where the labels actually live; the
     // filtered sidebar union carries dividers as well and is checked below.
-    const shown = navItemsForPermissions(gsd, 'employee');
+    const shown = navItemsForPermissions(gsd);
     const declared = ADMIN_NAV_ITEMS.filter((item) =>
       shown.some((s) => s.to === item.to),
     ).flatMap((item) => [

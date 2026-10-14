@@ -1,0 +1,216 @@
+.body {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-brand-primary) 6%, transparent),
+    transparent 60%
+  );
+}
+
+.roleName {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-brand-primary);
+}
+
+.identityChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.accessFieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.accessFieldset > legend {
+  padding: 0;
+  margin-bottom: var(--space-3);
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.formGrid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.activeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.permissionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.permissionTitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.permissionCount {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Page-access list: group dropdowns of single "Can access" rows. */
+.moduleList {
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.groupBlock {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+/* Group header: one full-width disclosure row, no bulk controls. */
+.groupToggleButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-brand-primary) 7%, transparent),
+    transparent 70%
+  );
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.groupToggleButton:hover {
+  background-color: var(--color-state-hover);
+}
+
+.groupToggleButton:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.groupName {
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.02em;
+  color: var(--color-brand-primary);
+}
+
+/* The chevron points right when closed and rotates open, so the direction of
+   the disclosure is animated rather than swapped between two glyphs. */
+.chevron {
+  display: inline-flex;
+  color: var(--color-brand-secondary);
+  transition: transform var(--transition-fast);
+}
+
+.chevron[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+/* Granted/total pill: quiet when nothing is granted, brand-tinted when the
+   group holds access, so an operator can see what the role has without
+   expanding it. */
+.groupCount,
+.groupCountOn {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-muted);
+}
+
+.groupCountOn {
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-weight: 700;
+}
+
+.moduleRows {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-3) var(--space-2) var(--space-5);
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.moduleRow {
+  display: flex;
+}
+
+.moduleCheck {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.moduleCheck:hover {
+  background-color: var(--color-state-hover);
+}
+
+.moduleCheck:has(input:focus-visible) {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.moduleName {
+  font-weight: 600;
+}
+
+/* Tags a page where the role keeps action rights beyond opening it. */
+.moduleTag {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+

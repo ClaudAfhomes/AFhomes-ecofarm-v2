@@ -37,12 +37,12 @@ import {
   Alert,
   Button,
   DateField,
+  Dialog,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
   DetailField,
   DetailFieldGrid,
-  Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -54,19 +54,16 @@ import {
   StatusChip,
   TextAreaField,
 } from '@afhomes/ui';
+import { TierBadge } from './TierBadge';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   ACCEPTED_MIME,
   MAX_BYTES,
-  getDocumentAccessUrl,
-  getDocuments,
   getCurrentDocument,
   completeDocumentUpload,
-  confirmDocument,
   putUploadBytes,
   requestUploadGrant,
-  runDocumentOcr,
 } from '../documents/services';
 import {
   createCustomerApplication,
@@ -555,11 +552,13 @@ export function CustomerApplicationEditorPage() {
   const [primary, setPrimary] = useState(() => emptyHolder('PRIMARY'));
   const [secondary, setSecondary] = useState<ApplicationHolder | null>(null);
   const [meta, setMeta] = useState({
-    salesManagerName: '',
+    svdStaffId: '',
+    ssmStaffId: '',
+    smStaffId: '',
+    referrerStaffId: '',
     vipRecommenderName: '',
     recommenderContact: '',
     recommenderEmail: '',
-    vipReferrer: '',
     acknowledgedAt: today(),
   });
   const [channels, setChannels] = useState<string[]>([]);
@@ -567,36 +566,57 @@ export function CustomerApplicationEditorPage() {
   const [validId, setValidId] = useState(false);
   const [paymentProof, setPaymentProof] = useState(false);
   const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
-  const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [idFile, setIdFile] = useState<File | null>(null);
   // Local thumbnail for the not-yet-uploaded selection. Object URLs never hit
   // the network. Derived during render (no setState-in-effect); a cleanup-only
   // effect revokes the URL the moment the selection changes or the component
   // unmounts. Runtimes without createObjectURL simply get no thumbnail.
-  const ocrPreviewUrl = useMemo(() => {
-    if (!ocrFile || !ocrFile.type.startsWith('image/')) return null;
+  const idPreviewUrl = useMemo(() => {
+    if (!idFile || !idFile.type.startsWith('image/')) return null;
     try {
-      return URL.createObjectURL(ocrFile);
+      return URL.createObjectURL(idFile);
     } catch {
       return null;
     }
-  }, [ocrFile]);
+  }, [idFile]);
   useEffect(() => {
     return () => {
-      if (ocrPreviewUrl) {
+      if (idPreviewUrl) {
         try {
-          URL.revokeObjectURL(ocrPreviewUrl);
+          URL.revokeObjectURL(idPreviewUrl);
         } catch {
           // Test environments without object URLs have nothing to revoke.
         }
       }
     };
-  }, [ocrPreviewUrl]);
+  }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const uploadPendingId = useCallback(
+    async (targetCustomerId: string, file: File, type: string) => {
+      const mime = ACCEPTED_MIME.find((value) => value === file.type);
+      if (!mime || !file.size || file.size > MAX_BYTES)
+        throw new Error('Choose JPEG, PNG or PDF up to 10 MiB.');
+      if (!targetCustomerId) throw new Error('Select a customer first.');
+      if (!type) throw new Error('Choose ID type first.');
+      const grant = await requestUploadGrant({
+        idType: governmentIdTypeSchema.parse(type),
+        subjectType: 'customer',
+        subjectId: targetCustomerId,
+        mime,
+        sizeBytes: file.size,
+        originalFilename: file.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, file);
+      const document = await completeDocumentUpload(grant.documentId);
+      if (!document.hasFile) throw new Error('Upload verification is still pending.');
+      return { documentId: grant.documentId, filename: file.name };
+    },
+    [],
+  );
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
   const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
-  const [idPreview, setIdPreview] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   // Customer dropdown: one bounded page (the server max), so every option is
   // reachable without loading an unbounded directory into the control. The
   // chosen record resolves to a display name through the same single-customer
@@ -612,17 +632,10 @@ export function CustomerApplicationEditorPage() {
   });
   const pickCustomer = (next: string) => {
     setCustomerId(next);
-    setOcrFile(null);
+    setIdFile(null);
     setPickerVersion((version) => version + 1);
-    setIdPreview(null);
     setValidId(false);
   };
-  const documents = useQuery({
-    queryKey: sharedScopes.documentsCustomer(customerId),
-    queryFn: () => getDocuments({ subjectType: 'customer', subjectId: customerId }),
-    enabled: Boolean(customerId),
-    retry: false,
-  });
   const currentDocument = useQuery({
     queryKey: sharedScopes.documentsCurrentCustomer(customerId),
     queryFn: () => getCurrentDocument({ subjectType: 'customer', subjectId: customerId }),
@@ -636,46 +649,6 @@ export function CustomerApplicationEditorPage() {
     currentDocument.data.verificationStatus !== 'rejected'
       ? currentDocument.data
       : null;
-  const uploadId = useBusinessMutation({
-    mutationFn: async (pendingDocumentId?: string) => {
-      if (pendingDocumentId) {
-        const document = await completeDocumentUpload(pendingDocumentId);
-        if (!document.hasFile) throw new Error('Upload is still incomplete.');
-        return { documentId: document.id, filename: document.originalFilename };
-      }
-      if (!ocrFile || !customerId) throw new Error('Select a customer and ID file first.');
-      const mime = ACCEPTED_MIME.find((value) => value === ocrFile.type);
-      if (!mime || !ocrFile.size || ocrFile.size > MAX_BYTES)
-        throw new Error('Choose a non-empty JPEG, PNG or PDF up to 10 MiB.');
-      const grant = await requestUploadGrant({
-        idType: governmentIdTypeSchema.parse(idType),
-        subjectType: 'customer',
-        subjectId: customerId,
-        mime,
-        sizeBytes: ocrFile.size,
-        originalFilename: ocrFile.name.slice(0, 255),
-      });
-      await putUploadBytes(grant.uploadUrl, ocrFile);
-      const document = await completeDocumentUpload(grant.documentId);
-      if (!document.hasFile) throw new Error('Upload verification is still pending.');
-      return { documentId: grant.documentId, filename: ocrFile.name };
-    },
-    onSuccess: async () => {
-      setOcrFile(null);
-      setPickerVersion((version) => version + 1);
-      setIdPreview(null);
-      setValidId(true);
-      setMessage('Valid ID uploaded privately. Review before submitting.');
-      // Wait for subject-wide authority; never promote a completion locally.
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Upload failed.'),
-  });
-  const previewId = useBusinessMutation({
-    mutationFn: (documentId: string) => getDocumentAccessUrl(documentId),
-    onSuccess: (grant) => setIdPreview(grant.url),
-    onError: () => setMessage('ID preview unavailable. Try again.'),
-  });
   const optionalPhonesValid =
     [meta.recommenderContact].every(
       (value) => optionalContactNumberSchema.safeParse(value).success,
@@ -685,36 +658,26 @@ export function CustomerApplicationEditorPage() {
     );
   // WHY THIS IS A LIST AND NOT A `disabled` EXPRESSION.
   //
-  // Submit used to be disabled by a silent nine-term `||`. The reported symptom
-  // was "Submit cannot be clicked", and that grey button was the entire visible
-  // explanation. Two of the terms were traps a user could not reason about: any
-  // replacement ID photo stages `ocrFile`, which greys Submit until "Detect
-  // fields" is pressed; and the ID-type gate needs a confirmed document. Neither
-  // was stated anywhere on screen.
+  // Save-and-submit used to be a silent multi-term `||` plus a separate
+  // "Submit" button. The reported symptom was "Submit cannot be clicked", and
+  // that grey button was the entire visible explanation.
   //
   // A disabled control is also unfocusable, so a keyboard or screen-reader user
   // is not merely uninformed - the button does not exist for them at all.
   //
-  // Same conditions, one derived list, rendered next to the button. Blocking is
-  // unchanged; only the silence is removed. Transient states (a mutation in
-  // flight) are deliberately NOT blockers - they are not something to fix.
-  //
-  // Save mirrors the submit pattern: the same contact/field checks that used
-  // to grey the button silently now read as an inline list in both modes.
-  const saveBlockers: string[] = [];
-  if (!optionalPhonesValid)
-    saveBlockers.push('Correct the recommender contact or landline number.');
-  if (Object.values(invalidFields).some(Boolean))
-    saveBlockers.push('Correct the highlighted fields.');
-  const submitBlockers: string[] = [];
-  if (!consent) submitBlockers.push('Certification and consent must be ticked.');
-  if (!serverCurrentDocument?.reviewedFields?.idType)
-    submitBlockers.push('Record the ID type on the uploaded identity document.');
-  if (ocrFile) submitBlockers.push('Run "Detect fields" to upload the selected ID photo.');
-  if (!optionalPhonesValid)
-    submitBlockers.push('Correct the recommender contact or landline number.');
-  if (Object.values(invalidFields).some(Boolean))
-    submitBlockers.push('Correct the highlighted fields.');
+  // One derived list, rendered next to the button: every condition that blocks
+  // the single save-and-submit action. Transient states (a mutation in flight)
+  // are deliberately NOT blockers - they are not something to fix.
+  const blockers: string[] = [];
+  if (!planId) blockers.push('Select a VIP plan.');
+  if (!consent) blockers.push('Certification and consent must be ticked.');
+  // A picked file uploads on Save, so it satisfies the gate.
+  if (!serverCurrentDocument?.reviewedFields?.idType && !idFile)
+    blockers.push('Upload a valid ID and choose its ID type.');
+  if (idFile && !idType) blockers.push('Choose ID type first.');
+  if (idFile && !customerId && id) blockers.push('Select a customer first.');
+  if (!optionalPhonesValid) blockers.push('Correct the recommender contact or landline number.');
+  if (Object.values(invalidFields).some(Boolean)) blockers.push('Correct the highlighted fields.');
   useEffect(() => {
     const app = existing.data;
     if (!app) return;
@@ -726,11 +689,13 @@ export function CustomerApplicationEditorPage() {
       setPrimary(app.primary);
       setSecondary(app.secondary ?? null);
       setMeta({
-        salesManagerName: app.salesManagerName ?? '',
+        svdStaffId: app.svdStaffId ?? '',
+        ssmStaffId: app.ssmStaffId ?? '',
+        smStaffId: app.smStaffId ?? '',
+        referrerStaffId: app.referrerStaffId ?? '',
         vipRecommenderName: app.vipRecommenderName ?? '',
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
-        vipReferrer: app.vipReferrer ?? '',
         acknowledgedAt: app.acknowledgedAt,
       });
       setChannels(app.acquisitionChannels);
@@ -758,13 +723,21 @@ export function CustomerApplicationEditorPage() {
     validIdReceived: validId,
     reservationPaymentProofReceived: paymentProof,
   });
-  const save = useBusinessMutation({
+  // ONE action: save and submit. There is no draft-only save - a new
+  // application is created (or an existing draft updated) and then immediately
+  // submitted with the server's own purchase-terms hash, so a lost response
+  // retries the transition instead of editing a submitted record.
+  const saveAndSubmit = useBusinessMutation({
     mutationFn: () =>
       runSave(async () => {
-        if (!planId) {
-          document.querySelector<HTMLInputElement>('input[aria-label="Customer"]')?.focus();
-          throw new Error('Select a VIP plan before saving the registration application.');
-        }
+        if (!planId) throw new Error('Select a VIP plan before saving the application.');
+        const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
+        if (!checkedForSubmit.success)
+          throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
+        if (!checkedForSubmit.data.consentAcknowledged)
+          throw new Error('Certification and consent are required.');
+
+        let appId: string;
         if (!id && !customerId) {
           const registration = registerCustomerApplicationSchema.safeParse({
             ...payload(),
@@ -772,117 +745,81 @@ export function CustomerApplicationEditorPage() {
           });
           if (!registration.success)
             throw new Error(humanizeApplicationIssues(registration.error.issues));
-          return registerCustomerApplication({
+          const created = await registerCustomerApplication({
             ...registration.data,
             requestId: applicationRequest.forPayload(registration.data),
           });
-        }
-        const checked = createCustomerApplicationSchema.safeParse(payload());
-        if (!checked.success) {
-          document
-            .querySelector<HTMLInputElement>(
-              '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
-            )
-            ?.focus();
-          throw new Error(humanizeApplicationIssues(checked.error.issues));
-        }
-        return id
-          ? updateCustomerApplication(id, checked.data)
-          : createCustomerApplication({
-              ...checked.data,
-              requestId: applicationRequest.forPayload(checked.data),
+          appId = created.id;
+          // New customer now exists: upload the picked ID on Save.
+          if (idFile) {
+            if (!idType) throw new Error('Choose ID type first.');
+            await uploadPendingId(created.customerId, idFile, idType);
+            setIdFile(null);
+            setPickerVersion((version) => version + 1);
+            setValidId(true);
+            setCustomerId(created.customerId);
+            await currentDocument.refetch();
+          }
+        } else if (id) {
+          const latest = await getCustomerApplication(id);
+          if (latest.status === 'submitted') {
+            // A lost Submit response must retry the transition, not edit a
+            // submitted record.
+            const offer = await getPurchaseTermsProposal(id);
+            return submitCustomerApplication(id, {
+              requestId: applicationRequest.forPayload({
+                applicationId: id,
+                expectedProposalHash: offer.expectedProposalHash,
+              }),
+              expectedProposalHash: offer.expectedProposalHash,
             });
+          }
+          // Upload the picked ID on Save before updating the draft.
+          if (idFile) {
+            await uploadPendingId(customerId || latest.customerId, idFile, idType);
+            setIdFile(null);
+            setPickerVersion((version) => version + 1);
+            setValidId(true);
+            await currentDocument.refetch();
+          }
+          await updateCustomerApplication(id, checkedForSubmit.data);
+          appId = id;
+        } else {
+          // Upload the picked ID on Save before creating the application.
+          if (idFile) {
+            await uploadPendingId(customerId, idFile, idType);
+            setIdFile(null);
+            setPickerVersion((version) => version + 1);
+            setValidId(true);
+            await currentDocument.refetch();
+          }
+          const created = await createCustomerApplication({
+            ...checkedForSubmit.data,
+            requestId: applicationRequest.forPayload(checkedForSubmit.data),
+          });
+          appId = created.id;
+        }
+
+        // The hash is fetched fresh so it is always the offer the server holds
+        // at this instant. A stale offer is refused server-side.
+        const offer = await getPurchaseTermsProposal(appId);
+        return submitCustomerApplication(appId, {
+          requestId: applicationRequest.forPayload({
+            applicationId: appId,
+            expectedProposalHash: offer.expectedProposalHash,
+          }),
+          expectedProposalHash: offer.expectedProposalHash,
+        });
       }),
     onSuccess: (app) => {
-      notifySuccess({ title: 'Success', message: 'Application saved as draft.' });
-      applicationRequest.complete();
-      void client.invalidateQueries({ queryKey: applicationKeys.scope });
-      if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
-    },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
-  });
-  const submit = useBusinessMutation({
-    mutationFn: async () => {
-      const checked = createCustomerApplicationSchema.safeParse(payload());
-      if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
-      if (!checked.data.consentAcknowledged)
-        throw new Error('Certification and consent are required.');
-      // A lost Submit response must retry the transition, not edit a submitted record.
-      const latest = await getCustomerApplication(id!);
-      // The hash is fetched with the submit so it is always the offer the server
-      // holds at this instant. A stale displayed offer is refused by the server.
-      const offer = proposal.data;
-      if (!offer) throw new Error('Load the purchase terms offer before confirming.');
-      const confirmation = {
-        requestId: applicationRequest.forPayload({
-          applicationId: id,
-          expectedProposalHash: offer.expectedProposalHash,
-        }),
-        expectedProposalHash: offer.expectedProposalHash,
-      };
-      if (latest.status === 'submitted') return submitCustomerApplication(id!, confirmation);
-      await updateCustomerApplication(id!, checked.data);
-      return submitCustomerApplication(id!, confirmation);
-    },
-    onSuccess: () => {
       notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
     },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Submit failed.'),
-  });
-  const ocr = useBusinessMutation({
-    mutationFn: async () => {
-      const documentId = ocrFile
-        ? (await uploadId.mutateAsync()).documentId
-        : serverCurrentDocument?.id;
-      if (!documentId) throw new Error('Select an ID file first.');
-      const doc = await runDocumentOcr(documentId);
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-      return doc;
-    },
-    onSuccess: (doc) => {
-      const fields = doc.extractedFields;
-      const confident = (key: string) => {
-        const field = fields[key];
-        return field && field.confidence !== null && field.confidence >= 0.8 ? field.value : null;
-      };
-      setPrimary((current) => ({
-        ...current,
-        firstName: current.firstName || confident('firstName') || '',
-        middleName: current.middleName || confident('middleName') || undefined,
-        lastName: current.lastName || confident('lastName') || '',
-        birthDate: current.birthDate || confident('dateOfBirth') || '',
-        permanentAddressLine1: current.permanentAddressLine1 || confident('address') || '',
-      }));
-      const suggestedType = governmentIdTypeSchema.safeParse(confident('idType'));
-      if (suggestedType.success) setIdType((current) => current || suggestedType.data);
-      setMessage(
-        doc.ocrStatus === 'completed'
-          ? 'OCR completed: review and correct suggestions before saving.'
-          : 'OCR failed: enter details manually. Your private upload is retained.',
-      );
-    },
-    onError: (e) =>
-      setMessage(e instanceof Error ? e.message : 'OCR failed; continue with manual entry.'),
-  });
-  const confirmIdType = useBusinessMutation({
-    mutationFn: async () => {
-      if (!serverCurrentDocument) throw new Error('Upload and verify an ID first.');
-      const document = await confirmDocument(serverCurrentDocument.id, {
-        decision: 'confirmed',
-        // Only the ID type is recorded here. Identity-document numbers stay
-        // write-only and are never sent from this screen.
-        fields: { idType: governmentIdTypeSchema.parse(idType) },
-      });
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-      return document;
-    },
-    onSuccess: () =>
-      setMessage('ID type recorded on the identity document. The application can be submitted.'),
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Could not record the ID type.'),
+    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save and submit failed.'),
   });
   // One stable request identity per logical action, so a timeout-after-commit
   // retry replays the original decision instead of attempting a second one.
@@ -961,6 +898,20 @@ export function CustomerApplicationEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = linkedCustomer.data ?? null;
+  // Snapshot names for chain selections the genealogy list no longer contains
+  // (a departure, or a chain outside the viewer's own scope). The dropdowns
+  // stay legible; the server still refuses an ineligible id at write time.
+  const chainNames: Record<string, string> = {};
+  {
+    const app = existing.data;
+    const pairs: [string | undefined, string | undefined][] = [
+      [app?.svdStaffId, app?.svdName],
+      [app?.ssmStaffId, app?.ssmName],
+      [app?.smStaffId, app?.salesManagerName],
+      [app?.referrerStaffId, app?.vipReferrer],
+    ];
+    for (const [staffId, name] of pairs) if (staffId && name) chainNames[staffId] = name;
+  }
   if (id && existing.isPending) {
     return (
       <section>
@@ -1004,25 +955,37 @@ export function CustomerApplicationEditorPage() {
       </section>
     );
   }
-  // The primary action lives in the header and the sticky footer alike, so a
-  // long form never buries it. One element, rendered twice. Blocking matches
-  // the submit pattern: disabled with a visible inline list, never silent.
+  // The ONE primary action lives in the header and the sticky footer alike, so
+  // a long form never buries it. One element, rendered twice. Blocking stays
+  // visible: disabled with an inline list of what to fix, never silent.
   const saveAction = (
     <Button
-      onClick={() => save.mutate()}
-      disabled={!editable || uploadId.isPending || ocr.isPending || saveBlockers.length > 0}
-      loading={save.isPending}
-      loadingLabel="Saving…"
+      onClick={() => saveAndSubmit.mutate()}
+      disabled={!editable || saveAndSubmit.isPending || blockers.length > 0}
+      loading={saveAndSubmit.isPending}
+      loadingLabel="Saving and submitting…"
     >
-      Save draft
+      Save &amp; Submit
     </Button>
   );
+  const steps = [
+    { id: 'step-application', label: 'Application', done: Boolean(planId && customerId) },
+    {
+      id: 'step-identity',
+      label: 'Identity',
+      done: Boolean(serverCurrentDocument?.reviewedFields?.idType || idFile),
+    },
+    { id: 'step-primary', label: 'Primary', done: Boolean(primary.firstName && primary.lastName) },
+    { id: 'step-recommender', label: 'Recommender', done: Boolean(meta.acknowledgedAt) },
+    { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
+    { id: 'step-cert', label: 'Certify', done: consent },
+  ];
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section className={styles.editorSection}>
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
-          description="Manual entry, file upload, or scan."
+          description="Manual entry or ID capture."
           actions={
             <>
               {saveAction}
@@ -1033,8 +996,22 @@ export function CustomerApplicationEditorPage() {
           }
         />
         <Alert variant="info" title="How this form works">
-          Save a draft first; submit later.
+          Saves and submits in one step.
         </Alert>
+        <nav aria-label="Application steps" className={styles.stepper}>
+          <ol className={styles.stepperList}>
+            {steps.map((step, index) => (
+              <li key={step.id} className={styles.stepperItem} data-done={step.done}>
+                <a href={`#${step.id}`} className={styles.stepperLink}>
+                  <span className={styles.stepperIndex} aria-hidden="true">
+                    {step.done ? '✓' : index + 1}
+                  </span>
+                  <span className={styles.stepperLabel}>{step.label}</span>
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1049,9 +1026,10 @@ export function CustomerApplicationEditorPage() {
           <section aria-label="Linked company record">
             <h2>Linked company record — read-only</h2>
             <p>
-              Combined customer record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}).
-              Edit it on the customer detail page; application holders below stay separate
-              transaction facts. Stated figures never affect the purchase offer above.
+              Combined customer record for {relatedCustomer.fullName} (
+              {relatedCustomer.customerNumber}). Edit it on the customer detail page; application
+              holders below stay separate transaction facts. Stated figures never affect the
+              purchase offer above.
             </p>
             <dl className="form-grid">
               <dt>RA NO</dt>
@@ -1064,7 +1042,12 @@ export function CustomerApplicationEditorPage() {
               <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
               <dt>RELATED</dt>
               <dd>
-                {[relatedCustomer.ostIstName, relatedCustomer.svdName, relatedCustomer.ssmName, relatedCustomer.smName]
+                {[
+                  relatedCustomer.ostIstName,
+                  relatedCustomer.svdName,
+                  relatedCustomer.ssmName,
+                  relatedCustomer.smName,
+                ]
                   .filter(Boolean)
                   .join(' · ') || '—'}
               </dd>
@@ -1131,28 +1114,38 @@ export function CustomerApplicationEditorPage() {
           </section>
         ) : null}
         {selectedPlan ? (
-          <DetailCard>
-            <DetailCardTitle>Official {selectedPlan.code} plan benefits</DetailCardTitle>
-            <DetailFieldGrid>
-              <DetailField label="Discount">{selectedPlan.discountPercent}%</DetailField>
+          <DetailCard
+            className={`${styles.planBenefits} ${styles[`plan${selectedPlan.code}`] ?? ''}`}
+          >
+            <div className={styles.planBenefitsHead}>
+              <div>
+                <p className={styles.planEyebrow}>Official plan benefits</p>
+                <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
+              </div>
+              <TierBadge tier={selectedPlan.code} />
+            </div>
+            <DetailFieldGrid className={styles.planGrid}>
+              <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
               <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
               <DetailField label="Yearly points">
                 {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
               </DetailField>
               <DetailField label="Validity">
-                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} years
+                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
               </DetailField>
               <DetailField label="Total value">
                 {formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}
               </DetailField>
             </DetailFieldGrid>
-            <p className={styles.hint}>
-              Snapshots freeze at submit; later plan edits never rewrite this application.
-            </p>
+            <p className={styles.hint}>Frozen at submit. Later edits change nothing.</p>
           </DetailCard>
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
-          <section className={styles.panel} aria-labelledby="application-panel-heading">
+          <section
+            id="step-application"
+            className={styles.panel}
+            aria-labelledby="application-panel-heading"
+          >
             <h2 id="application-panel-heading" className={styles.panelTitle}>
               1. Application
             </h2>
@@ -1164,10 +1157,10 @@ export function CustomerApplicationEditorPage() {
                   <Select
                     aria-label="Customer"
                     value={customerId}
-                    disabled={uploadId.isPending || ocr.isPending}
+                    disabled={saveAndSubmit.isPending}
                     onChange={(e) => pickCustomer(e.target.value)}
                     options={[
-                      { value: '', label: 'New customer: register with this application' },
+                      { value: '', label: 'New Register' },
                       ...(customerOptions.data?.data.map((c) => ({
                         value: c.id,
                         label: c.fullName,
@@ -1226,11 +1219,15 @@ export function CustomerApplicationEditorPage() {
               </label>
             </div>
           </section>
-          <section className={styles.panel} aria-labelledby="identity-panel-heading">
+          <section
+            id="step-identity"
+            className={styles.panel}
+            aria-labelledby="identity-panel-heading"
+          >
             <h2 id="identity-panel-heading" className={styles.panelTitle}>
               2. Identity
             </h2>
-            <p className={styles.hint}>Capture ID, detect fields, record type.</p>
+            <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
             <fieldset className={styles.subGroup}>
               <legend className={styles.subGroupTitle}>Valid ID</legend>
               <p>
@@ -1245,32 +1242,41 @@ export function CustomerApplicationEditorPage() {
                   <p>
                     ID type:{' '}
                     {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                      'Missing: review the identity document'}
+                      'Missing: choose the type and upload again'}
                   </p>
                 </>
               ) : null}
-              {ocrFile ? (
-                <div role="status">
-                  <p>Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).</p>
-                  {ocrPreviewUrl ? (
-                    <p>
+              {idFile ? (
+                <div role="status" className={styles.idReady}>
+                  {idPreviewUrl ? (
+                    <button
+                      type="button"
+                      className={styles.thumbnailButton}
+                      onClick={() => setPreviewOpen(true)}
+                      aria-label="Open full ID preview"
+                    >
                       <img
-                        src={ocrPreviewUrl}
-                        alt={`Selected ID preview: ${ocrFile.name}`}
+                        src={idPreviewUrl}
+                        alt="ID preview thumbnail"
                         className={styles.thumbnail}
                       />
-                    </p>
-                  ) : null}
-                  <Button
-                    variant="secondary"
-                    disabled={uploadId.isPending || ocr.isPending}
-                    onClick={() => {
-                      setOcrFile(null);
-                      setPickerVersion((version) => version + 1);
-                    }}
-                  >
-                    Cancel replacement
-                  </Button>
+                    </button>
+                  ) : (
+                    <p className={styles.hint}>Ready to upload on save.</p>
+                  )}
+                  <div className={styles.idReadyActions}>
+                    <span className={styles.hint}>Ready to upload on save.</span>
+                    <Button
+                      variant="secondary"
+                      disabled={saveAndSubmit.isPending}
+                      onClick={() => {
+                        setIdFile(null);
+                        setPickerVersion((version) => version + 1);
+                      }}
+                    >
+                      Cancel selection
+                    </Button>
+                  </div>
                 </div>
               ) : null}
               <label className={styles.filterLabel}>
@@ -1278,7 +1284,7 @@ export function CustomerApplicationEditorPage() {
                 <Select
                   aria-label="ID Type"
                   value={idType}
-                  disabled={uploadId.isPending || ocr.isPending}
+                  disabled={saveAndSubmit.isPending}
                   onChange={(event) => setIdType(event.target.value)}
                   options={[
                     { value: '', label: 'Select ID type' },
@@ -1292,153 +1298,27 @@ export function CustomerApplicationEditorPage() {
                 />
               </label>
               <IdCapturePicker
-                onFile={setOcrFile}
-                disabled={uploadId.isPending || ocr.isPending}
+                onFile={setIdFile}
+                disabled={saveAndSubmit.isPending}
                 resetVersion={pickerVersion}
               />
-              {ocrFile ? (
-                <p role="status">
-                  Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
-                  the OCR suggestions.
-                </p>
-              ) : null}
-              <Button
-                onClick={() => ocr.mutate()}
-                disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
-                loading={ocr.isPending || uploadId.isPending}
-                loadingLabel="Processing…"
+              <Dialog
+                open={previewOpen && Boolean(idPreviewUrl)}
+                onClose={() => setPreviewOpen(false)}
+                title="ID preview"
               >
-                Detect fields
-              </Button>
-              {/* Submit requires an ID type recorded on the identity document, and
-                that field is only ever written by the document-confirm endpoint.
-                Without this the requirement is unreachable from this screen and
-                Submit stays disabled after a successful upload, so the reviewer
-                records the ID type here through the same secure document
-                pipeline. The gate itself is unchanged. */}
-              {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
-                <p role="status">
-                  Submit needs the ID type recorded against this identity document.{' '}
-                  <Button
-                    variant="secondary"
-                    disabled={!idType || uploadId.isPending}
-                    loading={confirmIdType.isPending}
-                    loadingLabel="Recording…"
-                    onClick={() => confirmIdType.mutate()}
-                  >
-                    Record ID type on this ID
-                  </Button>
-                </p>
-              ) : null}
-              {serverCurrentDocument ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => previewId.mutate(serverCurrentDocument.id)}
-                  >
-                    Preview uploaded ID
-                  </Button>
-                  <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
-                    Review identity document
-                  </Link>
-                </>
-              ) : null}
-              {serverCurrentDocument ? (
-                <div>
-                  <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
-                  {Object.entries(serverCurrentDocument.extractedFields).length ? (
-                    <>
-                      <p>
-                        Detected suggestions: verify against the ID and correct the form manually.
-                        ID numbers remain masked; use document review to confirm them.
-                      </p>
-                      <dl>
-                        {Object.entries(serverCurrentDocument.extractedFields).map(
-                          ([key, field]) => (
-                            <div key={key}>
-                              <dt>{key}</dt>
-                              <dd>
-                                {field.value ?? 'Not detected'}
-                                {field.confidence !== null
-                                  ? ` (${Math.round(field.confidence * 100)}% confidence)`
-                                  : ''}
-                              </dd>
-                            </div>
-                          ),
-                        )}
-                      </dl>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
-              {idPreview ? (
-                <>
-                  <button
-                    type="button"
-                    className={styles.thumbnailButton}
-                    onClick={() => setPreviewOpen(true)}
-                    aria-label="View identity document preview fullscreen"
-                  >
-                    <img
-                      src={idPreview}
-                      alt="Identity document preview thumbnail"
-                      className={styles.thumbnail}
-                    />
-                  </button>
-                  <Dialog
-                    open={previewOpen}
-                    onClose={() => setPreviewOpen(false)}
-                    title="Identity document preview"
-                    footer={
-                      <Button variant="secondary" onClick={() => setPreviewOpen(false)}>
-                        Close
-                      </Button>
-                    }
-                  >
-                    <img
-                      src={idPreview}
-                      alt="Identity document preview"
-                      className={styles.previewImage}
-                    />
-                  </Dialog>
-                </>
-              ) : null}
-              {documents.data
-                ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
-                .map((doc) => (
-                  <p key={doc.id}>
-                    Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
-                    <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
-                      Preview
-                    </Button>
-                  </p>
-                ))}
-              {documents.data
-                ?.filter((doc) => !doc.hasFile)
-                .map((doc) => (
-                  <p key={doc.id}>
-                    Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
-                      onClick={() => uploadId.mutate(doc.id)}
-                    >
-                      Verify saved upload
-                    </Button>
-                  </p>
-                ))}
+                {idPreviewUrl ? (
+                  <img src={idPreviewUrl} alt="Full ID preview" className={styles.previewImage} />
+                ) : null}
+              </Dialog>
               {currentDocument.isError ? (
-                <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
-              ) : null}
-              {documents.isError ? (
-                <p role="status">
-                  Existing ID documents could not be loaded. Document permissions still apply.
-                </p>
+                <p role="status">Current ID could not be loaded. Retry before saving.</p>
               ) : null}
             </fieldset>
           </section>
-          <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+          <div id="step-primary">
+            <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+          </div>
           <label className={styles.checkRow}>
             <input
               type="checkbox"
@@ -1455,16 +1335,19 @@ export function CustomerApplicationEditorPage() {
               onChange={setSecondary}
             />
           ) : null}
-          <fieldset className={styles.panel}>
+          <fieldset id="step-recommender" className={styles.panel}>
             <legend className={styles.panelTitle}>5. Recommender details</legend>
+            <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
             <div className={styles.editorGrid}>
               <RecommenderFields
                 meta={meta}
-                onChange={(key, value) => setMeta({ ...meta, [key]: value })}
+                chainNames={chainNames}
+                onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
+                onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
               />
             </div>
           </fieldset>
-          <fieldset className={styles.panel}>
+          <fieldset id="step-channel" className={styles.panel}>
             <legend className={styles.panelTitle}>6. Acquisition channel</legend>
             {[
               'CMP',
@@ -1491,7 +1374,7 @@ export function CustomerApplicationEditorPage() {
               </label>
             ))}
           </fieldset>
-          <fieldset className={styles.panel}>
+          <fieldset id="step-cert" className={styles.panel}>
             <legend className={styles.panelTitle}>7. Certification</legend>
             <label className={styles.checkRow}>
               <input
@@ -1511,10 +1394,10 @@ export function CustomerApplicationEditorPage() {
             </label>
           </fieldset>
         </fieldset>
-        {saveBlockers.length > 0 ? (
-          <Alert variant="warning" title="Cannot save yet:">
+        {blockers.length > 0 ? (
+          <Alert variant="warning" title="Cannot save and submit yet:">
             <ul>
-              {saveBlockers.map((blocker) => (
+              {blockers.map((blocker) => (
                 <li key={blocker}>{blocker}</li>
               ))}
             </ul>
@@ -1524,29 +1407,7 @@ export function CustomerApplicationEditorPage() {
           <div className={styles.stickyFooterActions}>{saveAction}</div>
         </div>
         <p>
-          {id && editable ? (
-            <>
-              {submitBlockers.length > 0 ? (
-                <Alert variant="warning" title="Cannot submit yet:">
-                  <ul>
-                    {submitBlockers.map((blocker) => (
-                      <li key={blocker}>{blocker}</li>
-                    ))}
-                  </ul>
-                </Alert>
-              ) : null}{' '}
-              <Button
-                onClick={() => submit.mutate()}
-                disabled={
-                  submitBlockers.length > 0 || save.isPending || uploadId.isPending || ocr.isPending
-                }
-                loading={submit.isPending}
-                loadingLabel="Submitting…"
-              >
-                Submit
-              </Button>
-            </>
-          ) : null}{' '}
+          {' '}
           {id && existing.data?.status === 'submitted' ? (
             <>
               <Button

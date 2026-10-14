@@ -17,9 +17,11 @@ import {
   customerExportXlsx,
   fetchGoogleSheetCsv,
   isCompanyMembershipTemplate,
+  isLegacyCompanyMembershipTemplate,
+  looksLikeSectionBandRow,
   matrixToRecords,
   membershipTemplateCsv,
-  membershipTemplateXlsx,
+  membershipTemplateSectionedXlsx,
   mergeSectionedTemplateSheets,
   parseCsvMatrix,
   parseXlsxMatrix,
@@ -29,7 +31,10 @@ import {
   type ImportContext,
   type ValidatedImportRow,
 } from '../_lib/customer-import.js';
-import { COMPANY_IMPORT_EXTRA_COLUMNS } from '@afhomes/contracts';
+import {
+  COMPANY_IMPORT_EXTRA_COLUMNS,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+} from '@afhomes/contracts';
 import {
   audit,
   deny,
@@ -224,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res,
         'membership-template.xlsx',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        membershipTemplateXlsx(),
+        membershipTemplateSectionedXlsx(),
       );
     }
     if (method(req) === 'GET' && path === 'template/csv') {
@@ -265,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return fail(res, 'VALIDATION_ERROR', 'File is empty or exceeds the size limit', 400);
           if (source === 'excel') {
             // Sectioned membership workbooks (README + 4 entry tabs) merge
-            // back into the canonical 45 columns by row order; every other
+            // back into the canonical 44 columns by row order; every other
             // workbook keeps the single-worksheet behavior. A multi-sheet
             // file that is not the sectioned template stays rejected rather
             // than silently reading the wrong tab.
@@ -288,6 +293,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } else {
             matrix = parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+            // The CSV download carries a section band row above the 44
+            // headers so the columns read as groups; strip it here so a
+            // saved-and-refilled template parses exactly like the plain
+            // 44-column company file. A file without the band row (deleted,
+            // or an older template) is unchanged.
+            if (looksLikeSectionBandRow(matrix[0] ?? [])) matrix = matrix.slice(1);
           }
         }
       } catch (error) {
@@ -300,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       let records: { rowNumber: number; fields: Record<string, string> }[];
       let unknownHeaders: string[];
-      // Company membership template (45 exact columns) is remapped by POSITION
+      // Company membership template (44 exact columns) is remapped by POSITION
       // onto import columns; anything else keeps the established name-based
       // behavior. Dropped company headers are reported by exact name below.
       let droppedCompanyHeaders: { index: number; header: string }[] = [];
@@ -308,6 +319,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         if (isCompanyMembershipTemplate(matrix[0] ?? [])) {
           const remapped = remapCompanyTemplateMatrix(matrix);
+          matrix = remapped.matrix;
+          droppedCompanyHeaders = remapped.dropped;
+          companyTemplate = true;
+        } else if (isLegacyCompanyMembershipTemplate(matrix[0] ?? [])) {
+          // Superseded 45-column download (OST/IST NAME still at position
+          // 28): remap through the legacy positions so its values still land
+          // on the existing customer-record pipeline instead of failing as
+          // 45 unknown headers. Fresh downloads no longer carry the column.
+          const remapped = remapCompanyTemplateMatrix(
+            matrix,
+            LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+          );
           matrix = remapped.matrix;
           droppedCompanyHeaders = remapped.dropped;
           companyTemplate = true;

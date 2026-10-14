@@ -211,7 +211,7 @@ export function CustomerDetailPage() {
       ],
     },
     {
-      // Company-stated primary-member facts (45-column template §1). STATUS
+      // Company-stated primary-member facts (44-column template §1). STATUS
       // here is the verbatim company value; lifecycle state stays under
       // Customer above. TIN is masked like the government ID.
       title: 'Primary Member',
