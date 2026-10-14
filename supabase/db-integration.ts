@@ -1943,13 +1943,20 @@ async function main(): Promise<void> {
     );
     for (const fn of definer.rows) {
       const config = (fn.proconfig ?? []).join(',');
+      // Accepted paths never include an attacker-writable schema. The exact
+      // `pg_catalog,pg_temp` lockdown is narrower than the public forms: every
+      // app reference in such a body must be schema-qualified, and a missing
+      // schema fails loudly in the functional sections, never silently here.
       check(
         `  ${fn.proname} pins search_path`,
         /search_path\s*=\s*public/.test(config) ||
+          /search_path\s*=\s*pg_catalog,\s*pg_temp/.test(config) ||
           /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(
             config,
           ) ||
-          /search_path\s*=\s*pg_catalog,\s*public,\s*(private,\s*)?pg_temp/.test(config),
+          /search_path\s*=\s*pg_catalog,\s*public,\s*(extensions,\s*)?(private,\s*)?pg_temp/.test(
+            config,
+          ),
         config,
       );
     }
