@@ -70,3 +70,16 @@ export function formatDayLabel(iso: string, now: Date = new Date()): string {
   if (dayDiff === 1) return 'Yesterday';
   return formatDate(iso);
 }
+
+/**
+ * Turn a machine token into a readable label: `STAFF_ROLE_CHANGED` and
+ * `staffRoleChanged` both become `Staff role changed`. Presentation only -
+ * the caller keeps the raw token wherever it is still the identity.
+ */
+export function humanizeToken(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
+}

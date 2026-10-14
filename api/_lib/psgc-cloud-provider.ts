@@ -149,11 +149,15 @@ export const psgcCloudAddressProvider: AddressProvider = {
       // for, which is what makes the parent link explicit and checkable.
       const type = LOCALITY_TYPE_BY_PROVIDER[String(row.type)];
       if (!type) throw new AddressProviderError('PROVIDER_BAD_RESPONSE');
+      // `zip_code` is published for most localities and blank for some; a
+      // blank is "no published zip", never an empty code to store.
+      const postalCode = typeof row.zip_code === 'string' ? row.zip_code.trim() : '';
       return parseRow(localitySchema, {
         code: row.code,
         name: officialName(row.name),
         type,
         provinceCode,
+        ...(postalCode ? { postalCode } : {}),
       });
     });
   },

@@ -3,7 +3,8 @@ import { Outlet, useLocation } from 'react-router';
 import { AppShell, Breadcrumbs, ConfirmDialog, Icon, Skeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
-import { breadcrumbItems, navItemsForPermissions } from './navigation';
+import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions } from './navigation';
+import { AdminForbiddenPage } from './AdminForbiddenPage';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath } from '@afhomes/contracts';
 import { useProfilePhoto } from '../features/account/profile-photo';
@@ -11,7 +12,7 @@ import logo from '../assets/logo.png';
 
 export function AdminLayout() {
   const photo = useProfilePhoto();
-  const { user, logout } = useSession();
+  const { user, logout, sessionError, revalidate } = useSession();
   const location = useLocation();
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(
@@ -25,6 +26,15 @@ export function AdminLayout() {
   // AFHomes pattern: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
+  // Denied paths render standalone: no sidebar, no topbar, professional card.
+  // RequireRole still guards the route; this only removes the shell chrome.
+  const denied =
+    user &&
+    !gated &&
+    !canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname));
+  if (denied) {
+    return <AdminForbiddenPage retry={sessionError ? () => void revalidate() : undefined} />;
+  }
   return (
     <>
       <AppShell
@@ -40,7 +50,7 @@ export function AdminLayout() {
         navItems={
           gated
             ? []
-            : navItemsForPermissions(user?.afHomesPermissions, user?.roleSlug).map((item) => ({
+            : navItemsForPermissions(user?.afHomesPermissions).map((item) => ({
                 ...item,
                 to: staffPortalPath(user?.roleSlug, item.to),
                 dropdown: item.dropdown?.map((child) =>

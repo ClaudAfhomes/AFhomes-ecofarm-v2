@@ -320,16 +320,20 @@ export const CUSTOMER_EXPORT_COLUMNS = [
 export type CustomerExportRow = Record<(typeof CUSTOMER_EXPORT_COLUMNS)[number], string>;
 
 /* ------------------------------------------------------------------ */
-/* Company membership template (45 columns, exact order and wording)   */
+/* Company membership template (44 columns, exact order and wording)    */
 /* ------------------------------------------------------------------ */
 
 /**
  * The company-provided membership template headers, verbatim. Capitalization,
  * spacing and punctuation are the source of truth - do not normalize them
  * here. Note the intentional duplicates: ADDRESS appears at positions 3 and
- * 16, EMAIL ADDRESS at 11 and 35, and several demographic headers repeat
+ * 16, EMAIL ADDRESS at 11 and 34, and several demographic headers repeat
  * across the primary/supplementary blocks. Header-name matching therefore
  * cannot disambiguate them - see MEMBERSHIP_TEMPLATE_POSITION_MAP.
+ *
+ * OST/IST NAME used to sit at position 28 and was removed from the download;
+ * see LEGACY_MEMBERSHIP_TEMPLATE_* below for reading files filled from an
+ * older download.
  */
 export const MEMBERSHIP_TEMPLATE_COLUMNS = [
   'RA NO',
@@ -360,7 +364,6 @@ export const MEMBERSHIP_TEMPLATE_COLUMNS = [
   'OCCUPATION / BUSINESS NAME',
   'OFFICE / BUSINESS ADDRESS',
   'EMPLOYED POSITION',
-  'OST/IST NAME',
   'SVD',
   'SSM',
   'SM',
@@ -420,7 +423,7 @@ export const COMPANY_IMPORT_EXTRA_COLUMNS = [
 ] as const;
 
 /**
- * Positional mapping from the 45-column company template onto customer-import
+ * Positional mapping from the 44-column company template onto customer-import
  * columns. An entry is the import column for that exact position, or null
  * when the company field has no established v2 target (unmapped positions are
  * reported as ignored warnings, never silently merged). Only fields whose
@@ -459,23 +462,46 @@ export const MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
   /* 25 OCCUPATION / BUSINESS NAME */ 'supplementary_occupation_business_name',
   /* 26 OFFICE / BUSINESS ADDRESS */ 'supplementary_office_address',
   /* 27 EMPLOYED POSITION */ 'supplementary_position',
-  /* 28 OST/IST NAME */ 'ost_ist_name',
-  /* 29 SVD */ 'svd_name',
-  /* 30 SSM */ 'ssm_name',
-  /* 31 SM */ 'sm_name',
-  /* 32 REFERRER */ 'referrer_name',
-  /* 33 VIP RECOMMENDER */ 'vip_recommender_name',
-  /* 34 CONTACT NO. */ 'related_contact_no',
-  /* 35 EMAIL ADDRESS (related persons) */ 'related_email',
-  /* 36 VIP PACKAGE */ 'vip_tier',
-  /* 37 PAYMENT TERMS */ 'payment_scheme',
-  /* 38 REGULAR PRICE */ 'stated_regular_price',
-  /* 39 DISCOUNT */ 'stated_discount',
-  /* 40 TOTAL AMOUNT */ 'stated_total_amount',
-  /* 41 RF */ 'stated_rf',
-  /* 42 PAYMENT TYPE */ 'payment_method',
-  /* 43 REF NO */ 'payment_reference',
-  /* 44 DATE */ 'payment_date',
+  /* 28 SVD */ 'svd_name',
+  /* 29 SSM */ 'ssm_name',
+  /* 30 SM */ 'sm_name',
+  /* 31 REFERRER */ 'referrer_name',
+  /* 32 VIP RECOMMENDER */ 'vip_recommender_name',
+  /* 33 CONTACT NO. */ 'related_contact_no',
+  /* 34 EMAIL ADDRESS (related persons) */ 'related_email',
+  /* 35 VIP PACKAGE */ 'vip_tier',
+  /* 36 PAYMENT TERMS */ 'payment_scheme',
+  /* 37 REGULAR PRICE */ 'stated_regular_price',
+  /* 38 DISCOUNT */ 'stated_discount',
+  /* 39 TOTAL AMOUNT */ 'stated_total_amount',
+  /* 40 RF */ 'stated_rf',
+  /* 41 PAYMENT TYPE */ 'payment_method',
+  /* 42 REF NO */ 'payment_reference',
+  /* 43 DATE */ 'payment_date',
+];
+
+/**
+ * The header text of the removed OST/IST NAME column, kept as the single
+ * source for recognizing files filled from a superseded 45-column download.
+ * Downloads no longer emit it; uploads still honor it (see
+ * LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN = 'OST/IST NAME';
+
+/** Position in the superseded 45-column layout where the removed column sat. */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX = 28;
+
+/**
+ * Positional mapping for the superseded 45-column layout: the current map
+ * with the preserved `ost_ist_name` target re-inserted at its old position.
+ * Legacy files keep importing fully (their OST/IST NAME values still land on
+ * the existing customer-record pipeline) instead of failing as 45 unknown
+ * headers; only fresh downloads stop carrying the column.
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+  'ost_ist_name',
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
 ];
 
 /* ------------------------------------------------------------------ */

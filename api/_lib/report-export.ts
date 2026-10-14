@@ -235,7 +235,7 @@ export function toXlsx(sheetName: string, columns: XlsxColumn[], rows: unknown[]
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
     `<fonts><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>` +
-    `<fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9E2F3"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9E2F3"/><bgColor indexed="64"/></patternFill></fill></fills>` +
     `<borders><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
     `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
     `<cellXfs count="4">` +
@@ -300,6 +300,17 @@ export type XlsxSheetSpec = {
   filter?: boolean;
   /** Wrap body text (README guidance). Defaults false (grid stays single-line). */
   wrapBody?: boolean;
+  /**
+   * Tab color (ARGB hex, e.g. `FFD9E2F3`) painted on the sheet's tab so a
+   * section is identifiable from the tab bar alone, without opening it.
+   */
+  tabColor?: string;
+  /**
+   * Prepared-entry mode: body rows get thin borders and alternating zebra
+   * fills, and explicit column widths are honored instead of being clamped
+   * to the (empty) content, so a header-only form still reads as a grid.
+   */
+  zebra?: boolean;
 };
 
 /**
@@ -343,19 +354,30 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
   const sheetXml = sheets.map((sheet, si) => {
     const columns = sheet.columns;
     const rows = sheet.rows;
+    const zebra = sheet.zebra === true;
     const widths = columns.map((col, i) => {
       const longest = Math.max(
         col.label.length,
         ...rows.map((row) => String((row as unknown[])[i] ?? '').length),
       );
-      return Math.min(48, Math.max(12, Math.min(col.width ?? 18, longest + 2)));
+      // A prepared (empty) grid has no content to fit, so an explicit width
+      // is the design; otherwise keep the best-fit clamp.
+      const fit = zebra ? (col.width ?? longest + 2) : Math.min(col.width ?? 18, longest + 2);
+      return Math.min(48, Math.max(12, fit));
     });
     const lastCol = colLetter(columns.length - 1);
     const headerStyle = String(toneIndex[sheet.headerTone ?? 'blue']);
     const bodyWrap = sheet.wrapBody === true ? ' s="8"' : '';
+    const tabColor =
+      sheet.tabColor && /^[0-9A-F]{6,8}$/i.test(sheet.tabColor)
+        ? sheet.tabColor.toUpperCase()
+        : null;
+    const sheetPr = tabColor ? `<sheetPr><tabColor rgb="${tabColor}"/></sheetPr>` : '';
     const cellRefs: string[] = [];
     for (let r = 0; r <= rows.length; r += 1) {
       const isHeader = r === 0;
+      // Zebra alternates per body row: even rows plain grid, odd rows tinted.
+      const gridStyle = zebra ? ((r - 1) % 2 === 0 ? 9 : 10) : null;
       const cells: string[] = [];
       for (let c = 0; c < columns.length; c += 1) {
         const ref = `${colLetter(c)}${r + 1}`;
@@ -368,7 +390,7 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
           continue;
         }
         if (raw === null || raw === undefined || raw === '') {
-          cells.push(`<c r="${ref}"/>`);
+          cells.push(gridStyle === null ? `<c r="${ref}"/>` : `<c r="${ref}" s="${gridStyle}"/>`);
           continue;
         }
         if (type === 'number' || type === 'money') {
@@ -394,10 +416,11 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
           continue;
         }
         cells.push(
-          `<c r="${ref}" t="inlineStr"${bodyWrap}><is><t>${xmlEscape(String(raw))}</t></is></c>`,
+          `<c r="${ref}" t="inlineStr"${gridStyle === null ? bodyWrap : ` s="${gridStyle}"`}><is><t>${xmlEscape(String(raw))}</t></is></c>`,
         );
       }
-      cellRefs.push(`<row r="${r + 1}">${cells.join('')}</row>`);
+      const rowAttrs = isHeader ? ' ht="26" customHeight="1"' : '';
+      cellRefs.push(`<row r="${r + 1}"${rowAttrs}>${cells.join('')}</row>`);
     }
     const filter =
       sheet.filter !== false
@@ -406,11 +429,18 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
     return (
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+      // sheetPr (tab color) is first in the worksheet XSD sequence.
+      `${sheetPr}` +
       `<dimension ref="A1:${lastCol}${rows.length + 1}"/>` +
       `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
       `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` +
+      // Schema order is load-bearing: sheetData MUST precede autoFilter.
+      // A filter before the data violates the worksheet XSD sequence, and
+      // strict Excel readers then drop the row content they were meant to
+      // annotate - headers vanish and only the tab names survive.
+      `<sheetData>${cellRefs.join('')}</sheetData>` +
       `${filter}` +
-      `<sheetData>${cellRefs.join('')}</sheetData></worksheet>`
+      `</worksheet>`
     );
   });
 
@@ -418,30 +448,38 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
     `<sheets>${safeNames.map((name, i) => `<sheet name="${xmlEscape(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`;
-  // Blue / green / amber / purple section fills + slate README fill. Header
-  // text stays dark on all five so contrast never depends on the tint.
+  // Saturated section fills (blue / green / amber / purple / slate) with
+  // white bold header text, so the column-name row reads as colored at a
+  // glance instead of a washed-out tint.
+  // Borders: 0 = none, 1 = thin gray; fills 0/1 are reserved, 2-6 are the
+  // header tones, 7 is the zebra band. cellXfs 1-5 are the bordered header
+  // tones, 6/7 money/date, 8 the wrapped README body, and 9/10 the prepared
+  // entry grid (plain / zebra).
   const styles =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
-    `<fonts><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>` +
+    `<fonts><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts>` +
     `<fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FFD9E2F3"/><bgColor indexed="64"/></patternFill></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/><bgColor indexed="64"/></patternFill></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FFE4DFEC"/><bgColor indexed="64"/></patternFill></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill></fills>` +
-    `<borders><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FF4472C4"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FF548235"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFBF8F00"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FF7030A0"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FF595959"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+    `<borders><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD9D9D9"/></left><right style="thin"><color rgb="FFD9D9D9"/></right><top style="thin"><color rgb="FFD9D9D9"/></top><bottom style="thin"><color rgb="FFD9D9D9"/></bottom><diagonal/></border></borders>` +
     `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-    `<cellXfs count="9">` +
+    `<cellXfs count="11">` +
     `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    `<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    `<xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    `<xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    `<xf numFmtId="0" fontId="2" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
     `<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
     `<xf numFmtId="22" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
     `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>` +
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>` +
+    `<xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>` +
     `</cellXfs></styleSheet>`;
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +

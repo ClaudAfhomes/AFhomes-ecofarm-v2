@@ -11,6 +11,10 @@
 export {
   afHomesActionSchema,
   afHomesModuleKeySchema,
+  MODULE_CATALOG,
+  MODULE_LABELS,
+  moduleLabel,
+  groupedModuleCatalog,
   afHomesPermissionSchema,
   afHomesRestrictionSchema,
   afHomesRoleSchema,
@@ -30,6 +34,7 @@ export {
 export type {
   AfHomesAction,
   AfHomesModuleKey,
+  AfHomesModuleDescriptor,
   AfHomesPermission,
   AfHomesRole,
   AfHomesDepartment,
@@ -89,6 +94,7 @@ export {
   normalizeEmail,
   normalizeMoneyString,
   isPlausibleBirthDate,
+  toTitleCase,
 } from './schemas/input.js';
 
 export { listResponseSchema } from './schemas/collection.js';
@@ -381,6 +387,9 @@ export {
   CUSTOMER_EXPORT_COLUMNS,
   MEMBERSHIP_TEMPLATE_COLUMNS,
   MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
   COMPANY_IMPORT_EXTRA_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
   importSourceSchema,
@@ -424,6 +433,16 @@ export {
   signatureStatusSchema,
   acquisitionChannelSchema,
   applicationHolderSchema,
+  storedApplicationHolderSchema,
+  SUFFIX_OPTIONS,
+  SEX_OPTIONS,
+  CITIZENSHIP_OPTIONS,
+  CIVIL_STATUS_OPTIONS,
+  suffixOptionSchema,
+  sexOptionSchema,
+  citizenshipOptionSchema,
+  civilStatusOptionSchema,
+  tinNumberSchema,
   reservationHolderSchema,
   createCustomerApplicationSchema,
   customerApplicationSchema,

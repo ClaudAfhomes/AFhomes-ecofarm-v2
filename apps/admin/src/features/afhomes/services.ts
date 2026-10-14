@@ -65,6 +65,9 @@ export const getAfHomesStaffAudit = (id: string) =>
   requestList(`/admin/afhomes/staff/${id}/audit`, auditEventSchema);
 export const getAfHomesRoleById = (id: string): Promise<AfHomesRole> =>
   request(`/admin/afhomes/roles/${id}`, afHomesRoleSchema);
+const roleDeletionSchema = z.object({ deleted: z.literal(true) });
+export const deleteAfHomesRole = (id: string) =>
+  request(`/admin/afhomes/roles/${id}`, roleDeletionSchema, { method: 'DELETE' });
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
   requestList('/admin/afhomes/staff', afHomesStaffSchema);
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
@@ -115,9 +118,18 @@ export function isTestStaffEmail(email: unknown): boolean {
   const parts = email.trim().toLowerCase().split('@');
   if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
   const host = parts[1]!;
-  if (host === 'localhost' || host === 'example.com' || host === 'example.net' || host === 'example.org')
+  if (
+    host === 'localhost' ||
+    host === 'example.com' ||
+    host === 'example.net' ||
+    host === 'example.org'
+  )
     return true;
-  if (host.endsWith('.example.com') || host.endsWith('.example.net') || host.endsWith('.example.org'))
+  if (
+    host.endsWith('.example.com') ||
+    host.endsWith('.example.net') ||
+    host.endsWith('.example.org')
+  )
     return true;
   return host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost');
 }

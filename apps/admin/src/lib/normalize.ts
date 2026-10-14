@@ -17,6 +17,7 @@ import {
   normalizePersonName,
   normalizePhilippinePhone,
   normalizePostalCode,
+  toTitleCase,
   type CreateCustomerApplicationRequest,
   type CreateCustomerRequest,
   type CreateReservationAgreementRequest,
@@ -28,6 +29,24 @@ const upperOpt = (value: string | undefined): string | undefined =>
 const upperAddress = (value: string): string => normalizeAddressField(value);
 const upperAddressOpt = (value: string | undefined): string | undefined =>
   value === undefined || value === '' ? value : upperAddress(value);
+
+/**
+ * Live title-casing for the application holder fields. `toTitleCase` trims and
+ * collapses for storage; this keeps the typed whitespace intact so a trailing
+ * space survives while the operator is still on the word.
+ */
+export const titleCaseLive = (value: string): string =>
+  value.replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+
+/** Live filter for name fields: drop anything a person name can never contain. */
+export const filterHolderNameInput = (value: string): string =>
+  titleCaseLive(value.replace(/[^\p{L}\p{M}'’.\- ]/gu, ''));
+
+/** Live title-casing for street lines (digits and punctuation stay). */
+export const filterHolderAddressInput = (value: string): string => titleCaseLive(value);
+
+/** Live filter for TIN input: digits and dashes only. */
+export const filterTinInput = (value: string): string => value.replace(/[^\d-]/g, '').slice(0, 15);
 
 // Live editing preserves whitespace and cursor positions; trimming belongs to
 // submission. Technical fields deliberately have no entry in this allowlist.
@@ -72,6 +91,8 @@ export function normalizeLiveHumanField(field: string, value: string): string {
     ].includes(field)
   )
     return value;
+  // Email always stays lowercase while typing: uppercase is never valid.
+  if (['email', 'recommenderEmail'].includes(field)) return value.toLowerCase();
   return LIVE_UPPERCASE_FIELDS.has(field) ? value.toUpperCase() : value;
 }
 
@@ -139,12 +160,16 @@ type ApplicationHolder =
 function normalizeApplicationHolder<T extends ApplicationHolder>(holder: T): T {
   return {
     ...holder,
-    lastName: upper(holder.lastName),
-    firstName: upper(holder.firstName),
-    middleName: upperOpt(holder.middleName),
+    // Names and street lines are stored Title Case so the saved form reads as
+    // words; the server re-applies the same rule on write.
+    lastName: toTitleCase(holder.lastName),
+    firstName: toTitleCase(holder.firstName),
+    middleName: holder.middleName ? toTitleCase(holder.middleName) : holder.middleName,
     suffix: upperOpt(holder.suffix),
-    permanentAddressLine1: upperAddress(holder.permanentAddressLine1),
-    permanentAddressLine2: upperAddressOpt(holder.permanentAddressLine2),
+    permanentAddressLine1: toTitleCase(holder.permanentAddressLine1),
+    permanentAddressLine2: holder.permanentAddressLine2
+      ? toTitleCase(holder.permanentAddressLine2)
+      : holder.permanentAddressLine2,
     officeBusinessAddress: upperAddressOpt(holder.officeBusinessAddress),
     /**
      * Official geographic names, chosen from the authority's list. Their casing is
@@ -160,7 +185,7 @@ function normalizeApplicationHolder<T extends ApplicationHolder>(holder: T): T {
     email: normalizeEmail(holder.email) ?? holder.email,
     occupationBusinessName: upperAddressOpt(holder.occupationBusinessName),
     employedPosition: upperAddressOpt(holder.employedPosition),
-    printedName: upper(holder.printedName),
+    printedName: toTitleCase(holder.printedName),
   };
 }
 
@@ -172,6 +197,8 @@ export function normalizeCustomerApplicationRequest<T extends CreateCustomerAppl
     primary: normalizeApplicationHolder(input.primary),
     secondary: input.secondary ? normalizeApplicationHolder(input.secondary) : input.secondary,
     salesManagerName: upperOpt(input.salesManagerName),
+    svdName: input.svdName ? toTitleCase(input.svdName) : input.svdName,
+    ssmName: input.ssmName ? toTitleCase(input.ssmName) : input.ssmName,
     vipRecommenderName: upperOpt(input.vipRecommenderName),
     vipReferrer: upperOpt(input.vipReferrer),
   };

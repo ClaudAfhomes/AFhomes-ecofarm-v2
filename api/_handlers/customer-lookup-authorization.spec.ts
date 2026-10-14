@@ -18,6 +18,10 @@ const memberships = (await import('./memberships.js')).default;
  *    `AFHOMES:` envelope, and not a QR or fallback credential. The response has no
  *    field one could be rendered into, which is why this is asserted on the response
  *    BODY rather than on a UI that could be changed tomorrow.
+ *
+ * It also pins the SEPARATION from the till: the screen is its own module
+ * (`operations.customer_lookup`, seeded by 20261131000003), so holding the
+ * `operations.redemption` till key no longer opens it.
  */
 
 const customerId = '11111111-1111-4111-8111-111111111111';
@@ -57,11 +61,11 @@ function install({
   if (allowed)
     tables.role_permissions.push({
       role_id: UUID.role.employee,
-      module_id: moduleId('operations.redemption'),
+      module_id: moduleId('operations.customer_lookup'),
       can_view: true,
-      // Explicitly false: an Employee's GSD desk is a lookup, not a till. These are
-      // the baseline's real values, restated here so the test fails if someone
-      // quietly widens the grant this route depends on.
+      // Explicitly false: the GSD desk is a lookup, not a till. The seeded
+      // grant carries view only, and these are restated here so the test fails
+      // if someone quietly widens the grant this route depends on.
       can_create: grant.canCreate ?? false,
       can_update: grant.canUpdate ?? false,
       can_delete: grant.canDelete ?? false,
@@ -111,6 +115,29 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
       return original(...args);
     };
     const s = await lookup(TOKEN.unassigned);
+    expect(s.status).toBe(403);
+    expect(called).toBe(false);
+  });
+
+  it('refuses the till permission: redemption alone does not open the lookup', async () => {
+    // The separation the dedicated module exists for. A tills-only grant must
+    // not read customer records, and the refusal happens before the database.
+    const db = install({ allowed: false });
+    db.tables['role_permissions']!.push({
+      role_id: UUID.role.employee,
+      module_id: moduleId('operations.redemption'),
+      can_view: true,
+      can_create: false,
+      can_update: false,
+      can_delete: false,
+    });
+    let called = false;
+    const original = db.rpc.bind(db);
+    db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
+      if (args[0] !== 'afhomes_admin_mfa_required') called = true;
+      return original(...args);
+    };
+    const s = await lookup(TOKEN.viewer);
     expect(s.status).toBe(403);
     expect(called).toBe(false);
   });
@@ -174,10 +201,10 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     expect(state.status).toBe(404);
   });
 
-  it('does not become writable when the shared module gains a create grant', async () => {
-    // The permission key is shared with the till. Even with `create` present on the
-    // grant, this route still has no mutating branch - which is the property that
-    // makes "read-only by construction" true rather than aspirational.
+  it('does not become writable when its module gains a create grant', async () => {
+    // Even with `create` present on the grant, this route still has no mutating
+    // branch - which is the property that makes "read-only by construction"
+    // true rather than aspirational.
     install({ grant: { canCreate: true } });
     const { res, state } = makeRes();
     await memberships(

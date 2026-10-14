@@ -1,8 +1,11 @@
 /**
- * Company 45-column membership template (BR-RATE-06 area: issuance integrity
+ * Company 44-column membership template (BR-RATE-06 area: issuance integrity
  * starts with a correct template; import mapping in `customer-import.ts`).
  *
- * - Template endpoints serve the exact 45 headers in order, duplicates kept.
+ * - Template endpoints serve the exact 44 headers in order, duplicates kept.
+ *   OST/IST NAME sat at position 28 and was removed from the download; files
+ *   filled from the superseded 45-column layout still parse (see the legacy
+ *   tests below) with their values preserved on the customer record.
  * - The company layout remaps positionally onto import columns; unmapped
  *   company headers warn by exact name and merge nothing (ADDRESS ×2 and
  *   EMAIL ADDRESS ×2 must not collide).
@@ -10,9 +13,18 @@
  *   required first/last names instead of inventing identity parse rules.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MEMBERSHIP_TEMPLATE_COLUMNS } from '@afhomes/contracts';
-import { parseXlsxMatrix } from '../_lib/customer-import.js';
-import { toXlsxMulti } from '../_lib/report-export.js';
+import {
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+} from '@afhomes/contracts';
+import {
+  MEMBERSHIP_TEMPLATE_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_SECTIONS,
+  mergeSectionedTemplateSheets,
+  parseXlsxSheets,
+} from '../_lib/customer-import.js';
+import { toCsv, toXlsxMulti } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown }));
 
@@ -91,7 +103,7 @@ async function call(opts: {
 
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 
-/** One company-template data row, values aligned to the 45 positions. */
+/** One company-template data row, values aligned to the 44 positions. */
 const companyRow = (): string[] => [
   'RA-001', // RA NO
   'Pending', // STATUS
@@ -121,7 +133,6 @@ const companyRow = (): string[] => [
   'Doctor', // OCCUPATION / BUSINESS NAME
   'Quezon City', // OFFICE / BUSINESS ADDRESS
   'Doctor', // EMPLOYED POSITION
-  'OST Name', // OST/IST NAME
   'SVD Name', // SVD
   'SSM Name', // SSM
   'SM Name', // SM
@@ -158,34 +169,58 @@ describe('company membership template', () => {
   it('refuses anonymous and unauthorized callers before reading anything', async () => {
     expect((await call({ path: 'template/xlsx', token: '' })).status).toBe(401);
     expect((await call({ path: 'template/xlsx', token: 'seller-token' })).status).toBe(403);
+    expect((await call({ path: 'template/csv', token: '' })).status).toBe(401);
+    expect((await call({ path: 'template/csv', token: 'seller-token' })).status).toBe(403);
   });
 
-  it('serves the exact 45 headers in order, duplicates kept', async () => {
-    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(45);
+  it('serves README plus four section tabs holding the 44 headers', async () => {
+    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
     const xlsx = await call({ path: 'template/xlsx' });
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
     const bytes = Buffer.from((xlsx.body as { content: string }).content, 'base64');
-    const matrix = parseXlsxMatrix(new Uint8Array(bytes));
+    const sheets = parseXlsxSheets(new Uint8Array(bytes));
+    expect(sheets.map((s) => s.name)).toEqual([
+      'README',
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+    ]);
+    const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
+    for (const section of MEMBERSHIP_TEMPLATE_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([...section.headers]);
+    // OST/IST NAME left the download: no tab may carry it anymore.
+    for (const sheet of sheets) expect(sheet.matrix[0]).not.toContain('OST/IST NAME');
+    const { matrix } = mergeSectionedTemplateSheets(sheets);
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
     // Spot-check the spec: first/last headers and the duplicated ADDRESS pair.
     expect(matrix[0]![0]).toBe('RA NO');
-    expect(matrix[0]![44]).toBe('DATE');
+    expect(matrix[0]![43]).toBe('DATE');
     expect(matrix[0]![3]).toBe('ADDRESS');
     expect(matrix[0]![16]).toBe('ADDRESS');
     expect(matrix[0]![11]).toBe('EMAIL ADDRESS');
-    expect(matrix[0]![35]).toBe('EMAIL ADDRESS');
+    expect(matrix[0]![34]).toBe('EMAIL ADDRESS');
 
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);
-    const firstLine = Buffer.from((csv.body as { content: string }).content, 'base64')
-      .toString('utf8')
+    expect((csv.body as { mime: string }).mime).toBe('text/csv');
+    expect((csv.body as { filename: string }).filename).toBe('membership-template.csv');
+    const csvText = Buffer.from((csv.body as { content: string }).content, 'base64').toString(
+      'utf8',
+    );
+    const csvMatrix = csvText
       .replace(/^\ufeff/, '')
-      .split('\n')[0]!;
-    const csvHeaders = firstLine.split(',');
-    expect(csvHeaders).toHaveLength(45);
-    expect(csvHeaders[0]).toBe('RA NO');
-    expect(csvHeaders[44]!.trim()).toBe('DATE');
+      .split('\r\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => line.split(','));
+    // Row 1 groups the columns by section; row 2 is the verbatim 44 headers.
+    expect(csvMatrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_SECTION_BANDS]);
+    expect(csvMatrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(csvMatrix[0]![0]).toBe('Primary');
+    expect(csvMatrix[0]![43]).toBe('Package');
+    expect(csvMatrix[1]![0]).toBe('RA NO');
+    expect(csvMatrix[1]![43]).toBe('DATE');
   });
 
   it('remaps company headers positionally without merging duplicates', async () => {
@@ -232,7 +267,6 @@ describe('company membership template', () => {
     expect(row.fields.employed_position).toBe('Engineer');
     expect(row.fields.supplementary_full_name).toBe('MARIA CLARA');
     expect(row.fields.supplementary_address).toBe('456 Acacia Ave');
-    expect(row.fields.ost_ist_name).toBe('OST Name');
     expect(row.fields.svd_name).toBe('SVD Name');
     expect(row.fields.referrer_name).toBe('Ref Name');
     expect(row.fields.related_email).toBe('related@example.com');
@@ -261,8 +295,8 @@ describe('company membership template', () => {
     });
     const primary = section(0, 15);
     const supplementary = section(15, 28);
-    const related = section(28, 36);
-    const pkg = section(36, 45);
+    const related = section(28, 35);
+    const pkg = section(35, 44);
     const bytes = toXlsxMulti('Membership Template', [
       {
         name: 'README',
@@ -318,6 +352,89 @@ describe('company membership template', () => {
     expect(parsed.fields.ra_number).toBe('RA-001');
     expect(parsed.fields.stated_rf).toBe('RF-001');
     expect(parsed.warnings.map((w) => w.field)).toContain('FULL NAME');
+  });
+
+  it('parses a filled banded CSV into the same fields as the single sheet', async () => {
+    install();
+    const banded = [...MEMBERSHIP_TEMPLATE_SECTION_BANDS].join(',') + '\n' + companyCsv();
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'csv',
+        contentBase64: b64(Buffer.from(banded, 'utf8')),
+        sourceName: 'members.csv',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as {
+      rows: { fields: Record<string, string>; warnings: { field: string }[] }[];
+    };
+    const parsed = body.rows[0]!;
+    expect(parsed.fields.email).toBe('juan@example.com');
+    expect(parsed.fields.secondary_email).toBe('maria@example.com');
+    expect(parsed.fields.ra_number).toBe('RA-001');
+    expect(parsed.fields.stated_rf).toBe('RF-001');
+    expect(parsed.warnings.map((w) => w.field)).toContain('FULL NAME');
+  });
+
+  it('keeps a plain 44-column CSV working without the band row', async () => {
+    install();
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'csv',
+        contentBase64: b64(Buffer.from(companyCsv(), 'utf8')),
+        sourceName: 'members.csv',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as { rows: { fields: Record<string, string> }[] };
+    expect(body.rows[0]!.fields.email).toBe('juan@example.com');
+  });
+
+  it('still imports a superseded 45-column file with its OST/IST NAME preserved', async () => {
+    install();
+    // Headers and values of an older download: the removed column back at its
+    // old position. The row must parse and keep its value on the existing
+    // customer-record pipeline instead of failing as 45 unknown headers.
+    const legacyHeaders = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    expect(legacyHeaders).toHaveLength(45);
+    const legacyRow = [
+      ...companyRow().slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      'OST Name',
+      ...companyRow().slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    const quote = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csv = legacyHeaders.map(quote).join(',') + '\n' + legacyRow.map(quote).join(',') + '\n';
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'csv',
+        contentBase64: b64(Buffer.from(csv, 'utf8')),
+        sourceName: 'members-legacy.csv',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as {
+      rows: {
+        fields: Record<string, string>;
+        warnings: { field: string; message: string }[];
+      }[];
+    };
+    const row = body.rows[0]!;
+    expect(row.fields.ost_ist_name).toBe('OST Name');
+    expect(row.fields.svd_name).toBe('SVD Name');
+    expect(row.fields.email).toBe('juan@example.com');
+    // The removed column has a real target, so it is preserved rather than
+    // reported among the ignored-column warnings.
+    expect(row.warnings.map((w) => w.field)).not.toContain('OST/IST NAME');
   });
 
   it('rejects foreign multi-sheet workbooks instead of guessing a tab', async () => {

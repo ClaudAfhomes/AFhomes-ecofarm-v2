@@ -7,115 +7,196 @@
 
 ## Stack (unchanging)
 
-pnpm + Turborepo. `apps/web` (:5173, `/` + `/customer/**` + `/ost/**`) |
+pnpm + Turborepo. `apps/web` (:5173; marketing + `/customer/**` + `/ost/**`) |
 `apps/admin` (:5174, `/admin/`) | single Vercel Function `api/router.ts` →
 `api/_lib/router.ts` → `api/_handlers/**` → Supabase Postgres + Auth.
-`packages/contracts` (Zod SSOT, `schemas/lifecycle.ts` owns all statuses) |
-`packages/shared` (BigInt money) | `packages/config` (`VITE_`-only) |
-`packages/ui` (tokens + primitives). `docs/security/` deletions in working
-tree are PRE-EXISTING user changes (do not touch). Branch: `claud/develop`.
-Session work UNCOMMITTED (list below).
+`packages/contracts` (Zod SSOT; `lifecycle.ts` owns statuses; `afhomes.ts` owns
+the module catalog) | `packages/shared` (BigInt money) | `packages/config`
+(`VITE_`-only) | `packages/ui` (tokens + primitives). Branch `orly/develop`; ALL
+session work UNCOMMITTED. `SESSION.md` + `docs/security/` churn and
+`docs/supabase/CURRENT-SCHEMA.sql` (untracked) are pre-existing user items — do
+not touch.
 
 ## Standing user preferences (apply without asking)
 
-- Single 45-column company membership template only: `GET template/xlsx|csv`
-  serves `membership-template.*`. No parallel/duplicate template buttons.
-- Exact company header text/order/duplicates preserved verbatim in code.
-- Never invent business semantics (no name-splitting, no money/status value
-  translation, no hierarchy inference from name columns).
-- Prettier: only `--write` files whose HEAD version is clean (verified via
-  `git show HEAD:<file>` + `--check`); repo has pre-existing CRLF warnings
-  (`sales.ts`, `customers.ts`, CSS modules) — leave untouched.
-- New guards proven by failing-first evidence (new specs assert 403/409 +
-  zero number calls + no row; transcription bugs caught by `test:db:local`).
-- Flakes: app/jsdom timing tests + zip-bomb timeout flake under parallel
-  load; solo re-runs green; `--maxWorkers=2` reduces them. Never adjust
-  assertions to force a pass.
+- Membership template: exactly ONE download per format. `template/xlsx` =
+  README + 4 data tabs; `template/csv` = section band row + headers (one file,
+  no zip). No duplicate/parallel template buttons. Company columns are 44
+  verbatim headers (IST/OST removed); legacy 45-column uploads still accepted.
+- Verbatim company header text/order/duplicates preserved. Never invent
+  business semantics (no name-splitting, no value translation, no hierarchy
+  inference).
+- User-facing copy: every sentence max 5–6 words.
+- Admin console speaks PAGES, not internals: human-readable module names only
+  (never raw keys, never role slugs, no View/Create/Update/Delete jargon). Role
+  access = one "Can access" checkbox per page; staff overrides = one
+  "Deny access" per page. No bulk "View all" control anywhere.
+- Grouped modules are dropdowns; a single-module group (Dashboard) is a flat
+  row; a multi-module group opens pre-expanded when the role/staff already
+  holds a grant in it.
+- Application drafts are hand-entry only (`/admin/customers/applications/new`
+  has no file import; bulk entry lives in the Import/Export workspace).
+- Guards ship with failing-first evidence; flakes: jsdom timing + zip-bomb
+  timeout under parallel load → `--maxWorkers=2`; never adjust assertions to
+  force a pass.
+- Prettier is NOT a gate in this checkout: `--check` warns on unmodified files
+  too (CRLF checkout artifact). Gate on `tsc` + `eslint`. Never `--write`
+  pre-existing formatting.
 
 ## This session's work (UNCOMMITTED)
 
-### A. Business-rules documentation program (Phases 1–8, read-only + 2 slices)
+### A. Membership template → 44 columns, sectioned XLSX, band-row CSV
 
-- `docs/business-rules/`: INDEX (67 rows: 55 rules + 12 code-observed),
-  STATUSES, AGENT-GUIDE, CONFLICTS (CF-01…06, CF-06 resolved-by-hierarchy),
-  OPEN_QUESTIONS (Q1–Q12), CHANGELOG, 14× `BR-*.md` (54→55 rules),
-  IMPLEMENTATION-GAP-MATRIX, ROADMAP, TEST-PLAN, CONFORMANCE-EVIDENCE
-  (all 55 IDs explicit), SOURCE-DECISIONS, DEPENDENCY-GRAPH.
-- `docs/system-audit/`: architecture audit, traceability audit, doc plan,
-  Phase 1–8 reports, membership plan + implementation report.
-- Source: `C:/Users/SSD-ORLANDO/Documents/AF Homes Document/Business Rules.zip`
-  (19 entries = 18 files; C3–C7 + D1–D7 absent; C2 mtime 2026-10-11 anomaly;
-  no "Master List" exists — Q5 open). Workbook internals read via
-  `unzip -p` streams to approved temp (never extracted into repo):
-  `QualFormula` + `FreezeSaleRates` bodies, `ParamInfo` 30 cases, Control
-  Panel A23–A35 history, Reference R44–R63, 25 A2 sheets enumerated.
-- Central finding: Generator payroll model (BA/PA/PB, DSC/DRI, QP/EP,
-  Equivalent TCP, Close Month) vs v2 card/points model do not meet — Q1
-  presidential ruling blocks Lane 4; Q3/Q2 block W1; Q4/Q5/Q6/Q7 doc gaps.
-- Statuses: MATCH 1 (BR-RATE-06), MISMATCH 1 (BR-QLF-02, 25% vs 100% gate),
-  PARTIAL 15, NOT_IMPLEMENTED 32, BLOCKED 4, OUT_OF_SCOPE 2, NOT_ASSESSED 2
-  (CUT-01/02, matrix lens).
-- Slices implemented: S1/BR-RATE-01 ordering (seller before number,
-  `sale-creation-order.spec.ts` 4 tests); S2/BR-RATE-06 (scheme validation
-  before `next_sale_number`, `sales.ts` reorder); S3/BR-RATE-06 extension
-  (duplicate gov-ID/email pre-check before `next_customer_number`,
-  `customers.ts` + `customer-creation-order.spec.ts` 3 tests).
-- Verified ledger: api 2131–2146, web 245, admin 799 (+flakes, all
-  solo-green), shared 41, contracts 226, `test:db:local` 2464/2464,
-  `check:env` PASS, tsc clean (api/contracts/admin).
+- `packages/contracts/.../customer-import.ts`: `MEMBERSHIP_TEMPLATE_COLUMNS` =
+  44 verbatim headers, duplicates kept (ADDRESS ×2, EMAIL ADDRESS ×3, AGE ×2,
+  FULL NAME ×2).
+- `api/_lib/customer-import.ts`: `MEMBERSHIP_TEMPLATE_SECTIONS` (Primary 0–15,
+  Supplementary 15–28, Related 28–35 = SVD/SSM/SM/REFERRER/VIP RECOMMENDER/
+  CONTACT NO./EMAIL ADDRESS, Package 35–44), guide sheets skipped
+  (`readme|instructions|guide|example(s)`), `membershipTemplateSectionedXlsx`
+  (tinted headers, tab colors, zebra, 20 blank rows), `membershipTemplateCsv`
+  (band row + 44 headers), `looksLikeSectionBandRow` (strips band on upload,
+  ≥15 cells must match), `isCompanyMembershipTemplate` (exact positional 44);
+  legacy 45-column layout still parsed; foreign multi-sheet stays rejected.
+- Served by `api/_handlers/customer-imports.ts` (`membership-template.xlsx` /
+  `.csv`). Specs: `membership-template.spec.ts`, `customer-import*.spec.ts`.
 
-### B. Membership 45-column company template (this session's build)
+### B. Applications/new rework + referral chain (migrations 000001/2)
 
-- Single template: `template/xlsx|csv` serve 45-col `membership-template.*`
-  (retired old builders deleted; UI keeps one button pair + note).
-- Contracts: `MEMBERSHIP_TEMPLATE_COLUMNS` (verbatim, duplicates kept) +
-  `MEMBERSHIP_TEMPLATE_POSITION_MAP` (41 mapped / 4 dropped: FULL NAME ×2,
-  AGE ×2) + `COMPANY_IMPORT_EXTRA_COLUMNS` (29 verbatim keys, remap-path
-  only; established customer template untouched).
-- Import: positional remap (duplicates can't collide) + dropped-header
-  warnings naming exact headers; validators reuse established schemas;
-  FULL NAME never split (rows fail safe); unknown tier/scheme/status fail
-  rows, never corrupt.
-- Migration `20261130000001_afhomes_membership_company_fields.sql`: 37
-  nullable verbatim columns on customers (personal, 12 supplementary,
-  8 related-person, 9 `stated_*` package/payment); both import RPCs persist
-  (`company` object; CREATE inserts, UPDATE preserve-when-blank); gender
-  CHECK shared; TIN write-only (no browser grant, masked read, never
-  audited); no new grants, RLS posture unchanged.
-- Manual API: create/update schemas + handler mapping + masked reads
-  (`tinNumberMasked`, `supplementaryTinNumberMasked` via `maskGovernmentId`);
-  portal profile unchanged (explicit selects exclude new fields).
-- UI: CustomerDetailPage 4 exact-label read sections (AGE derived, never
-  stored); Import/Export template panel per-format cards (xlsx/csv guidance
-  + 45-column meta) on existing tokens.
-- Specs: `membership-template` (3), `customer-company-fields` (2),
-  `phase33` structural incl. surgery-preservation tripwires (6),
-  DetailPage +10th test, ImportExportPage card test. All green.
-- Transcription-bug saga (recorded so it isn't repeated): full-body
-  `CREATE OR REPLACE` of the import RPCs initially clobbered (a) the
-  20261021 widened membership-number regex + guarded setval and (b) used
-  nonexistent `p_job_id` in the row-commit audit. `test:db:local` caught
-  both (2 failures in sections 46–47); fixed + tripwired; re-run 2464/2464.
+- `/admin/customers/applications/new`: ONE `Save & Submit` (no separate Submit;
+  submit-schema check + single-flight inside), `New Register` register option,
+  Valid ID upload-only (FileField + "Uploaded ✓ / Required / Missing" chip),
+  dropdowns for suffix/sex/citizenship/civil status, auto postal code (PSGC),
+  TIN/phone validation (`input.ts`, `HumanInput.tsx`, `normalize.ts`).
+- Chain selects in `official-forms-fields.tsx` (`chainOptions`): SVD
+  (vice_director), SSM (senior_sales_manager), SM (sales_manager), Referrer
+  (ost); active staff only, downline-scoped by chosen upline, gaps allowed,
+  cycles stopped, lapsed-accreditation OSTs excluded.
+- `20261131000001`: adds `customer_applications.svd_name|ssm_name` + re-delivers
+  `save_customer_application`.
+- `20261131000002`: 4 nullable staff refs; server resolves ids to ACTIVE staff
+  of the exact level role, refuses chains contradicting
+  `referral_relationships` (gaps OK), snapshots `*_name` from
+  `staff_users.full_name` when an id is given (client text ignored), legacy
+  text passthrough otherwise. No commission/money semantics.
+- Specs: `official-forms-chain.spec.ts` (admin),
+  `application-referral-chain-migration.spec.ts` (api, asserts re-delivery does
+  not broaden grants), `supabase/db-integration.ts` chain section (gaps kept,
+  legacy text stored, disagreement/wrong-role/malformed-id refused, cleanup).
 
-## Open threads (need user/stakeholder input)
+### C. Module catalog + Customer Lookup module (migration 000003)
 
-- Q1 model authority, Q3 gate/product, Q2 cutover scope, Q4 missing 12
-  files, Q5 Master List, Q6 C2 authority, Q7 VIP DSC figure (exhaustively
-  searched: B8, B2-ParamInfo, Control Panel, guides — absent).
-- FULL NAME split rule (bulk name imports fail safe until decided); RA/STATUS
-  value sets, RF, price/discount/total semantics, package/terms vocabularies
-  stored verbatim uninterpreted; related names carry no hierarchy semantics.
-- AF-RES/AF-CSALE/AF-CC issuance audited conformant (random/inline claim);
-  no action.
-- Next unblocked verification: per-rule DB conformance mapping; next build:
-  W1 on Q3+Q2. Lane 4 closed without Q1. Further phases without answers can
-  only re-verify.
+- `packages/contracts/.../afhomes.ts`: `MODULE_CATALOG` (32 modules, 8 groups:
+  Dashboard, Organization, Sales & Customers, Finance, Network, Operations,
+  Governance, Website), `moduleLabel()`, `groupedModuleCatalog()` — the ONLY
+  place labels/groups live; mirrors the `public.modules` seed.
+- New module `operations.customer_lookup` ("Customer Lookup"). The screen was
+  authorized by `operations.redemption` before (a till key), so the Roles
+  listing could not show it.
+- `20261131000003`: upserts the module row + view grants (employee keeps till,
+  gains lookup; admin oversight; nothing else changes). Mirrored in
+  `MIGRATION_SEEDED_GRANTS` (`role-baseline.ts`).
+- `api/_handlers/memberships.ts` customer-lookup authorizes the new key; nav
+  entry + `EXTRA_GATED_ROUTES` use it; the employee-only nav special case is
+  gone — `navItemsForPermissions(permissions)` (roleSlug param deleted).
+- Tripwires: `afhomes-modules.spec.ts` (contracts: every key once, unique
+  labels/order, unknown key falls back to the raw key), `module-coverage.spec.ts`
+  (admin: every nav item + dropdown child + `EXTRA_GATED_ROUTES` path is a
+  catalog module; destinations unique).
+
+### D. Roles / Staff console simplification (final ask)
+
+- `/admin/roles`: metric cards, search + type/status filters, chips + permission
+  meter; NO slug under the role name; role link has no underline (hover shifts
+  color).
+- Role detail: hero = name + description only (no slug); Role card has no "Key"
+  row; Permissions = accessible pages as grouped chips ("N of 32 pages
+  accessible"; super_admin: "All pages - granted by slug, not by row.");
+  `permissionGroups` memo deleted.
+- `AfHomesRoleFormDialog.tsx`: ONE checkbox per page,
+  `aria-label="<Page> access"`; group dropdowns with chevron + granted/total
+  pill; "Page access — N of 32 pages accessible"; no bulk control; a page that
+  keeps action rights shows a "Full" chip
+  (`title="This role also keeps its action rights here."`).
+- `AfHomesStaffPage.tsx` Restrict dialog: ONE "Deny access" per page
+  (`aria-label="<Page> deny access"`), same list; deny-only Alert kept.
+- Semantics (load-bearing): the four flags still exist and are server-enforced.
+  Role dialog toggles canView only; CHECKING preserves stored
+  canCreate/canUpdate/canDelete (an edit can never silently escalate);
+  UNCHECKING clears all four (DB requires action ⇒ view). Staff dialog:
+  checking sets denyView (server resolves it as no access at all); unchecking
+  clears all four deny flags; an existing finer deny reads as checked and
+  clears the same way.
+- Specs: `role-access-review.spec.tsx` (10: labels, dropdowns, no bulk control,
+  keep-and-clear flags), `staff-lifecycle.spec.tsx` (restrict dropdowns),
+  `navigation.spec.ts` + `authorization.regression.spec.tsx` (single-arg calls).
+
+### E. Company-column surfacing (carried from the previous handoff)
+
+- Contracts `sales.ts`: 9 `stated_*` on create/update; handler `customers.ts`
+  persists them, read masks TIN; `audit-sanitize.ts` redacts `tin|tax_id`.
+- UI: `CustomerCompanyEditDialog.tsx` (37 verbatim fields, TIN blank-keeps) via
+  Edit on `CustomerDetailPage` (`sales.customers:update` only); linked-record
+  panel on the application editor; lookups/redemption/portal stay PII-free.
+
+### F. Import/Export workspace + editor file-import removal (carried)
+
+- Route `/admin/customers/applications/import-export` (gated by
+  `governance.customer_import`); old URL deleted; Applications list has the
+  gated `Import/Export Data` action; copy trimmed, Excel + CSV pickers side by
+  side.
+- The application editor has NO file import: the company-template mapping path
+  and its spec are removed; the form-template + reservation IST path is
+  untouched.
+
+## Decisions (do not re-litigate)
+
+- Module labels/groups live in contracts, mirroring the DB seed; the DB stays
+  the authorization authority; UI never shows raw keys.
+- Access is presented per PAGE; the 4 action flags are internal but never
+  silently rewritten by an edit (preserve on check, clear on uncheck).
+- No bulk "View all": a click must never grant a module the operator did not
+  see (removed from both dialogs).
+- Customer Lookup owns its module instead of borrowing a till key.
+- Single-module groups are flat rows; multi-module groups are disclosures.
+
+## Blocked / needs user action
+
+- `pnpm db:migrate` for `20261131000001` / `…0002` / `…0003` — needs explicit
+  approval. Until `…0003` is applied AND deployed, Customer Lookup breaks
+  (handler authorizes a key the DB does not know yet).
+- Dev API restart / redeploy to see handler + template changes.
+- After that batch: run `supabase/security/rls_invariants.sql` (empty = PASS)
+  and `pnpm test:db:local`.
+
+## Carried open threads (older sessions, still unanswered)
+
+- Q1 model authority, Q2 cutover scope, Q3 gate/product, Q4 missing 12 files,
+  Q5 Master List, Q6 C2 authority, Q7 VIP DSC figure (exhaustively searched —
+  absent).
+- FULL NAME split rule (fail safe until decided); RA/STATUS value sets, RF,
+  price/discount/total semantics, package/terms vocabularies verbatim
+  uninterpreted; related names carry no hierarchy semantics.
+- Tech debt: `toXlsxMulti` float mirrors pre-existing `toXlsx`;
+  `CustomerCompanyEditDialog` reuses the detail CSS module; dialog
+  normalization via `normalize.ts`; `updateCustomer` duplication (`services.ts`
+  vs `services-customers.ts`); `StatedPackage` object; stated money-schema
+  question.
 
 ## Verify (from root)
 
 ```sh
-pnpm --filter ./api exec vitest run _handlers/membership-template.spec.ts _handlers/customer-company-fields.spec.ts _handlers/phase33-membership-company-fields.spec.ts _handlers/customer-creation-order.spec.ts _handlers/sale-creation-order.spec.ts
-pnpm test:db:local   # disposable loopback PG; proves migration + 2464 checks
-pnpm --filter ./api exec tsc --noEmit && pnpm --filter ./packages/contracts exec tsc --noEmit && pnpm --filter ./apps/admin exec tsc --noEmit
-# Prettier: HEAD-clean files only; sales.ts/customers.ts/CSS warn pre-existing (CRLF), leave alone.
+pnpm --filter ./apps/admin exec vitest run --maxWorkers=2   # 80 files / 801 tests
+pnpm --filter ./packages/contracts exec vitest run          # 244
+pnpm --filter ./api exec vitest run                         # 113 files / 2173
+pnpm --filter ./api exec tsc --noEmit && pnpm --filter ./packages/contracts exec tsc --noEmit
+pnpm --filter ./apps/admin exec tsc --noEmit && pnpm check:env
+pnpm lint                                                   # 0 errors (web 8 warn, admin 21 warn — pre-existing)
+pnpm test:db:local                                          # boots its own disposable PG
 ```
+
+Last verified (final pass, AFTER the last UI edit): admin 801/801, contracts
+244/244, api 2173/2173, tsc clean (admin/contracts/api), `check:env` PASS,
+`lint` 0 errors, `test:db:local` 2490/2490. `pnpm test:db:harness` and
+`rls_invariants.sql` were NOT re-run for the last batch (no RLS surface change)
+— re-run if RLS/grants are touched.

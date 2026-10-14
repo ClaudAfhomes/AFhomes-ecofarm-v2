@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { escapeCsvCell, toCsv, toPdf, toXlsx, toXlsxMulti } from './report-export.js';
+import { readXlsxSheets } from './customer-xlsx.js';
 
 describe('CSV export', () => {
   it('emits stable headers, a BOM, and CRLF rows', () => {
@@ -106,10 +107,53 @@ describe('multi-sheet XLSX export', () => {
     expect(text).toContain('name="Package"');
     expect(text).toContain('xl/worksheets/sheet2.xml');
     // Section tints plus frozen panes plus auto-filters per tab.
-    expect(text).toContain('FFD9E2F3');
-    expect(text).toContain('FFE4DFEC');
+    expect(text).toContain('FF4472C4');
+    expect(text).toContain('FF7030A0');
     expect(text).toContain('state="frozen"');
     expect(text).toContain('<autoFilter ref="A1:A1"/>');
+  });
+
+  it('paints tab colors and a prepared zebra grid with honored widths', () => {
+    const bytes = toXlsxMulti('Template', [
+      {
+        name: 'Primary',
+        columns: [{ label: 'ADDRESS', type: 'text', width: 32 }],
+        rows: [[], []],
+        headerTone: 'blue',
+        tabColor: 'FF4472C4',
+        zebra: true,
+      },
+    ]);
+    const text = Buffer.from(bytes).toString('utf8');
+    // Tab color rides in sheetPr, first in the worksheet sequence.
+    expect(text).toContain('<sheetPr><tabColor rgb="FF4472C4"/></sheetPr>');
+    // White bold header text sits on the saturated section fill (font 2,
+    // cellXfs 1), so the column-name row reads as colored at a glance.
+    expect(text).toContain('<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>');
+    expect(text).toContain('fontId="2" fillId="2"');
+    // Prepared grid: headers get a taller bordered row, blanks are styled,
+    // and rows alternate plain / zebra fills (cellXfs 9 and 10).
+    expect(text).toContain('ht="26" customHeight="1"');
+    expect(text).toContain('<c r="A2" s="9"/>');
+    expect(text).toContain('<c r="A3" s="10"/>');
+    expect(text).toContain('FFF2F2F2');
+    expect(text).toContain('style="thin"');
+    // The explicit width wins over the empty-content best fit.
+    expect(text).toContain('<col min="1" max="1" width="32" customWidth="1"/>');
+  });
+
+  it('ignores a malformed tab color instead of writing bad XML', () => {
+    const bytes = toXlsxMulti('Template', [
+      {
+        name: 'Primary',
+        columns: [{ label: 'RA NO', type: 'text' }],
+        rows: [[]],
+        tabColor: '"><bad/>',
+      },
+    ]);
+    const text = Buffer.from(bytes).toString('utf8');
+    expect(text).not.toContain('tabColor');
+    expect(text).not.toContain('<bad/>');
   });
 
   it('rejects duplicate sheet names and empty specs', () => {
@@ -120,6 +164,28 @@ describe('multi-sheet XLSX export', () => {
     };
     expect(() => toXlsxMulti('T', [sheet, { ...sheet }])).toThrow(/duplicate/i);
     expect(() => toXlsxMulti('T', [])).toThrow(/1 to 16/);
+  });
+
+  it('keeps sheetData before autoFilter so strict readers keep the rows', () => {
+    // The worksheet XSD sequences sheetData before autoFilter. A filter
+    // before the data made strict Excel readers drop the rows it annotated,
+    // leaving tabs with no visible column names while lenient parsers (and
+    // our own reader) still saw them.
+    const bytes = toXlsxMulti('Template', [
+      {
+        name: 'Primary',
+        columns: [{ label: 'RA NO', type: 'text' }],
+        rows: [['x']],
+      },
+    ]);
+    const sheets = readXlsxSheets(bytes);
+    expect(sheets[0]!.matrix[0]).toEqual(['RA NO']);
+    const text = Buffer.from(bytes).toString('utf8');
+    const sheetStart = text.indexOf('<worksheet');
+    const sheetEnd = text.indexOf('</worksheet>', sheetStart);
+    const sheet = text.substring(sheetStart, sheetEnd);
+    expect(sheet.indexOf('<sheetData>')).toBeLessThan(sheet.indexOf('<autoFilter'));
+    expect(sheet.indexOf('<autoFilter')).toBeGreaterThan(-1);
   });
 });
 

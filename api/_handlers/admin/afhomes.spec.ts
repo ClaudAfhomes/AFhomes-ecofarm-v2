@@ -1514,7 +1514,7 @@ describe('roles', () => {
     expect(err(state.body)?.message).toMatch(/do not possess/i);
   });
 
-  it('404s an unknown role and 404s on delete (no role delete surface)', async () => {
+  it('404s an unknown role and protects system roles on delete', async () => {
     const unknown = await call({
       method: 'PATCH',
       afPath: 'roles/00000000-0000-4000-8000-000000009999',
@@ -1522,12 +1522,31 @@ describe('roles', () => {
       body: { name: 'Ghost' },
     });
     expect(unknown.status).toBe(404);
-    const del = await call({
+    const missing = await call({
       method: 'DELETE',
-      afPath: `roles/${UUID.role.custom}`,
+      afPath: 'roles/00000000-0000-4000-8000-000000009999',
       token: TOKEN.superAdmin,
     });
-    expect(del.status).toBe(404);
+    expect(missing.status).toBe(404);
+    const system = await call({
+      method: 'DELETE',
+      afPath: `roles/${UUID.role.admin}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(system.status).toBe(403);
+  });
+
+  it('deletes an unassigned custom role', async () => {
+    const created = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.superAdmin,
+      body: { name: 'Temp Delete Role', isActive: true, permissions: [] },
+    });
+    expect(created.status).toBe(201);
+    const id = (created.body as { id: string }).id;
+    const del = await call({ method: 'DELETE', afPath: `roles/${id}`, token: TOKEN.superAdmin });
+    expect(del.status).toBe(200);
   });
 
   it('returns the audit trail for a role', async () => {

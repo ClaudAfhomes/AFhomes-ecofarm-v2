@@ -1,11 +1,11 @@
 /**
  * Canonical AFHomes fixtures for handler tests.
  *
- * Mirrors the shape produced by `supabase/migrations/20260926023325_afhomes_phase1_foundation.sql`:
- * 22 modules, 10 system roles, 5 departments, and the `staff_users` /
- * `staff_role_assignments` / `role_permissions` / `staff_permission_restrictions`
- * links the resolver walks. Nothing here is production data - ids are stable
- * literals so assertions can name them.
+ * Mirrors the shape produced by the Phase 1 migration plus the later module
+ * seeds that the console depends on: modules, 10 system roles, departments,
+ * and the `staff_users` / `staff_role_assignments` / `role_permissions` /
+ * `staff_permission_restrictions` links the resolver walks. Nothing here is
+ * production data - ids are stable literals so assertions can name them.
  */
 import type { AfHomesPermission } from '@afhomes/contracts';
 
@@ -33,6 +33,7 @@ export const MODULE_KEYS = [
   'operations.redemption',
   'operations.catalog',
   'operations.sales',
+  'operations.customer_lookup',
   'governance.audit',
   'governance.config',
 ] as const satisfies readonly AfHomesPermission['moduleKey'][];
