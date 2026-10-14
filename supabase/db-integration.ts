@@ -1278,7 +1278,12 @@ async function main(): Promise<void> {
         ]);
       };
 
-      const underSale = await mkSale('under', await mkCustomer('under', code), plan, code);
+      const underSale = await mkSale(
+        'under',
+        await mkCustomer('under', code.toLowerCase()),
+        plan,
+        code,
+      );
       await payVerified(underSale, justUnder, `${code}-UNDER`);
       const under = await summaryOf(underSale);
       check(
@@ -1286,7 +1291,7 @@ async function main(): Promise<void> {
         under.downPaymentSatisfied === false,
       );
 
-      const atSale = await mkSale('at', await mkCustomer('at', code), plan, code);
+      const atSale = await mkSale('at', await mkCustomer('at', code.toLowerCase()), plan, code);
       await payVerified(atSale, down, `${code}-AT`);
       const at = await summaryOf(atSale);
       check(
@@ -1296,7 +1301,7 @@ async function main(): Promise<void> {
     }
 
     // Recorded-but-unverified must not satisfy the minimum.
-    const recCust = await mkCustomer('rec', 'GOLD');
+    const recCust = await mkCustomer('rec', 'gold');
     const recOnlySale = uuidFor('sale:GOLD:rec');
     const recCn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
       .sale_number;
@@ -7774,7 +7779,7 @@ async function main(): Promise<void> {
           const person = {
             firstName: 'Imported',
             lastName: label,
-            email: RUN + '-sec47-' + label + '@example.invalid',
+            email: RUN + '-sec47-' + label.toLowerCase() + '@example.invalid',
             phone: '+639170000001',
           };
           const normalized = {
@@ -7901,7 +7906,7 @@ async function main(): Promise<void> {
           (
             await one<{ n: number }>(
               'select count(*)::int as n from public.customers where email=$1',
-              [RUN + '-sec47-Fault@example.invalid'],
+              [RUN + '-sec47-fault@example.invalid'],
             )
           ).n,
           0,
@@ -8008,7 +8013,7 @@ async function main(): Promise<void> {
         const person = (label: string) => ({
           firstName: 'Release',
           lastName: label,
-          email: RUN + '-release48-' + label + '@example.invalid',
+          email: RUN + '-release48-' + label.toLowerCase() + '@example.invalid',
           phone: '09170000000',
           customerStatus: 'active',
           paymentScheme: 'spot_cash',
@@ -8251,13 +8256,13 @@ async function main(): Promise<void> {
             String(opening),
           );
         }
-        const mixed = RUN + '-MixedCase48@EXAMPLE.INVALID';
+        const mixed = RUN + '-mixedcase48@example.invalid';
         await db.query('update customers set email=$1 where id=$2', [mixed, member.customerId]);
         eq(
           'database email lookup is case insensitive',
           (
             await one<{ id: string }>('select id from match_import_emails($1)', [
-              [mixed.toLowerCase()],
+              [mixed.toUpperCase()],
             ])
           ).id,
           member.customerId,
