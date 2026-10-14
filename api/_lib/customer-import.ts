@@ -38,7 +38,7 @@ const SHEET_FETCH_TIMEOUT_MS = 20000;
 /* Dependency-free XLSX reader (stored AND deflated entries)           */
 /* ------------------------------------------------------------------ */
 
-export { readXlsx as parseXlsxMatrix } from './customer-xlsx.js';
+export { readXlsx as parseXlsxMatrix, readXlsxSheets as parseXlsxSheets } from './customer-xlsx.js';
 
 /* ------------------------------------------------------------------ */
 /* Dependency-free UTF-8 CSV reader (RFC 4180, BOM-tolerant)           */
@@ -775,6 +775,55 @@ export const customerExportCsv = (rows: CustomerExportRow[]): string =>
 /* Company membership template (45 columns) + positional import mapping */
 /* ------------------------------------------------------------------ */
 
+export type MembershipTemplateSection = {
+  /** Worksheet tab name (<=31 chars, no :\/?*[]). */
+  sheet: string;
+  /** Slice of MEMBERSHIP_TEMPLATE_COLUMNS, verbatim order. */
+  headers: readonly string[];
+  /** Header tint for the downloadable workbook. */
+  tone: 'blue' | 'green' | 'amber' | 'purple';
+  /** One-line guidance rendered on the README tab. */
+  blurb: string;
+};
+
+/**
+ * The 45 company columns grouped for guided entry: one tab per member
+ * group instead of one 45-wide wall. Slices are positional views of
+ * MEMBERSHIP_TEMPLATE_COLUMNS, so the single-sheet order, the duplicates
+ * (ADDRESS x2, EMAIL ADDRESS x3, AGE x2, FULL NAME x2) and the positional
+ * remap below stay the single source of truth - this list only decides
+ * which tab a verbatim header is printed on.
+ */
+export const MEMBERSHIP_TEMPLATE_SECTIONS: readonly MembershipTemplateSection[] = [
+  {
+    sheet: 'Primary',
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, 15),
+    tone: 'blue',
+    blurb: 'Primary member identity, contact, work, and company status.',
+  },
+  {
+    sheet: 'Supplementary',
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(15, 28),
+    tone: 'green',
+    blurb: 'Supplementary member facts. Leave the whole row blank when none.',
+  },
+  {
+    sheet: 'Related',
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 36),
+    tone: 'amber',
+    blurb: 'Referral chain and related-person contact, stated verbatim.',
+  },
+  {
+    sheet: 'Package',
+    headers: MEMBERSHIP_TEMPLATE_COLUMNS.slice(36, 45),
+    tone: 'purple',
+    blurb: 'Stated package and payment facts. Reference only, never totals.',
+  },
+];
+
+/** Sheet names the sectioned parser skips (guidance, never data). */
+export const MEMBERSHIP_TEMPLATE_GUIDE_SHEETS = ['readme', 'instructions', 'guide', 'example', 'examples'];
+
 const membershipTemplateColumns = (): XlsxColumn[] =>
   MEMBERSHIP_TEMPLATE_COLUMNS.map((label) => ({
     label,
@@ -782,7 +831,7 @@ const membershipTemplateColumns = (): XlsxColumn[] =>
     width: Math.min(36, Math.max(16, label.length + 2)),
   }));
 
-/** Stable machine-readable membership template: header row only, no data rows. */
+/** Stable single-sheet membership template: all 45 headers, no data rows. */
 export const membershipTemplateXlsx = () =>
   toXlsx('Membership Template', membershipTemplateColumns(), [[]]);
 
@@ -825,4 +874,123 @@ export function remapCompanyTemplateMatrix(matrix: string[][]): CompanyTemplateR
     return `__company_ignored_${index}`;
   });
   return { matrix: [headers, ...body], dropped };
+}
+
+export type SectionedTemplateMerge = {
+  /** Canonical 45-column company matrix, ready for the positional remap. */
+  matrix: string[][];
+  /** Headers found on section tabs with no v2 meaning, for warnings. */
+  unknownHeaders: string[];
+};
+
+/**
+ * Merge a sectioned membership workbook (README + Primary/Supplementary/
+ * Related/Package tabs) back into the canonical 45-column company matrix.
+ *
+ * Matching is by accurate column NAME within each tab's group, in any order:
+ * every non-empty header must belong to exactly one section's verbatim set,
+ * and the tab is that section. Missing columns read as blank; unknown ones
+ * are reported (never merged). Rows merge by POSITION across tabs, so every
+ * data tab must carry the same number of data rows - keep the same row order
+ * on every tab and leave unused rows blank instead of deleting them. Guide
+ * sheets (README and friends) are skipped, never data.
+ */
+export function mergeSectionedTemplateSheets(
+  sheets: { name: string; matrix: string[][] }[],
+): SectionedTemplateMerge {
+  const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
+  const data = sheets.filter((sheet) => !guide.has(sheet.name.trim().toLowerCase()));
+  if (data.length === 0) throw new Error('Sectioned template has no entry sheets');
+  const sectionOf = (headers: string[]): number => {
+    let best = -1;
+    let bestHits = 0;
+    MEMBERSHIP_TEMPLATE_SECTIONS.forEach((section, si) => {
+      const expected = new Set(section.headers.map((h) => h.toLowerCase()));
+      const hits = headers.filter((h) => h !== '' && expected.has(h)).length;
+      const foreign = headers.filter((h) => h !== '' && !expected.has(h)).length;
+      if (foreign === 0 && hits > bestHits) {
+        best = si;
+        bestHits = hits;
+      }
+    });
+    return bestHits > 0 ? best : -1;
+  };
+  const bySection = new Map<number, { name: string; matrix: string[][] }>();
+  const unknownHeaders: string[] = [];
+  for (const sheet of data) {
+    const headers = (sheet.matrix[0] ?? []).map((h) => (h ?? '').trim().toLowerCase());
+    if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
+    const si = sectionOf(headers);
+    if (si < 0)
+      throw new Error(
+        `Worksheet "${sheet.name}" does not match a template section; ` +
+          'use the downloaded tabs with their exact headers, or a single worksheet instead',
+      );
+    if (bySection.has(si))
+      throw new Error(
+        `Duplicate "${MEMBERSHIP_TEMPLATE_SECTIONS[si]!.sheet}" sheets; keep one tab per section`,
+      );
+    const expected = new Set(
+      MEMBERSHIP_TEMPLATE_SECTIONS[si]!.headers.map((h) => h.toLowerCase()),
+    );
+    for (const h of headers)
+      if (h !== '' && !expected.has(h) && !unknownHeaders.includes(h)) unknownHeaders.push(h);
+    bySection.set(si, sheet);
+  }
+  if (bySection.size !== MEMBERSHIP_TEMPLATE_SECTIONS.length) {
+    const missing = MEMBERSHIP_TEMPLATE_SECTIONS.filter((_, si) => !bySection.has(si)).map(
+      (section) => section.sheet,
+    );
+    throw new Error(`Sectioned template is missing sheets: ${missing.join(', ')}`);
+  }
+  // Row alignment: trim trailing blank rows per tab, then require agreement.
+  // A blank row inside the range still counts, so a deleted middle row cannot
+  // silently shift one tab's persons out of line with the others.
+  const bodies = MEMBERSHIP_TEMPLATE_SECTIONS.map((section, si) => {
+    const body = bySection.get(si)!.matrix.slice(1);
+    let end = body.length;
+    while (end > 0 && (body[end - 1] ?? []).every((c) => (c ?? '').trim() === '')) end -= 1;
+    return body.slice(0, end);
+  });
+  const counts = bodies.map((body) => body.length);
+  if (!counts.every((n) => n === counts[0]))
+    throw new Error(
+      `Section sheets have different row counts (${MEMBERSHIP_TEMPLATE_SECTIONS.map(
+        (section, si) => `${section.sheet} has ${counts[si]}`,
+      ).join(', ')}). Keep the same row order across sheets.`,
+    );
+  // Canonical positions per section: the sections are slices of the 45, so
+  // the k-th header of section si lives at offset[si] + k. Offsets (not
+  // indexOf) break the verbatim duplicates across tabs: ADDRESS on the
+  // Supplementary tab lands at 16, never at Primary's 3.
+  const offsets: number[] = [];
+  let at = 0;
+  for (const section of MEMBERSHIP_TEMPLATE_SECTIONS) {
+    offsets.push(at);
+    at += section.headers.length;
+  }
+  const canonical = [...MEMBERSHIP_TEMPLATE_COLUMNS];
+  const rows: string[][] = [];
+  for (let r = 0; r < (counts[0] ?? 0); r += 1) {
+    const out = new Array<string>(canonical.length).fill('');
+    MEMBERSHIP_TEMPLATE_SECTIONS.forEach((section, si) => {
+      const headers = (bySection.get(si)!.matrix[0] ?? []).map((h) => (h ?? '').trim().toLowerCase());
+      const seen = new Set<string>();
+      for (const h of headers) {
+        if (h === '') continue;
+        if (seen.has(h))
+          throw new Error(
+            `Worksheet "${bySection.get(si)!.name}" repeats "${h}"; keep one column per header`,
+          );
+        seen.add(h);
+      }
+      const cells = bodies[si]![r] ?? [];
+      section.headers.forEach((verbatim, k) => {
+        const hi = headers.indexOf(verbatim.toLowerCase());
+        if (hi >= 0) out[offsets[si]! + k] = cells[hi] ?? '';
+      });
+    });
+    rows.push(out);
+  }
+  return { matrix: [canonical, ...rows], unknownHeaders };
 }

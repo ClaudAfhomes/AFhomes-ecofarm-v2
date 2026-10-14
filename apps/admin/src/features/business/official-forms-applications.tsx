@@ -25,6 +25,7 @@ import {
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import { useSession } from '../../lib/session';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
@@ -77,10 +78,8 @@ import {
   getCustomerApplicationsPage,
   getCustomerById,
   getCustomersPage,
-  getOfficialFormTemplate,
   getPurchaseTermsProposal,
   getReservationAgreements,
-  previewOfficialFormImport,
   reopenCustomerApplication,
   reviewApplicationPurchaseTerms,
   submitCustomerApplication,
@@ -90,7 +89,6 @@ import {
 import {
   today,
   emptyHolder,
-  asBase64,
   HolderFields,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
@@ -99,6 +97,14 @@ import {
 
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
+  const { user } = useSession();
+  // Bulk membership import/export lives here now (membership work), gated on
+  // its own module like the direct URL guard in navigation.ts. The server
+  // re-checks regardless.
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
+    ) === true;
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
@@ -192,9 +198,19 @@ export function CustomerApplicationsPage() {
         title="Customer Applications"
         description="Applications still needing application work."
         actions={
-          <Button onClick={() => navigate('/admin/customers/applications/new')}>
-            New application
-          </Button>
+          <>
+            {canSeeImportExport ? (
+              <Button
+                variant="secondary"
+                onClick={() => navigate('/admin/customers/applications/import-export')}
+              >
+                Import/Export Data
+              </Button>
+            ) : null}
+            <Button onClick={() => navigate('/admin/customers/applications/new')}>
+              New application
+            </Button>
+          </>
         }
       />
       <FilterBar
@@ -581,8 +597,6 @@ export function CustomerApplicationEditorPage() {
   const [pickerVersion, setPickerVersion] = useState(0);
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const xlsxInput = useRef<HTMLInputElement>(null);
-  const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
   // Customer dropdown: one bounded page (the server max), so every option is
   // reachable without loading an unbounded directory into the control. The
   // chosen record resolves to a display name through the same single-customer
@@ -819,43 +833,6 @@ export function CustomerApplicationEditorPage() {
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Submit failed.'),
   });
-  const importFile = async (file: File) => {
-    const preview = await previewOfficialFormImport('customer_application', await asBase64(file));
-    if (preview.errors.length) {
-      setMessage(preview.errors.map((e) => `${e.field}: ${e.message}`).join('; '));
-      return;
-    }
-    const f = preview.fields;
-    setPrimary({
-      ...primary,
-      lastName: f.primary_last_name ?? '',
-      firstName: f.primary_first_name ?? '',
-      middleName: f.primary_middle_name,
-      suffix: f.primary_suffix,
-      birthDate: f.primary_birth_date ?? '',
-      sex: f.primary_sex,
-      citizenship: f.primary_citizenship,
-      civilStatus: f.primary_civil_status,
-      permanentAddressLine1: f.primary_address_line_1 ?? '',
-      permanentAddressLine2: f.primary_address_line_2,
-      cityMunicipality: f.primary_city_municipality ?? '',
-      province: f.primary_province ?? '',
-      postalCode: f.primary_postal_code,
-      landline: f.primary_landline,
-      mobile: f.primary_mobile ?? '',
-      email: f.primary_email ?? '',
-      tinNumber: f.primary_tin,
-      occupationBusinessName: f.primary_occupation_business,
-      officeBusinessAddress: f.primary_office_business_address,
-      businessIndustry: f.primary_business_industry,
-      employedPosition: f.primary_employed_position,
-      printedName: `${f.primary_first_name ?? ''} ${f.primary_last_name ?? ''}`.trim(),
-    });
-    setTier((f.card_tier?.toUpperCase() || 'BRONZE') as typeof tier);
-    setPaymentScheme((f.payment_scheme || 'spot_cash') as typeof paymentScheme);
-    setChannels((f.acquisition_channels ?? '').split('|').filter(Boolean));
-    setMessage('Imported candidates: please verify every field before saving.');
-  };
   const ocr = useBusinessMutation({
     mutationFn: async () => {
       const documentId = ocrFile
@@ -1068,6 +1045,39 @@ export function CustomerApplicationEditorPage() {
           </p>
         ) : null}
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
+        {relatedCustomer ? (
+          <section aria-label="Linked company record">
+            <h2>Linked company record — read-only</h2>
+            <p>
+              Combined customer record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}).
+              Edit it on the customer detail page; application holders below stay separate
+              transaction facts. Stated figures never affect the purchase offer above.
+            </p>
+            <dl className="form-grid">
+              <dt>RA NO</dt>
+              <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+              <dt>STATUS (company)</dt>
+              <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+              <dt>CITIZENSHIP</dt>
+              <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+              <dt>SUPPLEMENTARY</dt>
+              <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+              <dt>RELATED</dt>
+              <dd>
+                {[relatedCustomer.ostIstName, relatedCustomer.svdName, relatedCustomer.ssmName, relatedCustomer.smName]
+                  .filter(Boolean)
+                  .join(' · ') || '—'}
+              </dd>
+              <dt>STATED PACKAGE</dt>
+              <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+            </dl>
+            <p>
+              <Link to={`/admin/customers/${relatedCustomer.id}`}>
+                Open customer record to view or edit all 37 company fields
+              </Link>
+            </p>
+          </section>
+        ) : null}
         {proposal.data ? (
           <section aria-label="Purchase terms offer">
             <h2>
@@ -1214,35 +1224,6 @@ export function CustomerApplicationEditorPage() {
                   }))}
                 />
               </label>
-            </div>
-            <div className={styles.actions}>
-              <Button
-                variant="secondary"
-                onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}
-              >
-                Download template
-              </Button>
-              <input
-                ref={xlsxInput}
-                hidden
-                aria-label="Import XLSX file"
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setChosenXlsx(file.name);
-                    void importFile(file);
-                  }
-                  e.target.value = '';
-                }}
-              />
-              <Button onClick={() => xlsxInput.current?.click()}>Choose XLSX file</Button>
-              {chosenXlsx ? (
-                <span role="status" className={styles.fileName}>
-                  Selected: {chosenXlsx}
-                </span>
-              ) : null}
             </div>
           </section>
           <section className={styles.panel} aria-labelledby="identity-panel-heading">

@@ -98,6 +98,14 @@
   margin-top: var(--space-3);
 }
 
+/* File pickers sit side by side in one row. */
+.filePickers {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .filePicker {
   display: flex;
   flex-wrap: wrap;

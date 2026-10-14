@@ -20,8 +20,10 @@ import {
   matrixToRecords,
   membershipTemplateCsv,
   membershipTemplateXlsx,
+  mergeSectionedTemplateSheets,
   parseCsvMatrix,
   parseXlsxMatrix,
+  parseXlsxSheets,
   remapCompanyTemplateMatrix,
   validateImportRow,
   type ImportContext,
@@ -244,6 +246,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { source, sourceName } = parsed.data;
       let matrix: string[][];
       let sheetId: string | null = null;
+      // Sectioned-template extras surface as per-row warnings below, next to
+      // the established unknown-column and dropped-header warnings.
+      let sectionedUnknown: string[] = [];
       try {
         if (source === 'google_sheets') {
           if (!parsed.data.sheetUrl)
@@ -258,10 +263,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const bytes = new Uint8Array(Buffer.from(parsed.data.contentBase64, 'base64'));
           if (bytes.length === 0 || bytes.length > MAX_IMPORT_BYTES)
             return fail(res, 'VALIDATION_ERROR', 'File is empty or exceeds the size limit', 400);
-          matrix =
-            source === 'excel'
-              ? parseXlsxMatrix(bytes)
-              : parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+          if (source === 'excel') {
+            // Sectioned membership workbooks (README + 4 entry tabs) merge
+            // back into the canonical 45 columns by row order; every other
+            // workbook keeps the single-worksheet behavior. A multi-sheet
+            // file that is not the sectioned template stays rejected rather
+            // than silently reading the wrong tab.
+            const sheets = parseXlsxSheets(bytes);
+            if (sheets.length === 1) {
+              matrix = sheets[0]!.matrix;
+            } else {
+              try {
+                const merged = mergeSectionedTemplateSheets(sheets);
+                matrix = merged.matrix;
+                sectionedUnknown = merged.unknownHeaders;
+              } catch {
+                return fail(
+                  res,
+                  'VALIDATION_ERROR',
+                  'Import requires exactly one worksheet; for guided entry use the sectioned membership template (README + Primary/Supplementary/Related/Package)',
+                  400,
+                );
+              }
+            }
+          } else {
+            matrix = parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+          }
         }
       } catch (error) {
         return fail(
@@ -321,6 +348,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const validated: ValidatedImportRow[] = records.map((r) => {
         const v = validateImportRow(r.rowNumber, r.fields, ctx, today);
         for (const h of unknownHeaders)
+          v.warnings.push({ field: h, message: 'Unknown column: ignored' });
+        for (const h of sectionedUnknown)
           v.warnings.push({ field: h, message: 'Unknown column: ignored' });
         for (const dropped of droppedCompanyHeaders)
           v.warnings.push({

@@ -13,6 +13,7 @@ export const XLSX_LIMITS = {
   text: 4096,
   rows: 5001,
   entries: 128,
+  sheets: 16,
 } as const;
 type Node = { name: string; attrs: Record<string, string>; text: string; children: Node[] };
 function xml(bytes: Uint8Array): Node {
@@ -128,6 +129,25 @@ function zip(bytes: Uint8Array): Map<string, Uint8Array> {
   return out;
 }
 export function readXlsx(bytes: Uint8Array): string[][] {
+  const sheets = readXlsxSheets(bytes);
+  if (sheets.length !== 1)
+    throw new Error(
+      'Import requires exactly one worksheet; multiple payment sheets are not supported',
+    );
+  return sheets[0]!.matrix;
+}
+
+/**
+ * Multi-sheet workbook reader for sectioned templates (README + entry tabs).
+ *
+ * Same budgets and cell-safety rules as `readXlsx`, applied across the whole
+ * workbook: at most 16 sheets, shared-string and total-cell caps shared, and
+ * the same rejection of formulas, doctypes, traversal targets and oversized
+ * values. Sheet names come straight from `xl/workbook.xml`. Callers decide
+ * which sheets carry data; README-style sheets are returned like any other
+ * so the caller (not the reader) chooses what to ignore.
+ */
+export function readXlsxSheets(bytes: Uint8Array): { name: string; matrix: string[][] }[] {
   const parts = zip(bytes);
   const part = (name: string) => {
     const p = parts.get(name);
@@ -136,18 +156,9 @@ export function readXlsx(bytes: Uint8Array): string[][] {
   };
   const book = part('xl/workbook.xml'),
     rels = part('xl/_rels/workbook.xml.rels');
-  const sheets = descendants(book, 'sheet');
-  if (sheets.length !== 1)
-    throw new Error(
-      'Import requires exactly one worksheet; multiple payment sheets are not supported',
-    );
-  const id = sheets[0]!.attrs['r:id'];
-  const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
-  if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
-    throw new Error('Unsupported worksheet relationship');
-  const target = rel.attrs.Target ?? '';
-  if (target.startsWith('/') || target.includes('..') || target.includes('\\'))
-    throw new Error('Unsafe worksheet target');
+  const sheetEls = descendants(book, 'sheet');
+  if (sheetEls.length < 1 || sheetEls.length > XLSX_LIMITS.sheets)
+    throw new Error('Spreadsheet sheet limit exceeded');
   const strings = parts.has('xl/sharedStrings.xml')
     ? children(part('xl/sharedStrings.xml'), 'si').map((si) =>
         descendants(si, 't')
@@ -157,42 +168,52 @@ export function readXlsx(bytes: Uint8Array): string[][] {
     : [];
   if (strings.length > XLSX_LIMITS.strings || strings.some((s) => s.length > XLSX_LIMITS.text))
     throw new Error('Shared strings limit exceeded');
-  const sheet = part('xl/' + target);
-  if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
-    throw new Error('Unsupported worksheet structure');
-  const rows = children(children(sheet, 'sheetData')[0]!, 'row');
-  if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
   let cellCount = 0;
-  const matrix: string[][] = [];
-  for (const row of rows) {
-    const cells: string[] = [];
-    for (const c of children(row, 'c')) {
-      if (++cellCount > XLSX_LIMITS.cells) throw new Error('Worksheet cell limit exceeded');
-      const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(c.attrs.r ?? '');
-      if (!match) throw new Error('Malformed worksheet cell reference');
-      let col = 0;
-      for (const l of match[1]!) col = col * 26 + l.charCodeAt(0) - 64;
-      if (col > XLSX_LIMITS.columns) throw new Error('Worksheet column limit exceeded');
-      if (cells[col - 1] !== undefined) throw new Error('Duplicate worksheet cell');
-      if (children(c, 'f').length)
-        throw new Error('Formula cells are unsupported; export values only');
-      const value = children(c, 'v')[0]?.text ?? '';
-      if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
-        throw new Error('Invalid shared-string index');
-      let text =
-        c.attrs.t === 's'
-          ? strings[Number(value)]
-          : c.attrs.t === 'inlineStr'
-            ? descendants(c, 't')
-                .map((t) => t.text)
-                .join('')
-            : value;
-      if (text === undefined || text.length > XLSX_LIMITS.text)
-        throw new Error('Invalid or oversized worksheet value');
-      cells[col - 1] = text.trim();
+  return sheetEls.map((el) => {
+    const name = String(el.attrs.name ?? '');
+    const id = el.attrs['r:id'];
+    const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
+    if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
+      throw new Error('Unsupported worksheet relationship');
+    const target = rel.attrs.Target ?? '';
+    if (target.startsWith('/') || target.includes('..') || target.includes('\\'))
+      throw new Error('Unsafe worksheet target');
+    const sheet = part('xl/' + target);
+    if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
+      throw new Error('Unsupported worksheet structure');
+    const rows = children(children(sheet, 'sheetData')[0]!, 'row');
+    if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
+    const matrix: string[][] = [];
+    for (const row of rows) {
+      const cells: string[] = [];
+      for (const c of children(row, 'c')) {
+        if (++cellCount > XLSX_LIMITS.cells) throw new Error('Worksheet cell limit exceeded');
+        const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(c.attrs.r ?? '');
+        if (!match) throw new Error('Malformed worksheet cell reference');
+        let col = 0;
+        for (const l of match[1]!) col = col * 26 + l.charCodeAt(0) - 64;
+        if (col > XLSX_LIMITS.columns) throw new Error('Worksheet column limit exceeded');
+        if (cells[col - 1] !== undefined) throw new Error('Duplicate worksheet cell');
+        if (children(c, 'f').length)
+          throw new Error('Formula cells are unsupported; export values only');
+        const value = children(c, 'v')[0]?.text ?? '';
+        if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
+          throw new Error('Invalid shared-string index');
+        const text =
+          c.attrs.t === 's'
+            ? strings[Number(value)]
+            : c.attrs.t === 'inlineStr'
+              ? descendants(c, 't')
+                  .map((t) => t.text)
+                  .join('')
+              : value;
+        if (text === undefined || text.length > XLSX_LIMITS.text)
+          throw new Error('Invalid or oversized worksheet value');
+        cells[col - 1] = text.trim();
+      }
+      matrix.push(Array.from({ length: cells.length }, (_, i) => cells[i] ?? ''));
     }
-    matrix.push(Array.from({ length: cells.length }, (_, i) => cells[i] ?? ''));
-  }
-  if (!matrix.length) throw new Error('Spreadsheet has no rows');
-  return matrix;
+    if (!matrix.length) throw new Error('Spreadsheet has no rows');
+    return { name, matrix };
+  });
 }

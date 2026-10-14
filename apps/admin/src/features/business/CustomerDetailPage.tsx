@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import type { Sale } from '@afhomes/contracts';
 import {
+  Button,
   DetailCard,
   DetailCardTitle,
   DetailField,
@@ -19,10 +20,12 @@ import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts
 
 import { formatDate, formatDateTime } from '../../lib/format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import { useSession } from '../../lib/session';
 import { getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
 import { formatMoneyOrDash } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
+import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
@@ -71,6 +74,13 @@ function describeSalesLoadError(error: unknown): string | undefined {
  */
 export function CustomerDetailPage() {
   const { id } = useParams();
+  const { user } = useSession();
+  const [editing, setEditing] = useState(false);
+  const canEditCompany =
+    user?.roleSlug === 'super_admin' ||
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
+    ) === true;
   const customer = useQuery({
     queryKey: businessKeys.customer(id),
     queryFn: () => getCustomerById(id ?? ''),
@@ -297,7 +307,25 @@ export function CustomerDetailPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title={record.fullName} description="Customer record and card sales." />
+      <PageHeader
+        title={record.fullName}
+        description="Customer record and card sales."
+        actions={
+          canEditCompany ? (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit company record
+            </Button>
+          ) : undefined
+        }
+      />
+      {editing ? (
+        <CustomerCompanyEditDialog
+          customer={record}
+          open={editing}
+          onClose={() => setEditing(false)}
+          onSaved={() => void customer.refetch()}
+        />
+      ) : null}
       <DetailGrid className={styles.topGrid}>
         {groups.map((group) => (
           <DetailCard key={group.title}>

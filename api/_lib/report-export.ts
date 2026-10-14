@@ -285,6 +285,219 @@ export function toXlsx(sheetName: string, columns: XlsxColumn[], rows: unknown[]
 }
 
 /* ------------------------------------------------------------------ */
+/* Multi-sheet XLSX (sectioned templates - one workbook, many tabs)    */
+/* ------------------------------------------------------------------ */
+
+export type XlsxHeaderTone = 'blue' | 'green' | 'amber' | 'purple' | 'slate';
+
+export type XlsxSheetSpec = {
+  name: string;
+  columns: XlsxColumn[];
+  rows: unknown[][];
+  /** Section color for the header row. Defaults to the standard blue. */
+  headerTone?: XlsxHeaderTone;
+  /** Freeze the header row + add an auto-filter. Defaults true. */
+  filter?: boolean;
+  /** Wrap body text (README guidance). Defaults false (grid stays single-line). */
+  wrapBody?: boolean;
+};
+
+/**
+ * Sectioned workbook writer for guided templates (README + entry tabs).
+ *
+ * Same dependency-free stored-ZIP machinery as `toXlsx`, extended to N
+ * worksheets with per-sheet header colors. Data cells stay plain text unless
+ * the column type says otherwise, so leading zeros on IDs and references
+ * survive. Every sheet freezes its header row and (by default) carries an
+ * auto-filter, so a 15-column tab reads as a table instead of a wall of
+ * text. Column widths are best-fit within the same 12..48 budget as the
+ * single-sheet writer, so cells stay readable without horizontal scrolling
+ * on ordinary laptop widths for one section at a time.
+ */
+export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array {
+  if (sheets.length < 1 || sheets.length > 16)
+    throw new Error('toXlsxMulti requires 1 to 16 worksheets');
+  const encoder = new TextEncoder();
+  const safeTitle = title.slice(0, 60) || 'Template';
+  const safeNames = sheets.map(
+    (sheet, i) => sheet.name.slice(0, 31).replace(/[:\\/?*[\]]/g, ' ').trim() || `Sheet${i + 1}`,
+  );
+  const seen = new Set<string>();
+  for (const name of safeNames) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) throw new Error(`toXlsxMulti duplicate sheet name: ${name}`);
+    seen.add(key);
+  }
+  if (sheets.some((sheet) => sheet.columns.length < 1 || sheet.columns.length > 64))
+    throw new Error('toXlsxMulti sheets require 1 to 64 columns');
+
+  // Header tone -> cellXfs index (0 is the plain default; data money/date
+  // follow after the five header tones + the wrapped body style).
+  const toneIndex: Record<XlsxHeaderTone, number> = {
+    blue: 1,
+    green: 2,
+    amber: 3,
+    purple: 4,
+    slate: 5,
+  };
+  const sheetXml = sheets.map((sheet, si) => {
+    const columns = sheet.columns;
+    const rows = sheet.rows;
+    const widths = columns.map((col, i) => {
+      const longest = Math.max(
+        col.label.length,
+        ...rows.map((row) => String((row as unknown[])[i] ?? '').length),
+      );
+      return Math.min(48, Math.max(12, Math.min(col.width ?? 18, longest + 2)));
+    });
+    const lastCol = colLetter(columns.length - 1);
+    const headerStyle = String(toneIndex[sheet.headerTone ?? 'blue']);
+    const bodyWrap = sheet.wrapBody === true ? ' s="8"' : '';
+    const cellRefs: string[] = [];
+    for (let r = 0; r <= rows.length; r += 1) {
+      const isHeader = r === 0;
+      const cells: string[] = [];
+      for (let c = 0; c < columns.length; c += 1) {
+        const ref = `${colLetter(c)}${r + 1}`;
+        const raw = isHeader ? columns[c]!.label : (rows[r - 1] as unknown[])[c];
+        const type = columns[c]!.type;
+        if (isHeader) {
+          cells.push(
+            `<c r="${ref}" t="inlineStr" s="${headerStyle}"><is><t>${xmlEscape(String(raw ?? ''))}</t></is></c>`,
+          );
+          continue;
+        }
+        if (raw === null || raw === undefined || raw === '') {
+          cells.push(`<c r="${ref}"/>`);
+          continue;
+        }
+        if (type === 'number' || type === 'money') {
+          const num = Number(raw);
+          if (!Number.isFinite(num)) {
+            cells.push(
+              `<c r="${ref}" t="inlineStr"${bodyWrap}><is><t>${xmlEscape(String(raw))}</t></is></c>`,
+            );
+            continue;
+          }
+          cells.push(`<c r="${ref}" s="${type === 'money' ? 6 : 0}"><v>${String(num)}</v></c>`);
+          continue;
+        }
+        if (type === 'date') {
+          const serial = toSerial(String(raw));
+          if (serial === null) {
+            cells.push(
+              `<c r="${ref}" t="inlineStr"${bodyWrap}><is><t>${xmlEscape(String(raw))}</t></is></c>`,
+            );
+            continue;
+          }
+          cells.push(`<c r="${ref}" s="7"><v>${serial}</v></c>`);
+          continue;
+        }
+        cells.push(
+          `<c r="${ref}" t="inlineStr"${bodyWrap}><is><t>${xmlEscape(String(raw))}</t></is></c>`,
+        );
+      }
+      cellRefs.push(`<row r="${r + 1}">${cells.join('')}</row>`);
+    }
+    const filter =
+      sheet.filter !== false
+        ? `<autoFilter ref="A1:${lastCol}1"/>`
+        : '';
+    return (
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+      `<dimension ref="A1:${lastCol}${rows.length + 1}"/>` +
+      `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
+      `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` +
+      `${filter}` +
+      `<sheetData>${cellRefs.join('')}</sheetData></worksheet>`
+    );
+  });
+
+  const workbook =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+    `<sheets>${safeNames.map((name, i) => `<sheet name="${xmlEscape(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`;
+  // Blue / green / amber / purple section fills + slate README fill. Header
+  // text stays dark on all five so contrast never depends on the tint.
+  const styles =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+    `<fonts><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>` +
+    `<fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFD9E2F3"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFE4DFEC"/><bgColor indexed="64"/></patternFill></fill>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+    `<borders><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+    `<cellXfs count="9">` +
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="0" fontId="1" fillId="6" borderId="0" xfId="0" applyFont="1" applyFill="1"/>` +
+    `<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+    `<xf numFmtId="22" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>` +
+    `</cellXfs></styleSheet>`;
+  const contentTypes =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+    `<Default Extension="xml" ContentType="application/xml"/>` +
+    `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+    sheets
+      .map(
+        (_, i) =>
+          `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+      )
+      .join('') +
+    `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
+    `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>` +
+    `<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-package.extended-properties+xml"/>` +
+    `</Types>`;
+  const rels =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+    `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>` +
+    `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
+  const wbRels =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    sheets
+      .map(
+        (_, i) =>
+          `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`,
+      )
+      .join('') +
+    `</Relationships>`;
+  const core =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xmlEscape(safeTitle)}</dc:title><dc:creator>AFHomes</dc:creator></cp:coreProperties>`;
+  const app =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>AFHomes Reports</Application></Properties>`;
+  const files = [
+    { name: '[Content_Types].xml', data: encoder.encode(contentTypes) },
+    { name: '_rels/.rels', data: encoder.encode(rels) },
+    { name: 'xl/workbook.xml', data: encoder.encode(workbook) },
+    { name: 'xl/_rels/workbook.xml.rels', data: encoder.encode(wbRels) },
+    ...sheetXml.map((xmlText, i) => ({
+      name: `xl/worksheets/sheet${i + 1}.xml`,
+      data: encoder.encode(xmlText),
+    })),
+    { name: 'xl/styles.xml', data: encoder.encode(styles) },
+    { name: 'docProps/core.xml', data: encoder.encode(core) },
+    { name: 'docProps/app.xml', data: encoder.encode(app) },
+  ];
+  return zipStored(files);
+}
+
+/* ------------------------------------------------------------------ */
 /* PDF (minimal valid PDF 1.4, Helvetica base-14 - no embedded fonts)  */
 /* ------------------------------------------------------------------ */
 

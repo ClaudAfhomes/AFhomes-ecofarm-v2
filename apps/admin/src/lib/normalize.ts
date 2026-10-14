@@ -111,6 +111,24 @@ export function normalizeCustomerRequest(input: CreateCustomerRequest): CreateCu
         : input.address.postalCode,
       countryCode: (input.address.countryCode ?? 'PH').toUpperCase(),
     },
+    // Company-stated fields: same rules as the handler. Names collapse
+    // whitespace (no case invention), PH mobiles canonicalize, emails
+    // lowercase; every other verbatim field passes through for Zod trim.
+    supplementaryFullName: input.supplementaryFullName
+      ? upper(input.supplementaryFullName)
+      : input.supplementaryFullName,
+    supplementaryMobile: input.supplementaryMobile
+      ? (normalizePhilippinePhone(input.supplementaryMobile) ?? input.supplementaryMobile)
+      : input.supplementaryMobile,
+    supplementaryEmail: input.supplementaryEmail
+      ? (normalizeEmail(input.supplementaryEmail) ?? input.supplementaryEmail)
+      : input.supplementaryEmail,
+    relatedContactNo: input.relatedContactNo
+      ? (normalizePhilippinePhone(input.relatedContactNo) ?? input.relatedContactNo)
+      : input.relatedContactNo,
+    relatedEmail: input.relatedEmail
+      ? (normalizeEmail(input.relatedEmail) ?? input.relatedEmail)
+      : input.relatedEmail,
   };
 }
 
