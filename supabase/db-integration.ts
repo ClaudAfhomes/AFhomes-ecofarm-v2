@@ -15334,7 +15334,7 @@ async function main(): Promise<void> {
           await db.query(
             `insert into public.customers(id,customer_number,first_name,last_name,email,phone,status)
              values($1,$2,'POS','MEMBER',$3,'09180000003','active')`,
-            [buyer, `CUS-${s71}-${tag}`, `pos-${tag}-${s71}@example.invalid`],
+            [buyer, `CUS-${s71}-${tag}`, `pos-${tag.toLowerCase()}-${s71}@example.invalid`],
           );
           // super_admin sellers carry no genealogy chain, so no hierarchy rows.
           const sale = uuidFor(`${s71}:sale:${tag}`);
