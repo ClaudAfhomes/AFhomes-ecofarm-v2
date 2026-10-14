@@ -1,6 +1,6 @@
 # AF Homes: Supabase Free capacity and implementation SSOT
 
-Updated: 2026-10-13 (Asia/Singapore). Status: current repository practices and a read-only capacity snapshot; proposed policies are explicitly marked. This file is the single reference for working within the Supabase Free budget. Repository code, migrations and `AGENTS.md` remain authoritative for application behavior. Update this document when a quota, query, storage rule or company decision changes; do not create parallel capacity documents.
+Updated: 2026-10-13 (Asia/Singapore). Status: current repository practices and a read-only capacity snapshot; proposed policies are explicitly marked. This file is the single reference for working within the Supabase Free budget. Repository code, migrations and `AGENTS.md` remain authoritative for application behavior. Update this document when a quota, query, storage rule or company decision changes; do not create parallel capacity documents. Implementation work derived from this document lives in `docs/supabase/solutions/EGRESS-SOLUTIONS.md` (Phase 1 — egress and bandwidth reduction), `docs/supabase/solutions/DATABASE-SOLUTIONS.md` (Phase 2 — database size control), `docs/supabase/solutions/MAU-SOLUTIONS.md` (Phase 3 — Monthly Active Users control), `docs/supabase/solutions/STORAGE-SOLUTIONS.md` (Phase 4 — File Storage control + public URL media), `docs/supabase/solutions/LOG-SOLUTIONS.md` (Phase 5 — Log Ingestion control) and `docs/supabase/solutions/LOG-QUERY-SOLUTIONS.md` (Phase 6 — Log Query control).
 
 ## Current database and application
 

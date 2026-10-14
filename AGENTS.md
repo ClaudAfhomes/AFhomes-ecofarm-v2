@@ -5,12 +5,19 @@ business). Stack: **React 19 + Vite 8 SPAs → TanStack Query → Vercel Functio
 REST API → Supabase Postgres + Supabase Auth**.
 
 > **This file is the authority for the AF Homes codebase.** The retired JAD
-> Realty reference material (`docs/`, `legacy/`, `CHANGELOG.md`) was removed
-> from the repo during cleanup. Do not reintroduce it and do not implement from
-> JAD DTOs, table names, statuses, or permission models — they do not carry over
-> to the AF Homes schema.
+> Realty reference material (`legacy/`, `CHANGELOG.md`, and the old JAD `docs/`
+> tree) was removed from the repo during cleanup. Do not reintroduce it and do
+> not implement from JAD DTOs, table names, statuses, or permission models —
+> they do not carry over to the AF Homes schema. (The current `docs/` tree —
+> `docs/security/`, `docs/supabase/` — holds AF Homes material and is exempt
+> from that removal.)
 
-## Current state (Phase 2 — business foundation delivered)
+> Supabase Free-plan capacity (quotas, meters, and the six phased
+> implementation plans) lives in `docs/supabase/SUPABASE-FREE.md` (SSOT),
+> with plans in `docs/supabase/solutions/`. Read the SSOT before changing
+> queries, projections, polling, indexes, uploads, or Auth surfaces.
+
+## Current state (Phases 1–5 delivered below; later phases summarized after Phase 5)
 
 ### Phase 1 (complete)
 
@@ -32,19 +39,34 @@ Four new migrations, all prefixed `20260927…afhomes_phase2_*`:
 | `…_rpc.sql` | `private.money`, `private.hash_token`, `private.new_fallback_code`, `private.new_qr_token`, `public.sale_financial_summary`, `record_card_payment`, `verify_card_payment`, `activate_card_sale`, `correct_referral_upline` |
 | `…_support_functions.sql` | `next_customer_number`, `next_sale_number`, `issue_customer_onboarding_token` |
 
-API families (`api/_lib/router.ts`, data-driven `BUSINESS_FAMILIES`):
-`card-products`, `customers`, `sales` (+`payments`), `memberships` (+`points`),
-`commissions`, `referrals`, `queues`. Handlers in `api/_handlers/`.
+API families (`api/_lib/router.ts`, data-driven `BUSINESS_FAMILIES`;
+`admin/afhomes/*` is dispatched separately before them):
+`card-products`, `card-categories`, `customers`, `sales` (+`payments`),
+`memberships` (+`points`), `commissions`, `referrals`, `genealogy`,
+`analytics`, `reports`, `ost`, `ost-accreditation`, `documents`, `queues`,
+`official-forms`, `customer-imports`, `earning` (points earning),
+`redemptions`, `cms`, `address` (read-only PSGC reference), plus the
+unauthenticated `auth/customer/activate` + `auth/portals` and the
+ownership-based `customer` portal family. Handlers in `api/_handlers/`.
 
-Contracts: `packages/contracts/src/schemas/{lifecycle,sales,finance}.ts`.
-`lifecycle.ts` is the **single source for every status string and every legal
-transition** in the system — handlers, contracts and tests all import it.
+Contracts live in `packages/contracts/src/schemas/` (~25 files). `lifecycle.ts`
+is the **single source for the core sale-lifecycle statuses and their legal
+transitions** (customer, sale, payment, membership, commission, application,
+reservation — each with a transition map); newer domains own their own enums
+(import jobs, documents/OCR, genealogy, official-forms signatures, OST,
+redemption). Handlers, contracts and tests import these instead of
+re-declaring them.
 
 Pure rules: `api/_lib/commerce.ts` (commission, totals, spot cash, sellability,
 seller resolution). `api/_lib/handler-kit.ts` is the shared handler plumbing.
 
-Admin screens: `apps/admin/src/features/business/` — Card Products, Customers,
-Card Sales, Payment Queue, Activation Queue (+ commission qualification).
+Admin screens: `apps/admin/src/features/` — `business/` (Card Products,
+Customers, Card Sales, Payment Queue, Activation Queue + commission
+qualification), plus `redemption/`, `documents/` (ID review queue),
+`genealogy/`, `memberships/`, `ost/`, `cms/`, `reports/`, `account/`,
+`address/`, `auth/`, `afhomes/` (session, roles, departments, staff,
+dashboard). The directory is the source of truth; the list above names the
+headline areas.
 
 ### Phase 3 (complete — customer account activation and the customer portal)
 
@@ -112,9 +134,14 @@ Staff screens: `/admin/redemption` (identify → price → confirm, with a real
 browser QR camera scanner), `/admin/redemption/history`, `/admin/redemption/items`.
 The camera decoder is `jsqr`, run **locally**; no frame is ever uploaded.
 
-**Still not built (deliberately):** OST standalone app, NFC (none exists and
-none is planned), point redemption *by the customer*, genealogy UI, commission
-payout, email, refunds, renewal automation, OCR, notifications, marketing site.
+**Still not built (deliberately):** OST standalone app (OST lives inside the
+public SPA, `apps/web/src/features/ost/`), NFC (none exists and none is
+planned), commission payout as money movement (a payout *reference* marker
+exists on commissions — "WHEN and BY WHOM, never HOW MUCH or TO WHOM" — but no
+batching, schedule, method or tax handling), scheduled/auto renewal (OST
+renewal is a manual submit/approve/endorse/reject workflow), notifications.
+Transactional onboarding email over SMTP is wired (`customers.ts`, `sales.ts`
+via `api/_lib/customer-onboarding-email.ts`); there is no bulk/marketing mail.
 **No final-commission-qualification rule exists in this codebase** — the
 `final_qualification_pending → earned` transition is deliberately a manual,
 permission-gated, audited decision with mandatory notes. Do not invent it.
@@ -147,7 +174,57 @@ be aimed at a development or production database.
 Prior readiness assessment (the `docs/` runbook was removed during cleanup, so
 re-verify before relying on this): **Verdict: NOT READY** — there is no
 development/staging Supabase project, so the managed stack (PostgREST, GoTrue,
-Storage) has never been executed.
+Storage) has never been executed. Note (2026-10-14): the shared production
+project has since gone live and serves traffic (`docs/supabase/SUPABASE-FREE.md`
+2026-10-13 snapshot), so this verdict predates live operation — re-verify it
+against the Supabase Dashboard rather than relying on it.
+
+### Later phases (delivered after Phase 5 — summarized, not narrated)
+
+Roughly sixty further migrations, `20260930…` through `20261129…`. Grouped by
+family; filename prefixes are the pointers, full bodies are authoritative:
+
+- **Roles/permissions baseline** (`20260930…_role_permission_baseline`) and
+  **function hardening** (`…_phase17…`, `…_self_search_path_hardening`,
+  `…_claim_rpc_authorization`, `…_claim_lifecycle_repair`,
+  `…_private_trigger_execute_grants`, `…_readonly_auth_recovery`,
+  `…_staff_business_security`).
+- **CMS & marketing site** (`…_phase6_cms_foundation` — `afhomes-cms-media`
+  bucket, `cms_*` tables; public pages in `apps/web/src/marketing/`).
+- **Genealogy** (`…_phase7_genealogy`; UI in
+  `apps/admin/src/features/genealogy/`).
+- **OST registration, accreditation and renewal workflow**
+  (`…_phase8_ost_registration`, `…_ost_accreditation_workflow`; manual
+  submit/approve/endorse/reject — no scheduled auto-renewal exists).
+- **Card management & plans** (`…_phase10_card_management`,
+  `…_phase19_card_plan_description`, `…_card_plan_order`,
+  `…_vip_payment_schemes`, `…_official_vip_benefits`).
+- **Identity OCR & document security** (`…_phase12_identity_ocr`,
+  `…_document_scope_security`; `extracted_data`/`reviewed_data` on
+  `identity_documents`, review queue in `apps/admin/src/features/documents/`).
+- **Analytics & reports** (`…_phase14_analytics`; `reports` API family).
+- **Customer imports & directory** (`…_customer_import_jobs`,
+  `…_customer_directory_*`, `…_fix_customer_application_plan_field`,
+  `…_application_psgc_address`).
+- **Application purchase flow & official forms** (`…_application_purchase_flow`,
+  `…_official_forms`, `…_official_vip_benefits`).
+- **Services catalog** (`…_service_tier_discounts`, `…_service_publication`,
+  `…_server_service_prices`, `…_service_policy_status`,
+  `…_service_photo_management`, `…_service_staycation_eligibility`,
+  `…_operational_service_payments`; `afhomes-service-images` bucket).
+- **Points engine evolution** (`…_points_rebuild`, `…_retire_points_spending`,
+  `…_restore_points_spending`, `…_reserved_point_settlement`,
+  `…_point_refund_compensation`, `…_refund_earning_consistency`,
+  `…_preserve_legacy_points`, `…_points_position_service_acl`,
+  `…_fix_customer_points_position`, `…_promotion_stacking`,
+  `…_sale_tier_choice`, `…_commit_keeps_tier_discount`).
+- **Customer-initiated redemption & refunds**
+  (`…_customer_redemption_approval`, `…_external_service_refunds`;
+  `CustomerRedemptionsPage`, `CustomerRefundHistory` in the portal).
+- **Idempotency & identifiers** (`…_mutation_idempotency`,
+  `…_operational_sale_idempotency`, `…_business_ids`, `…_customer_code`,
+  `…_legacy_business_id_upgrade`, `…_membership_code_upgrade`,
+  `…_random_membership_number_allocator`).
 
 ## Layout
 
@@ -186,13 +263,16 @@ pnpm bootstrap:superadmin       # idempotent Super Admin bootstrap (see below)
 pnpm test:db                    # Phase 2 DB integration suite (needs a dev DB URL)
 pnpm test:db:local              # …against a disposable local PostgreSQL it boots itself
 pnpm test:db:harness            # …and proves the suite fails closed on an injected fault
+pnpm test:security:db           # security-focused DB checks (see package.json)
 ```
 
 Local API: `pnpm exec tsx api/dev-server.ts` (`:3000`; Vite proxies `/api`).
 
 > `pnpm` is invoked through corepack. If `turbo` reports "Unable to find package
-> manager binary", `pnpm` is not on `PATH` — use `npx pnpm <cmd>` or put a
-> `pnpm` shim on `PATH` (this repo has an untracked `.tmp-bin/pnpm.cmd`).
+> manager binary", `pnpm` is not on `PATH` — use `npx pnpm <cmd>` or run
+> `corepack enable` to put a `pnpm` shim on `PATH`. (A previously referenced
+> untracked `.tmp-bin/pnpm.cmd` shim does not exist in the tree — do not rely
+> on it.)
 
 Single spec: `pnpm --filter api exec vitest run <path>` (same per workspace).
 
@@ -270,9 +350,11 @@ the migrations assume but never create (`auth.users`, `auth.uid()`, the
   project-level `revoke` **outside** the migrations (the migrations must not
   fight the platform), and it must be verified on a real Supabase project — the
   local shim deliberately grants only `USAGE`, so it cannot prove either way.
-- **Private buckets** (`afhomes-customer-ids`, `afhomes-ost-ids`,
-  `afhomes-payment-receipts`) are non-public. Object delivery must use
-  short-lived signed URLs from an authorized server API.
+- **Storage buckets.** Private: `afhomes-customer-ids`, `afhomes-ost-ids`,
+  `afhomes-payment-receipts`, `afhomes-service-images` — all non-public;
+  object delivery must use short-lived signed URLs from an authorized server
+  API. Public: `afhomes-cms-media` (marketing content) — read-only public
+  delivery; uploads and deletes stay server-side via the service role.
 - **Migration discipline:** one idempotent migration per change, prefixed
   `afhomes_`, with the validation queries in the file header and a down note.
   After each batch run `supabase/security/rls_invariants.sql` (empty = PASS) and
@@ -428,7 +510,7 @@ works, and a test that cannot fail is not a test.** `pnpm test:db:local` and
   original control: adding it where none existed hard-blocks submission
   through native validation. Multi-selects, checkboxes, number/url inputs,
   and hidden+Button file uploads keep sanctioned native patterns.
-- Admin routes split per feature (`React.lazy` in `App.tsx`, shell-mounted
+- Admin routes split per feature (`React.lazy` in `apps/admin/src/app/App.tsx`, shell-mounted
   `Suspense` in `AdminLayout`); the chart library loads behind its own
   skeleton. Specs that render routes await the chunk (`findBy*`, longer
   timeouts for first-transform). Never stub the global `URL` constructor with
@@ -545,9 +627,9 @@ host matches the expected ref.
 Procedure (requires approval — do not run unattended):
 
 ```sh
-npx pnpm bootstrap:superadmin -- --check   # validate config; no network
-npx pnpm db:migrate                        # only when an approved migration is pending
-npx pnpm bootstrap:superadmin              # reconcile after invitation approval
+pnpm bootstrap:superadmin -- --check   # validate config; no network
+pnpm db:migrate                        # only when an approved migration is pending
+pnpm bootstrap:superadmin              # reconcile after invitation approval
 ```
 
 It reconciles every partial state: no auth user → invite; auth user without a
@@ -610,7 +692,10 @@ sanctioned whole-object read — it parses through a `VITE_`-only Zod object, an
 
 Single Vercel project, single origin:
 
-- `/` → `apps/web/dist`, `/admin` → `apps/admin/dist`
+- `/` → `apps/web/dist` (marketing pages, customer portal, OST/staff
+  surfaces), `/admin` → `apps/admin/dist` (also served at the `/staff`,
+  `/employee`, `/finance`, `/hr`, `/sales` aliases — see `vercel.json`
+  rewrites)
 - `/api/v1/*` → the single Function `api/router.ts`
 - `/health` → readiness probe, also the only scheduled job (daily `0 0 * * *`)
 
