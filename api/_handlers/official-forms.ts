@@ -12,6 +12,7 @@ import {
   normalizePersonName,
   normalizePostalCode,
   officialFormListQuerySchema,
+  officialVipNumberSchema,
   purchaseReservationCreateSchema,
   purchaseReservationUpdateSchema,
   recordPurchasePaymentSchema,
@@ -32,6 +33,7 @@ import {
   deny,
   fail,
   isoOrNull,
+  legacyVipSchema,
   jsonBody,
   list,
   mapRpcError,
@@ -439,6 +441,7 @@ async function getAgreement(db: Db, id: string) {
   return {
     id: row.id,
     reservationNumber: row.reservation_number,
+    officialVipNumber: row.official_vip_number ?? null,
     revisionNumber: row.revision_number ?? undefined,
     reservationDate: row.reservation_date,
     agreementDate: row.agreement_date,
@@ -537,11 +540,22 @@ async function listRows(
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);
   if (q.to) query = query.lte('created_at', `${q.to}T23:59:59.999Z`);
-  if (q.search)
+  if (
+    q.search &&
+    table === 'reservation_agreements' &&
+    officialVipNumberSchema.safeParse(q.search).success
+  ) {
+    if (await legacyVipSchema(db))
+      return res
+        .status(200)
+        .json({ data: [], meta: { total: 0, limit: q.limit, offset: q.offset } });
+    query = query.eq('official_vip_number', q.search);
+  } else if (q.search) {
     query = query.ilike(
       table === 'customer_applications' ? 'application_number' : 'reservation_number',
       `%${q.search.replace(/[%_,]/g, '')}%`,
     );
+  }
   // The application-origin link is the ONLY way to ask "did this application
   // become a reservation?", so this is the authoritative lookup for it.
   if (table === 'reservation_agreements' && q.application)
@@ -1671,6 +1685,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const primary = (agreement.primary ?? {}) as Record<string, string>;
       const secondary = (agreement.secondary ?? null) as Record<string, string> | null;
       const fields: Record<string, string> = {
+        ...(agreement.officialVipNumber
+          ? { official_vip_number: String(agreement.officialVipNumber) }
+          : {}),
         sale_id: String(agreement.saleId),
         customer_application_id: String(agreement.customerApplicationId ?? ''),
         vip_tier: String(agreement.tier),

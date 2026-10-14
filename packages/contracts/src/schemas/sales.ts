@@ -1,3 +1,4 @@
+import { officialVipNumberSchema } from './business-ids.js';
 /**
  * AFHomes Phase 2 - card products, customers, sales, and referrals.
  *
@@ -316,6 +317,7 @@ export type CustomerAddress = z.infer<typeof customerAddressSchema>;
 
 /** `governmentIdNumber` is accepted on write and never returned on read. */
 export const createCustomerSchema = z.object({
+  requestId: z.string().uuid().optional(),
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
   lastName: personNameSchema,
@@ -407,6 +409,7 @@ export function maskGovernmentId(value: string | null | undefined): string | nul
 /* ================================================================== */
 
 export const createSaleSchema = z.object({
+  requestId: z.string().uuid(),
   customerId: z.string().uuid(),
   productId: z.string().uuid(),
   /**
@@ -424,11 +427,13 @@ export const createSaleSchema = z.object({
    */
   paymentScheme: paymentSchemeSchema.default('spot_cash'),
 });
+/** Keep this UUID for every retry of the same purchase submission. */
 export type CreateSaleRequest = z.infer<typeof createSaleSchema>;
 
 export const saleSchema = z.object({
   id: z.string().uuid(),
   saleNumber: z.string(),
+  officialVipNumber: officialVipNumberSchema.nullish(),
   customerId: z.string().uuid(),
   customerName: z.string(),
   productId: z.string().uuid(),

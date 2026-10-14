@@ -496,6 +496,11 @@ const captureBaseline = async (): Promise<void> => {
     (await db.query<{ n: number }>('select count(*)::int n from private.mutation_requests'))
       .rows[0]!.n,
   );
+  baseline.set(
+    'private.vip_control_numbers',
+    (await db.query<{ n: number }>('select count(*)::int n from private.vip_control_numbers'))
+      .rows[0]!.n,
+  );
   for (const table of BASELINE_TABLES) {
     const r = await db.query<{ n: number }>(`select count(*)::int as n from public.${table}`);
     baseline.set(table, r.rows[0]!.n);
@@ -8886,7 +8891,11 @@ async function main(): Promise<void> {
         const cn = (
           await one<{ customer_number: string }>('select * from public.next_customer_number()')
         ).customer_number;
-        check('new customers allocate AF-CUS-XXXXX', afRe('AF-CUS').test(cn), cn);
+        check(
+          'new customers allocate annual AF-CUS-YYYY-NNNNNN',
+          /^AF-CUS-[1-9][0-9]{3}-(?!000000)[0-9]{6}$/.test(cn),
+          cn,
+        );
         const sn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
           .sale_number;
         check(
@@ -9816,7 +9825,7 @@ async function main(): Promise<void> {
           // row only for the five public tables.
           if (t.entity.startsWith('ost_')) continue;
           const row = await db.query<{ key: string }>(
-            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? ' where id <> all($1::uuid[])' : ''} order by ${t.key} limit 1`,
+            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? " where id <> all($1::uuid[]) and customer_number !~ '^AF-CUS-[1-9][0-9]{3}-[0-9]{6}$'" : ''} order by ${t.key} limit 1`,
             t.entity === 'customer' ? [seededCustomers.map((customer) => customer.id)] : [],
           );
           if (!row.rows[0]) continue;
@@ -10116,7 +10125,7 @@ async function main(): Promise<void> {
         // Already-modern identifiers are never regenerated.
         const modernUntouched = await db.query<{ n: number }>(
           `select count(*)::int as n from public.customers
-            where customer_code is not null and customer_number !~ '^AF-CUS-[A-HJ-NP-Z2-9]{5}$'`,
+            where customer_code is not null and customer_number !~ '^AF-CUS-([A-HJ-NP-Z2-9]{5}|[1-9][0-9]{3}-(?!000000)[0-9]{6})$'`,
         );
         eq('no customer number is left in a legacy format', modernUntouched.rows[0]!.n, 0);
 
@@ -15649,6 +15658,10 @@ async function main(): Promise<void> {
         ))!.rows.map((r) => r.id);
 
         await db?.query('begin');
+        await db?.query(
+          `delete from private.business_id_aliases where entity_type='customer' and entity_id=any($1::uuid[])`,
+          [[...new Set([...custSet, ...createdCustomerIds])]],
+        );
         await db?.query('delete from private.mutation_requests where actor_id = any($1::uuid[])', [
           staffSet,
         ]);
@@ -15689,6 +15702,10 @@ async function main(): Promise<void> {
         // Reservation-origin payments are protected history, so the owner-only cleanup
         // escape is armed before this delete, not just before the evidence one.
         await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+        await db?.query(
+          `delete from private.purchase_document_evidence where payment_id in (select id from public.payments where customer_id=any($1::uuid[])) or membership_id in (select id from public.memberships where customer_id=any($1::uuid[])) or sale_id in (select id from public.card_sales where customer_id=any($1::uuid[]))`,
+          [custSet],
+        );
         await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
           custSet,
         ]);
@@ -15799,9 +15816,17 @@ async function main(): Promise<void> {
            (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
           [custSet],
         );
+        await db?.query(
+          'update public.customer_applications set sale_id=null where customer_id=any($1::uuid[])',
+          [custSet],
+        );
         await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
           custSet,
         ]);
+        await db?.query(
+          'delete from private.vip_control_numbers where customer_id=any($1::uuid[])',
+          [custSet],
+        );
         // Customer-application rows reference synthetic customers (and synthetic
         // sales, already removed above). Holders go before headers; headers go
         // before the customer row itself. Documents were removed with payments.
@@ -15972,6 +15997,11 @@ async function main(): Promise<void> {
         ).rows[0]!.n;
         if (requestsRemaining !== baseline.get('private.mutation_requests'))
           leaks.push('private.mutation_requests: cleanup mismatch');
+        const vipRemaining = (
+          await db.query<{ n: number }>('select count(*)::int n from private.vip_control_numbers')
+        ).rows[0]!.n;
+        if (vipRemaining !== baseline.get('private.vip_control_numbers'))
+          leaks.push('private.vip_control_numbers: cleanup mismatch');
         for (const table of BASELINE_TABLES) {
           const after = await db?.query<{ n: number }>(
             `select count(*)::int as n from public.${table}`,

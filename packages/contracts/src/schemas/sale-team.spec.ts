@@ -1,5 +1,32 @@
 import { expect, it } from 'vitest';
-import { aaNumberSchema } from './sale-team.js';
+import { aaNumberSchema, saleTeamAccreditationSchema } from './sale-team.js';
+
+it.each(['AAI26100001', 'AAO26100002', 'AAI26019999', 'AAO26120001'])(
+  'accepts official accreditation number %s',
+  (value) => expect(aaNumberSchema.parse(` ${value.toLowerCase()} `)).toBe(value),
+);
+
+it.each(['AAI26000001', 'AAO26130001', 'AAI26100000', 'AAO261000001', 'JAI26100001'])(
+  'rejects invalid official accreditation number %s',
+  (value) => expect(aaNumberSchema.safeParse(value).success).toBe(false),
+);
+
+it('rejects a typed accreditation number belonging to the other seller kind', () => {
+  const record = {
+    aaNumber: 'AAI26100001',
+    kind: 'IST',
+    fullName: 'Synthetic Seller',
+    status: 'accredited',
+    startsOn: '2026-10-01',
+    expiresOn: '2027-09-30',
+  };
+  expect(saleTeamAccreditationSchema.safeParse(record).success).toBe(true);
+  expect(saleTeamAccreditationSchema.safeParse({ ...record, kind: 'OST' }).success).toBe(false);
+  expect(
+    saleTeamAccreditationSchema.safeParse({ ...record, aaNumber: 'AAO26100001', kind: 'OST' })
+      .success,
+  ).toBe(true);
+});
 
 it('accepts six letters and six digits, normalizing typed case and spacing', () => {
   expect(aaNumberSchema.parse(' aa-k7q2m9t4b1r8 ')).toBe('AA-K7Q2M9T4B1R8');

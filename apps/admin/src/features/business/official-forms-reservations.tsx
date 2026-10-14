@@ -728,6 +728,11 @@ export function ReservationAgreementEditorPage() {
       />
       {existing.data ? (
         <p className={styles.stateSummary}>
+          {existing.data.officialVipNumber ? (
+            <>
+              <strong>Official VIP number:</strong> {existing.data.officialVipNumber} ·{' '}
+            </>
+          ) : null}
           <strong>Status:</strong> {existing.data.status} · <strong>Tier:</strong>{' '}
           {existing.data.tier} · <strong>Total:</strong> {existing.data.totalPrice}
           {!applicationOrigin ? (

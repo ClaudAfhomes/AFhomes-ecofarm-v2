@@ -512,12 +512,18 @@ export const exportReservationAgreement = (id: string, format: 'xlsx' | 'pdf') =
 /* ------------------------------------------------------------------ */
 
 export const getSales = (
-  params: { status?: string; customerId?: string; productId?: string } = {},
+  params: {
+    status?: string;
+    customerId?: string;
+    productId?: string;
+    officialVipNumber?: string;
+  } = {},
 ): Promise<Sale[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.customerId) query.set('customerId', params.customerId);
   if (params.productId) query.set('productId', params.productId);
+  if (params.officialVipNumber) query.set('officialVipNumber', params.officialVipNumber);
   const suffix = query.toString();
   return requestList(`/sales${suffix ? `?${suffix}` : ''}`, saleSchema);
 };

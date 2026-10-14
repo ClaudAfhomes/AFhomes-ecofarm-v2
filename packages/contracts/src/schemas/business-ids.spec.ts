@@ -6,10 +6,25 @@ import {
   afIdPattern,
   isAfId,
   matchesBusinessId,
+  officialVipNumberSchema,
   type AfIdPrefix,
 } from './business-ids.js';
 
 describe('AF business-ID vocabulary', () => {
+  it('accepts only approved VIP tiers, fixed cash and explicit installment terms with S', () => {
+    for (const code of ['26101400001G1C01S', '26101400002S1T12S', '26101400003B1T04S']) {
+      expect(officialVipNumberSchema.safeParse(code).success).toBe(true);
+    }
+    for (const code of [
+      '26101400000G1C01S',
+      '26101400001G1C12S',
+      '26101400001G1T00S',
+      '26101400001G1T12N',
+      '26131400001G1C01S',
+    ]) {
+      expect(officialVipNumberSchema.safeParse(code).success).toBe(false);
+    }
+  });
   it('uses the 32-symbol readable alphabet with no ambiguous characters', () => {
     expect(AF_ID_ALPHABET).toHaveLength(32);
     expect(new Set(AF_ID_ALPHABET).size).toBe(32);
@@ -52,6 +67,16 @@ describe('AF business-ID vocabulary', () => {
     expect(pattern.test(`${prefix}-K7M40`)).toBe(false);
     expect(isAfId(prefix, null)).toBe(false);
     expect(isAfId(prefix, 42)).toBe(false);
+  });
+
+  it('accepts annual customer IDs without renumbering legacy random IDs', () => {
+    expect(isAfId('AF-CUS', 'AF-CUS-2026-000001')).toBe(true);
+    expect(isAfId('AF-CUS', 'AF-CUS-2027-999999')).toBe(true);
+    for (const bad of ['AF-CUS-2026-000000', 'AF-CUS-2026-12345', 'AF-CUS-026-000001']) {
+      expect(isAfId('AF-CUS', bad)).toBe(false);
+    }
+    expect(isAfId('AF-CUS', 'AF-CUS-K7M4Q')).toBe(true);
+    expect(isAfId('AF-CSALE', 'AF-CSALE-2026-000001')).toBe(false);
   });
 
   it('matches legacy and AF identifiers case-insensitively for search', () => {

@@ -62,6 +62,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (result.error) {
       if (result.error.code === '42501')
         return fail(res, 'FORBIDDEN', 'Accreditation approval is not permitted.', 403);
+      if (result.error.code === '55000' && result.error.message === 'AA_SEQUENCE_EXHAUSTED')
+        return fail(
+          res,
+          'CONFLICT',
+          'This month’s AA number series is full. Contact an administrator.',
+          409,
+        );
       if (/INVALID|REQUIRED|CONFLICT/.test(result.error.message))
         return fail(res, 'CONFLICT', 'Review the account and approved accreditation dates.', 409);
       throw result.error;

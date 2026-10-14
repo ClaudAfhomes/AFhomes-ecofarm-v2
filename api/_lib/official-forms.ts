@@ -177,10 +177,14 @@ export const customerApplicationXlsx = (fields: Record<string, string>) =>
     CUSTOMER_IMPORT_HEADERS.map((header) => fields[header] ?? ''),
   ]);
 
-export const reservationAgreementXlsx = (fields: Record<string, string>) =>
-  toXlsx('IST Agreement', textColumns(IST_IMPORT_HEADERS), [
-    IST_IMPORT_HEADERS.map((header) => fields[header] ?? ''),
+export const reservationAgreementXlsx = (fields: Record<string, string>) => {
+  const headers = fields.official_vip_number
+    ? [...IST_IMPORT_HEADERS, 'official_vip_number']
+    : IST_IMPORT_HEADERS;
+  return toXlsx('IST Agreement', textColumns(headers), [
+    headers.map((header) => fields[header] ?? ''),
   ]);
+};
 
 const decodeXml = (value: string) =>
   value

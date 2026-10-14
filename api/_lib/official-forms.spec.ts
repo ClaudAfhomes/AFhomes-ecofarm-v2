@@ -127,6 +127,11 @@ describe('official form XLSX/PDF', () => {
     expect(parseFormXlsx(reservationAgreementXlsx(fields))).toEqual(fields);
     expect(validateFormImport('reservation_agreement', fields).errors).toEqual([]);
   });
+  it('exports the issued VIP number as text without replacing the reservation reference', () => {
+    const fields = { official_vip_number: '26101400001G1C01S', sale_id: 'preserved-sale' };
+    expect(parseFormXlsx(reservationAgreementXlsx(fields))).toMatchObject(fields);
+  });
+
   it('requires vip_tier on IST imports so secondary holders can be validated', () => {
     const fields = Object.fromEntries(IST_IMPORT_HEADERS.map((key) => [key, '']));
     Object.assign(fields, {

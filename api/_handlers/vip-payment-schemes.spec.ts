@@ -191,7 +191,11 @@ let customerCursor = 0;
 const nextCustomer = () => CUSTOMERS[customerCursor++ % CUSTOMERS.length]!;
 
 async function createSale(productId: string, paymentScheme?: string) {
-  const body: Record<string, string> = { customerId: nextCustomer(), productId };
+  const body: Record<string, string> = {
+    requestId: crypto.randomUUID(),
+    customerId: nextCustomer(),
+    productId,
+  };
   if (paymentScheme) body.paymentScheme = paymentScheme;
   return call('sales', { method: 'POST', path: '', token: TOKEN.admin, body });
 }

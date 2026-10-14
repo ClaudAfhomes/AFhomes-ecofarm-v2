@@ -5,10 +5,11 @@ export const aaNumberSchema = z
   .trim()
   .toUpperCase()
   .max(64)
-  .regex(/^AA-[A-Z0-9]{12}$/)
   .refine(
-    (value) => (value.slice(3).match(/[A-Z]/g) ?? []).length === 6,
-    'Use six letters and six digits.',
+    (value) =>
+      /^AA[IO]\d{2}(?:0[1-9]|1[0-2])(?!0000)\d{4}$/.test(value) ||
+      (/^AA-[A-Z0-9]{12}$/.test(value) && (value.slice(3).match(/[A-Z]/g) ?? []).length === 6),
+    'Use an AAI/AAO number with a valid month and sequence, or an existing AA number.',
   );
 export const saleTeamKindSchema = z.enum(['IST', 'OST']);
 export const saleTeamAccreditationSchema = z
@@ -20,7 +21,19 @@ export const saleTeamAccreditationSchema = z
     startsOn: z.iso.date(),
     expiresOn: z.iso.date(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      (value.aaNumber.startsWith('AAI') && value.kind !== 'IST') ||
+      (value.aaNumber.startsWith('AAO') && value.kind !== 'OST')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['aaNumber'],
+        message: 'AA prefix must match seller kind.',
+      });
+    }
+  });
 export const saleTeamLookupSchema = saleTeamAccreditationSchema.nullable();
 export const manageSaleTeamSchema = z
   .object({

@@ -45,6 +45,12 @@ it('shows the own AA without editing or approval controls', async () => {
   expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
   expect(api.request).toHaveBeenCalledWith('/sale-team/me', expect.anything());
 });
+it('displays the official IST number on the own account', async () => {
+  api.request.mockResolvedValue({ ...record, aaNumber: 'AAI26100001' });
+  renderWithProviders(<SaleTeamAccreditationCard kind="IST" />, { user: admin });
+  expect(await screen.findByText('AAI26100001')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+});
 it('requires dates and explicit confirmation before admin issuance', async () => {
   api.request.mockImplementation((_path: string, _schema: unknown, init?: RequestInit) =>
     Promise.resolve(init ? record : null),

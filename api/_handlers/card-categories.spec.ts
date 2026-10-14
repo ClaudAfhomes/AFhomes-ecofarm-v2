@@ -397,7 +397,11 @@ describe('category-gated selling', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(ok.status).toBe(201);
 
@@ -415,15 +419,13 @@ describe('category-gated selling', () => {
       token: TOKEN.superAdmin,
       query: { active: 'all' },
     });
-    expect(
-      (data(managed.body) as { code: string }[]).map((r) => r.code),
-    ).toEqual(expect.arrayContaining(['GOLD']));
+    expect((data(managed.body) as { code: string }[]).map((r) => r.code)).toEqual(
+      expect.arrayContaining(['GOLD']),
+    );
 
     // …its detail is 404 for sellers but resolvable for management…
     expect((await call('cards', { path: PRODUCT.gold, token: TOKEN.admin })).status).toBe(404);
-    expect((await call('cards', { path: PRODUCT.gold, token: TOKEN.superAdmin })).status).toBe(
-      200,
-    );
+    expect((await call('cards', { path: PRODUCT.gold, token: TOKEN.superAdmin })).status).toBe(200);
 
     // …and a NEW application for it is refused without touching history.
     install([{ fn: 'next_sale_number', result: [{ sale_number: 'SALE-920002' }] }]);
@@ -434,7 +436,11 @@ describe('category-gated selling', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(refused.status).toBe(409);
     expect(db2.rows('card_sales')).toHaveLength(salesBefore);
@@ -459,7 +465,11 @@ describe('category-gated selling', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(sale.status).toBe(201);
   });
@@ -470,7 +480,11 @@ describe('category-gated selling', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     const db = holder.db as FakeSupabase;
     const before = {

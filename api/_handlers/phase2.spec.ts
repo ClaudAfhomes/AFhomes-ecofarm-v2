@@ -529,6 +529,8 @@ describe('customers', () => {
     ['memberships', 'memberships', 'customer_id'],
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
+    ['customer applications', 'customer_applications', 'customer_id'],
+    ['reservation agreements', 'reservation_agreements', 'customer_id'],
   ])('blocks customer deletion when protected %s exist', async (label, table, column) => {
     const id = 'aaaaaaaa-0000-4000-8000-000000000098';
     install({
@@ -699,7 +701,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(state.status).toBe(201);
     const body = state.body as Record<string, unknown>;
@@ -745,7 +751,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.viewer,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(state.status).toBe(201);
     expect(state.body).toMatchObject({
@@ -764,7 +774,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     const sale = db.rows('card_sales').find((r) => r.id === SALE.submitted)!;
     expect(sale.id).toBe(SALE.submitted);
@@ -780,7 +794,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.retired },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.retired,
+      },
     });
     expect(state.status).toBe(409);
     expect(err(state.body).message).toMatch(/product inactive/);
@@ -791,7 +809,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.cancelled, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.cancelled,
+        productId: PRODUCT.gold,
+      },
     });
     expect(state.status).toBe(409);
   });
@@ -801,14 +823,22 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: '99999999-9999-4999-8999-999999999999' },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: '99999999-9999-4999-8999-999999999999',
+      },
     });
     expect(badProduct.status).toBe(404);
     const badCustomer = await call('sales', {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: '99999999-9999-4999-8999-999999999999', productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: '99999999-9999-4999-8999-999999999999',
+        productId: PRODUCT.gold,
+      },
     });
     expect(badCustomer.status).toBe(404);
   });
@@ -819,7 +849,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.bronze },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.bronze,
+      },
     });
     const saleNumber = (created.body as { saleNumber: string }).saleNumber;
     const sale = db.rows('card_sales').find((r) => r.sale_number === saleNumber)!;
@@ -834,7 +868,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     const saleNumber = (created.body as { saleNumber: string }).saleNumber;
     expect(
@@ -851,6 +889,7 @@ describe('card sales', () => {
       token: TOKEN.admin,
       // The inactive staff account is a valid row but must not be sellable.
       body: {
+        requestId: crypto.randomUUID(),
         customerId: CUSTOMER.prospect,
         productId: PRODUCT.gold,
         sellerStaffId: UUID.inactiveStaff,
@@ -868,6 +907,7 @@ describe('card sales', () => {
       path: '',
       token: TOKEN.admin,
       body: {
+        requestId: crypto.randomUUID(),
         customerId: CUSTOMER.prospect,
         productId: PRODUCT.gold,
         sellerStaffId: UUID.superAdminStaff,
@@ -881,7 +921,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.viewer,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -891,7 +935,7 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: 'nope', productId: PRODUCT.gold },
+      body: { requestId: crypto.randomUUID(), customerId: 'nope', productId: PRODUCT.gold },
     });
     expect(state.status).toBe(400);
   });
@@ -902,7 +946,11 @@ describe('card sales', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+      body: {
+        requestId: crypto.randomUUID(),
+        customerId: CUSTOMER.prospect,
+        productId: PRODUCT.gold,
+      },
     });
     expect(state.status).toBe(409);
   });

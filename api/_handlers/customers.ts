@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { customerDirectory } from '../_lib/customer-directory.js';
 /**
  * AFHomes customer master records.
@@ -28,6 +29,7 @@ import {
   deny,
   fail,
   isoOrNull,
+  isUnavailableRpc,
   jsonBody,
   type Db,
   list,
@@ -162,6 +164,8 @@ async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
     ['memberships', 'memberships', 'customer_id'],
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
+    ['customer applications', 'customer_applications', 'customer_id'],
+    ['reservation agreements', 'reservation_agreements', 'customer_id'],
   ];
   const results = await Promise.all(
     checks.map(async ([label, table, column]) => ({
@@ -233,15 +237,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer details', 400);
       const input = parsed.data;
 
-      const { data: sequence, error: seqError } = await db.rpc('next_customer_number');
-      if (seqError) return mapRpcError(res, seqError);
-      // next_customer_number() is RETURNS TABLE, so live PostgREST answers
-      // with a one-row array. Fail BEFORE the insert, never persist a blank.
-      const customerNumber = singleRpcText(sequence, 'customer_number');
-      if (!customerNumber) return fail(res, 'INTERNAL', 'Customer number generation failed', 500);
-
       const row = {
-        customer_number: customerNumber,
         first_name: input.firstName,
         middle_name: input.middleName === undefined ? null : normalizePersonName(input.middleName),
         last_name: input.lastName,
@@ -269,28 +265,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: 'prospect',
       };
 
-      const { data, error } = await db.from('customers').insert(row).select('*').single();
+      const { data: customerId, error } = await db.rpc('create_customer_once', {
+        p_request_id: input.requestId ?? randomUUID(),
+        p_actor_id: auth.userId,
+        p_input: row,
+      });
+      if (isUnavailableRpc(error, 'create_customer_once')) {
+        const sequence = await db.rpc('next_customer_number');
+        if (sequence.error) return mapRpcError(res, sequence.error);
+        const number = singleRpcText(sequence.data, 'customer_number');
+        if (!number) return fail(res, 'INTERNAL', 'Customer number generation failed', 500);
+        if (/^AF-CUS-\d{4}-\d{6}$/.test(number))
+          return fail(res, 'INTERNAL', 'Customer numbering migration is not available yet', 503);
+        // shortcut: legacy writes remain non-atomic until the approved numbering RPC is deployed.
+        const inserted = await db
+          .from('customers')
+          .insert({ ...row, customer_number: number })
+          .select('*')
+          .single();
+        if (inserted.error) return mapRpcError(res, inserted.error);
+        await audit(db, auth.userId, 'CUSTOMER_CREATED', 'customer', inserted.data.id, null, {
+          customerNumber: number,
+          email: input.email,
+          createdBy: auth.userId,
+        });
+        return res.status(201).json(toCustomer(inserted.data));
+      }
       if (error) {
-        if ((error as { code?: string }).code === '23505')
+        if (error.code === '23505')
           return fail(
             res,
             'CONFLICT',
             'A customer with that government ID or email already exists',
             409,
           );
-        throw error;
+        return mapRpcError(res, error);
       }
-
-      await audit(
-        db,
-        auth.userId,
-        'CUSTOMER_CREATED',
-        'customer',
-        String((data as { id: string }).id),
-        null,
-        // Never place the government ID number in the audit trail.
-        { customerNumber, email: input.email, createdBy: auth.userId },
-      );
+      if (typeof customerId !== 'string' || !customerId)
+        return fail(res, 'INTERNAL', 'Customer creation failed', 500);
+      const { data, error: readError } = await db
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .single();
+      if (readError) throw readError;
       return res.status(201).json(toCustomer(data as Record<string, unknown>));
     }
 

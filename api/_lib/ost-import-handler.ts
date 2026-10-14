@@ -32,7 +32,7 @@ type OstExportRow = {
 type SponsorScanRow = {
   id: string;
   status: string;
-  staff_role_assignments: { roles: { slug: string; is_active: boolean } }[];
+  staff_role_assignments: unknown;
 };
 type ContactRow = { email: string; phone: string };
 type StaffEmailRow = { email: string };
@@ -142,7 +142,9 @@ export async function handleOstImport(
       const results = (await Promise.all([
         db
           .from('staff_users')
-          .select('id,status,staff_role_assignments(roles(slug,is_active))')
+          .select(
+            'id,status,staff_role_assignments!staff_role_assignments_staff_id_fkey(roles(slug,is_active))',
+          )
           .in('id', [...new Set(batch.map((i) => i.sponsorStaffId))]),
         db
           .from('ost_applications')
@@ -167,8 +169,9 @@ export async function handleOstImport(
           .object({
             id: z.string(),
             status: z.string(),
-            staff_role_assignments: z.array(
-              z.object({ roles: z.object({ slug: z.string(), is_active: z.boolean() }) }),
+            staff_role_assignments: z.preprocess(
+              (value) => (Array.isArray(value) ? value : value == null ? [] : [value]),
+              z.array(z.object({ roles: z.object({ slug: z.string(), is_active: z.boolean() }) })),
             ),
           })
           .safeParse(sponsor);

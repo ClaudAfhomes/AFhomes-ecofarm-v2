@@ -14,6 +14,29 @@ export type Db = any;
 
 export type FailureCode = Parameters<typeof toErrorEnvelope>[0];
 
+/** Rollout compatibility applies only to the named missing RPC, never its dependency errors. */
+export function isUnavailableRpc(
+  error: { code?: string; message?: string } | null,
+  name: string,
+): boolean {
+  const message = error?.message ?? '';
+  return (
+    (error?.code === 'PGRST202' &&
+      message.startsWith(`Could not find the function public.${name}(`)) ||
+    (error?.code === '42883' &&
+      (message === `${name} does not exist` ||
+        (message.startsWith(`function public.${name}(`) && message.endsWith('does not exist'))))
+  );
+}
+
+/** A stale RPC cache after migration must not reactivate legacy issuance. */
+export async function legacyVipSchema(db: Db): Promise<boolean> {
+  const { error } = await db.from('card_sales').select('official_vip_number').limit(0);
+  if (!error) return false;
+  if (error.code === '42703' && String(error.message).includes('official_vip_number')) return true;
+  throw error;
+}
+
 export function fail(
   res: VercelResponse,
   code: FailureCode,
@@ -104,6 +127,18 @@ export function mapRpcError(
   const [code] = message.split(':');
 
   const byCode: Record<string, [FailureCode, number]> = {
+    VIP_SEQUENCE_EXHAUSTED_OR_INVALID: ['CONFLICT', 409],
+    VIP_SEQUENCE_EXHAUSTED: ['CONFLICT', 409],
+    VIP_PAYMENT_OFFER_NOT_APPROVED: ['CONFLICT', 409],
+    VIP_PLAN_NOT_ACTIVE: ['CONFLICT', 409],
+    VIP_TIER_NOT_APPROVED: ['CONFLICT', 409],
+    VIP_ENCODED_TERMS_CONFLICT: ['CONFLICT', 409],
+    VIP_NUMBER_IMMUTABLE: ['CONFLICT', 409],
+    CUSTOMER_SEQUENCE_EXHAUSTED: ['CONFLICT', 409],
+    SALE_SUBMISSION_INVALID: ['FORBIDDEN', 403],
+    SELLER_OUTSIDE_DOWNLINE: ['FORBIDDEN', 403],
+    SELLER_NOT_ELIGIBLE: ['FORBIDDEN', 403],
+    CUSTOMER_ALREADY_HAS_MEMBERSHIP: ['CONFLICT', 409],
     SALE_NOT_FOUND: ['NOT_FOUND', 404],
     PAYMENT_NOT_FOUND: ['NOT_FOUND', 404],
     ACTOR_REQUIRED: ['UNAUTHORIZED', 401],

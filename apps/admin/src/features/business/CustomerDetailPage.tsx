@@ -277,6 +277,11 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
         <DetailField label="Sale number">
           <DetailMono>{sale.saleNumber}</DetailMono>
         </DetailField>
+        {sale.officialVipNumber ? (
+          <DetailField label="Official VIP number">
+            <DetailMono>{sale.officialVipNumber}</DetailMono>
+          </DetailField>
+        ) : null}
         <DetailField label="Card">{sale.productName}</DetailField>
         <DetailField label="Scheme">{paymentSchemeLabel(sale.paymentScheme)}</DetailField>
         <DetailField label="Seller">{sale.sellerName ?? '—'}</DetailField>

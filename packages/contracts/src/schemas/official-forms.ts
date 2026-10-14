@@ -1,3 +1,4 @@
+import { officialVipNumberSchema } from './business-ids.js';
 import { z } from 'zod';
 import {
   birthDateSchema,
@@ -131,7 +132,8 @@ const customerApplicationInputSchema = z.object({
  * substitute for.
  */
 const validateHolderLocationCodes = (
-  holder: { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
+  holder:
+    { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
   path: string,
   ctx: z.RefinementCtx,
 ) => {
@@ -296,6 +298,7 @@ export const createReservationAgreementSchema = z
 export const reservationAgreementSchema = z.object({
   id: z.string().uuid(),
   reservationNumber: z.string(),
+  officialVipNumber: officialVipNumberSchema.nullish(),
   /**
    * Null for an application-origin reservation.
    *

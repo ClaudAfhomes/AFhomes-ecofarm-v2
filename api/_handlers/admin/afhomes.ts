@@ -195,6 +195,8 @@ export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
 > = [
   ['sales', 'card_sales', 'seller_staff_id'],
   ['sales', 'card_sales', 'created_by'],
+  ['reservation agreements', 'reservation_agreements', 'seller_staff_id'],
+  ['reservation agreements', 'reservation_agreements', 'created_by'],
   ['commissions', 'commissions', 'beneficiary_staff_id'],
   ['commissions', 'commissions', 'qualified_by'],
   ['commissions', 'commissions', 'paid_by'],

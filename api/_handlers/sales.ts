@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import {
   createSaleSchema,
+  officialVipNumberSchema,
   recordPaymentSchema,
   verifyPaymentSchema,
   activateSaleSchema,
@@ -36,6 +37,8 @@ import {
   deny,
   fail,
   isoOrNull,
+  isUnavailableRpc,
+  legacyVipSchema,
   jsonBody,
   type Db,
   list,
@@ -53,6 +56,7 @@ import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const listQuerySchema = z.object({
+  officialVipNumber: officialVipNumberSchema.optional(),
   status: z.string().trim().max(40).optional(),
   customerId: z.string().uuid().optional(),
   productId: z.string().uuid().optional(),
@@ -203,6 +207,7 @@ const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
   return {
     id: row.id,
     saleNumber: row.sale_number,
+    officialVipNumber: row.official_vip_number ?? null,
     customerId: row.customer_id,
     customerName:
       [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
@@ -290,6 +295,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // intent obvious and keeps the two paths independent.
       const { canSeeAll, auth } = await resolveSaleScope(req);
       if ('error' in auth) return deny(res, auth);
+      if (parsed.data.officialVipNumber && (await legacyVipSchema(db)))
+        return res.status(200).json({ data: [], meta: { total: 0, limit, offset } });
 
       let query = db
         .from('card_sales')
@@ -300,6 +307,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (status) query = query.eq('status', status);
       if (customerId) query = query.eq('customer_id', customerId);
       if (productId) query = query.eq('plan_id', productId);
+      if (parsed.data.officialVipNumber)
+        query = query.eq('official_vip_number', parsed.data.officialVipNumber);
       if (!canSeeAll) query = query.eq('seller_staff_id', auth.userId);
 
       const { data, error, count } = await query
@@ -417,14 +426,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('is_active', true)
         .maybeSingle();
 
-      const { data: sequence, error: seqError } = await db.rpc('next_sale_number');
-      if (seqError) return mapRpcError(res, seqError);
-      // next_sale_number() is RETURNS TABLE, so live PostgREST answers with a
-      // one-row array. A missing or blank number is a generation failure: the
-      // sale must fail BEFORE the row is inserted, never persist a blank.
-      const saleNumber = singleRpcText(sequence, 'sale_number');
-      if (!saleNumber) return fail(res, 'INTERNAL', 'Sale number generation failed', 500);
-
       const saleDate = new Date().toISOString().slice(0, 10);
       const { data: resolvedRule, error: ruleError } = await db.rpc('resolve_commission_rule', {
         p_seller_type: 'staff',
@@ -496,76 +497,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const expectedCommission = calculateCommission(frozenTotal, resolvedCommissionRate);
       const now = new Date().toISOString();
 
-      const { data: sale, error: saleError } = await db
-        .from('card_sales')
-        .insert({
-          sale_number: saleNumber,
-          customer_id: input.customerId,
-          plan_id: input.productId,
-          seller_type: 'staff',
-          seller_staff_id: seller.staffId,
-          seller_ost_id: null,
-          // Snapshot columns are written explicitly, never spread: the commercial
-          // terms must be frozen on the sale at creation.
-          cash_price: frozenTotal,
-          cash_price_snapshot: frozenTotal,
-          minimum_down_payment_snapshot: terms.minimumDownPaymentSnapshot,
-          payment_scheme: schemeTerms.paymentScheme,
-          reservation_fee_snapshot: schemeTerms.reservationFeeSnapshot,
-          required_initial_snapshot: schemeTerms.requiredInitialSnapshot,
-          installment_months_snapshot: schemeTerms.installmentMonthsSnapshot,
-          monthly_amount_snapshot: schemeTerms.monthlyAmountSnapshot,
-          validity_months_snapshot: schemeTerms.validityMonthsSnapshot,
-          yearly_points_snapshot: terms.yearlyPointsSnapshot,
-          commission_rate_snapshot: terms.commissionRateSnapshot,
-          commission_rule_id: commissionRuleId,
-          commission_base_snapshot: frozenTotal,
-          expected_commission_snapshot: expectedCommission,
-          status: 'submitted',
-          submitted_at: now,
-          balance_due_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-          referral_relationship_id: relationship?.id ?? null,
-          created_by: auth.userId,
-        })
-        .select('*')
-        .single();
+      const saleRow = {
+        customer_id: input.customerId,
+        plan_id: input.productId,
+        seller_type: 'staff',
+        seller_staff_id: seller.staffId,
+        seller_ost_id: null,
+        // Snapshot columns are written explicitly, never spread: the commercial
+        // terms must be frozen on the sale at creation.
+        cash_price: frozenTotal,
+        cash_price_snapshot: frozenTotal,
+        minimum_down_payment_snapshot: terms.minimumDownPaymentSnapshot,
+        payment_scheme: schemeTerms.paymentScheme,
+        reservation_fee_snapshot: schemeTerms.reservationFeeSnapshot,
+        required_initial_snapshot: schemeTerms.requiredInitialSnapshot,
+        installment_months_snapshot: schemeTerms.installmentMonthsSnapshot,
+        monthly_amount_snapshot: schemeTerms.monthlyAmountSnapshot,
+        validity_months_snapshot: schemeTerms.validityMonthsSnapshot,
+        yearly_points_snapshot: terms.yearlyPointsSnapshot,
+        commission_rate_snapshot: terms.commissionRateSnapshot,
+        commission_rule_id: commissionRuleId,
+        commission_base_snapshot: frozenTotal,
+        expected_commission_snapshot: expectedCommission,
+        status: 'submitted',
+        submitted_at: now,
+        balance_due_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        referral_relationship_id: relationship?.id ?? null,
+        created_by: auth.userId,
+      };
+      let { data: saleId, error: saleError } = await db.rpc('submit_card_sale_once', {
+        p_request_id: input.requestId,
+        p_actor_id: auth.userId,
+        p_input: {
+          customerId: input.customerId,
+          productId: input.productId,
+          sellerStaffId: input.sellerStaffId ?? auth.userId,
+          paymentScheme: input.paymentScheme,
+        },
+        p_sale: saleRow,
+      });
+      if (isUnavailableRpc(saleError, 'submit_card_sale_once') && (await legacyVipSchema(db))) {
+        const sequence = await db.rpc('next_sale_number');
+        if (sequence.error) return mapRpcError(res, sequence.error);
+        const number = singleRpcText(sequence.data, 'sale_number');
+        if (!number) return fail(res, 'INTERNAL', 'Sale number generation failed', 500);
+        // shortcut: preserve legacy submission until the approved transactional RPC is deployed.
+        const inserted = await db
+          .from('card_sales')
+          .insert({ ...saleRow, sale_number: number })
+          .select('*')
+          .single();
+        saleError = inserted.error;
+        saleId = inserted.data?.id;
+        if (!saleError && saleId) {
+          const commission = await db.from('commissions').insert({
+            sale_id: saleId,
+            ost_id: null,
+            beneficiary_type: 'staff',
+            beneficiary_staff_id: seller.staffId,
+            amount: expectedCommission,
+            rate_snapshot: terms.commissionRateSnapshot,
+            basis_amount_snapshot: frozenTotal,
+            commission_rule_id: commissionRuleId,
+            status: 'pending',
+          });
+          if (commission.error) throw commission.error;
+          await audit(db, auth.userId, 'APPLICATION_SUBMITTED', 'card_sale', saleId, null, {
+            saleNumber: number,
+            customerId: input.customerId,
+            productId: input.productId,
+            sellerStaffId: seller.staffId,
+            paymentScheme: schemeTerms.paymentScheme,
+            frozenTotal,
+            expectedCommission,
+          });
+        }
+      }
       if (saleError) {
-        if ((saleError as { code?: string }).code === '23505')
+        if (saleError.code === '23505')
           return fail(
             res,
             'CONFLICT',
             'This customer already has an open application for this card',
             409,
           );
-        throw saleError;
+        return mapRpcError(res, saleError);
       }
+      if (typeof saleId !== 'string' || !saleId)
+        return fail(res, 'INTERNAL', 'Sale submission failed', 500);
 
-      // One commission per sale, created pending. Never earned here. The basis
-      // is the frozen SELECTED total (Stage 1 §19), not the live plan price.
-      const { error: commissionError } = await db.from('commissions').insert({
-        sale_id: sale.id,
-        ost_id: null,
-        beneficiary_type: 'staff',
-        beneficiary_staff_id: seller.staffId,
-        amount: expectedCommission,
-        rate_snapshot: terms.commissionRateSnapshot,
-        basis_amount_snapshot: frozenTotal,
-        commission_rule_id: commissionRuleId,
-        status: 'pending',
-      });
-      if (commissionError) throw commissionError;
-
-      await audit(db, auth.userId, 'APPLICATION_SUBMITTED', 'card_sale', String(sale.id), null, {
-        saleNumber,
-        customerId: input.customerId,
-        productId: input.productId,
-        sellerStaffId: seller.staffId,
-        paymentScheme: schemeTerms.paymentScheme,
-        frozenTotal,
-        expectedCommission,
-      });
-
-      const view = await loadSaleView(db, String(sale.id));
+      const view = await loadSaleView(db, saleId);
       if (!view) return fail(res, 'INTERNAL', 'Sale was created but could not be read back', 500);
       return res.status(201).json(toSale(view));
     }

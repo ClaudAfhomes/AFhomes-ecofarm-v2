@@ -119,6 +119,14 @@ beforeEach(() => {
   vi.mocked(getSales).mockResolvedValue([]);
 });
 
+it('shows the official VIP number alongside the original sale reference', async () => {
+  vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+  vi.mocked(getSales).mockResolvedValue([{ ...SALE, officialVipNumber: '26101400001G1C01S' }]);
+  renderDetail();
+  expect(await screen.findByText('26101400001G1C01S')).toBeInTheDocument();
+  expect(screen.getByText(SALE.saleNumber)).toBeInTheDocument();
+});
+
 describe('CustomerDetailPage', () => {
   it('renders the full record, including fields the table no longer shows', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);

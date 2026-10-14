@@ -54,7 +54,7 @@ export default function SaleTeamSearch() {
             id="sale-team-aa"
             name="aaNumber"
             label="AA number"
-            placeholder="AA-K7Q2M9T4B1R8"
+            placeholder="AAI26100001 or AAO26100001"
             value={input}
             onChange={(value) => {
               setInput(value);

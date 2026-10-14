@@ -439,6 +439,12 @@ export async function runActivationIntegrationChecks(world: World) {
   await db.query('begin');
   try {
     await db.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+    const vipCleanupNumbers = (
+      await db.query<{ control_number: string }>(
+        `select control_number from private.vip_control_numbers where original_sale_id=any($1::uuid[]) or original_reservation_id in (select id from public.reservation_agreements where sale_id=any($1::uuid[]))`,
+        [ownedSales],
+      )
+    ).rows.map((row) => row.control_number);
     await db.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
     await db.query(
       `delete from private.purchase_document_evidence
@@ -512,6 +518,9 @@ export async function runActivationIntegrationChecks(world: World) {
     ]);
     await db.query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [
       [activator, seller, finance],
+    ]);
+    await db.query('delete from private.vip_control_numbers where control_number=any($1::text[])', [
+      vipCleanupNumbers,
     ]);
     await db.query('commit');
   } catch (error) {

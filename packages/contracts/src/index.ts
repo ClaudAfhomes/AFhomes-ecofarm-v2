@@ -305,6 +305,7 @@ export {
   isAfId,
   afBusinessIdSchema,
   customerCodeSchema,
+  officialVipNumberSchema,
   matchesBusinessId,
 } from './schemas/business-ids.js';
 export type { AfIdPrefix, AfCodePrefix, AfBusinessPrefix } from './schemas/business-ids.js';

@@ -46,6 +46,29 @@ describe('sale-team boundaries', () => {
     expect(state.body).toEqual(record);
     expect(state.headers['cache-control']).toBe('no-store');
   });
+  it.each([
+    ['AAI26100001', 'IST'],
+    ['AAO26100002', 'OST'],
+  ])('looks up the exact official number %s', async (aaNumber, kind) => {
+    const official = { ...record, aaNumber, kind };
+    holder.db = new FakeSupabase({
+      tables: {},
+      rpcs: [{ fn: 'search_sale_team_accreditation', result: official }],
+    });
+    const state = await call('search', { query: { aaNumber: ` ${aaNumber.toLowerCase()} ` } });
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual(official);
+    expect(holder.db.calls.find((c) => c.op === 'rpc')?.arg).toEqual({ p_aa_number: aaNumber });
+  });
+  it('refuses a database result with a conflicting official prefix and seller kind', async () => {
+    holder.db = new FakeSupabase({
+      tables: {},
+      rpcs: [
+        { fn: 'search_sale_team_accreditation', result: { ...record, aaNumber: 'AAO26100001' } },
+      ],
+    });
+    expect((await call('search', { query: { aaNumber: 'AAO26100001' } })).status).toBe(503);
+  });
   it.each(['', '%', 'AA-', 'AA-K7Q2M9T4B1R8 OR 1=1'])(
     'refuses malformed AA input %s before lookup',
     async (aaNumber) => {
@@ -83,6 +106,25 @@ describe('sale-team boundaries', () => {
   it('requires authentication for self-read and approval', async () => {
     expect((await call('me')).status).toBe(401);
     expect((await call(UUID.viewerStaff, { method: 'POST' })).status).toBe(401);
+  });
+  it('reports an exhausted official monthly series without retrying issuance', async () => {
+    holder.db = new FakeSupabase({
+      tables: phase2World({}),
+      tokens: phase2WorldTokens(),
+      rpcErrors: {
+        manage_sale_team_accreditation: { code: '55000', message: 'AA_SEQUENCE_EXHAUSTED' },
+      },
+    });
+    const state = await call(UUID.viewerStaff, {
+      token: TOKEN.superAdmin,
+      method: 'POST',
+      body: { action: 'approve', kind: 'IST', startsOn: '2026-10-01', expiresOn: '2027-09-30' },
+    });
+    expect(state.status).toBe(409);
+    expect(JSON.stringify(state.body)).toContain('series is full');
+    expect(
+      holder.db.calls.filter((c) => c.op === 'rpc' && c.table === 'manage_sale_team_accreditation'),
+    ).toHaveLength(1);
   });
   it('refuses non-admin issuance and forged date payloads', async () => {
     expect(

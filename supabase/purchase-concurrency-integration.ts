@@ -716,6 +716,12 @@ export async function runPurchaseConcurrencyChecks(world: World) {
   await db.query('begin');
   try {
     await db.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+    const vipCleanupNumbers = (
+      await db.query<{ control_number: string }>(
+        `select control_number from private.vip_control_numbers where original_reservation_id=any($1::uuid[]) or original_sale_id=any($2::uuid[])`,
+        [ownedReservations, ownedSales],
+      )
+    ).rows.map((row) => row.control_number);
     await db.query(`set local afhomes.allow_snapshot_maintenance = 'on'`);
     await db.query(
       `delete from private.purchase_document_evidence
@@ -764,6 +770,9 @@ export async function runPurchaseConcurrencyChecks(world: World) {
     await db.query(`delete from public.customer_application_purchase_terms where application_id in
                       (select id from public.customer_applications where customer_id = any($1::uuid[]))`, [
       world.createdCustomers,
+    ]);
+    await db.query('delete from private.vip_control_numbers where control_number=any($1::text[])', [
+      vipCleanupNumbers,
     ]);
     await db.query('commit');
   } catch (error) {
