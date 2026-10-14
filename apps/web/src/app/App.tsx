@@ -41,6 +41,7 @@ const StoryDetailPage = lazy(() => import('../marketing/pages/StoryDetail'));
 const FAQPage = lazy(() => import('../marketing/pages/FAQ'));
 const CompliancePage = lazy(() => import('../marketing/pages/Compliance'));
 const ContactPage = lazy(() => import('../marketing/pages/Contact'));
+const SaleTeamSearchPage = lazy(() => import('../marketing/pages/SaleTeamSearch'));
 const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
 
 /**
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="faq" element={<FAQPage />} />
         <Route path="compliance" element={<CompliancePage />} />
         <Route path="contact" element={<ContactPage />} />
+        <Route path="sale-team-search" element={<SaleTeamSearchPage />} />
         <Route path=":slug" element={<CmsPage />} />
       </Route>
 

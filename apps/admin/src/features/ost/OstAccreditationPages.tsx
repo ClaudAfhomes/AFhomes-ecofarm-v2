@@ -52,6 +52,7 @@ import {
   downloadOstFile,
 } from './services';
 import { downloadExport } from '../reports/services';
+import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
 import styles from './OstAccreditationPages.module.css';
 
 /** Query keys scoped to the OST accreditation workspace. */
@@ -372,6 +373,7 @@ export function OstAccreditationHistoryPage() {
         }
       />
 
+      {['admin', 'super_admin'].includes(user?.roleSlug ?? '') ? <SaleTeamAccreditationCard staffId={id} kind="OST" /> : null}
       <div className={styles.badges} aria-label="Accreditation summary">
         <StatusChip
           label={`Recorded terms: ${formatCountOrDash(terms.length)}`}

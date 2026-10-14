@@ -81,8 +81,8 @@ export function Hero() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.8, ease: EASE }}
           >
-            <Button to="/experiences" variant="accent" size="lg" withArrow>
-              {content.heroPrimaryCta}
+            <Button to="/sale-team-search" variant="accent" size="lg" withArrow>
+              AA Search
             </Button>
             <Button to="/vip" variant="outline-light" size="lg" className="border-cream-50/50">
               {content.heroSecondaryCta}

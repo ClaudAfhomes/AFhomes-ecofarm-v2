@@ -12,6 +12,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+// Load the real chart during collection; assertions should not race worker import latency.
+import './AfHomesTrendChart';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
 

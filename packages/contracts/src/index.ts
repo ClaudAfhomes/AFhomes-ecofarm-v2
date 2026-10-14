@@ -644,6 +644,7 @@ export {
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';
 export * from './schemas/ost-accreditation.js';
+export * from './schemas/sale-team.js';
 export * from './schemas/address.js';
 export { staffPortalBase, operationsPath, staffPortalPath } from './schemas/portal-routing.js';
 export {

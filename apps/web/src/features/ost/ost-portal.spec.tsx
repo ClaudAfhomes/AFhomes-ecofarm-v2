@@ -60,6 +60,8 @@ function installFetch() {
   // Read the current probe result lazily: tests reassign it per case.
   routes.set('/auth/portals', () => ok(portalsBody.current)());
   routes.set('/ost/me', ok(OST_ME));
+  routes.set('/sale-team/me', ok({ aaNumber: 'AA-J6P3N8V5C2S0', kind: 'OST', fullName: 'Ollie Seller',
+    status: 'accredited', startsOn: '2026-09-01', expiresOn: '2027-09-01' }));
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -140,6 +142,8 @@ describe('OST login', () => {
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect(await screen.findByText('OST-000007')).toBeInTheDocument();
+    expect(await screen.findByText('AA-J6P3N8V5C2S0')).toBeInTheDocument();
+    expect(screen.getByText('2027-09-01')).toBeInTheDocument();
     expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
   });
 

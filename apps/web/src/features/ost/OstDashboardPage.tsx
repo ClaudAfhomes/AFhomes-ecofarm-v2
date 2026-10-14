@@ -6,6 +6,8 @@ import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
 import { getOstMe } from './services';
 import { Card, Field, FieldList, formatDate, styles } from '../customer/portal-ui';
+import { saleTeamLookupSchema } from '@afhomes/contracts';
+import { request } from '../../lib/api/client';
 
 /**
  * The approved OST member's own dashboard: their number, status, sponsor and
@@ -15,6 +17,12 @@ import { Card, Field, FieldList, formatDate, styles } from '../customer/portal-u
 export function OstDashboardPage() {
   const { signOut } = useCustomerSession();
   const portals = useQuery({ queryKey: ['ost', 'portals'], queryFn: getAuthPortals });
+  const accreditation = useQuery({
+    queryKey: ['ost', 'accreditation'],
+    queryFn: () => request('/sale-team/me', saleTeamLookupSchema),
+    enabled: portals.data?.ost?.status === 'active',
+    retry: false,
+  });
   const me = useQuery({
     queryKey: ['ost', 'me'],
     queryFn: getOstMe,
@@ -45,6 +53,23 @@ export function OstDashboardPage() {
       >
         <FieldList>
           <Field label="OST number" value={record.ostNumber} />
+          <Field
+            label="AA number"
+            value={
+              accreditation.isPending
+                ? 'Loading accreditation'
+                : accreditation.isError
+                  ? 'Accreditation unavailable'
+                  : (accreditation.data?.aaNumber ?? 'AA number not yet issued')
+            }
+          />
+          {accreditation.data ? (
+            <>
+              <Field label="Accreditation" value={accreditation.data.status.replaceAll('_', ' ')} />
+              <Field label="Valid from" value={accreditation.data.startsOn} />
+              <Field label="Valid until" value={accreditation.data.expiresOn} />
+            </>
+          ) : null}
           <Field label="Name" value={record.fullName} />
           <Field
             label="Status"
@@ -58,6 +83,11 @@ export function OstDashboardPage() {
           <Field label="Sponsor" value={record.sponsorName} />
           <Field label="Approved" value={formatDate(record.approvedAt)} />
         </FieldList>
+        {accreditation.isError ? (
+          <Button variant="secondary" onClick={() => void accreditation.refetch()}>
+            Retry accreditation
+          </Button>
+        ) : null}
         <p className={styles.notice}>
           Applications you sponsor appear after applicants register with your referral code.{' '}
           <Link to="/ost/renewal">Accreditation history and renewal</Link>
