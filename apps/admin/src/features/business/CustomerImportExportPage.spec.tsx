@@ -80,6 +80,16 @@ describe('CustomerImportExportPage export filters', () => {
 });
 
 describe('CustomerImportExportPage workspace tabs', () => {
+  it('presents one download card per template format with guidance', async () => {
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    expect(await screen.findByText('1. Download a template')).toBeInTheDocument();
+    expect(screen.getByText('Excel workbook (.xlsx)')).toBeInTheDocument();
+    expect(screen.getByText('Plain text (.csv)')).toBeInTheDocument();
+    expect(screen.getAllByText(/45 columns · header row only/).length).toBe(2);
+    expect(screen.getByRole('button', { name: 'Download XLSX template' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download CSV template' })).toBeInTheDocument();
+  });
+
   it('switches between Import, Export, and Job history panels', async () => {
     const user = userEvent.setup();
     renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });

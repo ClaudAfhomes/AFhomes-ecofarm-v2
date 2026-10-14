@@ -124,16 +124,12 @@ describe('CustomerDetailPage', () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     renderDetail();
     expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
-    for (const value of [
-      'CUS-000001',
-      'AF-CC-1A2B3C4D',
-      'maria@example.com',
-      '+639171234567',
-      '••••1234',
-      'GOLD',
-    ]) {
+    for (const value of ['CUS-000001', 'AF-CC-1A2B3C4D', '••••1234', 'GOLD']) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
+    // Contact facts repeat inside Primary Member by company layout (15 columns).
+    expect(screen.getAllByText('maria@example.com').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('+639171234567').length).toBeGreaterThanOrEqual(2);
     // Lookup-mirrored membership facts: status chip, tier, formatted expiry.
     expect(screen.getAllByText('active').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/May.*2027/)).toBeInTheDocument();
@@ -160,6 +156,58 @@ describe('CustomerDetailPage', () => {
     // ErrorState never renders raw internals; it shows canonical copy + retry.
     expect(await screen.findByText(/couldn’t load this information/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('renders the four company-stated sections with exact labels and masked TIN', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      raNumber: 'RA-2026-0001',
+      companyStatus: 'Active Member',
+      citizenship: 'Filipino',
+      civilStatus: 'Single',
+      tinNumberMasked: '********9012',
+      occupationBusinessName: 'Engineer',
+      officeBusinessAddress: 'Makati HQ',
+      employedPosition: 'Engineer II',
+      supplementaryFullName: 'JUAN CRUZ',
+      supplementaryBirthday: '1992-08-10',
+      supplementaryGender: 'male',
+      supplementaryMobile: '+639181234567',
+      supplementaryEmail: 'juan@example.com',
+      supplementaryTinNumberMasked: '********7001',
+      ostIstName: 'OST Silk',
+      svdName: 'SVD Santos',
+      referrerName: 'Ref Reyes',
+      relatedEmail: 'related@example.com',
+      statedVipPackage: 'GOLD VIP',
+      statedRegularPrice: '60000.00',
+      statedRf: 'RF-001',
+      statedPaymentDate: '2026-01-01',
+    } as unknown as Customer);
+    renderDetail();
+    for (const title of [
+      'Primary Member',
+      'Supplementary Member',
+      'Related Persons and Referral',
+      'Package and Payment — company stated',
+    ]) {
+      expect(await screen.findByText(title)).toBeInTheDocument();
+    }
+    // Exact company labels with stored values; TIN only ever masked.
+    for (const value of [
+      'RA-2026-0001',
+      'Active Member',
+      '********9012',
+      'JUAN CRUZ',
+      'OST Silk',
+      'SVD Santos',
+      'GOLD VIP',
+      '60000.00',
+      'RF-001',
+    ]) {
+      expect(screen.getByText(value)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
   });
 });
 

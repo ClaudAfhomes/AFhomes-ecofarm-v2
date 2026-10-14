@@ -336,12 +336,37 @@ export function CustomerImportExportPage() {
             <h2 id={`${TAB_BASE_ID}-template-heading`} className={styles.panelTitle}>
               1. Download a template
             </h2>
-            <div className={styles.actions}>
-              <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
-              <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
-                Download CSV template
-              </Button>
+            <div className={styles.templateGrid}>
+              <div className={styles.templateCard}>
+                <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
+                <p className={styles.templateDesc}>
+                  Best for filling in Excel: frozen header row, sized columns, and text cells that
+                  keep leading zeros on IDs and reference numbers.
+                </p>
+                <p className={styles.templateMeta}>45 columns · header row only · no sample data</p>
+                <div className={styles.actions}>
+                  <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
+                </div>
+              </div>
+              <div className={styles.templateCard}>
+                <h3 className={styles.templateName}>Plain text (.csv)</h3>
+                <p className={styles.templateDesc}>
+                  Best for Google Sheets and quick edits: lightweight UTF-8 text with the same 45
+                  headers in the same order.
+                </p>
+                <p className={styles.templateMeta}>45 columns · header row only · no sample data</p>
+                <div className={styles.actions}>
+                  <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
+                    Download CSV template
+                  </Button>
+                </div>
+              </div>
             </div>
+            <p className={styles.hint}>
+              Single 45-column company membership template: primary and supplementary members,
+              related persons and referral, package and payment. Unmapped columns are reported as
+              ignored warnings on preview; rows still require split first/last names.
+            </p>
           </section>
 
           <section className={styles.panel} aria-labelledby={`${TAB_BASE_ID}-upload-heading`}>

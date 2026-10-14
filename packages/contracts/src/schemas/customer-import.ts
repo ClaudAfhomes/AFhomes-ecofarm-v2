@@ -320,6 +320,165 @@ export const CUSTOMER_EXPORT_COLUMNS = [
 export type CustomerExportRow = Record<(typeof CUSTOMER_EXPORT_COLUMNS)[number], string>;
 
 /* ------------------------------------------------------------------ */
+/* Company membership template (45 columns, exact order and wording)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The company-provided membership template headers, verbatim. Capitalization,
+ * spacing and punctuation are the source of truth - do not normalize them
+ * here. Note the intentional duplicates: ADDRESS appears at positions 3 and
+ * 16, EMAIL ADDRESS at 11 and 35, and several demographic headers repeat
+ * across the primary/supplementary blocks. Header-name matching therefore
+ * cannot disambiguate them - see MEMBERSHIP_TEMPLATE_POSITION_MAP.
+ */
+export const MEMBERSHIP_TEMPLATE_COLUMNS = [
+  'RA NO',
+  'STATUS',
+  'FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SUPPLEMENTARY FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'OST/IST NAME',
+  'SVD',
+  'SSM',
+  'SM',
+  'REFERRER',
+  'VIP RECOMMENDER',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+] as const;
+
+export type MembershipTemplateColumn = (typeof MEMBERSHIP_TEMPLATE_COLUMNS)[number];
+
+/**
+ * Additional import keys accepted ONLY through the company-template remap
+ * path (never part of `CUSTOMER_IMPORT_COLUMNS`, so the established customer
+ * template is unchanged). Each key has a matching nullable column on
+ * customers and is validated in `validateImportRow` before persistence.
+ */
+export const COMPANY_IMPORT_EXTRA_COLUMNS = [
+  'ra_number',
+  'citizenship',
+  'civil_status',
+  'tin_number',
+  'occupation_business_name',
+  'office_business_address',
+  'employed_position',
+  'supplementary_full_name',
+  'supplementary_address',
+  'supplementary_birthday',
+  'supplementary_gender',
+  'supplementary_citizenship',
+  'supplementary_civil_status',
+  'supplementary_tin_number',
+  'supplementary_occupation_business_name',
+  'supplementary_office_address',
+  'supplementary_position',
+  'ost_ist_name',
+  'svd_name',
+  'ssm_name',
+  'sm_name',
+  'referrer_name',
+  'vip_recommender_name',
+  'related_contact_no',
+  'related_email',
+  'stated_regular_price',
+  'stated_discount',
+  'stated_total_amount',
+  'stated_rf',
+] as const;
+
+/**
+ * Positional mapping from the 45-column company template onto customer-import
+ * columns. An entry is the import column for that exact position, or null
+ * when the company field has no established v2 target (unmapped positions are
+ * reported as ignored warnings, never silently merged). Only fields whose
+ * meaning is exact AND whose values flow through existing validators are
+ * mapped - value vocabularies are never translated, so unknown tier, scheme
+ * or status values fail rows safely instead of corrupting records. FULL NAME
+ * is deliberately unmapped: splitting it into first/middle/last would invent
+ * identity parse rules.
+ */
+export const MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  /* 0 RA NO */ 'ra_number',
+  /* 1 STATUS */ 'source_status',
+  /* 2 FULL NAME */ null,
+  /* 3 ADDRESS (primary) */ 'address_line_1',
+  /* 4 BIRTHDAY (primary) */ 'birth_date',
+  /* 5 AGE */ null,
+  /* 6 GENDER (primary) */ 'sex',
+  /* 7 CITIZENSHIP */ 'citizenship',
+  /* 8 CIVIL STATUS */ 'civil_status',
+  /* 9 TIN NO. */ 'tin_number',
+  /* 10 MOBILE NO. (primary) */ 'mobile',
+  /* 11 EMAIL ADDRESS (primary) */ 'email',
+  /* 12 OCCUPATION / BUSINESS NAME */ 'occupation_business_name',
+  /* 13 OFFICE / BUSINESS ADDRESS */ 'office_business_address',
+  /* 14 EMPLOYED POSITION */ 'employed_position',
+  /* 15 SUPPLEMENTARY FULL NAME */ 'supplementary_full_name',
+  /* 16 ADDRESS (supplementary) */ 'supplementary_address',
+  /* 17 BIRTHDAY (supplementary) */ 'secondary_birth_date',
+  /* 18 AGE */ null,
+  /* 19 GENDER */ 'supplementary_gender',
+  /* 20 CITIZENSHIP */ 'supplementary_citizenship',
+  /* 21 CIVIL STATUS */ 'supplementary_civil_status',
+  /* 22 TIN NO. */ 'supplementary_tin_number',
+  /* 23 MOBILE NO. (supplementary) */ 'secondary_mobile',
+  /* 24 EMAIL ADDRESS (supplementary) */ 'secondary_email',
+  /* 25 OCCUPATION / BUSINESS NAME */ 'supplementary_occupation_business_name',
+  /* 26 OFFICE / BUSINESS ADDRESS */ 'supplementary_office_address',
+  /* 27 EMPLOYED POSITION */ 'supplementary_position',
+  /* 28 OST/IST NAME */ 'ost_ist_name',
+  /* 29 SVD */ 'svd_name',
+  /* 30 SSM */ 'ssm_name',
+  /* 31 SM */ 'sm_name',
+  /* 32 REFERRER */ 'referrer_name',
+  /* 33 VIP RECOMMENDER */ 'vip_recommender_name',
+  /* 34 CONTACT NO. */ 'related_contact_no',
+  /* 35 EMAIL ADDRESS (related persons) */ 'related_email',
+  /* 36 VIP PACKAGE */ 'vip_tier',
+  /* 37 PAYMENT TERMS */ 'payment_scheme',
+  /* 38 REGULAR PRICE */ 'stated_regular_price',
+  /* 39 DISCOUNT */ 'stated_discount',
+  /* 40 TOTAL AMOUNT */ 'stated_total_amount',
+  /* 41 RF */ 'stated_rf',
+  /* 42 PAYMENT TYPE */ 'payment_method',
+  /* 43 REF NO */ 'payment_reference',
+  /* 44 DATE */ 'payment_date',
+];
+
+/* ------------------------------------------------------------------ */
 /* API shapes                                                          */
 /* ------------------------------------------------------------------ */
 

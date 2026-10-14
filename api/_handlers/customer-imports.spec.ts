@@ -185,15 +185,16 @@ describe('customer import/export handler', () => {
     ).toBe(403);
   });
 
-  it('serves stable XLSX and CSV templates', async () => {
+  it('serves the single 45-column membership template as XLSX and CSV', async () => {
     const xlsx = await call({ path: 'template/xlsx' });
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
+    expect((xlsx.body as { filename: string }).filename).toBe('membership-template.xlsx');
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);
     expect(
       Buffer.from((csv.body as { content: string }).content, 'base64').toString('utf8'),
-    ).toContain('membership_number');
+    ).toContain('SUPPLEMENTARY FULL NAME');
   });
 
   it('parses a valid XLSX into a committable preview without writing customers', async () => {

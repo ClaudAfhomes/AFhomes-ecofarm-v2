@@ -417,6 +417,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('is_active', true)
         .maybeSingle();
 
+      // BR-RATE-06: invalid inputs generate no sale number. The scheme is
+      // resolved (and can reject) before the sequence is consumed, so a
+      // rejected scheme never burns a number. The VIP Stage 1 rule holds:
+      // the client selects only the scheme code and every figure is resolved
+      // server-side, so a tampered body cannot change what a sale costs.
+      // Bronze B1/B2 is rejected here - the UI hiding those options is never
+      // the control.
+      const scheme = resolveSchemeEconomics(
+        {
+          cashPrice: product.cash_price,
+          installmentPrice: product.installment_price,
+          reservationFee: product.reservation_fee,
+          spotCashDays: product.spot_cash_days,
+          standardInstallmentMonths: product.standard_installment_months,
+          validityYears: product.validity_years,
+          moveAEnabled: product.move_a_enabled,
+          moveB1Enabled: product.move_b1_enabled,
+          moveB2Enabled: product.move_b2_enabled,
+        },
+        input.paymentScheme,
+      );
+      if ('error' in scheme) {
+        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
+          return fail(
+            res,
+            'CONFLICT',
+            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
+            409,
+          );
+        }
+        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
+          return fail(
+            res,
+            'CONFLICT',
+            'The installment price is not configured for this card plan',
+            409,
+          );
+        }
+        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
+      }
+
       const { data: sequence, error: seqError } = await db.rpc('next_sale_number');
       if (seqError) return mapRpcError(res, seqError);
       // next_sale_number() is RETURNS TABLE, so live PostgREST answers with a
@@ -452,43 +493,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         yearlyPoints: product.yearly_points,
         commissionRate: resolvedCommissionRate,
       });
-      // VIP Stage 1: the client selects only the scheme code. Every figure is
-      // resolved server-side from the plan row and frozen below, so a tampered
-      // body cannot change what a sale costs. Bronze B1/B2 is rejected here -
-      // the UI hiding those options is never the control.
-      const scheme = resolveSchemeEconomics(
-        {
-          cashPrice: product.cash_price,
-          installmentPrice: product.installment_price,
-          reservationFee: product.reservation_fee,
-          spotCashDays: product.spot_cash_days,
-          standardInstallmentMonths: product.standard_installment_months,
-          validityYears: product.validity_years,
-          moveAEnabled: product.move_a_enabled,
-          moveB1Enabled: product.move_b1_enabled,
-          moveB2Enabled: product.move_b2_enabled,
-        },
-        input.paymentScheme,
-      );
-      if ('error' in scheme) {
-        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
-          return fail(
-            res,
-            'CONFLICT',
-            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
-            409,
-          );
-        }
-        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
-          return fail(
-            res,
-            'CONFLICT',
-            'The installment price is not configured for this card plan',
-            409,
-          );
-        }
-        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
-      }
+      // VIP Stage 1 figures ride in their own columns; the frozen SELECTED
+      // total below is the commercial record.
       const schemeTerms = snapshotSchemeTerms(scheme.economics);
       // The frozen SELECTED total is the commercial record: commission basis
       // and every payment threshold derive from it, never from the live plan.
