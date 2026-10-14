@@ -9866,6 +9866,15 @@ async function main(): Promise<void> {
           [ostMemberId, `${RUN}-legacy-ost@example.invalid`],
         );
         createdStaffIds.push(ostMemberId);
+        // The approval trigger issues an AA row through the accreditation
+        // function, which only accredits staff holding the ost role. A real
+        // OST member always has one; the fixture must too, or the term insert
+        // below is refused for the wrong reason.
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+           select $1, id from public.roles where slug = 'ost'`,
+          [ostMemberId],
+        );
         await db.query(
           `insert into public.referral_codes (id, code_hash, code_hint, sponsor_staff_id, expires_at, created_by)
            values ($1,$2,$3,$4, now() + interval '1 year', $4)`,
