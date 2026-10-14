@@ -32,6 +32,7 @@ import {
   type AfHomesAuditEvent,
 } from './services';
 import { formatDateTime } from '../../lib/format';
+import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
 
 export function AfHomesStaffDetailPage() {
   const { id } = useParams();
@@ -186,6 +187,9 @@ function StaffDetailForm({
         }
       />
       <div style={{ display: 'grid', gap: 16 }}>
+        {['admin', 'super_admin'].includes(user?.roleSlug ?? '') &&
+          ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(roles?.find(r => r.id === member.roleId)?.slug ?? '') ?
+          <SaleTeamAccreditationCard staffId={member.id} kind={roles?.find(r => r.id === member.roleId)?.slug === 'ost' ? 'OST' : 'IST'} /> : null}
         <DetailCard>
           <DetailCardTitle>Staff information</DetailCardTitle>
           <DetailFieldGrid>

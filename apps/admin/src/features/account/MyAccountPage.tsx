@@ -17,6 +17,7 @@ import { useSession } from '../../lib/session';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
 import styles from './MyAccountPage.module.css';
+import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
 
 /**
  * My Account (AF Homes pattern, `/admin/profile`): the signed-in staff
@@ -70,6 +71,8 @@ export function MyAccountPage() {
         </Alert>
       ) : null}
       <div className={styles.stack}>
+        {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(user?.roleSlug ?? '') ?
+          <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} /> : null}
         <DetailCard>
           <DetailCardTitle>Profile</DetailCardTitle>
           <DetailFieldGrid>

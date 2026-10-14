@@ -52,7 +52,8 @@ function FooterGroup({ id, title, open, onToggle, children }: FooterGroupProps) 
 export function Footer() {
   const siteConfig = cmsRepository.getSiteConfig();
   const experiences = cmsRepository.getExperiences();
-  const explore = siteConfig.nav.main.filter((item) => item.path !== "/");
+  const explore = [...siteConfig.nav.main.filter((item) => item.path !== "/"),
+    { path: '/sale-team-search', label: 'Verify sales accreditation' }];
   const socialLinks = [...siteConfig.socialLinks]
     .filter((item) => item.enabled)
     // A hostile or mistaken editor must never get a clickable attacker URL:
