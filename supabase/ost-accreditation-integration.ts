@@ -574,6 +574,13 @@ export async function runOstAccreditationChecks({
         [actor],
       );
       await db.query('delete from public.staff_invitations where auth_user_id=$1', [member]);
+      // Approving a term issues an AA row for the member via trigger, and that
+      // row RESTRICTs the staff delete below. Approval history is disposable
+      // here; issued numbers are proven by the checks above, not by residue.
+      await db.query(
+        'delete from private.sale_team_accreditations where staff_id=any($1::uuid[]) or approved_by=any($1::uuid[]) or revoked_by=any($1::uuid[])',
+        [[member, alternate]],
+      );
       await db.query('delete from public.staff_users where id=any($1::uuid[])', [
         [member, alternate],
       ]);

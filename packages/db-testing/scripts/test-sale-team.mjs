@@ -79,8 +79,20 @@ try {
   const db = await connect();
   check((await db.query('select host(inet_server_addr()) host')).rows[0].host, '127.0.0.1');
   await db.query(fs.readFileSync('supabase/db-testing/supabase-shim.sql', 'utf8'));
-  for (const file of listMigrations())
+  // Exercise the normalization migration's orphan preflight below before applying it.
+  for (const file of listMigrations().filter(
+    (name) => !name.endsWith('_afhomes_normalization_integrity.sql'),
+  ))
     await db.query(fs.readFileSync(`supabase/migrations/${file}`, 'utf8').replace(/^\uFEFF/, ''));
+  check(
+    (
+      await db.query(
+        "select public,file_size_limit::int,allowed_mime_types from storage.buckets where id='afhomes-profile-photos'",
+      )
+    ).rows,
+    [{ public: false, file_size_limit: 500000, allowed_mime_types: ['image/jpeg'] }],
+    'Private profile-photo bucket cap and MIME',
+  );
   const actor = randomUUID(),
     seller = randomUUID(),
     other = randomUUID(),
@@ -389,6 +401,352 @@ try {
     same[0].aaNumber,
     'Migration replay preserves other issued numbers',
   );
+  const normalization = fs.readFileSync(
+    'supabase/migrations/20261201000001_afhomes_normalization_integrity.sql',
+    'utf8',
+  );
+  const orphanRule = randomUUID();
+  await db.query(
+    "insert into public.commission_rules(id,target_type,target_id,rate,effective_from,created_by) values($1,'staff',$2,'0.04','2026-01-01',$3)",
+    [orphanRule, randomUUID(), actor],
+  );
+  await assert.rejects(
+    db.query(normalization),
+    (error) =>
+      error.code === '23503' && error.message === 'NORMALIZATION_BLOCKED_ORPHAN_COMMISSION_TARGETS',
+  );
+  await db.query('rollback');
+  check(
+    (
+      await db.query(
+        "select count(*)::int n from pg_attribute where attrelid='public.commission_rules'::regclass and attname='target_staff_id' and not attisdropped",
+      )
+    ).rows[0].n,
+    0,
+    'Blocked migration leaves no generated columns',
+  );
+  check(
+    (
+      await db.query('select count(*)::int n from public.commission_rules where id=$1', [
+        orphanRule,
+      ])
+    ).rows[0].n,
+    1,
+    'Blocked migration preserves orphan for review',
+  );
+  const repair = fs.readFileSync(
+    'supabase/migrations/20261130000002_afhomes_archive_orphan_commission_rules.sql',
+    'utf8',
+  );
+  await assert.rejects(
+    db.query(repair),
+    (error) => error.message === 'ARCHIVE_BLOCKED_UNREVIEWED_ORPHAN',
+  );
+  await db.query('rollback');
+  await db.query('delete from public.commission_rules where id=$1', [orphanRule]);
+
+  // Synthetic rows only. Substitute their SHA pins, never the allowlist or repair logic.
+  const repairedIds = [
+    '01d28c04-b31c-48e5-be11-b1ec7db35cd5',
+    '9a7640d8-4b93-44ed-aa47-f93ecbce2db1',
+  ];
+  const deletedTargets = [randomUUID(), randomUUID()];
+  for (let i = 0; i < 2; i++)
+    await db.query(
+      "insert into public.commission_rules(id,target_type,target_id,rate,effective_from,effective_until,is_active,created_by) values($1,'staff',$2,$3,'2026-10-01',$4,$5,$6)",
+      [
+        repairedIds[i],
+        deletedTargets[i],
+        i === 0 ? '0.04' : '0.08',
+        i === 0 ? null : '2026-10-01',
+        i !== 0,
+        actor,
+      ],
+    );
+  const originals = (
+    await db.query(
+      "select id,to_jsonb(r) snapshot,encode(sha256(convert_to(to_jsonb(r)::text,'UTF8')),'hex') hash from public.commission_rules r order by id",
+    )
+  ).rows;
+  check(originals.length, 2, 'Two synthetic reviewed rules');
+  const syntheticRepair = repair
+    .replace('23c969c31b18b7d959cf784dc215c970840c0a26fa595a58ddd1fb55dfe6a6e8', originals[0].hash)
+    .replace('1d445cf3fcacb87ee3bc30377c46618f5a75acd793f520449419c1b88c622e5b', originals[1].hash);
+  check(syntheticRepair !== repair, true, 'Only synthetic expected hashes substituted');
+  const validRule = randomUUID();
+  const validRole = (
+    await db.query('select role_id from public.staff_role_assignments where staff_id=$1', [seller])
+  ).rows[0].role_id;
+  await db.query(
+    "insert into public.commission_rules(id,target_type,target_id,rate,effective_from,created_by) values($1,'role',$2,'0.06','2026-01-01',$3)",
+    [validRule, validRole, actor],
+  );
+  const resolveCurrentRate = async () =>
+    (
+      await db.query("select * from public.resolve_commission_rule('staff',$1,'2026-10-14')", [
+        seller,
+      ])
+    ).rows;
+  const rateBeforeRepair = await resolveCurrentRate();
+  check(
+    rateBeforeRepair,
+    [{ rule_id: validRule, rate: '0.06' }],
+    'Representative valid current rule selected',
+  );
+  await db.query("update public.commission_rules set rate='0.09' where id=$1", [repairedIds[1]]);
+  await assert.rejects(
+    db.query(syntheticRepair),
+    (error) => error.message === 'ARCHIVE_BLOCKED_CHANGED_OR_ELIGIBLE_RULE',
+  );
+  await db.query('rollback');
+  check(
+    (await db.query('select count(*)::int n from private.commission_rule_archive')).rows[0].n,
+    0,
+    'Second-row drift rolls back first archive',
+  );
+  check(
+    (
+      await db.query(
+        "select count(*)::int n from public.audit_events where action='COMMISSION_RULE_ARCHIVED'",
+      )
+    ).rows[0].n,
+    0,
+    'Second-row drift rolls back audit',
+  );
+  check(
+    (
+      await db.query(
+        'select count(*)::int n from public.commission_rules where id=any($1::uuid[])',
+        [repairedIds],
+      )
+    ).rows[0].n,
+    2,
+    'Second-row drift preserves both source rules',
+  );
+  await db.query("update public.commission_rules set rate='0.08' where id=$1", [repairedIds[1]]);
+
+  const category = randomUUID(),
+    plan = randomUUID(),
+    customer = randomUUID(),
+    sale = randomUUID();
+  await db.query(
+    "insert into public.card_categories(id,slug,name) values($1,'synthetic-archive','Synthetic archive category')",
+    [category],
+  );
+  await db.query(
+    "insert into public.card_plans(id,category_id,code,name,cash_price,minimum_down_payment,yearly_points) values($1,$2,'SYNTHETIC_ARCHIVE','Synthetic archive plan','60000.00','10000.00',60000)",
+    [plan, category],
+  );
+  await db.query(
+    "insert into public.customers(id,customer_number,email,phone,first_name,last_name) values($1,'SYNTHETIC_ARCHIVE','archive@example.invalid','+639185550101','Synthetic','Archive')",
+    [customer],
+  );
+  await db.query(
+    "insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,commission_rate_snapshot,expected_commission_snapshot,created_by,commission_rule_id,status,balance_due_at) values($1,'SYNTHETIC_ARCHIVE',$2,$3,'staff',$4,'60000.00','60000.00','10000.00',60000,'0.08','4800.00',$5,$6,'draft',now()+interval '7 days')",
+    [sale, customer, plan, actor, actor, repairedIds[1]],
+  );
+  await assert.rejects(
+    db.query(syntheticRepair),
+    (error) => error.message === 'ARCHIVE_BLOCKED_FINANCIAL_DEPENDENCY',
+  );
+  await db.query('rollback');
+  check(
+    (await db.query('select commission_rule_id from public.card_sales where id=$1', [sale])).rows[0]
+      .commission_rule_id,
+    repairedIds[1],
+    'Dependency denial preserves sale link',
+  );
+  check(
+    (await db.query('select count(*)::int n from private.commission_rule_archive')).rows[0].n,
+    0,
+    'Dependency denial rolls back whole archive batch',
+  );
+  // Local fixture only: remove the test dependency before exercising the allowed repair.
+  await db.query('update public.card_sales set commission_rule_id=null where id=$1', [sale]);
+  const protectedState = async () => {
+    const state = {};
+    for (const table of [
+      'auth.users',
+      'public.staff_users',
+      'public.customers',
+      'public.card_plans',
+      'public.card_sales',
+      'public.payments',
+      'public.commissions',
+      'public.customer_application_purchase_terms',
+      'public.reservation_agreements',
+      'public.memberships',
+      'public.points_accounts',
+      'public.points_ledger',
+      'private.sale_team_accreditations',
+    ])
+      state[table] = (
+        await db.query(
+          `select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]'::jsonb) value from ${table} t`,
+        )
+      ).rows[0].value;
+    state.audit = (
+      await db.query(
+        "select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) value from public.audit_events t where action<>'COMMISSION_RULE_ARCHIVED'",
+      )
+    ).rows[0].value;
+    state.unrelatedRules = (
+      await db.query(
+        "select coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb) value from public.commission_rules t where not(id=any($1::uuid[]))",
+        [repairedIds],
+      )
+    ).rows[0].value;
+    return state;
+  };
+  const beforeRepair = await protectedState();
+  await db.query(syntheticRepair);
+  check(
+    await protectedState(),
+    beforeRepair,
+    'Repair preserves every protected row and prior audit event byte-for-value',
+  );
+  check(await resolveCurrentRate(), rateBeforeRepair, 'Current commission resolution unchanged');
+  check(
+    (
+      await db.query(
+        'select count(*)::int n from public.commission_rules where id=any($1::uuid[])',
+        [repairedIds],
+      )
+    ).rows[0].n,
+    0,
+    'Only reviewed rules removed from operational table',
+  );
+  check(
+    (
+      await db.query(
+        'select rule_id id,rule_snapshot snapshot,snapshot_sha256 hash from private.commission_rule_archive order by rule_id',
+      )
+    ).rows,
+    originals,
+    'Entire original rows and hashes preserved',
+  );
+  check(
+    (
+      await db.query(
+        "select entity_id id,before_data snapshot from public.audit_events where action='COMMISSION_RULE_ARCHIVED' order by entity_id",
+      )
+    ).rows,
+    originals.map(({ id, snapshot }) => ({ id, snapshot })),
+    'One exact before-image audit per archived rule',
+  );
+  for (const role of ['anon', 'authenticated', 'service_role'])
+    check(
+      (
+        await db.query(
+          "select has_table_privilege($1,'private.commission_rule_archive','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') allowed",
+          [role],
+        )
+      ).rows[0].allowed,
+      false,
+      'Archive denies browser/service direct ACL',
+    );
+  for (const sql of [
+    'update private.commission_rule_archive set reason=reason',
+    'delete from private.commission_rule_archive',
+    'truncate private.commission_rule_archive',
+  ])
+    await assert.rejects(
+      db.query(sql),
+      (error) => error.code === '42501' && error.message === 'COMMISSION_ARCHIVE_IMMUTABLE',
+    );
+  await db.query(syntheticRepair);
+  check(
+    (
+      await db.query(
+        "select count(*)::int n from public.audit_events where action='COMMISSION_RULE_ARCHIVED'",
+      )
+    ).rows[0].n,
+    2,
+    'Repair replay adds no audit duplicates',
+  );
+  await db.query(normalization);
+  const targetRole = randomUUID();
+  await db.query(
+    "insert into public.roles(id,slug,name) values($1,'synthetic_normalization_role','Synthetic normalization role')",
+    [targetRole],
+  );
+  for (const [kind, target] of [
+    ['role', targetRole],
+    ['staff', seller],
+    ['ost', ost],
+  ]) {
+    await assert.rejects(
+      db.query(
+        "insert into public.commission_rules(target_type,target_id,rate,effective_from,created_by) values($1,$2,'0.04','2026-01-01',$3)",
+        [kind, randomUUID(), actor],
+      ),
+      (error) =>
+        error.code === '23503' && error.constraint === `commission_rules_target_${kind}_fk`,
+    );
+    const rule = randomUUID();
+    await db.query(
+      "insert into public.commission_rules(id,target_type,target_id,rate,effective_from,created_by) values($1,$2,$3,'0.04','2026-01-01',$4)",
+      [rule, kind, target, actor],
+    );
+    const row = (
+      await db.query(
+        'select target_role_id,target_staff_id,target_ost_id from public.commission_rules where id=$1',
+        [rule],
+      )
+    ).rows[0];
+    check(
+      row,
+      {
+        target_role_id: kind === 'role' ? target : null,
+        target_staff_id: kind === 'staff' ? target : null,
+        target_ost_id: kind === 'ost' ? target : null,
+      },
+      'Exactly one typed target generated',
+    );
+    if (kind === 'role')
+      await assert.rejects(
+        db.query('delete from public.roles where id=$1', [target]),
+        (error) =>
+          ['23503', '23001'].includes(error.code) &&
+          error.constraint === 'commission_rules_target_role_fk',
+      );
+  }
+  await assert.rejects(
+    db.query("update public.staff_users set email=' NOT-CANONICAL@EXAMPLE.INVALID ' where id=$1", [
+      seller,
+    ]),
+    (error) => error.code === '23514' && error.constraint === 'staff_users_email_canonical',
+  );
+  await db.query("update public.staff_users set full_name='McDonald de la Cruz' where id=$1", [
+    seller,
+  ]);
+  check(
+    (await db.query('select full_name from public.staff_users where id=$1', [seller])).rows[0]
+      .full_name,
+    'McDonald de la Cruz',
+    'Normalization preserves deliberate name casing',
+  );
+  await assert.rejects(
+    db.query("update public.ost_members set email=' NOT-CANONICAL@EXAMPLE.INVALID ' where id=$1", [
+      ost,
+    ]),
+    (error) => error.code === '23514' && error.constraint === 'ost_members_email_canonical',
+  );
+  await db.query(normalization);
+  check(
+    (
+      await db.query(
+        "select count(*)::int n from pg_constraint where convalidated and conname in ('commission_rules_target_role_fk','commission_rules_target_staff_fk','commission_rules_target_ost_fk','staff_users_email_canonical','customers_email_canonical','ost_members_email_canonical')",
+      )
+    ).rows[0].n,
+    6,
+    'Six validated constraints survive migration replay',
+  );
+  const postNormalization = await db.query(
+    fs.readFileSync('supabase/security/rls_invariants.sql', 'utf8'),
+  );
+  for (const result of Array.isArray(postNormalization) ? postNormalization : [postNormalization])
+    check(result.rowCount, 0, 'Post-normalization RLS invariants');
 } finally {
   await Promise.all(clients.map((db) => db.end().catch(() => {})));
   if (started) {
@@ -398,5 +756,5 @@ try {
   fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 console.log(
-  `PASS: ${checks} real PostgreSQL AA/accreditation checks; all migrations applied locally; synthetic fixtures cleaned up.`,
+  `PASS: ${checks} real PostgreSQL AA/accreditation and normalization checks; all migrations applied locally; synthetic fixtures cleaned up.`,
 );

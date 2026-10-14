@@ -1278,7 +1278,12 @@ async function main(): Promise<void> {
         ]);
       };
 
-      const underSale = await mkSale('under', await mkCustomer('under', code), plan, code);
+      const underSale = await mkSale(
+        'under',
+        await mkCustomer('under', code.toLowerCase()),
+        plan,
+        code,
+      );
       await payVerified(underSale, justUnder, `${code}-UNDER`);
       const under = await summaryOf(underSale);
       check(
@@ -1286,7 +1291,7 @@ async function main(): Promise<void> {
         under.downPaymentSatisfied === false,
       );
 
-      const atSale = await mkSale('at', await mkCustomer('at', code), plan, code);
+      const atSale = await mkSale('at', await mkCustomer('at', code.toLowerCase()), plan, code);
       await payVerified(atSale, down, `${code}-AT`);
       const at = await summaryOf(atSale);
       check(
@@ -1296,7 +1301,7 @@ async function main(): Promise<void> {
     }
 
     // Recorded-but-unverified must not satisfy the minimum.
-    const recCust = await mkCustomer('rec', 'GOLD');
+    const recCust = await mkCustomer('rec', 'gold');
     const recOnlySale = uuidFor('sale:GOLD:rec');
     const recCn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
       .sale_number;
@@ -1938,13 +1943,20 @@ async function main(): Promise<void> {
     );
     for (const fn of definer.rows) {
       const config = (fn.proconfig ?? []).join(',');
+      // Accepted paths never include an attacker-writable schema. The exact
+      // `pg_catalog,pg_temp` lockdown is narrower than the public forms: every
+      // app reference in such a body must be schema-qualified, and a missing
+      // schema fails loudly in the functional sections, never silently here.
       check(
         `  ${fn.proname} pins search_path`,
         /search_path\s*=\s*public/.test(config) ||
+          /search_path\s*=\s*pg_catalog,\s*pg_temp/.test(config) ||
           /search_path\s*=\s*pg_catalog,\s*extensions,\s*private,\s*public,\s*pg_temp/.test(
             config,
           ) ||
-          /search_path\s*=\s*pg_catalog,\s*public,\s*(private,\s*)?pg_temp/.test(config),
+          /search_path\s*=\s*pg_catalog,\s*public,\s*(extensions,\s*)?(private,\s*)?pg_temp/.test(
+            config,
+          ),
         config,
       );
     }
@@ -7774,7 +7786,7 @@ async function main(): Promise<void> {
           const person = {
             firstName: 'Imported',
             lastName: label,
-            email: RUN + '-sec47-' + label + '@example.invalid',
+            email: RUN + '-sec47-' + label.toLowerCase() + '@example.invalid',
             phone: '+639170000001',
           };
           const normalized = {
@@ -7901,7 +7913,7 @@ async function main(): Promise<void> {
           (
             await one<{ n: number }>(
               'select count(*)::int as n from public.customers where email=$1',
-              [RUN + '-sec47-Fault@example.invalid'],
+              [RUN + '-sec47-fault@example.invalid'],
             )
           ).n,
           0,
@@ -8008,7 +8020,7 @@ async function main(): Promise<void> {
         const person = (label: string) => ({
           firstName: 'Release',
           lastName: label,
-          email: RUN + '-release48-' + label + '@example.invalid',
+          email: RUN + '-release48-' + label.toLowerCase() + '@example.invalid',
           phone: '09170000000',
           customerStatus: 'active',
           paymentScheme: 'spot_cash',
@@ -8251,13 +8263,13 @@ async function main(): Promise<void> {
             String(opening),
           );
         }
-        const mixed = RUN + '-MixedCase48@EXAMPLE.INVALID';
+        const mixed = RUN + '-mixedcase48@example.invalid';
         await db.query('update customers set email=$1 where id=$2', [mixed, member.customerId]);
         eq(
           'database email lookup is case insensitive',
           (
             await one<{ id: string }>('select id from match_import_emails($1)', [
-              [mixed.toLowerCase()],
+              [mixed.toUpperCase()],
             ])
           ).id,
           member.customerId,
@@ -9854,6 +9866,15 @@ async function main(): Promise<void> {
           [ostMemberId, `${RUN}-legacy-ost@example.invalid`],
         );
         createdStaffIds.push(ostMemberId);
+        // The approval trigger issues an AA row through the accreditation
+        // function, which only accredits staff holding the ost role. A real
+        // OST member always has one; the fixture must too, or the term insert
+        // below is refused for the wrong reason.
+        await db.query(
+          `insert into public.staff_role_assignments (staff_id, role_id)
+           select $1, id from public.roles where slug = 'ost'`,
+          [ostMemberId],
+        );
         await db.query(
           `insert into public.referral_codes (id, code_hash, code_hint, sponsor_staff_id, expires_at, created_by)
            values ($1,$2,$3,$4, now() + interval '1 year', $4)`,
@@ -15313,7 +15334,7 @@ async function main(): Promise<void> {
           await db.query(
             `insert into public.customers(id,customer_number,first_name,last_name,email,phone,status)
              values($1,$2,'POS','MEMBER',$3,'09180000003','active')`,
-            [buyer, `CUS-${s71}-${tag}`, `pos-${tag}-${s71}@example.invalid`],
+            [buyer, `CUS-${s71}-${tag}`, `pos-${tag.toLowerCase()}-${s71}@example.invalid`],
           );
           // super_admin sellers carry no genealogy chain, so no hierarchy rows.
           const sale = uuidFor(`${s71}:sale:${tag}`);
@@ -15848,6 +15869,75 @@ async function main(): Promise<void> {
             [ids],
           );
         }
+        // Sale-team accreditation and the OST member graph reference synthetic
+        // staff, applications and members with ON DELETE RESTRICT, so the
+        // newest tables go before the application/member/staff deletes below.
+        // Predicates reuse the same synthetic sets: staff by recorded union,
+        // applications by synthetic sponsor, members by synthetic application
+        // or run email.
+        await db?.query(
+          `delete from private.sale_team_accreditations
+           where staff_id = any($1::uuid[]) or approved_by = any($1::uuid[])
+             or revoked_by = any($1::uuid[])`,
+          [staffSet],
+        );
+        await db?.query(
+          `delete from public.commissions
+           where ost_id in (select id from public.ost_members where email like $1)
+              or beneficiary_ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from public.identity_documents
+           where ost_application_id in
+            (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        // Terms and renewals reference each other; renewal_id is nullable so
+        // it is cleared first, then renewals (whose prior_term chain dies with
+        // them), then terms. Only renewal-linked terms (application_id null;
+        // exactly one side is set) may be nulled, or the CHECK fails.
+        await db?.query(
+          `update private.ost_accreditation_terms set renewal_id = null
+           where application_id is null
+             and ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from private.ost_accreditation_renewals
+           where ost_id in (select id from public.ost_members where email like $1)`,
+          [`${RUN}-%`],
+        );
+        await db?.query(
+          `delete from private.ost_accreditation_terms
+           where ost_id in (select id from public.ost_members where email like $1)
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($2::uuid[]))`,
+          [`${RUN}-%`, staffSet],
+        );
+        await db?.query(
+          `delete from private.ost_registration_details
+           where application_id in
+            (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        await db?.query(
+          `delete from private.ost_import_rows
+           where job_id in (select id from private.ost_import_jobs where created_by = any($1::uuid[]))
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($1::uuid[]))`,
+          [staffSet],
+        );
+        await db?.query('delete from private.ost_import_jobs where created_by = any($1::uuid[])', [
+          staffSet,
+        ]);
+        await db?.query(
+          `delete from public.ost_members
+           where email like $1
+              or application_id in
+               (select id from public.ost_applications where sponsor_staff_id = any($2::uuid[]))`,
+          [`${RUN}-%`, staffSet],
+        );
         await db?.query(
           'delete from public.ost_applications where sponsor_staff_id = any($1::uuid[])',
           [staffSet],

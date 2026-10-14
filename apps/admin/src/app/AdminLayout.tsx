@@ -6,9 +6,11 @@ import { logoutUrlForRole } from '../lib/portal';
 import { breadcrumbItems, navItemsForPermissions } from './navigation';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath } from '@afhomes/contracts';
+import { useProfilePhoto } from '../features/account/profile-photo';
 import logo from '../assets/logo.png';
 
 export function AdminLayout() {
+  const photo = useProfilePhoto();
   const { user, logout } = useSession();
   const location = useLocation();
   const [confirm, setConfirm] = useState(false);
@@ -69,6 +71,7 @@ export function AdminLayout() {
         }
         topbarActions={
           <UserMenu
+            photoUrl={photo.photo.data?.url}
             name={user?.name}
             role={user?.roleName}
             items={[

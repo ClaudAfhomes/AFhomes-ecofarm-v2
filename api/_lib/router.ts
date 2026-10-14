@@ -53,6 +53,11 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * `route-coverage` can still prove every handler is reachable.
  */
 export const BUSINESS_FAMILIES = [
+  {
+    prefix: 'profile-photo',
+    module: 'profile-photo',
+    load: () => import('../_handlers/profile-photo.js'),
+  },
   { prefix: 'sale-team', module: 'sale-team', load: () => import('../_handlers/sale-team.js') },
   {
     prefix: 'ost-accreditation',
@@ -132,7 +137,7 @@ export const BUSINESS_FAMILIES = [
   },
   { prefix: 'customer', module: 'customer', load: () => import('../_handlers/customer-portal.js') },
   // Points EARNING: recording a purchase, creating and reissuing an earning claim,
-// the customer's own QR claim, and the catalog/rules that decide what earns.
+  // the customer's own QR claim, and the catalog/rules that decide what earns.
   //
   // The prefix is `earning`, NOT `points`. `/points` is ALREADY owned by
   // memberships.ts (the per-member account, ledger and card), and selectHandler
@@ -147,7 +152,11 @@ export const BUSINESS_FAMILIES = [
   // NO new authorization vocabulary and the eight existing authorization
   // invariants are untouched. The module field only builds the routeKey; each
   // handler authorizes its own module and action.
-  { prefix: 'earning', module: 'operations.redemption', load: () => import('../_handlers/points.js') },
+  {
+    prefix: 'earning',
+    module: 'operations.redemption',
+    load: () => import('../_handlers/points.js'),
+  },
   // Staff redemption. Reuses the Phase 1 `operations.redemption` and
   // `operations.catalog` module keys, so Phase 4 adds NO new authorization
   // vocabulary. `items` and `history` live under the same prefix, and because a

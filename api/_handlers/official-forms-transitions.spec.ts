@@ -370,6 +370,37 @@ describe('official form review lifecycle', () => {
     expect([200, 201]).toContain(created.status);
   });
 
+  it('reads retained archive history after the operational rule is absent', async () => {
+    const ruleId = '01d28c04-b31c-48e5-be11-b1ec7db35cd5';
+    install({
+      commission_rules: [],
+      audit_events: [
+        {
+          id: 1,
+          action: 'COMMISSION_RULE_ARCHIVED',
+          actor_id: null,
+          entity_type: 'commission_rule',
+          entity_id: ruleId,
+          before_data: { id: ruleId, rate: '0.04' },
+          after_data: { archiveTable: 'commission_rule_archive' },
+          reason: 'Synthetic archival repair',
+          created_at: '2026-10-14T00:00:00.000Z',
+        },
+      ],
+    });
+    const state = await call(commissions, {
+      path: `rules/${ruleId}/history`,
+      token: 'super-admin-token',
+    });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      data: [
+        { action: 'COMMISSION_RULE_ARCHIVED', actorId: null, before: { id: ruleId, rate: '0.04' } },
+      ],
+      meta: { total: 1 },
+    });
+  });
+
   it('rejects Bronze/Silver secondary holders at the contract', () => {
     expect(
       createCustomerApplicationSchema.safeParse({

@@ -168,6 +168,10 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.clear();
   routes.set('/auth/portals', ok({ staff: null, customer: { status: 'active' }, ost: null }));
   routes.set('/customer', ok(CUSTOMER));
+  routes.set(
+    '/profile-photo/customer',
+    ok({ url: null, expiresAt: null, canUpload: true, notice: null }),
+  );
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
   routes.set('/customer/points/position', ok(POSITION));
@@ -1051,21 +1055,44 @@ describe('membership status display', () => {
   });
 });
 
-
 describe('points history pagination', () => {
   it('loads an older bounded page and returns to newer activity', async () => {
     installRoutes({
-      '/customer/points/ledger': ok({data:[{id:'101',entryType:'earned',amount:100,balanceAfter:100,reason:'Newest synthetic award',occurredAt:'2026-10-01T00:00:00.000Z'}],meta:{nextCursor:'older-page'}}),
-      '/customer/points/ledger?cursor=older-page': ok({data:[{id:'1',entryType:'adjustment',amount:50,balanceAfter:50,reason:'Older synthetic correction',occurredAt:'2026-09-01T00:00:00.000Z'}],meta:{nextCursor:null}}),
+      '/customer/points/ledger': ok({
+        data: [
+          {
+            id: '101',
+            entryType: 'earned',
+            amount: 100,
+            balanceAfter: 100,
+            reason: 'Newest synthetic award',
+            occurredAt: '2026-10-01T00:00:00.000Z',
+          },
+        ],
+        meta: { nextCursor: 'older-page' },
+      }),
+      '/customer/points/ledger?cursor=older-page': ok({
+        data: [
+          {
+            id: '1',
+            entryType: 'adjustment',
+            amount: 50,
+            balanceAfter: 50,
+            reason: 'Older synthetic correction',
+            occurredAt: '2026-09-01T00:00:00.000Z',
+          },
+        ],
+        meta: { nextCursor: null },
+      }),
     });
     render('/customer/points');
     expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
-    const user=userEvent.setup();
-    await user.click(screen.getByRole('button',{name:'Older activity'}));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Older activity' }));
     expect(await screen.findByText('Older synthetic correction')).toBeInTheDocument();
     expect(screen.queryByText('Newest synthetic award')).not.toBeInTheDocument();
-    expect(screen.getByRole('button',{name:'Older activity'})).toBeDisabled();
-    await user.click(screen.getByRole('button',{name:'Newer activity'}));
+    expect(screen.getByRole('button', { name: 'Older activity' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Newer activity' }));
     expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
   });
 });
