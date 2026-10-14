@@ -198,6 +198,8 @@ export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
   ['commissions', 'commissions', 'beneficiary_staff_id'],
   ['commissions', 'commissions', 'qualified_by'],
   ['commissions', 'commissions', 'paid_by'],
+  ['commission rules', 'commission_rules', 'created_by'],
+  ['commission rules', 'commission_rules', 'updated_by'],
   ['genealogy', 'referral_relationships', 'subject_staff_id'],
   ['genealogy', 'referral_relationships', 'upline_staff_id'],
   ['genealogy', 'referral_relationships', 'assigned_by'],
@@ -235,6 +237,17 @@ export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
   ['staff invitations', 'staff_invitations', 'invited_by'],
 ];
 
+async function isCommissionRuleTarget(db: Db, id: string): Promise<boolean> {
+  const { data, error } = await db
+    .from('commission_rules')
+    .select('target_id')
+    .eq('target_id', id)
+    .in('target_type', ['staff', 'ost'])
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
 async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
   const results = await Promise.all(
     STAFF_DELETE_BLOCKER_CHECKS.map(async ([label, table, column]) => ({
@@ -242,6 +255,8 @@ async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
       blocked: await hasReference(db, table, column, id),
     })),
   );
+  if (await isCommissionRuleTarget(db, id))
+    results.push({ label: 'commission rules', blocked: true });
   return [...new Set(results.filter((result) => result.blocked).map((result) => result.label))];
 }
 
@@ -375,11 +390,17 @@ async function planTestPurge(
     ['memberships', 'activated_by', 'membership'],
     ['redemptions', 'redeemed_by', 'redemption'],
     ['commissions', 'beneficiary_staff_id', 'commission'],
+    ['commission_rules', 'created_by', 'commission rule'],
+    ['commission_rules', 'updated_by', 'commission rule'],
   ];
   for (const [table, column, kind] of mustSurvive) {
     if (await hasReference(db, table, column, targetId)) {
       block(`a ${kind} record references this account and must be preserved`);
     }
+  }
+
+  if (await isCommissionRuleTarget(db, targetId)) {
+    block('a commission rule targets this account and must be preserved');
   }
 
   // Genealogy: the target's own placement row is their history (purged);

@@ -372,6 +372,7 @@ describe('staff account deletion safety', () => {
   const blockerSchema: Record<string, readonly string[]> = {
     card_sales: ['seller_staff_id', 'created_by'],
     commissions: ['beneficiary_staff_id', 'qualified_by', 'paid_by'],
+    commission_rules: ['created_by', 'updated_by'],
     referral_relationships: ['subject_staff_id', 'upline_staff_id', 'assigned_by'],
     card_sale_hierarchy_snapshots: ['ancestor_staff_id'],
     customers: ['referred_by_staff_id', 'created_by'],
@@ -492,6 +493,59 @@ describe('staff account deletion safety', () => {
     expect(state.body).toMatchObject({
       error: { code: 'PROTECTED_HISTORY', details: { blockers: ['sales'] } },
     });
+  });
+
+  it.each(['staff', 'ost'])(
+    'preserves a %s commission rule target during deletion',
+    async (targetType) => {
+      const db = install({
+        tables: {
+          commission_rules: [{ id: 'rule', target_type: targetType, target_id: UUID.viewerStaff }],
+        },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(state.body).toMatchObject({
+        error: { code: 'PROTECTED_HISTORY', details: { blockers: ['commission rules'] } },
+      });
+      expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(true);
+      expect(db.deletedAuthUsers).toEqual([]);
+    },
+  );
+
+  it.each(['created_by', 'updated_by'])(
+    'preserves a commission rule %s attribution',
+    async (column) => {
+      const db = install({
+        tables: { commission_rules: [{ id: 'rule', [column]: UUID.viewerStaff }] },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(db.deletedAuthUsers).toEqual([]);
+    },
+  );
+
+  it('keeps a role-target UUID separate from a staff-target UUID', async () => {
+    const db = install({
+      tables: {
+        commission_rules: [{ id: 'rule', target_type: 'role', target_id: UUID.viewerStaff }],
+      },
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(false);
   });
 
   it.each([
@@ -921,6 +975,21 @@ describe('staff test-account purge', () => {
     const actions = db.rows('audit_events').map((row) => row.action);
     expect(actions).toContain('TEST_ACCOUNT_PURGE_STARTED');
     expect(actions).toContain('TEST_ACCOUNT_PURGED');
+  });
+
+  it('refuses test purge when it would orphan a commission rule', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('commission_rules').push({
+      id: 'rule',
+      target_type: 'staff',
+      target_id: TEST_STAFF_ID,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+    expect(db.deletedAuthUsers).toEqual([]);
   });
 
   it('purges a disposable test customer owned by the staff graph', async () => {
@@ -2386,9 +2455,11 @@ describe('handler surface', () => {
   });
 });
 
-
 describe('read-only staff session HTTP boundary', () => {
-  afterEach(() => { holder.svcNull = false; holder.userDb = null; });
+  afterEach(() => {
+    holder.svcNull = false;
+    holder.userDb = null;
+  });
   it('serves an authenticated self session while keeping staff writes blocked', async () => {
     install();
     const full = await call({ afPath: 'session', token: TOKEN.admin });
@@ -2402,6 +2473,6 @@ describe('read-only staff session HTTP boundary', () => {
     // Mutations stay service-only: without a service key the write is refused
     // before any insert reaches the database.
     expect(write.status).toBe(503);
-    expect((holder.userDb as FakeSupabase).calls.filter(c => c.op === 'insert')).toHaveLength(0);
+    expect((holder.userDb as FakeSupabase).calls.filter((c) => c.op === 'insert')).toHaveLength(0);
   });
 });
