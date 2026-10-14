@@ -84,6 +84,15 @@ try {
     (name) => !name.endsWith('_afhomes_normalization_integrity.sql'),
   ))
     await db.query(fs.readFileSync(`supabase/migrations/${file}`, 'utf8').replace(/^\uFEFF/, ''));
+  check(
+    (
+      await db.query(
+        "select public,file_size_limit::int,allowed_mime_types from storage.buckets where id='afhomes-profile-photos'",
+      )
+    ).rows,
+    [{ public: false, file_size_limit: 500000, allowed_mime_types: ['image/jpeg'] }],
+    'Private profile-photo bucket cap and MIME',
+  );
   const actor = randomUUID(),
     seller = randomUUID(),
     other = randomUUID(),

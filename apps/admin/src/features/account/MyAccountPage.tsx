@@ -18,6 +18,8 @@ import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
 import styles from './MyAccountPage.module.css';
 import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
+import { ProfilePhotoEditor } from '@afhomes/ui';
+import { useProfilePhoto } from './profile-photo';
 
 /**
  * My Account (AFHomes pattern, `/admin/profile`): the signed-in staff
@@ -27,6 +29,7 @@ import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard'
  * first-login change.
  */
 export function MyAccountPage() {
+  const photo = useProfilePhoto();
   const navigate = useNavigate();
   const { user, revalidate } = useSession();
   const mustChangePassword = user?.mustChangePassword === true;
@@ -71,8 +74,22 @@ export function MyAccountPage() {
         </Alert>
       ) : null}
       <div className={styles.stack}>
-        {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(user?.roleSlug ?? '') ?
-          <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} /> : null}
+        <ProfilePhotoEditor
+          photo={photo.photo.data}
+          loading={photo.photo.isPending}
+          error={photo.photo.error?.message}
+          onRefresh={() => void photo.photo.refetch()}
+          onUpload={(data) =>
+            user
+              ? photo.upload.mutateAsync({ dataBase64: data, expectedUserId: user.id })
+              : Promise.reject(new Error('Sign in again before uploading.'))
+          }
+        />
+        {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
+          user?.roleSlug ?? '',
+        ) ? (
+          <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} />
+        ) : null}
         <DetailCard>
           <DetailCardTitle>Profile</DetailCardTitle>
           <DetailFieldGrid>

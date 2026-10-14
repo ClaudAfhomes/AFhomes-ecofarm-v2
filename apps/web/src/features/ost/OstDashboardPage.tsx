@@ -8,6 +8,7 @@ import { getOstMe } from './services';
 import { Card, Field, FieldList, formatDate, styles } from '../customer/portal-ui';
 import { saleTeamLookupSchema } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
+import { ProfilePhotoCard } from '../customer/ProfilePhotoCard';
 
 /**
  * The approved OST member's own dashboard: their number, status, sponsor and
@@ -93,6 +94,7 @@ export function OstDashboardPage() {
           <Link to="/ost/renewal">Accreditation history and renewal</Link>
         </p>
       </Card>
+      <ProfilePhotoCard scope="staff" />
     </>
   );
 }

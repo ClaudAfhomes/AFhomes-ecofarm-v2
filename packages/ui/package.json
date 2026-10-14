@@ -36,6 +36,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@afhomes/contracts": "workspace:*",
     "qrcode": "^1.5.4",
     "sweetalert2": "^11.26.25",
     "jsqr": "^1.4.0"

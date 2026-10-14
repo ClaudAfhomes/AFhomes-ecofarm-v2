@@ -106,6 +106,7 @@ export {
   DetailMockNote,
 } from './components/DetailCard.js';
 export { UserMenu, getInitials } from './components/UserMenu.js';
+export { ProfilePhotoEditor } from './components/ProfilePhotoEditor.js';
 export type { UserMenuItem, UserMenuProps } from './components/UserMenu.js';
 export { OverflowMenu } from './components/OverflowMenu.js';
 export type { OverflowMenuItem, OverflowMenuProps } from './components/OverflowMenu.js';
