@@ -165,6 +165,7 @@ async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
     ['customer applications', 'customer_applications', 'customer_id'],
+    ['customer applications', 'customer_applications', 'recommender_customer_id'],
     ['reservation agreements', 'reservation_agreements', 'customer_id'],
   ];
   const results = await Promise.all(

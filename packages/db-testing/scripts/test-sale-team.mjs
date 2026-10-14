@@ -990,6 +990,78 @@ try {
     };
     const customer = await makeCustomer(db),
       request = randomUUID();
+    const applicationHeader = {
+      customerId: customer,
+      planId: plan.id,
+      paymentScheme: 'spot_cash',
+      acknowledgedAt: '2026-10-14',
+      primarySignatureStatus: 'received',
+      vdStaffId: other,
+      smStaffId: seller,
+      recommenderCustomerId: canonicalCustomer,
+      referrerOstId: ost,
+    };
+    const primaryHolder = {
+      firstName: 'SYNTHETIC',
+      lastName: 'CUSTOMER',
+      birthDate: '1990-01-01',
+      permanentAddressLine1: 'FIXTURE STREET',
+      cityMunicipality: 'CALAMBA',
+      province: 'LAGUNA',
+      mobile: '+639171234567',
+      email: 'holder@example.invalid',
+      printedName: 'SYNTHETIC CUSTOMER',
+    };
+    await db.query('begin');
+    try {
+      const application = (
+        await db.query('select public.save_customer_application(null,$1,$2,$3,null) id', [
+          actor,
+          applicationHeader,
+          primaryHolder,
+        ])
+      ).rows[0].id;
+      check(
+        (
+          await db.query(
+            'select vd_staff_id,sm_staff_id,recommender_customer_id,referrer_ost_id from public.customer_applications where id=$1',
+            [application],
+          )
+        ).rows[0],
+        {
+          vd_staff_id: other,
+          sm_staff_id: seller,
+          recommender_customer_id: canonicalCustomer,
+          referrer_ost_id: ost,
+        },
+        'Applied hierarchy function persists stable references',
+      );
+      await db.query('savepoint invalid_hierarchy_reference');
+      await assert.rejects(
+        db.query('select public.save_customer_application($1,$2,$3,$4,null)', [
+          application,
+          actor,
+          { ...applicationHeader, vdStaffId: randomUUID() },
+          primaryHolder,
+        ]),
+        (e) => e.code === '23503',
+      );
+      checks++;
+      await db.query('rollback to savepoint invalid_hierarchy_reference');
+    } finally {
+      await db.query('rollback');
+    }
+    for (const role of ['anon', 'authenticated'])
+      check(
+        (
+          await db.query(
+            "select has_function_privilege($1,'public.save_customer_application(uuid,uuid,jsonb,jsonb,jsonb)','EXECUTE') allowed",
+            [role],
+          )
+        ).rows[0].allowed,
+        false,
+        'Browser cannot call hierarchy save directly',
+      );
     const saleInput = {
       customerId: customer,
       productId: plan.id,

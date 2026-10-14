@@ -530,6 +530,7 @@ describe('customers', () => {
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
     ['customer applications', 'customer_applications', 'customer_id'],
+    ['customer applications', 'customer_applications', 'recommender_customer_id'],
     ['reservation agreements', 'reservation_agreements', 'customer_id'],
   ])('blocks customer deletion when protected %s exist', async (label, table, column) => {
     const id = 'aaaaaaaa-0000-4000-8000-000000000098';

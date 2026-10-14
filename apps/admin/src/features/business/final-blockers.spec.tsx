@@ -19,6 +19,7 @@ const calls = vi.hoisted(() => ({
 vi.mock('./services', async (original) => ({
   ...(await original()),
   getCustomers: async () => [],
+  getCustomersPage: async () => ({ data: [], total: 0 }),
   getCustomerApplications: async () => [
     {
       id: '00000000-0000-4000-8000-000000000003',

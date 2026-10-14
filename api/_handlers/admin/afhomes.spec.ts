@@ -372,6 +372,7 @@ describe('staff account deletion safety', () => {
   const blockerSchema: Record<string, readonly string[]> = {
     card_sales: ['seller_staff_id', 'created_by'],
     reservation_agreements: ['seller_staff_id', 'created_by'],
+    customer_applications: ['created_by', 'vd_staff_id', 'ssm_staff_id', 'sm_staff_id'],
     commissions: ['beneficiary_staff_id', 'qualified_by', 'paid_by'],
     commission_rules: ['created_by', 'updated_by'],
     referral_relationships: ['subject_staff_id', 'upline_staff_id', 'assigned_by'],
@@ -503,6 +504,25 @@ describe('staff account deletion safety', () => {
     expect(state.body).toMatchObject({ error: { code: 'PROTECTED_HISTORY', details: { blockers: ['reservation agreements'] } } });
     expect(db.calls.some((entry) => entry.op === 'delete')).toBe(false);
   });
+
+  it.each(['created_by', 'vd_staff_id', 'ssm_staff_id', 'sm_staff_id'])(
+    'preserves the application %s account before removing access',
+    async (column) => {
+      const db = install({
+        tables: { customer_applications: [{ id: 'application', [column]: UUID.viewerStaff }] },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(state.body).toMatchObject({
+        error: { code: 'PROTECTED_HISTORY', details: { blockers: ['customer applications'] } },
+      });
+      expect(db.calls.some((entry) => entry.op === 'delete')).toBe(false);
+    },
+  );
 
   it.each(['staff', 'ost'])(
     'preserves a %s commission rule target during deletion',

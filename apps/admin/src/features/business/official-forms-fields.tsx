@@ -5,7 +5,10 @@
  */
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { useId, useState } from 'react';
-import type { ApplicationHolder } from '@afhomes/contracts';
+import type { ApplicationHolder, Customer } from '@afhomes/contracts';
+import { useQuery } from '@tanstack/react-query';
+import { Combobox, type ComboboxOption } from '@afhomes/ui';
+import { getGenealogy } from '../genealogy/services';
 import { birthDateSchema } from '@afhomes/contracts';
 import styles from './OfficialFormsPages.module.css';
 import { normalizeLiveHumanField } from '../../lib/normalize';
@@ -82,6 +85,7 @@ export function Field({
   type = 'text',
   required = false,
   placeholder,
+  readOnly = false,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
@@ -92,6 +96,7 @@ export function Field({
   type?: string;
   required?: boolean;
   placeholder?: string;
+  readOnly?: boolean;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -123,6 +128,7 @@ export function Field({
         value={value}
         placeholder={placeholder}
         required={required}
+        readOnly={readOnly}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
@@ -369,42 +375,314 @@ export const APPLICATION_STATUS_TONES: Record<string, 'neutral' | 'info' | 'succ
  * Recommender fields with explicit human labels (never generated from keys),
  * so renaming a label cannot silently rename the payload field.
  */
-export function RecommenderFields({
-  meta,
+export interface HierarchySelection {
+  vdStaffId?: string;
+  ssmStaffId?: string;
+  smStaffId?: string;
+  referrerOstId?: string;
+}
+
+export function HierarchyFields({
+  value,
+  fallbackSmName,
+  fallbackReferrerName,
   onChange,
+  disabled = false,
 }: {
-  meta: {
-    salesManagerName: string;
-    vipRecommenderName: string;
-    recommenderContact: string;
-    recommenderEmail: string;
-    vipReferrer: string;
-    acknowledgedAt: string;
-  };
-  onChange: (key: keyof typeof meta, value: string) => void;
+  value: HierarchySelection;
+  /** Stored SM snapshot for records written before the selectors existed. */
+  fallbackSmName: string;
+  /** Stored referrer snapshot for records written before the selectors existed. */
+  fallbackReferrerName: string;
+  onChange: (next: HierarchySelection & { salesManagerName: string; vipReferrer: string }) => void;
+  disabled?: boolean;
 }) {
-  const fields = [
-    { key: 'salesManagerName', label: 'Sales Manager Name', optionalPhone: false },
-    { key: 'vipRecommenderName', label: 'VIP Recommender Name', optionalPhone: false },
-    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
-    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
-    { key: 'vipReferrer', label: 'VIP Referrer', optionalPhone: false },
-    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
-  ] as const;
+  const [opened, setOpened] = useState(false);
+  const genealogy = useQuery({
+    queryKey: ['genealogy'],
+    queryFn: getGenealogy,
+    // Like the address lists: fetch on first reach, not on page load.
+    enabled: opened || Boolean(value.vdStaffId ?? value.ssmStaffId ?? value.smStaffId),
+  });
+  const nodes = genealogy.data ?? [];
+  const active = (role: string, upline: string | null) =>
+    nodes
+      .filter(
+        (n) => n.role === role && n.status === 'active' && (n.uplineStaffId ?? null) === upline,
+      )
+      .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }));
+  const vdOptions = nodes
+    .filter((n) => n.role === 'vice_director' && n.status === 'active' && !n.uplineStaffId)
+    .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }));
+  const ssmOptions = value.vdStaffId ? active('senior_sales_manager', value.vdStaffId) : [];
+  const smOptions = value.ssmStaffId ? active('sales_manager', value.ssmStaffId) : [];
+  /**
+   * Referring OSTs: accredited only. `ostStatus` comes from the OST membership
+   * record itself, so only `active` is eligible - a pending or suspended OST
+   * cannot refer, and a seller without a membership row cannot satisfy the
+   * reference the server persists.
+   */
+  const ostOptions = value.smStaffId
+    ? nodes
+        .filter(
+          (n) =>
+            n.role === 'ost' &&
+            n.status === 'active' &&
+            n.ostStatus === 'active' &&
+            (n.uplineStaffId ?? null) === value.smStaffId,
+        )
+        .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }))
+    : [];
+  const shownAs = (id: string | undefined, options: ComboboxOption[], legacyName: string) => {
+    const found = options.find((o) => o.code === id);
+    if (found) return found;
+    // A stored id the list does not recognise (inactive, moved, deleted) keeps
+    // its snapshot visible but unverified: empty code, never an invented id.
+    if (id) return { code: '', name: `${legacyName || 'Previously selected'} — reselect` };
+    if (legacyName && options.length === 0) return null;
+    return null;
+  };
+  const vdValue = shownAs(value.vdStaffId, vdOptions, '');
+  const ssmValue = shownAs(value.ssmStaffId, ssmOptions, '');
+  const smValue =
+    shownAs(value.smStaffId, smOptions, '') ??
+    (!value.smStaffId && fallbackSmName ? { code: '', name: fallbackSmName } : null);
+  const ostValue =
+    shownAs(value.referrerOstId, ostOptions, '') ??
+    (!value.referrerOstId && fallbackReferrerName
+      ? { code: '', name: fallbackReferrerName }
+      : null);
+  // The SM display name, resolved live: the stored snapshot is only a fallback
+  // for records whose member left the eligible list.
+  const smName = smOptions.find((o) => o.code === value.smStaffId)?.name ?? fallbackSmName;
+  const stale =
+    // Only once the list has loaded: while it is still fetching, every stored
+    // id is "unrecognised" and would flash a reselect warning for no reason.
+    genealogy.data !== undefined &&
+    ((value.vdStaffId && vdValue?.code === '') ||
+      (value.ssmStaffId && ssmValue?.code === '') ||
+      (value.smStaffId && smValue?.code === '') ||
+      (value.referrerOstId && ostValue?.code === ''));
+  const loadError = genealogy.isError ? 'Unable to load the sales hierarchy. Try again.' : null;
   return (
     <>
-      {fields.map(({ key, label, optionalPhone }) => (
-        <Field
-          key={key}
-          label={label}
-          value={meta[key]}
-          type={key === 'acknowledgedAt' ? 'date' : 'text'}
-          normalize={(v) => normalizeLiveHumanField(key, v)}
-          optionalPhone={optionalPhone}
-          onChange={(v) => onChange(key, v)}
-        />
-      ))}
+      <Combobox
+        id="recommender-vd"
+        label="Vice Director"
+        disabled={disabled}
+        onOpen={() => setOpened(true)}
+        loadingLabel="Loading Vice Directors"
+        loading={genealogy.isFetching}
+        error={loadError}
+        onRetry={() => void genealogy.refetch()}
+        value={vdValue}
+        options={vdOptions}
+        placeholder="Search or select Vice Director"
+        emptyMessage="No eligible Vice Directors"
+        onSelect={(option) =>
+          onChange({
+            vdStaffId: option?.code || undefined,
+            ssmStaffId: undefined,
+            smStaffId: undefined,
+            referrerOstId: undefined,
+            salesManagerName: '',
+            vipReferrer: '',
+          })
+        }
+      />
+      <Combobox
+        id="recommender-ssm"
+        label="Senior Sales Manager"
+        disabled={disabled || !value.vdStaffId}
+        disabledHint="Select a Vice Director first"
+        loading={genealogy.isFetching}
+        loadingLabel="Loading Senior Sales Managers"
+        error={loadError}
+        onRetry={() => void genealogy.refetch()}
+        value={ssmValue}
+        options={ssmOptions}
+        placeholder="Search or select SSM"
+        emptyMessage={
+          value.vdStaffId ? 'This Vice Director has no Senior Sales Manager' : undefined
+        }
+        onSelect={(option) =>
+          onChange({
+            vdStaffId: value.vdStaffId,
+            ssmStaffId: option?.code || undefined,
+            smStaffId: undefined,
+            referrerOstId: undefined,
+            salesManagerName: '',
+            vipReferrer: '',
+          })
+        }
+      />
+      <Combobox
+        id="recommender-sm"
+        label="Sales Manager"
+        disabled={disabled || !value.ssmStaffId}
+        disabledHint="Select a Senior Sales Manager first"
+        loading={genealogy.isFetching}
+        loadingLabel="Loading Sales Managers"
+        error={loadError}
+        onRetry={() => void genealogy.refetch()}
+        value={smValue}
+        options={smOptions}
+        placeholder="Search or select SM"
+        emptyMessage={
+          value.ssmStaffId ? 'This Senior Sales Manager has no Sales Manager' : undefined
+        }
+        onSelect={(option) =>
+          onChange({
+            vdStaffId: value.vdStaffId,
+            ssmStaffId: value.ssmStaffId,
+            smStaffId: option?.code || undefined,
+            referrerOstId: undefined,
+            salesManagerName: option?.name ?? '',
+            vipReferrer: '',
+          })
+        }
+      />
+      <Combobox
+        id="recommender-ost"
+        label="Referring OST"
+        disabled={disabled || !value.smStaffId}
+        disabledHint="Select a Sales Manager first"
+        loading={genealogy.isFetching}
+        loadingLabel="Loading OST referrers"
+        error={loadError}
+        onRetry={() => void genealogy.refetch()}
+        value={ostValue}
+        options={ostOptions}
+        placeholder="Search or select OST referrer"
+        emptyMessage={value.smStaffId ? 'This Sales Manager has no OST' : undefined}
+        onSelect={(option) =>
+          onChange({
+            vdStaffId: value.vdStaffId,
+            ssmStaffId: value.ssmStaffId,
+            smStaffId: value.smStaffId,
+            referrerOstId: option?.code || undefined,
+            salesManagerName: smName,
+            vipReferrer: option?.name ?? '',
+          })
+        }
+      />
+      {stale && !disabled ? (
+        <p role="status">
+          A previously selected member is no longer eligible. Choose again from the list.
+        </p>
+      ) : null}
     </>
   );
 }
 
+/**
+ * VIP recommender lookup from the existing customer directory.
+ *
+ * Selecting a record copies its authoritative phone and email into the
+ * snapshots; clearing the selection clears what was copied. The snapshots stay
+ * editable only while no record is linked (legacy free-text entries); a linked
+ * record's contact details are read-only here and corrected on the customer
+ * record, never by overwriting this form. Nothing is invented when the record
+ * has no contact on file.
+ */
+export interface RecommenderSelection {
+  recommenderCustomerId?: string;
+  vipRecommenderName: string;
+  recommenderContact: string;
+  recommenderEmail: string;
+}
+
+export function VipRecommenderFields({
+  value,
+  customers,
+  customersLoading,
+  customersError,
+  onRetryCustomers,
+  onChange,
+  disabled = false,
+  onSearch,}: {
+  value: RecommenderSelection;
+  customers: Customer[];
+  customersLoading: boolean;
+  customersError: string | null;
+  onRetryCustomers: () => void;
+  onChange: (next: RecommenderSelection) => void;
+  disabled?: boolean;
+  onSearch?: (query: string) => void;}) {
+  const options: ComboboxOption[] = customers.map((c) => ({
+    code: c.id,
+    name: c.fullName,
+    // The number is part of the answer: duplicate names stay distinguishable
+    // to assistive tech through the option's accessible name.
+    type: c.customerNumber,
+  }));
+  const selected = customers.find((c) => c.id === value.recommenderCustomerId) ?? null;
+  const comboboxValue: ComboboxOption | null = selected
+    ? { code: selected.id, name: selected.fullName }
+    : value.vipRecommenderName
+      ? { code: '', name: value.vipRecommenderName }
+      : null;
+  const linked = Boolean(selected);
+  return (
+    <>
+      <Combobox
+        id="vip-recommender"
+        label="VIP Recommender Name"
+        onSearch={onSearch}        onOpen={() => onSearch?.('')}        disabled={disabled}
+        loading={customersLoading}
+        loadingLabel="Loading recommenders"
+        error={customersError}
+        onRetry={onRetryCustomers}
+        value={comboboxValue}
+        options={options}
+        placeholder="Search recommender by name"
+        emptyMessage="No matching recommender"
+        onSelect={(option) => {
+          if (!option || !option.code) {
+            onChange({
+              recommenderCustomerId: undefined,
+              vipRecommenderName: '',
+              recommenderContact: '',
+              recommenderEmail: '',
+            });
+            return;
+          }
+          const customer = customers.find((c) => c.id === option.code);
+          if (!customer) return;
+          onChange({
+            recommenderCustomerId: customer.id,
+            vipRecommenderName: customer.fullName,
+            recommenderContact: customer.phone ?? '',
+            recommenderEmail: customer.email ?? '',
+          });
+        }}
+      />
+      {comboboxValue && !linked && !disabled ? (
+        <p role="status">
+          Historical entry, not linked to a record. Search and select the recommender to link it.
+        </p>
+      ) : null}
+      <Field
+        label="Recommender Contact"
+        value={value.recommenderContact}
+        optionalPhone
+        normalize={(v) => normalizeLiveHumanField('recommenderContact', v)}
+        onChange={(v) =>
+          onChange({ ...value, recommenderContact: v, recommenderCustomerId: undefined })
+        }
+        readOnly={linked}
+        placeholder={linked && !value.recommenderContact ? 'No contact on record' : undefined}
+      />
+      <Field
+        label="Recommender Email"
+        value={value.recommenderEmail}
+        normalize={(v) => normalizeLiveHumanField('recommenderEmail', v)}
+        onChange={(v) =>
+          onChange({ ...value, recommenderEmail: v, recommenderCustomerId: undefined })
+        }
+        readOnly={linked}
+        placeholder={linked && !value.recommenderEmail ? 'No email on record' : undefined}
+      />
+    </>
+  );
+}

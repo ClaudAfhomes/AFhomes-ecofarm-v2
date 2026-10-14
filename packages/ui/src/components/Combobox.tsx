@@ -45,6 +45,8 @@ export interface ComboboxProps {
    * form should not fetch a reference list for a field nobody touched.
    */
   onOpen?: () => void;
+  /** Optional server-search input; typing still never commits an option. */
+  onSearch?: (query: string) => void;
   placeholder?: string;
   /** Extra wording so three levels do not all read "Loading…". */
   loadingLabel?: string;
@@ -59,6 +61,7 @@ export function Combobox({
   value,
   options,
   onSelect,
+  onSearch,
   loading = false,
   error = null,
   onRetry,
@@ -220,6 +223,7 @@ export function Combobox({
           placeholder={placeholder}
           value={draft}
           onChange={(e) => {
+            onSearch?.(e.target.value);
             setDraft(e.target.value);
             setFilter(e.target.value);
             setActiveIndex(-1);
@@ -240,7 +244,12 @@ export function Combobox({
         {loading ? <Spinner size="sm" /> : null}
 
         {value ? (
-          <IconButton icon="close" label={`Clear ${label.toLowerCase()}`} onClick={() => commit(null)} disabled={disabled} />
+          <IconButton
+            icon="close"
+            label={`Clear ${label.toLowerCase()}`}
+            onClick={() => commit(null)}
+            disabled={disabled}
+          />
         ) : null}
 
         <Icon name="chevron-down" size={16} aria-hidden="true" />

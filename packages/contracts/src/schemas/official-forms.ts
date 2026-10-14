@@ -108,13 +108,32 @@ const customerApplicationInputSchema = z.object({
   primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
   salesManagerName: z.string().trim().max(160).optional(),
+  /**
+   * Stable hierarchy selection (VD -> SSM -> SM). The names above stay the
+   * document snapshots; these ids are the validated relationship. All three or
+   * a leading prefix only: an SM implies its SSM and VD, an SSM implies its VD.
+   */
+  vdStaffId: optionalUuid,
+  ssmStaffId: optionalUuid,
+  smStaffId: optionalUuid,
   vipRecommenderName: z.string().trim().max(160).optional(),
+  /**
+   * Stable VIP recommender selection. The contact/email snapshots below stay
+   * the document record; this id is the validated customer it was copied from.
+   */
+  recommenderCustomerId: optionalUuid,
+  vipReferrer: z.string().trim().max(160).optional(),
+  /**
+   * Stable VIP referrer selection: the OST under the selected Sales Manager.
+   * The `vipReferrer` name stays the document snapshot; this id is the
+   * validated OST it names.
+   */
+  referrerOstId: optionalUuid,
   recommenderContact: optionalContactNumberSchema,
   recommenderEmail: z.preprocess(
     (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
     emailSchema.optional(),
   ),
-  vipReferrer: z.string().trim().max(160).optional(),
   acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
   consentAcknowledged: z.boolean(),
   acknowledgedAt: dateSchema,
@@ -156,6 +175,10 @@ const validateApplicationHolders = (
     secondary?: unknown;
     secondarySignatureStatus?: unknown;
     primary?: unknown;
+    vdStaffId?: string;
+    ssmStaffId?: string;
+    smStaffId?: string;
+    referrerOstId?: string;
   },
   ctx: z.RefinementCtx,
 ) => {
@@ -170,6 +193,27 @@ const validateApplicationHolders = (
       code: 'custom',
       path: ['secondarySignatureStatus'],
       message: 'Secondary signature requires a secondary holder',
+    });
+  // Hierarchy is a leading prefix only: an SM implies its SSM and VD, an SSM
+  // implies its VD. A dangling child id is a stale cascade, never a save.
+  if (value.smStaffId && (!value.ssmStaffId || !value.vdStaffId))
+    ctx.addIssue({
+      code: 'custom',
+      path: ['smStaffId'],
+      message: 'Select the Vice Director and Senior Sales Manager for this Sales Manager',
+    });
+  if (value.ssmStaffId && !value.vdStaffId)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['ssmStaffId'],
+      message: 'Select the Vice Director for this Senior Sales Manager',
+    });
+  // The referrer is the OST under the selected Sales Manager, never a free id.
+  if (value.referrerOstId && !value.smStaffId)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referrerOstId'],
+      message: 'Select the Sales Manager for this referring OST',
     });
   validateHolderLocationCodes(
     value.primary as { provinceCode?: string } | undefined,

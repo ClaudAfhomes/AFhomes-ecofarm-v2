@@ -1,5 +1,5 @@
 {
-  "observedAt": "2026-10-14T11:47:42.341Z",
+  "observedAt": "2026-10-14T13:39:55.504Z",
   "readOnly": true,
   "cliVersion": "63.1.2",
   "authenticatedUser": "claudmarsjimenezafhomes-9026",
@@ -30,6 +30,13 @@
     }
   ],
   "environmentNames": [
+    {
+      "key": "SUPABASE_SERVICE_ROLE_KEY",
+      "targets": [
+        "preview"
+      ],
+      "gitBranch": "develop"
+    },
     {
       "key": "VITE_WEB_URL",
       "targets": [

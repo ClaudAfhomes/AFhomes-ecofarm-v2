@@ -27,6 +27,7 @@ import {
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
+import { normalizeLiveHumanField } from '../../lib/normalize';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
@@ -94,7 +95,10 @@ import {
   HolderFields,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
-  RecommenderFields,
+  HierarchyFields,
+  VipRecommenderFields,
+  Field,
+  type HierarchySelection,
 } from './official-forms-fields';
 
 export function CustomerApplicationsPage() {
@@ -546,6 +550,10 @@ export function CustomerApplicationEditorPage() {
     vipReferrer: '',
     acknowledgedAt: today(),
   });
+  // Stable hierarchy + recommender references. The names above stay the document
+  // snapshots; these ids are the validated relationships the server checks.
+  const [hierarchy, setHierarchy] = useState<HierarchySelection>({});
+  const [recommenderCustomerId, setRecommenderCustomerId] = useState<string | undefined>(undefined);
   const [channels, setChannels] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
   const [validId, setValidId] = useState(false);
@@ -591,6 +599,26 @@ export function CustomerApplicationEditorPage() {
     queryKey: applicationKeys.picker,
     queryFn: () => getCustomersPage({ limit: 200, offset: 0 }),
   });
+  const [recommenderSearch, setRecommenderSearch] = useState('');
+  const settledRecommenderSearch = useDebouncedValue(recommenderSearch, 300);
+  const recommenderOptions = useQuery({
+    queryKey: ['business', 'customers', 'recommender', settledRecommenderSearch],
+    queryFn: () =>
+      getCustomersPage({
+        search: settledRecommenderSearch.trim() || undefined,
+        limit: 50,
+        offset: 0,
+      }),
+  });
+  const linkedRecommender = useQuery({
+    queryKey: businessKeys.customer(recommenderCustomerId ?? ''),
+    queryFn: () => getCustomerById(recommenderCustomerId ?? ''),
+    enabled: Boolean(recommenderCustomerId),
+  });
+  const recommenders = [...(recommenderOptions.data?.data ?? [])];
+  const chosenRecommender = linkedRecommender.data;
+  if (chosenRecommender && !recommenders.some((customer) => customer.id === chosenRecommender.id))
+    recommenders.push(chosenRecommender);
   const linkedCustomer = useQuery({
     queryKey: businessKeys.customer(customerId),
     queryFn: () => getCustomerById(customerId),
@@ -719,6 +747,13 @@ export function CustomerApplicationEditorPage() {
         vipReferrer: app.vipReferrer ?? '',
         acknowledgedAt: app.acknowledgedAt,
       });
+      setHierarchy({
+        vdStaffId: app.vdStaffId ?? undefined,
+        ssmStaffId: app.ssmStaffId ?? undefined,
+        smStaffId: app.smStaffId ?? undefined,
+        referrerOstId: app.referrerOstId ?? undefined,
+      });
+      setRecommenderCustomerId(app.recommenderCustomerId ?? undefined);
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);
       setValidId(app.validIdReceived);
@@ -735,6 +770,13 @@ export function CustomerApplicationEditorPage() {
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
     ...meta,
+    // Stable references ride with the snapshots. Absent on legacy records and
+    // simply omitted there; the snapshots keep those readable and printable.
+    ...(hierarchy.vdStaffId ? { vdStaffId: hierarchy.vdStaffId } : {}),
+    ...(hierarchy.ssmStaffId ? { ssmStaffId: hierarchy.ssmStaffId } : {}),
+    ...(hierarchy.smStaffId ? { smStaffId: hierarchy.smStaffId } : {}),
+    ...(hierarchy.referrerOstId ? { referrerOstId: hierarchy.referrerOstId } : {}),
+    ...(recommenderCustomerId ? { recommenderCustomerId } : {}),
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
     )[],
@@ -1477,9 +1519,66 @@ export function CustomerApplicationEditorPage() {
           <fieldset className={styles.panel}>
             <legend className={styles.panelTitle}>5. Recommender details</legend>
             <div className={styles.editorGrid}>
-              <RecommenderFields
-                meta={meta}
-                onChange={(key, value) => setMeta({ ...meta, [key]: value })}
+              <HierarchyFields
+                value={hierarchy}
+                fallbackSmName={meta.salesManagerName}
+                fallbackReferrerName={meta.vipReferrer}
+                disabled={!editable}
+                onChange={(next) => {
+                  setHierarchy({
+                    vdStaffId: next.vdStaffId,
+                    ssmStaffId: next.ssmStaffId,
+                    smStaffId: next.smStaffId,
+                    referrerOstId: next.referrerOstId,
+                  });
+                  setMeta((current) => ({
+                    ...current,
+                    salesManagerName: next.salesManagerName,
+                    vipReferrer: next.vipReferrer,
+                  }));
+                }}
+              />
+              <VipRecommenderFields
+                onSearch={setRecommenderSearch}
+                value={{
+                  recommenderCustomerId,
+                  vipRecommenderName: meta.vipRecommenderName,
+                  recommenderContact: meta.recommenderContact,
+                  recommenderEmail: meta.recommenderEmail,
+                }}
+                customers={recommenders}
+                customersLoading={recommenderOptions.isFetching}
+                customersError={
+                  recommenderOptions.isError ? 'Unable to load recommenders. Try again.' : null
+                }
+                onRetryCustomers={() => void recommenderOptions.refetch()}
+                disabled={!editable}
+                onChange={(next) => {
+                  setRecommenderCustomerId(next.recommenderCustomerId);
+                  setMeta((current) => ({
+                    ...current,
+                    vipRecommenderName: next.vipRecommenderName,
+                    recommenderContact: next.recommenderContact,
+                    recommenderEmail: next.recommenderEmail,
+                  }));
+                }}
+              />
+              <Field
+                label="VIP Referrer"
+                value={meta.vipReferrer}
+                normalize={(v) => normalizeLiveHumanField('vipReferrer', v)}
+                onChange={(v) => {
+                  setHierarchy((current) => ({ ...current, referrerOstId: undefined }));
+                  setMeta({ ...meta, vipReferrer: v });
+                }}
+                readOnly={Boolean(hierarchy.referrerOstId)}
+              />
+              <DateField
+                id="application-acknowledged-at"
+                name="acknowledgedAt"
+                label="Acknowledged At"
+                value={meta.acknowledgedAt}
+                onChange={(v) => setMeta({ ...meta, acknowledgedAt: v })}
               />
             </div>
           </fieldset>
