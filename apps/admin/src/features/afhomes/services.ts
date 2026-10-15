@@ -69,7 +69,7 @@ const roleDeletionSchema = z.object({ deleted: z.literal(true) });
 export const deleteAfHomesRole = (id: string) =>
   request(`/admin/afhomes/roles/${id}`, roleDeletionSchema, { method: 'DELETE' });
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
-  requestList('/admin/afhomes/staff', afHomesStaffSchema);
+  requestList('/admin/afhomes/staff?includeAccreditation=1', afHomesStaffSchema);
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
   request(`/admin/afhomes/staff/${id}`, afHomesStaffSchema);
 /**

@@ -509,15 +509,16 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
     if (window.to) reservationQuery = reservationQuery.lte('recorded_at', window.to);
     payments = dedupeByPaymentId([
       ...payments,
-      ...(((await readSearchRows(
-        reservationQuery.order('recorded_at', { ascending: false }),
-      )) ?? []) as Row[]),
+      ...(((await readSearchRows(reservationQuery.order('recorded_at', { ascending: false }))) ??
+        []) as Row[]),
     ]).filter((row) => inReportWindow(row.recorded_at, window.from, window.to));
   }
   const reservationIdsSeen = [
     ...new Set(payments.map((row) => String(row.reservation_id ?? ''))),
   ].filter(Boolean);
-  const saleIdsSeen = [...new Set(payments.map((row) => String(row.sale_id ?? '')))].filter(Boolean);
+  const saleIdsSeen = [...new Set(payments.map((row) => String(row.sale_id ?? '')))].filter(
+    Boolean,
+  );
   const customerIds = [...new Set(payments.map((row) => String(row.customer_id ?? '')))].filter(
     Boolean,
   );
@@ -1518,7 +1519,9 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
       const actors = actorIds.length
         ? await db
             .from('staff_users')
-            .select('id,full_name,staff_role_assignments(roles(name))')
+            .select(
+              'id,full_name,staff_role_assignments!staff_role_assignments_staff_id_fkey(roles(name))',
+            )
             .in('id', actorIds)
         : { data: [], error: null };
       if (actors.error) throw actors.error;
@@ -1526,7 +1529,9 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
       for (const person of (actors.data ?? []) as Row[]) {
         const assignments = Array.isArray(person.staff_role_assignments)
           ? person.staff_role_assignments
-          : [];
+          : person.staff_role_assignments
+            ? [person.staff_role_assignments]
+            : [];
         const assignment: unknown = assignments[0];
         const role =
           assignment && typeof assignment === 'object' && 'roles' in assignment

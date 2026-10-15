@@ -150,6 +150,7 @@ const MEMBER: OstMember = {
   sponsorStaffId: '22222222-2222-4222-8222-222222222222',
   sponsorName: 'Sam Manager',
   ostNumber: 'OST-000001',
+  aaNumber: 'AAO26100002',
   fullName: 'Oscar Trainee',
   email: 'oscar@example.invalid',
   phone: '+639171234567',
@@ -396,6 +397,7 @@ describe('OST members', () => {
     mockedGetOstMembers.mockResolvedValue([MEMBER]);
     renderWithProviders(<OstMembersPage />, { user: STAFF });
     expect(await screen.findByText('OST-000001')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy ID AAO26100002' })).toBeInTheDocument();
     expect(screen.getByText('Oscar Trainee')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Genealogy' })).toHaveAttribute(
       'href',

@@ -47,6 +47,7 @@
     { "source": "/faq", "destination": "/faq/index.html" },
     { "source": "/compliance", "destination": "/compliance/index.html" },
     { "source": "/contact", "destination": "/contact/index.html" },
+    { "source": "/sale-team-search", "destination": "/sale-team-search/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "git": {

@@ -28,7 +28,7 @@ type SponsorCandidate = {
   id: string;
   full_name: string;
   status: string;
-  staff_role_assignments: { roles: { slug: string; is_active: boolean } }[];
+  staff_role_assignments: unknown;
 };
 type StaffUsersResult = { data: SponsorCandidate[] | null; error: { message: string } | null };
 
@@ -140,15 +140,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // environment. The per-row Zod check below still validates at runtime.
     const result = (await db
       .from('staff_users')
-      .select('id,full_name,status,staff_role_assignments(roles(slug,is_active))')
+      .select(
+        'id,full_name,status,staff_role_assignments!staff_role_assignments_staff_id_fkey(roles(slug,is_active))',
+      )
       .eq('status', 'active')) as StaffUsersResult;
     if (result.error) return rpcFailure(res, result.error);
     const sponsors = (result.data ?? [])
       .filter((row) => {
         const parsed = z
           .object({
-            staff_role_assignments: z.array(
-              z.object({ roles: z.object({ slug: z.string(), is_active: z.boolean() }) }),
+            staff_role_assignments: z.preprocess(
+              (value) => (Array.isArray(value) ? value : value == null ? [] : [value]),
+              z.array(z.object({ roles: z.object({ slug: z.string(), is_active: z.boolean() }) })),
             ),
           })
           .safeParse(row);

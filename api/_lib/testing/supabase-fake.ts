@@ -619,6 +619,11 @@ export class FakeSupabase {
       } else if (write === undefined) {
         const rerr = self.errors[table];
         if (rerr) return { data: null, error: { ...rerr }, count: null };
+        const selected = ops.find((op) => op.t === 'select');
+        if (selected?.t === 'select') {
+          const columnError = self.errors[`${table}.${selected.cols}`];
+          if (columnError) return { data: null, error: { ...columnError }, count: null };
+        }
       }
       const store = self.tables[table]!;
 
@@ -792,8 +797,8 @@ export class FakeSupabase {
       const [embedTable, constraint] = target.split('!');
       const byName = (l: FakeLink) =>
         constraint && constraint !== 'inner'
-          ? l.child === parent &&
-            l.parent === embedTable &&
+          ? ((l.child === parent && l.parent === embedTable) ||
+              (l.parent === parent && l.child === embedTable)) &&
             `${l.child}_${l.fk}_fkey` === constraint
           : false;
       const asParent = (l: FakeLink) =>
