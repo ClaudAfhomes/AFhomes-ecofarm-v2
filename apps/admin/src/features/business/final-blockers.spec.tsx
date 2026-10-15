@@ -165,6 +165,33 @@ function mount(application = false) {
   );
   return { ...view, user: userEvent.setup() };
 }
+type QAUser = ReturnType<typeof userEvent.setup>;
+const GOLD_PLAN_ID = '00000000-0000-4000-8000-000000000001';
+/**
+ * Walk the new-application wizard to the Holders step: pick Gold on
+ * Application, then satisfy Identity with a picked (not yet uploaded) ID.
+ * Upload happens on Save, so no server upload runs during navigation.
+ */
+async function goToHolders(user: QAUser) {
+  await screen.findByRole('option', { name: 'Gold' });
+  await user.selectOptions(await screen.findByLabelText('VIP plan'), GOLD_PLAN_ID);
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.change(await screen.findByLabelText('ID Type'), { target: { value: 'passport' } });
+  fireEvent.change(screen.getByLabelText('Upload ID'), {
+    target: { files: [new File(['x'], 'x.png', { type: 'image/png' })] },
+  });
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByLabelText('First name');
+}
+/** Fill the required primary fields so Holders Next unlocks. */
+function fillPrimaryHolders() {
+  fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ana' } });
+  fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+  fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+  fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+  fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
+}
 /**
  * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
  *
@@ -243,9 +270,12 @@ it('actual IST tier is a closed dropdown, not a free-text box', async () => {
   const view = mount();
   const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
   expect(select.tagName).toBe('SELECT');
-  expect(
-    [...select.options].map((option) => option.value),
-  ).toEqual(['', 'BRONZE', 'SILVER', 'GOLD']);
+  expect([...select.options].map((option) => option.value)).toEqual([
+    '',
+    'BRONZE',
+    'SILVER',
+    'GOLD',
+  ]);
   await view.user.selectOptions(select, 'GOLD');
   expect(select.value).toBe('GOLD');
 });
@@ -309,6 +339,7 @@ const blockersText = () =>
   screen.queryByText('Cannot save and submit yet:')?.parentElement?.textContent ?? '';
 it('primary landline refuses letters and blocks save while the number is invalid', async () => {
   const { user } = mount(true);
+  await goToHolders(user);
   const input = screen.getByLabelText<HTMLInputElement>('Landline');
   await user.type(input, '09ABC123456');
   // Letters are refused at the keystroke: a landline can never hold them. The
@@ -335,11 +366,7 @@ it('primary landline refuses letters and blocks save while the number is invalid
 });
 it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);
-  await screen.findByRole('option', { name: 'Gold' });
-  await user.selectOptions(
-    await screen.findByLabelText('VIP plan'),
-    '00000000-0000-4000-8000-000000000001',
-  );
+  await goToHolders(user);
   await user.click(screen.getByLabelText(/Add optional Gold secondary/));
   const input = screen.getAllByLabelText<HTMLInputElement>('Landline')[1]!;
   await user.type(input, 'PHONE123');
@@ -353,7 +380,10 @@ it('supplementary landline gets its own frontend error', async () => {
 });
 it('recommender contact gets its own frontend error and valid formatting is allowed', async () => {
   const { user } = mount(true);
-  const input = screen.getByLabelText('Recommender Contact');
+  await goToHolders(user);
+  fillPrimaryHolders();
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  const input = await screen.findByLabelText('Recommender Contact');
   await user.type(input, '0917TEST');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
@@ -369,19 +399,34 @@ it.each(['Silver', 'Bronze', 'Select plan'])(
   'clears Gold secondary holder when changing to %s',
   async (label) => {
     const { user } = mount(true);
-    await screen.findByRole('option', { name: 'Gold' });
-    await user.selectOptions(
-      screen.getByLabelText('VIP plan'),
-      screen.getByRole('option', { name: 'Gold' }),
-    );
+    await goToHolders(user);
     await user.click(screen.getByLabelText(/Add optional Gold secondary/));
     expect(screen.getByRole('group', { name: /Secondary holder/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await user.selectOptions(
       screen.getByLabelText('VIP plan'),
       screen.getByRole('option', { name: label }),
     );
+    // Clearing the plan locks step 0 (nothing to proceed with), so re-pick
+    // Gold to observe the cleared secondary state on the Holders step. A
+    // stale secondary would still render its group there.
+    const reselected = label === 'Select plan';
+    if (reselected) {
+      await user.selectOptions(
+        screen.getByLabelText('VIP plan'),
+        screen.getByRole('option', { name: 'Gold' }),
+      );
+    }
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText(/Add optional Gold secondary/);
     expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
-    expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    if (reselected) {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeEnabled();
+    } else {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    }
     expect(screen.queryByRole('group', { name: /Secondary holder/ })).not.toBeInTheDocument();
   },
 );

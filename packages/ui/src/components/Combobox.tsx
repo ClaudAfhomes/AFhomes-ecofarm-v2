@@ -247,7 +247,12 @@ export function Combobox({
         {loading ? <Spinner size="sm" /> : null}
 
         {value ? (
-          <IconButton icon="close" label={`Clear ${label.toLowerCase()}`} onClick={() => commit(null)} disabled={disabled} />
+          <IconButton
+            icon="close"
+            label={`Clear ${label.toLowerCase()}`}
+            onClick={() => commit(null)}
+            disabled={disabled}
+          />
         ) : null}
 
         <Icon name="chevron-down" size={16} aria-hidden="true" />
