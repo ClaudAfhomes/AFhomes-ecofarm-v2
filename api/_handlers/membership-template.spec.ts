@@ -1,16 +1,21 @@
 /**
- * Company 44-column membership template (BR-RATE-06 area: issuance integrity
- * starts with a correct template; import mapping in `customer-import.ts`).
+ * Membership template endpoints and import mapping (BR-RATE-06 area:
+ * issuance integrity starts with a correct template; mapping in
+ * `customer-import.ts`).
  *
- * - Template endpoints serve the exact 44 headers in order, duplicates kept.
- *   OST/IST NAME sat at position 28 and was removed from the download; files
- *   filled from the superseded 45-column layout still parse (see the legacy
- *   tests below) with their values preserved on the customer record.
- * - The company layout remaps positionally onto import columns; unmapped
- *   company headers warn by exact name and merge nothing (ADDRESS ×2 and
- *   EMAIL ADDRESS ×2 must not collide).
- * - FULL NAME is never split: rows carry the name warning and fail on the
- *   required first/last names instead of inventing identity parse rules.
+ * - The CURRENT download is the guided workbook: README + Primary/
+ *   Supplementary/Related/Package tabs modelled on the customer-application
+ *   form - split names, split address, and fixed-value dropdowns. It merges
+ *   to the canonical guided flat matrix and remaps positionally.
+ * - The previous company layout (44 verbatim headers, OST/IST NAME removed at
+ *   position 28) still parses: files filled from those downloads keep
+ *   importing, and the legacy tests below pin that.
+ * - Company headers with no import target warn by exact name and merge
+ *   nothing; duplicated headers (ADDRESS x2, EMAIL ADDRESS x3) never collide
+ *   because both remaps are POSITIONAL.
+ * - The supplementary name/address are entered as parts and JOINED into the
+ *   one text column the customer record actually has; FULL NAME is gone from
+ *   the download, so nothing is ever split by code.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -19,8 +24,13 @@ import {
   MEMBERSHIP_TEMPLATE_COLUMNS,
 } from '@afhomes/contracts';
 import {
+  INTERIM_V2_COLUMNS,
   MEMBERSHIP_TEMPLATE_SECTION_BANDS,
   MEMBERSHIP_TEMPLATE_SECTIONS,
+  MEMBERSHIP_TEMPLATE_V2_COLUMNS,
+  MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_V2_SECTIONS,
+  isInterimV2Flat,
   mergeSectionedTemplateSheets,
   parseXlsxSheets,
 } from '../_lib/customer-import.js';
@@ -173,8 +183,7 @@ describe('company membership template', () => {
     expect((await call({ path: 'template/csv', token: 'seller-token' })).status).toBe(403);
   });
 
-  it('serves README plus four section tabs holding the 44 headers', async () => {
-    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
+  it('serves the guided README plus four tabs with dropdowns and split names', async () => {
     const xlsx = await call({ path: 'template/xlsx' });
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
@@ -188,19 +197,17 @@ describe('company membership template', () => {
       'Package',
     ]);
     const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
-    for (const section of MEMBERSHIP_TEMPLATE_SECTIONS)
-      expect(byName.get(section.sheet)).toEqual([...section.headers]);
-    // OST/IST NAME left the download: no tab may carry it anymore.
-    for (const sheet of sheets) expect(sheet.matrix[0]).not.toContain('OST/IST NAME');
-    const { matrix } = mergeSectionedTemplateSheets(sheets);
-    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
-    // Spot-check the spec: first/last headers and the duplicated ADDRESS pair.
-    expect(matrix[0]![0]).toBe('RA NO');
-    expect(matrix[0]![43]).toBe('DATE');
-    expect(matrix[0]![3]).toBe('ADDRESS');
-    expect(matrix[0]![16]).toBe('ADDRESS');
-    expect(matrix[0]![11]).toBe('EMAIL ADDRESS');
-    expect(matrix[0]![34]).toBe('EMAIL ADDRESS');
+    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([
+        ...section.columns.map((column) => column.header),
+      ]);
+    // FULL NAME left the download: names are the operator's own split.
+    for (const sheet of sheets) expect(sheet.matrix[0]).not.toContain('FULL NAME');
+    // Dropdowns live in the worksheet XML; ZIP entries are stored
+    // uncompressed, so the validation list is readable in the raw bytes.
+    const xml = bytes.toString('latin1');
+    expect(xml).toContain('<dataValidation type="list"');
+    expect(xml).toContain('GOLD,SILVER,BRONZE');
 
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);
@@ -214,13 +221,36 @@ describe('company membership template', () => {
       .split('\r\n')
       .filter((line) => line.trim() !== '')
       .map((line) => line.split(','));
-    // Row 1 groups the columns by section; row 2 is the verbatim 44 headers.
-    expect(csvMatrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_SECTION_BANDS]);
-    expect(csvMatrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
-    expect(csvMatrix[0]![0]).toBe('Primary');
-    expect(csvMatrix[0]![43]).toBe('Package');
+    // Row 1 groups the columns by section; row 2 is the guided headers.
+    expect(csvMatrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS]);
+    expect(csvMatrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+    expect(csvMatrix[1]).toHaveLength(62);
     expect(csvMatrix[1]![0]).toBe('RA NO');
-    expect(csvMatrix[1]![43]).toBe('DATE');
+    // Names split on the Primary tab; the Supplementary tab carries the same
+    // headers (they are section-separated, never SUPPLEMENTARY-prefixed).
+    expect(csvMatrix[1]).toContain('BARANGGAY');
+    expect(csvMatrix[1]).toContain('PERMANENT ADDRESS LINE 1');
+    expect(csvMatrix[1]!.filter((header) => header === 'FIRST NAME')).toHaveLength(2);
+  });
+
+  it('keeps serving the previous company layout for already-filled files', async () => {
+    // The legacy download is no longer offered by the endpoint, but files
+    // filled from it still merge and remap exactly as before.
+    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
+    const legacy = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    expect(legacy).toHaveLength(45);
+    const { matrix } = mergeSectionedTemplateSheets(
+      MEMBERSHIP_TEMPLATE_SECTIONS.map((section) => ({
+        name: section.sheet,
+        matrix: [[...section.headers]],
+      })),
+    );
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(MEMBERSHIP_TEMPLATE_SECTION_BANDS).toHaveLength(44);
   });
 
   it('remaps company headers positionally without merging duplicates', async () => {
@@ -250,7 +280,9 @@ describe('company membership template', () => {
     expect(row.fields.address_line_1).toBe('123 Sampaguita St');
     expect(row.fields.secondary_email).toBe('maria@example.com');
     expect(row.fields.secondary_mobile).toBe('09181234567');
-    expect(row.fields.secondary_birth_date).toBe('1992-08-10');
+    // The legacy layout's supplementary BIRTHDAY now lands on the dedicated
+    // column instead of being validated and dropped.
+    expect(row.fields.supplementary_birthday).toBe('1992-08-10');
     expect(row.fields.source_status).toBe('Pending');
     expect(row.fields.vip_tier).toBe('GOLD');
     expect(row.fields.payment_scheme).toBe('spot_cash');
@@ -286,7 +318,168 @@ describe('company membership template', () => {
     );
   });
 
-  it('parses sectioned entry tabs into the same fields as the single sheet', async () => {
+  it('parses a filled guided workbook into split names, joins and dropdown values', async () => {
+    install();
+    const tabs = (values: Record<string, Record<string, string>>) =>
+      MEMBERSHIP_TEMPLATE_V2_SECTIONS.map((entry) => {
+        const filled = values[entry.sheet] ?? {};
+        const hasRow = Object.keys(filled).length > 0;
+        return {
+          name: entry.sheet,
+          columns: entry.columns.map((column) => ({ label: column.header, type: 'text' as const })),
+          rows: (hasRow
+            ? [entry.columns.map((column) => filled[column.header] ?? '')]
+            : []) as unknown[][],
+          headerTone: entry.tone,
+        };
+      });
+    const bytes = toXlsxMulti('Membership Template', [
+      {
+        name: 'README',
+        columns: [
+          { label: 'Tab', type: 'text' as const },
+          { label: 'Fill guide', type: 'text' as const },
+        ],
+        rows: [['Primary', 'Fill it']],
+        headerTone: 'slate' as const,
+        filter: false,
+      },
+      ...tabs({
+        Primary: {
+          'FIRST NAME': 'Juan',
+          'LAST NAME': 'Cruz',
+          SUFFIX: 'Jr.',
+          GENDER: 'Male',
+          STATUS: 'Pending',
+          EMAIL: 'juan@example.com',
+          'MOBILE NO.': '09171234567',
+          'PERMANENT ADDRESS LINE 1': '1 QA Street',
+          'PERMANENT ADDRESS LINE 2': 'Brgy San Roque',
+          CITY: 'Calauan',
+          PROVINCE: 'Laguna',
+          BARANGGAY: 'Santo Tomas',
+          'POSTAL CODE': '4012',
+          LANDLINE: '(049) 555-1234',
+          'RA NO': 'RA-001',
+        },
+        Supplementary: {
+          'FIRST NAME': 'Maria',
+          'LAST NAME': 'Santos',
+          'PERMANENT ADDRESS LINE 1': '456 Acacia Ave',
+          'PERMANENT ADDRESS LINE 2': 'Quezon City',
+          BIRTHDAY: '1992-08-10',
+          'MOBILE NO.': '09181234567',
+          EMAIL: 'maria@example.com',
+          LANDLINE: '(02) 8123-4567',
+        },
+        Related: { 'REFERRER (NAME)': 'Thanos' },
+        Package: { 'VIP PACKAGE': 'GOLD', RF: 'RF-001', 'REF NO': 'REF-001' },
+      }),
+    ]);
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'excel',
+        contentBase64: b64(bytes),
+        sourceName: 'members.xlsx',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as {
+      rows: { fields: Record<string, string>; warnings: { field: string }[] }[];
+    };
+    const parsed = body.rows[0]!;
+    // Split columns land on the established person fields.
+    expect(parsed.fields.first_name).toBe('Juan');
+    expect(parsed.fields.last_name).toBe('Cruz');
+    expect(parsed.fields.suffix).toBe('Jr.');
+    expect(parsed.fields.address_line_1).toBe('1 QA Street');
+    expect(parsed.fields.address_line_2).toBe('Brgy San Roque');
+    expect(parsed.fields.city).toBe('Calauan');
+    expect(parsed.fields.province).toBe('Laguna');
+    expect(parsed.fields.barangay).toBe('Santo Tomas');
+    expect(parsed.fields.postal_code).toBe('4012');
+    expect(parsed.fields.landline).toBe('(049) 555-1234');
+    expect(parsed.fields.email).toBe('juan@example.com');
+    expect(parsed.fields.ra_number).toBe('RA-001');
+    expect(parsed.fields.stated_rf).toBe('RF-001');
+    // Part columns joined into the one text column the record has; the
+    // supplementary singles land on their dedicated columns (the old
+    // notes-blob targets are gone).
+    expect(parsed.fields.supplementary_full_name).toBe('Maria Santos');
+    expect(parsed.fields.supplementary_address).toBe('456 Acacia Ave, Quezon City');
+    expect(parsed.fields.supplementary_birthday).toBe('1992-08-10');
+    expect(parsed.fields.supplementary_mobile).toBe('09181234567');
+    expect(parsed.fields.supplementary_email).toBe('maria@example.com');
+    expect(parsed.fields.supplementary_landline).toBe('(02) 8123-4567');
+    // Only the reference-only AGE columns warn; nothing else is unknown.
+    const warned = parsed.warnings.map((w) => w.field);
+    expect(warned).toContain('AGE');
+    expect(warned).not.toContain('FIRST NAME');
+    expect(warned).not.toContain('PERMANENT ADDRESS LINE 1');
+  });
+
+  it('rejects a flat file filled from the superseded interim template with the fix message', async () => {
+    install();
+    expect(isInterimV2Flat([...INTERIM_V2_COLUMNS])).toBe(true);
+    const row = INTERIM_V2_COLUMNS.map((header) =>
+      header === 'FIRST NAME' ? 'Juan' : header === 'LAST NAME' ? 'Cruz' : '',
+    );
+    const quote = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csv =
+      [...INTERIM_V2_COLUMNS].map(quote).join(',') + '\n' + row.map(quote).join(',') + '\n';
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'csv',
+        contentBase64: b64(Buffer.from(csv, 'utf8')),
+        sourceName: 'members-interim.csv',
+      },
+    });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: { message: string } }).error.message).toContain('older template');
+  });
+
+  it('rejects a sectioned workbook from the superseded interim template with the fix message', async () => {
+    install();
+    const interimPrimary = INTERIM_V2_COLUMNS.slice(0, 20);
+    const interimSupplementary = INTERIM_V2_COLUMNS.slice(20, 36);
+    const interimRelated = INTERIM_V2_COLUMNS.slice(36, 43);
+    const interimPackage = INTERIM_V2_COLUMNS.slice(43);
+    const tab = (name: string, headers: readonly string[]) => ({
+      name,
+      columns: headers.map((label) => ({ label, type: 'text' as const })),
+      rows: [],
+      headerTone: 'blue' as const,
+    });
+    const bytes = toXlsxMulti('Membership Template', [
+      {
+        name: 'README',
+        columns: [
+          { label: 'Tab', type: 'text' as const },
+          { label: 'Fill guide', type: 'text' as const },
+        ],
+        rows: [['Primary', 'Fill it']],
+        headerTone: 'slate' as const,
+        filter: false,
+      },
+      tab('Primary', interimPrimary),
+      tab('Supplementary', interimSupplementary),
+      tab('Related', interimRelated),
+      tab('Package', interimPackage),
+    ]);
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'excel', contentBase64: b64(bytes), sourceName: 'members-interim.xlsx' },
+    });
+    expect(res.status).toBe(400);
+    expect((res.body as { error: { message: string } }).error.message).toContain('older template');
+  });
+
+  it('parses sectioned legacy tabs into the same fields as the single sheet', async () => {
     install();
     const row = companyRow();
     const section = (from: number, to: number) => ({

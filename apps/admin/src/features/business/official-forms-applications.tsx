@@ -427,6 +427,7 @@ function describeApplicationLoadError(error: unknown): string | undefined {
  * server-side rather than merely hidden here.
  */
 function PurchaseWorkflowPanel({ application }: { application: CustomerApplication }) {
+  const navigate = useNavigate();
   const reservations = useQuery({
     queryKey: applicationKeys.reservations(application.id),
     queryFn: () => getReservationAgreements({ application: application.id }),
@@ -445,76 +446,86 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
     { label: 'Application submitted', done: status !== 'draft', current: status === 'draft' },
     { label: 'Application approved', done: approved, current: status === 'submitted' },
     {
-      label: 'Reservation agreement created',
+      label: 'Reservation created',
       done: hasReservation,
       current: status === 'approved' && !hasReservation,
     },
     { label: 'Payment processing', done: finalized, current: hasReservation && !finalized },
     { label: 'Activation', done: false, current: finalized },
-    { label: 'Commission qualification', done: false, current: false },
+    { label: 'Commission', done: false, current: false },
   ];
 
   const next = !hasReservation
     ? status === 'approved'
       ? {
-          label: 'Create Reservation Agreement',
-          detail: 'This application is approved and has no reservation yet.',
+          label: 'Create Reservation',
+          detail: 'No reservation exists yet.',
           to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
         }
       : status === 'submitted'
         ? {
-            label: 'Review Purchase Terms',
-            detail: 'Review the server proposal below, then approve or reject.',
+            label: 'Review terms',
+            detail: 'Review the offer, then decide.',
             to: null,
           }
         : {
-            label: 'Continue Application',
-            detail: 'Complete the draft and submit it for review.',
+            label: 'Continue draft',
+            detail: 'Complete the draft and submit.',
             to: null,
           }
     : finalized
       ? {
-          label: 'Continue to Activation',
-          detail: `Purchase finalized as sale ${reservation!.saleId}.`,
+          label: 'Continue Activation',
+          detail: `Sale ${reservation!.saleId} is finalized.`,
           to: '/admin/finance/activation',
         }
       : executed
         ? {
             label: 'Continue Payment',
-            detail: 'The executed agreement is collectable in the Finance queue.',
+            detail: 'Collect payment in Finance.',
             to: '/admin/finance/payments',
           }
         : {
             label: 'Open Reservation',
-            detail: 'The agreement still needs review and execution.',
+            detail: 'Agreement needs execution.',
             to: `/admin/sales/reservations/${reservation!.id}`,
           };
+  const nextTarget = next.to;
 
   return (
-    <section aria-label="Purchase workflow">
-      <h2>Purchase workflow</h2>
-      <ol>
+    <section aria-label="Purchase workflow" className={styles.panel}>
+      <h2 className={styles.panelTitle}>Purchase workflow</h2>
+      <ol className={styles.workflowSteps}>
         {steps.map((step) => (
-          <li key={step.label}>
-            {step.done ? '✓' : step.current ? '→' : '○'} {step.label}
+          <li
+            key={step.label}
+            className={styles.workflowStep}
+            data-state={step.done ? 'done' : step.current ? 'current' : 'pending'}
+          >
+            <span className={styles.workflowMark} aria-hidden="true">
+              {step.done ? '✓' : step.current ? '→' : '○'}
+            </span>{' '}
+            {step.label}
             {step.current ? ' (current)' : ''}
           </li>
         ))}
       </ol>
-      <h3>Next step</h3>
-      <p>{next.detail}</p>
-      {next.to ? (
-        <p>
-          <Link to={next.to}>{next.label}</Link>
-        </p>
-      ) : (
-        <p>{next.label}</p>
-      )}
-      {finalized ? (
-        <p>
-          <Link to="/admin/finance/commissions">Open Commissions</Link> for qualification decisions.
-        </p>
-      ) : null}
+      <div className={styles.workflowNext}>
+        <h3>Next step</h3>
+        <p className={styles.hint}>{next.detail}</p>
+        <div className={styles.actions}>
+          {nextTarget ? (
+            <Button onClick={() => navigate(nextTarget)}>{next.label}</Button>
+          ) : (
+            <span className={styles.note}>{next.label}</span>
+          )}
+          {finalized ? (
+            <Button variant="secondary" onClick={() => navigate('/admin/finance/commissions')}>
+              Open Commissions
+            </Button>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -742,20 +753,22 @@ export function CustomerApplicationEditorPage() {
     mutationFn: () =>
       runSave(async () => {
         if (!planId) throw new Error('Select a VIP plan before saving the application.');
-        const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
-        if (!checkedForSubmit.success)
-          throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
-        if (!checkedForSubmit.data.consentAcknowledged)
-          throw new Error('Certification and consent are required.');
 
         let appId: string;
         if (!id && !customerId) {
+          // New Register carries NO customerId by design, so parsing against
+          // the create contract here would reject the payload for the very
+          // field this path deliberately leaves empty. The register contract
+          // (customerId omitted, registerNewCustomer true) is the one this
+          // path must satisfy.
           const registration = registerCustomerApplicationSchema.safeParse({
             ...payload(),
             registerNewCustomer: true,
           });
           if (!registration.success)
             throw new Error(humanizeApplicationIssues(registration.error.issues));
+          if (!registration.data.consentAcknowledged)
+            throw new Error('Certification and consent are required.');
           const created = await registerCustomerApplication({
             ...registration.data,
             requestId: applicationRequest.forPayload(registration.data),
@@ -771,44 +784,52 @@ export function CustomerApplicationEditorPage() {
             setCustomerId(created.customerId);
             await currentDocument.refetch();
           }
-        } else if (id) {
-          const latest = await getCustomerApplication(id);
-          if (latest.status === 'submitted') {
-            // A lost Submit response must retry the transition, not edit a
-            // submitted record.
-            const offer = await getPurchaseTermsProposal(id);
-            return submitCustomerApplication(id, {
-              requestId: applicationRequest.forPayload({
-                applicationId: id,
-                expectedProposalHash: offer.expectedProposalHash,
-              }),
-              expectedProposalHash: offer.expectedProposalHash,
-            });
-          }
-          // Upload the picked ID on Save before updating the draft.
-          if (idFile) {
-            await uploadPendingId(customerId || latest.customerId, idFile, idType);
-            setIdFile(null);
-            setPickerVersion((version) => version + 1);
-            setValidId(true);
-            await currentDocument.refetch();
-          }
-          await updateCustomerApplication(id, checkedForSubmit.data);
-          appId = id;
         } else {
-          // Upload the picked ID on Save before creating the application.
-          if (idFile) {
-            await uploadPendingId(customerId, idFile, idType);
-            setIdFile(null);
-            setPickerVersion((version) => version + 1);
-            setValidId(true);
-            await currentDocument.refetch();
+          const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
+          if (!checkedForSubmit.success)
+            throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
+          if (!checkedForSubmit.data.consentAcknowledged)
+            throw new Error('Certification and consent are required.');
+
+          if (id) {
+            const latest = await getCustomerApplication(id);
+            if (latest.status === 'submitted') {
+              // A lost Submit response must retry the transition, not edit a
+              // submitted record.
+              const offer = await getPurchaseTermsProposal(id);
+              return submitCustomerApplication(id, {
+                requestId: applicationRequest.forPayload({
+                  applicationId: id,
+                  expectedProposalHash: offer.expectedProposalHash,
+                }),
+                expectedProposalHash: offer.expectedProposalHash,
+              });
+            }
+            // Upload the picked ID on Save before updating the draft.
+            if (idFile) {
+              await uploadPendingId(customerId || latest.customerId, idFile, idType);
+              setIdFile(null);
+              setPickerVersion((version) => version + 1);
+              setValidId(true);
+              await currentDocument.refetch();
+            }
+            await updateCustomerApplication(id, checkedForSubmit.data);
+            appId = id;
+          } else {
+            // Upload the picked ID on Save before creating the application.
+            if (idFile) {
+              await uploadPendingId(customerId, idFile, idType);
+              setIdFile(null);
+              setPickerVersion((version) => version + 1);
+              setValidId(true);
+              await currentDocument.refetch();
+            }
+            const created = await createCustomerApplication({
+              ...checkedForSubmit.data,
+              requestId: applicationRequest.forPayload(checkedForSubmit.data),
+            });
+            appId = created.id;
           }
-          const created = await createCustomerApplication({
-            ...checkedForSubmit.data,
-            requestId: applicationRequest.forPayload(checkedForSubmit.data),
-          });
-          appId = created.id;
         }
 
         // The hash is fetched fresh so it is always the offer the server holds
@@ -1041,6 +1062,20 @@ export function CustomerApplicationEditorPage() {
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
   };
+  // Edit entry point for the record-actions panel: the form below is the only
+  // editor (there is no separate edit route), so editing means revealing it.
+  // Draft-only by construction — the fieldset stays disabled past draft and
+  // the server refuses non-draft writes regardless.
+  const focusApplicationForm = () => {
+    const section = document.getElementById('step-application');
+    if (!section) return;
+    section.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    section
+      .querySelector<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])',
+      )
+      ?.focus({ preventScroll: true });
+  };
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section className={styles.editorSection}>
@@ -1106,102 +1141,166 @@ export function CustomerApplicationEditorPage() {
           </nav>
         )}
         {existing.data ? (
-          <p>
-            Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
-            Approved: {existing.data.approvedAt ?? '—'} · Rejected:{' '}
-            {existing.data.rejectedAt ?? '—'} · Related customer:{' '}
-            {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
-            {existing.data.saleId ?? '—'}
-          </p>
+          <section aria-label="Application record status" className={styles.panel}>
+            <div className={styles.statusHead}>
+              <StatusChip
+                label={existing.data.status}
+                tone={APPLICATION_STATUS_TONES[existing.data.status] ?? 'neutral'}
+              />
+              <span className={styles.note}>Official application record</span>
+            </div>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>Submitted</dt>
+                <dd>{existing.data.submittedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Approved</dt>
+                <dd>{existing.data.approvedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Rejected</dt>
+                <dd>{existing.data.rejectedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Customer</dt>
+                <dd>
+                  {relatedCustomer ? (
+                    <Link to={`/admin/customers/${relatedCustomer.id}`}>
+                      {relatedCustomer.fullName}
+                    </Link>
+                  ) : (
+                    existing.data.customerId
+                  )}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Sale</dt>
+                <dd>{existing.data.saleId ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
         ) : null}
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
         {relatedCustomer ? (
-          <section aria-label="Linked company record">
-            <h2>Linked company record — read-only</h2>
-            <p>
-              Combined customer record for {relatedCustomer.fullName} (
-              {relatedCustomer.customerNumber}). Edit it on the customer detail page; application
-              holders below stay separate transaction facts. Stated figures never affect the
-              purchase offer above.
+          <section aria-label="Linked company record" className={styles.panel}>
+            <h2 className={styles.panelTitle}>Linked company record — read-only</h2>
+            <p className={styles.hint}>
+              Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
+              on the customer page. Stated figures never change the offer.
             </p>
-            <dl className="form-grid">
-              <dt>RA NO</dt>
-              <dd>{relatedCustomer.raNumber ?? '—'}</dd>
-              <dt>STATUS (company)</dt>
-              <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
-              <dt>CITIZENSHIP</dt>
-              <dd>{relatedCustomer.citizenship ?? '—'}</dd>
-              <dt>SUPPLEMENTARY</dt>
-              <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
-              <dt>RELATED</dt>
-              <dd>
-                {[
-                  relatedCustomer.ostIstName,
-                  relatedCustomer.svdName,
-                  relatedCustomer.ssmName,
-                  relatedCustomer.smName,
-                ]
-                  .filter(Boolean)
-                  .join(' · ') || '—'}
-              </dd>
-              <dt>STATED PACKAGE</dt>
-              <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>RA NO</dt>
+                <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>STATUS (company)</dt>
+                <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>CITIZENSHIP</dt>
+                <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>SUPPLEMENTARY</dt>
+                <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>RELATED</dt>
+                <dd>
+                  {[
+                    relatedCustomer.ostIstName,
+                    relatedCustomer.svdName,
+                    relatedCustomer.ssmName,
+                    relatedCustomer.smName,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '—'}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>STATED PACKAGE</dt>
+                <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+              </div>
             </dl>
-            <p>
-              <Link to={`/admin/customers/${relatedCustomer.id}`}>
-                Open customer record to view or edit all 37 company fields
-              </Link>
-            </p>
+            <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => navigate(`/admin/customers/${relatedCustomer.id}`)}
+              >
+                Open Customer
+              </Button>
+            </div>
           </section>
         ) : null}
         {proposal.data ? (
-          <section aria-label="Purchase terms offer">
-            <h2>
+          <section aria-label="Purchase terms offer" className={styles.panel}>
+            <h2 className={styles.panelTitle}>
               {proposal.data.offerKind === 'newly_confirmed_offer'
                 ? 'Newly confirmed offer'
                 : 'Purchase terms offer'}
             </h2>
             {/* Read-only by construction: there is no price input on this screen. */}
-            <dl className="form-grid">
-              <dt>Tier</dt>
-              <dd>{proposal.data.terms.tier}</dd>
-              <dt>Payment scheme</dt>
-              <dd>{proposal.data.terms.paymentScheme}</dd>
-              <dt>Total purchase amount</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
-              <dt>Included reservation amount</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
-              <dt>Required initial</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.requiredInitial)}</dd>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>Tier</dt>
+                <dd>{proposal.data.terms.tier}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Payment scheme</dt>
+                <dd>{proposal.data.terms.paymentScheme}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Total purchase amount</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Included reservation amount</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Required initial</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.requiredInitial)}</dd>
+              </div>
               {proposal.data.terms.monthlyAmount ? (
-                <>
+                <div className={styles.snapshotField}>
                   <dt>Installments</dt>
                   <dd>
                     {formatMoneyOrDash(proposal.data.terms.monthlyAmount)} ×{' '}
                     {proposal.data.terms.installmentMonths} months
                   </dd>
-                </>
+                </div>
               ) : null}
-              <dt>Spot-cash window</dt>
-              <dd>{proposal.data.terms.spotCashDays} days from the first verified payment</dd>
-              <dt>Yearly points</dt>
-              <dd>{proposal.data.terms.yearlyPoints}</dd>
-              <dt>Validity</dt>
-              <dd>{proposal.data.terms.validityMonths} months</dd>
-              <dt>Commission</dt>
-              <dd>
-                {proposal.data.terms.commissionRate} on{' '}
-                {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
-                {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
-              </dd>
-              <dt>Offer as of</dt>
-              <dd>{formatDateTime(proposal.data.asOf)}</dd>
+              <div className={styles.snapshotField}>
+                <dt>Spot-cash window</dt>
+                <dd>{proposal.data.terms.spotCashDays} days from first payment</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Yearly points</dt>
+                <dd>{proposal.data.terms.yearlyPoints}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Validity</dt>
+                <dd>{proposal.data.terms.validityMonths} months</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Commission</dt>
+                <dd>
+                  {proposal.data.terms.commissionRate} on{' '}
+                  {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
+                  {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Offer as of</dt>
+                <dd>{formatDateTime(proposal.data.asOf)}</dd>
+              </div>
             </dl>
             {proposal.data.offerKind === 'newly_confirmed_offer' ? (
-              <p>
-                This application predates stored purchase evidence. Confirming the offer above
-                records a new review record with your name, the time and your reason; today&apos;s
-                figures are never presented as the historical terms.
+              <p className={styles.hint}>
+                This record predates stored evidence. Confirming adds your name, time and reason.
+                Figures are not historical terms.
               </p>
             ) : null}
           </section>
@@ -1530,119 +1629,181 @@ export function CustomerApplicationEditorPage() {
             {saveAction}
           </div>
         </div>
-        <p>
-          {' '}
-          {id && existing.data?.status === 'submitted' ? (
-            <>
-              <Button
-                onClick={() => decide.mutate('approved')}
-                loading={decide.isPending}
-                loadingLabel="Approving…"
-              >
-                Approve
-              </Button>{' '}
-              <Button
-                variant="danger"
-                onClick={() => decide.mutate('rejected')}
-                loading={decide.isPending}
-                loadingLabel="Rejecting…"
-              >
-                Reject
-              </Button>{' '}
-              <Button
-                onClick={() => reopen.mutate()}
-                loading={reopen.isPending}
-                loadingLabel="Reopening…"
-              >
-                {existing.data.purchaseTermsId
-                  ? 'Reopen to draft'
-                  : 'Reopen to review purchase terms'}
-              </Button>{' '}
-            </>
-          ) : null}{' '}
-          {id && existing.data?.status === 'rejected' ? (
-            <Button
-              onClick={() => reopen.mutate()}
-              loading={reopen.isPending}
-              loadingLabel="Reopening…"
-            >
-              Reopen to draft
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'approved' && !proposal.data ? (
-            <Button
-              onClick={() => void proposal.refetch()}
-              loading={proposal.isFetching}
-              loadingLabel="Loading offer…"
-              type="button"
-            >
-              Load purchase terms offer
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'approved' && proposal.data ? (
-            <>
-              <TextAreaField
-                id="application-review-reason"
-                name="reviewReason"
-                label="Review reason"
-                optional
-                rows={2}
-                value={reviewReason}
-                onChange={setReviewReason}
-              />{' '}
-              <Button
-                onClick={() => review.mutate()}
-                disabled={reviewReason.trim().length < 5}
-                loading={review.isPending}
-                loadingLabel="Confirming…"
-              >
-                Confirm purchase terms
-              </Button>
-            </>
-          ) : null}{' '}
-          {id &&
-          existing.data &&
-          canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
-            <Button
-              onClick={() => decide.mutate('cancelled')}
-              loading={decide.isPending}
-              loadingLabel="Cancelling…"
-            >
-              Cancel
-            </Button>
-          ) : null}{' '}
-          {id ? (
-            <>
-              {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
-                <Link to={`/admin/sales/reservations/new?application=${id}`}>
-                  Create reservation from application
-                </Link>
-              )}
-              <Button
-                onClick={() =>
-                  void exportCustomerApplication(id, 'xlsx')
-                    .then(saveFile)
-                    .catch((e: unknown) =>
-                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                    )
-                }
-              >
-                Export XLSX
-              </Button>
-              <Button
-                onClick={() =>
-                  void exportCustomerApplication(id, 'pdf')
-                    .then(saveFile)
-                    .catch((e: unknown) =>
-                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                    )
-                }
-              >
-                Export PDF
-              </Button>
-            </>
-          ) : null}
-        </p>
+        {id ? (
+          <section aria-label="Record actions" className={styles.panel}>
+            <h2 className={styles.panelTitle}>Record actions</h2>
+            <div className={styles.recordGroups}>
+              {id && existing.data?.status === 'submitted' ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Decision</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      onClick={() => decide.mutate('approved')}
+                      loading={decide.isPending}
+                      loadingLabel="Approving…"
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => decide.mutate('rejected')}
+                      loading={decide.isPending}
+                      loadingLabel="Rejecting…"
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => reopen.mutate()}
+                      loading={reopen.isPending}
+                      loadingLabel="Reopening…"
+                    >
+                      {existing.data.purchaseTermsId
+                        ? 'Reopen to draft'
+                        : 'Reopen to review purchase terms'}
+                    </Button>
+                  </div>
+                  <p className={styles.hint}>
+                    Approval needs reviewed purchase terms; reopening returns the record to
+                    draft for corrections.
+                  </p>
+                </div>
+              ) : null}
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Application data</h3>
+                <div className={styles.actions}>
+                  {editable ? (
+                    <Button variant="secondary" type="button" onClick={focusApplicationForm}>
+                      Edit application
+                    </Button>
+                  ) : null}
+                </div>
+                {!editable ? (
+                  <p className={styles.hint}>
+                    {existing.data && ['submitted', 'rejected'].includes(existing.data.status)
+                      ? 'Data is read-only once submitted. Reopen to draft to edit it.'
+                      : 'Data is read-only in this status.'}
+                  </p>
+                ) : null}
+              </div>
+              {id && existing.data?.status === 'rejected' ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Lifecycle</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => reopen.mutate()}
+                      loading={reopen.isPending}
+                      loadingLabel="Reopening…"
+                    >
+                      Reopen to draft
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id && existing.data?.status === 'approved' && !proposal.data ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void proposal.refetch()}
+                      loading={proposal.isFetching}
+                      loadingLabel="Loading offer…"
+                      type="button"
+                    >
+                      Load purchase terms offer
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id && existing.data?.status === 'approved' && proposal.data ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
+                  <TextAreaField
+                    id="application-review-reason"
+                    name="reviewReason"
+                    label="Review reason"
+                    optional
+                    rows={2}
+                    value={reviewReason}
+                    onChange={setReviewReason}
+                  />
+                  <div className={styles.actions}>
+                    <Button
+                      onClick={() => review.mutate()}
+                      disabled={reviewReason.trim().length < 5}
+                      loading={review.isPending}
+                      loadingLabel="Confirming…"
+                    >
+                      Confirm purchase terms
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id &&
+              existing.data &&
+              canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Cancel</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => decide.mutate('cancelled')}
+                      loading={decide.isPending}
+                      loadingLabel="Cancelling…"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  <p className={styles.hint}>Cancelling ends this application. This cannot be undone.</p>
+                </div>
+              ) : null}
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Next step</h3>
+                <div className={styles.actions}>
+                  {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => navigate(`/admin/sales/reservations/new?application=${id}`)}
+                    >
+                      Create Reservation
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Exports</h3>
+                <div className={styles.actions}>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      void exportCustomerApplication(id, 'xlsx')
+                        .then(saveFile)
+                        .catch((e: unknown) =>
+                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                        )
+                    }
+                  >
+                    Export XLSX
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      void exportCustomerApplication(id, 'pdf')
+                        .then(saveFile)
+                        .catch((e: unknown) =>
+                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                        )
+                    }
+                  >
+                    Export PDF
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
       </section>
     </HumanInputValidity.Provider>
   );

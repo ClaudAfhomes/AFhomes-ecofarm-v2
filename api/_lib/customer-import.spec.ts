@@ -2,24 +2,34 @@ import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   CUSTOMER_CATEGORY_LABELS,
+  CUSTOMER_EXPORT_COLUMNS,
   compareMoney,
   mapSourceStatus,
   normalizeTier,
   parseGoogleSheetUrl,
   resolveCustomerCategory,
+  type CustomerExportRow,
 } from '@afhomes/contracts';
 import {
   MAX_IMPORT_ROWS,
   MEMBERSHIP_TEMPLATE_SECTIONS,
   MEMBERSHIP_TEMPLATE_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_V2_COLUMNS,
+  MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_V2_SECTIONS,
+  TEMPLATE_STATUS_OPTIONS,
   customerExportCsv,
   customerExportXlsx,
   isLegacyCompanyMembershipTemplate,
+  isV2MembershipTemplate,
   matrixToRecords,
   membershipTemplateCsv,
   membershipTemplateSectionedXlsx,
+  membershipTemplateV2Csv,
+  membershipTemplateV2SectionedXlsx,
   membershipTemplateXlsx,
   mergeSectionedTemplateSheets,
+  mergeV2SectionedTemplateSheets,
   looksLikeSectionBandRow,
   neutralizeFormula,
   parseCsvMatrix,
@@ -27,6 +37,7 @@ import {
   parseXlsxMatrix,
   parseXlsxSheets,
   remapCompanyTemplateMatrix,
+  remapV2TemplateMatrix,
   validateImportRow,
   type ImportContext,
 } from './customer-import.js';
@@ -255,7 +266,7 @@ describe('template and headers', () => {
     const matrix = parseXlsxMatrix(membershipTemplateXlsx());
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
-  it('emits README plus four section tabs in the sectioned XLSX template', () => {
+  it('emits README plus four section tabs in the legacy sectioned XLSX template', () => {
     const sheets = parseXlsxSheets(membershipTemplateSectionedXlsx());
     expect(sheets.map((s) => s.name)).toEqual([
       'README',
@@ -270,7 +281,62 @@ describe('template and headers', () => {
     const { matrix } = mergeSectionedTemplateSheets(sheets);
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
   });
-  it('emits the section band row above the 44 columns in the CSV template', () => {
+  it('emits the guided workbook with split names, split address and dropdowns', () => {
+    const bytes = membershipTemplateV2SectionedXlsx();
+    const sheets = parseXlsxSheets(bytes);
+    expect(sheets.map((s) => s.name)).toEqual([
+      'README',
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+    ]);
+    const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
+    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([
+        ...section.columns.map((column) => column.header),
+      ]);
+    // FULL NAME is gone; the name columns are the operator's own split.
+    const primary = byName.get('Primary')!;
+    expect(primary).toContain('FIRST NAME');
+    expect(primary).toContain('LAST NAME');
+    expect(primary).not.toContain('FULL NAME');
+    // Dropdowns live in the worksheet XML. Entries are stored uncompressed,
+    // so the validation list is readable in the raw bytes.
+    const xml = Buffer.from(bytes).toString('latin1');
+    expect(xml).toContain('<dataValidation type="list"');
+    expect(xml).toContain('GOLD,SILVER,BRONZE');
+    expect(xml).toContain('Jr.,Sr.,II,III,IV');
+    // The sectioned workbook merges to the canonical guided matrix.
+    const { matrix } = mergeV2SectionedTemplateSheets(sheets);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+  });
+  it('offers only values the validator accepts, on the fixed-value columns', () => {
+    for (const status of TEMPLATE_STATUS_OPTIONS) expect(mapSourceStatus(status)).not.toBeNull();
+    const dropdownColumns = MEMBERSHIP_TEMPLATE_V2_SECTIONS.flatMap((section) =>
+      section.columns.filter((column) => column.values),
+    ).map((column) => column.header);
+    expect(dropdownColumns).toEqual([
+      'STATUS',
+      'SUFFIX',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'VIP PACKAGE',
+      'PAYMENT TERMS',
+      'PAYMENT TYPE',
+    ]);
+  });
+  it('emits the guided band row above the guided columns in the CSV template', () => {
+    const matrix = parseCsvMatrix(membershipTemplateV2Csv());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS]);
+    expect(matrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+    expect(looksLikeSectionBandRow(matrix[0]!)).toBe(true);
+  });
+  it('emits the section band row above the 44 columns in the legacy CSV template', () => {
     const matrix = parseCsvMatrix(membershipTemplateCsv());
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_SECTION_BANDS]);
     expect(matrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
@@ -669,26 +735,12 @@ describe('limits and export safety', () => {
     expect(neutralizeFormula('plain')).toBe('plain');
   });
   it('exports filterable rows with escaped cells', () => {
-    const csv = customerExportCsv([
-      {
-        customer_number: 'CUS-1',
-        membership_number: '',
-        customer_name: '=Juan',
-        vip_tier: 'GOLD',
-        customer_status: 'active',
-        membership_status: '',
-        payment_status: 'no_payment',
-        derived_category: 'Active',
-        activated_at: '',
-        expires_at: '',
-        current_points_balance: '0',
-        seller: 'VD',
-        email: 'j@example.com',
-        mobile: '0917',
-        created_at: '2026-10-01',
-      },
-    ]);
+    const row = () =>
+      Object.fromEntries(CUSTOMER_EXPORT_COLUMNS.map((column) => [column, ''])) as CustomerExportRow;
+    const csv = customerExportCsv([{ ...row(), 'FIRST NAME': '=Juan' }]);
     expect(csv).toContain("'=Juan");
+    expect(csv).toContain('RA NO');
+    expect(csv).toContain('BARANGGAY');
     expect(customerExportXlsx([]).length).toBeGreaterThan(0);
   });
 });
@@ -710,10 +762,19 @@ describe('sectioned template merge', () => {
     const kRow = pkg.map((_, i) => `k${i}`);
     const { matrix } = mergeSectionedTemplateSheets([
       { name: 'Primary', matrix: [rev(primary), rev(primary).map((h) => pick(primary, pRow, h))] },
-      { name: 'Supplementary', matrix: [rev(supplementary), rev(supplementary).map((h) => pick(supplementary, sRow, h))] },
+      {
+        name: 'Supplementary',
+        matrix: [rev(supplementary), rev(supplementary).map((h) => pick(supplementary, sRow, h))],
+      },
       { name: 'Related', matrix: [related, rRow] },
       { name: 'Package', matrix: [pkg, kRow] },
-      { name: 'README', matrix: [['Section', 'What to do'], ['Primary', 'Fill it']] },
+      {
+        name: 'README',
+        matrix: [
+          ['Section', 'What to do'],
+          ['Primary', 'Fill it'],
+        ],
+      },
     ]);
     expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
     expect(matrix[1]).toEqual([...pRow, ...sRow, ...rRow, ...kRow]);
@@ -739,15 +800,146 @@ describe('sectioned template merge', () => {
     expect(remapped.dropped.map((d) => d.header)).toContain('FULL NAME');
   });
 
-  it('rejects mismatched row counts with the offending sheets named', () => {
+  it('pads all-blank tabs instead of rejecting members with no supplementary', () => {
+    // A member with no supplementary (and an untouched Package tab) merges:
+    // blank tabs carry no persons, so padding them cannot misalign anyone.
+    const { matrix } = mergeSectionedTemplateSheets([
+      { name: 'Primary', matrix: [primary, primary.map(() => 'x')] },
+      { name: 'Supplementary', matrix: [supplementary] },
+      { name: 'Related', matrix: [related, related.map(() => 'y')] },
+      { name: 'Package', matrix: [pkg] },
+    ]);
+    expect(matrix).toHaveLength(2);
+    expect(matrix[1]).toEqual([
+      ...primary.map(() => 'x'),
+      ...supplementary.map(() => ''),
+      ...related.map(() => 'y'),
+      ...pkg.map(() => ''),
+    ]);
+  });
+
+  it('recognizes only the exact guided flat layout', () => {
+    expect(isV2MembershipTemplate([...MEMBERSHIP_TEMPLATE_V2_COLUMNS])).toBe(true);
+    expect(isV2MembershipTemplate([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    expect(isV2MembershipTemplate(MEMBERSHIP_TEMPLATE_V2_COLUMNS.slice(0, 3))).toBe(false);
+    // Order-sensitive: duplicated headers make name matching ambiguous.
+    const reordered = [...MEMBERSHIP_TEMPLATE_V2_COLUMNS];
+    [reordered[0], reordered[1]] = [reordered[1]!, reordered[0]!];
+    expect(isV2MembershipTemplate(reordered)).toBe(false);
+  });
+
+  it('merges guided tabs into the canonical flat matrix in any column order', () => {
+    const section = (sheet: string) =>
+      MEMBERSHIP_TEMPLATE_V2_SECTIONS.find((entry) => entry.sheet === sheet)!;
+    const headersOf = (sheet: string) => section(sheet).columns.map((column) => column.header);
+    // The Primary tab ships reversed: order within a tab is free.
+    const reversed = [...headersOf('Primary')].reverse();
+    const reversedRow = reversed.map((header) =>
+      header === 'FIRST NAME' ? 'JUAN' : header === 'LAST NAME' ? 'CRUZ' : '',
+    );
+    const relatedRow = headersOf('Related').map((header) =>
+      header === 'REFERRER (NAME)' ? 'Thanos' : '',
+    );
+    const { matrix } = mergeV2SectionedTemplateSheets([
+      { name: 'README', matrix: [['Tab', 'Fill guide']] },
+      { name: 'Primary', matrix: [reversed, reversedRow] },
+      { name: 'Supplementary', matrix: [headersOf('Supplementary')] },
+      { name: 'Related', matrix: [headersOf('Related'), relatedRow] },
+      { name: 'Package', matrix: [headersOf('Package')] },
+    ]);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+    expect(matrix[1]![matrix[0]!.indexOf('FIRST NAME')]).toBe('JUAN');
+    expect(matrix[1]![matrix[0]!.indexOf('LAST NAME')]).toBe('CRUZ');
+    expect(matrix[1]![matrix[0]!.indexOf('REFERRER (NAME)')]).toBe('Thanos');
+  });
+
+  it('remaps guided fields, joins part columns, and drops reference columns', () => {
+    const cells = MEMBERSHIP_TEMPLATE_V2_COLUMNS.map(() => '');
+    const offsetOf = (sheet: string) => {
+      let at = 0;
+      for (const entry of MEMBERSHIP_TEMPLATE_V2_SECTIONS) {
+        if (entry.sheet === sheet) break;
+        at += entry.columns.length;
+      }
+      return at;
+    };
+    const set = (sheet: string, header: string, value: string) => {
+      const entry = MEMBERSHIP_TEMPLATE_V2_SECTIONS.find((s) => s.sheet === sheet)!;
+      const k = entry.columns.findIndex((column) => column.header === header);
+      cells[offsetOf(sheet) + k] = value;
+    };
+    set('Primary', 'FIRST NAME', 'Juan');
+    set('Primary', 'LAST NAME', 'Cruz');
+    set('Primary', 'MIDDLE NAME', 'Dela');
+    set('Primary', 'SUFFIX', 'Jr.');
+    set('Primary', 'GENDER', 'Male');
+    set('Primary', 'PERMANENT ADDRESS LINE 1', '1 QA Street');
+    set('Primary', 'PERMANENT ADDRESS LINE 2', 'Brgy San Roque');
+    set('Primary', 'CITY', 'Calauan');
+    set('Primary', 'PROVINCE', 'Laguna');
+    set('Primary', 'BARANGGAY', 'Santo Tomas');
+    set('Primary', 'POSTAL CODE', '4012');
+    set('Primary', 'LANDLINE', '(049) 555-1234');
+    set('Primary', 'EMAIL', 'juan@example.com');
+    set('Primary', 'STATUS', 'Pending');
+    set('Primary', 'AGE', '35');
+    set('Supplementary', 'FIRST NAME', 'Maria');
+    set('Supplementary', 'MIDDLE NAME', 'Clara');
+    set('Supplementary', 'LAST NAME', 'Santos');
+    set('Supplementary', 'SUFFIX', 'II');
+    set('Supplementary', 'PERMANENT ADDRESS LINE 1', '456 Acacia Ave');
+    set('Supplementary', 'PERMANENT ADDRESS LINE 2', 'Quezon City');
+    set('Supplementary', 'PROVINCE', 'Metro Manila');
+    set('Supplementary', 'CITY', 'Quezon City');
+    set('Supplementary', 'BARANGGAY', 'Diliman');
+    set('Supplementary', 'POSTAL CODE', '1101');
+    set('Supplementary', 'BIRTHDAY', '1992-08-10');
+    set('Supplementary', 'LANDLINE', '(02) 8123-4567');
+    set('Supplementary', 'MOBILE NO.', '09181234567');
+    set('Supplementary', 'EMAIL', 'maria@example.com');
+
+    const remapped = remapV2TemplateMatrix([[...MEMBERSHIP_TEMPLATE_V2_COLUMNS], cells]);
+    const machine = remapped.matrix[0]!;
+    const values = remapped.matrix[1]!;
+    const field = (key: string) => values[machine.indexOf(key)];
+    expect(field('first_name')).toBe('Juan');
+    expect(field('middle_name')).toBe('Dela');
+    expect(field('last_name')).toBe('Cruz');
+    expect(field('suffix')).toBe('Jr.');
+    expect(field('sex')).toBe('Male');
+    expect(field('address_line_1')).toBe('1 QA Street');
+    expect(field('address_line_2')).toBe('Brgy San Roque');
+    expect(field('city')).toBe('Calauan');
+    expect(field('province')).toBe('Laguna');
+    expect(field('barangay')).toBe('Santo Tomas');
+    expect(field('postal_code')).toBe('4012');
+    expect(field('landline')).toBe('(049) 555-1234');
+    expect(field('email')).toBe('juan@example.com');
+    expect(field('source_status')).toBe('Pending');
+    expect(field('supplementary_birthday')).toBe('1992-08-10');
+    expect(field('supplementary_mobile')).toBe('09181234567');
+    expect(field('supplementary_email')).toBe('maria@example.com');
+    expect(field('supplementary_landline')).toBe('(02) 8123-4567');
+    // Part columns join into the one text column the record actually has:
+    // names in FIRST/LAST/MIDDLE/SUFFIX order, the six address parts in the
+    // SSOT order, blank parts skipped.
+    expect(remapped.joins[0]!.values.supplementary_full_name).toBe('Maria Santos Clara II');
+    expect(remapped.joins[0]!.values.supplementary_address).toBe(
+      '456 Acacia Ave, Quezon City, Metro Manila, Quezon City, Diliman, 1101',
+    );
+    // Both AGE columns (Primary and Supplementary) are reference-only.
+    expect(remapped.dropped.map((dropped) => dropped.header)).toEqual(['AGE', 'AGE']);
+  });
+
+  it('rejects mismatched row counts when two tabs both carry rows', () => {
     expect(() =>
       mergeSectionedTemplateSheets([
-        { name: 'Primary', matrix: [primary, primary.map(() => 'x')] },
+        { name: 'Primary', matrix: [primary, primary.map(() => 'x'), primary.map(() => 'z')] },
         { name: 'Supplementary', matrix: [supplementary] },
-        { name: 'Related', matrix: [related] },
+        { name: 'Related', matrix: [related, related.map(() => 'y')] },
         { name: 'Package', matrix: [pkg] },
       ]),
-    ).toThrow(/Primary has 1, Supplementary has 0/);
+    ).toThrow(/Primary has 2, Supplementary has 0, Related has 1/);
   });
 
   it('rejects missing sheets, duplicate sections, and foreign workbooks', () => {

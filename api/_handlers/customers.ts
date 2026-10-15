@@ -69,8 +69,13 @@ const toCustomer = (row: Record<string, unknown>) => ({
   // Returned to authorized staff only; it authorizes nothing.
   customerCode: (row.customer_code as string | null | undefined) ?? null,
   fullName: fullName(row),
+  firstName: isoOrNull(row.first_name),
+  middleName: isoOrNull(row.middle_name),
+  lastName: isoOrNull(row.last_name),
+  suffix: isoOrNull(row.suffix),
   email: row.email,
   phone: row.phone,
+  landline: isoOrNull(row.landline),
   dateOfBirth: isoOrNull(row.birth_date),
   gender: isoOrNull(row.gender),
   address: row.address ?? null,
@@ -96,6 +101,7 @@ const toCustomer = (row: Record<string, unknown>) => ({
   supplementaryTinNumberMasked: maskGovernmentId(isoOrNull(row.supplementary_tin_number)),
   supplementaryMobile: isoOrNull(row.supplementary_mobile),
   supplementaryEmail: isoOrNull(row.supplementary_email),
+  supplementaryLandline: isoOrNull(row.supplementary_landline),
   supplementaryOccupationBusinessName: isoOrNull(row.supplementary_occupation_business_name),
   supplementaryOfficeAddress: isoOrNull(row.supplementary_office_address),
   supplementaryPosition: isoOrNull(row.supplementary_position),
@@ -195,12 +201,25 @@ async function hasReference(db: Db, table: string, column: string, id: string) {
 }
 
 async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
+  // Every table with a RESTRICT (or NO ACTION) foreign key to customers(id).
+  // customer_onboarding_tokens is deliberately absent: those ephemeral rows
+  // are removed by the delete handler itself before the customer row goes.
+  // An incomplete list fails loudly as a raw 23503 instead of the 409 below,
+  // which is why this list must track every inbound customer FK in
+  // supabase/migrations.
   const checks: Array<[string, string, string]> = [
     ['sales', 'card_sales', 'customer_id'],
     ['payments', 'payments', 'customer_id'],
     ['memberships', 'memberships', 'customer_id'],
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
+    ['applications', 'customer_applications', 'customer_id'],
+    ['purchase_terms', 'customer_application_purchase_terms', 'customer_id'],
+    ['reservations', 'reservation_agreements', 'customer_id'],
+    ['imports', 'customer_import_rows', 'customer_id'],
+    ['purchases', 'purchases', 'customer_id'],
+    ['earning_claims', 'earning_claims', 'customer_id'],
+    ['redemption_approvals', 'redemption_quotes', 'approval_customer_id'],
   ];
   const results = await Promise.all(
     checks.map(async ([label, table, column]) => ({
@@ -324,6 +343,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         gender: input.gender ?? null,
         email: input.email,
         phone: input.phone,
+        landline: input.landline ?? null,
         address: {
           ...input.address,
           postalCode: input.address.postalCode
@@ -358,6 +378,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? null
             : (normalizePhilippinePhone(input.supplementaryMobile) ?? input.supplementaryMobile),
         supplementary_email: input.supplementaryEmail ?? null,
+        supplementary_landline: input.supplementaryLandline ?? null,
         supplementary_occupation_business_name: input.supplementaryOccupationBusinessName ?? null,
         supplementary_office_address: input.supplementaryOfficeAddress ?? null,
         supplementary_position: input.supplementaryPosition ?? null,
@@ -460,6 +481,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.gender !== undefined) patch.gender = p.gender;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
+      if (p.landline !== undefined) patch.landline = p.landline;
       if (p.address !== undefined)
         patch.address = {
           ...p.address,
@@ -498,6 +520,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? null
             : (normalizePhilippinePhone(p.supplementaryMobile) ?? p.supplementaryMobile);
       if (p.supplementaryEmail !== undefined) patch.supplementary_email = p.supplementaryEmail;
+      if (p.supplementaryLandline !== undefined)
+        patch.supplementary_landline = p.supplementaryLandline;
       if (p.supplementaryOccupationBusinessName !== undefined)
         patch.supplementary_occupation_business_name = p.supplementaryOccupationBusinessName;
       if (p.supplementaryOfficeAddress !== undefined)
@@ -725,12 +749,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           suffix: null,
           email: `deleted+${suffix}@invalid.local`,
           phone: '0000000',
+          landline: null,
           birth_date: null,
           gender: null,
           address: {},
           government_id_type: null,
           government_id_number: null,
           notes: null,
+          // Company-stated fields are customer PII too: anonymize clears them
+          // so an anonymized record cannot keep a TIN, a related-person
+          // contact or stated figures behind.
+          ra_number: null,
+          company_status: null,
+          citizenship: null,
+          civil_status: null,
+          tin_number: null,
+          occupation_business_name: null,
+          office_business_address: null,
+          employed_position: null,
+          supplementary_full_name: null,
+          supplementary_address: null,
+          supplementary_birthday: null,
+          supplementary_gender: null,
+          supplementary_citizenship: null,
+          supplementary_civil_status: null,
+          supplementary_tin_number: null,
+          supplementary_mobile: null,
+          supplementary_email: null,
+          supplementary_landline: null,
+          supplementary_occupation_business_name: null,
+          supplementary_office_address: null,
+          supplementary_position: null,
+          ost_ist_name: null,
+          svd_name: null,
+          ssm_name: null,
+          sm_name: null,
+          referrer_name: null,
+          vip_recommender_name: null,
+          related_contact_no: null,
+          related_email: null,
+          stated_vip_package: null,
+          stated_payment_terms: null,
+          stated_regular_price: null,
+          stated_discount: null,
+          stated_total_amount: null,
+          stated_rf: null,
+          stated_payment_type: null,
+          stated_ref_no: null,
+          stated_payment_date: null,
           auth_user_id: null,
           status: 'cancelled',
           updated_at: new Date().toISOString(),
@@ -750,6 +816,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         {
           status: 'cancelled',
           directProfilePiiRemoved: true,
+          companyStatedFieldsRemoved: true,
           identityDocumentsRetainedPendingPolicy: true,
         },
       );

@@ -16,6 +16,11 @@ type Props = {
 };
 
 const text = (v: string | null | undefined) => v ?? '';
+const addressPart = (address: unknown, key: string): string => {
+  if (!address || typeof address !== 'object') return '';
+  const part = (address as Record<string, unknown>)[key];
+  return typeof part === 'string' ? part : '';
+};
 
 /**
  * Edit company-stated fields on the combined customer record.
@@ -24,12 +29,21 @@ const text = (v: string | null | undefined) => v ?? '';
  * inferred, FULL NAME is never split. Stated package/payment figures never
  * drive server totals. TIN inputs are write-only: they start empty (the API
  * only returns a mask), a filled value sets, an empty value keeps.
+ * The primary address parts and the two landlines are editable here; blank
+ * parts fall back to the stored value, so a partial edit never wipes them.
  */
 export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: Props) {
   const client = useQueryClient();
   const [form, setForm] = useState(() => ({
     raNumber: text(customer.raNumber),
     companyStatus: text(customer.companyStatus),
+    addressLine1: addressPart(customer.address, 'line1'),
+    addressLine2: addressPart(customer.address, 'line2'),
+    province: addressPart(customer.address, 'province'),
+    city: addressPart(customer.address, 'city'),
+    barangay: addressPart(customer.address, 'barangay'),
+    postalCode: addressPart(customer.address, 'postalCode'),
+    landline: text(customer.landline),
     citizenship: text(customer.citizenship),
     civilStatus: text(customer.civilStatus),
     tinNumber: '',
@@ -45,6 +59,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     supplementaryTinNumber: '',
     supplementaryMobile: text(customer.supplementaryMobile),
     supplementaryEmail: text(customer.supplementaryEmail),
+    supplementaryLandline: text(customer.supplementaryLandline),
     supplementaryOccupationBusinessName: text(customer.supplementaryOccupationBusinessName),
     supplementaryOfficeAddress: text(customer.supplementaryOfficeAddress),
     supplementaryPosition: text(customer.supplementaryPosition),
@@ -72,9 +87,26 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
   const save = useBusinessMutation({
     mutationFn: () => {
       const orNull = (v: string) => (v.trim() === '' ? null : v.trim());
+      const address = customer.address && typeof customer.address === 'object'
+        ? (customer.address as Record<string, unknown>)
+        : {};
+      const stored = (key: string) =>
+        typeof address[key] === 'string' ? (address[key] as string) : '';
       return updateCustomer(customer.id, {
         raNumber: orNull(form.raNumber),
         companyStatus: orNull(form.companyStatus),
+        // Required parts fall back to the stored value; optional parts are
+        // omitted when blank, never sent as empty strings.
+        address: {
+          line1: orNull(form.addressLine1) ?? stored('line1'),
+          city: orNull(form.city) ?? stored('city'),
+          province: orNull(form.province) ?? stored('province'),
+          ...(form.addressLine2.trim() ? { line2: form.addressLine2.trim() } : {}),
+          ...(form.barangay.trim() ? { barangay: form.barangay.trim() } : {}),
+          ...(form.postalCode.trim() ? { postalCode: form.postalCode.trim() } : {}),
+          countryCode: stored('countryCode') || 'PH',
+        },
+        landline: orNull(form.landline),
         citizenship: orNull(form.citizenship),
         civilStatus: orNull(form.civilStatus),
         // Write-only: empty keeps the stored value, filled sets it.
@@ -94,6 +126,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           : {}),
         supplementaryMobile: orNull(form.supplementaryMobile),
         supplementaryEmail: orNull(form.supplementaryEmail),
+        supplementaryLandline: orNull(form.supplementaryLandline),
         supplementaryOccupationBusinessName: orNull(form.supplementaryOccupationBusinessName),
         supplementaryOfficeAddress: orNull(form.supplementaryOfficeAddress),
         supplementaryPosition: orNull(form.supplementaryPosition),
@@ -159,6 +192,55 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           label="STATUS"
           value={form.companyStatus}
           onChange={set('companyStatus')}
+        />
+        <TextField
+          id="ce-addr1"
+          name="addressLine1"
+          label="PERMANENT ADDRESS LINE 1"
+          value={form.addressLine1}
+          onChange={set('addressLine1')}
+        />
+        <TextField
+          id="ce-addr2"
+          name="addressLine2"
+          label="PERMANENT ADDRESS LINE 2"
+          value={form.addressLine2}
+          onChange={set('addressLine2')}
+        />
+        <TextField
+          id="ce-prov"
+          name="province"
+          label="PROVINCE"
+          value={form.province}
+          onChange={set('province')}
+        />
+        <TextField
+          id="ce-city"
+          name="city"
+          label="CITY"
+          value={form.city}
+          onChange={set('city')}
+        />
+        <TextField
+          id="ce-bgy"
+          name="barangay"
+          label="BARANGGAY"
+          value={form.barangay}
+          onChange={set('barangay')}
+        />
+        <TextField
+          id="ce-postal"
+          name="postalCode"
+          label="POSTAL CODE"
+          value={form.postalCode}
+          onChange={set('postalCode')}
+        />
+        <TextField
+          id="ce-land"
+          name="landline"
+          label="LANDLINE"
+          value={form.landline}
+          onChange={set('landline')}
         />
         <TextField
           id="ce-cit"
@@ -271,9 +353,16 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-sup-email"
           name="supplementaryEmail"
-          label="EMAIL ADDRESS"
+          label="EMAIL"
           value={form.supplementaryEmail}
           onChange={set('supplementaryEmail')}
+        />
+        <TextField
+          id="ce-sup-land"
+          name="supplementaryLandline"
+          label="LANDLINE"
+          value={form.supplementaryLandline}
+          onChange={set('supplementaryLandline')}
         />
         <TextField
           id="ce-sup-occ"
@@ -307,35 +396,35 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-svd"
           name="svdName"
-          label="SVD"
+          label="SVD (NAME)"
           value={form.svdName}
           onChange={set('svdName')}
         />
         <TextField
           id="ce-ssm"
           name="ssmName"
-          label="SSM"
+          label="SSM (NAME)"
           value={form.ssmName}
           onChange={set('ssmName')}
         />
         <TextField
           id="ce-sm"
           name="smName"
-          label="SM"
+          label="SM (NAME)"
           value={form.smName}
           onChange={set('smName')}
         />
         <TextField
           id="ce-ref"
           name="referrerName"
-          label="REFERRER"
+          label="REFERRER (NAME)"
           value={form.referrerName}
           onChange={set('referrerName')}
         />
         <TextField
           id="ce-viprec"
           name="vipRecommenderName"
-          label="VIP RECOMMENDER"
+          label="VIP RECOMMENDER (NAME)"
           value={form.vipRecommenderName}
           onChange={set('vipRecommenderName')}
         />

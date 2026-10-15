@@ -531,6 +531,91 @@
   flex: 1 1 auto;
 }
 
+/* Application record status: lifecycle state plus the linked records on one
+   card, so reviewers stop hunting a flat text line for timestamps. */
+.statusHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* Record actions on the application detail screen: decision, data,
+   lifecycle, next-step and export controls grouped under their own headings
+   instead of one undifferentiated run of buttons. */
+.recordGroups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.actionGroup {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.actionGroupTitle {
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+/* Purchase workflow: compact progress checklist plus the one next action. */
+.workflowSteps {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workflowStep {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.workflowStep[data-state='done'],
+.workflowStep[data-state='current'] {
+  color: var(--color-text-primary);
+}
+
+.workflowStep[data-state='current'] {
+  font-weight: 600;
+}
+
+.workflowMark {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.workflowStep[data-state='done'] .workflowMark {
+  color: var(--color-success);
+}
+
+.workflowStep[data-state='current'] .workflowMark {
+  color: var(--color-brand-primary);
+}
+
+/* The workflow's single next action, set off from the checklist. */
+.workflowNext {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.workflowNext h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body);
+}
+
 /* Payments ledger on the reservation detail screen. */
 .ledgerWrap {
   margin-top: var(--space-3);

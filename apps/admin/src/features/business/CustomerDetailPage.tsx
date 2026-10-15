@@ -163,13 +163,10 @@ export function CustomerDetailPage() {
       age -= 1;
     return age < 0 ? '—' : String(age);
   };
-  const addressOf = (address: unknown): string => {
-    if (!address || typeof address !== 'object') return '—';
-    const parts = address as Record<string, unknown>;
-    const text = [parts.line1, parts.line2, parts.city, parts.province, parts.countryCode]
-      .filter((part) => typeof part === 'string' && part.trim().length > 0)
-      .join(', ');
-    return text || '—';
+  const addressPartOf = (address: unknown, key: string): string => {
+    if (!address || typeof address !== 'object') return '';
+    const part = (address as Record<string, unknown>)[key];
+    return typeof part === 'string' ? part.trim() : '';
   };
   const groups: Array<{ title: string; fields: Array<[string, ReactNode]>; columns?: 2 }> = [
     {
@@ -211,43 +208,57 @@ export function CustomerDetailPage() {
       ],
     },
     {
-      // Company-stated primary-member facts (44-column template §1). STATUS
-      // here is the verbatim company value; lifecycle state stays under
-      // Customer above. TIN is masked like the government ID.
+      // Company-stated primary-member facts, SSOT order (see
+      // customer-ssot.ts). STATUS here is the verbatim company value;
+      // lifecycle state stays under Customer above. TIN is masked like the
+      // government ID; AGE derives from the birthday, never stored.
       title: 'Primary Member',
       columns: 2,
       fields: [
         ['RA NO', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
         ['STATUS', record.companyStatus ?? '—'],
-        ['FULL NAME', record.fullName],
-        ['ADDRESS', addressOf(record.address)],
+        ['FIRST NAME', record.firstName ?? '—'],
+        ['LAST NAME', record.lastName ?? '—'],
+        ['MIDDLE NAME', record.middleName ?? '—'],
+        ['SUFFIX', record.suffix ?? '—'],
         ['BIRTHDAY', record.dateOfBirth ?? '—'],
-        ['AGE', ageOn(record.dateOfBirth)],
         ['GENDER', record.gender ?? '—'],
+        ['AGE', ageOn(record.dateOfBirth)],
         ['CITIZENSHIP', record.citizenship ?? '—'],
         ['CIVIL STATUS', record.civilStatus ?? '—'],
+        ['PERMANENT ADDRESS LINE 1', addressPartOf(record.address, 'line1') || '—'],
+        ['PERMANENT ADDRESS LINE 2', addressPartOf(record.address, 'line2') || '—'],
+        ['PROVINCE', addressPartOf(record.address, 'province') || '—'],
+        ['CITY', addressPartOf(record.address, 'city') || '—'],
+        ['BARANGGAY', addressPartOf(record.address, 'barangay') || '—'],
+        ['POSTAL CODE', addressPartOf(record.address, 'postalCode') || '—'],
+        ['LANDLINE', record.landline ?? '—'],
+        ['EMAIL', record.email],
         ['TIN NO.', record.tinNumberMasked ?? '—'],
         ['MOBILE NO.', record.phone],
-        ['EMAIL ADDRESS', record.email],
         ['OCCUPATION / BUSINESS NAME', record.occupationBusinessName ?? '—'],
         ['OFFICE / BUSINESS ADDRESS', record.officeBusinessAddress ?? '—'],
         ['EMPLOYED POSITION', record.employedPosition ?? '—'],
       ],
     },
     {
+      // Supplementary block, SSOT order. Names and address are stored joined
+      // (single text columns) and display as the two stored fields; AGE
+      // derives from the supplementary birthday.
       title: 'Supplementary Member',
       columns: 2,
       fields: [
         ['SUPPLEMENTARY FULL NAME', record.supplementaryFullName ?? '—'],
-        ['ADDRESS', record.supplementaryAddress ?? '—'],
+        ['SUPPLEMENTARY ADDRESS', record.supplementaryAddress ?? '—'],
         ['BIRTHDAY', record.supplementaryBirthday ?? '—'],
-        ['AGE', ageOn(record.supplementaryBirthday)],
         ['GENDER', record.supplementaryGender ?? '—'],
+        ['AGE', ageOn(record.supplementaryBirthday)],
         ['CITIZENSHIP', record.supplementaryCitizenship ?? '—'],
         ['CIVIL STATUS', record.supplementaryCivilStatus ?? '—'],
         ['TIN NO.', record.supplementaryTinNumberMasked ?? '—'],
+        ['LANDLINE', record.supplementaryLandline ?? '—'],
         ['MOBILE NO.', record.supplementaryMobile ?? '—'],
-        ['EMAIL ADDRESS', record.supplementaryEmail ?? '—'],
+        ['EMAIL', record.supplementaryEmail ?? '—'],
         ['OCCUPATION / BUSINESS NAME', record.supplementaryOccupationBusinessName ?? '—'],
         ['OFFICE / BUSINESS ADDRESS', record.supplementaryOfficeAddress ?? '—'],
         ['EMPLOYED POSITION', record.supplementaryPosition ?? '—'],
@@ -260,11 +271,11 @@ export function CustomerDetailPage() {
       columns: 2,
       fields: [
         ['OST/IST NAME', record.ostIstName ?? '—'],
-        ['SVD', record.svdName ?? '—'],
-        ['SSM', record.ssmName ?? '—'],
-        ['SM', record.smName ?? '—'],
-        ['REFERRER', record.referrerName ?? '—'],
-        ['VIP RECOMMENDER', record.vipRecommenderName ?? '—'],
+        ['SVD (NAME)', record.svdName ?? '—'],
+        ['SSM (NAME)', record.ssmName ?? '—'],
+        ['SM (NAME)', record.smName ?? '—'],
+        ['REFERRER (NAME)', record.referrerName ?? '—'],
+        ['VIP RECOMMENDER (NAME)', record.vipRecommenderName ?? '—'],
         ['CONTACT NO.', record.relatedContactNo ?? '—'],
         ['EMAIL ADDRESS', record.relatedEmail ?? '—'],
       ],

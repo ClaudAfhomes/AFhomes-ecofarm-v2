@@ -12,191 +12,233 @@ pnpm + Turborepo. `apps/web` (:5173; marketing + `/customer/**` + `/ost/**`) |
 `api/_lib/router.ts` → `api/_handlers/**` → Supabase Postgres + Auth.
 `packages/contracts` (Zod SSOT; `lifecycle.ts` owns statuses; `afhomes.ts` owns
 the module catalog) | `packages/shared` (BigInt money) | `packages/config`
-(`VITE_`-only) | `packages/ui` (tokens + primitives). Branch `orly/develop`; ALL
-session work UNCOMMITTED. `SESSION.md` + `docs/security/` churn and
-`docs/supabase/CURRENT-SCHEMA.sql` (untracked) are pre-existing user items — do
-not touch.
+(`VITE_`-only) | `packages/ui` (tokens + primitives). Branch `orly/develop` @
+`62b0bfc`, 26 commits ahead of `origin/orly/develop`. `SESSION.md`,
+`docs/security/`, `docs/supabase/CURRENT-SCHEMA.sql` churn and untracked
+`docs/testing/` are user items — do not touch.
 
 ## Standing user preferences (apply without asking)
 
-- Membership template: exactly ONE download per format. `template/xlsx` =
-  README + 4 data tabs; `template/csv` = section band row + headers (one file,
-  no zip). No duplicate/parallel template buttons. Company columns are 44
-  verbatim headers (IST/OST removed); legacy 45-column uploads still accepted.
-- Verbatim company header text/order/duplicates preserved. Never invent
-  business semantics (no name-splitting, no value translation, no hierarchy
-  inference).
-- User-facing copy: every sentence max 5–6 words.
-- Admin console speaks PAGES, not internals: human-readable module names only
-  (never raw keys, never role slugs, no View/Create/Update/Delete jargon). Role
-  access = one "Can access" checkbox per page; staff overrides = one
-  "Deny access" per page. No bulk "View all" control anywhere.
-- Grouped modules are dropdowns; a single-module group (Dashboard) is a flat
-  row; a multi-module group opens pre-expanded when the role/staff already
-  holds a grant in it.
+- Membership template: exactly ONE download per format. `template/xlsx` = the
+  GUIDED workbook (README + Primary/Supplementary/Related/Package; split name
+  and address columns; fixed-value DROPDOWNS). `template/csv` = band row +
+  guided headers, one file — CSV CANNOT carry dropdowns (state that plainly,
+  never fake it). Legacy 44-column and 45-column company uploads still parse.
+  Never split FULL NAME by code: the guided download carries explicit
+  FIRST/MIDDLE/LAST/SUFFIX columns (operator-entered parts) instead.
+- Dropdown values come only from the application form's pick-lists and the
+  import validator's vocabularies (SUFFIX, SEX, CITIZENSHIP, CIVIL STATUS,
+  tiers, payment schemes/methods, canonical statuses). Never invent values.
+- User-facing copy: every sentence max 5–6 words. In detail areas the user
+  names explicitly, ALL links become `ui` Buttons with ≤2-word labels that
+  navigate via router.
+- Admin console speaks PAGES, not internals (no raw keys/slugs, no
+  View/Create/Update/Delete jargon). Role access = one "Can access" checkbox
+  per page; staff overrides = one "Deny access" per page. No bulk "View all".
+- Grouped modules are dropdowns; Dashboard is a flat row; multi-module groups
+  pre-expand when the role/staff already holds a grant in it.
 - Application drafts are hand-entry only (`/admin/customers/applications/new`
   has no file import; bulk entry lives in the Import/Export workspace).
 - Guards ship with failing-first evidence; flakes: jsdom timing + zip-bomb
   timeout under parallel load → `--maxWorkers=2`; never adjust assertions to
   force a pass.
-- Prettier is NOT a gate in this checkout: `--check` warns on unmodified files
-  too (CRLF checkout artifact). Gate on `tsc` + `eslint`. Never `--write`
-  pre-existing formatting.
+- Prettier is NOT a gate: `--check` warns on unmodified files too (CRLF
+  checkout artifact). Gate on `tsc` + `eslint`. Never `--write` pre-existing
+  formatting; on files that carry user WIP, diff against `prettier <file>` with
+  line endings normalized to see only your own lines.
+- The user edits files in parallel with the agent. Re-read shared files before
+  editing; leave diffs that are not yours alone.
 
 ## This session's work (UNCOMMITTED)
 
-### A. Membership template → 44 columns, sectioned XLSX, band-row CSV
+### A. Membership template v2 — the guided workbook (largest change)
 
-- `packages/contracts/.../customer-import.ts`: `MEMBERSHIP_TEMPLATE_COLUMNS` =
-  44 verbatim headers, duplicates kept (ADDRESS ×2, EMAIL ADDRESS ×3, AGE ×2,
-  FULL NAME ×2).
-- `api/_lib/customer-import.ts`: `MEMBERSHIP_TEMPLATE_SECTIONS` (Primary 0–15,
-  Supplementary 15–28, Related 28–35 = SVD/SSM/SM/REFERRER/VIP RECOMMENDER/
-  CONTACT NO./EMAIL ADDRESS, Package 35–44), guide sheets skipped
-  (`readme|instructions|guide|example(s)`), `membershipTemplateSectionedXlsx`
-  (tinted headers, tab colors, zebra, 20 blank rows), `membershipTemplateCsv`
-  (band row + 44 headers), `looksLikeSectionBandRow` (strips band on upload,
-  ≥15 cells must match), `isCompanyMembershipTemplate` (exact positional 44);
-  legacy 45-column layout still parsed; foreign multi-sheet stays rejected.
-- Served by `api/_handlers/customer-imports.ts` (`membership-template.xlsx` /
-  `.csv`). Specs: `membership-template.spec.ts`, `customer-import*.spec.ts`.
+- `api/_lib/customer-import.ts`: `MEMBERSHIP_TEMPLATE_V2_SECTIONS` — Primary =
+  FIRST NAME, MIDDLE NAME, LAST NAME, SUFFIX, BIRTHDAY, AGE(ref), GENDER,
+  CITIZENSHIP, CIVIL STATUS, TIN NO., MOBILE NO., EMAIL ADDRESS, ADDRESS
+  LINE 1, CITY / MUNICIPALITY, PROVINCE, OCCUPATION / BUSINESS NAME, OFFICE /
+  BUSINESS ADDRESS, EMPLOYED POSITION, RA NO, STATUS. Supplementary =
+  SUPPLEMENTARY FIRST/MIDDLE/LAST NAME and ADDRESS LINE 1/2 (parts JOIN into
+  the single `supplementary_full_name` / `supplementary_address` columns),
+  then BIRTHDAY, AGE(ref), GENDER, CITIZENSHIP, CIVIL STATUS, TIN NO., MOBILE
+  NO., EMAIL ADDRESS, OCCUPATION / BUSINESS NAME, OFFICE / BUSINESS ADDRESS,
+  EMPLOYED POSITION. Related + Package identical to legacy. Vocabularies:
+  `TEMPLATE_STATUS_OPTIONS` (round-trips `mapSourceStatus`, asserted),
+  `TEMPLATE_TIER_OPTIONS`, `TEMPLATE_PAYMENT_METHOD_OPTIONS`.
+- `membershipTemplateV2SectionedXlsx()` / `membershipTemplateV2Csv()` are what
+  the endpoints serve; the legacy builders (`membershipTemplateSectionedXlsx`,
+  `membershipTemplateCsv`, `membershipTemplateXlsx`) stay as fixtures proving
+  already-filled old downloads still parse.
+- Dropdowns: `XlsxColumn.validation` (`api/_lib/report-export.ts`) emits
+  `<dataValidations>` AFTER `<autoFilter>` — XSD order sheetData → autoFilter →
+  dataValidations is load-bearing. Guards fail loud: values may not contain
+  commas/quotes; inline list ≤250 chars.
+- Multi-sheet routing: `workbookLooksV2()` — ANY v2-ONLY header (FIRST NAME,
+  ADDRESS LINE 1, CITY / MUNICIPALITY, PROVINCE…) picks the GUIDED merge. Do
+  NOT route by "headers ⊆ v2 vocabulary": Related and Package tabs are
+  IDENTICAL in both layouts.
+- Guided flat path: `isV2MembershipTemplate` (exact positional, order-sensitive
+  — duplicates forbid name matching) → `remapV2TemplateMatrix` (positional;
+  part columns fold per row, keys = join keys; AGE lands in `dropped` → per-row
+  warning "Reference-only column was ignored"). Joins overlay AFTER
+  `matrixToRecords` (keyed by rowNumber), so a part column can never collide
+  with an import key. Both remaps parse with `COMPANY_IMPORT_EXTRA_COLUMNS`.
+- Merge rules (both layouts): all-blank tabs PAD (member with no supplementary
+  imports); tabs that both carry rows must match counts (error names each
+  sheet); guide sheets (`readme|instructions|guide|example(s)`) skipped; the
+  handler surfaces the merge's own message (names the exact tab) instead of the
+  generic single-worksheet hint.
+- Specs: `membership-template.spec.ts` (v2 endpoint shape, dropdown XML read
+  from raw bytes — ZIP entries are STORED/uncompressed, guided + legacy
+  round-trips through `/parse`), `customer-import.spec.ts` (v2 merge/remap,
+  exact-flat detection, band rows BOTH layouts), `customer-imports.spec.ts`.
+- Admin copy: XLSX card "Four tabs guide entry. Dropdowns included." CSV card
+  "One file. No dropdowns."
 
-### B. Applications/new rework + referral chain (migrations 000001/2)
+### B. New Register save bug (`official-forms-applications.tsx`)
 
-- `/admin/customers/applications/new`: ONE `Save & Submit` (no separate Submit;
-  submit-schema check + single-flight inside), `New Register` register option,
-  Valid ID upload-only (FileField + "Uploaded ✓ / Required / Missing" chip),
-  dropdowns for suffix/sex/citizenship/civil status, auto postal code (PSGC),
-  TIN/phone validation (`input.ts`, `HumanInput.tsx`, `normalize.ts`).
-- Chain selects in `official-forms-fields.tsx` (`chainOptions`): SVD
-  (vice_director), SSM (senior_sales_manager), SM (sales_manager), Referrer
-  (ost); active staff only, downline-scoped by chosen upline, gaps allowed,
-  cycles stopped, lapsed-accreditation OSTs excluded.
-- `20261131000001`: adds `customer_applications.svd_name|ssm_name` + re-delivers
-  `save_customer_application`.
-- `20261131000002`: 4 nullable staff refs; server resolves ids to ACTIVE staff
-  of the exact level role, refuses chains contradicting
-  `referral_relationships` (gaps OK), snapshots `*_name` from
-  `staff_users.full_name` when an id is given (client text ignored), legacy
-  text passthrough otherwise. No commission/money semantics.
-- Specs: `official-forms-chain.spec.ts` (admin),
-  `application-referral-chain-migration.spec.ts` (api, asserts re-delivery does
-  not broaden grants), `supabase/db-integration.ts` chain section (gaps kept,
-  legacy text stored, disagreement/wrong-role/malformed-id refused, cleanup).
+- Root cause: `saveAndSubmit` parsed the payload with
+  `createCustomerApplicationSchema` (REQUIRES customerId) BEFORE the
+  `!id && !customerId` register branch, so New Register always died with
+  "Select a customer for this application." and `registerCustomerApplication`
+  was never called.
+- Fix: the register branch validates ONLY with
+  `registerCustomerApplicationSchema` (`registerNewCustomer: true`, no
+  customerId); the create contract guards only paths that carry a customerId.
+  Consent check kept in both.
+- Evidence: `OfficialFormsPages.spec.tsx` full-walk regression ("registers a
+  new customer on Save & Submit when New Register is selected") — proven RED
+  against pre-fix code via `git stash push -- <file>`, green after. The user
+  later refined it (pointerdown option commits, schema-parsed
+  `purchaseTermsProposalSchema` mock) — keep their refinements.
 
-### C. Module catalog + Customer Lookup module (migration 000003)
+### C. Application detail redesign (four areas user named)
 
-- `packages/contracts/.../afhomes.ts`: `MODULE_CATALOG` (32 modules, 8 groups:
-  Dashboard, Organization, Sales & Customers, Finance, Network, Operations,
-  Governance, Website), `moduleLabel()`, `groupedModuleCatalog()` — the ONLY
-  place labels/groups live; mirrors the `public.modules` seed.
-- New module `operations.customer_lookup` ("Customer Lookup"). The screen was
-  authorized by `operations.redemption` before (a till key), so the Roles
-  listing could not show it.
-- `20261131000003`: upserts the module row + view grants (employee keeps till,
-  gains lookup; admin oversight; nothing else changes). Mirrored in
-  `MIGRATION_SEEDED_GRANTS` (`role-baseline.ts`).
-- `api/_handlers/memberships.ts` customer-lookup authorizes the new key; nav
-  entry + `EXTRA_GATED_ROUTES` use it; the employee-only nav special case is
-  gone — `navItemsForPermissions(permissions)` (roleSlug param deleted).
-- Tripwires: `afhomes-modules.spec.ts` (contracts: every key once, unique
-  labels/order, unknown key falls back to the raw key), `module-coverage.spec.ts`
-  (admin: every nav item + dropdown child + `EXTRA_GATED_ROUTES` path is a
-  catalog module; destinations unique).
+- Purchase workflow, Next step, Linked company record — read-only, Newly
+  confirmed offer (on `/admin/customers/applications/:id`).
+- ALL links → `ui` Buttons navigating via `useNavigate`, ≤2-word labels:
+  Create Reservation, Continue Activation, Continue Payment, Open Reservation,
+  Open Commissions, Open Customer; Record-actions Next step link → Create
+  Reservation button.
+- `PurchaseWorkflowPanel`: `styles.panel` + checklist `.workflowSteps` with
+  `data-state=done|current|pending` marks (✓/→/○; success/brand/muted). Step
+  labels shortened (Reservation created, Commission). Next step in
+  `.workflowNext` (divider) with a button + ≤6-word hint; destinationless next
+  steps render as `.note` text, no control.
+- Linked record + offer sections: `dl` moved off the undefined `form-grid` to
+  `snapshotGrid`/`snapshotField` (matches the user's status card).
+- Copy ≤6 words/sentence ("This record predates stored evidence. Confirming
+  adds your name, time and reason. Figures are not historical terms.";
+  "7 days from first payment").
+- Specs: `application-actions.spec.tsx` — navigation proven by CLICKING buttons
+  against a `LocationProbe` route (`aria-label="route"`, prints
+  pathname+search); href assertions removed; step-label assertions updated;
+  queries scoped with `within(panel)` because Record actions and the workflow
+  panel can BOTH show "Create Reservation".
 
-### D. Roles / Staff console simplification (final ask)
+### D. Parallel user WIP in the same files (do not clobber)
 
-- `/admin/roles`: metric cards, search + type/status filters, chips + permission
-  meter; NO slug under the role name; role link has no underline (hover shifts
-  color).
-- Role detail: hero = name + description only (no slug); Role card has no "Key"
-  row; Permissions = accessible pages as grouped chips ("N of 32 pages
-  accessible"; super_admin: "All pages - granted by slug, not by row.");
-  `permissionGroups` memo deleted.
-- `AfHomesRoleFormDialog.tsx`: ONE checkbox per page,
-  `aria-label="<Page> access"`; group dropdowns with chevron + granted/total
-  pill; "Page access — N of 32 pages accessible"; no bulk control; a page that
-  keeps action rights shows a "Full" chip
-  (`title="This role also keeps its action rights here."`).
-- `AfHomesStaffPage.tsx` Restrict dialog: ONE "Deny access" per page
-  (`aria-label="<Page> deny access"`), same list; deny-only Alert kept.
-- Semantics (load-bearing): the four flags still exist and are server-enforced.
-  Role dialog toggles canView only; CHECKING preserves stored
-  canCreate/canUpdate/canDelete (an edit can never silently escalate);
-  UNCHECKING clears all four (DB requires action ⇒ view). Staff dialog:
-  checking sets denyView (server resolves it as no access at all); unchecking
-  clears all four deny flags; an existing finer deny reads as checked and
-  clears the same way.
-- Specs: `role-access-review.spec.tsx` (10: labels, dropdowns, no bulk control,
-  keep-and-clear flags), `staff-lifecycle.spec.tsx` (restrict dropdowns),
-  `navigation.spec.ts` + `authorization.regression.spec.tsx` (single-arg calls).
+- `official-forms-applications.tsx`: status card (`statusHead`,
+  `snapshotGrid`), record-actions grouping (`recordGroups`, `actionGroup`,
+  `actionGroupTitle`), `focusApplicationForm`; two prettier-dirty hint lines
+  (Decision / Cancel) are THEIR formatting — leave.
+- `OfficialFormsPages.module.css`: user's status/record CSS + this session's
+  appended `.workflowSteps/.workflowStep/.workflowMark/.workflowNext`.
+- `OfficialFormsPages.spec.tsx`: user refined the register test.
+- `docs/supabase/CURRENT-SCHEMA.sql` (large deletion churn) and untracked
+  `docs/testing/` are user items.
 
-### E. Company-column surfacing (carried from the previous handoff)
+## Committed earlier this session (context only)
 
-- Contracts `sales.ts`: 9 `stated_*` on create/update; handler `customers.ts`
-  persists them, read masks TIN; `audit-sanitize.ts` redacts `tin|tax_id`.
-- UI: `CustomerCompanyEditDialog.tsx` (37 verbatim fields, TIN blank-keeps) via
-  Edit on `CustomerDetailPage` (`sales.customers:update` only); linked-record
-  panel on the application editor; lookups/redemption/portal stay PII-free.
+Applications wizard (6 steps, Back/Next, Save & Submit in header + footer),
+red Cancel beside Take a photo (`IdCapturePicker.showCancel/onCancel`),
+postal-code UX + the Combobox reopen-on-click fix, plan-benefits artwork,
+Recommender stepper badge fix (only entered chain/contact details mark done),
+roles/staff console batch, Total Sales naming — user-committed (`cceefd9`,
+`5892bcb`, `6c59098`, merge `62b0bfc`). The `@afhomes/contracts` Vite import
+error was a stale node_modules workspace link — fixed by `pnpm install`, no
+code change.
 
-### F. Import/Export workspace + editor file-import removal (carried)
+## Test patterns worth reusing
 
-- Route `/admin/customers/applications/import-export` (gated by
-  `governance.customer_import`); old URL deleted; Applications list has the
-  gated `Import/Export Data` action; copy trimmed, Excel + CSV pickers side by
-  side.
-- The application editor has NO file import: the company-template mapping path
-  and its spec are removed; the form-template + reservation IST path is
-  untouched.
+- Navigation assertions: render a catch-all route with a `LocationProbe`
+  (`aria-label="route"`, pathname+search); click the button; `waitFor` the
+  probe's text. Stronger than href checks and survives link→button changes.
+- XLSX internals (dropdowns, XML order) assert on RAW BYTES: entries are stored
+  uncompressed, so `<dataValidation …>` and list values are readable directly.
+- Hoisted `vi.mock` factories cannot reference module constants — inline the
+  fixtures (address hierarchy mock) or use `vi.hoisted`.
+- Combobox options commit on pointerdown (fires before blur can revert the
+  draft) — specs use `fireEvent.pointerDown(option)`.
+- For shared files with user WIP: `prettier <file> | tr -d '\r'` vs
+  `tr -d '\r' < <file>` diff shows only real formatting deltas; only touch
+  your own hunks.
 
 ## Decisions (do not re-litigate)
 
+- Guided template targets = existing import keys; no second pipeline.
+- V2 workbook routing by v2-ONLY headers (Related/Package are shared).
+- Supplementary name/address JOIN operator-entered parts into the single
+  stored text columns — never derived from FULL NAME.
+- AGE is reference-only (warned, never merged) in both layouts.
+- CSV carries no dropdowns — a format limit, stated in the UI.
+- New Register owns the register contract; the create contract owns the rest.
+- Detail-area links are buttons; destinationless next steps are plain text.
 - Module labels/groups live in contracts, mirroring the DB seed; the DB stays
   the authorization authority; UI never shows raw keys.
 - Access is presented per PAGE; the 4 action flags are internal but never
   silently rewritten by an edit (preserve on check, clear on uncheck).
-- No bulk "View all": a click must never grant a module the operator did not
-  see (removed from both dialogs).
 - Customer Lookup owns its module instead of borrowing a till key.
-- Single-module groups are flat rows; multi-module groups are disclosures.
 
 ## Blocked / needs user action
 
-- `pnpm db:migrate` for `20261131000001` / `…0002` / `…0003` — needs explicit
-  approval. Until `…0003` is applied AND deployed, Customer Lookup breaks
-  (handler authorizes a key the DB does not know yet).
+- `docs/testing/membership-template.xlsx` (user's file, old company layout)
+  fails on required names, STATUS `Paid`, birthday serial `37880`, related
+  email typo. Re-download the NEW guided template and refill (dropdowns + split
+  names). Old-layout files still parse; the required-name rule is unchanged.
 - Dev API restart / redeploy to see handler + template changes.
-- After that batch: run `supabase/security/rls_invariants.sql` (empty = PASS)
-  and `pnpm test:db:local`.
+- `pnpm db:migrate` for `20261131000001/0002/0003` (carried) — needs explicit
+  approval; until `…0003` is applied AND deployed, Customer Lookup breaks
+  (handler authorizes a key the DB may not know). Verify applied state first;
+  then run `supabase/security/rls_invariants.sql` (empty = PASS) and
+  `pnpm test:db:local`.
+- Two identical "Create Reservation" buttons (workflow panel + Record actions
+  → Next step) — user may want one removed or relabeled.
 
 ## Carried open threads (older sessions, still unanswered)
 
 - Q1 model authority, Q2 cutover scope, Q3 gate/product, Q4 missing 12 files,
   Q5 Master List, Q6 C2 authority, Q7 VIP DSC figure (exhaustively searched —
   absent).
-- FULL NAME split rule (fail safe until decided); RA/STATUS value sets, RF,
-  price/discount/total semantics, package/terms vocabularies verbatim
-  uninterpreted; related names carry no hierarchy semantics.
-- Tech debt: `toXlsxMulti` float mirrors pre-existing `toXlsx`;
-  `CustomerCompanyEditDialog` reuses the detail CSS module; dialog
-  normalization via `normalize.ts`; `updateCustomer` duplication (`services.ts`
-  vs `services-customers.ts`); `StatedPackage` object; stated money-schema
-  question.
+- FULL NAME split: RESOLVED for downloads (explicit operator-entered columns;
+  code never splits). RA/STATUS value sets, RF, price/discount/total
+  semantics, package/terms vocabularies stay verbatim, uninterpreted; related
+  names carry no hierarchy semantics.
+- Tech debt: `toXlsxMulti` float/date handling mirrors pre-existing `toXlsx`
+  (validation lists added this session); `CustomerCompanyEditDialog` reuses the
+  detail CSS module; dialog normalization via `normalize.ts`; `updateCustomer`
+  duplication (`services.ts` vs `services-customers.ts`); `StatedPackage`
+  object; stated money-schema question.
 
 ## Verify (from root)
 
 ```sh
-pnpm --filter ./apps/admin exec vitest run --maxWorkers=2   # 80 files / 801 tests
-pnpm --filter ./packages/contracts exec vitest run          # 244
-pnpm --filter ./api exec vitest run                         # 113 files / 2173
-pnpm --filter ./api exec tsc --noEmit && pnpm --filter ./packages/contracts exec tsc --noEmit
-pnpm --filter ./apps/admin exec tsc --noEmit && pnpm check:env
-pnpm lint                                                   # 0 errors (web 8 warn, admin 21 warn — pre-existing)
+pnpm --filter ./apps/admin exec vitest run --maxWorkers=2   # 82 files / 806 tests
+pnpm --filter ./packages/contracts exec vitest run          # 251
+pnpm --filter ./api exec vitest run                         # 115 files / 2225
+pnpm --filter ./packages/ui exec vitest run                 # 215
+pnpm typecheck                                              # turbo 7 + tsc -p supabase
+pnpm check:env
+pnpm lint                                                   # 0 errors (admin 23 / web 8 warn, pre-existing)
 pnpm test:db:local                                          # boots its own disposable PG
 ```
 
-Last verified (final pass, AFTER the last UI edit): admin 801/801, contracts
-244/244, api 2173/2173, tsc clean (admin/contracts/api), `check:env` PASS,
-`lint` 0 errors, `test:db:local` 2490/2490. `pnpm test:db:harness` and
-`rls_invariants.sql` were NOT re-run for the last batch (no RLS surface change)
-— re-run if RLS/grants are touched.
+Last verified (after the FINAL detail-page edit): admin 806/806, api 2225/2225,
+contracts 251/251, ui 215/215; `tsc` clean everywhere incl. the supabase half
+(admin re-verified after the last edit; api/contracts untouched since theirs);
+`check:env` PASS (no env-touching change after it); `lint` 0 errors (warnings
+pre-existing class). Evidence: register regression RED without the fix
+(stash) / green with it; guided-template dropdowns asserted at byte level.
+NOT re-run this session (no SQL/RLS surface change): `test:db:local`,
+`test:db:harness`, `rls_invariants.sql` — re-run if migrations/grants are
+touched.

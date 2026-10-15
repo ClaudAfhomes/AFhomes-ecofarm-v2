@@ -5,19 +5,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
-import { customerSchema, identityDocumentSchema } from '@afhomes/contracts';
+import {
+  customerSchema,
+  identityDocumentSchema,
+  purchaseTermsProposalSchema,
+} from '@afhomes/contracts';
 import {
   CustomerApplicationEditorPage,
   CustomerApplicationsPage,
   ReservationAgreementsPage,
 } from './OfficialFormsPages';
 import {
+  createCustomerApplication,
   getCardProducts,
   getCustomerApplication,
   getCustomerById,
   getCustomerApplicationsPage,
   getCustomersPage,
+  getPurchaseTermsProposal,
   getReservationAgreementsPage,
+  registerCustomerApplication,
+  submitCustomerApplication,
 } from './services';
 import {
   getCurrentDocument,
@@ -46,8 +54,10 @@ vi.mock('./services', () => ({
   getSaleSummary: vi.fn(),
   getSales: vi.fn(),
   previewOfficialFormImport: vi.fn(),
+  registerCustomerApplication: vi.fn(),
   reopenCustomerApplication: vi.fn(),
   reopenReservationAgreement: vi.fn(),
+  getPurchaseTermsProposal: vi.fn(),
   submitCustomerApplication: vi.fn(),
   submitReservationAgreement: vi.fn(),
   updateCustomerApplication: vi.fn(),
@@ -73,6 +83,26 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: vi.fn(async () => []),
   getGenealogyDownline: vi.fn(async () => []),
   getGenealogySummary: vi.fn(),
+}));
+
+// Geographic reference data comes from the server-held provider. ONE small
+// synthetic hierarchy proves the holder cascade end to end without the
+// network; nothing here is real PSGC data. Fixtures are inline because
+// `vi.mock` factories are hoisted above any module-scope constant.
+vi.mock('../address/services', () => ({
+  getAddressProvinces: vi.fn(async () => [{ code: '0403400000', name: 'Laguna' }]),
+  getAddressLocalities: vi.fn(async () => [
+    {
+      code: '0403406000',
+      name: 'Calauan',
+      type: 'municipality' as const,
+      provinceCode: '0403400000',
+      postalCode: '4004',
+    },
+  ]),
+  getAddressBarangays: vi.fn(async () => [
+    { code: '0403406003', name: 'Dayap', localityCode: '0403406000' },
+  ]),
 }));
 
 beforeEach(() => {
@@ -364,7 +394,10 @@ describe('application private ID intake', () => {
     validityExtensionYears: 2,
     totalLoyaltyValue: '500000.00',
   };
-  const setup = async (current: ReturnType<typeof document> | null = null) => {
+  const setup = async (
+    current: ReturnType<typeof document> | null = null,
+    { pickCustomer = true }: { pickCustomer?: boolean } = {},
+  ) => {
     const qaCustomer = customerSchema.parse({
       id: customerId,
       customerNumber: 'CUS-QA-1',
@@ -398,7 +431,10 @@ describe('application private ID intake', () => {
     } as never);
     renderWithProviders(<CustomerApplicationEditorPage />);
     await screen.findByRole('option', { name: 'QA Customer' });
-    fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
+    // New Register is the untouched default; only tests that need an existing
+    // customer run the picker.
+    if (pickCustomer)
+      fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
     // The editor is a wizard: pick a plan on step 1 so Next reaches Identity.
     fireEvent.change(screen.getByLabelText('VIP plan'), { target: { value: PLAN_ID } });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -500,6 +536,106 @@ describe('application private ID intake', () => {
     } as never);
     expect(await screen.findByText('Valid ID: Required / Missing')).toBeInTheDocument();
     expect(screen.queryByText(/Current ID:/)).not.toBeInTheDocument();
+  });
+
+  const chooseAddress = async (box: HTMLElement, option: string | RegExp) => {
+    // A real user cannot click a control that has not unlocked yet; waiting
+    // here models that instead of racing the province -> city cascade.
+    await waitFor(() => expect(box).toBeEnabled());
+    fireEvent.click(box);
+    // Options commit on pointerdown (before blur can revert the draft), so a
+    // plain click models nothing a real browser does. pointerdown first is the
+    // browser's own event order.
+    fireEvent.pointerDown(await screen.findByRole('option', { name: option }));
+  };
+
+  it('registers a new customer on Save & Submit when New Register is selected', async () => {
+    // Regression: the create contract was parsed before the register branch,
+    // so New Register - which carries no customerId by design - was refused
+    // with "Select a customer for this application." and never registered.
+    vi.mocked(registerCustomerApplication).mockResolvedValue({
+      id: '00000000-0000-4000-8000-0000000000aa',
+      customerId: '00000000-0000-4000-8000-0000000000bb',
+    } as never);
+    // The service Zod-parses the proposal, so production data always carries
+    // terms. After submit the screen refetches and renders the offer, so the
+    // mock must be complete or the render crashes on `terms.tier`.
+    vi.mocked(getPurchaseTermsProposal).mockResolvedValue(
+      purchaseTermsProposalSchema.parse({
+        applicationId: '00000000-0000-4000-8000-0000000000aa',
+        expectedProposalHash: 'a'.repeat(64),
+        asOf: '2026-10-07T00:00:00.000Z',
+        offerKind: 'submission',
+        sellerName: 'QA SELLER',
+        terms: {
+          applicationId: '00000000-0000-4000-8000-0000000000aa',
+          customerId: '00000000-0000-4000-8000-0000000000bb',
+          planId: PLAN_ID,
+          sellerStaffId: customerId,
+          captureKind: 'submission',
+          tier: 'GOLD',
+          paymentScheme: 'spot_cash',
+          totalPrice: '60000.00',
+          reservationFee: '10000.00',
+          minimumDownPayment: '10000.00',
+          requiredInitial: '10000.00',
+          installmentMonths: null,
+          monthlyAmount: null,
+          spotCashDays: 7,
+          validityMonths: 12,
+          discountPercent: 10,
+          yearlyPoints: 25000,
+          annualPointsTranches: 1,
+          holderLimit: 2,
+          inclusions: [],
+          commissionRuleId: null,
+          commissionRate: '0.04',
+          commissionBase: '60000.00',
+          expectedCommission: '2400.00',
+        },
+      }),
+    );
+    vi.mocked(submitCustomerApplication).mockResolvedValue({
+      id: '00000000-0000-4000-8000-0000000000aa',
+    } as never);
+
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    await screen.findByText('Ready to upload on save.');
+
+    // Identity is satisfied by the picked file; forward to Holders and fill
+    // every field the register contract requires.
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+    fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+    fireEvent.change(screen.getByLabelText('Permanent address line 1'), {
+      target: { value: '1 QA Street' },
+    });
+    // Province -> city -> barangay is all three or none: a half-verified
+    // hierarchy is refused, so all three are chosen.
+    await chooseAddress(screen.getByRole('combobox', { name: /^Province/ }), 'Laguna');
+    await chooseAddress(screen.getByRole('combobox', { name: /City \/ municipality/ }), /Calauan/);
+    await chooseAddress(screen.getByRole('combobox', { name: /Barangay/ }), 'Dayap');
+    fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+    fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Recommender
+    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Channel
+    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Certify
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /I certify the information and consent/ }),
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save & Submit' })[1]!);
+
+    await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
+    const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
+    expect(registration).toMatchObject({ registerNewCustomer: true });
+    // The register contract omits customerId by type: no linked id may travel.
+    expect('customerId' in registration).toBe(false);
+    // The create path belongs to a picked customer only.
+    expect(vi.mocked(createCustomerApplication)).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
   });
 });
 

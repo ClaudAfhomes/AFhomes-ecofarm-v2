@@ -161,6 +161,20 @@ describe('CustomerDetailPage', () => {
   it('renders the four company-stated sections with exact labels and masked TIN', async () => {
     vi.mocked(getCustomerById).mockResolvedValue({
       ...RECORD,
+      firstName: 'MARIA',
+      lastName: 'SANTOS',
+      middleName: 'DELA',
+      suffix: 'Jr.',
+      landline: '(049) 555-1234',
+      address: {
+        line1: '1 SSOT Street',
+        line2: 'Unit 7',
+        province: 'Laguna',
+        city: 'Calamba',
+        barangay: 'Parian',
+        postalCode: '4027',
+        countryCode: 'PH',
+      },
       raNumber: 'RA-2026-0001',
       companyStatus: 'Active Member',
       citizenship: 'Filipino',
@@ -170,10 +184,12 @@ describe('CustomerDetailPage', () => {
       officeBusinessAddress: 'Makati HQ',
       employedPosition: 'Engineer II',
       supplementaryFullName: 'JUAN CRUZ',
+      supplementaryAddress: '1 Side St, Biñan',
       supplementaryBirthday: '1992-08-10',
       supplementaryGender: 'male',
       supplementaryMobile: '+639181234567',
       supplementaryEmail: 'juan@example.com',
+      supplementaryLandline: '(02) 8999-0000',
       supplementaryTinNumberMasked: '********7001',
       ostIstName: 'OST Silk',
       svdName: 'SVD Santos',
@@ -204,10 +220,67 @@ describe('CustomerDetailPage', () => {
       'GOLD VIP',
       '60000.00',
       'RF-001',
+      '(049) 555-1234',
+      'Parian',
+      '4027',
+      '(02) 8999-0000',
     ]) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
+    // Primary Member follows the SSOT order exactly: split names, split
+    // address parts, one landline, one email, one mobile number.
+    const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
+    expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
+      'RA NO',
+      'STATUS',
+      'FIRST NAME',
+      'LAST NAME',
+      'MIDDLE NAME',
+      'SUFFIX',
+      'BIRTHDAY',
+      'GENDER',
+      'AGE',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'PERMANENT ADDRESS LINE 1',
+      'PERMANENT ADDRESS LINE 2',
+      'PROVINCE',
+      'CITY',
+      'BARANGGAY',
+      'POSTAL CODE',
+      'LANDLINE',
+      'EMAIL',
+      'TIN NO.',
+      'MOBILE NO.',
+      'OCCUPATION / BUSINESS NAME',
+      'OFFICE / BUSINESS ADDRESS',
+      'EMPLOYED POSITION',
+    ]);
+    // Supplementary block: joined name/address, SSOT singles, one landline.
+    const supplementaryGrid = screen.getByText('SUPPLEMENTARY FULL NAME').closest('dl');
+    expect(
+      Array.from(supplementaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
+    ).toEqual([
+      'SUPPLEMENTARY FULL NAME',
+      'SUPPLEMENTARY ADDRESS',
+      'BIRTHDAY',
+      'GENDER',
+      'AGE',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'TIN NO.',
+      'LANDLINE',
+      'MOBILE NO.',
+      'EMAIL',
+      'OCCUPATION / BUSINESS NAME',
+      'OFFICE / BUSINESS ADDRESS',
+      'EMPLOYED POSITION',
+    ]);
+    // Related block carries the verbatim (NAME) headers.
+    for (const label of ['SVD (NAME)', 'SSM (NAME)', 'SM (NAME)', 'REFERRER (NAME)', 'VIP RECOMMENDER (NAME)']) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
   });
 });
 

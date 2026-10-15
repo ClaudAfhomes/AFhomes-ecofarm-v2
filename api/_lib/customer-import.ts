@@ -2,13 +2,20 @@ import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
+  CUSTOMER_SSOT_COLUMNS,
+  CUSTOMER_SSOT_SECTION_BANDS,
+  CUSTOMER_SSOT_SECTIONS,
   LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
   LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
   MEMBERSHIP_TEMPLATE_COLUMNS,
   MEMBERSHIP_TEMPLATE_POSITION_MAP,
   PERSON_NAME_RE,
+  TEMPLATE_PAYMENT_METHOD_OPTIONS,
+  TEMPLATE_STATUS_OPTIONS,
+  TEMPLATE_TIER_OPTIONS,
   dateOfBirthSchema,
   emailSchema,
+  optionalLandlineSchema,
   personNameSchema,
   categoryRequiresMember,
   compareMoney,
@@ -24,6 +31,8 @@ import {
   resolveCustomerCategory,
   type CustomerCategory,
   type CustomerExportRow,
+  type CustomerSsotColumn,
+  type CustomerSsotSection,
 } from '@afhomes/contracts';
 import { escapeCsvCell, toCsv, toXlsx, toXlsxMulti, type XlsxColumn } from './report-export.js';
 
@@ -322,6 +331,8 @@ export function validateImportRow(
   const mobile = normalizePhilippinePhone(get('mobile'));
   if (!nonEmpty(get('mobile'))) err('mobile', 'Required');
   else if (mobile === null) err('mobile', 'Invalid phone');
+  if (nonEmpty(get('landline')) && !optionalLandlineSchema.safeParse(get('landline')).success)
+    err('landline', 'Use a 7-15 digit landline number');
   if (nonEmpty(get('birth_date')) && !dateOfBirthSchema.safeParse(get('birth_date')).success)
     err('birth_date', 'Use a real past birth date within 120 years');
   for (const key of [
@@ -345,13 +356,37 @@ export function validateImportRow(
   const tier = nonEmpty(get('vip_tier')) ? normalizeTier(get('vip_tier')) : null;
   if (nonEmpty(get('vip_tier')) && !tier) err('vip_tier', 'Unknown tier');
 
+  // A secondary holder may be stated through the legacy secondary_* keys
+  // (the old company layout) or through the supplementary_* keys (the
+  // guided SSOT layout). Both blocks mean the same Gold-only rule; the
+  // error names the block the row actually used.
+  const hasSupplementaryBlock = [
+    'supplementary_full_name',
+    'supplementary_address',
+    'supplementary_birthday',
+    'supplementary_gender',
+    'supplementary_citizenship',
+    'supplementary_civil_status',
+    'supplementary_tin_number',
+    'supplementary_landline',
+    'supplementary_mobile',
+    'supplementary_email',
+    'supplementary_occupation_business_name',
+    'supplementary_office_address',
+    'supplementary_position',
+  ].some((key) => nonEmpty(get(key)));
   const hasSecondary =
+    hasSupplementaryBlock ||
     nonEmpty(get('secondary_first_name')) ||
     nonEmpty(get('secondary_last_name')) ||
     nonEmpty(get('secondary_email')) ||
     nonEmpty(get('secondary_mobile')) ||
     nonEmpty(get('secondary_birth_date'));
-  if (hasSecondary && tier !== 'GOLD') err('secondary_first_name', 'Secondary holder is Gold-only');
+  if (hasSecondary && tier !== 'GOLD')
+    err(
+      hasSupplementaryBlock ? 'supplementary_full_name' : 'secondary_first_name',
+      'Secondary holder is Gold-only',
+    );
   for (const field of [
     'secondary_first_name',
     'secondary_middle_name',
@@ -381,6 +416,7 @@ export function validateImportRow(
   for (const key of [
     'citizenship',
     'civil_status',
+    'barangay',
     'employed_position',
     'supplementary_citizenship',
     'supplementary_civil_status',
@@ -428,6 +464,22 @@ export function validateImportRow(
     if (g !== 'male' && g !== 'female' && g !== 'other' && g !== 'undisclosed')
       warn('supplementary_gender', 'Unrecognized gender resolves to no value');
   }
+  const supplementaryMobileRaw = get('supplementary_mobile');
+  const supplementaryMobile = supplementaryMobileRaw
+    ? normalizePhilippinePhone(supplementaryMobileRaw)
+    : null;
+  if (supplementaryMobileRaw && supplementaryMobile === null)
+    err('supplementary_mobile', 'Invalid phone');
+  if (
+    nonEmpty(get('supplementary_email')) &&
+    !emailSchema.safeParse(get('supplementary_email')).success
+  )
+    err('supplementary_email', 'Invalid email');
+  if (
+    nonEmpty(get('supplementary_landline')) &&
+    !optionalLandlineSchema.safeParse(get('supplementary_landline')).success
+  )
+    err('supplementary_landline', 'Use a 7-15 digit landline number');
   const relatedContactRaw = get('related_contact_no');
   if (relatedContactRaw && normalizePhilippinePhone(relatedContactRaw) === null)
     err('related_contact_no', 'Invalid phone');
@@ -635,6 +687,7 @@ export function validateImportRow(
       })(),
       email: normalizeEmail(get('email')) ?? get('email'),
       phone: mobile ?? get('mobile'),
+      landline: nonEmpty(get('landline')) ? get('landline') : null,
     },
     payment,
     historicalSaleTotal: nonEmpty(get('historical_sale_total'))
@@ -684,6 +737,11 @@ export function validateImportRow(
       supplementaryCitizenship: get('supplementary_citizenship') || null,
       supplementaryCivilStatus: get('supplementary_civil_status') || null,
       supplementaryTinNumber: get('supplementary_tin_number') || null,
+      supplementaryMobile: supplementaryMobile ?? (supplementaryMobileRaw || null),
+      supplementaryEmail: nonEmpty(get('supplementary_email'))
+        ? normalizeEmail(get('supplementary_email')) ?? get('supplementary_email')
+        : null,
+      supplementaryLandline: get('supplementary_landline') || null,
       supplementaryOccupationBusinessName: get('supplementary_occupation_business_name') || null,
       supplementaryOfficeAddress: get('supplementary_office_address') || null,
       supplementaryPosition: get('supplementary_position') || null,
@@ -824,7 +882,13 @@ export const MEMBERSHIP_TEMPLATE_SECTIONS: readonly MembershipTemplateSection[] 
 ];
 
 /** Sheet names the sectioned parser skips (guidance, never data). */
-export const MEMBERSHIP_TEMPLATE_GUIDE_SHEETS = ['readme', 'instructions', 'guide', 'example', 'examples'];
+export const MEMBERSHIP_TEMPLATE_GUIDE_SHEETS = [
+  'readme',
+  'instructions',
+  'guide',
+  'example',
+  'examples',
+];
 
 const membershipTemplateColumns = (): XlsxColumn[] =>
   MEMBERSHIP_TEMPLATE_COLUMNS.map((label) => ({
@@ -865,13 +929,15 @@ const TEMPLATE_TAB_COLORS: Record<MembershipTemplateSection['tone'], string> = {
 export const MEMBERSHIP_TEMPLATE_ENTRY_ROWS = 20;
 
 /**
- * Sectioned membership template: README + Primary/Supplementary/
- * Related/Package tabs. Same 45 headers, same order, split for entry.
- * Rows merge by position on upload.
+ * Sectioned membership template (previous layout, kept for round-trip
+ * tests of already-filled downloads): README + Primary/Supplementary/
+ * Related/Package tabs carrying the 44 company headers as slices. The
+ * CURRENT download is `membershipTemplateV2SectionedXlsx`; this builder is
+ * the fixture that proves the older shape still parses.
  *
  * Presentation only: tinted + bordered headers, a section tab color, and a
  * prepared zebra grid of blank rows. No header text is added, changed or
- * reordered - the positional remap sees the same 45 verbatim names.
+ * reordered - the positional remap sees the same 44 verbatim names.
  */
 export const membershipTemplateSectionedXlsx = () =>
   toXlsxMulti('Membership Template', [
@@ -882,7 +948,7 @@ export const membershipTemplateSectionedXlsx = () =>
         { label: 'Fill guide', type: 'text' as const, width: 44 },
       ],
       rows: [
-        ['Primary', 'Fill primary member facts.'],
+        ['Primary', 'Fill names and member facts.'],
         ['Supplementary', 'Leave blank when none.'],
         ['Related', 'Copy referral chain verbatim.'],
         ['Package', 'State prices for reference.'],
@@ -924,21 +990,267 @@ export const MEMBERSHIP_TEMPLATE_SECTION_BANDS: readonly string[] =
 export const membershipTemplateCsv = (): string =>
   toCsv([...MEMBERSHIP_TEMPLATE_SECTION_BANDS], [[...MEMBERSHIP_TEMPLATE_COLUMNS]]);
 
+/* ------------------------------------------------------------------ */
+/* Guided template (v2): the application-form layout                   */
+/* ------------------------------------------------------------------ */
+
 /**
- * True when a CSV first row is the section band row: same width as the
- * template, every non-empty cell naming its own section, and enough cells
- * present that a couple of clears do not disable the strip.
+ * Template vocabularies now live in the contracts SSOT registry
+ * (`customer-ssot.ts`) so the downloads and the field definitions cannot
+ * drift apart. Re-exported here under their historical names; every status
+ * value still round-trips `mapSourceStatus` (asserted in the spec).
+ */
+export { TEMPLATE_PAYMENT_METHOD_OPTIONS, TEMPLATE_STATUS_OPTIONS, TEMPLATE_TIER_OPTIONS };
+
+/**
+ * One column of the guided workbook. A column either maps to an import key
+ * (`target`), joins into one import key with its sibling part columns
+ * (`join` - names and the supplementary address, stored as the one text
+ * column the record actually has), or is reference-only (`target: null`,
+ * warned and never merged, e.g. the derived AGE).
+ */
+export type MembershipTemplateV2Column = CustomerSsotColumn;
+
+export type MembershipTemplateV2Section = CustomerSsotSection;
+
+/**
+ * The guided workbook sections now live in the contracts SSOT registry
+ * (`@afhomes/contracts` -> `customer-ssot.ts`), the single source for the
+ * company's master field list: split names, split address, and fixed-value
+ * dropdowns wherever the application form has a closed pick-list.
+ * Re-exported here under the historical name so handlers, builders and
+ * specs keep their imports. The legacy 44-column layout stays defined
+ * above and still parses; files filled from the superseded 52-column
+ * interim layout are recognized by `isInterimV2Flat` /
+ * `workbookLooksInterimV2` below so their error can name the fix.
+ */
+export const MEMBERSHIP_TEMPLATE_V2_SECTIONS: readonly MembershipTemplateV2Section[] =
+  CUSTOMER_SSOT_SECTIONS;
+
+/** Every guided-tab column in merge order (duplicates across tabs kept). */
+export const MEMBERSHIP_TEMPLATE_V2_COLUMNS: readonly string[] = CUSTOMER_SSOT_COLUMNS;
+
+/** Section band labels for the flat CSV, one per guided column. */
+export const MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS: readonly string[] = CUSTOMER_SSOT_SECTION_BANDS;
+
+/**
+ * The superseded INTERIM guided layout (the 52-column workbook this repo
+ * briefly served before the SSOT restructure). Downloads no longer emit it;
+ * files filled from it are recognized so the error can name the fix
+ * ("download the new template") instead of drowning in unknown-column
+ * warnings.
+ */
+export const INTERIM_V2_COLUMNS: readonly string[] = [
+  'FIRST NAME',
+  'MIDDLE NAME',
+  'LAST NAME',
+  'SUFFIX',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'ADDRESS LINE 1',
+  'CITY / MUNICIPALITY',
+  'PROVINCE',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'RA NO',
+  'STATUS',
+  'SUPPLEMENTARY FIRST NAME',
+  'SUPPLEMENTARY MIDDLE NAME',
+  'SUPPLEMENTARY LAST NAME',
+  'ADDRESS LINE 1',
+  'ADDRESS LINE 2',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SVD',
+  'SSM',
+  'SM',
+  'REFERRER',
+  'VIP RECOMMENDER',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+];
+
+/**
+ * True when a flat header row is exactly the superseded 52-column interim
+ * guided list (compared trimmed + lowercased, order-sensitive) - a file
+ * filled from the interim download that must be refilled from the current
+ * template.
+ */
+export function isInterimV2Flat(headers: readonly string[]): boolean {
+  if (headers.length !== INTERIM_V2_COLUMNS.length) return false;
+  return INTERIM_V2_COLUMNS.every(
+    (column, index) => (headers[index] ?? '').trim().toLowerCase() === column.toLowerCase(),
+  );
+}
+
+/** Headers only the interim layout carried (markers for sectioned files). */
+const INTERIM_ONLY_HEADERS = new Set(
+  [
+    'ADDRESS LINE 1',
+    'ADDRESS LINE 2',
+    'CITY / MUNICIPALITY',
+    'SUPPLEMENTARY FIRST NAME',
+    'SUPPLEMENTARY MIDDLE NAME',
+    'SUPPLEMENTARY LAST NAME',
+  ].map((header) => header.toLowerCase()),
+);
+
+/** True when a multi-sheet workbook was filled from the interim download. */
+export function workbookLooksInterimV2(
+  sheets: { name: string; matrix: string[][] }[],
+): boolean {
+  const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
+  return sheets.some((sheet) => {
+    if (guide.has(sheet.name.trim().toLowerCase())) return false;
+    return (sheet.matrix[0] ?? []).some((h) =>
+      INTERIM_ONLY_HEADERS.has((h ?? '').trim().toLowerCase()),
+    );
+  });
+}
+
+/**
+ * Guided workbook download: README + the four entry tabs, dropdowns on
+ * every fixed-value column. Prepared blank rows make the grid fill-ready;
+ * uploads are read for cells only, so the validations never gate import.
+ */
+export const membershipTemplateV2SectionedXlsx = () =>
+  toXlsxMulti('Membership Template', [
+    {
+      name: 'README',
+      columns: [
+        { label: 'Tab', type: 'text' as const, width: 18 },
+        { label: 'Fill guide', type: 'text' as const, width: 44 },
+      ],
+      rows: [
+        ['Primary', 'Names, birth, contact, address, work.'],
+        ['Supplementary', 'Second cardholder. Blank when none.'],
+        ['Related', 'Referral chain, verbatim.'],
+        ['Package', 'Prices, terms, payment facts.'],
+        ['Dropdowns', 'Pick only listed values.'],
+        ['Dates', 'Use YYYY-MM-DD.'],
+        ['Rows', 'Keep same order on every tab.'],
+      ],
+      headerTone: 'slate' as const,
+      filter: false,
+      wrapBody: true,
+      tabColor: 'FF595959',
+    },
+    ...MEMBERSHIP_TEMPLATE_V2_SECTIONS.map((section) => ({
+      name: section.sheet,
+      columns: section.columns.map((column) => ({
+        label: column.header,
+        type: 'text' as const,
+        width: templateColumnWidth(column.header),
+        ...(column.values ? { validation: column.values } : {}),
+      })),
+      rows: Array.from({ length: MEMBERSHIP_TEMPLATE_ENTRY_ROWS }, () => [] as unknown[]),
+      headerTone: section.tone,
+      tabColor: TEMPLATE_TAB_COLORS[section.tone],
+      zebra: true,
+    })),
+  ]);
+
+/**
+ * Guided flat template as banded CSV. CSV is plain text: it can group the
+ * columns with a band row, but it cannot carry dropdowns - the XLSX offers
+ * the fixed-value lists, this file is for tooling that reads CSV.
+ */
+export const membershipTemplateV2Csv = (): string =>
+  toCsv([...MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS], [[...MEMBERSHIP_TEMPLATE_V2_COLUMNS]]);
+
+/**
+ * Guided headers the legacy layout never carried. Related and Package are
+ * SHARED between the layouts, so a workbook of only those tabs looks like
+ * both; the tell that a workbook is the guided one is a header like
+ * FIRST NAME / ADDRESS LINE 1 / CITY / MUNICIPALITY that only the guided
+ * layout has.
+ */
+const V2_ONLY_HEADERS = new Set(
+  MEMBERSHIP_TEMPLATE_V2_COLUMNS.filter(
+    (header) =>
+      !MEMBERSHIP_TEMPLATE_COLUMNS.some((legacy) => legacy.toLowerCase() === header.toLowerCase()),
+  ).map((header) => header.toLowerCase()),
+);
+
+/** Route a multi-sheet workbook: any guided-only header marks it guided. */
+export function workbookLooksV2(sheets: { name: string; matrix: string[][] }[]): boolean {
+  const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
+  return sheets.some((sheet) => {
+    if (guide.has(sheet.name.trim().toLowerCase())) return false;
+    return (sheet.matrix[0] ?? []).some((h) => V2_ONLY_HEADERS.has((h ?? '').trim().toLowerCase()));
+  });
+}
+
+/**
+ * True when a flat header row is exactly the guided column list (compared
+ * trimmed + lowercased, order-sensitive). Duplicated headers across tabs
+ * (ADDRESS LINE 1, AGE, GENDER, …) make name-based matching ambiguous, so
+ * only an exact positional match qualifies for the guided remap.
+ */
+export function isV2MembershipTemplate(headers: readonly string[]): boolean {
+  if (headers.length !== MEMBERSHIP_TEMPLATE_V2_COLUMNS.length) return false;
+  return MEMBERSHIP_TEMPLATE_V2_COLUMNS.every(
+    (column, index) => (headers[index] ?? '').trim().toLowerCase() === column.toLowerCase(),
+  );
+}
+
+/**
+ * True when a CSV first row is a section band row (either the guided
+ * layout or the company layout): same width as that template, every
+ * non-empty cell naming its own section, and enough cells present that a
+ * couple of clears do not disable the strip.
  */
 export function looksLikeSectionBandRow(cells: string[]): boolean {
-  if (cells.length !== MEMBERSHIP_TEMPLATE_COLUMNS.length) return false;
-  let matched = 0;
-  for (let i = 0; i < cells.length; i += 1) {
-    const value = (cells[i] ?? '').trim().toLowerCase();
-    if (value === '') continue;
-    if (value !== MEMBERSHIP_TEMPLATE_SECTION_BANDS[i]!.toLowerCase()) return false;
-    matched += 1;
-  }
-  return matched >= 15;
+  const matches = (bands: readonly string[]): boolean => {
+    if (cells.length !== bands.length) return false;
+    let matched = 0;
+    for (let i = 0; i < cells.length; i += 1) {
+      const value = (cells[i] ?? '').trim().toLowerCase();
+      if (value === '') continue;
+      if (value !== bands[i]!.toLowerCase()) return false;
+      matched += 1;
+    }
+    return matched >= 15;
+  };
+  // The superseded 52-column interim layout: strip its band too so the
+  // header row below it can be recognized as interim (isInterimV2Flat) and
+  // fail with the pointed re-download message.
+  const interimBands: readonly string[] = [
+    ...Array.from({ length: 20 }, () => 'Primary'),
+    ...Array.from({ length: 16 }, () => 'Supplementary'),
+    ...Array.from({ length: 7 }, () => 'Related'),
+    ...Array.from({ length: 9 }, () => 'Package'),
+  ];
+  return (
+    matches(MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS) ||
+    matches(MEMBERSHIP_TEMPLATE_SECTION_BANDS) ||
+    matches(interimBands)
+  );
 }
 
 /**
@@ -1005,24 +1317,102 @@ export function remapCompanyTemplateMatrix(
   return { matrix: [headers, ...body], dropped };
 }
 
+/**
+ * Row alignment across section tabs: trim trailing blank rows per tab, then
+ * require agreement among tabs that carry data. A tab with NO data rows at
+ * all ("leave the whole row blank when none") pads with blanks to the
+ * data-row count: an empty tab carries no persons, so padding it cannot
+ * misalign anyone. Tabs that both carry rows must agree, so a deleted row
+ * that would shift one tab's persons out of line stays a loud error. A blank
+ * row inside the range still counts, so a deleted middle row cannot silently
+ * shift one tab's persons out of line with the others.
+ */
+function alignSectionBodies(
+  sections: readonly { sheet: string }[],
+  bySection: Map<number, { name: string; matrix: string[][] }>,
+): { width: number; aligned: string[][][] } {
+  const bodies = sections.map((_, si) => {
+    const body = bySection.get(si)!.matrix.slice(1);
+    let end = body.length;
+    while (end > 0 && (body[end - 1] ?? []).every((c) => (c ?? '').trim() === '')) end -= 1;
+    return body.slice(0, end);
+  });
+  const counts = bodies.map((body) => body.length);
+  const filled = counts.filter((n) => n > 0);
+  if (!filled.every((n) => n === filled[0]))
+    throw new Error(
+      `Section sheets have different row counts (${sections
+        .map((section, si) => `${section.sheet} has ${counts[si]}`)
+        .join(', ')}). Keep the same row order across sheets.`,
+    );
+  const width = filled[0] ?? 0;
+  return {
+    width,
+    aligned: bodies.map((body) =>
+      body.length === 0 ? Array.from({ length: width }, () => [] as string[]) : body,
+    ),
+  };
+}
+
+/** The lowered header row of a sheet, for name-based section matching. */
+const loweredHeaders = (matrix: string[][]): string[] =>
+  (matrix[0] ?? []).map((h) => (h ?? '').trim().toLowerCase());
+
+/** Reject a worksheet that repeats a header: one column per name. */
+function assertNoRepeatedHeader(sheetName: string, headers: string[]): void {
+  const seen = new Set<string>();
+  for (const h of headers) {
+    if (h === '') continue;
+    if (seen.has(h))
+      throw new Error(`Worksheet "${sheetName}" repeats "${h}"; keep one column per header`);
+    seen.add(h);
+  }
+}
+
+/**
+ * Match a worksheet to one section by accurate column NAME. Every non-empty
+ * header must belong to the section; the tab with the most hits wins when
+ * sections share columns (AGE/GENDER/… exist on two tabs), and a tab
+ * carrying a header that no single section contains matches nothing.
+ */
+function sectionOfHeaders(expectedSets: readonly Set<string>[], headers: string[]): number {
+  let best = -1;
+  let bestHits = 0;
+  expectedSets.forEach((expected, si) => {
+    const hits = headers.filter((h) => h !== '' && expected.has(h)).length;
+    const foreign = headers.filter((h) => h !== '' && !expected.has(h)).length;
+    if (foreign === 0 && hits > bestHits) {
+      best = si;
+      bestHits = hits;
+    }
+  });
+  return bestHits > 0 ? best : -1;
+}
+
 export type SectionedTemplateMerge = {
   /** Canonical 44-column company matrix, ready for the positional remap. */
   matrix: string[][];
-  /** Headers found on section tabs with no v2 meaning, for warnings. */
+  /**
+   * Headers found on section tabs with no meaning in the layout. Always
+   * empty today: a header that belongs to no section fails its tab outright.
+   */
   unknownHeaders: string[];
 };
 
 /**
- * Merge a sectioned membership workbook (README + Primary/Supplementary/
- * Related/Package tabs) back into the canonical 44-column company matrix.
+ * Merge a LEGACY sectioned workbook (README + Primary/Supplementary/
+ * Related/Package tabs holding slices of the 44 company columns) back into
+ * the canonical 44-column company matrix. Kept for files filled from the
+ * previous download; the current download uses mergeV2SectionedTemplateSheets.
  *
  * Matching is by accurate column NAME within each tab's group, in any order:
  * every non-empty header must belong to exactly one section's verbatim set,
- * and the tab is that section. Missing columns read as blank; unknown ones
- * are reported (never merged). Rows merge by POSITION across tabs, so every
- * data tab must carry the same number of data rows - keep the same row order
- * on every tab and leave unused rows blank instead of deleting them. Guide
- * sheets (README and friends) are skipped, never data.
+ * and the tab is that section. Missing columns read as blank; a foreign one
+ * fails the tab. Rows merge by POSITION across tabs: tabs that carry rows
+ * must carry the SAME number - keep the same row order on every tab and
+ * leave unused rows blank instead of deleting them. A tab with no data rows
+ * at all ("leave blank when none") pads with blanks instead of failing.
+ * Guide sheets (README and friends) are skipped, never data.
  */
 export function mergeSectionedTemplateSheets(
   sheets: { name: string; matrix: string[][] }[],
@@ -1030,26 +1420,14 @@ export function mergeSectionedTemplateSheets(
   const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
   const data = sheets.filter((sheet) => !guide.has(sheet.name.trim().toLowerCase()));
   if (data.length === 0) throw new Error('Sectioned template has no entry sheets');
-  const sectionOf = (headers: string[]): number => {
-    let best = -1;
-    let bestHits = 0;
-    MEMBERSHIP_TEMPLATE_SECTIONS.forEach((section, si) => {
-      const expected = new Set(section.headers.map((h) => h.toLowerCase()));
-      const hits = headers.filter((h) => h !== '' && expected.has(h)).length;
-      const foreign = headers.filter((h) => h !== '' && !expected.has(h)).length;
-      if (foreign === 0 && hits > bestHits) {
-        best = si;
-        bestHits = hits;
-      }
-    });
-    return bestHits > 0 ? best : -1;
-  };
+  const expectedSets = MEMBERSHIP_TEMPLATE_SECTIONS.map(
+    (section) => new Set(section.headers.map((h) => h.toLowerCase())),
+  );
   const bySection = new Map<number, { name: string; matrix: string[][] }>();
-  const unknownHeaders: string[] = [];
   for (const sheet of data) {
-    const headers = (sheet.matrix[0] ?? []).map((h) => (h ?? '').trim().toLowerCase());
+    const headers = loweredHeaders(sheet.matrix);
     if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
-    const si = sectionOf(headers);
+    const si = sectionOfHeaders(expectedSets, headers);
     if (si < 0)
       throw new Error(
         `Worksheet "${sheet.name}" does not match a template section; ` +
@@ -1059,11 +1437,6 @@ export function mergeSectionedTemplateSheets(
       throw new Error(
         `Duplicate "${MEMBERSHIP_TEMPLATE_SECTIONS[si]!.sheet}" sheets; keep one tab per section`,
       );
-    const expected = new Set(
-      MEMBERSHIP_TEMPLATE_SECTIONS[si]!.headers.map((h) => h.toLowerCase()),
-    );
-    for (const h of headers)
-      if (h !== '' && !expected.has(h) && !unknownHeaders.includes(h)) unknownHeaders.push(h);
     bySection.set(si, sheet);
   }
   if (bySection.size !== MEMBERSHIP_TEMPLATE_SECTIONS.length) {
@@ -1072,22 +1445,7 @@ export function mergeSectionedTemplateSheets(
     );
     throw new Error(`Sectioned template is missing sheets: ${missing.join(', ')}`);
   }
-  // Row alignment: trim trailing blank rows per tab, then require agreement.
-  // A blank row inside the range still counts, so a deleted middle row cannot
-  // silently shift one tab's persons out of line with the others.
-  const bodies = MEMBERSHIP_TEMPLATE_SECTIONS.map((section, si) => {
-    const body = bySection.get(si)!.matrix.slice(1);
-    let end = body.length;
-    while (end > 0 && (body[end - 1] ?? []).every((c) => (c ?? '').trim() === '')) end -= 1;
-    return body.slice(0, end);
-  });
-  const counts = bodies.map((body) => body.length);
-  if (!counts.every((n) => n === counts[0]))
-    throw new Error(
-      `Section sheets have different row counts (${MEMBERSHIP_TEMPLATE_SECTIONS.map(
-        (section, si) => `${section.sheet} has ${counts[si]}`,
-      ).join(', ')}). Keep the same row order across sheets.`,
-    );
+  const { width, aligned } = alignSectionBodies(MEMBERSHIP_TEMPLATE_SECTIONS, bySection);
   // Canonical positions per section: the sections are slices of the 44, so
   // the k-th header of section si lives at offset[si] + k. Offsets (not
   // indexOf) break the verbatim duplicates across tabs: ADDRESS on the
@@ -1100,20 +1458,12 @@ export function mergeSectionedTemplateSheets(
   }
   const canonical = [...MEMBERSHIP_TEMPLATE_COLUMNS];
   const rows: string[][] = [];
-  for (let r = 0; r < (counts[0] ?? 0); r += 1) {
+  for (let r = 0; r < width; r += 1) {
     const out = new Array<string>(canonical.length).fill('');
     MEMBERSHIP_TEMPLATE_SECTIONS.forEach((section, si) => {
-      const headers = (bySection.get(si)!.matrix[0] ?? []).map((h) => (h ?? '').trim().toLowerCase());
-      const seen = new Set<string>();
-      for (const h of headers) {
-        if (h === '') continue;
-        if (seen.has(h))
-          throw new Error(
-            `Worksheet "${bySection.get(si)!.name}" repeats "${h}"; keep one column per header`,
-          );
-        seen.add(h);
-      }
-      const cells = bodies[si]![r] ?? [];
+      const headers = loweredHeaders(bySection.get(si)!.matrix);
+      assertNoRepeatedHeader(bySection.get(si)!.name, headers);
+      const cells = aligned[si]![r] ?? [];
       section.headers.forEach((verbatim, k) => {
         const hi = headers.indexOf(verbatim.toLowerCase());
         if (hi >= 0) out[offsets[si]! + k] = cells[hi] ?? '';
@@ -1121,5 +1471,140 @@ export function mergeSectionedTemplateSheets(
     });
     rows.push(out);
   }
-  return { matrix: [canonical, ...rows], unknownHeaders };
+  return { matrix: [canonical, ...rows], unknownHeaders: [] };
+}
+
+/**
+ * Merge the GUIDED workbook (README + the four guided tabs) into the
+ * canonical guided flat matrix. Same name-matching and row-alignment rules
+ * as the legacy merge; the flat output is what `isV2MembershipTemplate` and
+ * `remapV2TemplateMatrix` consume, so the sectioned XLSX and the flat CSV
+ * converge on ONE parse from here on.
+ */
+export function mergeV2SectionedTemplateSheets(
+  sheets: {
+    name: string;
+    matrix: string[][];
+  }[],
+): { matrix: string[][] } {
+  const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
+  const data = sheets.filter((sheet) => !guide.has(sheet.name.trim().toLowerCase()));
+  if (data.length === 0) throw new Error('Sectioned template has no entry sheets');
+  const expectedSets = MEMBERSHIP_TEMPLATE_V2_SECTIONS.map(
+    (section) => new Set(section.columns.map((column) => column.header.toLowerCase())),
+  );
+  // The Supplementary header set is a SUBSET of the Primary set (the SSOT
+  // lists the same names on both tabs), so header matching alone cannot tell
+  // them apart: a tab NAMED like a section claims that section, and only a
+  // renamed tab falls back to header matching.
+  const sectionByName = new Map(
+    MEMBERSHIP_TEMPLATE_V2_SECTIONS.map((section, si) => [section.sheet.toLowerCase(), si]),
+  );
+  const bySection = new Map<number, { name: string; matrix: string[][] }>();
+  for (const sheet of data) {
+    const headers = loweredHeaders(sheet.matrix);
+    if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
+    const named = sectionByName.get(sheet.name.trim().toLowerCase());
+    let si: number;
+    if (named !== undefined) {
+      // A tab named exactly like a section claims it; its headers must all
+      // belong to it (a foreign header fails the tab like any other).
+      const expected = expectedSets[named]!;
+      si = headers.every((h) => h === '' || expected.has(h)) ? named : -1;
+    } else {
+      si = sectionOfHeaders(expectedSets, headers);
+    }
+    if (si < 0)
+      throw new Error(
+        `Worksheet "${sheet.name}" does not match a template section; ` +
+          'use the downloaded tabs with their exact headers, or a single worksheet instead',
+      );
+    if (bySection.has(si))
+      throw new Error(
+        `Duplicate "${MEMBERSHIP_TEMPLATE_V2_SECTIONS[si]!.sheet}" sheets; keep one tab per section`,
+      );
+    bySection.set(si, sheet);
+  }
+  if (bySection.size !== MEMBERSHIP_TEMPLATE_V2_SECTIONS.length) {
+    const missing = MEMBERSHIP_TEMPLATE_V2_SECTIONS.filter((_, si) => !bySection.has(si)).map(
+      (section) => section.sheet,
+    );
+    throw new Error(`Sectioned template is missing sheets: ${missing.join(', ')}`);
+  }
+  const { width, aligned } = alignSectionBodies(MEMBERSHIP_TEMPLATE_V2_SECTIONS, bySection);
+  const canonical = [...MEMBERSHIP_TEMPLATE_V2_COLUMNS];
+  const rows: string[][] = [];
+  for (let r = 0; r < width; r += 1) {
+    const out = new Array<string>(canonical.length).fill('');
+    let at = 0;
+    MEMBERSHIP_TEMPLATE_V2_SECTIONS.forEach((section, si) => {
+      const headers = loweredHeaders(bySection.get(si)!.matrix);
+      assertNoRepeatedHeader(bySection.get(si)!.name, headers);
+      const cells = aligned[si]![r] ?? [];
+      section.columns.forEach((column) => {
+        const hi = headers.indexOf(column.header.toLowerCase());
+        out[at] = hi >= 0 ? (cells[hi] ?? '') : '';
+        at += 1;
+      });
+    });
+    rows.push(out);
+  }
+  return { matrix: [canonical, ...rows] };
+}
+
+export type V2TemplateRemap = {
+  /** Machine-column matrix (part columns folded out), ready for matrixToRecords. */
+  matrix: string[][];
+  /**
+   * Joined part-column values per data row, keyed by row number (the sheet
+   * row, 1-based). Applied by the caller AFTER parsing, so a part column can
+   * never collide with an import key of its own.
+   */
+  joins: { rowNumber: number; values: Record<string, string> }[];
+  /** Reference-only columns (no import target), warned by the caller. */
+  dropped: { index: number; header: string }[];
+};
+
+/**
+ * Rewrite a GUIDED flat matrix onto import columns by POSITION. Part columns
+ * (names, the supplementary address) fold into their join key per row; a
+ * reference-only column surfaces in `dropped`. Values are never transformed
+ * here - validation downstream decides what each value means.
+ */
+export function remapV2TemplateMatrix(matrix: string[][]): V2TemplateRemap {
+  const specs = MEMBERSHIP_TEMPLATE_V2_SECTIONS.flatMap((section) => section.columns);
+  const dropped: { index: number; header: string }[] = [];
+  const machine: string[] = [];
+  const kept: number[] = [];
+  const groups = new Map<string, { separator: string; indexes: number[] }>();
+  specs.forEach((spec, index) => {
+    if (spec.join) {
+      const group = groups.get(spec.join.key) ?? { separator: spec.join.separator, indexes: [] };
+      group.indexes.push(index);
+      groups.set(spec.join.key, group);
+      return;
+    }
+    if (!spec.target) {
+      dropped.push({ index, header: spec.header });
+      return;
+    }
+    machine.push(spec.target);
+    kept.push(index);
+  });
+  const body = matrix.slice(1);
+  return {
+    matrix: [machine, ...body.map((cells) => kept.map((index) => cells[index] ?? ''))],
+    joins: body.map((cells, index) => {
+      const values: Record<string, string> = {};
+      for (const [key, group] of groups) {
+        const joined = group.indexes
+          .map((i) => (cells[i] ?? '').trim())
+          .filter((value) => value !== '')
+          .join(group.separator);
+        if (joined !== '') values[key] = joined;
+      }
+      return { rowNumber: index + 2, values };
+    }),
+    dropped,
+  };
 }

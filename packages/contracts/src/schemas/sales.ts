@@ -12,6 +12,7 @@ import {
   emailSchema,
   normalizeAddressField,
   nullablePersonNameSchema,
+  optionalLandlineSchema,
   optionalPersonNameSchema,
   optionalPhoneSchema,
   personNameSchema,
@@ -306,11 +307,15 @@ export const customerAddressSchema = z
       .min(1)
       .max(100)
       .transform((v) => normalizeAddressField(v)),
+    barangay: z.string().trim().max(100).transform(normalizeAddressField).optional(),
     postalCode: z.string().trim().max(20).optional(),
     countryCode: z.string().trim().toUpperCase().length(2).default('PH'),
   })
   .refine((v) => !v.line2 || v.line2.trim().length > 0, {
     message: 'line2 must be omitted rather than blank',
+  })
+  .refine((v) => !v.barangay || v.barangay.trim().length > 0, {
+    message: 'barangay must be omitted rather than blank',
   });
 export type CustomerAddress = z.infer<typeof customerAddressSchema>;
 
@@ -324,6 +329,7 @@ export const createCustomerSchema = z.object({
   gender: genderSchema.optional(),
   email: emailSchema,
   phone: phoneSchema,
+  landline: optionalLandlineSchema,
   address: customerAddressSchema,
   governmentIdType: governmentIdTypeSchema.optional(),
   governmentIdNumber: z.string().trim().min(4).max(40).optional(),
@@ -348,6 +354,7 @@ export const createCustomerSchema = z.object({
   supplementaryTinNumber: z.string().trim().max(40).optional(),
   supplementaryMobile: optionalPhoneSchema,
   supplementaryEmail: emailSchema.optional(),
+  supplementaryLandline: optionalLandlineSchema,
   supplementaryOccupationBusinessName: z.string().trim().max(200).optional(),
   supplementaryOfficeAddress: z.string().trim().max(200).optional(),
   supplementaryPosition: z.string().trim().max(100).optional(),
@@ -387,6 +394,7 @@ export const updateCustomerSchema = z
     gender: genderSchema.nullable().optional(),
     email: emailSchema.optional(),
     phone: optionalPhoneSchema,
+    landline: optionalLandlineSchema.nullable().optional(),
     address: customerAddressSchema.optional(),
     governmentIdType: governmentIdTypeSchema.nullable().optional(),
     governmentIdNumber: z.string().trim().min(4).max(40).nullable().optional(),
@@ -409,6 +417,7 @@ export const updateCustomerSchema = z
     supplementaryTinNumber: z.string().trim().max(40).nullable().optional(),
     supplementaryMobile: optionalPhoneSchema.nullable().optional(),
     supplementaryEmail: emailSchema.nullable().optional(),
+    supplementaryLandline: optionalLandlineSchema.nullable().optional(),
     supplementaryOccupationBusinessName: z.string().trim().max(200).nullable().optional(),
     supplementaryOfficeAddress: z.string().trim().max(200).nullable().optional(),
     supplementaryPosition: z.string().trim().max(100).nullable().optional(),
@@ -449,8 +458,13 @@ export const customerSchema = z.object({
    */
   customerCode: z.string().nullish(),
   fullName: z.string(),
+  firstName: z.string().nullable().optional(),
+  middleName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  suffix: z.string().nullable().optional(),
   email: z.string(),
   phone: z.string(),
+  landline: z.string().nullable().optional(),
   dateOfBirth: z.string().nullable(),
   gender: z.string().nullable(),
   address: z.unknown().nullable(),
@@ -474,6 +488,7 @@ export const customerSchema = z.object({
   supplementaryTinNumberMasked: z.string().nullable().optional(),
   supplementaryMobile: z.string().nullable().optional(),
   supplementaryEmail: z.string().nullable().optional(),
+  supplementaryLandline: z.string().nullable().optional(),
   supplementaryOccupationBusinessName: z.string().nullable().optional(),
   supplementaryOfficeAddress: z.string().nullable().optional(),
   supplementaryPosition: z.string().nullable().optional(),

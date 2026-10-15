@@ -8,7 +8,18 @@
  */
 
 export type XlsxColumnType = 'text' | 'number' | 'money' | 'date';
-export type XlsxColumn = { label: string; type: XlsxColumnType; width?: number };
+export type XlsxColumn = {
+  label: string;
+  type: XlsxColumnType;
+  width?: number;
+  /**
+   * Dropdown (list data validation) applied to every data cell of the
+   * column. Values must not contain commas - they are the list separator -
+   * and must stay within Excel's 255-character inline-list budget. CSV has
+   * no way to carry this, so it applies to XLSX only.
+   */
+  validation?: readonly string[];
+};
 
 /* ------------------------------------------------------------------ */
 /* CSV                                                                 */
@@ -331,7 +342,11 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
   const encoder = new TextEncoder();
   const safeTitle = title.slice(0, 60) || 'Template';
   const safeNames = sheets.map(
-    (sheet, i) => sheet.name.slice(0, 31).replace(/[:\\/?*[\]]/g, ' ').trim() || `Sheet${i + 1}`,
+    (sheet, i) =>
+      sheet.name
+        .slice(0, 31)
+        .replace(/[:\\/?*[\]]/g, ' ')
+        .trim() || `Sheet${i + 1}`,
   );
   const seen = new Set<string>();
   for (const name of safeNames) {
@@ -422,9 +437,33 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
       const rowAttrs = isHeader ? ' ht="26" customHeight="1"' : '';
       cellRefs.push(`<row r="${r + 1}"${rowAttrs}>${cells.join('')}</row>`);
     }
-    const filter =
-      sheet.filter !== false
-        ? `<autoFilter ref="A1:${lastCol}1"/>`
+    const filter = sheet.filter !== false ? `<autoFilter ref="A1:${lastCol}1"/>` : '';
+    // Dropdowns for fixed-value columns. Excel's inline list is a quoted,
+    // comma-separated string on the data range: values that contain a comma
+    // or a quote would corrupt it, and an over-long list would be dropped by
+    // the reader - both fail loud here instead of shipping a broken file.
+    const validations: string[] = [];
+    if (rows.length > 0)
+      columns.forEach((col, c) => {
+        if (!col.validation || col.validation.length === 0) return;
+        for (const value of col.validation)
+          if (/[",]/.test(value))
+            throw new Error(
+              `XlsxColumn validation value may not contain a comma or quote: ${value}`,
+            );
+        const list = col.validation.join(',');
+        if (list.length > 250)
+          throw new Error(`XlsxColumn validation list exceeds Excel's inline limit: ${col.label}`);
+        const letter = colLetter(c);
+        validations.push(
+          `<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Pick a value" error="Choose one of the fixed values." sqref="${letter}2:${letter}${rows.length + 1}">` +
+            `<formula1>${xmlEscape(`"${list}"`)}</formula1>` +
+            `</dataValidation>`,
+        );
+      });
+    const dataValidations =
+      validations.length > 0
+        ? `<dataValidations count="${validations.length}">${validations.join('')}</dataValidations>`
         : '';
     return (
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -434,12 +473,12 @@ export function toXlsxMulti(title: string, sheets: XlsxSheetSpec[]): Uint8Array 
       `<dimension ref="A1:${lastCol}${rows.length + 1}"/>` +
       `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` +
       `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` +
-      // Schema order is load-bearing: sheetData MUST precede autoFilter.
-      // A filter before the data violates the worksheet XSD sequence, and
-      // strict Excel readers then drop the row content they were meant to
-      // annotate - headers vanish and only the tab names survive.
+      // Schema order is load-bearing: sheetData MUST precede autoFilter, and
+      // autoFilter MUST precede dataValidations. A reader that finds them out
+      // of sequence drops the content they were meant to annotate.
       `<sheetData>${cellRefs.join('')}</sheetData>` +
       `${filter}` +
+      `${dataValidations}` +
       `</worksheet>`
     );
   });

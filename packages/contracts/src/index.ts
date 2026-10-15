@@ -426,6 +426,16 @@ export type {
   CustomerImportParseResponse,
   CustomerImportCommitResponse,
 } from './schemas/customer-import.js';
+/* ---- Customer-record SSOT: the company's master field list. ---- */
+export {
+  CUSTOMER_SSOT_SECTIONS,
+  CUSTOMER_SSOT_COLUMNS,
+  CUSTOMER_SSOT_SECTION_BANDS,
+  TEMPLATE_STATUS_OPTIONS,
+  TEMPLATE_PAYMENT_METHOD_OPTIONS,
+  TEMPLATE_TIER_OPTIONS,
+} from './schemas/customer-ssot.js';
+export type { CustomerSsotColumn, CustomerSsotSection } from './schemas/customer-ssot.js';
 /* ---- Official paper-form transaction snapshots and review-first imports. ---- */
 export {
   vipTierSchema,

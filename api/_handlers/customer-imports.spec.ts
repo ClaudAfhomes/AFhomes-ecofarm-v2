@@ -200,8 +200,9 @@ describe('customer import/export handler', () => {
       .split('\r\n');
     expect(lines[0]).toContain('Primary');
     expect(lines[0]).toContain('Package');
-    expect(lines[1]).toContain('RA NO');
-    expect(lines[1]).toContain('SUPPLEMENTARY FULL NAME');
+    expect(lines[1]).toContain('FIRST NAME');
+    expect(lines[1]).toContain('BARANGGAY');
+    expect(lines[1]).toContain('SVD (NAME)');
   });
 
   it('parses a valid XLSX into a committable preview without writing customers', async () => {

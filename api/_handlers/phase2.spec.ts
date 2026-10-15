@@ -529,6 +529,16 @@ describe('customers', () => {
     ['memberships', 'memberships', 'customer_id'],
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
+    // Every inbound RESTRICT/NO ACTION customer FK must refuse with a 409 that
+    // names the blocker — never a raw 23503. Regression: an application alone
+    // used to slip through this list and fail the delete with INTERNAL.
+    ['applications', 'customer_applications', 'customer_id'],
+    ['purchase_terms', 'customer_application_purchase_terms', 'customer_id'],
+    ['reservations', 'reservation_agreements', 'customer_id'],
+    ['imports', 'customer_import_rows', 'customer_id'],
+    ['purchases', 'purchases', 'customer_id'],
+    ['earning_claims', 'earning_claims', 'customer_id'],
+    ['redemption_approvals', 'redemption_quotes', 'approval_customer_id'],
   ])('blocks customer deletion when protected %s exist', async (label, table, column) => {
     const id = 'aaaaaaaa-0000-4000-8000-000000000098';
     install({

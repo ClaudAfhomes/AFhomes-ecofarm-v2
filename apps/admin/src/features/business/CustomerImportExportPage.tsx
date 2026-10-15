@@ -263,10 +263,7 @@ export function CustomerImportExportPage() {
           title="Customer Import / Export"
           description="Bulk customer migration is restricted to authorized Admin accounts."
           actions={
-            <Button
-              variant="secondary"
-              onClick={() => navigate('/admin/customers/applications')}
-            >
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
               Back to applications
             </Button>
           }
@@ -339,18 +336,14 @@ export function CustomerImportExportPage() {
             <div className={styles.templateGrid}>
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
-                <p className={styles.templateDesc}>
-                  Four tabs guide entry. Same headers, same order.
-                </p>
+                <p className={styles.templateDesc}>Four tabs guide entry. Dropdowns included.</p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
                 </div>
               </div>
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Plain text (.csv)</h3>
-                <p className={styles.templateDesc}>
-                  One file. Top row groups columns.
-                </p>
+                <p className={styles.templateDesc}>One file. No dropdowns.</p>
                 <div className={styles.actions}>
                   <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
                     Download CSV template
@@ -366,64 +359,64 @@ export function CustomerImportExportPage() {
             </h2>
             <div className={styles.fileRow}>
               <div className={styles.filePickers}>
-              <div className={styles.filePicker}>
-                <input
-                  ref={excelInput}
-                  hidden
-                  aria-label="Import Excel (.xlsx)"
-                  type="file"
-                  accept=".xlsx"
-                  disabled={parse.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void upload('excel', file);
-                    e.target.value = '';
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={parse.isPending}
-                  onClick={() => excelInput.current?.click()}
-                >
-                  Choose Excel file
-                </Button>
-                {chosenFile?.kind === 'excel' ? (
-                  <span role="status" className={styles.fileName}>
-                    {parse.isPending
-                      ? `Reading ${chosenFile.name}…`
-                      : `Selected: ${chosenFile.name}`}
-                  </span>
-                ) : null}
-              </div>
-              <div className={styles.filePicker}>
-                <input
-                  ref={csvInput}
-                  hidden
-                  aria-label="Import CSV (UTF-8)"
-                  type="file"
-                  accept=".csv"
-                  disabled={parse.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void upload('csv', file);
-                    e.target.value = '';
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={parse.isPending}
-                  onClick={() => csvInput.current?.click()}
-                >
-                  Choose CSV file
-                </Button>
-                {chosenFile?.kind === 'csv' ? (
-                  <span role="status" className={styles.fileName}>
-                    {parse.isPending
-                      ? `Reading ${chosenFile.name}…`
-                      : `Selected: ${chosenFile.name}`}
-                  </span>
-                ) : null}
-              </div>
+                <div className={styles.filePicker}>
+                  <input
+                    ref={excelInput}
+                    hidden
+                    aria-label="Import Excel (.xlsx)"
+                    type="file"
+                    accept=".xlsx"
+                    disabled={parse.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void upload('excel', file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={parse.isPending}
+                    onClick={() => excelInput.current?.click()}
+                  >
+                    Choose Excel file
+                  </Button>
+                  {chosenFile?.kind === 'excel' ? (
+                    <span role="status" className={styles.fileName}>
+                      {parse.isPending
+                        ? `Reading ${chosenFile.name}…`
+                        : `Selected: ${chosenFile.name}`}
+                    </span>
+                  ) : null}
+                </div>
+                <div className={styles.filePicker}>
+                  <input
+                    ref={csvInput}
+                    hidden
+                    aria-label="Import CSV (UTF-8)"
+                    type="file"
+                    accept=".csv"
+                    disabled={parse.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void upload('csv', file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={parse.isPending}
+                    onClick={() => csvInput.current?.click()}
+                  >
+                    Choose CSV file
+                  </Button>
+                  {chosenFile?.kind === 'csv' ? (
+                    <span role="status" className={styles.fileName}>
+                      {parse.isPending
+                        ? `Reading ${chosenFile.name}…`
+                        : `Selected: ${chosenFile.name}`}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className={styles.sheetRow}>
                 <label className={styles.sheetField}>

@@ -7,6 +7,7 @@ import {
   customerImportCommitResponseSchema,
   customerImportJobSchema,
   customerImportParseResponseSchema,
+  maskGovernmentId,
   type CustomerExportRow,
 } from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
@@ -17,16 +18,22 @@ import {
   customerExportXlsx,
   fetchGoogleSheetCsv,
   isCompanyMembershipTemplate,
+  isInterimV2Flat,
   isLegacyCompanyMembershipTemplate,
+  isV2MembershipTemplate,
   looksLikeSectionBandRow,
   matrixToRecords,
-  membershipTemplateCsv,
-  membershipTemplateSectionedXlsx,
+  membershipTemplateV2Csv,
+  membershipTemplateV2SectionedXlsx,
   mergeSectionedTemplateSheets,
+  mergeV2SectionedTemplateSheets,
   parseCsvMatrix,
   parseXlsxMatrix,
   parseXlsxSheets,
   remapCompanyTemplateMatrix,
+  remapV2TemplateMatrix,
+  workbookLooksInterimV2,
+  workbookLooksV2,
   validateImportRow,
   type ImportContext,
   type ValidatedImportRow,
@@ -229,7 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res,
         'membership-template.xlsx',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        membershipTemplateSectionedXlsx(),
+        membershipTemplateV2SectionedXlsx(),
       );
     }
     if (method(req) === 'GET' && path === 'template/csv') {
@@ -239,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res,
         'membership-template.csv',
         'text/csv',
-        new TextEncoder().encode(membershipTemplateCsv()),
+        new TextEncoder().encode(membershipTemplateV2Csv()),
       );
     }
 
@@ -254,6 +261,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Sectioned-template extras surface as per-row warnings below, next to
       // the established unknown-column and dropped-header warnings.
       let sectionedUnknown: string[] = [];
+      // Guided-template part columns (names, the supplementary address) are
+      // joined per row and overlaid onto the parsed fields after parsing.
+      let v2Joins: { rowNumber: number; values: Record<string, string> }[] = [];
       try {
         if (source === 'google_sheets') {
           if (!parsed.data.sheetUrl)
@@ -269,35 +279,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (bytes.length === 0 || bytes.length > MAX_IMPORT_BYTES)
             return fail(res, 'VALIDATION_ERROR', 'File is empty or exceeds the size limit', 400);
           if (source === 'excel') {
-            // Sectioned membership workbooks (README + 4 entry tabs) merge
-            // back into the canonical 44 columns by row order; every other
-            // workbook keeps the single-worksheet behavior. A multi-sheet
-            // file that is not the sectioned template stays rejected rather
-            // than silently reading the wrong tab.
+            // A workbook whose non-guide tabs carry the guided vocabulary
+            // merges as the guided template (the current download); anything
+            // else tries the legacy sectioned merge. A multi-sheet file that
+            // matches neither stays rejected rather than silently reading
+            // the wrong tab.
             const sheets = parseXlsxSheets(bytes);
             if (sheets.length === 1) {
               matrix = sheets[0]!.matrix;
             } else {
-              try {
-                const merged = mergeSectionedTemplateSheets(sheets);
-                matrix = merged.matrix;
-                sectionedUnknown = merged.unknownHeaders;
-              } catch {
+              // A workbook filled from the superseded interim guided layout
+              // gets a pointed fix message instead of drowning in
+              // unknown-column warnings from the legacy merge.
+              if (workbookLooksInterimV2(sheets))
                 return fail(
                   res,
                   'VALIDATION_ERROR',
-                  'Import requires exactly one worksheet; for guided entry use the sectioned membership template (README + Primary/Supplementary/Related/Package)',
+                  'This workbook was filled from an older template. Download the new template and copy the rows over.',
+                  400,
+                );
+              const looksV2 = workbookLooksV2(sheets);
+              try {
+                if (looksV2) {
+                  matrix = mergeV2SectionedTemplateSheets(sheets).matrix;
+                } else {
+                  const merged = mergeSectionedTemplateSheets(sheets);
+                  matrix = merged.matrix;
+                  sectionedUnknown = merged.unknownHeaders;
+                }
+              } catch (error) {
+                // Surface the merge's own reason (missing tab, row-count
+                // mismatch, foreign workbook): it names the exact tab and
+                // fix, while the generic single-worksheet hint never did.
+                return fail(
+                  res,
+                  'VALIDATION_ERROR',
+                  error instanceof Error
+                    ? error.message.slice(0, 300)
+                    : 'Import requires exactly one worksheet; for guided entry use the sectioned membership template (README + Primary/Supplementary/Related/Package)',
                   400,
                 );
               }
             }
           } else {
             matrix = parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-            // The CSV download carries a section band row above the 44
-            // headers so the columns read as groups; strip it here so a
-            // saved-and-refilled template parses exactly like the plain
-            // 44-column company file. A file without the band row (deleted,
-            // or an older template) is unchanged.
+            // The CSV download carries a section band row above the headers
+            // so the columns read as groups; strip it here so a
+            // saved-and-refilled template parses exactly like a plain header
+            // file. A file without the band row (deleted, or an older
+            // template) is unchanged.
             if (looksLikeSectionBandRow(matrix[0] ?? [])) matrix = matrix.slice(1);
           }
         }
@@ -311,17 +341,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       let records: { rowNumber: number; fields: Record<string, string> }[];
       let unknownHeaders: string[];
-      // Company membership template (44 exact columns) is remapped by POSITION
-      // onto import columns; anything else keeps the established name-based
-      // behavior. Dropped company headers are reported by exact name below.
+      // A flat file (CSV or single-sheet XLSX) filled from the superseded
+      // interim guided layout gets the pointed fix message before any remap.
+      if (isInterimV2Flat(matrix[0] ?? []))
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'This file was filled from an older template. Download the new template and refill it.',
+          400,
+        );
+      // Positional remaps onto import columns: the guided layout first, then
+      // the 44-column company template. Anything else keeps the established
+      // name-based behavior. Dropped reference columns are reported below.
       let droppedCompanyHeaders: { index: number; header: string }[] = [];
-      let companyTemplate = false;
+      let droppedTemplateColumns: { index: number; header: string }[] = [];
+      let templated = false;
       try {
-        if (isCompanyMembershipTemplate(matrix[0] ?? [])) {
+        if (isV2MembershipTemplate(matrix[0] ?? [])) {
+          const remapped = remapV2TemplateMatrix(matrix);
+          matrix = remapped.matrix;
+          droppedTemplateColumns = remapped.dropped;
+          v2Joins = remapped.joins;
+          templated = true;
+        } else if (isCompanyMembershipTemplate(matrix[0] ?? [])) {
           const remapped = remapCompanyTemplateMatrix(matrix);
           matrix = remapped.matrix;
           droppedCompanyHeaders = remapped.dropped;
-          companyTemplate = true;
+          templated = true;
         } else if (isLegacyCompanyMembershipTemplate(matrix[0] ?? [])) {
           // Superseded 45-column download (OST/IST NAME still at position
           // 28): remap through the legacy positions so its values still land
@@ -333,18 +379,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
           matrix = remapped.matrix;
           droppedCompanyHeaders = remapped.dropped;
-          companyTemplate = true;
+          templated = true;
         }
         const converted = matrixToRecords(
           matrix,
-          // Remapped company keys live outside the established template
+          // Remapped template keys live outside the established template
           // columns; every other file keeps strict known headers.
-          companyTemplate ? [...COMPANY_IMPORT_EXTRA_COLUMNS] : [],
+          templated ? [...COMPANY_IMPORT_EXTRA_COLUMNS] : [],
         );
         records = converted.rows;
         unknownHeaders = converted.unknownHeaders.filter(
           (h) => !h.startsWith('__company_ignored_'),
         );
+        // Part columns land on their join key (never derived from FULL
+        // NAME); blank parts leave the field alone. Keyed by row number so
+        // dropped all-blank rows cannot shift the alignment.
+        if (v2Joins.length > 0) {
+          const byRow = new Map(v2Joins.map((join) => [join.rowNumber, join.values]));
+          for (const record of converted.rows) {
+            const values = byRow.get(record.rowNumber);
+            if (!values) continue;
+            for (const [key, value] of Object.entries(values))
+              if (value.trim() !== '') record.fields[key] = value;
+          }
+        }
       } catch (error) {
         return fail(
           res,
@@ -378,6 +436,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           v.warnings.push({
             field: dropped.header || `column ${dropped.index + 1}`,
             message: 'Company template column has no v2 import target and was ignored',
+          });
+        for (const dropped of droppedTemplateColumns)
+          v.warnings.push({
+            field: dropped.header || `column ${dropped.index + 1}`,
+            message: 'Reference-only column was ignored',
           });
         if (v.errors.length === 0 && v.warnings.length > 0) v.validation = 'warning';
         return v;
@@ -789,21 +852,103 @@ async function buildExportRows(db: Db, filters: ExportFilters): Promise<Customer
     )?.[0],
     sort: 'created',
   });
+  // Derived AGE is display-only, computed from the stored birthdays; the
+  // value is never stored and a blank birthday exports a blank cell.
+  const ageOn = (value: unknown): string => {
+    const iso = typeof value === 'string' ? value.slice(0, 10) : '';
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+    const born = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(born.valueOf())) return '';
+    const now = new Date();
+    let age = now.getFullYear() - born.getFullYear();
+    if (
+      now.getMonth() < born.getMonth() ||
+      (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())
+    )
+      age -= 1;
+    return age < 0 ? '' : String(age);
+  };
+  const text = (value: unknown): string => String(value ?? '');
+  const date = (value: unknown): string => (isoOrNull(value) ?? '').slice(0, 10);
+  const masked = (value: unknown): string => maskGovernmentId(text(value)) ?? '';
+  const addressPart = (record: Record<string, unknown>, key: string): string => {
+    const address = record.address;
+    if (!address || typeof address !== 'object') return '';
+    const part = (address as Record<string, unknown>)[key];
+    return typeof part === 'string' ? part : '';
+  };
   return directory.map(({ record: r }) => ({
-    customer_number: String(r.customer_number ?? ''),
-    membership_number: String(r.membership_number ?? ''),
-    customer_name: String(r.full_name ?? ''),
-    vip_tier: String(r.tier ?? ''),
-    customer_status: String(r.status ?? ''),
-    membership_status: String(r.member_status ?? ''),
-    payment_status: String(r.payment_status ?? 'no_payment'),
-    derived_category: CUSTOMER_CATEGORY_LABELS[customerCategorySchema.parse(r.derivedCategory)],
-    activated_at: isoOrNull(r.activated_at) ?? '',
-    expires_at: isoOrNull(r.expires_at) ?? '',
-    current_points_balance: String(r.available_points ?? 0),
-    seller: String(r.seller_name ?? ''),
-    email: String(r.email ?? ''),
-    mobile: String(r.phone ?? ''),
-    created_at: isoOrNull(r.created_at) ?? '',
+    // PRIMARY block, SSOT order. TIN stays masked on this read surface too.
+    'RA NO': text(r.ra_number),
+    'STATUS': text(r.company_status),
+    'FIRST NAME': text(r.first_name),
+    'LAST NAME': text(r.last_name),
+    'MIDDLE NAME': text(r.middle_name),
+    'SUFFIX': text(r.suffix),
+    'BIRTHDAY': date(r.birth_date),
+    'GENDER': text(r.gender),
+    'AGE': ageOn(r.birth_date),
+    'CITIZENSHIP': text(r.citizenship),
+    'CIVIL STATUS': text(r.civil_status),
+    'PERMANENT ADDRESS LINE 1': addressPart(r, 'line1'),
+    'PERMANENT ADDRESS LINE 2': addressPart(r, 'line2'),
+    'PROVINCE': addressPart(r, 'province'),
+    'CITY': addressPart(r, 'city'),
+    'BARANGGAY': addressPart(r, 'barangay'),
+    'POSTAL CODE': addressPart(r, 'postalCode'),
+    'LANDLINE': text(r.landline),
+    'EMAIL': text(r.email),
+    'TIN NO.': masked(r.tin_number),
+    'MOBILE NO.': text(r.phone),
+    'OCCUPATION / BUSINESS NAME': text(r.occupation_business_name),
+    'OFFICE / BUSINESS ADDRESS': text(r.office_business_address),
+    'EMPLOYED POSITION': text(r.employed_position),
+    // SUPPLEMENTARY block. Names and address are stored joined (single text
+    // columns) and export as the two stored fields.
+    'SUPPLEMENTARY FULL NAME': text(r.supplementary_full_name),
+    'SUPPLEMENTARY ADDRESS': text(r.supplementary_address),
+    'SUPPLEMENTARY BIRTHDAY': date(r.supplementary_birthday),
+    'SUPPLEMENTARY GENDER': text(r.supplementary_gender),
+    'SUPPLEMENTARY AGE': ageOn(r.supplementary_birthday),
+    'SUPPLEMENTARY CITIZENSHIP': text(r.supplementary_citizenship),
+    'SUPPLEMENTARY CIVIL STATUS': text(r.supplementary_civil_status),
+    'SUPPLEMENTARY TIN NO.': masked(r.supplementary_tin_number),
+    'SUPPLEMENTARY LANDLINE': text(r.supplementary_landline),
+    'SUPPLEMENTARY MOBILE NO.': text(r.supplementary_mobile),
+    'SUPPLEMENTARY EMAIL': text(r.supplementary_email),
+    'SUPPLEMENTARY OCCUPATION / BUSINESS NAME': text(r.supplementary_occupation_business_name),
+    'SUPPLEMENTARY OFFICE / BUSINESS ADDRESS': text(r.supplementary_office_address),
+    'SUPPLEMENTARY EMPLOYED POSITION': text(r.supplementary_position),
+    // OST/IST block, verbatim.
+    'SVD (NAME)': text(r.svd_name),
+    'SSM (NAME)': text(r.ssm_name),
+    'SM (NAME)': text(r.sm_name),
+    'REFERRER (NAME)': text(r.referrer_name),
+    'VIP RECOMMENDER (NAME)': text(r.vip_recommender_name),
+    'CONTACT NO.': text(r.related_contact_no),
+    'EMAIL ADDRESS': text(r.related_email),
+    // VIP PACKAGE block, verbatim stated facts.
+    'VIP PACKAGE': text(r.stated_vip_package),
+    'PAYMENT TERMS': text(r.stated_payment_terms),
+    'REGULAR PRICE': text(r.stated_regular_price),
+    'DISCOUNT': text(r.stated_discount),
+    'TOTAL AMOUNT': text(r.stated_total_amount),
+    'RF': text(r.stated_rf),
+    'PAYMENT TYPE': text(r.stated_payment_type),
+    'REF NO': text(r.stated_ref_no),
+    'DATE': date(r.stated_payment_date),
+    // System columns: identifiers and derived state, never company-stated.
+    'CUSTOMER ID': text(r.customer_number),
+    'CUSTOMER CODE': text(r.customer_code),
+    'MEMBERSHIP NUMBER': text(r.membership_number),
+    'CUSTOMER STATUS': text(r.status),
+    'MEMBERSHIP STATUS': text(r.member_status),
+    'PAYMENT STATUS': text(r.payment_status ?? 'no_payment'),
+    'CATEGORY': CUSTOMER_CATEGORY_LABELS[customerCategorySchema.parse(r.derivedCategory)],
+    'POINTS BALANCE': text(r.available_points),
+    'SELLER': text(r.seller_name),
+    'ACTIVATED AT': isoOrNull(r.activated_at) ?? '',
+    'EXPIRES AT': isoOrNull(r.expires_at) ?? '',
+    'CREATED AT': isoOrNull(r.created_at) ?? '',
   }));
 }

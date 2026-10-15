@@ -104,5 +104,27 @@ describe('Customer company edit', () => {
     // Stated section present, verbatim, no money math.
     expect(screen.getByLabelText('VIP PACKAGE')).toBeInTheDocument();
     expect(screen.getByLabelText('REF NO')).toBeInTheDocument();
+    // SSOT address parts and landlines are editable here (one LANDLINE
+    // per member block).
+    for (const label of [
+      'PERMANENT ADDRESS LINE 1',
+      'PERMANENT ADDRESS LINE 2',
+      'PROVINCE',
+      'CITY',
+      'BARANGGAY',
+      'POSTAL CODE',
+      'SVD (NAME)',
+      'SSM (NAME)',
+      'SM (NAME)',
+      'REFERRER (NAME)',
+      'VIP RECOMMENDER (NAME)',
+    ]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(screen.getAllByLabelText('LANDLINE')).toHaveLength(2);
+    // One EMAIL on each member block (never EMAIL ADDRESS), one MOBILE NO.
+    // per member block (never MOBILE).
+    expect(screen.getAllByLabelText('EMAIL')).toHaveLength(1);
+    expect(screen.getAllByLabelText('MOBILE NO.')).toHaveLength(1);
   });
 });
