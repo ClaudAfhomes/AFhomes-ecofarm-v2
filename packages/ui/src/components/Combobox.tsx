@@ -226,6 +226,13 @@ export function Combobox({
             if (!open) setOpen(true);
           }}
           onFocus={openToBrowse}
+          // Clicking an already-focused (but closed) box fires no focus
+          // event, so without this the list would never reopen for a mouse
+          // user who already picked once. Guarded: an open list keeps its
+          // active option instead of resetting under the cursor.
+          onClick={() => {
+            if (!open) openToBrowse();
+          }}
           onBlur={() => {
             // A draft that was never selected is discarded, so the input can
             // never hold an invented name.

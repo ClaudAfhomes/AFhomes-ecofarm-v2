@@ -600,6 +600,9 @@ export function CustomerApplicationEditorPage() {
   // records open unlocked: their data was entered before, or the form below
   // is read-only review anyway.
   const [maxReached, setMaxReached] = useState(() => (id ? 5 : 0));
+  // The wizard guides NEW applications step by step. Existing records keep
+  // the full page: reviewers need every section and decision button at once.
+  const isNew = !id;
   const uploadPendingId = useCallback(
     async (targetCustomerId: string, file: File, type: string) => {
       const mime = ACCEPTED_MIME.find((value) => value === file.type);
@@ -1042,35 +1045,52 @@ export function CustomerApplicationEditorPage() {
         <Alert variant="info" title="How this form works">
           Saves and submits in one step.
         </Alert>
-        <nav aria-label="Application steps" className={styles.stepper}>
-          <ol className={styles.stepperList}>
-            {steps.map((step, index) => {
-              const current = index === activeStep;
-              const reachable = index <= maxReached;
-              return (
-                <li
-                  key={step.id}
-                  className={styles.stepperItem}
-                  data-done={step.done}
-                  data-current={current}
-                >
-                  <button
-                    type="button"
-                    className={styles.stepperLink}
-                    disabled={!reachable}
-                    aria-current={current ? 'step' : undefined}
-                    onClick={() => goStep(index)}
+        {isNew ? (
+          <nav aria-label="Application steps" className={styles.stepper}>
+            <ol className={styles.stepperList}>
+              {steps.map((step, index) => {
+                const current = index === activeStep;
+                const reachable = index <= maxReached;
+                return (
+                  <li
+                    key={step.id}
+                    className={styles.stepperItem}
+                    data-done={step.done}
+                    data-current={current}
                   >
+                    <button
+                      type="button"
+                      className={styles.stepperLink}
+                      disabled={!reachable}
+                      aria-current={current ? 'step' : undefined}
+                      onClick={() => goStep(index)}
+                    >
+                      <span className={styles.stepperIndex} aria-hidden="true">
+                        {step.done ? '✓' : index + 1}
+                      </span>
+                      <span className={styles.stepperLabel}>{step.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+        ) : (
+          <nav aria-label="Application steps" className={styles.stepper}>
+            <ol className={styles.stepperList}>
+              {steps.map((step, index) => (
+                <li key={step.id} className={styles.stepperItem} data-done={step.done}>
+                  <a href={`#${step.id}`} className={styles.stepperLink}>
                     <span className={styles.stepperIndex} aria-hidden="true">
                       {step.done ? '✓' : index + 1}
                     </span>
                     <span className={styles.stepperLabel}>{step.label}</span>
-                  </button>
+                  </a>
                 </li>
-              );
-            })}
-          </ol>
-        </nav>
+              ))}
+            </ol>
+          </nav>
+        )}
         {existing.data ? (
           <p>
             Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
@@ -1205,7 +1225,7 @@ export function CustomerApplicationEditorPage() {
           </DetailCard>
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
-          {activeStep === 0 && (
+          {(!isNew || activeStep === 0) && (
           <section
             id="step-application"
             className={styles.panel}
@@ -1285,7 +1305,7 @@ export function CustomerApplicationEditorPage() {
             </div>
           </section>
           )}
-          {activeStep === 1 && (
+          {(!isNew || activeStep === 1) && (
           <section
             id="step-identity"
             className={styles.panel}
@@ -1382,7 +1402,7 @@ export function CustomerApplicationEditorPage() {
             </fieldset>
           </section>
           )}
-          {activeStep === 2 && (
+          {(!isNew || activeStep === 2) && (
           <div id="step-holders">
             <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
           <label className={styles.checkRow}>
@@ -1403,7 +1423,7 @@ export function CustomerApplicationEditorPage() {
           ) : null}
           </div>
           )}
-          {activeStep === 3 && (
+          {(!isNew || activeStep === 3) && (
           <fieldset id="step-recommender" className={styles.panel}>
             <legend className={styles.panelTitle}>4. Recommender details</legend>
             <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
@@ -1417,7 +1437,7 @@ export function CustomerApplicationEditorPage() {
             </div>
           </fieldset>
           )}
-          {activeStep === 4 && (
+          {(!isNew || activeStep === 4) && (
           <fieldset id="step-channel" className={styles.panel}>
             <legend className={styles.panelTitle}>5. Acquisition channel</legend>
             {[
@@ -1446,7 +1466,7 @@ export function CustomerApplicationEditorPage() {
             ))}
           </fieldset>
           )}
-          {activeStep === 5 && (
+          {(!isNew || activeStep === 5) && (
           <fieldset id="step-cert" className={styles.panel}>
             <legend className={styles.panelTitle}>6. Certification</legend>
             <label className={styles.checkRow}>
@@ -1479,12 +1499,12 @@ export function CustomerApplicationEditorPage() {
         ) : null}
         <div className={styles.stickyFooter}>
           <div className={styles.stickyFooterActions}>
-            {activeStep > 0 ? (
+            {isNew && activeStep > 0 ? (
               <Button variant="secondary" onClick={() => goStep(activeStep - 1)}>
                 Back
               </Button>
             ) : null}
-            {activeStep < steps.length - 1 ? (
+            {isNew && activeStep < steps.length - 1 ? (
               <Button
                 onClick={goNext}
                 disabled={stepBlockers[activeStep] !== null}
@@ -1495,11 +1515,6 @@ export function CustomerApplicationEditorPage() {
             ) : null}
             {saveAction}
           </div>
-          {activeStep < steps.length - 1 && stepBlockers[activeStep] ? (
-            <p className={styles.hint} role="status">
-              Next needs: {stepBlockers[activeStep]}
-            </p>
-          ) : null}
         </div>
         <p>
           {' '}
