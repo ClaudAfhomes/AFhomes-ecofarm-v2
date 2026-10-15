@@ -1,0 +1,209 @@
+-- AF Homes Ecofarm — Current Database Schema Snapshot
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+-- Last updated: 2026-10-15 (UTC)
+-- Source: supabase/migrations on origin/claud/develop (81 files, sorted A-Z = apply order).
+-- Authoritative DDL lives in supabase/migrations/*.sql — read the defining file
+-- listed per table below for the full column list. This file is an index only
+-- (table inventory + migration manifest) so it cannot drift from the migrations.
+-- Live verification: shared project history holds 77 applied versions including
+-- 20261203000002_afhomes_official_aa_numbering.sql (verified read-only; see notes).
+-- This file is never read by pnpm db:migrate and never applied to any database.
+--
+-- ============================================================================
+-- 1. MIGRATION MANIFEST (81 files)
+-- ============================================================================
+-- 20260926023325_afhomes_phase1_foundation.sql
+-- 20260926025313_afhomes_phase1_advisor_indexes.sql
+-- 20260927000001_afhomes_phase2_business_foundation.sql
+-- 20260927000002_afhomes_phase2_rls.sql
+-- 20260927000003_afhomes_phase2_rpc.sql
+-- 20260927000004_afhomes_phase2_support_functions.sql
+-- 20260927000005_afhomes_phase3_customer_portal.sql
+-- 20260928000001_afhomes_phase4_redemption.sql
+-- 20260929000001_afhomes_phase5_reconcile_phase2_fixes.sql
+-- 20260930000001_afhomes_role_permission_baseline.sql
+-- 20261001000001_afhomes_phase6_cms_foundation.sql
+-- 20261002000001_afhomes_phase7_genealogy.sql
+-- 20261003000001_afhomes_phase8_ost_registration.sql
+-- 20261004000001_afhomes_phase10_card_management.sql
+-- 20261005000001_afhomes_phase12_identity_ocr.sql
+-- 20261010000001_afhomes_phase14_analytics.sql
+-- 20261011000001_afhomes_phase17_function_search_path_hardening.sql
+-- 20261012000001_afhomes_preview_qa_sale_hierarchy.sql
+-- 20261013000001_afhomes_phase19_card_plan_description.sql
+-- 20261014000001_afhomes_vip_payment_schemes.sql
+-- 20261015000001_afhomes_phase20_staff_password_lifecycle.sql
+-- 20261016000001_afhomes_onboarding_token_pgcrypto_path.sql
+-- 20261017000001_afhomes_card_plan_order.sql
+-- 20261018000001_afhomes_official_vip_benefits.sql
+-- 20261018000002_afhomes_flexible_commission_rules.sql
+-- 20261018000003_afhomes_official_forms.sql
+-- 20261019000001_afhomes_fix_customer_application_plan_field.sql
+-- 20261019000002_afhomes_customer_import_jobs.sql
+-- 20261019000003_afhomes_private_trigger_execute_grants.sql
+-- 20261020000001_afhomes_customer_directory_private_privileges.sql
+-- 20261021000001_afhomes_random_membership_number_allocator.sql
+-- 20261022000001_afhomes_mutation_idempotency.sql
+-- 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- 20261025000001_afhomes_business_ids.sql
+-- 20261026000001_afhomes_customer_code.sql
+-- 20261027000001_afhomes_legacy_business_id_upgrade.sql
+-- 20261028000001_afhomes_membership_code_upgrade.sql
+-- 20261029000001_afhomes_operational_access_functions.sql
+-- 20261030000001_afhomes_customer_directory_id_filter.sql
+-- 20261031000001_afhomes_customer_directory_payment_filter.sql
+-- 20261101000001_afhomes_application_purchase_flow.sql
+-- 20261102000001_afhomes_customer_directory_workflow_filter.sql
+-- 20261103000001_afhomes_application_psgc_address.sql
+-- 20261104000001_afhomes_points_rebuild.sql
+-- 20261105000001_afhomes_service_tier_discounts.sql
+-- 20261106000001_afhomes_operational_service_payments.sql
+-- 20261107000001_afhomes_operational_sale_idempotency.sql
+-- 20261108000001_afhomes_retire_points_spending.sql
+-- 20261109000001_afhomes_claim_rpc_authorization.sql
+-- 20261110000001_afhomes_claim_lifecycle_repair.sql
+-- 20261111000000_afhomes_service_publication.sql
+-- 20261111000001_afhomes_server_service_prices.sql
+-- 20261112000001_afhomes_service_policy_status.sql
+-- 20261112000002_afhomes_service_photo_management.sql
+-- 20261113000001_afhomes_service_staycation_eligibility.sql
+-- 20261114000001_afhomes_restore_points_spending.sql
+-- 20261115000001_afhomes_commit_keeps_tier_discount.sql
+-- 20261115000002_afhomes_fix_customer_points_position.sql
+-- 20261116000001_afhomes_promotion_stacking.sql
+-- 20261116000002_afhomes_sale_tier_choice.sql
+-- 20261117000001_afhomes_customer_redemption_approval.sql
+-- 20261118000001_afhomes_reserved_point_settlement.sql
+-- 20261119000001_afhomes_point_refund_compensation.sql
+-- 20261120000001_afhomes_refund_earning_consistency.sql
+-- 20261121000001_afhomes_external_service_refunds.sql
+-- 20261122000001_afhomes_readonly_auth_recovery.sql
+-- 20261123000001_afhomes_preserve_legacy_points.sql
+-- 20261124000001_afhomes_points_position_service_acl.sql
+-- 20261125000001_afhomes_preview_caller_wrappers.sql
+-- 20261127000001_afhomes_catalog_policy_management.sql
+-- 20261128000002_afhomes_self_search_path_hardening.sql
+-- 20261129000001_afhomes_document_scope_security.sql
+-- 20261129000002_afhomes_staff_business_security.sql
+-- 20261130000001_afhomes_sale_team_accreditation.sql
+-- 20261130000002_afhomes_archive_orphan_commission_rules.sql
+-- 20261201000001_afhomes_normalization_integrity.sql
+-- 20261202000001_afhomes_private_profile_photos.sql
+-- 20261203000001_afhomes_application_hierarchy_recommender.sql
+-- 20261203000002_afhomes_official_aa_numbering.sql
+-- 20261204000001_afhomes_official_customer_numbering.sql
+-- 20261204000002_afhomes_official_vip_numbering.sql
+--
+-- ============================================================================
+-- 2. TABLE INVENTORY (73 tables: table <= first-defined-in migration)
+-- Later migrations may ALTER these tables (add columns, tighten CHECKs, add
+-- RLS/policies/indexes). Read the defining file for base DDL, then grep later
+-- files for `alter table <name>` for the delta.
+-- ============================================================================
+-- private.business_id_aliases <= 20261027000001_afhomes_legacy_business_id_upgrade.sql
+-- private.commission_rule_archive <= 20261130000002_afhomes_archive_orphan_commission_rules.sql
+-- private.mutation_requests <= 20261022000001_afhomes_mutation_idempotency.sql
+-- private.official_id_counters <= 20261204000001_afhomes_official_customer_numbering.sql
+-- private.ost_accreditation_renewals <= 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- private.ost_accreditation_terms <= 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- private.ost_import_jobs <= 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- private.ost_import_rows <= 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- private.ost_registration_details <= 20261023000001_afhomes_ost_accreditation_workflow.sql
+-- private.purchase_document_evidence <= 20261101000001_afhomes_application_purchase_flow.sql
+-- private.sale_team_aa_counters <= 20261203000002_afhomes_official_aa_numbering.sql
+-- private.sale_team_accreditations <= 20261130000001_afhomes_sale_team_accreditation.sql
+-- private.staff_security_policy <= 20261129000002_afhomes_staff_business_security.sql
+-- private.vip_control_numbers <= 20261204000002_afhomes_official_vip_numbering.sql
+-- public.audit_events <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.card_categories <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.card_plans <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.card_sale_hierarchy_snapshots <= 20261010000001_afhomes_phase14_analytics.sql
+-- public.card_sales <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.cms_document_versions <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.cms_documents <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.cms_media_assets <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.cms_page_sections <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.cms_page_versions <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.cms_pages <= 20261001000001_afhomes_phase6_cms_foundation.sql
+-- public.commission_rules <= 20261018000002_afhomes_flexible_commission_rules.sql
+-- public.commissions <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.customer_application_documents <= 20261018000003_afhomes_official_forms.sql
+-- public.customer_application_holders <= 20261018000003_afhomes_official_forms.sql
+-- public.customer_application_purchase_terms <= 20261101000001_afhomes_application_purchase_flow.sql
+-- public.customer_applications <= 20261018000003_afhomes_official_forms.sql
+-- public.customer_import_jobs <= 20261019000002_afhomes_customer_import_jobs.sql
+-- public.customer_import_rows <= 20261019000002_afhomes_customer_import_jobs.sql
+-- public.customer_onboarding_tokens <= 20260927000001_afhomes_phase2_business_foundation.sql
+-- public.customers <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.departments <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.earning_claims <= 20261104000001_afhomes_points_rebuild.sql
+-- public.final_qualifications <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.identity_documents <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.memberships <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.modules <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.ost_applications <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.ost_members <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.payments <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.point_earning_rules <= 20261104000001_afhomes_points_rebuild.sql
+-- public.point_redemption_rules <= 20261104000001_afhomes_points_rebuild.sql
+-- public.points_accounts <= 20260927000001_afhomes_phase2_business_foundation.sql
+-- public.points_ledger <= 20260927000001_afhomes_phase2_business_foundation.sql
+-- public.points_periods <= 20261104000001_afhomes_points_rebuild.sql
+-- public.purchase_lines <= 20261104000001_afhomes_points_rebuild.sql
+-- public.purchase_payments <= 20261104000001_afhomes_points_rebuild.sql
+-- public.purchase_point_refunds <= 20261119000001_afhomes_point_refund_compensation.sql
+-- public.purchases <= 20261104000001_afhomes_points_rebuild.sql
+-- public.redemption_items <= 20260928000001_afhomes_phase4_redemption.sql
+-- public.redemption_quotes <= 20261104000001_afhomes_points_rebuild.sql
+-- public.redemptions <= 20260928000001_afhomes_phase4_redemption.sql
+-- public.referral_codes <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.referral_relationships <= 20260927000001_afhomes_phase2_business_foundation.sql
+-- public.reservation_agreement_documents <= 20261018000003_afhomes_official_forms.sql
+-- public.reservation_agreement_holders <= 20261018000003_afhomes_official_forms.sql
+-- public.reservation_agreement_schedule <= 20261018000003_afhomes_official_forms.sql
+-- public.reservation_agreements <= 20261018000003_afhomes_official_forms.sql
+-- public.role_permissions <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.roles <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.service_catalog <= 20261104000001_afhomes_points_rebuild.sql
+-- public.service_refund_repayments <= 20261121000001_afhomes_external_service_refunds.sql
+-- public.service_refunds <= 20261121000001_afhomes_external_service_refunds.sql
+-- public.service_tier_discounts <= 20261105000001_afhomes_service_tier_discounts.sql
+-- public.staff_invitations <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.staff_permission_restrictions <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.staff_role_assignments <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.staff_users <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.tier_points_config <= 20261104000001_afhomes_points_rebuild.sql
+--
+-- ============================================================================
+-- 3. NOTES
+-- ============================================================================
+-- * Live history (verified read-only): 77 applied versions. All 81 tree
+--   files at or below 20261203000002 are applied EXCEPT these 5, which remain
+--   intentionally unapplied and are NOT bundled with any AA release:
+--   20261030000001_afhomes_customer_directory_id_filter.sql,
+--   20261031000001_afhomes_customer_directory_payment_filter.sql,
+--   20261127000001_afhomes_catalog_policy_management.sql,
+--   20261204000001_afhomes_official_customer_numbering.sql,
+--   20261204000002_afhomes_official_vip_numbering.sql.
+-- * Live-only version with no tree file: 20261012075439 (out-of-band fix;
+--   provenance recorded in the numbering review; no action in this file).
+-- * AA numbering (20261203000002, applied; file SHA-256 recorded in release packet):
+--   - private.sale_team_aa_counters(accreditation_month PK, last_value 1..9999),
+--     RLS enabled, zero grants to anon/authenticated/service_role (verified).
+--   - private.next_sale_team_aa_number(text,date): typed monthly allocator;
+--     the zero-argument legacy allocator is retained untouched.
+--   - public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date):
+--     signature unchanged; body re-delivered for official issuance; EXECUTE
+--     service_role only (verified).
+--   - public.get_sale_team_accreditation(uuid) and
+--     public.search_sale_team_accreditation(text): NOT redefined by the subject
+--     migration; bodies and grants byte-stable across the apply (verified).
+--   - sale_team_aa_format CHECK: allows legacy AA- (6 letters + 6 digits) and
+--     official AAI/AAO YYMM + nonzero sequence with kind/prefix match; validated.
+--   - sale_team_aa_identity_immutable trigger (BEFORE UPDATE): staff_id,
+--     aa_number and kind are immutable (verified in rehearsal).
+--   - ost_accreditation_issue_aa trigger untouched: approved OST terms still
+--     auto-issue through manage_sale_team_accreditation.
+-- * RLS invariants (supabase/security/rls_invariants.sql): zero rows post-apply.
+-- * No credentials, data rows, personal information, or secrets are stored here.
