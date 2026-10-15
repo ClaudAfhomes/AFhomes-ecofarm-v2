@@ -26,6 +26,7 @@ import {
   membershipTemplateCsv,
   membershipTemplateSectionedXlsx,
   membershipTemplateV2Csv,
+  membershipTemplateV2ReadmeRows,
   membershipTemplateV2SectionedXlsx,
   membershipTemplateXlsx,
   mergeSectionedTemplateSheets,
@@ -329,6 +330,50 @@ describe('template and headers', () => {
       'PAYMENT TERMS',
       'PAYMENT TYPE',
     ]);
+  });
+  it('lists every fixed-value field in the README, derived from the registry', () => {
+    const sheets = parseXlsxSheets(membershipTemplateV2SectionedXlsx());
+    const readme = sheets.find((s) => s.name === 'README')!.matrix;
+    expect(readme[0]).toEqual(['Tab', 'Fill guide']);
+    const rows = membershipTemplateV2ReadmeRows();
+    // README body matches the builder rows exactly.
+    expect(readme.slice(1)).toEqual(rows);
+    // Guide block stays first; CSV states plainly it has no dropdowns.
+    expect(rows.slice(0, 7).map((r) => r[0])).toEqual([
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+      'Dropdowns',
+      'Dates',
+      'Rows',
+    ]);
+    expect(rows[7]).toEqual(['CSV', 'CSV has no dropdowns. See lists below.']);
+    expect(rows[8]).toEqual(['Allowed values', 'Use only these values.']);
+    // One row per distinct header with values, exact registry order/values.
+    const seen = new Set<string>();
+    const expected: string[][] = [];
+    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
+      for (const column of section.columns) {
+        if (!column.values || seen.has(column.header)) continue;
+        seen.add(column.header);
+        expected.push([column.header, [...column.values].join(', ')]);
+      }
+    expect(rows.slice(9)).toEqual(expected);
+    expect(rows.slice(9).map((r) => r[0])).toEqual([
+      'STATUS',
+      'SUFFIX',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'VIP PACKAGE',
+      'PAYMENT TERMS',
+      'PAYMENT TYPE',
+    ]);
+    // Guide sentences stay short (max 6 words per sentence).
+    for (const [, guide] of rows.slice(0, 9))
+      for (const sentence of guide.split('.').map((s) => s.trim()).filter(Boolean))
+        expect(sentence.split(/\s+/).length).toBeLessThanOrEqual(6);
   });
   it('emits the guided band row above the guided columns in the CSV template', () => {
     const matrix = parseCsvMatrix(membershipTemplateV2Csv());

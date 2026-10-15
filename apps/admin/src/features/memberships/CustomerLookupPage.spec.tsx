@@ -1,5 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { Route, Routes, useLocation } from 'react-router';
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList } from '../../lib/api/client';
@@ -21,6 +22,7 @@ vi.mock('../../lib/api/client', () => ({
  */
 
 const PROSPECT = {
+  customerId: '11111111-1111-4111-8111-111111111111',
   customerNumber: 'AF-CUS-00042',
   customerCode: 'AF-CC-1A2B3C4D',
   fullName: 'PROSPECT DELA CRUZ',
@@ -35,6 +37,16 @@ const PROSPECT = {
 async function pickOption(name: RegExp) {
   const option = await screen.findByRole('option', { name });
   fireEvent.mouseDown(option);
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <p aria-label="route">
+      {location.pathname}
+      {location.search}
+    </p>
+  );
 }
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
@@ -272,6 +284,7 @@ it('shows a cardless placeholder — never a tier image — for a prospect', asy
 
 const MARIA = {
   ...PROSPECT,
+  customerId: '22222222-2222-4222-8222-222222222222',
   customerNumber: 'AF-CUS-00043',
   customerCode: 'AF-CC-9Z8Y7X6W',
   fullName: 'MARIA SANTOS',
@@ -383,4 +396,38 @@ it('offers no mutating control at all', async () => {
   // Read-only by construction: a GSD operator looking up a customer has no button
   // that could edit one, take a payment or spend points.
   expect(screen.queryByRole('button', { name: /edit|activate|payment|redeem/i })).toBeNull();
+});
+
+describe('lookup to record navigation', () => {
+  async function showCard() {
+    vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customer-lookup" element={<CustomerLookupPage />} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>,
+      { route: '/admin/customer-lookup' },
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
+      target: { value: 'DELA' },
+    });
+    await pickOption(/PROSPECT DELA CRUZ/);
+    await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
+  }
+
+  it('opens the customer record by UUID', async () => {
+    await showCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open record' }));
+    expect(await screen.findByLabelText('route')).toHaveTextContent(
+      `/admin/customers/${PROSPECT.customerId}`,
+    );
+  });
+
+  it('opens the application queue filtered to the picked number', async () => {
+    await showCard();
+    fireEvent.click(screen.getByRole('button', { name: 'View forms' }));
+    expect(await screen.findByLabelText('route')).toHaveTextContent(
+      '/admin/customers/applications?search=AF-CUS-00042',
+    );
+  });
 });

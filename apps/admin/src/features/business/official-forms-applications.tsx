@@ -30,7 +30,7 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
-import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
+import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
 import {
   notifySuccess,
   notifyWarning,
@@ -96,6 +96,7 @@ import {
 
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
+  const [urlParams] = useSearchParams();
   const { user } = useSession();
   // Bulk membership import/export lives here now (membership work), gated on
   // its own module like the direct URL guard in navigation.ts. The server
@@ -106,7 +107,7 @@ export function CustomerApplicationsPage() {
     ) === true;
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
@@ -849,6 +850,9 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
+      void client.invalidateQueries({ queryKey: sharedScopes.reports });
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Save and submit failed.'),
@@ -876,6 +880,9 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
+      void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
   });
@@ -907,6 +914,8 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
       navigate(`/admin/sales/reservations/new?application=${encodeURIComponent(id!)}`);
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Review failed.'),
@@ -924,6 +933,8 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Reopen failed.'),
   });

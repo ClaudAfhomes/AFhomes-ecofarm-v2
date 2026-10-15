@@ -97,6 +97,7 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     const body = s.body as { data: Array<Record<string, unknown>> };
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
+      customerId,
       customerNumber: 'AF-CUS-00042',
       customerCode: 'AF-CC-1A2B3C4D',
       fullName: 'PROSPECT DELA CRUZ',

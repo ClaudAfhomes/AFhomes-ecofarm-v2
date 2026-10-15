@@ -102,8 +102,15 @@ export const applicationKeys = {
 
 /** Reservation-agreement family (IST contracts plus their money views). */
 export const reservationKeys = {
-  list: (status: string, tier: string, search: string, workOnly: boolean, page: number) =>
-    key('reservation-agreements', status, tier, search, workOnly, page),
+  list: (
+    status: string,
+    tier: string,
+    search: string,
+    from: string,
+    to: string,
+    workOnly: boolean,
+    page: number,
+  ) => key('reservation-agreements', status, tier, search, from, to, workOnly, page),
   scope: key('reservation-agreements'),
   detail: (id: string | undefined) => key('reservation-agreement', id),
   finance: (id: string | undefined) => key('reservation-finance', id),
@@ -123,6 +130,7 @@ export const membershipKeys = {
   points: (id: string | undefined) => key('memberships', id, 'points'),
   ledger: (id: string | undefined, accountId: string | undefined) =>
     key('memberships', id, 'ledger', accountId),
+  customerLookupScope: key('customer-lookup'),
   customerLookup: (term: string) => key('customer-lookup', term),
   memberLookup: (term: string) => key('member-lookup', term),
 };

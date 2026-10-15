@@ -673,6 +673,8 @@ export type MemberLookup = z.infer<typeof memberLookupSchema>;
  * Membership Transaction screen.
  */
 export const customerLookupSchema = z.object({
+  /** Row UUID for detail navigation. Never displayed. */
+  customerId: z.string().uuid(),
   /** Customer ID, `AF-CUS-XXXXX`. */
   customerNumber: z.string(),
   /** Customer Code, `AF-CC-XXXXXXXX`. Also not a credential. */

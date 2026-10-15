@@ -4,6 +4,7 @@ import {
   applicationKeys,
   businessKeys,
   earningKeys,
+  membershipKeys,
   reservationKeys,
   sharedScopes,
 } from './queryKeys';
@@ -66,11 +67,13 @@ describe('business query keys', () => {
       'customer-application-reservations',
       'a-1',
     ]);
-    expect(reservationKeys.list('s', 't', 'q', false, 1)).toEqual([
+    expect(reservationKeys.list('s', 't', 'q', 'f', 't2', false, 1)).toEqual([
       'reservation-agreements',
       's',
       't',
       'q',
+      'f',
+      't2',
       false,
       1,
     ]);
@@ -88,6 +91,10 @@ describe('business query keys', () => {
     expect(startsWith(businessKeys.salePayments('x'), businessKeys.salePaymentsScope)).toBe(true);
     expect(startsWith(earningKeys.purchaseSummary('x'), earningKeys.purchase('x'))).toBe(true);
     expect(startsWith(earningKeys.settlement('x'), earningKeys.settlementScope)).toBe(true);
+    expect(membershipKeys.customerLookupScope).toEqual(['customer-lookup']);
+    expect(startsWith(membershipKeys.customerLookup('DELA'), membershipKeys.customerLookupScope)).toBe(
+      true,
+    );
   });
 
   it('documents that detail keys sit outside the list scope', () => {

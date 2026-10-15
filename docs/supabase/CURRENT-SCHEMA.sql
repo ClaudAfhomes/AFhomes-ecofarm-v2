@@ -2,7 +2,7 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 -- Last updated: 2026-10-15 (UTC)
--- Source: supabase/migrations (81 files, sorted A-Z = apply order).
+-- Source: supabase/migrations (83 files, sorted A-Z = apply order).
 -- Authoritative DDL lives in supabase/migrations/*.sql — read the defining file
 -- listed per table below for the full column list. This file is an index only
 -- (table inventory + migration manifest) so it cannot drift from the migrations.
@@ -35,7 +35,7 @@
 --      were added/removed since the previous snapshot, or "no changes".
 
 -- ============================================================================
--- 1. MIGRATION MANIFEST (81 files)
+-- 1. MIGRATION MANIFEST (83 files)
 -- ============================================================================
 -- 20260926023325_afhomes_phase1_foundation.sql
 -- 20260926025313_afhomes_phase1_advisor_indexes.sql
@@ -118,6 +118,8 @@
 -- 20261131000003_afhomes_customer_lookup_module.sql
 -- 20261201000001_afhomes_normalization_integrity.sql
 -- 20261202000001_afhomes_private_profile_photos.sql
+-- 20261203000001_afhomes_remove_test_customer_af_cus_7epwn.sql
+-- 20261204000001_afhomes_customer_ssot_alignment.sql
 
 -- ============================================================================
 -- 2. TABLE INVENTORY (70 tables: table <= first-defined-in migration)
@@ -201,29 +203,31 @@
 -- ============================================================================
 -- 3. NOTES
 -- ============================================================================
--- * Previous snapshot (2026-10-15): 77 files, 68 tables. This refresh adds
---   4 migrations and 2 tables:
---   - 20261130000001_afhomes_sale_team_accreditation.sql: NEW private table
---     private.sale_team_accreditations (staff_id PK, aa_number unique,
---     kind IST/OST, status active/revoked, starts_on/expires_on, approved_by/at,
---     revoked_by/at) + private.next_sale_team_aa_number(). RLS enabled, revoke
---     all incl. service_role (browser-inaccessible). NOTE: shares the
---     20261130000001 timestamp prefix with membership_company_fields; A-Z sort
---     applies membership_company_fields first.
---   - 20261130000002_afhomes_archive_orphan_commission_rules.sql: NEW private
---     table private.commission_rule_archive (rule_id PK, rule_snapshot jsonb,
---     snapshot_sha256, archived_at, reason, migration_version). RLS enabled,
---     revoke all incl. service_role; immutable archive for 2 reviewed orphans.
---   - 20261201000001_afhomes_normalization_integrity.sql: no new tables.
---     Preflight blocks on orphan commission targets; adds generated stored
---     columns commission_rules.target_role_id/target_staff_id/target_ost_id
---     + real FKs + canonical email checks. Fix callers forward, no rewrites.
---   - 20261202000001_afhomes_private_profile_photos.sql: no new tables. New
---     private storage bucket afhomes-profile-photos (public=false, 500 KB,
---     image/jpeg only, one object per Auth account, no browser write policy).
+-- * Previous snapshot: 81 files, 70 tables. This refresh adds 2 migrations,
+--   0 tables (inventory in Section 2 unchanged, verified by re-scan):
+--   - 20261203000001_afhomes_remove_test_customer_af_cus_7epwn.sql: no new
+--     tables. One-off row deletion (anonymized test customer AF-CUS-7EPWN +
+--     its test application + purchase-terms rows), preflight-guarded,
+--     forward-only. Audit rows retained by design.
+--   - 20261204000001_afhomes_customer_ssot_alignment.sql: no new tables.
+--     Adds public.customers.landline + supplementary_landline (nullable, no
+--     defaults, no browser column grants); re-delivers
+--     register_customer_application_once (holder SUFFIX/SEX/LANDLINE/BARANGGAY
+--     copied onto new customers), import_legacy_member (new columns on
+--     CREATE) and commit_customer_import_row (address line2/barangay/
+--     postalCode persisted; UPDATE merges address parts per key; landline +
+--     supplementary_landline preserve-when-blank).
+--   - Version hygiene: every file matches ^[0-9]{14}_afhomes_*.sql (verified,
+--     0 violations). The only shared version remains the pre-existing
+--     20261130000001 pair (membership_company_fields +
+--     sale_team_accreditation; A-Z sort applies membership_company_fields
+--     first) — a same-date SSOT/remove_test_customer collision was resolved
+--     by renumbering the SSOT file to 20261204000001 before apply.
 -- * Related DB files verified: supabase/security/rls_invariants.sql,
 --   supabase/apply-migrations.ts, supabase/db-testing/supabase-shim.sql,
---   supabase/db-integration.ts + integration suites — present, no conflicting
---   grants. After an authorized apply, re-run rls_invariants.sql (empty=PASS).
--- * Generation: `node -e` scan of `create table` across supabase/migrations,
---   first-defined-in wins. Re-run on "update schema".
+--   supabase/db-integration.ts — present, no new tables/policies/functions/
+--   buckets/grants introduced outside the migrations above. db-integration
+--   adds test section 74 (SSOT alignment proof, synthetic rows only).
+--   After an authorized apply, re-run rls_invariants.sql (empty=PASS).
+-- * Generation: `create table` scan across supabase/migrations,
+--   first-defined-in wins (70 tables). Re-run on "update schema".
