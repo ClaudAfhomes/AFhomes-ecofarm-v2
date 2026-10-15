@@ -1,3 +1,4 @@
+import { storedAccreditationNumbers } from '../../_lib/accreditation-numbers.js';
 import {
   afHomesModuleKeySchema,
   changeAfHomesStaffPasswordSchema,
@@ -117,7 +118,7 @@ async function replaceRolePermissions(db: Db, roleId: string, permissions: AfHom
   if (insertError) throw insertError;
 }
 
-async function staffCatalog(db: Db) {
+async function staffCatalog(db: Db, includeAccreditation = false) {
   const [
     { data: staff, error },
     { data: assignments },
@@ -146,7 +147,7 @@ async function staffCatalog(db: Db) {
   const assignmentByStaff = new Map(
     (assignments ?? []).map((a: { staff_id: string; role_id: string }) => [a.staff_id, a.role_id]),
   );
-  return (staff ?? []).flatMap((row: Record<string, unknown>) => {
+  const rows = (staff ?? []).flatMap((row: Record<string, unknown>) => {
     const roleId = assignmentByStaff.get(String(row.id));
     const role = roleById.get(roleId) as { name: string } | undefined;
     if (!roleId || !role) return [];
@@ -178,6 +179,19 @@ async function staffCatalog(db: Db) {
       },
     ];
   });
+  if (!includeAccreditation) return rows;
+  const eligible: string[] = [];
+  for (const row of rows) {
+    const role = roleById.get(row.roleId) as { slug: string } | undefined;
+    if (
+      role &&
+      ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(role.slug)
+    )
+      eligible.push(String(row.id));
+  }
+  const numbers = await storedAccreditationNumbers(db, eligible);
+  for (const row of rows) row.aaNumber = numbers.get(String(row.id)) ?? null;
+  return rows;
 }
 
 async function hasReference(db: Db, table: string, column: string, id: string) {
@@ -1004,7 +1018,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'staff' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'organization.staff');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
-      return list(res, await staffCatalog(db));
+      return list(res, await staffCatalog(db, req.query.includeAccreditation === '1'));
     }
     if (path === 'staff' && method === 'POST') {
       const auth = await authorizeAfHomes(req, 'organization.staff', 'create');

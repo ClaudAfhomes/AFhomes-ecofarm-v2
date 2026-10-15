@@ -49,6 +49,8 @@ it('displays the official IST number on the own account', async () => {
   api.request.mockResolvedValue({ ...record, aaNumber: 'AAI26100001' });
   renderWithProviders(<SaleTeamAccreditationCard kind="IST" />, { user: admin });
   expect(await screen.findByText('AAI26100001')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy ID AAI26100001' })).toBeInTheDocument();
+  expect(screen.queryByText(/Legacy ID/i)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
 });
 it('requires dates and explicit confirmation before admin issuance', async () => {
@@ -88,4 +90,11 @@ it('shows missing issuance and a retryable load error distinctly', async () => {
   renderWithProviders(<SaleTeamAccreditationCard kind="IST" />, { user: admin });
   expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   expect(screen.queryByText('AA number not yet issued')).not.toBeInTheDocument();
+});
+
+it('shows confirmed unissued accreditation without fabricating an identifier', async () => {
+  api.request.mockResolvedValue(null);
+  renderWithProviders(<SaleTeamAccreditationCard kind="IST" />, { user: admin });
+  expect(await screen.findByText('Not Yet Issued')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Copy ID/ })).not.toBeInTheDocument();
 });

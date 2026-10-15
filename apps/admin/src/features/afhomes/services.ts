@@ -66,7 +66,7 @@ export const getAfHomesStaffAudit = (id: string) =>
 export const getAfHomesRoleById = (id: string): Promise<AfHomesRole> =>
   request(`/admin/afhomes/roles/${id}`, afHomesRoleSchema);
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
-  requestList('/admin/afhomes/staff', afHomesStaffSchema);
+  requestList('/admin/afhomes/staff?includeAccreditation=1', afHomesStaffSchema);
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
   request(`/admin/afhomes/staff/${id}`, afHomesStaffSchema);
 /**
@@ -115,9 +115,18 @@ export function isTestStaffEmail(email: unknown): boolean {
   const parts = email.trim().toLowerCase().split('@');
   if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
   const host = parts[1]!;
-  if (host === 'localhost' || host === 'example.com' || host === 'example.net' || host === 'example.org')
+  if (
+    host === 'localhost' ||
+    host === 'example.com' ||
+    host === 'example.net' ||
+    host === 'example.org'
+  )
     return true;
-  if (host.endsWith('.example.com') || host.endsWith('.example.net') || host.endsWith('.example.org'))
+  if (
+    host.endsWith('.example.com') ||
+    host.endsWith('.example.net') ||
+    host.endsWith('.example.org')
+  )
     return true;
   return host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost');
 }

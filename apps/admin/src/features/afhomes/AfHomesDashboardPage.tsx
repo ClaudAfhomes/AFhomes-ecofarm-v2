@@ -24,6 +24,7 @@ import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 import { getAnalyticsOverview } from './services';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
+import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
 import styles from './AfHomesDashboardPage.module.css';
 
 const PERIODS = [
@@ -362,6 +363,11 @@ export function AfHomesDashboardPage() {
           </div>
         ) : null}
       </div>
+      {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
+        user?.roleSlug ?? '',
+      ) ? (
+        <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} />
+      ) : null}
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard" className={styles.loadingShell}>
           <div className={styles.scopeBar} aria-hidden="true">

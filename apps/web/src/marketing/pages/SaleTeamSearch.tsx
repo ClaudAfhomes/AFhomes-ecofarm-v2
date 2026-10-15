@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { aaNumberSchema, saleTeamLookupSchema } from '@afhomes/contracts';
-import { Alert, Button, Skeleton, TextField } from '@afhomes/ui';
+import { AccreditationId, Alert, Button, Skeleton, TextField } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
 import { Container } from '../components/ui/Container';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -90,7 +90,9 @@ export default function SaleTeamSearch() {
                   </div>
                   <div>
                     <dt>AA number</dt>
-                    <dd>{result.data.aaNumber}</dd>
+                    <dd>
+                      <AccreditationId value={result.data.aaNumber} />
+                    </dd>
                   </div>
                   <div>
                     <dt>Status</dt>

@@ -28,6 +28,7 @@ it.each([
   await userEvent.type(screen.getByLabelText('AA number'), aaNumber.toLowerCase());
   await userEvent.click(screen.getByRole('button', { name: 'Search' }));
   expect(await screen.findByText(aaNumber)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy ID ' + aaNumber })).toBeInTheDocument();
   expect(api.request).toHaveBeenCalledWith(
     `/sale-team/search?aaNumber=${aaNumber}`,
     expect.anything(),
