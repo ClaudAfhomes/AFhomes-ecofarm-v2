@@ -351,6 +351,19 @@ describe('application private ID intake', () => {
       uploadedAt: '2026-10-01',
       reviewedAt: null,
     });
+  const PLAN_ID = '00000000-0000-4000-8000-000000000010';
+  const QA_PLAN = {
+    id: PLAN_ID,
+    code: 'GOLD',
+    name: 'Gold',
+    discountPercent: 25,
+    cardholderLimit: 2,
+    yearlyPoints: 25000,
+    annualPointsTranches: 20,
+    baseValidityYears: 20,
+    validityExtensionYears: 2,
+    totalLoyaltyValue: '500000.00',
+  };
   const setup = async (current: ReturnType<typeof document> | null = null) => {
     const qaCustomer = customerSchema.parse({
       id: customerId,
@@ -370,7 +383,7 @@ describe('application private ID intake', () => {
     });
     vi.mocked(getCustomersPage).mockResolvedValue({ data: [qaCustomer], total: 1 });
     vi.mocked(getCustomerById).mockResolvedValue(qaCustomer);
-    vi.mocked(getCardProducts).mockResolvedValue([]);
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
     vi.mocked(getCurrentDocument).mockResolvedValue(current as never);
     vi.mocked(requestUploadGrant).mockResolvedValue({
       documentId,
@@ -386,6 +399,10 @@ describe('application private ID intake', () => {
     renderWithProviders(<CustomerApplicationEditorPage />);
     await screen.findByRole('option', { name: 'QA Customer' });
     fireEvent.change(screen.getByLabelText('Customer'), { target: { value: customerId } });
+    // The editor is a wizard: pick a plan on step 1 so Next reaches Identity.
+    fireEvent.change(screen.getByLabelText('VIP plan'), { target: { value: PLAN_ID } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('ID Type');
   };
   const chooseIdTypeAndFile = (name = 'qa.png', type = 'image/png') => {
     fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
