@@ -12,7 +12,6 @@ import {
   normalizePersonName,
   normalizePostalCode,
   officialFormListQuerySchema,
-  officialVipNumberSchema,
   purchaseReservationCreateSchema,
   purchaseReservationUpdateSchema,
   recordPurchasePaymentSchema,
@@ -32,9 +31,7 @@ import {
   audit,
   deny,
   fail,
-  type FailureCode,
   isoOrNull,
-  legacyVipSchema,
   jsonBody,
   list,
   mapRpcError,
@@ -103,6 +100,8 @@ const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T =>
 const normalizeApplicationHeader = <
   T extends {
     salesManagerName?: string;
+    svdName?: string;
+    ssmName?: string;
     vipRecommenderName?: string;
     vipReferrer?: string;
   },
@@ -113,6 +112,8 @@ const normalizeApplicationHeader = <
   ...(header.salesManagerName
     ? { salesManagerName: normalizePersonName(header.salesManagerName) }
     : {}),
+  ...(header.svdName ? { svdName: normalizePersonName(header.svdName) } : {}),
+  ...(header.ssmName ? { ssmName: normalizePersonName(header.ssmName) } : {}),
   ...(header.vipRecommenderName
     ? { vipRecommenderName: normalizePersonName(header.vipRecommenderName) }
     : {}),
@@ -194,6 +195,14 @@ async function resolveHolderLocation(holder: HolderLocation): Promise<LocationRe
         provinceCode: check.hierarchy.province.code,
         cityMunicipalityCode: check.hierarchy.locality.code,
         barangayCode: check.hierarchy.barangay.code,
+        // The postal code belongs to the LOCALITY, so it is derived from the
+        // authority's own record whenever one is published - a value typed
+        // into the form can never contradict the chosen address. A locality
+        // with no published zip keeps whatever the client sent, which is
+        // normally blank.
+        ...(check.hierarchy.locality.postalCode
+          ? { postalCode: check.hierarchy.locality.postalCode }
+          : {}),
       },
     };
 
@@ -315,15 +324,16 @@ async function getApplication(db: Db, id: string) {
     primary: primary ? shapeApplicationHolder(primary) : null,
     secondary: secondary ? shapeApplicationHolder(secondary) : undefined,
     salesManagerName: row.sales_manager_name ?? undefined,
-    vdStaffId: (row.vd_staff_id as string | null) ?? undefined,
-    ssmStaffId: (row.ssm_staff_id as string | null) ?? undefined,
-    smStaffId: (row.sm_staff_id as string | null) ?? undefined,
+    svdStaffId: row.svd_staff_id ?? undefined,
+    ssmStaffId: row.ssm_staff_id ?? undefined,
+    smStaffId: row.sm_staff_id ?? undefined,
+    referrerStaffId: row.referrer_staff_id ?? undefined,
+    svdName: row.svd_name ?? undefined,
+    ssmName: row.ssm_name ?? undefined,
     vipRecommenderName: row.vip_recommender_name ?? undefined,
-    recommenderCustomerId: (row.recommender_customer_id as string | null) ?? undefined,
-    vipReferrer: row.vip_referrer ?? undefined,
-    referrerOstId: (row.referrer_ost_id as string | null) ?? undefined,
     recommenderContact: row.recommender_contact ?? undefined,
     recommenderEmail: row.recommender_email ?? undefined,
+    vipReferrer: row.vip_referrer ?? undefined,
     acquisitionChannels: row.acquisition_channels ?? [],
     consentAcknowledged: row.consent_acknowledged === true,
     acknowledgedAt: row.acknowledged_at,
@@ -447,7 +457,6 @@ async function getAgreement(db: Db, id: string) {
   return {
     id: row.id,
     reservationNumber: row.reservation_number,
-    officialVipNumber: row.official_vip_number ?? null,
     revisionNumber: row.revision_number ?? undefined,
     reservationDate: row.reservation_date,
     agreementDate: row.agreement_date,
@@ -546,22 +555,11 @@ async function listRows(
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);
   if (q.to) query = query.lte('created_at', `${q.to}T23:59:59.999Z`);
-  if (
-    q.search &&
-    table === 'reservation_agreements' &&
-    officialVipNumberSchema.safeParse(q.search).success
-  ) {
-    if (await legacyVipSchema(db))
-      return res
-        .status(200)
-        .json({ data: [], meta: { total: 0, limit: q.limit, offset: q.offset } });
-    query = query.eq('official_vip_number', q.search);
-  } else if (q.search) {
+  if (q.search)
     query = query.ilike(
       table === 'customer_applications' ? 'application_number' : 'reservation_number',
       `%${q.search.replace(/[%_,]/g, '')}%`,
     );
-  }
   // The application-origin link is the ONLY way to ask "did this application
   // become a reservation?", so this is the authoritative lookup for it.
   if (table === 'reservation_agreements' && q.application)
@@ -1011,186 +1009,6 @@ async function authorizeAgreementSale(
   return false;
 }
 
-type ApplicationRefs = {
-  vdStaffId?: string;
-  ssmStaffId?: string;
-  smStaffId?: string;
-  recommenderCustomerId?: string;
-  referrerOstId?: string;
-};
-
-/**
- * Server-side hierarchy + recommender validation for a customer application.
- *
- * The comboboxes make a mismatched combination hard to produce by hand, but a
- * hand-crafted body does not go through them. Names prove nothing; the ids are
- * re-resolved here against staff status, role assignment and the active
- * genealogy edges before anything is persisted. Returns null on success, or
- * the refusal to hand to `fail`.
- */
-async function validateApplicationRefs(
-  db: Db,
-  header: ApplicationRefs,
-): Promise<{ status: number; code: FailureCode; message: string } | null> {
-  const { vdStaffId, ssmStaffId, smStaffId, recommenderCustomerId, referrerOstId } = header;
-  const hierarchyIds = [vdStaffId, ssmStaffId, smStaffId].filter(Boolean) as string[];
-  if (hierarchyIds.length) {
-    const { data: staff, error: staffError } = await db
-      .from('staff_users')
-      .select('id,status')
-      .in('id', hierarchyIds);
-    if (staffError) throw staffError;
-    const byId = new Map(
-      ((staff ?? []) as { id: string; status: string }[]).map((s) => [String(s.id), s.status]),
-    );
-    const names: Record<string, string> = {
-      vdStaffId: 'Vice Director',
-      ssmStaffId: 'Senior Sales Manager',
-      smStaffId: 'Sales Manager',
-    };
-    for (const [key, id] of Object.entries({ vdStaffId, ssmStaffId, smStaffId })) {
-      if (!id) continue;
-      const status = byId.get(id);
-      if (!status) return { status: 404, code: 'NOT_FOUND', message: `${names[key]} not found` };
-      if (status !== 'active')
-        return { status: 409, code: 'CONFLICT', message: `${names[key]} is not active` };
-    }
-    const expected: Record<string, string> = {
-      [vdStaffId!]: 'vice_director',
-      ...(ssmStaffId ? { [ssmStaffId]: 'senior_sales_manager' } : {}),
-      ...(smStaffId ? { [smStaffId]: 'sales_manager' } : {}),
-    };
-    const { data: assignments, error: assignError } = await db
-      .from('staff_role_assignments')
-      .select('staff_id,role_id')
-      .in('staff_id', hierarchyIds);
-    if (assignError) throw assignError;
-    const roleIds = [
-      ...new Set(((assignments ?? []) as { role_id: string }[]).map((a) => String(a.role_id))),
-    ];
-    const { data: roles, error: rolesError } = await db
-      .from('roles')
-      .select('id,slug')
-      .eq('is_active', true)
-      .in('id', roleIds.length ? roleIds : ['00000000-0000-0000-0000-000000000000']);
-    if (rolesError) throw rolesError;
-    const slugById = new Map(
-      ((roles ?? []) as { id: string; slug: string }[]).map((r) => [String(r.id), String(r.slug)]),
-    );
-    const slugByStaff = new Map(
-      ((assignments ?? []) as { staff_id: string; role_id: string }[]).map((a) => [
-        String(a.staff_id),
-        slugById.get(String(a.role_id)),
-      ]),
-    );
-    for (const [id, want] of Object.entries(expected)) {
-      const got = slugByStaff.get(id);
-      if (got !== want)
-        return {
-          status: 400,
-          code: 'VALIDATION_ERROR',
-          message: 'The selected hierarchy does not match their assigned roles',
-        };
-    }
-    // Chain edges: the SSM must report to the VD, the SM to the SSM.
-    const subjects = [ssmStaffId, smStaffId].filter(Boolean) as string[];
-    if (subjects.length) {
-      const { data: rels, error: relError } = await db
-        .from('referral_relationships')
-        .select('subject_staff_id,upline_staff_id')
-        .eq('is_active', true)
-        .in('subject_staff_id', subjects);
-      if (relError) throw relError;
-      const uplineOf = new Map(
-        ((rels ?? []) as { subject_staff_id: string; upline_staff_id: string }[]).map((r) => [
-          String(r.subject_staff_id),
-          String(r.upline_staff_id),
-        ]),
-      );
-      if (ssmStaffId && uplineOf.get(ssmStaffId) !== vdStaffId)
-        return {
-          status: 400,
-          code: 'VALIDATION_ERROR',
-          message: 'The Senior Sales Manager does not belong to the selected Vice Director',
-        };
-      if (smStaffId && uplineOf.get(smStaffId) !== ssmStaffId)
-        return {
-          status: 400,
-          code: 'VALIDATION_ERROR',
-          message: 'The Sales Manager does not belong to the selected Senior Sales Manager',
-        };
-    }
-  }
-  if (recommenderCustomerId) {
-    const { data: customer, error: customerError } = await db
-      .from('customers')
-      .select('id')
-      .eq('id', recommenderCustomerId)
-      .maybeSingle();
-    if (customerError) throw customerError;
-    if (!customer) return { status: 404, code: 'NOT_FOUND', message: 'VIP recommender not found' };
-  }
-  if (referrerOstId) {
-    const { data: ost, error: ostError } = await db
-      .from('ost_members')
-      .select('id,status')
-      .eq('id', referrerOstId)
-      .maybeSingle();
-    if (ostError) throw ostError;
-    if (!ost) return { status: 404, code: 'NOT_FOUND', message: 'Referring OST not found' };
-    if ((ost as { status?: string }).status !== 'active')
-      return { status: 409, code: 'CONFLICT', message: 'Referring OST is not active' };
-    const { data: ostStaff, error: ostStaffError } = await db
-      .from('staff_users')
-      .select('id,status')
-      .eq('id', referrerOstId)
-      .maybeSingle();
-    if (ostStaffError) throw ostStaffError;
-    if (!ostStaff || ostStaff.status !== 'active')
-      return { status: 409, code: 'CONFLICT', message: 'Referring OST account is not active' };
-    const { data: ostAssign, error: ostAssignError } = await db
-      .from('staff_role_assignments')
-      .select('role_id')
-      .eq('staff_id', referrerOstId)
-      .maybeSingle();
-    if (ostAssignError) throw ostAssignError;
-    const ostRoleId = (ostAssign as { role_id?: string } | null)?.role_id;
-    const { data: ostRole, error: ostRoleError } = await db
-      .from('roles')
-      .select('slug')
-      .eq('is_active', true)
-      .eq('id', ostRoleId ?? '00000000-0000-0000-0000-000000000000')
-      .maybeSingle();
-    if (ostRoleError) throw ostRoleError;
-    if ((ostRole as { slug?: string } | null)?.slug !== 'ost')
-      return {
-        status: 400,
-        code: 'VALIDATION_ERROR',
-        message: 'The referrer is not an accredited OST',
-      };
-    // The referrer is the OST under the selected Sales Manager. The contract
-    // already requires the SM alongside the OST; re-check the edge here so a
-    // hand-crafted body cannot pair an SM with another team's OST.
-    if (smStaffId) {
-      const { data: edge, error: edgeError } = await db
-        .from('referral_relationships')
-        .select('subject_staff_id')
-        .eq('is_active', true)
-        .eq('subject_staff_id', referrerOstId)
-        .eq('upline_staff_id', smStaffId)
-        .maybeSingle();
-      if (edgeError) throw edgeError;
-      if (!edge)
-        return {
-          status: 400,
-          code: 'VALIDATION_ERROR',
-          message: 'The referring OST does not belong to the selected Sales Manager',
-        };
-    }
-  }
-  return null;
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
@@ -1257,8 +1075,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           registerNewCustomer: _mode,
           ...header
         } = newRegistration.data;
-        const refRefusal = await validateApplicationRefs(db, header);
-        if (refRefusal) return fail(res, refRefusal.code, refRefusal.message, refRefusal.status);
         const locations = await resolveHolderLocations(primary, secondary);
         if ('status' in locations)
           return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
@@ -1283,9 +1099,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
       const { primary, secondary, requestId, ...header } = parsed.data;
-      const headerRefusal = await validateApplicationRefs(db, header);
-      if (headerRefusal)
-        return fail(res, headerRefusal.code, headerRefusal.message, headerRefusal.status);
       const locations = await resolveHolderLocations(primary, secondary);
       if ('status' in locations)
         return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
@@ -1327,9 +1140,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const before = await getApplication(db, appPatch[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
       const { primary, secondary, requestId: _requestId, ...header } = parsed.data;
-      const patchRefusal = await validateApplicationRefs(db, header);
-      if (patchRefusal)
-        return fail(res, patchRefusal.code, patchRefusal.message, patchRefusal.status);
       const { error } = await db.rpc('save_customer_application', {
         p_application_id: appPatch[1],
         p_actor_id: auth.userId,
@@ -1879,9 +1689,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const primary = (agreement.primary ?? {}) as Record<string, string>;
       const secondary = (agreement.secondary ?? null) as Record<string, string> | null;
       const fields: Record<string, string> = {
-        ...(agreement.officialVipNumber
-          ? { official_vip_number: String(agreement.officialVipNumber) }
-          : {}),
         sale_id: String(agreement.saleId),
         customer_application_id: String(agreement.customerApplicationId ?? ''),
         vip_tier: String(agreement.tier),

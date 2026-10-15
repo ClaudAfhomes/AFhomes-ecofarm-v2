@@ -6,6 +6,89 @@
   max-width: 100%;
 }
 
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3);
+}
+
+.roleLink {
+  display: block;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.clickableRow {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .clickableRow:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.clickableRow:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+.actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.roleLink:hover {
+  color: var(--color-brand-secondary);
+}
+
+.description {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.permissionCell {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 8rem;
+}
+
+.permissionText {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.permissionMeter {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--color-bg-sunken);
+  overflow: hidden;
+}
+
+.permissionMeterFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-brand-secondary), var(--color-brand-primary));
+}
+
 @media (max-width: 639px) {
   .page {
     overflow-x: clip;

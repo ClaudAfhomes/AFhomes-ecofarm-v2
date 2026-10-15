@@ -252,6 +252,10 @@ export function MembershipsPage() {
                             label: 'Open printable card',
                             onClick: () => navigate(`/admin/memberships/${m.id}/card`),
                           },
+                          {
+                            label: 'Open customer record',
+                            onClick: () => navigate(`/admin/customers/${m.customerId}`),
+                          },
                         ]}
                       />
                     </td>

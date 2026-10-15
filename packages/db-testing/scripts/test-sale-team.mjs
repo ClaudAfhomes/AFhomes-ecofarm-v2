@@ -81,9 +81,7 @@ try {
   await db.query(fs.readFileSync('supabase/db-testing/supabase-shim.sql', 'utf8'));
   // Exercise the normalization migration's orphan preflight below before applying it.
   for (const file of listMigrations().filter(
-    (name) =>
-      !name.endsWith('_afhomes_normalization_integrity.sql') &&
-      !name.endsWith('_afhomes_official_aa_numbering.sql'),
+    (name) => !name.endsWith('_afhomes_normalization_integrity.sql'),
   ))
     await db.query(fs.readFileSync(`supabase/migrations/${file}`, 'utf8').replace(/^\uFEFF/, ''));
   check(
@@ -99,15 +97,13 @@ try {
     seller = randomUUID(),
     other = randomUUID(),
     outsider = randomUUID(),
-    ost = randomUUID(),
-    legacy = randomUUID();
+    ost = randomUUID();
   for (const [id, role] of [
     [actor, 'super_admin'],
     [seller, 'sales_manager'],
     [other, 'vice_director'],
     [outsider, 'employee'],
     [ost, 'ost'],
-    [legacy, 'sales_manager'],
   ]) {
     await db.query('insert into auth.users(id,email) values($1,$2)', [id, `${id}@example.invalid`]);
     await db.query(
@@ -142,144 +138,25 @@ try {
   const search = async (number) =>
     (await db.query('select public.search_sale_team_accreditation($1) result', [number])).rows[0]
       .result;
-  const legacyIssued = await manage(db, legacy);
-  assert.match(legacyIssued.aaNumber, /^AA-[A-Z0-9]{12}$/);
-  const numberingMigration = fs.readFileSync(
-    'supabase/migrations/20261203000002_afhomes_official_aa_numbering.sql',
-    'utf8',
-  );
-  await db.query(numberingMigration);
-  check(
-    (await manage(db, legacy)).aaNumber,
-    legacyIssued.aaNumber,
-    'Legacy AA survives migration and reapproval',
-  );
-  check(
-    (await search(legacyIssued.aaNumber)).aaNumber,
-    legacyIssued.aaNumber,
-    'Legacy public lookup retained',
-  );
   const first = await manage(db, seller);
-  check(first.aaNumber, 'AAI20010001', 'IST uses approved date month, not current wall-clock date');
-  const allocate = async (connection, kind, date) =>
-    (
-      await connection.query('select private.next_sale_team_aa_number($1,$2::date) value', [
-        kind,
-        date,
-      ])
-    ).rows[0].value;
+  assert.match(first.aaNumber, /^AA-[A-Z0-9]{12}$/);
+  check((first.aaNumber.slice(3).match(/[A-Z]/g) ?? []).length, 6, 'Six letters');
+  check((first.aaNumber.slice(3).match(/[0-9]/g) ?? []).length, 6, 'Six digits');
+  const generated = (
+    await db.query('select private.next_sale_team_aa_number() value from generate_series(1,1000)')
+  ).rows.map((row) => row.value);
+  check(new Set(generated).size, 1000, 'Random sample uniqueness');
   check(
-    await allocate(db, 'OST', '2020-01-15'),
-    'AAO20010002',
-    'OST shares the IST monthly sequence',
+    generated.every(
+      (value) =>
+        /^AA-[A-Z0-9]{12}$/.test(value) &&
+        (value.slice(3).match(/[A-Z]/g) ?? []).length === 6 &&
+        (value.slice(3).match(/[0-9]/g) ?? []).length === 6,
+    ),
+    true,
+    'Random sample composition',
   );
-  check(await allocate(db, 'IST', '2020-02-01'), 'AAI20020001', 'New month starts at one');
-  check(await allocate(db, 'OST', '2020-12-31'), 'AAO20120001', 'December counter');
-  check(await allocate(db, 'IST', '2021-01-01'), 'AAI21010001', 'January/year rollover counter');
-  const concurrent = await Promise.all(
-    Array.from({ length: 10 }, async (_, i) => {
-      const connection = await connect();
-      return allocate(connection, i % 2 ? 'OST' : 'IST', '2025-10-01');
-    }),
-  );
-  check(new Set(concurrent).size, 10, 'Concurrent mixed-prefix allocation has no collisions');
-  check(
-    concurrent.map((n) => Number(n.slice(7))).sort((a, b) => a - b),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-    'Concurrent allocation shares one counter',
-  );
-  await db.query('begin');
-  check(await allocate(db, 'IST', '2020-03-01'), 'AAI20030001', 'Transaction-local allocation');
-  await db.query('rollback');
-  check(
-    await allocate(db, 'OST', '2020-03-01'),
-    'AAO20030001',
-    'Rolled-back approval does not consume a number',
-  );
-  await db.query('begin');
-  await db.query(
-    "update private.sale_team_aa_counters set last_value=9998 where accreditation_month='2020-03-01'",
-  );
-  check(
-    await allocate(db, 'IST', '2020-03-01'),
-    'AAI20039999',
-    'Maximum sequence is exactly four digits',
-  );
-  await db.query('savepoint exhausted');
-  await assert.rejects(allocate(db, 'OST', '2020-03-01'), /AA_SEQUENCE_EXHAUSTED/);
   checks++;
-  await db.query('rollback to savepoint exhausted');
-  check(
-    (
-      await db.query(
-        "select last_value from private.sale_team_aa_counters where accreditation_month='2020-03-01'",
-      )
-    ).rows[0].last_value,
-    9999,
-    'Overflow never wraps or changes counter',
-  );
-  await db.query('rollback');
-  const auditBeforeFull = (await db.query('select count(*)::int n from public.audit_events'))
-    .rows[0].n;
-  await db.query('begin');
-  await db.query(
-    "update private.sale_team_aa_counters set last_value=9999 where accreditation_month='2020-01-01'",
-  );
-  await db.query('savepoint full_approval');
-  await assert.rejects(manage(db, other), /AA_SEQUENCE_EXHAUSTED/);
-  checks++;
-  await db.query('rollback to savepoint full_approval');
-  check(await search('AAI20019999'), null, 'Full series creates no public accreditation');
-  check(
-    (await db.query('select count(*)::int n from public.audit_events')).rows[0].n,
-    auditBeforeFull,
-    'Failed issuance appends no approval audit',
-  );
-  check(
-    (
-      await db.query(
-        'select count(*)::int n from private.sale_team_accreditations where staff_id=$1',
-        [other],
-      )
-    ).rows[0].n,
-    0,
-    'Failed issuance leaves no record',
-  );
-  await db.query('rollback');
-  for (const patch of ["aa_number='AAI20019997'", "kind='OST'", `staff_id='${randomUUID()}'`]) {
-    await assert.rejects(
-      db.query(`update private.sale_team_accreditations set ${patch} where staff_id=$1`, [seller]),
-      /ACCREDITATION_IDENTITY_IMMUTABLE/,
-    );
-    checks++;
-  }
-  const counterBeforeReplay = (
-    await db.query('select * from private.sale_team_aa_counters order by accreditation_month')
-  ).rows;
-  await db.query(numberingMigration);
-  check(
-    (await db.query('select * from private.sale_team_aa_counters order by accreditation_month'))
-      .rows,
-    counterBeforeReplay,
-    'Migration replay preserves counters',
-  );
-  check(
-    (await search(first.aaNumber)).aaNumber,
-    first.aaNumber,
-    'Migration replay preserves official number',
-  );
-  for (const role of ['anon', 'authenticated', 'service_role']) {
-    for (const sql of [
-      'select * from private.sale_team_aa_counters',
-      "select private.next_sale_team_aa_number('IST','2026-10-01')",
-    ]) {
-      await db.query('begin');
-      await db.query(`set local role ${role}`);
-      await assert.rejects(db.query(sql), (error) => error.code === '42501');
-      checks++;
-      await db.query('rollback');
-    }
-  }
   check(first.status, 'accredited');
   check(await search(first.aaNumber), first);
   check(
@@ -315,11 +192,11 @@ try {
   await db.query("select set_config('afhomes.aa_collision_existing',$1,true)", [first.aaNumber]);
   await db.query('create temporary sequence aa_collision_calls');
   await db.query(
-    "create or replace function private.next_sale_team_aa_number(p_kind text,p_accredited_on date) returns text language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$ declare calls integer; begin calls:=nextval('pg_temp.aa_collision_calls'); return case when calls=1 then current_setting('afhomes.aa_collision_existing') else 'AAI20019998' end; end $$",
+    "create or replace function private.next_sale_team_aa_number() returns text language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$ declare calls integer; begin calls:=nextval('pg_temp.aa_collision_calls'); return case when calls=1 then current_setting('afhomes.aa_collision_existing') else 'AA-ABCDEF123456' end; end $$",
   );
   await db.query('savepoint collision');
   const retryIssued = await manage(db, outsider);
-  check(retryIssued.aaNumber, 'AAI20019998', 'Collision retries with a new number');
+  check(retryIssued.aaNumber, 'AA-ABCDEF123456', 'Collision retries with a new number');
   check(
     Number((await db.query('select last_value from aa_collision_calls')).rows[0].last_value),
     2,
@@ -327,7 +204,7 @@ try {
   );
   await db.query('rollback to savepoint collision');
   await db.query(
-    "create or replace function private.next_sale_team_aa_number(p_kind text,p_accredited_on date) returns text language sql volatile security definer set search_path=pg_catalog,pg_temp as $$ select current_setting('afhomes.aa_collision_existing') $$",
+    "create or replace function private.next_sale_team_aa_number() returns text language sql volatile security definer set search_path=pg_catalog,pg_temp as $$ select current_setting('afhomes.aa_collision_existing') $$",
   );
   await assert.rejects(manage(db, outsider), (error) => error.code === '23505');
   checks++;
@@ -430,7 +307,7 @@ try {
   const newlyIssued = (
     await db.query('select public.get_sale_team_accreditation($1) result', [newAuth])
   ).rows[0].result;
-  assert.match(newlyIssued.aaNumber, /^AAO[0-9]{2}(0[1-9]|1[0-2])[0-9]{4}$/);
+  assert.match(newlyIssued.aaNumber, /^AA-[A-Z0-9]{12}$/);
   checks++;
   check(newlyIssued.status, 'inactive', 'Invited account has its AA but is not publicly verified');
   check(await search(newlyIssued.aaNumber), null, 'Invite acceptance is still required');
@@ -474,9 +351,7 @@ try {
   for (const role of ['anon', 'authenticated']) {
     for (const sql of [
       'select * from private.sale_team_accreditations',
-      'select * from private.sale_team_aa_counters',
       'select private.next_sale_team_aa_number()',
-      "select private.next_sale_team_aa_number('IST','2026-10-01')",
       `select public.get_sale_team_accreditation('${seller}')`,
       `select public.search_sale_team_accreditation('${first.aaNumber}')`,
       `select public.manage_sale_team_accreditation('${actor}','${seller}','IST','approve','2020-01-01','2099-01-01')`,
@@ -867,388 +742,6 @@ try {
     6,
     'Six validated constraints survive migration replay',
   );
-
-  {
-    // Official ID proof uses the same disposable server; no managed data is touched.
-    check(
-      (await db.query("select private.next_official_customer_number('2040-01-01') n")).rows[0].n,
-      'AF-CUS-2040-000001',
-    );
-    check(
-      (await db.query("select private.next_official_customer_number('2041-01-01') n")).rows[0].n,
-      'AF-CUS-2041-000001',
-    );
-    const parallelCustomers = await Promise.all(
-      [db, await connect(), await connect()].map((c) =>
-        c.query("select private.next_official_customer_number('2040-02-01') n"),
-      ),
-    );
-    check(
-      new Set(parallelCustomers.map((r) => r.rows[0].n)).size,
-      3,
-      'Concurrent customer numbers unique',
-    );
-    await db.query('begin');
-    const rolled = (await db.query("select private.next_official_customer_number('2042-01-01') n"))
-      .rows[0].n;
-    await db.query('rollback');
-    check(
-      (await db.query("select private.next_official_customer_number('2042-01-01') n")).rows[0].n,
-      rolled,
-      'Uncommitted customer allocation rolled back',
-    );
-    await db.query("insert into private.official_id_counters values('customer',2043,999999)");
-    await assert.rejects(
-      db.query("select private.next_official_customer_number('2043-01-01')"),
-      (e) => e.code === '55000',
-    );
-    checks++;
-
-    check(
-      (await db.query("select private.next_official_vip_sequence('2040-01-01') n")).rows[0].n,
-      1,
-      'Annual VIP sequence starts at one',
-    );
-    check(
-      (await db.query("select private.next_official_vip_sequence('2040-12-31') n")).rows[0].n,
-      2,
-      'VIP sequence does not reset monthly',
-    );
-    check(
-      (await db.query("select private.next_official_vip_sequence('2041-01-01') n")).rows[0].n,
-      1,
-      'VIP sequence resets yearly',
-    );
-    await db.query("insert into private.official_id_counters values('vip',2043,99999)");
-    await assert.rejects(
-      db.query("select private.next_official_vip_sequence('2043-01-01')"),
-      (e) => e.code === '55000',
-    );
-    checks++;
-    const customerRequest = randomUUID();
-    const customerInput = {
-      first_name: 'SYNTHETIC',
-      last_name: 'IDENTITY',
-      birth_date: '1990-01-01',
-      email: randomUUID() + '@example.invalid',
-      phone: '+639171234567',
-      address: { line1: 'SYNTHETIC', city: 'SYNTHETIC', province: 'SYNTHETIC' },
-      government_id_type: 'passport',
-      government_id_number: randomUUID(),
-    };
-    const createCustomer = () =>
-      db.query('select public.create_customer_once($1,$2,$3) id', [
-        customerRequest,
-        actor,
-        customerInput,
-      ]);
-    const canonicalCustomer = (await createCustomer()).rows[0].id;
-    check(
-      (await createCustomer()).rows[0].id,
-      canonicalCustomer,
-      'Customer creation replay preserves canonical ID',
-    );
-    const customerNumber = (
-      await db.query('select customer_number n from public.customers where id=$1', [
-        canonicalCustomer,
-      ])
-    ).rows[0].n;
-    check(
-      /^AF-CUS-[0-9]{4}-[0-9]{6}$/.test(customerNumber),
-      true,
-      'Committed customer receives annual number',
-    );
-    await assert.rejects(
-      db.query("update public.customers set customer_number='AF-CUS-AAAAA' where id=$1", [
-        canonicalCustomer,
-      ]),
-      (e) => e.code === '55000',
-    );
-    checks++;
-    check(
-      (
-        await db.query(
-          "select count(*)::int n from public.audit_events where entity_id=$1 and after_data::text like '%'||$2||'%'",
-          [canonicalCustomer, customerInput.government_id_number],
-        )
-      ).rows[0].n,
-      0,
-      'Government ID excluded from audit',
-    );
-    await db.query('update public.staff_users set must_change_password=true where id=$1', [actor]);
-    await assert.rejects(createCustomer(), (e) => e.code === '42501');
-    checks++;
-    await db.query('update public.staff_users set must_change_password=false where id=$1', [actor]);
-    const plan = (await db.query("select * from public.card_plans where code='GOLD'")).rows[0];
-    const makeCustomer = async (connection) => {
-      const id = randomUUID();
-      await connection.query(
-        "insert into public.customers(id,customer_number,first_name,last_name,email,phone,status) values($1,(select customer_number from public.next_customer_number()),'SYNTHETIC','CUSTOMER',$2,'+639171234567','prospect')",
-        [id, id + '@example.invalid'],
-      );
-      return id;
-    };
-    const customer = await makeCustomer(db),
-      request = randomUUID();
-    const applicationHeader = {
-      customerId: customer,
-      planId: plan.id,
-      paymentScheme: 'spot_cash',
-      acknowledgedAt: '2026-10-14',
-      primarySignatureStatus: 'received',
-      vdStaffId: other,
-      smStaffId: seller,
-      recommenderCustomerId: canonicalCustomer,
-      referrerOstId: ost,
-    };
-    const primaryHolder = {
-      firstName: 'SYNTHETIC',
-      lastName: 'CUSTOMER',
-      birthDate: '1990-01-01',
-      permanentAddressLine1: 'FIXTURE STREET',
-      cityMunicipality: 'CALAMBA',
-      province: 'LAGUNA',
-      mobile: '+639171234567',
-      email: 'holder@example.invalid',
-      printedName: 'SYNTHETIC CUSTOMER',
-    };
-    await db.query('begin');
-    try {
-      const application = (
-        await db.query('select public.save_customer_application(null,$1,$2,$3,null) id', [
-          actor,
-          applicationHeader,
-          primaryHolder,
-        ])
-      ).rows[0].id;
-      check(
-        (
-          await db.query(
-            'select vd_staff_id,sm_staff_id,recommender_customer_id,referrer_ost_id from public.customer_applications where id=$1',
-            [application],
-          )
-        ).rows[0],
-        {
-          vd_staff_id: other,
-          sm_staff_id: seller,
-          recommender_customer_id: canonicalCustomer,
-          referrer_ost_id: ost,
-        },
-        'Applied hierarchy function persists stable references',
-      );
-      await db.query('savepoint invalid_hierarchy_reference');
-      await assert.rejects(
-        db.query('select public.save_customer_application($1,$2,$3,$4,null)', [
-          application,
-          actor,
-          { ...applicationHeader, vdStaffId: randomUUID() },
-          primaryHolder,
-        ]),
-        (e) => e.code === '23503',
-      );
-      checks++;
-      await db.query('rollback to savepoint invalid_hierarchy_reference');
-    } finally {
-      await db.query('rollback');
-    }
-    for (const role of ['anon', 'authenticated'])
-      check(
-        (
-          await db.query(
-            "select has_function_privilege($1,'public.save_customer_application(uuid,uuid,jsonb,jsonb,jsonb)','EXECUTE') allowed",
-            [role],
-          )
-        ).rows[0].allowed,
-        false,
-        'Browser cannot call hierarchy save directly',
-      );
-    const saleInput = {
-      customerId: customer,
-      productId: plan.id,
-      sellerStaffId: actor,
-      paymentScheme: 'spot_cash',
-    };
-    const saleRow = {
-      customer_id: customer,
-      plan_id: plan.id,
-      seller_type: 'staff',
-      seller_staff_id: actor,
-      created_by: actor,
-      status: 'submitted',
-      cash_price: plan.cash_price,
-      cash_price_snapshot: plan.cash_price,
-      minimum_down_payment_snapshot: plan.minimum_down_payment,
-      payment_scheme: 'spot_cash',
-      reservation_fee_snapshot: plan.reservation_fee,
-      required_initial_snapshot: plan.reservation_fee,
-      installment_months_snapshot: null,
-      monthly_amount_snapshot: null,
-      validity_months_snapshot: plan.validity_years * 12,
-      yearly_points_snapshot: plan.yearly_points,
-      commission_rate_snapshot: '0',
-      commission_base_snapshot: plan.cash_price,
-      expected_commission_snapshot: '0.00',
-      balance_due_at: new Date(Date.now() + 86400000).toISOString(),
-    };
-    const submit = (connection, nonce, input, row) =>
-      connection.query('select public.submit_card_sale_once($1,$2,$3,$4) id', [
-        nonce,
-        actor,
-        input,
-        row,
-      ]);
-    const attempts = await Promise.all(
-      [db, await connect()].map((c) => submit(c, request, saleInput, saleRow)),
-    );
-    check(
-      attempts[0].rows[0].id,
-      attempts[1].rows[0].id,
-      'Simultaneous retries return the same direct sale',
-    );
-    const issued = attempts[0],
-      saleId = issued.rows[0].id;
-    const number = (
-      await db.query('select official_vip_number n from public.card_sales where id=$1', [saleId])
-    ).rows[0].n;
-    check(/^[0-9]{6}[0-9]{5}G1C01S$/.test(number), true, 'Direct sale receives official number');
-    check(
-      (await submit(db, request, saleInput, { ...saleRow, cash_price: '1.00' })).rows[0].id,
-      saleId,
-      'Lost-response retry returns original sale',
-    );
-    check(
-      (
-        await db.query(
-          'select count(*)::int n from private.vip_control_numbers where original_sale_id=$1',
-          [saleId],
-        )
-      ).rows[0].n,
-      1,
-      'Exactly one issued identity',
-    );
-    check(
-      (await db.query('select count(*)::int n from public.commissions where sale_id=$1', [saleId]))
-        .rows[0].n,
-      1,
-      'Exactly one commission',
-    );
-    await assert.rejects(
-      submit(db, request, { ...saleInput, paymentScheme: 'move_a' }, saleRow),
-      (e) => e.message.includes('MUTATION_PAYLOAD_CONFLICT'),
-    );
-    checks++;
-    await assert.rejects(
-      db.query('update public.card_sales set official_vip_number=null where id=$1', [saleId]),
-      (e) => e.code === '55000',
-    );
-    checks++;
-    await assert.rejects(
-      db.query("update private.vip_control_numbers set tier='SILVER' where control_number=$1", [
-        number,
-      ]),
-      (e) => e.code === '55000',
-    );
-    checks++;
-    await db.query("update public.card_sales set status='cancelled' where id=$1", [saleId]);
-    await assert.rejects(
-      db.query(
-        `insert into public.card_sales(sale_number,customer_id,plan_id,seller_type,seller_staff_id,
-        cash_price,cash_price_snapshot,minimum_down_payment_snapshot,payment_scheme,
-        installment_months_snapshot,status,created_by,balance_due_at,official_vip_number)
-        values('SYNTHETIC_VIP_REUSE',$1,$2,'staff',$3,$4,$4,$5,'spot_cash',null,'draft',$3,now(),$6)`,
-        [customer, plan.id, actor, plan.cash_price, plan.minimum_down_payment, number],
-      ),
-      (e) => e.code === '55000' && e.message === 'VIP_ENCODED_TERMS_CONFLICT',
-    );
-    checks++;
-    check(
-      (await submit(db, request, saleInput, saleRow)).rows[0].id,
-      saleId,
-      'Cancelled purchase retains number and retry result',
-    );
-    const badCustomer = await makeCustomer(db);
-    const beforeCount = (await db.query('select count(*)::int n from public.card_sales')).rows[0].n;
-    await assert.rejects(
-      submit(
-        db,
-        randomUUID(),
-        { ...saleInput, customerId: badCustomer, paymentScheme: 'move_a' },
-        {
-          ...saleRow,
-          customer_id: badCustomer,
-          payment_scheme: 'move_a',
-          installment_months_snapshot: 3,
-        },
-      ),
-      (e) => e.code === '55000',
-    );
-    checks++;
-    check(
-      (await db.query('select count(*)::int n from public.card_sales')).rows[0].n,
-      beforeCount,
-      'Rejected offer rolls back sale',
-    );
-
-    const agreement = (
-      await db.query("select public.create_reservation_agreement_once($1,$2,$3,$4,null,'[]') id", [
-        randomUUID(),
-        actor,
-        {
-          saleId,
-          reservationDate: '2026-10-14',
-          agreementDate: '2026-10-14',
-          primarySignatureStatus: 'received',
-        },
-        {
-          name: 'SYNTHETIC CUSTOMER',
-          address: 'SYNTHETIC ADDRESS',
-          contactNumber: '+639171234567',
-          email: randomUUID() + '@example.invalid',
-        },
-      ])
-    ).rows[0].id;
-    check(
-      (
-        await db.query(
-          'select official_vip_number n from public.reservation_agreements where id=$1',
-          [agreement],
-        )
-      ).rows[0].n,
-      number,
-      'Later sale-origin agreement reuses issued number',
-    );
-    for (const role of ['anon', 'authenticated', 'service_role']) {
-      check(
-        (
-          await db.query(
-            "select has_table_privilege($1,'private.vip_control_numbers','SELECT') allowed",
-            [role],
-          )
-        ).rows[0].allowed,
-        false,
-        'Private identity denied',
-      );
-      check(
-        (
-          await db.query(
-            "select has_table_privilege($1,'private.official_id_counters','UPDATE') allowed",
-            [role],
-          )
-        ).rows[0].allowed,
-        false,
-        'Counter writes denied',
-      );
-    }
-    check(
-      (
-        await db.query(
-          "select has_function_privilege('authenticated','public.submit_card_sale_once(uuid,uuid,jsonb,jsonb)','EXECUTE') allowed",
-        )
-      ).rows[0].allowed,
-      false,
-      'Direct authenticated issuance denied',
-    );
-  }
   const postNormalization = await db.query(
     fs.readFileSync('supabase/security/rls_invariants.sql', 'utf8'),
   );

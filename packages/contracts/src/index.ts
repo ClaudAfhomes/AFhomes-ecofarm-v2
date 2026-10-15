@@ -11,6 +11,10 @@
 export {
   afHomesActionSchema,
   afHomesModuleKeySchema,
+  MODULE_CATALOG,
+  MODULE_LABELS,
+  moduleLabel,
+  groupedModuleCatalog,
   afHomesPermissionSchema,
   afHomesRestrictionSchema,
   afHomesRoleSchema,
@@ -30,6 +34,7 @@ export {
 export type {
   AfHomesAction,
   AfHomesModuleKey,
+  AfHomesModuleDescriptor,
   AfHomesPermission,
   AfHomesRole,
   AfHomesDepartment,
@@ -89,6 +94,7 @@ export {
   normalizeEmail,
   normalizeMoneyString,
   isPlausibleBirthDate,
+  toTitleCase,
 } from './schemas/input.js';
 
 export { listResponseSchema } from './schemas/collection.js';
@@ -305,7 +311,6 @@ export {
   isAfId,
   afBusinessIdSchema,
   customerCodeSchema,
-  officialVipNumberSchema,
   matchesBusinessId,
 } from './schemas/business-ids.js';
 export type { AfIdPrefix, AfCodePrefix, AfBusinessPrefix } from './schemas/business-ids.js';
@@ -380,6 +385,12 @@ export {
 export {
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_EXPORT_COLUMNS,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  COMPANY_IMPORT_EXTRA_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
   importSourceSchema,
   importJobStatusSchema,
@@ -403,6 +414,7 @@ export {
 export type {
   CustomerImportColumn,
   CustomerExportRow,
+  MembershipTemplateColumn,
   ImportSource,
   ImportJobStatus,
   ImportRowAction,
@@ -414,6 +426,16 @@ export type {
   CustomerImportParseResponse,
   CustomerImportCommitResponse,
 } from './schemas/customer-import.js';
+/* ---- Customer-record SSOT: the company's master field list. ---- */
+export {
+  CUSTOMER_SSOT_SECTIONS,
+  CUSTOMER_SSOT_COLUMNS,
+  CUSTOMER_SSOT_SECTION_BANDS,
+  TEMPLATE_STATUS_OPTIONS,
+  TEMPLATE_PAYMENT_METHOD_OPTIONS,
+  TEMPLATE_TIER_OPTIONS,
+} from './schemas/customer-ssot.js';
+export type { CustomerSsotColumn, CustomerSsotSection } from './schemas/customer-ssot.js';
 /* ---- Official paper-form transaction snapshots and review-first imports. ---- */
 export {
   vipTierSchema,
@@ -421,6 +443,16 @@ export {
   signatureStatusSchema,
   acquisitionChannelSchema,
   applicationHolderSchema,
+  storedApplicationHolderSchema,
+  SUFFIX_OPTIONS,
+  SEX_OPTIONS,
+  CITIZENSHIP_OPTIONS,
+  CIVIL_STATUS_OPTIONS,
+  suffixOptionSchema,
+  sexOptionSchema,
+  citizenshipOptionSchema,
+  civilStatusOptionSchema,
+  tinNumberSchema,
   reservationHolderSchema,
   createCustomerApplicationSchema,
   customerApplicationSchema,

@@ -657,11 +657,7 @@ const MATRIX = [
     options: {
       method: 'POST',
       path: '',
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.bronze,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.bronze },
     },
   },
   {

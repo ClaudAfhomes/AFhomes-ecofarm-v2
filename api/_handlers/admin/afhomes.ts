@@ -209,12 +209,6 @@ export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
 > = [
   ['sales', 'card_sales', 'seller_staff_id'],
   ['sales', 'card_sales', 'created_by'],
-  ['reservation agreements', 'reservation_agreements', 'seller_staff_id'],
-  ['reservation agreements', 'reservation_agreements', 'created_by'],
-  ['customer applications', 'customer_applications', 'created_by'],
-  ['customer applications', 'customer_applications', 'vd_staff_id'],
-  ['customer applications', 'customer_applications', 'ssm_staff_id'],
-  ['customer applications', 'customer_applications', 'sm_staff_id'],
   ['commissions', 'commissions', 'beneficiary_staff_id'],
   ['commissions', 'commissions', 'qualified_by'],
   ['commissions', 'commissions', 'paid_by'],
@@ -951,6 +945,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       await audit(db, auth.userId, 'ROLE_UPDATED', 'role', id, before, parsed.data);
       return res.status(200).json((await roleCatalog(db)).find((r: { id: string }) => r.id === id));
+    }
+    if (roleMatch && method === 'DELETE') {
+      const auth = await authorizeAfHomes(req, 'organization.roles', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = roleMatch[1]!;
+      const { data: before } = await db.from('roles').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Role not found', 404);
+      if (before.is_system || ['admin', 'super_admin', 'customer'].includes(String(before.slug)))
+        return fail(res, 'FORBIDDEN', 'System roles cannot be deleted', 403);
+      const { data: assigned } = await db
+        .from('staff_role_assignments')
+        .select('role_id')
+        .eq('role_id', id);
+      if ((assigned ?? []).length > 0) return fail(res, 'CONFLICT', 'Role has assigned staff', 409);
+      const { error: permError } = await db.from('role_permissions').delete().eq('role_id', id);
+      if (permError) throw permError;
+      const { error: roleError } = await db.from('roles').delete().eq('id', id);
+      if (roleError) throw roleError;
+      await audit(db, auth.userId, 'ROLE_DELETED', 'role', id, before, null);
+      return res.status(200).json({ deleted: true });
     }
     const roleAudit = path.match(/^roles\/([0-9a-f-]+)\/audit$/);
     if (roleAudit && method === 'GET') {

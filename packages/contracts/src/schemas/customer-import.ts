@@ -39,6 +39,7 @@ export const CUSTOMER_IMPORT_COLUMNS = [
   'address_line_2',
   'city',
   'province',
+  'barangay',
   'postal_code',
   'country',
   'occupation',
@@ -300,24 +301,272 @@ export function googleSheetCsvUrl(ref: { spreadsheetId: string; gid: string }): 
 }
 
 export const CUSTOMER_EXPORT_COLUMNS = [
-  'customer_number',
-  'membership_number',
-  'customer_name',
-  'vip_tier',
-  'customer_status',
-  'membership_status',
-  'payment_status',
-  'derived_category',
-  'activated_at',
-  'expires_at',
-  'current_points_balance',
-  'seller',
-  'email',
-  'mobile',
-  'created_at',
+  // Company record: PRIMARY block, SSOT order (see customer-ssot.ts). AGE is
+  // computed from the birthday at export time; it is never stored.
+  'RA NO',
+  'STATUS',
+  'FIRST NAME',
+  'LAST NAME',
+  'MIDDLE NAME',
+  'SUFFIX',
+  'BIRTHDAY',
+  'GENDER',
+  'AGE',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'PERMANENT ADDRESS LINE 1',
+  'PERMANENT ADDRESS LINE 2',
+  'PROVINCE',
+  'CITY',
+  'BARANGGAY',
+  'POSTAL CODE',
+  'LANDLINE',
+  'EMAIL',
+  'TIN NO.',
+  'MOBILE NO.',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  // SUPPLEMENTARY block. Names and address are stored joined (single text
+  // columns), so the export carries them as the two stored fields; the
+  // remaining columns keep the SSOT names with a SUPPLEMENTARY prefix so
+  // every export header stays unique.
+  'SUPPLEMENTARY FULL NAME',
+  'SUPPLEMENTARY ADDRESS',
+  'SUPPLEMENTARY BIRTHDAY',
+  'SUPPLEMENTARY GENDER',
+  'SUPPLEMENTARY AGE',
+  'SUPPLEMENTARY CITIZENSHIP',
+  'SUPPLEMENTARY CIVIL STATUS',
+  'SUPPLEMENTARY TIN NO.',
+  'SUPPLEMENTARY LANDLINE',
+  'SUPPLEMENTARY MOBILE NO.',
+  'SUPPLEMENTARY EMAIL',
+  'SUPPLEMENTARY OCCUPATION / BUSINESS NAME',
+  'SUPPLEMENTARY OFFICE / BUSINESS ADDRESS',
+  'SUPPLEMENTARY EMPLOYED POSITION',
+  // OST/IST block, verbatim.
+  'SVD (NAME)',
+  'SSM (NAME)',
+  'SM (NAME)',
+  'REFERRER (NAME)',
+  'VIP RECOMMENDER (NAME)',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  // VIP PACKAGE block, verbatim.
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+  // System columns: identifiers and derived state, never company-stated.
+  'CUSTOMER ID',
+  'CUSTOMER CODE',
+  'MEMBERSHIP NUMBER',
+  'CUSTOMER STATUS',
+  'MEMBERSHIP STATUS',
+  'PAYMENT STATUS',
+  'CATEGORY',
+  'POINTS BALANCE',
+  'SELLER',
+  'ACTIVATED AT',
+  'EXPIRES AT',
+  'CREATED AT',
 ] as const;
 
 export type CustomerExportRow = Record<(typeof CUSTOMER_EXPORT_COLUMNS)[number], string>;
+
+/* ------------------------------------------------------------------ */
+/* Company membership template (44 columns, exact order and wording)    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The company-provided membership template headers, verbatim. Capitalization,
+ * spacing and punctuation are the source of truth - do not normalize them
+ * here. Note the intentional duplicates: ADDRESS appears at positions 3 and
+ * 16, EMAIL ADDRESS at 11 and 34, and several demographic headers repeat
+ * across the primary/supplementary blocks. Header-name matching therefore
+ * cannot disambiguate them - see MEMBERSHIP_TEMPLATE_POSITION_MAP.
+ *
+ * OST/IST NAME used to sit at position 28 and was removed from the download;
+ * see LEGACY_MEMBERSHIP_TEMPLATE_* below for reading files filled from an
+ * older download.
+ */
+export const MEMBERSHIP_TEMPLATE_COLUMNS = [
+  'RA NO',
+  'STATUS',
+  'FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SUPPLEMENTARY FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SVD',
+  'SSM',
+  'SM',
+  'REFERRER',
+  'VIP RECOMMENDER',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+] as const;
+
+export type MembershipTemplateColumn = (typeof MEMBERSHIP_TEMPLATE_COLUMNS)[number];
+
+/**
+ * Additional import keys accepted ONLY through the company-template remap
+ * path (never part of `CUSTOMER_IMPORT_COLUMNS`, so the established customer
+ * template is unchanged). Each key has a matching nullable column on
+ * customers and is validated in `validateImportRow` before persistence.
+ */
+export const COMPANY_IMPORT_EXTRA_COLUMNS = [
+  'ra_number',
+  'citizenship',
+  'civil_status',
+  'tin_number',
+  'occupation_business_name',
+  'office_business_address',
+  'employed_position',
+  'supplementary_full_name',
+  'supplementary_address',
+  'supplementary_birthday',
+  'supplementary_gender',
+  'supplementary_citizenship',
+  'supplementary_civil_status',
+  'supplementary_tin_number',
+  'supplementary_mobile',
+  'supplementary_email',
+  'supplementary_landline',
+  'supplementary_occupation_business_name',
+  'supplementary_office_address',
+  'supplementary_position',
+  'ost_ist_name',
+  'svd_name',
+  'ssm_name',
+  'sm_name',
+  'referrer_name',
+  'vip_recommender_name',
+  'related_contact_no',
+  'related_email',
+  'stated_regular_price',
+  'stated_discount',
+  'stated_total_amount',
+  'stated_rf',
+] as const;
+
+/**
+ * Positional mapping from the 44-column company template onto customer-import
+ * columns. An entry is the import column for that exact position, or null
+ * when the company field has no established v2 target (unmapped positions are
+ * reported as ignored warnings, never silently merged). Only fields whose
+ * meaning is exact AND whose values flow through existing validators are
+ * mapped - value vocabularies are never translated, so unknown tier, scheme
+ * or status values fail rows safely instead of corrupting records. FULL NAME
+ * is deliberately unmapped: splitting it into first/middle/last would invent
+ * identity parse rules.
+ */
+export const MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  /* 0 RA NO */ 'ra_number',
+  /* 1 STATUS */ 'source_status',
+  /* 2 FULL NAME */ null,
+  /* 3 ADDRESS (primary) */ 'address_line_1',
+  /* 4 BIRTHDAY (primary) */ 'birth_date',
+  /* 5 AGE */ null,
+  /* 6 GENDER (primary) */ 'sex',
+  /* 7 CITIZENSHIP */ 'citizenship',
+  /* 8 CIVIL STATUS */ 'civil_status',
+  /* 9 TIN NO. */ 'tin_number',
+  /* 10 MOBILE NO. (primary) */ 'mobile',
+  /* 11 EMAIL ADDRESS (primary) */ 'email',
+  /* 12 OCCUPATION / BUSINESS NAME */ 'occupation_business_name',
+  /* 13 OFFICE / BUSINESS ADDRESS */ 'office_business_address',
+  /* 14 EMPLOYED POSITION */ 'employed_position',
+  /* 15 SUPPLEMENTARY FULL NAME */ 'supplementary_full_name',
+  /* 16 ADDRESS (supplementary) */ 'supplementary_address',
+  /* 17 BIRTHDAY (supplementary) */ 'supplementary_birthday',
+  /* 18 AGE */ null,
+  /* 19 GENDER */ 'supplementary_gender',
+  /* 20 CITIZENSHIP */ 'supplementary_citizenship',
+  /* 21 CIVIL STATUS */ 'supplementary_civil_status',
+  /* 22 TIN NO. */ 'supplementary_tin_number',
+  /* 23 MOBILE NO. (supplementary) */ 'secondary_mobile',
+  /* 24 EMAIL ADDRESS (supplementary) */ 'secondary_email',
+  /* 25 OCCUPATION / BUSINESS NAME */ 'supplementary_occupation_business_name',
+  /* 26 OFFICE / BUSINESS ADDRESS */ 'supplementary_office_address',
+  /* 27 EMPLOYED POSITION */ 'supplementary_position',
+  /* 28 SVD */ 'svd_name',
+  /* 29 SSM */ 'ssm_name',
+  /* 30 SM */ 'sm_name',
+  /* 31 REFERRER */ 'referrer_name',
+  /* 32 VIP RECOMMENDER */ 'vip_recommender_name',
+  /* 33 CONTACT NO. */ 'related_contact_no',
+  /* 34 EMAIL ADDRESS (related persons) */ 'related_email',
+  /* 35 VIP PACKAGE */ 'vip_tier',
+  /* 36 PAYMENT TERMS */ 'payment_scheme',
+  /* 37 REGULAR PRICE */ 'stated_regular_price',
+  /* 38 DISCOUNT */ 'stated_discount',
+  /* 39 TOTAL AMOUNT */ 'stated_total_amount',
+  /* 40 RF */ 'stated_rf',
+  /* 41 PAYMENT TYPE */ 'payment_method',
+  /* 42 REF NO */ 'payment_reference',
+  /* 43 DATE */ 'payment_date',
+];
+
+/**
+ * The header text of the removed OST/IST NAME column, kept as the single
+ * source for recognizing files filled from a superseded 45-column download.
+ * Downloads no longer emit it; uploads still honor it (see
+ * LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN = 'OST/IST NAME';
+
+/** Position in the superseded 45-column layout where the removed column sat. */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX = 28;
+
+/**
+ * Positional mapping for the superseded 45-column layout: the current map
+ * with the preserved `ost_ist_name` target re-inserted at its old position.
+ * Legacy files keep importing fully (their OST/IST NAME values still land on
+ * the existing customer-record pipeline) instead of failing as 45 unknown
+ * headers; only fresh downloads stop carrying the column.
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+  'ost_ist_name',
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+];
 
 /* ------------------------------------------------------------------ */
 /* API shapes                                                          */

@@ -235,13 +235,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // but because no handler exists on this path. Adding one would be a deliberate,
       // separately-reviewed decision.
       //
-      // The permission is `operations.redemption` view because that is what the
-      // `employee` role already holds. Reusing it means the GSD desk needs no new
-      // role, no new module key and no new grant - see `role-baseline.ts`, where
-      // `employee` holds `operations.redemption` and deliberately holds NO
-      // `sales.customers` row. Granting `sales.customers` here would have handed a
-      // GSD operator the whole customer-master module, including create and update.
-      const auth = await authorizeAfHomes(req, 'operations.redemption');
+      // The permission is now `operations.customer_lookup` view: the module
+      // exists precisely so this read-only screen is listed, and grantable, as
+      // itself rather than borrowing the `operations.redemption` till key.
+      // `employee` (the GSD desk) and `admin` hold it - see the
+      // 20261131000003 migration that seeds the module and those two grants.
+      // `sales.customers` remains deliberately NOT required: granting it would
+      // hand a GSD operator the whole customer-master module, including create
+      // and update.
+      const auth = await authorizeAfHomes(req, 'operations.customer_lookup');
       if ('error' in auth) return deny(res, auth);
       const search = String(req.query.search ?? '').trim();
       if (search.length < 2 || search.length > 120)

@@ -320,7 +320,7 @@ describe('test-account purge', () => {
     await screen.findByText('Ana Reyes');
     const purgeButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
     fireEvent.click(purgeButtons[purgeButtons.length - 1]!);
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
       target: { value: 'PURGE' },
     });
     const confirmButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
@@ -363,12 +363,12 @@ describe('test-account purge', () => {
     await screen.findByText('Ana Reyes');
     fireEvent.click(screen.getAllByRole('button', { name: 'Purge Test Account' })[0]!);
     // Any other confirmation text keeps the destructive action disabled.
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
       target: { value: 'DELETE' },
     });
     const confirm = screen.getAllByRole('button', { name: 'Purge Test Account' }).pop()!;
     expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm test account purge'), {
+    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
       target: { value: 'PURGE' },
     });
     fireEvent.click(confirm);
@@ -383,6 +383,60 @@ describe('test-account purge', () => {
     renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
     await confirmTestPurge();
     expect(await screen.findByRole('alert')).toHaveTextContent('Only test accounts can be purged.');
+  });
+});
+
+describe('staff restrictions module dropdowns', () => {
+  const openRestrictions = async (member: Record<string, unknown>) => {
+    vi.mocked(getAfHomesStaff).mockResolvedValue([member] as never);
+    vi.mocked(getAfHomesRoles).mockResolvedValue([
+      {
+        ...ROLE_ROW,
+        permissions: [
+          grant('dashboard.view'),
+          grant('sales.customers'),
+          grant('finance.points'),
+          grant('finance.card_activation'),
+        ],
+      },
+    ] as never);
+    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+    fireEvent.click(await screen.findByRole('button', { name: 'Restrictions' }));
+    return screen.getByRole('dialog', { name: 'Restrict Ana Reyes' });
+  };
+
+  it('renders Dashboard as a single row and keeps other groups collapsed', async () => {
+    await openRestrictions(STAFF_ROW);
+    // Dashboard owns one module, so it is its own row - no one-item dropdown.
+    expect(await screen.findByLabelText('Dashboard deny access')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Dashboard/ })).toBeNull();
+    // Sales & Customers has a single granted module here, so it is flat too: a
+    // one-row group never needs a disclosure.
+    expect(screen.getByLabelText('Customers deny access')).toBeInTheDocument();
+    // Finance has two, so it is a collapsed dropdown until asked.
+    const finance = await screen.findByRole('button', { name: /Finance/ });
+    expect(finance).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Points Ledger deny access')).toBeNull();
+    fireEvent.click(finance);
+    expect(screen.getByLabelText('Points Ledger deny access')).toBeInTheDocument();
+  });
+
+  it('opens a group that already carries an override', async () => {
+    await openRestrictions({
+      ...STAFF_ROW,
+      restrictions: [
+        {
+          moduleKey: 'finance.points',
+          denyView: true,
+          denyCreate: false,
+          denyUpdate: false,
+          denyDelete: false,
+        },
+      ],
+    });
+    const finance = await screen.findByRole('button', { name: /Finance/ });
+    expect(finance).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Points Ledger deny access')).toBeChecked();
   });
 });
 

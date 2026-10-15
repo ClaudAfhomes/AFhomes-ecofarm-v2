@@ -19,7 +19,6 @@ const calls = vi.hoisted(() => ({
 vi.mock('./services', async (original) => ({
   ...(await original()),
   getCustomers: async () => [],
-  getCustomersPage: async () => ({ data: [], total: 0 }),
   getCustomerApplications: async () => [
     {
       id: '00000000-0000-4000-8000-000000000003',
@@ -137,6 +136,13 @@ vi.mock('./services', async (original) => ({
     },
   }),
 }));
+vi.mock('../genealogy/services', () => ({
+  getGenealogy: async () => [],
+  getGenealogyNode: async () => null,
+  getGenealogyUpline: async () => [],
+  getGenealogyDownline: async () => [],
+  getGenealogySummary: async () => null,
+}));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   calls.application.mockReset().mockRejectedValue(new Error('QA save capture'));
@@ -158,6 +164,33 @@ function mount(application = false) {
     </QueryClientProvider>,
   );
   return { ...view, user: userEvent.setup() };
+}
+type QAUser = ReturnType<typeof userEvent.setup>;
+const GOLD_PLAN_ID = '00000000-0000-4000-8000-000000000001';
+/**
+ * Walk the new-application wizard to the Holders step: pick Gold on
+ * Application, then satisfy Identity with a picked (not yet uploaded) ID.
+ * Upload happens on Save, so no server upload runs during navigation.
+ */
+async function goToHolders(user: QAUser) {
+  await screen.findByRole('option', { name: 'Gold' });
+  await user.selectOptions(await screen.findByLabelText('VIP plan'), GOLD_PLAN_ID);
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.change(await screen.findByLabelText('ID Type'), { target: { value: 'passport' } });
+  fireEvent.change(screen.getByLabelText('Upload ID'), {
+    target: { files: [new File(['x'], 'x.png', { type: 'image/png' })] },
+  });
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByLabelText('First name');
+}
+/** Fill the required primary fields so Holders Next unlocks. */
+function fillPrimaryHolders() {
+  fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ana' } });
+  fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+  fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+  fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+  fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
 }
 /**
  * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
@@ -237,9 +270,12 @@ it('actual IST tier is a closed dropdown, not a free-text box', async () => {
   const view = mount();
   const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
   expect(select.tagName).toBe('SELECT');
-  expect(
-    [...select.options].map((option) => option.value),
-  ).toEqual(['', 'BRONZE', 'SILVER', 'GOLD']);
+  expect([...select.options].map((option) => option.value)).toEqual([
+    '',
+    'BRONZE',
+    'SILVER',
+    'GOLD',
+  ]);
   await view.user.selectOptions(select, 'GOLD');
   expect(select.value).toBe('GOLD');
 });
@@ -295,68 +331,102 @@ it('actual IST address IME preserves the draft and commits once complete', async
   expect(input.value).toBe('ASSB');
   expect(input.selectionStart).toBe(3);
 });
-it('primary landline shows a field error and prevents save; empty clears the error', async () => {
+/**
+ * The single save-and-submit action renders its blockers as one visible list.
+ * Its text is read through the title paragraph's container.
+ */
+const blockersText = () =>
+  screen.queryByText('Cannot save and submit yet:')?.parentElement?.textContent ?? '';
+it('primary landline refuses letters and blocks save while the number is invalid', async () => {
   const { user } = mount(true);
-  const input = screen.getByLabelText('Landline');
+  await goToHolders(user);
+  const input = screen.getByLabelText<HTMLInputElement>('Landline');
   await user.type(input, '09ABC123456');
+  // Letters are refused at the keystroke: a landline can never hold them. The
+  // attempt still flags the field until a deliberate correction, so the
+  // operator knows a keystroke was rejected rather than silently dropped.
+  expect(input.value).toBe('09123456');
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+  await user.clear(input);
+  expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
+  await user.type(input, '123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
-  // Save lives in the header and the sticky footer alike; both share state.
-  expect(screen.getAllByRole('button', { name: 'Save draft' })).toHaveLength(2);
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  // Save & Submit lives in the header and the sticky footer alike; both share state.
+  expect(screen.getAllByRole('button', { name: 'Save & Submit' })).toHaveLength(2);
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
   expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
-    expect(save).toBeEnabled();
+  // Clearing the field removes its blocker; the remaining blockers are other,
+  // unrelated requirements.
+  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
 });
 it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);
-  await screen.findByRole('option', { name: 'Gold' });
-  await user.selectOptions(
-    await screen.findByLabelText('VIP plan'),
-    '00000000-0000-4000-8000-000000000001',
-  );
+  await goToHolders(user);
   await user.click(screen.getByLabelText(/Add optional Gold secondary/));
-  const input = screen.getAllByLabelText('Landline')[1]!;
+  const input = screen.getAllByLabelText<HTMLInputElement>('Landline')[1]!;
   await user.type(input, 'PHONE123');
+  // The letters never land; the surviving digits are too short to be a number.
+  expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
 it('recommender contact gets its own frontend error and valid formatting is allowed', async () => {
   const { user } = mount(true);
-  const input = screen.getByLabelText('Recommender Contact');
+  await goToHolders(user);
+  fillPrimaryHolders();
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  const input = await screen.findByLabelText('Recommender Contact');
   await user.type(input, '0917TEST');
   expect(input).toHaveAttribute('aria-invalid', 'true');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
+  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
+  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
     expect(save).toBeDisabled();
   await user.clear(input);
   await user.type(input, '0917-123-4567');
   expect(input).not.toHaveAttribute('aria-invalid');
-  for (const save of screen.getAllByRole('button', { name: 'Save draft' }))
-    expect(save).toBeEnabled();
+  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
 });
 
 it.each(['Silver', 'Bronze', 'Select plan'])(
   'clears Gold secondary holder when changing to %s',
   async (label) => {
     const { user } = mount(true);
-    await screen.findByRole('option', { name: 'Gold' });
-    await user.selectOptions(
-      screen.getByLabelText('VIP plan'),
-      screen.getByRole('option', { name: 'Gold' }),
-    );
+    await goToHolders(user);
     await user.click(screen.getByLabelText(/Add optional Gold secondary/));
     expect(screen.getByRole('group', { name: /Secondary holder/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await user.selectOptions(
       screen.getByLabelText('VIP plan'),
       screen.getByRole('option', { name: label }),
     );
+    // Clearing the plan locks step 0 (nothing to proceed with), so re-pick
+    // Gold to observe the cleared secondary state on the Holders step. A
+    // stale secondary would still render its group there.
+    const reselected = label === 'Select plan';
+    if (reselected) {
+      await user.selectOptions(
+        screen.getByLabelText('VIP plan'),
+        screen.getByRole('option', { name: 'Gold' }),
+      );
+    }
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText(/Add optional Gold secondary/);
     expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
-    expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    if (reselected) {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeEnabled();
+    } else {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    }
     expect(screen.queryByRole('group', { name: /Secondary holder/ })).not.toBeInTheDocument();
   },
 );

@@ -1,19 +1,37 @@
-/**
- * Official-form field kit.
- *
- * Shared inputs, labels, tier vocabulary, and paging constants for the customer-application and reservation-agreement editors.
- */
+/**
+
+ * Official-form field kit.
+
+ *
+
+ * Shared inputs, labels, tier vocabulary, and paging constants for the customer-application and reservation-agreement editors.
+
+ */
+
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { useId, useState } from 'react';
-import type { ApplicationHolder, Customer } from '@afhomes/contracts';
 import { useQuery } from '@tanstack/react-query';
-import { Combobox, type ComboboxOption } from '@afhomes/ui';
-import { getGenealogy } from '../genealogy/services';
-import { birthDateSchema } from '@afhomes/contracts';
+import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
+import {
+  birthDateSchema,
+  CIVIL_STATUS_OPTIONS,
+  CITIZENSHIP_OPTIONS,
+  SEX_OPTIONS,
+  SUFFIX_OPTIONS,
+  tinNumberSchema,
+} from '@afhomes/contracts';
+import type { ZodType } from 'zod';
+import { Select } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
-import { normalizeLiveHumanField } from '../../lib/normalize';
-import { GeographicAddressFields } from '../address/GeographicAddressFields';
-
+import {
+  filterHolderAddressInput,
+  filterHolderNameInput,
+  filterTinInput,
+  normalizeLiveHumanField,
+} from '../../lib/normalize';
+import { GeographicAddressFields } from '../address/GeographicAddressFields';
+import { getGenealogy } from '../genealogy/services';
+
 export const today = () => new Date().toISOString().slice(0, 10);
 export const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHolder => ({
   holderType,
@@ -75,28 +93,47 @@ export const VIP_TIER_FIELD_OPTIONS = [
 export const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' =>
   value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
 
+/** Live filter for contact numbers: strip letters outright. */
+export const filterContactInput = (value: string): string => value.replace(/\p{L}/gu, '');
+
+/**
+ * Reservation-holder live filter, mirroring the reservation server rules.
+ * Address stays UPPERCASE (server `upperAddress`); names preserve typing;
+ * TIN keeps digits/dashes; emails lowercase; contacts strip letters.
+ */
+export const filterReservationFieldInput = (key: string, value: string): string => {
+  if (key === 'address') return value.toUpperCase();
+  if (key === 'tinNumber') return filterTinInput(value);
+  if (key === 'email') return value.toLowerCase();
+  if (key === 'contactNumber') return filterContactInput(value);
+  return normalizeLiveHumanField(key, value);
+};
+
 export function Field({
   normalize,
   suggestName = false,
   optionalPhone = false,
+  validate = null,
+  validateMessage,
   label,
   value,
   onChange,
   type = 'text',
   required = false,
   placeholder,
-  readOnly = false,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
   optionalPhone?: boolean;
+  /** Extra contract check on top of the built-in kind detection (e.g. TIN). */
+  validate?: ZodType | null;
+  validateMessage?: string;
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
   placeholder?: string;
-  readOnly?: boolean;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -105,7 +142,7 @@ export function Field({
     suggestName || /^(?:first|last|middle|printed|primary|secondary) name$/i.test(label);
   // HumanInput owns contact/name errors; only date validation belongs here.
   // A required field left empty always explains itself, whatever its kind.
-  const validator = /birth date/i.test(label) ? birthDateSchema : null;
+  const validator = /birth date/i.test(label) ? birthDateSchema : validate;
   const empty = touched && required && value === '';
   const error =
     empty ||
@@ -114,7 +151,7 @@ export function Field({
     );
   const errorMessage = empty
     ? 'This field cannot be left empty.'
-    : 'Enter a valid past birth date.';
+    : (validateMessage ?? 'Enter a valid past birth date.');
   return (
     <label className={styles.filterLabel} htmlFor={id}>
       <span>{label}</span>
@@ -123,17 +160,24 @@ export function Field({
         landline={/landline/i.test(label)}
         normalize={normalize}
         suggestName={isName}
+        contractSchema={validate}
+        contractMessage={validateMessage}
         type={isPhone ? 'tel' : /email/i.test(label) ? 'email' : type}
         inputMode={isPhone ? 'tel' : undefined}
         value={value}
         placeholder={placeholder}
         required={required}
-        readOnly={readOnly}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
         onChange={(event) => {
           setTouched(true);
+          // Block letters in phone fields at keystroke, like HumanInput.
+          if (isPhone && /\p{L}/u.test(event.target.value)) return;
+          // Emails stay lowercase while typing.
+          if (/email/i.test(label) && event.target.value !== event.target.value.toLowerCase()) {
+            event.target.value = event.target.value.toLowerCase();
+          }
           onChange(event.target.value);
         }}
       />
@@ -145,6 +189,44 @@ export function Field({
     </label>
   );
 }
+
+/**
+ * A closed-choice field for the fixed pick-lists (Suffix, Sex, Citizenship,
+ * Civil status). A dropdown rather than a text box: the value is a closed set,
+ * so free typing could only ever produce a value the server refuses.
+ */
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  required?: boolean;
+}) {
+  return (
+    <label className={styles.filterLabel}>
+      <span>{label}</span>
+      <Select
+        aria-label={label}
+        value={value}
+        required={required}
+        onChange={(event) => onChange(event.target.value)}
+        options={options}
+      />
+    </label>
+  );
+}
+
+/** `Not specified` plus the fixed options as both value and label. */
+const choiceOptions = (values: readonly string[]) => [
+  { value: '', label: 'Not specified' },
+  ...values.map((value) => ({ value, label: value })),
+];
 
 export function DateField({
   label,
@@ -209,7 +291,7 @@ export function HolderFields({
           label="Last name"
           value={value.lastName}
           suggestName
-          normalize={(v) => normalizeLiveHumanField('lastName', v)}
+          normalize={filterHolderNameInput}
           onChange={(v) => set('lastName', v)}
           required
         />
@@ -217,7 +299,7 @@ export function HolderFields({
           label="First name"
           value={value.firstName}
           suggestName
-          normalize={(v) => normalizeLiveHumanField('firstName', v)}
+          normalize={filterHolderNameInput}
           onChange={(v) => set('firstName', v)}
           required
         />
@@ -225,14 +307,14 @@ export function HolderFields({
           label="Middle name"
           value={value.middleName ?? ''}
           suggestName
-          normalize={(v) => normalizeLiveHumanField('middleName', v)}
+          normalize={filterHolderNameInput}
           onChange={(v) => set('middleName', v)}
         />
-        <Field
+        <SelectField
           label="Suffix"
           value={value.suffix ?? ''}
-          normalize={(v) => normalizeLiveHumanField('suffix', v)}
           onChange={(v) => set('suffix', v)}
+          options={choiceOptions(SUFFIX_OPTIONS)}
         />
         <DateField
           label="Birth date"
@@ -240,41 +322,41 @@ export function HolderFields({
           onChange={(v) => set('birthDate', v)}
           required
         />
-        <Field
+        <SelectField
           label="Sex"
           value={value.sex ?? ''}
-          normalize={(v) => normalizeLiveHumanField('sex', v)}
           onChange={(v) => set('sex', v)}
+          options={choiceOptions(SEX_OPTIONS)}
         />
-        <Field
+        <SelectField
           label="Citizenship"
           value={value.citizenship ?? ''}
-          normalize={(v) => normalizeLiveHumanField('citizenship', v)}
           onChange={(v) => set('citizenship', v)}
+          options={choiceOptions(CITIZENSHIP_OPTIONS)}
         />
-        <Field
+        <SelectField
           label="Civil status"
           value={value.civilStatus ?? ''}
-          normalize={(v) => normalizeLiveHumanField('civilStatus', v)}
           onChange={(v) => set('civilStatus', v)}
+          options={choiceOptions(CIVIL_STATUS_OPTIONS)}
         />
         <Field
           label="Permanent address line 1"
           value={value.permanentAddressLine1}
-          normalize={(v) => normalizeLiveHumanField('permanentAddressLine1', v)}
+          normalize={filterHolderAddressInput}
           onChange={(v) => set('permanentAddressLine1', v)}
           required
         />
         <Field
           label="Permanent address line 2"
           value={value.permanentAddressLine2 ?? ''}
-          normalize={(v) => normalizeLiveHumanField('permanentAddressLine2', v)}
+          normalize={filterHolderAddressInput}
           onChange={(v) => set('permanentAddressLine2', v)}
         />
         {/*
           Province -> city/municipality -> barangay, verified against the official
-          PSGC hierarchy. Street lines above and postal code below stay plain text:
-          those are the person's own words, these three are the authority's.
+          PSGC hierarchy. Street lines above stay plain text: those are the
+          person's own words, these three are the authority's.
 
           A legacy record with free-text geography and no codes renders exactly as
           stored and is labelled unverified; nothing here invents a code for it.
@@ -284,12 +366,31 @@ export function HolderFields({
           value={value}
           onChange={(next) => onChange({ ...value, ...next })}
         />
-        <Field
-          label="Postal code"
-          value={value.postalCode ?? ''}
-          normalize={(v) => normalizeLiveHumanField('postalCode', v)}
-          onChange={(v) => set('postalCode', v)}
-        />
+        {/*
+          The postal code belongs to the chosen city / municipality, so it is
+          FILLED from the authority's own record and rendered read-only: there
+          is no typed path that could contradict the address. A legacy record
+          keeps its stored value; the server re-derives it on save whenever the
+          provider publishes one.
+        */}
+        <label className={styles.filterLabel} htmlFor={`${value.holderType}-postal-code`}>
+          <span>Postal code</span>
+          <input
+            id={`${value.holderType}-postal-code`}
+            type="text"
+            readOnly
+            aria-readonly="true"
+            aria-label="Postal code"
+            placeholder="Filled from the city / municipality"
+            value={value.postalCode ?? ''}
+            onFocus={(event) => event.currentTarget.select()}
+          />
+          {value.cityMunicipalityCode && !value.postalCode ? (
+            <small>No published code. Leave blank.</small>
+          ) : (
+            <small>Fills from the city selected.</small>
+          )}
+        </label>
         <Field
           label="Landline"
           optionalPhone
@@ -315,7 +416,9 @@ export function HolderFields({
         <Field
           label="TIN"
           value={value.tinNumber ?? ''}
-          normalize={(v) => normalizeLiveHumanField('tinNumber', v)}
+          normalize={filterTinInput}
+          validate={tinNumberSchema}
+          validateMessage="Use a 9-digit TIN, for example 123-456-789."
           onChange={(v) => set('tinNumber', v)}
         />
         <Field
@@ -346,7 +449,7 @@ export function HolderFields({
           label="Printed name"
           value={value.printedName}
           suggestName
-          normalize={(v) => normalizeLiveHumanField('printedName', v)}
+          normalize={filterHolderNameInput}
           onChange={(v) => set('printedName', v)}
           required
         />
@@ -375,314 +478,190 @@ export const APPLICATION_STATUS_TONES: Record<string, 'neutral' | 'info' | 'succ
  * Recommender fields with explicit human labels (never generated from keys),
  * so renaming a label cannot silently rename the payload field.
  */
-export interface HierarchySelection {
-  vdStaffId?: string;
-  ssmStaffId?: string;
-  smStaffId?: string;
-  referrerOstId?: string;
+export type ReferralChainIds = {
+  svdStaffId: string;
+  ssmStaffId: string;
+  smStaffId: string;
+  referrerStaffId: string;
+};
+
+const CHAIN_LEVELS = [
+  { key: 'svdStaffId', label: 'SVD', role: 'vice_director' },
+  { key: 'ssmStaffId', label: 'SSM', role: 'senior_sales_manager' },
+  { key: 'smStaffId', label: 'SM', role: 'sales_manager' },
+  { key: 'referrerStaffId', label: 'Referrer', role: 'ost' },
+] as const;
+
+/**
+ * Dropdown candidates for one chain level: active sellers of the level's
+ * role, limited to the selected upline's downline when one is chosen.
+ *
+ * Ancestry is walked from the genealogy's own upline links with a depth cap,
+ * so a cycle stops contributing rather than looping. Inactive staff can never
+ * be named; a missing upline means "no constraint", never "no options".
+ */
+export function chainOptions(
+  nodes: readonly GenealogyNode[],
+  role: string,
+  aboveStaffId: string | null,
+): GenealogyNode[] {
+  const pool = nodes.filter(
+    (node) =>
+      node.role === role &&
+      node.status === 'active' &&
+      (node.ostStatus === null || node.ostStatus === 'active'),
+  );
+  if (!aboveStaffId) return pool;
+  const parent = new Map(nodes.map((node) => [node.staffId, node.uplineStaffId]));
+  return pool.filter((node) => {
+    let current = parent.get(node.staffId) ?? null;
+    const seen = new Set([node.staffId]);
+    for (let depth = 0; depth < 8 && current && !seen.has(current); depth += 1) {
+      if (current === aboveStaffId) return true;
+      seen.add(current);
+      current = parent.get(current) ?? null;
+    }
+    return false;
+  });
 }
 
-export function HierarchyFields({
-  value,
-  fallbackSmName,
-  fallbackReferrerName,
+export function RecommenderFields({
+  meta,
+  chainNames,
   onChange,
-  disabled = false,
+  onChain,
 }: {
-  value: HierarchySelection;
-  /** Stored SM snapshot for records written before the selectors existed. */
-  fallbackSmName: string;
-  /** Stored referrer snapshot for records written before the selectors existed. */
-  fallbackReferrerName: string;
-  onChange: (next: HierarchySelection & { salesManagerName: string; vipReferrer: string }) => void;
-  disabled?: boolean;
+  meta: {
+    svdStaffId: string;
+    ssmStaffId: string;
+    smStaffId: string;
+    referrerStaffId: string;
+    vipRecommenderName: string;
+    recommenderContact: string;
+    recommenderEmail: string;
+    acknowledgedAt: string;
+  };
+  /** Snapshot names for selections the list no longer contains. */
+  chainNames: Record<string, string>;
+  onChange: (
+    key: 'vipRecommenderName' | 'recommenderContact' | 'recommenderEmail' | 'acknowledgedAt',
+    value: string,
+  ) => void;
+  onChain: (next: ReferralChainIds) => void;
 }) {
-  const [opened, setOpened] = useState(false);
-  const genealogy = useQuery({
-    queryKey: ['genealogy'],
+  // The Organization chain, read live: every dropdown names a real, active
+  // seller, and each level is limited to the chosen upline's downline. The
+  // browser never invents linkage - the server re-resolves every id and
+  // refuses a chain that disagrees with the genealogy.
+  const chain = useQuery({
+    queryKey: ['genealogy', 'referral-chain'],
     queryFn: getGenealogy,
-    // Like the address lists: fetch on first reach, not on page load.
-    enabled: opened || Boolean(value.vdStaffId ?? value.ssmStaffId ?? value.smStaffId),
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
-  const nodes = genealogy.data ?? [];
-  const active = (role: string, upline: string | null) =>
-    nodes
-      .filter(
-        (n) => n.role === role && n.status === 'active' && (n.uplineStaffId ?? null) === upline,
-      )
-      .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }));
-  const vdOptions = nodes
-    .filter((n) => n.role === 'vice_director' && n.status === 'active' && !n.uplineStaffId)
-    .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }));
-  const ssmOptions = value.vdStaffId ? active('senior_sales_manager', value.vdStaffId) : [];
-  const smOptions = value.ssmStaffId ? active('sales_manager', value.ssmStaffId) : [];
-  /**
-   * Referring OSTs: accredited only. `ostStatus` comes from the OST membership
-   * record itself, so only `active` is eligible - a pending or suspended OST
-   * cannot refer, and a seller without a membership row cannot satisfy the
-   * reference the server persists.
-   */
-  const ostOptions = value.smStaffId
-    ? nodes
-        .filter(
-          (n) =>
-            n.role === 'ost' &&
-            n.status === 'active' &&
-            n.ostStatus === 'active' &&
-            (n.uplineStaffId ?? null) === value.smStaffId,
-        )
-        .map((n): ComboboxOption => ({ code: n.staffId, name: n.fullName }))
-    : [];
-  const shownAs = (id: string | undefined, options: ComboboxOption[], legacyName: string) => {
-    const found = options.find((o) => o.code === id);
-    if (found) return found;
-    // A stored id the list does not recognise (inactive, moved, deleted) keeps
-    // its snapshot visible but unverified: empty code, never an invented id.
-    if (id) return { code: '', name: `${legacyName || 'Previously selected'} — reselect` };
-    if (legacyName && options.length === 0) return null;
+  const nodes = chain.data ?? [];
+  // The nearest selected level above each dropdown: gaps stay selectable, so
+  // an SM under an SVD with no SSM named still lists that SVD's downline.
+  const aboveFor = (index: number): string | null => {
+    if (index <= 0) return null;
+    for (let up = index - 1; up >= 0; up -= 1) {
+      const selected = meta[CHAIN_LEVELS[up]!.key];
+      if (selected) return selected;
+    }
     return null;
   };
-  const vdValue = shownAs(value.vdStaffId, vdOptions, '');
-  const ssmValue = shownAs(value.ssmStaffId, ssmOptions, '');
-  const smValue =
-    shownAs(value.smStaffId, smOptions, '') ??
-    (!value.smStaffId && fallbackSmName ? { code: '', name: fallbackSmName } : null);
-  const ostValue =
-    shownAs(value.referrerOstId, ostOptions, '') ??
-    (!value.referrerOstId && fallbackReferrerName
-      ? { code: '', name: fallbackReferrerName }
-      : null);
-  // The SM display name, resolved live: the stored snapshot is only a fallback
-  // for records whose member left the eligible list.
-  const smName = smOptions.find((o) => o.code === value.smStaffId)?.name ?? fallbackSmName;
-  const stale =
-    // Only once the list has loaded: while it is still fetching, every stored
-    // id is "unrecognised" and would flash a reselect warning for no reason.
-    genealogy.data !== undefined &&
-    ((value.vdStaffId && vdValue?.code === '') ||
-      (value.ssmStaffId && ssmValue?.code === '') ||
-      (value.smStaffId && smValue?.code === '') ||
-      (value.referrerOstId && ostValue?.code === ''));
-  const loadError = genealogy.isError ? 'Unable to load the sales hierarchy. Try again.' : null;
+  const optionsFor = (index: number) => {
+    const level = CHAIN_LEVELS[index]!;
+    const options = chainOptions(nodes, level.role, aboveFor(index)).map((node) => ({
+      value: node.staffId,
+      label: node.fullName,
+    }));
+    // A stored selection the list no longer contains (a departure, or a chain
+    // outside the viewer's own scope) stays visible and submittable; the
+    // server refuses it at write time if the staff is no longer eligible.
+    const selected = meta[level.key];
+    if (selected && !options.some((option) => option.value === selected))
+      options.unshift({
+        value: selected,
+        label: `${chainNames[selected] ?? 'Selected member'} (unavailable)`,
+      });
+    return [{ value: '', label: 'Not specified' }, ...options];
+  };
+  const setChain = (key: keyof ReferralChainIds, next: string) => {
+    const order: (keyof ReferralChainIds)[] = [
+      'svdStaffId',
+      'ssmStaffId',
+      'smStaffId',
+      'referrerStaffId',
+    ];
+    // A changed upline clears everything below it: a downline chosen under a
+    // different leader would otherwise silently disagree with the new one.
+    const cleared: Partial<ReferralChainIds> = {};
+    for (const later of order.slice(order.indexOf(key) + 1)) cleared[later] = '';
+    onChain({ ...pickChain(meta), [key]: next, ...cleared });
+  };
+  const fields = [
+    { key: 'vipRecommenderName', label: 'VIP Recommender Name', optionalPhone: false, name: true },
+    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true, name: false },
+    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false, name: false },
+    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false, name: false },
+  ] as const;
   return (
     <>
-      <Combobox
-        id="recommender-vd"
-        label="Vice Director"
-        disabled={disabled}
-        onOpen={() => setOpened(true)}
-        loadingLabel="Loading Vice Directors"
-        loading={genealogy.isFetching}
-        error={loadError}
-        onRetry={() => void genealogy.refetch()}
-        value={vdValue}
-        options={vdOptions}
-        placeholder="Search or select Vice Director"
-        emptyMessage="No eligible Vice Directors"
-        onSelect={(option) =>
-          onChange({
-            vdStaffId: option?.code || undefined,
-            ssmStaffId: undefined,
-            smStaffId: undefined,
-            referrerOstId: undefined,
-            salesManagerName: '',
-            vipReferrer: '',
-          })
-        }
-      />
-      <Combobox
-        id="recommender-ssm"
-        label="Senior Sales Manager"
-        disabled={disabled || !value.vdStaffId}
-        disabledHint="Select a Vice Director first"
-        loading={genealogy.isFetching}
-        loadingLabel="Loading Senior Sales Managers"
-        error={loadError}
-        onRetry={() => void genealogy.refetch()}
-        value={ssmValue}
-        options={ssmOptions}
-        placeholder="Search or select SSM"
-        emptyMessage={
-          value.vdStaffId ? 'This Vice Director has no Senior Sales Manager' : undefined
-        }
-        onSelect={(option) =>
-          onChange({
-            vdStaffId: value.vdStaffId,
-            ssmStaffId: option?.code || undefined,
-            smStaffId: undefined,
-            referrerOstId: undefined,
-            salesManagerName: '',
-            vipReferrer: '',
-          })
-        }
-      />
-      <Combobox
-        id="recommender-sm"
-        label="Sales Manager"
-        disabled={disabled || !value.ssmStaffId}
-        disabledHint="Select a Senior Sales Manager first"
-        loading={genealogy.isFetching}
-        loadingLabel="Loading Sales Managers"
-        error={loadError}
-        onRetry={() => void genealogy.refetch()}
-        value={smValue}
-        options={smOptions}
-        placeholder="Search or select SM"
-        emptyMessage={
-          value.ssmStaffId ? 'This Senior Sales Manager has no Sales Manager' : undefined
-        }
-        onSelect={(option) =>
-          onChange({
-            vdStaffId: value.vdStaffId,
-            ssmStaffId: value.ssmStaffId,
-            smStaffId: option?.code || undefined,
-            referrerOstId: undefined,
-            salesManagerName: option?.name ?? '',
-            vipReferrer: '',
-          })
-        }
-      />
-      <Combobox
-        id="recommender-ost"
-        label="Referring OST"
-        disabled={disabled || !value.smStaffId}
-        disabledHint="Select a Sales Manager first"
-        loading={genealogy.isFetching}
-        loadingLabel="Loading OST referrers"
-        error={loadError}
-        onRetry={() => void genealogy.refetch()}
-        value={ostValue}
-        options={ostOptions}
-        placeholder="Search or select OST referrer"
-        emptyMessage={value.smStaffId ? 'This Sales Manager has no OST' : undefined}
-        onSelect={(option) =>
-          onChange({
-            vdStaffId: value.vdStaffId,
-            ssmStaffId: value.ssmStaffId,
-            smStaffId: value.smStaffId,
-            referrerOstId: option?.code || undefined,
-            salesManagerName: smName,
-            vipReferrer: option?.name ?? '',
-          })
-        }
-      />
-      {stale && !disabled ? (
-        <p role="status">
-          A previously selected member is no longer eligible. Choose again from the list.
-        </p>
-      ) : null}
+      <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
+        <p className={styles.subGroupTitle}>Organization chain (staff linkage)</p>
+        <p className={styles.hint}>Referrer must be active OST staff.</p>
+      </div>
+      {CHAIN_LEVELS.map((level, index) => (
+        <label key={level.key} className={styles.filterLabel}>
+          <span>{level.label}</span>
+          <Select
+            aria-label={level.label}
+            value={meta[level.key]}
+            disabled={chain.isPending}
+            onChange={(event) => setChain(level.key, event.target.value)}
+            options={optionsFor(index)}
+          />
+        </label>
+      ))}
+      {chain.isError ? <p role="status">Chain list unavailable. Retry.</p> : null}
+      <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
+        <p className={styles.subGroupTitle}>VIP recommender (free text)</p>
+        <p className={styles.hint}>Name, contact and email are typed.</p>
+      </div>
+      {fields.map(({ key, label, optionalPhone, name }) => (
+        <Field
+          key={key}
+          label={label}
+          value={meta[key]}
+          type={key === 'acknowledgedAt' ? 'date' : 'text'}
+          normalize={
+            key === 'recommenderEmail'
+              ? (v) => v.toLowerCase()
+              : name
+                ? filterHolderNameInput
+                : (v) => normalizeLiveHumanField(key, v)
+          }
+          optionalPhone={optionalPhone}
+          onChange={(v) => onChange(key, v)}
+        />
+      ))}
     </>
   );
-}
-
-/**
- * VIP recommender lookup from the existing customer directory.
- *
- * Selecting a record copies its authoritative phone and email into the
- * snapshots; clearing the selection clears what was copied. The snapshots stay
- * editable only while no record is linked (legacy free-text entries); a linked
- * record's contact details are read-only here and corrected on the customer
- * record, never by overwriting this form. Nothing is invented when the record
- * has no contact on file.
- */
-export interface RecommenderSelection {
-  recommenderCustomerId?: string;
-  vipRecommenderName: string;
-  recommenderContact: string;
-  recommenderEmail: string;
 }
 
-export function VipRecommenderFields({
-  value,
-  customers,
-  customersLoading,
-  customersError,
-  onRetryCustomers,
-  onChange,
-  disabled = false,
-  onSearch,}: {
-  value: RecommenderSelection;
-  customers: Customer[];
-  customersLoading: boolean;
-  customersError: string | null;
-  onRetryCustomers: () => void;
-  onChange: (next: RecommenderSelection) => void;
-  disabled?: boolean;
-  onSearch?: (query: string) => void;}) {
-  const options: ComboboxOption[] = customers.map((c) => ({
-    code: c.id,
-    name: c.fullName,
-    // The number is part of the answer: duplicate names stay distinguishable
-    // to assistive tech through the option's accessible name.
-    type: c.customerNumber,
-  }));
-  const selected = customers.find((c) => c.id === value.recommenderCustomerId) ?? null;
-  const comboboxValue: ComboboxOption | null = selected
-    ? { code: selected.id, name: selected.fullName }
-    : value.vipRecommenderName
-      ? { code: '', name: value.vipRecommenderName }
-      : null;
-  const linked = Boolean(selected);
-  return (
-    <>
-      <Combobox
-        id="vip-recommender"
-        label="VIP Recommender Name"
-        onSearch={onSearch}        onOpen={() => onSearch?.('')}        disabled={disabled}
-        loading={customersLoading}
-        loadingLabel="Loading recommenders"
-        error={customersError}
-        onRetry={onRetryCustomers}
-        value={comboboxValue}
-        options={options}
-        placeholder="Search recommender by name"
-        emptyMessage="No matching recommender"
-        onSelect={(option) => {
-          if (!option || !option.code) {
-            onChange({
-              recommenderCustomerId: undefined,
-              vipRecommenderName: '',
-              recommenderContact: '',
-              recommenderEmail: '',
-            });
-            return;
-          }
-          const customer = customers.find((c) => c.id === option.code);
-          if (!customer) return;
-          onChange({
-            recommenderCustomerId: customer.id,
-            vipRecommenderName: customer.fullName,
-            recommenderContact: customer.phone ?? '',
-            recommenderEmail: customer.email ?? '',
-          });
-        }}
-      />
-      {comboboxValue && !linked && !disabled ? (
-        <p role="status">
-          Historical entry, not linked to a record. Search and select the recommender to link it.
-        </p>
-      ) : null}
-      <Field
-        label="Recommender Contact"
-        value={value.recommenderContact}
-        optionalPhone
-        normalize={(v) => normalizeLiveHumanField('recommenderContact', v)}
-        onChange={(v) =>
-          onChange({ ...value, recommenderContact: v, recommenderCustomerId: undefined })
-        }
-        readOnly={linked}
-        placeholder={linked && !value.recommenderContact ? 'No contact on record' : undefined}
-      />
-      <Field
-        label="Recommender Email"
-        value={value.recommenderEmail}
-        normalize={(v) => normalizeLiveHumanField('recommenderEmail', v)}
-        onChange={(v) =>
-          onChange({ ...value, recommenderEmail: v, recommenderCustomerId: undefined })
-        }
-        readOnly={linked}
-        placeholder={linked && !value.recommenderEmail ? 'No email on record' : undefined}
-      />
-    </>
-  );
+/** The four chain ids out of a meta object. */
+function pickChain(meta: {
+  svdStaffId: string;
+  ssmStaffId: string;
+  smStaffId: string;
+  referrerStaffId: string;
+}): ReferralChainIds {
+  return {
+    svdStaffId: meta.svdStaffId,
+    ssmStaffId: meta.ssmStaffId,
+    smStaffId: meta.smStaffId,
+    referrerStaffId: meta.referrerStaffId,
+  };
 }

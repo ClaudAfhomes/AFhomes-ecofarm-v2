@@ -25,9 +25,9 @@ import {
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import { useSession } from '../../lib/session';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
-import { normalizeLiveHumanField } from '../../lib/normalize';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
@@ -37,12 +37,12 @@ import {
   Alert,
   Button,
   DateField,
+  Dialog,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
   DetailField,
   DetailFieldGrid,
-  Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -54,19 +54,17 @@ import {
   StatusChip,
   TextAreaField,
 } from '@afhomes/ui';
+import { TierBadge } from './TierBadge';
+import { tierArtwork } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   ACCEPTED_MIME,
   MAX_BYTES,
-  getDocumentAccessUrl,
-  getDocuments,
   getCurrentDocument,
   completeDocumentUpload,
-  confirmDocument,
   putUploadBytes,
   requestUploadGrant,
-  runDocumentOcr,
 } from '../documents/services';
 import {
   createCustomerApplication,
@@ -78,10 +76,8 @@ import {
   getCustomerApplicationsPage,
   getCustomerById,
   getCustomersPage,
-  getOfficialFormTemplate,
   getPurchaseTermsProposal,
   getReservationAgreements,
-  previewOfficialFormImport,
   reopenCustomerApplication,
   reviewApplicationPurchaseTerms,
   submitCustomerApplication,
@@ -91,18 +87,23 @@ import {
 import {
   today,
   emptyHolder,
-  asBase64,
   HolderFields,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
-  HierarchyFields,
-  VipRecommenderFields,
-  Field,
-  type HierarchySelection,
+  RecommenderFields,
+  formatFileSize,
 } from './official-forms-fields';
 
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
+  const { user } = useSession();
+  // Bulk membership import/export lives here now (membership work), gated on
+  // its own module like the direct URL guard in navigation.ts. The server
+  // re-checks regardless.
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
+    ) === true;
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
@@ -196,9 +197,19 @@ export function CustomerApplicationsPage() {
         title="Customer Applications"
         description="Applications still needing application work."
         actions={
-          <Button onClick={() => navigate('/admin/customers/applications/new')}>
-            New application
-          </Button>
+          <>
+            {canSeeImportExport ? (
+              <Button
+                variant="secondary"
+                onClick={() => navigate('/admin/customers/applications/import-export')}
+              >
+                Import/Export Data
+              </Button>
+            ) : null}
+            <Button onClick={() => navigate('/admin/customers/applications/new')}>
+              New application
+            </Button>
+          </>
         }
       />
       <FilterBar
@@ -416,6 +427,7 @@ function describeApplicationLoadError(error: unknown): string | undefined {
  * server-side rather than merely hidden here.
  */
 function PurchaseWorkflowPanel({ application }: { application: CustomerApplication }) {
+  const navigate = useNavigate();
   const reservations = useQuery({
     queryKey: applicationKeys.reservations(application.id),
     queryFn: () => getReservationAgreements({ application: application.id }),
@@ -434,76 +446,86 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
     { label: 'Application submitted', done: status !== 'draft', current: status === 'draft' },
     { label: 'Application approved', done: approved, current: status === 'submitted' },
     {
-      label: 'Reservation agreement created',
+      label: 'Reservation created',
       done: hasReservation,
       current: status === 'approved' && !hasReservation,
     },
     { label: 'Payment processing', done: finalized, current: hasReservation && !finalized },
     { label: 'Activation', done: false, current: finalized },
-    { label: 'Commission qualification', done: false, current: false },
+    { label: 'Commission', done: false, current: false },
   ];
 
   const next = !hasReservation
     ? status === 'approved'
       ? {
-          label: 'Create Reservation Agreement',
-          detail: 'This application is approved and has no reservation yet.',
+          label: 'Create Reservation',
+          detail: 'No reservation exists yet.',
           to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
         }
       : status === 'submitted'
         ? {
-            label: 'Review Purchase Terms',
-            detail: 'Review the server proposal below, then approve or reject.',
+            label: 'Review terms',
+            detail: 'Review the offer, then decide.',
             to: null,
           }
         : {
-            label: 'Continue Application',
-            detail: 'Complete the draft and submit it for review.',
+            label: 'Continue draft',
+            detail: 'Complete the draft and submit.',
             to: null,
           }
     : finalized
       ? {
-          label: 'Continue to Activation',
-          detail: `Purchase finalized as sale ${reservation!.saleId}.`,
+          label: 'Continue Activation',
+          detail: `Sale ${reservation!.saleId} is finalized.`,
           to: '/admin/finance/activation',
         }
       : executed
         ? {
             label: 'Continue Payment',
-            detail: 'The executed agreement is collectable in the Finance queue.',
+            detail: 'Collect payment in Finance.',
             to: '/admin/finance/payments',
           }
         : {
             label: 'Open Reservation',
-            detail: 'The agreement still needs review and execution.',
+            detail: 'Agreement needs execution.',
             to: `/admin/sales/reservations/${reservation!.id}`,
           };
+  const nextTarget = next.to;
 
   return (
-    <section aria-label="Purchase workflow">
-      <h2>Purchase workflow</h2>
-      <ol>
+    <section aria-label="Purchase workflow" className={styles.panel}>
+      <h2 className={styles.panelTitle}>Purchase workflow</h2>
+      <ol className={styles.workflowSteps}>
         {steps.map((step) => (
-          <li key={step.label}>
-            {step.done ? '✓' : step.current ? '→' : '○'} {step.label}
+          <li
+            key={step.label}
+            className={styles.workflowStep}
+            data-state={step.done ? 'done' : step.current ? 'current' : 'pending'}
+          >
+            <span className={styles.workflowMark} aria-hidden="true">
+              {step.done ? '✓' : step.current ? '→' : '○'}
+            </span>{' '}
+            {step.label}
             {step.current ? ' (current)' : ''}
           </li>
         ))}
       </ol>
-      <h3>Next step</h3>
-      <p>{next.detail}</p>
-      {next.to ? (
-        <p>
-          <Link to={next.to}>{next.label}</Link>
-        </p>
-      ) : (
-        <p>{next.label}</p>
-      )}
-      {finalized ? (
-        <p>
-          <Link to="/admin/finance/commissions">Open Commissions</Link> for qualification decisions.
-        </p>
-      ) : null}
+      <div className={styles.workflowNext}>
+        <h3>Next step</h3>
+        <p className={styles.hint}>{next.detail}</p>
+        <div className={styles.actions}>
+          {nextTarget ? (
+            <Button onClick={() => navigate(nextTarget)}>{next.label}</Button>
+          ) : (
+            <span className={styles.note}>{next.label}</span>
+          )}
+          {finalized ? (
+            <Button variant="secondary" onClick={() => navigate('/admin/finance/commissions')}>
+              Open Commissions
+            </Button>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -543,54 +565,80 @@ export function CustomerApplicationEditorPage() {
   const [primary, setPrimary] = useState(() => emptyHolder('PRIMARY'));
   const [secondary, setSecondary] = useState<ApplicationHolder | null>(null);
   const [meta, setMeta] = useState({
-    salesManagerName: '',
+    svdStaffId: '',
+    ssmStaffId: '',
+    smStaffId: '',
+    referrerStaffId: '',
     vipRecommenderName: '',
     recommenderContact: '',
     recommenderEmail: '',
-    vipReferrer: '',
     acknowledgedAt: today(),
   });
-  // Stable hierarchy + recommender references. The names above stay the document
-  // snapshots; these ids are the validated relationships the server checks.
-  const [hierarchy, setHierarchy] = useState<HierarchySelection>({});
-  const [recommenderCustomerId, setRecommenderCustomerId] = useState<string | undefined>(undefined);
   const [channels, setChannels] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
   const [validId, setValidId] = useState(false);
   const [paymentProof, setPaymentProof] = useState(false);
   const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
-  const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [idFile, setIdFile] = useState<File | null>(null);
   // Local thumbnail for the not-yet-uploaded selection. Object URLs never hit
   // the network. Derived during render (no setState-in-effect); a cleanup-only
   // effect revokes the URL the moment the selection changes or the component
   // unmounts. Runtimes without createObjectURL simply get no thumbnail.
-  const ocrPreviewUrl = useMemo(() => {
-    if (!ocrFile || !ocrFile.type.startsWith('image/')) return null;
+  const idPreviewUrl = useMemo(() => {
+    if (!idFile || !idFile.type.startsWith('image/')) return null;
     try {
-      return URL.createObjectURL(ocrFile);
+      return URL.createObjectURL(idFile);
     } catch {
       return null;
     }
-  }, [ocrFile]);
+  }, [idFile]);
   useEffect(() => {
     return () => {
-      if (ocrPreviewUrl) {
+      if (idPreviewUrl) {
         try {
-          URL.revokeObjectURL(ocrPreviewUrl);
+          URL.revokeObjectURL(idPreviewUrl);
         } catch {
           // Test environments without object URLs have nothing to revoke.
         }
       }
     };
-  }, [ocrPreviewUrl]);
+  }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  // Steps unlock only by moving forward. Going back is always free; jumping
+  // ahead never is, so an operator cannot skip a step's own checks. Existing
+  // records open unlocked: their data was entered before, or the form below
+  // is read-only review anyway.
+  const [maxReached, setMaxReached] = useState(() => (id ? 5 : 0));
+  // The wizard guides NEW applications step by step. Existing records keep
+  // the full page: reviewers need every section and decision button at once.
+  const isNew = !id;
+  const uploadPendingId = useCallback(
+    async (targetCustomerId: string, file: File, type: string) => {
+      const mime = ACCEPTED_MIME.find((value) => value === file.type);
+      if (!mime || !file.size || file.size > MAX_BYTES)
+        throw new Error('Choose JPEG, PNG or PDF up to 10 MiB.');
+      if (!targetCustomerId) throw new Error('Select a customer first.');
+      if (!type) throw new Error('Choose ID type first.');
+      const grant = await requestUploadGrant({
+        idType: governmentIdTypeSchema.parse(type),
+        subjectType: 'customer',
+        subjectId: targetCustomerId,
+        mime,
+        sizeBytes: file.size,
+        originalFilename: file.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, file);
+      const document = await completeDocumentUpload(grant.documentId);
+      if (!document.hasFile) throw new Error('Upload verification is still pending.');
+      return { documentId: grant.documentId, filename: file.name };
+    },
+    [],
+  );
   const runSave = useSingleFlight<Awaited<ReturnType<typeof createCustomerApplication>>>();
   const applicationRequest = useMutationRequest();
   const [pickerVersion, setPickerVersion] = useState(0);
-  const [idPreview, setIdPreview] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const xlsxInput = useRef<HTMLInputElement>(null);
-  const [chosenXlsx, setChosenXlsx] = useState<string | null>(null);
   // Customer dropdown: one bounded page (the server max), so every option is
   // reachable without loading an unbounded directory into the control. The
   // chosen record resolves to a display name through the same single-customer
@@ -599,26 +647,6 @@ export function CustomerApplicationEditorPage() {
     queryKey: applicationKeys.picker,
     queryFn: () => getCustomersPage({ limit: 200, offset: 0 }),
   });
-  const [recommenderSearch, setRecommenderSearch] = useState('');
-  const settledRecommenderSearch = useDebouncedValue(recommenderSearch, 300);
-  const recommenderOptions = useQuery({
-    queryKey: ['business', 'customers', 'recommender', settledRecommenderSearch],
-    queryFn: () =>
-      getCustomersPage({
-        search: settledRecommenderSearch.trim() || undefined,
-        limit: 50,
-        offset: 0,
-      }),
-  });
-  const linkedRecommender = useQuery({
-    queryKey: businessKeys.customer(recommenderCustomerId ?? ''),
-    queryFn: () => getCustomerById(recommenderCustomerId ?? ''),
-    enabled: Boolean(recommenderCustomerId),
-  });
-  const recommenders = [...(recommenderOptions.data?.data ?? [])];
-  const chosenRecommender = linkedRecommender.data;
-  if (chosenRecommender && !recommenders.some((customer) => customer.id === chosenRecommender.id))
-    recommenders.push(chosenRecommender);
   const linkedCustomer = useQuery({
     queryKey: businessKeys.customer(customerId),
     queryFn: () => getCustomerById(customerId),
@@ -626,17 +654,10 @@ export function CustomerApplicationEditorPage() {
   });
   const pickCustomer = (next: string) => {
     setCustomerId(next);
-    setOcrFile(null);
+    setIdFile(null);
     setPickerVersion((version) => version + 1);
-    setIdPreview(null);
     setValidId(false);
   };
-  const documents = useQuery({
-    queryKey: sharedScopes.documentsCustomer(customerId),
-    queryFn: () => getDocuments({ subjectType: 'customer', subjectId: customerId }),
-    enabled: Boolean(customerId),
-    retry: false,
-  });
   const currentDocument = useQuery({
     queryKey: sharedScopes.documentsCurrentCustomer(customerId),
     queryFn: () => getCurrentDocument({ subjectType: 'customer', subjectId: customerId }),
@@ -650,46 +671,6 @@ export function CustomerApplicationEditorPage() {
     currentDocument.data.verificationStatus !== 'rejected'
       ? currentDocument.data
       : null;
-  const uploadId = useBusinessMutation({
-    mutationFn: async (pendingDocumentId?: string) => {
-      if (pendingDocumentId) {
-        const document = await completeDocumentUpload(pendingDocumentId);
-        if (!document.hasFile) throw new Error('Upload is still incomplete.');
-        return { documentId: document.id, filename: document.originalFilename };
-      }
-      if (!ocrFile || !customerId) throw new Error('Select a customer and ID file first.');
-      const mime = ACCEPTED_MIME.find((value) => value === ocrFile.type);
-      if (!mime || !ocrFile.size || ocrFile.size > MAX_BYTES)
-        throw new Error('Choose a non-empty JPEG, PNG or PDF up to 10 MiB.');
-      const grant = await requestUploadGrant({
-        idType: governmentIdTypeSchema.parse(idType),
-        subjectType: 'customer',
-        subjectId: customerId,
-        mime,
-        sizeBytes: ocrFile.size,
-        originalFilename: ocrFile.name.slice(0, 255),
-      });
-      await putUploadBytes(grant.uploadUrl, ocrFile);
-      const document = await completeDocumentUpload(grant.documentId);
-      if (!document.hasFile) throw new Error('Upload verification is still pending.');
-      return { documentId: grant.documentId, filename: ocrFile.name };
-    },
-    onSuccess: async () => {
-      setOcrFile(null);
-      setPickerVersion((version) => version + 1);
-      setIdPreview(null);
-      setValidId(true);
-      setMessage('Valid ID uploaded privately. Review before submitting.');
-      // Wait for subject-wide authority; never promote a completion locally.
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Upload failed.'),
-  });
-  const previewId = useBusinessMutation({
-    mutationFn: (documentId: string) => getDocumentAccessUrl(documentId),
-    onSuccess: (grant) => setIdPreview(grant.url),
-    onError: () => setMessage('ID preview unavailable. Try again.'),
-  });
   const optionalPhonesValid =
     [meta.recommenderContact].every(
       (value) => optionalContactNumberSchema.safeParse(value).success,
@@ -699,36 +680,26 @@ export function CustomerApplicationEditorPage() {
     );
   // WHY THIS IS A LIST AND NOT A `disabled` EXPRESSION.
   //
-  // Submit used to be disabled by a silent nine-term `||`. The reported symptom
-  // was "Submit cannot be clicked", and that grey button was the entire visible
-  // explanation. Two of the terms were traps a user could not reason about: any
-  // replacement ID photo stages `ocrFile`, which greys Submit until "Detect
-  // fields" is pressed; and the ID-type gate needs a confirmed document. Neither
-  // was stated anywhere on screen.
+  // Save-and-submit used to be a silent multi-term `||` plus a separate
+  // "Submit" button. The reported symptom was "Submit cannot be clicked", and
+  // that grey button was the entire visible explanation.
   //
   // A disabled control is also unfocusable, so a keyboard or screen-reader user
   // is not merely uninformed - the button does not exist for them at all.
   //
-  // Same conditions, one derived list, rendered next to the button. Blocking is
-  // unchanged; only the silence is removed. Transient states (a mutation in
-  // flight) are deliberately NOT blockers - they are not something to fix.
-  //
-  // Save mirrors the submit pattern: the same contact/field checks that used
-  // to grey the button silently now read as an inline list in both modes.
-  const saveBlockers: string[] = [];
-  if (!optionalPhonesValid)
-    saveBlockers.push('Correct the recommender contact or landline number.');
-  if (Object.values(invalidFields).some(Boolean))
-    saveBlockers.push('Correct the highlighted fields.');
-  const submitBlockers: string[] = [];
-  if (!consent) submitBlockers.push('Certification and consent must be ticked.');
-  if (!serverCurrentDocument?.reviewedFields?.idType)
-    submitBlockers.push('Record the ID type on the uploaded identity document.');
-  if (ocrFile) submitBlockers.push('Run "Detect fields" to upload the selected ID photo.');
-  if (!optionalPhonesValid)
-    submitBlockers.push('Correct the recommender contact or landline number.');
-  if (Object.values(invalidFields).some(Boolean))
-    submitBlockers.push('Correct the highlighted fields.');
+  // One derived list, rendered next to the button: every condition that blocks
+  // the single save-and-submit action. Transient states (a mutation in flight)
+  // are deliberately NOT blockers - they are not something to fix.
+  const blockers: string[] = [];
+  if (!planId) blockers.push('Select a VIP plan.');
+  if (!consent) blockers.push('Certification and consent must be ticked.');
+  // A picked file uploads on Save, so it satisfies the gate.
+  if (!serverCurrentDocument?.reviewedFields?.idType && !idFile)
+    blockers.push('Upload a valid ID and choose its ID type.');
+  if (idFile && !idType) blockers.push('Choose ID type first.');
+  if (idFile && !customerId && id) blockers.push('Select a customer first.');
+  if (!optionalPhonesValid) blockers.push('Correct the recommender contact or landline number.');
+  if (Object.values(invalidFields).some(Boolean)) blockers.push('Correct the highlighted fields.');
   useEffect(() => {
     const app = existing.data;
     if (!app) return;
@@ -740,20 +711,15 @@ export function CustomerApplicationEditorPage() {
       setPrimary(app.primary);
       setSecondary(app.secondary ?? null);
       setMeta({
-        salesManagerName: app.salesManagerName ?? '',
+        svdStaffId: app.svdStaffId ?? '',
+        ssmStaffId: app.ssmStaffId ?? '',
+        smStaffId: app.smStaffId ?? '',
+        referrerStaffId: app.referrerStaffId ?? '',
         vipRecommenderName: app.vipRecommenderName ?? '',
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
-        vipReferrer: app.vipReferrer ?? '',
         acknowledgedAt: app.acknowledgedAt,
       });
-      setHierarchy({
-        vdStaffId: app.vdStaffId ?? undefined,
-        ssmStaffId: app.ssmStaffId ?? undefined,
-        smStaffId: app.smStaffId ?? undefined,
-        referrerOstId: app.referrerOstId ?? undefined,
-      });
-      setRecommenderCustomerId(app.recommenderCustomerId ?? undefined);
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);
       setValidId(app.validIdReceived);
@@ -770,13 +736,6 @@ export function CustomerApplicationEditorPage() {
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
     ...meta,
-    // Stable references ride with the snapshots. Absent on legacy records and
-    // simply omitted there; the snapshots keep those readable and printable.
-    ...(hierarchy.vdStaffId ? { vdStaffId: hierarchy.vdStaffId } : {}),
-    ...(hierarchy.ssmStaffId ? { ssmStaffId: hierarchy.ssmStaffId } : {}),
-    ...(hierarchy.smStaffId ? { smStaffId: hierarchy.smStaffId } : {}),
-    ...(hierarchy.referrerOstId ? { referrerOstId: hierarchy.referrerOstId } : {}),
-    ...(recommenderCustomerId ? { recommenderCustomerId } : {}),
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
     )[],
@@ -786,168 +745,113 @@ export function CustomerApplicationEditorPage() {
     validIdReceived: validId,
     reservationPaymentProofReceived: paymentProof,
   });
-  const save = useBusinessMutation({
+  // ONE action: save and submit. There is no draft-only save - a new
+  // application is created (or an existing draft updated) and then immediately
+  // submitted with the server's own purchase-terms hash, so a lost response
+  // retries the transition instead of editing a submitted record.
+  const saveAndSubmit = useBusinessMutation({
     mutationFn: () =>
       runSave(async () => {
-        if (!planId) {
-          document.querySelector<HTMLInputElement>('input[aria-label="Customer"]')?.focus();
-          throw new Error('Select a VIP plan before saving the registration application.');
-        }
+        if (!planId) throw new Error('Select a VIP plan before saving the application.');
+
+        let appId: string;
         if (!id && !customerId) {
+          // New Register carries NO customerId by design, so parsing against
+          // the create contract here would reject the payload for the very
+          // field this path deliberately leaves empty. The register contract
+          // (customerId omitted, registerNewCustomer true) is the one this
+          // path must satisfy.
           const registration = registerCustomerApplicationSchema.safeParse({
             ...payload(),
             registerNewCustomer: true,
           });
           if (!registration.success)
             throw new Error(humanizeApplicationIssues(registration.error.issues));
-          return registerCustomerApplication({
+          if (!registration.data.consentAcknowledged)
+            throw new Error('Certification and consent are required.');
+          const created = await registerCustomerApplication({
             ...registration.data,
             requestId: applicationRequest.forPayload(registration.data),
           });
-        }
-        const checked = createCustomerApplicationSchema.safeParse(payload());
-        if (!checked.success) {
-          document
-            .querySelector<HTMLInputElement>(
-              '[aria-invalid="true"], input[required]:invalid, select[required]:invalid',
-            )
-            ?.focus();
-          throw new Error(humanizeApplicationIssues(checked.error.issues));
-        }
-        return id
-          ? updateCustomerApplication(id, checked.data)
-          : createCustomerApplication({
-              ...checked.data,
-              requestId: applicationRequest.forPayload(checked.data),
+          appId = created.id;
+          // New customer now exists: upload the picked ID on Save.
+          if (idFile) {
+            if (!idType) throw new Error('Choose ID type first.');
+            await uploadPendingId(created.customerId, idFile, idType);
+            setIdFile(null);
+            setPickerVersion((version) => version + 1);
+            setValidId(true);
+            setCustomerId(created.customerId);
+            await currentDocument.refetch();
+          }
+        } else {
+          const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
+          if (!checkedForSubmit.success)
+            throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
+          if (!checkedForSubmit.data.consentAcknowledged)
+            throw new Error('Certification and consent are required.');
+
+          if (id) {
+            const latest = await getCustomerApplication(id);
+            if (latest.status === 'submitted') {
+              // A lost Submit response must retry the transition, not edit a
+              // submitted record.
+              const offer = await getPurchaseTermsProposal(id);
+              return submitCustomerApplication(id, {
+                requestId: applicationRequest.forPayload({
+                  applicationId: id,
+                  expectedProposalHash: offer.expectedProposalHash,
+                }),
+                expectedProposalHash: offer.expectedProposalHash,
+              });
+            }
+            // Upload the picked ID on Save before updating the draft.
+            if (idFile) {
+              await uploadPendingId(customerId || latest.customerId, idFile, idType);
+              setIdFile(null);
+              setPickerVersion((version) => version + 1);
+              setValidId(true);
+              await currentDocument.refetch();
+            }
+            await updateCustomerApplication(id, checkedForSubmit.data);
+            appId = id;
+          } else {
+            // Upload the picked ID on Save before creating the application.
+            if (idFile) {
+              await uploadPendingId(customerId, idFile, idType);
+              setIdFile(null);
+              setPickerVersion((version) => version + 1);
+              setValidId(true);
+              await currentDocument.refetch();
+            }
+            const created = await createCustomerApplication({
+              ...checkedForSubmit.data,
+              requestId: applicationRequest.forPayload(checkedForSubmit.data),
             });
+            appId = created.id;
+          }
+        }
+
+        // The hash is fetched fresh so it is always the offer the server holds
+        // at this instant. A stale offer is refused server-side.
+        const offer = await getPurchaseTermsProposal(appId);
+        return submitCustomerApplication(appId, {
+          requestId: applicationRequest.forPayload({
+            applicationId: appId,
+            expectedProposalHash: offer.expectedProposalHash,
+          }),
+          expectedProposalHash: offer.expectedProposalHash,
+        });
       }),
     onSuccess: (app) => {
-      notifySuccess({ title: 'Success', message: 'Application saved as draft.' });
-      applicationRequest.complete();
-      void client.invalidateQueries({ queryKey: applicationKeys.scope });
-      if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
-    },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
-  });
-  const submit = useBusinessMutation({
-    mutationFn: async () => {
-      const checked = createCustomerApplicationSchema.safeParse(payload());
-      if (!checked.success) throw new Error(humanizeApplicationIssues(checked.error.issues));
-      if (!checked.data.consentAcknowledged)
-        throw new Error('Certification and consent are required.');
-      // A lost Submit response must retry the transition, not edit a submitted record.
-      const latest = await getCustomerApplication(id!);
-      // The hash is fetched with the submit so it is always the offer the server
-      // holds at this instant. A stale displayed offer is refused by the server.
-      const offer = proposal.data;
-      if (!offer) throw new Error('Load the purchase terms offer before confirming.');
-      const confirmation = {
-        requestId: applicationRequest.forPayload({
-          applicationId: id,
-          expectedProposalHash: offer.expectedProposalHash,
-        }),
-        expectedProposalHash: offer.expectedProposalHash,
-      };
-      if (latest.status === 'submitted') return submitCustomerApplication(id!, confirmation);
-      await updateCustomerApplication(id!, checked.data);
-      return submitCustomerApplication(id!, confirmation);
-    },
-    onSuccess: () => {
       notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
     },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Submit failed.'),
-  });
-  const importFile = async (file: File) => {
-    const preview = await previewOfficialFormImport('customer_application', await asBase64(file));
-    if (preview.errors.length) {
-      setMessage(preview.errors.map((e) => `${e.field}: ${e.message}`).join('; '));
-      return;
-    }
-    const f = preview.fields;
-    setPrimary({
-      ...primary,
-      lastName: f.primary_last_name ?? '',
-      firstName: f.primary_first_name ?? '',
-      middleName: f.primary_middle_name,
-      suffix: f.primary_suffix,
-      birthDate: f.primary_birth_date ?? '',
-      sex: f.primary_sex,
-      citizenship: f.primary_citizenship,
-      civilStatus: f.primary_civil_status,
-      permanentAddressLine1: f.primary_address_line_1 ?? '',
-      permanentAddressLine2: f.primary_address_line_2,
-      cityMunicipality: f.primary_city_municipality ?? '',
-      province: f.primary_province ?? '',
-      postalCode: f.primary_postal_code,
-      landline: f.primary_landline,
-      mobile: f.primary_mobile ?? '',
-      email: f.primary_email ?? '',
-      tinNumber: f.primary_tin,
-      occupationBusinessName: f.primary_occupation_business,
-      officeBusinessAddress: f.primary_office_business_address,
-      businessIndustry: f.primary_business_industry,
-      employedPosition: f.primary_employed_position,
-      printedName: `${f.primary_first_name ?? ''} ${f.primary_last_name ?? ''}`.trim(),
-    });
-    setTier((f.card_tier?.toUpperCase() || 'BRONZE') as typeof tier);
-    setPaymentScheme((f.payment_scheme || 'spot_cash') as typeof paymentScheme);
-    setChannels((f.acquisition_channels ?? '').split('|').filter(Boolean));
-    setMessage('Imported candidates: please verify every field before saving.');
-  };
-  const ocr = useBusinessMutation({
-    mutationFn: async () => {
-      const documentId = ocrFile
-        ? (await uploadId.mutateAsync()).documentId
-        : serverCurrentDocument?.id;
-      if (!documentId) throw new Error('Select an ID file first.');
-      const doc = await runDocumentOcr(documentId);
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-      return doc;
-    },
-    onSuccess: (doc) => {
-      const fields = doc.extractedFields;
-      const confident = (key: string) => {
-        const field = fields[key];
-        return field && field.confidence !== null && field.confidence >= 0.8 ? field.value : null;
-      };
-      setPrimary((current) => ({
-        ...current,
-        firstName: current.firstName || confident('firstName') || '',
-        middleName: current.middleName || confident('middleName') || undefined,
-        lastName: current.lastName || confident('lastName') || '',
-        birthDate: current.birthDate || confident('dateOfBirth') || '',
-        permanentAddressLine1: current.permanentAddressLine1 || confident('address') || '',
-      }));
-      const suggestedType = governmentIdTypeSchema.safeParse(confident('idType'));
-      if (suggestedType.success) setIdType((current) => current || suggestedType.data);
-      setMessage(
-        doc.ocrStatus === 'completed'
-          ? 'OCR completed: review and correct suggestions before saving.'
-          : 'OCR failed: enter details manually. Your private upload is retained.',
-      );
-    },
-    onError: (e) =>
-      setMessage(e instanceof Error ? e.message : 'OCR failed; continue with manual entry.'),
-  });
-  const confirmIdType = useBusinessMutation({
-    mutationFn: async () => {
-      if (!serverCurrentDocument) throw new Error('Upload and verify an ID first.');
-      const document = await confirmDocument(serverCurrentDocument.id, {
-        decision: 'confirmed',
-        // Only the ID type is recorded here. Identity-document numbers stay
-        // write-only and are never sent from this screen.
-        fields: { idType: governmentIdTypeSchema.parse(idType) },
-      });
-      await Promise.all([documents.refetch(), currentDocument.refetch()]);
-      return document;
-    },
-    onSuccess: () =>
-      setMessage('ID type recorded on the identity document. The application can be submitted.'),
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Could not record the ID type.'),
+    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save and submit failed.'),
   });
   // One stable request identity per logical action, so a timeout-after-commit
   // retry replays the original decision instead of attempting a second one.
@@ -1026,6 +930,20 @@ export function CustomerApplicationEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = linkedCustomer.data ?? null;
+  // Snapshot names for chain selections the genealogy list no longer contains
+  // (a departure, or a chain outside the viewer's own scope). The dropdowns
+  // stay legible; the server still refuses an ineligible id at write time.
+  const chainNames: Record<string, string> = {};
+  {
+    const app = existing.data;
+    const pairs: [string | undefined, string | undefined][] = [
+      [app?.svdStaffId, app?.svdName],
+      [app?.ssmStaffId, app?.ssmName],
+      [app?.smStaffId, app?.salesManagerName],
+      [app?.referrerStaffId, app?.vipReferrer],
+    ];
+    for (const [staffId, name] of pairs) if (staffId && name) chainNames[staffId] = name;
+  }
   if (id && existing.isPending) {
     return (
       <section>
@@ -1069,25 +987,101 @@ export function CustomerApplicationEditorPage() {
       </section>
     );
   }
-  // The primary action lives in the header and the sticky footer alike, so a
-  // long form never buries it. One element, rendered twice. Blocking matches
-  // the submit pattern: disabled with a visible inline list, never silent.
+  // The ONE primary action lives in the header and the sticky footer alike, so
+  // a long form never buries it. One element, rendered twice. Blocking stays
+  // visible: disabled with an inline list of what to fix, never silent.
   const saveAction = (
     <Button
-      onClick={() => save.mutate()}
-      disabled={!editable || uploadId.isPending || ocr.isPending || saveBlockers.length > 0}
-      loading={save.isPending}
-      loadingLabel="Saving…"
+      onClick={() => saveAndSubmit.mutate()}
+      disabled={!editable || saveAndSubmit.isPending || blockers.length > 0}
+      loading={saveAndSubmit.isPending}
+      loadingLabel="Saving and submitting…"
     >
-      Save draft
+      Save &amp; Submit
     </Button>
   );
+  const primaryComplete = [
+    primary.firstName,
+    primary.lastName,
+    primary.birthDate,
+    primary.mobile,
+    primary.email,
+    primary.printedName,
+  ].every((field) => field.trim() !== '');
+  // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
+  // the final authority, and Next can never refuse what Save allows.
+  const stepBlockers: (string | null)[] = [
+    !planId ? 'Select a VIP plan.' : null,
+    !serverCurrentDocument?.reviewedFields?.idType && !idFile
+      ? 'Upload a valid ID and choose its ID type.'
+      : idFile && !idType
+        ? 'Choose ID type first.'
+        : null,
+    Object.values(invalidFields).some(Boolean)
+      ? 'Correct the highlighted fields.'
+      : !primaryComplete
+        ? 'Complete primary holder fields.'
+        : null,
+    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
+    null,
+    null,
+  ];
+  const steps = [
+    { id: 'step-application', label: 'Application', done: Boolean(planId) },
+    {
+      id: 'step-identity',
+      label: 'Identity',
+      done: Boolean(serverCurrentDocument?.reviewedFields?.idType || idFile),
+    },
+    { id: 'step-holders', label: 'Holders', done: primaryComplete },
+    {
+      id: 'step-recommender',
+      label: 'Recommender',
+      // acknowledgedAt ships pre-filled with today, so it can never mark the
+      // step done on its own: only entered chain or contact details count.
+      done: [
+        meta.svdStaffId,
+        meta.ssmStaffId,
+        meta.smStaffId,
+        meta.referrerStaffId,
+        meta.vipRecommenderName,
+        meta.recommenderContact,
+        meta.recommenderEmail,
+      ].some((field) => field.trim() !== ''),
+    },
+    { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
+    { id: 'step-cert', label: 'Certify', done: consent },
+  ];
+  const goStep = (index: number) => {
+    if (index < 0 || index > steps.length - 1 || index > maxReached) return;
+    setActiveStep(index);
+  };
+  const goNext = () => {
+    if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
+    const next = activeStep + 1;
+    setMaxReached((reached) => Math.max(reached, next));
+    setActiveStep(next);
+  };
+  // Edit entry point for the record-actions panel: the form below is the only
+  // editor (there is no separate edit route), so editing means revealing it.
+  // Draft-only by construction — the fieldset stays disabled past draft and
+  // the server refuses non-draft writes regardless.
+  const focusApplicationForm = () => {
+    const section = document.getElementById('step-application');
+    if (!section) return;
+    section.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    section
+      .querySelector<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])',
+      )
+      ?.focus({ preventScroll: true });
+  };
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section className={styles.editorSection}>
         <PageHeader
           title={existing.data?.applicationNumber ?? 'New Customer Application'}
-          description="Manual entry, file upload, or scan."
+          description="Manual entry or ID capture."
           actions={
             <>
               {saveAction}
@@ -1098,684 +1092,718 @@ export function CustomerApplicationEditorPage() {
           }
         />
         <Alert variant="info" title="How this form works">
-          Save a draft first; submit later.
+          Saves and submits in one step.
         </Alert>
+        {isNew ? (
+          <nav aria-label="Application steps" className={styles.stepper}>
+            <ol className={styles.stepperList}>
+              {steps.map((step, index) => {
+                const current = index === activeStep;
+                const reachable = index <= maxReached;
+                return (
+                  <li
+                    key={step.id}
+                    className={styles.stepperItem}
+                    data-done={step.done}
+                    data-current={current}
+                  >
+                    <button
+                      type="button"
+                      className={styles.stepperLink}
+                      disabled={!reachable}
+                      aria-current={current ? 'step' : undefined}
+                      onClick={() => goStep(index)}
+                    >
+                      <span className={styles.stepperIndex} aria-hidden="true">
+                        {step.done ? '✓' : index + 1}
+                      </span>
+                      <span className={styles.stepperLabel}>{step.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+        ) : (
+          <nav aria-label="Application steps" className={styles.stepper}>
+            <ol className={styles.stepperList}>
+              {steps.map((step, index) => (
+                <li key={step.id} className={styles.stepperItem} data-done={step.done}>
+                  <a href={`#${step.id}`} className={styles.stepperLink}>
+                    <span className={styles.stepperIndex} aria-hidden="true">
+                      {step.done ? '✓' : index + 1}
+                    </span>
+                    <span className={styles.stepperLabel}>{step.label}</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
         {existing.data ? (
-          <p>
-            Status: {existing.data.status} · Submitted: {existing.data.submittedAt ?? '—'} ·
-            Approved: {existing.data.approvedAt ?? '—'} · Rejected:{' '}
-            {existing.data.rejectedAt ?? '—'} · Related customer:{' '}
-            {relatedCustomer?.fullName ?? existing.data.customerId} · Related sale:{' '}
-            {existing.data.saleId ?? '—'}
-          </p>
+          <section aria-label="Application record status" className={styles.panel}>
+            <div className={styles.statusHead}>
+              <StatusChip
+                label={existing.data.status}
+                tone={APPLICATION_STATUS_TONES[existing.data.status] ?? 'neutral'}
+              />
+              <span className={styles.note}>Official application record</span>
+            </div>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>Submitted</dt>
+                <dd>{existing.data.submittedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Approved</dt>
+                <dd>{existing.data.approvedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Rejected</dt>
+                <dd>{existing.data.rejectedAt ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Customer</dt>
+                <dd>
+                  {relatedCustomer ? (
+                    <Link to={`/admin/customers/${relatedCustomer.id}`}>
+                      {relatedCustomer.fullName}
+                    </Link>
+                  ) : (
+                    existing.data.customerId
+                  )}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Sale</dt>
+                <dd>{existing.data.saleId ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
         ) : null}
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
+        {relatedCustomer ? (
+          <section aria-label="Linked company record" className={styles.panel}>
+            <h2 className={styles.panelTitle}>Linked company record — read-only</h2>
+            <p className={styles.hint}>
+              Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
+              on the customer page. Stated figures never change the offer.
+            </p>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>RA NO</dt>
+                <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>STATUS (company)</dt>
+                <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>CITIZENSHIP</dt>
+                <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>SUPPLEMENTARY</dt>
+                <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>RELATED</dt>
+                <dd>
+                  {[
+                    relatedCustomer.ostIstName,
+                    relatedCustomer.svdName,
+                    relatedCustomer.ssmName,
+                    relatedCustomer.smName,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '—'}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>STATED PACKAGE</dt>
+                <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+              </div>
+            </dl>
+            <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => navigate(`/admin/customers/${relatedCustomer.id}`)}
+              >
+                Open Customer
+              </Button>
+            </div>
+          </section>
+        ) : null}
         {proposal.data ? (
-          <section aria-label="Purchase terms offer">
-            <h2>
+          <section aria-label="Purchase terms offer" className={styles.panel}>
+            <h2 className={styles.panelTitle}>
               {proposal.data.offerKind === 'newly_confirmed_offer'
                 ? 'Newly confirmed offer'
                 : 'Purchase terms offer'}
             </h2>
             {/* Read-only by construction: there is no price input on this screen. */}
-            <dl className="form-grid">
-              <dt>Tier</dt>
-              <dd>{proposal.data.terms.tier}</dd>
-              <dt>Payment scheme</dt>
-              <dd>{proposal.data.terms.paymentScheme}</dd>
-              <dt>Total purchase amount</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
-              <dt>Included reservation amount</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
-              <dt>Required initial</dt>
-              <dd>{formatMoneyOrDash(proposal.data.terms.requiredInitial)}</dd>
+            <dl className={styles.snapshotGrid}>
+              <div className={styles.snapshotField}>
+                <dt>Tier</dt>
+                <dd>{proposal.data.terms.tier}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Payment scheme</dt>
+                <dd>{proposal.data.terms.paymentScheme}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Total purchase amount</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Included reservation amount</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Required initial</dt>
+                <dd>{formatMoneyOrDash(proposal.data.terms.requiredInitial)}</dd>
+              </div>
               {proposal.data.terms.monthlyAmount ? (
-                <>
+                <div className={styles.snapshotField}>
                   <dt>Installments</dt>
                   <dd>
                     {formatMoneyOrDash(proposal.data.terms.monthlyAmount)} ×{' '}
                     {proposal.data.terms.installmentMonths} months
                   </dd>
-                </>
+                </div>
               ) : null}
-              <dt>Spot-cash window</dt>
-              <dd>{proposal.data.terms.spotCashDays} days from the first verified payment</dd>
-              <dt>Yearly points</dt>
-              <dd>{proposal.data.terms.yearlyPoints}</dd>
-              <dt>Validity</dt>
-              <dd>{proposal.data.terms.validityMonths} months</dd>
-              <dt>Commission</dt>
-              <dd>
-                {proposal.data.terms.commissionRate} on{' '}
-                {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
-                {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
-              </dd>
-              <dt>Offer as of</dt>
-              <dd>{formatDateTime(proposal.data.asOf)}</dd>
+              <div className={styles.snapshotField}>
+                <dt>Spot-cash window</dt>
+                <dd>{proposal.data.terms.spotCashDays} days from first payment</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Yearly points</dt>
+                <dd>{proposal.data.terms.yearlyPoints}</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Validity</dt>
+                <dd>{proposal.data.terms.validityMonths} months</dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Commission</dt>
+                <dd>
+                  {proposal.data.terms.commissionRate} on{' '}
+                  {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
+                  {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
+                </dd>
+              </div>
+              <div className={styles.snapshotField}>
+                <dt>Offer as of</dt>
+                <dd>{formatDateTime(proposal.data.asOf)}</dd>
+              </div>
             </dl>
             {proposal.data.offerKind === 'newly_confirmed_offer' ? (
-              <p>
-                This application predates stored purchase evidence. Confirming the offer above
-                records a new review record with your name, the time and your reason; today&apos;s
-                figures are never presented as the historical terms.
+              <p className={styles.hint}>
+                This record predates stored evidence. Confirming adds your name, time and reason.
+                Figures are not historical terms.
               </p>
             ) : null}
           </section>
         ) : null}
         {selectedPlan ? (
-          <DetailCard>
-            <DetailCardTitle>Official {selectedPlan.code} plan benefits</DetailCardTitle>
-            <DetailFieldGrid>
-              <DetailField label="Discount">{selectedPlan.discountPercent}%</DetailField>
+          <DetailCard
+            className={`${styles.planBenefits} ${styles[`plan${selectedPlan.code}`] ?? ''}`}
+          >
+            <div className={styles.planBenefitsHead}>
+              <div>
+                <p className={styles.planEyebrow}>Official plan benefits</p>
+                <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
+              </div>
+              <TierBadge tier={selectedPlan.code} />
+            </div>
+            {['GOLD', 'SILVER', 'BRONZE'].includes(selectedPlan.code.trim().toUpperCase()) ? (
+              <div className={styles.planArt}>
+                <img {...tierArtwork(selectedPlan.code)} className={styles.planArtImage} />
+              </div>
+            ) : null}
+            <DetailFieldGrid className={styles.planGrid}>
+              <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
               <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
               <DetailField label="Yearly points">
                 {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
               </DetailField>
               <DetailField label="Validity">
-                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} years
+                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
               </DetailField>
               <DetailField label="Total value">
                 {formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}
               </DetailField>
             </DetailFieldGrid>
-            <p className={styles.hint}>
-              Snapshots freeze at submit; later plan edits never rewrite this application.
-            </p>
+            <p className={styles.hint}>Frozen at submit. Later edits change nothing.</p>
           </DetailCard>
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
-          <section className={styles.panel} aria-labelledby="application-panel-heading">
-            <h2 id="application-panel-heading" className={styles.panelTitle}>
-              1. Application
-            </h2>
-            <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
-            <div className={styles.editorGrid}>
-              <div className={styles.pickerWrap}>
+          {(!isNew || activeStep === 0) && (
+            <section
+              id="step-application"
+              className={styles.panel}
+              aria-labelledby="application-panel-heading"
+            >
+              <h2 id="application-panel-heading" className={styles.panelTitle}>
+                1. Application
+              </h2>
+              <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+              <div className={styles.editorGrid}>
+                <div className={styles.pickerWrap}>
+                  <label className={styles.filterLabel}>
+                    Customer
+                    <Select
+                      aria-label="Customer"
+                      value={customerId}
+                      disabled={saveAndSubmit.isPending}
+                      onChange={(e) => pickCustomer(e.target.value)}
+                      options={[
+                        { value: '', label: 'New Register' },
+                        ...(customerOptions.data?.data.map((c) => ({
+                          value: c.id,
+                          label: c.fullName,
+                        })) ?? []),
+                      ]}
+                    />
+                  </label>
+                  {customerOptions.isPending ? (
+                    <div role="status" aria-label="Searching customers">
+                      <Skeleton style={{ height: 40 }} />
+                    </div>
+                  ) : null}
+                  {customerId && !linkedCustomer.data ? (
+                    <p role="status" className={styles.pickedLine}>
+                      Loading customer…
+                    </p>
+                  ) : null}
+                </div>
                 <label className={styles.filterLabel}>
-                  Customer
+                  VIP plan
                   <Select
-                    aria-label="Customer"
-                    value={customerId}
-                    disabled={uploadId.isPending || ocr.isPending}
-                    onChange={(e) => pickCustomer(e.target.value)}
+                    aria-label="VIP plan"
+                    value={planId}
+                    onChange={(e) => {
+                      const plan = plans.data?.find((p) => p.id === e.target.value);
+                      setPlanId(e.target.value);
+                      if (plan) setTier(plan.code as typeof tier);
+                      else setTier('BRONZE');
+                      if (plan?.code !== 'GOLD') setSecondary(null);
+                    }}
                     options={[
-                      { value: '', label: 'New customer: register with this application' },
-                      ...(customerOptions.data?.data.map((c) => ({
-                        value: c.id,
-                        label: c.fullName,
-                      })) ?? []),
+                      { value: '', label: 'Select plan' },
+                      ...(plans.data
+                        ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
+                        .map((p) => ({ value: p.id, label: p.name })) ?? []),
                     ]}
                   />
                 </label>
-                {customerOptions.isPending ? (
-                  <div role="status" aria-label="Searching customers">
-                    <Skeleton style={{ height: 40 }} />
+                <label className={styles.filterLabel}>
+                  Payment scheme
+                  <Select
+                    aria-label="Payment scheme"
+                    value={paymentScheme}
+                    onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
+                    options={[
+                      'spot_cash',
+                      'move_a',
+                      'installment_4_month',
+                      'move_b1_40_12',
+                      'move_b2_25_12',
+                    ].map((scheme) => ({
+                      value: scheme,
+                      label: paymentSchemeLabel(scheme as typeof paymentScheme),
+                    }))}
+                  />
+                </label>
+              </div>
+            </section>
+          )}
+          {(!isNew || activeStep === 1) && (
+            <section
+              id="step-identity"
+              className={styles.panel}
+              aria-labelledby="identity-panel-heading"
+            >
+              <h2 id="identity-panel-heading" className={styles.panelTitle}>
+                2. Identity
+              </h2>
+              <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
+              <fieldset className={styles.subGroup}>
+                <legend className={styles.subGroupTitle}>Valid ID</legend>
+                <p>
+                  <StatusChip
+                    label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
+                    tone={validId ? 'success' : 'warning'}
+                  />
+                </p>
+                {serverCurrentDocument ? (
+                  <>
+                    <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                    <p>
+                      ID type:{' '}
+                      {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
+                        'Missing: choose the type and upload again'}
+                    </p>
+                  </>
+                ) : null}
+                {idFile ? (
+                  <div role="status" className={styles.idReady}>
+                    <p className={styles.hint}>Ready to upload on save.</p>
+                    {idPreviewUrl ? (
+                      <button
+                        type="button"
+                        className={styles.thumbnailButton}
+                        onClick={() => setPreviewOpen(true)}
+                        aria-label="Open full ID preview"
+                      >
+                        <img
+                          src={idPreviewUrl}
+                          alt="ID preview thumbnail"
+                          className={styles.thumbnailLarge}
+                        />
+                        <span className={styles.thumbnailZoom}>
+                          {idFile.name} · {formatFileSize(idFile.size)} · Click to enlarge
+                        </span>
+                      </button>
+                    ) : (
+                      <p className={styles.hint}>
+                        {idFile.name} · {formatFileSize(idFile.size)}
+                      </p>
+                    )}
                   </div>
                 ) : null}
-                {customerId && !linkedCustomer.data ? (
-                  <p role="status" className={styles.pickedLine}>
-                    Loading customer…
-                  </p>
-                ) : null}
-              </div>
-              <label className={styles.filterLabel}>
-                VIP plan
-                <Select
-                  aria-label="VIP plan"
-                  value={planId}
-                  onChange={(e) => {
-                    const plan = plans.data?.find((p) => p.id === e.target.value);
-                    setPlanId(e.target.value);
-                    if (plan) setTier(plan.code as typeof tier);
-                    else setTier('BRONZE');
-                    if (plan?.code !== 'GOLD') setSecondary(null);
+                <label className={styles.filterLabel}>
+                  ID Type *
+                  <Select
+                    aria-label="ID Type"
+                    value={idType}
+                    disabled={saveAndSubmit.isPending}
+                    onChange={(event) => setIdType(event.target.value)}
+                    options={[
+                      { value: '', label: 'Select ID type' },
+                      ...governmentIdTypeSchema.options.map((value) => ({
+                        value,
+                        label: value
+                          .replace(/_/g, ' ')
+                          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                      })),
+                    ]}
+                  />
+                </label>
+                <IdCapturePicker
+                  onFile={setIdFile}
+                  disabled={saveAndSubmit.isPending}
+                  resetVersion={pickerVersion}
+                  showCancel={Boolean(idFile)}
+                  onCancel={() => {
+                    setIdFile(null);
+                    setPickerVersion((version) => version + 1);
                   }}
-                  options={[
-                    { value: '', label: 'Select plan' },
-                    ...(plans.data
-                      ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
-                      .map((p) => ({ value: p.id, label: p.name })) ?? []),
-                  ]}
                 />
-              </label>
-              <label className={styles.filterLabel}>
-                Payment scheme
-                <Select
-                  aria-label="Payment scheme"
-                  value={paymentScheme}
-                  onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
-                  options={[
-                    'spot_cash',
-                    'move_a',
-                    'installment_4_month',
-                    'move_b1_40_12',
-                    'move_b2_25_12',
-                  ].map((scheme) => ({
-                    value: scheme,
-                    label: paymentSchemeLabel(scheme as typeof paymentScheme),
-                  }))}
-                />
-              </label>
-            </div>
-            <div className={styles.actions}>
-              <Button
-                variant="secondary"
-                onClick={() => void getOfficialFormTemplate('customer').then(saveFile)}
-              >
-                Download template
-              </Button>
-              <input
-                ref={xlsxInput}
-                hidden
-                aria-label="Import XLSX file"
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setChosenXlsx(file.name);
-                    void importFile(file);
-                  }
-                  e.target.value = '';
-                }}
-              />
-              <Button onClick={() => xlsxInput.current?.click()}>Choose XLSX file</Button>
-              {chosenXlsx ? (
-                <span role="status" className={styles.fileName}>
-                  Selected: {chosenXlsx}
-                </span>
-              ) : null}
-            </div>
-          </section>
-          <section className={styles.panel} aria-labelledby="identity-panel-heading">
-            <h2 id="identity-panel-heading" className={styles.panelTitle}>
-              2. Identity
-            </h2>
-            <p className={styles.hint}>Capture ID, detect fields, record type.</p>
-            <fieldset className={styles.subGroup}>
-              <legend className={styles.subGroupTitle}>Valid ID</legend>
-              <p>
-                <StatusChip
-                  label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
-                  tone={validId ? 'success' : 'warning'}
-                />
-              </p>
-              {serverCurrentDocument ? (
-                <>
-                  <p>Current ID: {serverCurrentDocument.originalFilename}</p>
-                  <p>
-                    ID type:{' '}
-                    {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                      'Missing: review the identity document'}
-                  </p>
-                </>
-              ) : null}
-              {ocrFile ? (
-                <div role="status">
-                  <p>Replacement selected: {ocrFile.name} (Pending replacement: not saved yet).</p>
-                  {ocrPreviewUrl ? (
-                    <p>
-                      <img
-                        src={ocrPreviewUrl}
-                        alt={`Selected ID preview: ${ocrFile.name}`}
-                        className={styles.thumbnail}
-                      />
-                    </p>
+                <Dialog
+                  open={previewOpen && Boolean(idPreviewUrl)}
+                  onClose={() => setPreviewOpen(false)}
+                  title="ID preview"
+                >
+                  {idPreviewUrl ? (
+                    <img src={idPreviewUrl} alt="Full ID preview" className={styles.previewImage} />
                   ) : null}
-                  <Button
-                    variant="secondary"
-                    disabled={uploadId.isPending || ocr.isPending}
-                    onClick={() => {
-                      setOcrFile(null);
-                      setPickerVersion((version) => version + 1);
-                    }}
-                  >
-                    Cancel replacement
-                  </Button>
-                </div>
-              ) : null}
-              <label className={styles.filterLabel}>
-                ID Type *
-                <Select
-                  aria-label="ID Type"
-                  value={idType}
-                  disabled={uploadId.isPending || ocr.isPending}
-                  onChange={(event) => setIdType(event.target.value)}
-                  options={[
-                    { value: '', label: 'Select ID type' },
-                    ...governmentIdTypeSchema.options.map((value) => ({
-                      value,
-                      label: value
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
-                    })),
-                  ]}
-                />
-              </label>
-              <IdCapturePicker
-                onFile={setOcrFile}
-                disabled={uploadId.isPending || ocr.isPending}
-                resetVersion={pickerVersion}
-              />
-              {ocrFile ? (
-                <p role="status">
-                  Selected ID: {ocrFile.name}. Choose Detect fields to upload it privately and read
-                  the OCR suggestions.
-                </p>
-              ) : null}
-              <Button
-                onClick={() => ocr.mutate()}
-                disabled={(!ocrFile && !serverCurrentDocument) || !customerId}
-                loading={ocr.isPending || uploadId.isPending}
-                loadingLabel="Processing…"
-              >
-                Detect fields
-              </Button>
-              {/* Submit requires an ID type recorded on the identity document, and
-                that field is only ever written by the document-confirm endpoint.
-                Without this the requirement is unreachable from this screen and
-                Submit stays disabled after a successful upload, so the reviewer
-                records the ID type here through the same secure document
-                pipeline. The gate itself is unchanged. */}
-              {serverCurrentDocument && !serverCurrentDocument.reviewedFields?.idType ? (
-                <p role="status">
-                  Submit needs the ID type recorded against this identity document.{' '}
-                  <Button
-                    variant="secondary"
-                    disabled={!idType || uploadId.isPending}
-                    loading={confirmIdType.isPending}
-                    loadingLabel="Recording…"
-                    onClick={() => confirmIdType.mutate()}
-                  >
-                    Record ID type on this ID
-                  </Button>
-                </p>
-              ) : null}
-              {serverCurrentDocument ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => previewId.mutate(serverCurrentDocument.id)}
-                  >
-                    Preview uploaded ID
-                  </Button>
-                  <Link to={`/admin/documents/${serverCurrentDocument.id}`}>
-                    Review identity document
-                  </Link>
-                </>
-              ) : null}
-              {serverCurrentDocument ? (
-                <div>
-                  <p>OCR status: {serverCurrentDocument.ocrStatus}</p>
-                  {Object.entries(serverCurrentDocument.extractedFields).length ? (
-                    <>
-                      <p>
-                        Detected suggestions: verify against the ID and correct the form manually.
-                        ID numbers remain masked; use document review to confirm them.
-                      </p>
-                      <dl>
-                        {Object.entries(serverCurrentDocument.extractedFields).map(
-                          ([key, field]) => (
-                            <div key={key}>
-                              <dt>{key}</dt>
-                              <dd>
-                                {field.value ?? 'Not detected'}
-                                {field.confidence !== null
-                                  ? ` (${Math.round(field.confidence * 100)}% confidence)`
-                                  : ''}
-                              </dd>
-                            </div>
-                          ),
-                        )}
-                      </dl>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
-              {idPreview ? (
-                <>
-                  <button
-                    type="button"
-                    className={styles.thumbnailButton}
-                    onClick={() => setPreviewOpen(true)}
-                    aria-label="View identity document preview fullscreen"
-                  >
-                    <img
-                      src={idPreview}
-                      alt="Identity document preview thumbnail"
-                      className={styles.thumbnail}
-                    />
-                  </button>
-                  <Dialog
-                    open={previewOpen}
-                    onClose={() => setPreviewOpen(false)}
-                    title="Identity document preview"
-                    footer={
-                      <Button variant="secondary" onClick={() => setPreviewOpen(false)}>
-                        Close
-                      </Button>
-                    }
-                  >
-                    <img
-                      src={idPreview}
-                      alt="Identity document preview"
-                      className={styles.previewImage}
-                    />
-                  </Dialog>
-                </>
-              ) : null}
-              {documents.data
-                ?.filter((doc) => doc.hasFile && doc.id !== serverCurrentDocument?.id)
-                .map((doc) => (
-                  <p key={doc.id}>
-                    Retained ID: {doc.originalFilename} · {doc.verificationStatus}{' '}
-                    <Button size="sm" variant="ghost" onClick={() => previewId.mutate(doc.id)}>
-                      Preview
-                    </Button>
-                  </p>
-                ))}
-              {documents.data
-                ?.filter((doc) => !doc.hasFile)
-                .map((doc) => (
-                  <p key={doc.id}>
-                    Pending ID upload: {doc.originalFilename}. File completion is not verified.{' '}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={uploadId.isPending || ocr.isPending || Boolean(ocrFile)}
-                      onClick={() => uploadId.mutate(doc.id)}
-                    >
-                      Verify saved upload
-                    </Button>
-                  </p>
-                ))}
-              {currentDocument.isError ? (
-                <p role="status">Current ID could not be loaded. Retry before using OCR.</p>
-              ) : null}
-              {documents.isError ? (
-                <p role="status">
-                  Existing ID documents could not be loaded. Document permissions still apply.
-                </p>
-              ) : null}
-            </fieldset>
-          </section>
-          <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
-          <label className={styles.checkRow}>
-            <input
-              type="checkbox"
-              checked={Boolean(secondary)}
-              disabled={tier !== 'GOLD'}
-              onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
-            />{' '}
-            Add optional Gold secondary cardholder
-          </label>
-          {secondary ? (
-            <HolderFields
-              title="4. Secondary holder (gold optional)"
-              value={secondary}
-              onChange={setSecondary}
-            />
-          ) : null}
-          <fieldset className={styles.panel}>
-            <legend className={styles.panelTitle}>5. Recommender details</legend>
-            <div className={styles.editorGrid}>
-              <HierarchyFields
-                value={hierarchy}
-                fallbackSmName={meta.salesManagerName}
-                fallbackReferrerName={meta.vipReferrer}
-                disabled={!editable}
-                onChange={(next) => {
-                  setHierarchy({
-                    vdStaffId: next.vdStaffId,
-                    ssmStaffId: next.ssmStaffId,
-                    smStaffId: next.smStaffId,
-                    referrerOstId: next.referrerOstId,
-                  });
-                  setMeta((current) => ({
-                    ...current,
-                    salesManagerName: next.salesManagerName,
-                    vipReferrer: next.vipReferrer,
-                  }));
-                }}
-              />
-              <VipRecommenderFields
-                onSearch={setRecommenderSearch}
-                value={{
-                  recommenderCustomerId,
-                  vipRecommenderName: meta.vipRecommenderName,
-                  recommenderContact: meta.recommenderContact,
-                  recommenderEmail: meta.recommenderEmail,
-                }}
-                customers={recommenders}
-                customersLoading={recommenderOptions.isFetching}
-                customersError={
-                  recommenderOptions.isError ? 'Unable to load recommenders. Try again.' : null
-                }
-                onRetryCustomers={() => void recommenderOptions.refetch()}
-                disabled={!editable}
-                onChange={(next) => {
-                  setRecommenderCustomerId(next.recommenderCustomerId);
-                  setMeta((current) => ({
-                    ...current,
-                    vipRecommenderName: next.vipRecommenderName,
-                    recommenderContact: next.recommenderContact,
-                    recommenderEmail: next.recommenderEmail,
-                  }));
-                }}
-              />
-              <Field
-                label="VIP Referrer"
-                value={meta.vipReferrer}
-                normalize={(v) => normalizeLiveHumanField('vipReferrer', v)}
-                onChange={(v) => {
-                  setHierarchy((current) => ({ ...current, referrerOstId: undefined }));
-                  setMeta({ ...meta, vipReferrer: v });
-                }}
-                readOnly={Boolean(hierarchy.referrerOstId)}
-              />
-              <DateField
-                id="application-acknowledged-at"
-                name="acknowledgedAt"
-                label="Acknowledged At"
-                value={meta.acknowledgedAt}
-                onChange={(v) => setMeta({ ...meta, acknowledgedAt: v })}
-              />
-            </div>
-          </fieldset>
-          <fieldset className={styles.panel}>
-            <legend className={styles.panelTitle}>6. Acquisition channel</legend>
-            {[
-              'CMP',
-              'DRP',
-              'GDP Corporate',
-              'Walk-In',
-              'GDP Public Servant',
-              'Referral',
-              'FB Ads',
-            ].map((channel) => (
-              <label key={channel} className={styles.checkRow}>
+                </Dialog>
+                {currentDocument.isError ? (
+                  <p role="status">Current ID could not be loaded. Retry before saving.</p>
+                ) : null}
+              </fieldset>
+            </section>
+          )}
+          {(!isNew || activeStep === 2) && (
+            <div id="step-holders">
+              <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+              <label className={styles.checkRow}>
                 <input
                   type="checkbox"
-                  checked={channels.includes(channel)}
-                  onChange={(e) =>
-                    setChannels(
-                      e.target.checked
-                        ? [...channels, channel]
-                        : channels.filter((v) => v !== channel),
-                    )
-                  }
-                />
-                {channel}
+                  checked={Boolean(secondary)}
+                  disabled={tier !== 'GOLD'}
+                  onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
+                />{' '}
+                Add optional Gold secondary cardholder
               </label>
-            ))}
-          </fieldset>
-          <fieldset className={styles.panel}>
-            <legend className={styles.panelTitle}>7. Certification</legend>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />{' '}
-              I certify the information and consent to verification and processing under RA 10173.
-            </label>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={validId}
-                onChange={(e) => setValidId(e.target.checked)}
-              />{' '}
-              Valid government ID with specimen signatures received
-            </label>
-          </fieldset>
+              {secondary ? (
+                <HolderFields
+                  title="Secondary holder (gold optional)"
+                  value={secondary}
+                  onChange={setSecondary}
+                />
+              ) : null}
+            </div>
+          )}
+          {(!isNew || activeStep === 3) && (
+            <fieldset id="step-recommender" className={styles.panel}>
+              <legend className={styles.panelTitle}>4. Recommender details</legend>
+              <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
+              <div className={styles.editorGrid}>
+                <RecommenderFields
+                  meta={meta}
+                  chainNames={chainNames}
+                  onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
+                  onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
+                />
+              </div>
+            </fieldset>
+          )}
+          {(!isNew || activeStep === 4) && (
+            <fieldset id="step-channel" className={styles.panel}>
+              <legend className={styles.panelTitle}>5. Acquisition channel</legend>
+              {[
+                'CMP',
+                'DRP',
+                'GDP Corporate',
+                'Walk-In',
+                'GDP Public Servant',
+                'Referral',
+                'FB Ads',
+              ].map((channel) => (
+                <label key={channel} className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={channels.includes(channel)}
+                    onChange={(e) =>
+                      setChannels(
+                        e.target.checked
+                          ? [...channels, channel]
+                          : channels.filter((v) => v !== channel),
+                      )
+                    }
+                  />
+                  {channel}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {(!isNew || activeStep === 5) && (
+            <fieldset id="step-cert" className={styles.panel}>
+              <legend className={styles.panelTitle}>6. Certification</legend>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                />{' '}
+                I certify the information and consent to verification and processing under RA 10173.
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={validId}
+                  onChange={(e) => setValidId(e.target.checked)}
+                />{' '}
+                Valid government ID with specimen signatures received
+              </label>
+            </fieldset>
+          )}
         </fieldset>
-        {saveBlockers.length > 0 ? (
-          <Alert variant="warning" title="Cannot save yet:">
+        {blockers.length > 0 ? (
+          <Alert variant="warning" title="Cannot save and submit yet:">
             <ul>
-              {saveBlockers.map((blocker) => (
+              {blockers.map((blocker) => (
                 <li key={blocker}>{blocker}</li>
               ))}
             </ul>
           </Alert>
         ) : null}
         <div className={styles.stickyFooter}>
-          <div className={styles.stickyFooterActions}>{saveAction}</div>
+          <div className={styles.stickyFooterActions}>
+            {isNew && activeStep > 0 ? (
+              <Button variant="secondary" onClick={() => goStep(activeStep - 1)}>
+                Back
+              </Button>
+            ) : null}
+            {isNew && activeStep < steps.length - 1 ? (
+              <Button
+                onClick={goNext}
+                disabled={stepBlockers[activeStep] !== null}
+                title={stepBlockers[activeStep] ?? undefined}
+              >
+                Next
+              </Button>
+            ) : null}
+            {saveAction}
+          </div>
         </div>
-        <p>
-          {id && editable ? (
-            <>
-              {submitBlockers.length > 0 ? (
-                <Alert variant="warning" title="Cannot submit yet:">
-                  <ul>
-                    {submitBlockers.map((blocker) => (
-                      <li key={blocker}>{blocker}</li>
-                    ))}
-                  </ul>
-                </Alert>
-              ) : null}{' '}
-              <Button
-                onClick={() => submit.mutate()}
-                disabled={
-                  submitBlockers.length > 0 || save.isPending || uploadId.isPending || ocr.isPending
-                }
-                loading={submit.isPending}
-                loadingLabel="Submitting…"
-              >
-                Submit
-              </Button>
-            </>
-          ) : null}{' '}
-          {id && existing.data?.status === 'submitted' ? (
-            <>
-              <Button
-                onClick={() => decide.mutate('approved')}
-                loading={decide.isPending}
-                loadingLabel="Approving…"
-              >
-                Approve
-              </Button>{' '}
-              <Button
-                variant="danger"
-                onClick={() => decide.mutate('rejected')}
-                loading={decide.isPending}
-                loadingLabel="Rejecting…"
-              >
-                Reject
-              </Button>{' '}
-              <Button
-                onClick={() => reopen.mutate()}
-                loading={reopen.isPending}
-                loadingLabel="Reopening…"
-              >
-                {existing.data.purchaseTermsId
-                  ? 'Reopen to draft'
-                  : 'Reopen to review purchase terms'}
-              </Button>{' '}
-            </>
-          ) : null}{' '}
-          {id && existing.data?.status === 'rejected' ? (
-            <Button
-              onClick={() => reopen.mutate()}
-              loading={reopen.isPending}
-              loadingLabel="Reopening…"
-            >
-              Reopen to draft
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'approved' && !proposal.data ? (
-            <Button
-              onClick={() => void proposal.refetch()}
-              loading={proposal.isFetching}
-              loadingLabel="Loading offer…"
-              type="button"
-            >
-              Load purchase terms offer
-            </Button>
-          ) : null}{' '}
-          {id && existing.data?.status === 'approved' && proposal.data ? (
-            <>
-              <TextAreaField
-                id="application-review-reason"
-                name="reviewReason"
-                label="Review reason"
-                optional
-                rows={2}
-                value={reviewReason}
-                onChange={setReviewReason}
-              />{' '}
-              <Button
-                onClick={() => review.mutate()}
-                disabled={reviewReason.trim().length < 5}
-                loading={review.isPending}
-                loadingLabel="Confirming…"
-              >
-                Confirm purchase terms
-              </Button>
-            </>
-          ) : null}{' '}
-          {id &&
-          existing.data &&
-          canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
-            <Button
-              onClick={() => decide.mutate('cancelled')}
-              loading={decide.isPending}
-              loadingLabel="Cancelling…"
-            >
-              Cancel
-            </Button>
-          ) : null}{' '}
-          {id ? (
-            <>
-              {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
-                <Link to={`/admin/sales/reservations/new?application=${id}`}>
-                  Create reservation from application
-                </Link>
-              )}
-              <Button
-                onClick={() =>
-                  void exportCustomerApplication(id, 'xlsx')
-                    .then(saveFile)
-                    .catch((e: unknown) =>
-                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                    )
-                }
-              >
-                Export XLSX
-              </Button>
-              <Button
-                onClick={() =>
-                  void exportCustomerApplication(id, 'pdf')
-                    .then(saveFile)
-                    .catch((e: unknown) =>
-                      setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                    )
-                }
-              >
-                Export PDF
-              </Button>
-            </>
-          ) : null}
-        </p>
+        {id ? (
+          <section aria-label="Record actions" className={styles.panel}>
+            <h2 className={styles.panelTitle}>Record actions</h2>
+            <div className={styles.recordGroups}>
+              {id && existing.data?.status === 'submitted' ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Decision</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      onClick={() => decide.mutate('approved')}
+                      loading={decide.isPending}
+                      loadingLabel="Approving…"
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => decide.mutate('rejected')}
+                      loading={decide.isPending}
+                      loadingLabel="Rejecting…"
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => reopen.mutate()}
+                      loading={reopen.isPending}
+                      loadingLabel="Reopening…"
+                    >
+                      {existing.data.purchaseTermsId
+                        ? 'Reopen to draft'
+                        : 'Reopen to review purchase terms'}
+                    </Button>
+                  </div>
+                  <p className={styles.hint}>
+                    Approval needs reviewed purchase terms; reopening returns the record to
+                    draft for corrections.
+                  </p>
+                </div>
+              ) : null}
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Application data</h3>
+                <div className={styles.actions}>
+                  {editable ? (
+                    <Button variant="secondary" type="button" onClick={focusApplicationForm}>
+                      Edit application
+                    </Button>
+                  ) : null}
+                </div>
+                {!editable ? (
+                  <p className={styles.hint}>
+                    {existing.data && ['submitted', 'rejected'].includes(existing.data.status)
+                      ? 'Data is read-only once submitted. Reopen to draft to edit it.'
+                      : 'Data is read-only in this status.'}
+                  </p>
+                ) : null}
+              </div>
+              {id && existing.data?.status === 'rejected' ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Lifecycle</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => reopen.mutate()}
+                      loading={reopen.isPending}
+                      loadingLabel="Reopening…"
+                    >
+                      Reopen to draft
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id && existing.data?.status === 'approved' && !proposal.data ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void proposal.refetch()}
+                      loading={proposal.isFetching}
+                      loadingLabel="Loading offer…"
+                      type="button"
+                    >
+                      Load purchase terms offer
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id && existing.data?.status === 'approved' && proposal.data ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
+                  <TextAreaField
+                    id="application-review-reason"
+                    name="reviewReason"
+                    label="Review reason"
+                    optional
+                    rows={2}
+                    value={reviewReason}
+                    onChange={setReviewReason}
+                  />
+                  <div className={styles.actions}>
+                    <Button
+                      onClick={() => review.mutate()}
+                      disabled={reviewReason.trim().length < 5}
+                      loading={review.isPending}
+                      loadingLabel="Confirming…"
+                    >
+                      Confirm purchase terms
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {id &&
+              existing.data &&
+              canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
+                <div className={styles.actionGroup}>
+                  <h3 className={styles.actionGroupTitle}>Cancel</h3>
+                  <div className={styles.actions}>
+                    <Button
+                      variant="secondary"
+                      onClick={() => decide.mutate('cancelled')}
+                      loading={decide.isPending}
+                      loadingLabel="Cancelling…"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  <p className={styles.hint}>Cancelling ends this application. This cannot be undone.</p>
+                </div>
+              ) : null}
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Next step</h3>
+                <div className={styles.actions}>
+                  {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => navigate(`/admin/sales/reservations/new?application=${id}`)}
+                    >
+                      Create Reservation
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className={styles.actionGroup}>
+                <h3 className={styles.actionGroupTitle}>Exports</h3>
+                <div className={styles.actions}>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      void exportCustomerApplication(id, 'xlsx')
+                        .then(saveFile)
+                        .catch((e: unknown) =>
+                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                        )
+                    }
+                  >
+                    Export XLSX
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      void exportCustomerApplication(id, 'pdf')
+                        .then(saveFile)
+                        .catch((e: unknown) =>
+                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
+                        )
+                    }
+                  >
+                    Export PDF
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
       </section>
     </HumanInputValidity.Provider>
   );

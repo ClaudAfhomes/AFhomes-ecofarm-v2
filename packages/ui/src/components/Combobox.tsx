@@ -45,8 +45,6 @@ export interface ComboboxProps {
    * form should not fetch a reference list for a field nobody touched.
    */
   onOpen?: () => void;
-  /** Optional server-search input; typing still never commits an option. */
-  onSearch?: (query: string) => void;
   placeholder?: string;
   /** Extra wording so three levels do not all read "Loading…". */
   loadingLabel?: string;
@@ -61,7 +59,6 @@ export function Combobox({
   value,
   options,
   onSelect,
-  onSearch,
   loading = false,
   error = null,
   onRetry,
@@ -223,13 +220,19 @@ export function Combobox({
           placeholder={placeholder}
           value={draft}
           onChange={(e) => {
-            onSearch?.(e.target.value);
             setDraft(e.target.value);
             setFilter(e.target.value);
             setActiveIndex(-1);
             if (!open) setOpen(true);
           }}
           onFocus={openToBrowse}
+          // Clicking an already-focused (but closed) box fires no focus
+          // event, so without this the list would never reopen for a mouse
+          // user who already picked once. Guarded: an open list keeps its
+          // active option instead of resetting under the cursor.
+          onClick={() => {
+            if (!open) openToBrowse();
+          }}
           onBlur={() => {
             // A draft that was never selected is discarded, so the input can
             // never hold an invented name.

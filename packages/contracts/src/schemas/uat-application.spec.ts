@@ -20,3 +20,29 @@ describe('UAT optional inputs', () => {
       'qa@example.com',
     ));
 });
+
+describe('referral chain staff linkage', () => {
+  const shape = createCustomerApplicationSchema.shape;
+  const id = '11111111-1111-4111-8111-111111111111';
+  it.each(['svdStaffId', 'ssmStaffId', 'smStaffId', 'referrerStaffId'] as const)(
+    'treats a blank %s as unnamed rather than invalid',
+    (key) => {
+      expect(shape[key].parse('')).toBeUndefined();
+      expect(shape[key].parse(undefined)).toBeUndefined();
+    },
+  );
+  it.each(['svdStaffId', 'ssmStaffId', 'smStaffId', 'referrerStaffId'] as const)(
+    'accepts a staff id for %s and refuses anything else shaped',
+    (key) => {
+      expect(shape[key].parse(id)).toBe(id);
+      expect(shape[key].safeParse('not-a-uuid').success).toBe(false);
+      expect(shape[key].safeParse('Maria Santos').success).toBe(false);
+    },
+  );
+  it('keeps the legacy stated names writable without linkage', () => {
+    // Text without ids is the legacy path: the server stores it verbatim and
+    // no chain rule applies, because names carry no linkage to check.
+    expect(shape.svdName.parse('Pedro Reyes')).toBe('Pedro Reyes');
+    expect(shape.vipReferrer.parse('Juan Cruz')).toBe('Juan Cruz');
+  });
+});

@@ -496,11 +496,6 @@ const captureBaseline = async (): Promise<void> => {
     (await db.query<{ n: number }>('select count(*)::int n from private.mutation_requests'))
       .rows[0]!.n,
   );
-  baseline.set(
-    'private.vip_control_numbers',
-    (await db.query<{ n: number }>('select count(*)::int n from private.vip_control_numbers'))
-      .rows[0]!.n,
-  );
   for (const table of BASELINE_TABLES) {
     const r = await db.query<{ n: number }>(`select count(*)::int as n from public.${table}`);
     baseline.set(table, r.rows[0]!.n);
@@ -8891,11 +8886,7 @@ async function main(): Promise<void> {
         const cn = (
           await one<{ customer_number: string }>('select * from public.next_customer_number()')
         ).customer_number;
-        check(
-          'new customers allocate annual AF-CUS-YYYY-NNNNNN',
-          /^AF-CUS-[1-9][0-9]{3}-(?!000000)[0-9]{6}$/.test(cn),
-          cn,
-        );
+        check('new customers allocate AF-CUS-XXXXX', afRe('AF-CUS').test(cn), cn);
         const sn = (await one<{ sale_number: string }>('select * from public.next_sale_number()'))
           .sale_number;
         check(
@@ -9825,7 +9816,7 @@ async function main(): Promise<void> {
           // row only for the five public tables.
           if (t.entity.startsWith('ost_')) continue;
           const row = await db.query<{ key: string }>(
-            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? " where id <> all($1::uuid[]) and customer_number !~ '^AF-CUS-[1-9][0-9]{3}-[0-9]{6}$'" : ''} order by ${t.key} limit 1`,
+            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? ' where id <> all($1::uuid[])' : ''} order by ${t.key} limit 1`,
             t.entity === 'customer' ? [seededCustomers.map((customer) => customer.id)] : [],
           );
           if (!row.rows[0]) continue;
@@ -10125,7 +10116,7 @@ async function main(): Promise<void> {
         // Already-modern identifiers are never regenerated.
         const modernUntouched = await db.query<{ n: number }>(
           `select count(*)::int as n from public.customers
-            where customer_code is not null and customer_number !~ '^AF-CUS-([A-HJ-NP-Z2-9]{5}|[1-9][0-9]{3}-(?!000000)[0-9]{6})$'`,
+            where customer_code is not null and customer_number !~ '^AF-CUS-[A-HJ-NP-Z2-9]{5}$'`,
         );
         eq('no customer number is left in a legacy format', modernUntouched.rows[0]!.n, 0);
 
@@ -15619,6 +15610,595 @@ async function main(): Promise<void> {
           await db.query(`delete from public.customers where id = any($1::uuid[])`, [buyers71]).catch(() => undefined);
         }
       }
+      section('73. application referral-chain staff linkage');
+      /* ---------------------------------------------------------------- */
+      // SVD/SSM/SM/Referrer as Organization linkage through the REAL RPC:
+      // ids resolve to active staff of the exact role, the chain must agree
+      // with referral_relationships (gaps allowed, contradiction refused),
+      // and names snapshot from staff_users - with the legacy text path
+      // unchanged when no id is supplied.
+      //
+      // Dedicated chain fixtures, not the shared suite chain: referral tests
+      // earlier in the run move the shared links, so only a chain this
+      // section owns can prove agreement. Fixture staff use the run prefix
+      // and are recorded, so the shared cleanup removes staff, links and
+      // auth rows; applications and customers are removed inline below.
+      {
+        const actor = staff['sm']!;
+        const bronzePlan = await one<{ id: string }>(
+          `select id from public.card_plans where code = 'BRONZE'`,
+        );
+        const chainRoleId = async (slug: string) =>
+          (await one<{ id: string }>(`select id from public.roles where slug = $1`, [slug])).id;
+        const mkChainStaff = async (label: string, role: string) => {
+          const id = uuidFor(`staff:chain73:${label}`);
+          const email = `${RUN}-chain73-${label}@example.invalid`;
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status)
+             values ($1, $2, $3, 'active')`,
+            [id, email, `Chain73 ${label}`],
+          );
+          await db.query(
+            'insert into public.staff_role_assignments (staff_id, role_id) values ($1, $2)',
+            [id, await chainRoleId(role)],
+          );
+          createdStaffIds.push(id);
+          return id;
+        };
+        // VD vd -> SSM ssm -> SM sm1 + SM sm2, OST ost under sm1.
+        const cvd = await mkChainStaff('vd', 'vice_director');
+        const cssm = await mkChainStaff('ssm', 'senior_sales_manager');
+        const csm1 = await mkChainStaff('sm1', 'sales_manager');
+        const csm2 = await mkChainStaff('sm2', 'sales_manager');
+        const cost = await mkChainStaff('ost', 'ost');
+        const chainLink = async (subject: string, upline: string, level: string) => {
+          await db.query(
+            `insert into public.referral_relationships
+             (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+             values ($1, $2, $3, true, true, $4)`,
+            [subject, upline, level, actor],
+          );
+        };
+        await chainLink(cssm, cvd, 'senior_sales_manager');
+        await chainLink(csm1, cssm, 'sales_manager');
+        await chainLink(csm2, cssm, 'sales_manager');
+        await chainLink(cost, csm1, 'ost');
+        const chainCustomers: string[] = [];
+        const chainApps: string[] = [];
+        const mkChainCustomer = async (label: string) => {
+          const id = uuidFor(`cust:chain73:${label}`);
+          const cn = (
+            await one<{ customer_number: string }>('select * from public.next_customer_number()')
+          ).customer_number;
+          await db.query(
+            `insert into public.customers (id, customer_number, first_name, last_name, birth_date, email, phone, status)
+           values ($1,$2,'Chain','Test','1990-01-01',$3,'09175550002','prospect')`,
+            [id, cn, `${RUN}-chain73-${label}@example.invalid`],
+          );
+          createdCustomerIds.push(id);
+          chainCustomers.push(id);
+          return id;
+        };
+        const chainHolder = () => ({
+          lastName: 'Chain',
+          firstName: 'Test',
+          middleName: '',
+          suffix: '',
+          birthDate: '1990-04-05',
+          sex: '',
+          citizenship: '',
+          civilStatus: '',
+          permanentAddressLine1: '1 RPC Street',
+          permanentAddressLine2: '',
+          cityMunicipality: 'Calamba',
+          province: 'Laguna',
+          postalCode: '',
+          landline: '',
+          mobile: '09170000002',
+          email: `${RUN}-chain73-holder@example.invalid`,
+          tinNumber: '',
+          occupationBusinessName: '',
+          officeBusinessAddress: '',
+          businessIndustry: '',
+          employedPosition: '',
+          printedName: 'Test Chain',
+        });
+        const chainHeader = (customerId: string, extra: Record<string, unknown> = {}) => ({
+          customerId,
+          planId: bronzePlan.id,
+          paymentScheme: 'spot_cash',
+          salesManagerName: '',
+          svdName: '',
+          ssmName: '',
+          vipRecommenderName: '',
+          recommenderContact: '',
+          recommenderEmail: '',
+          vipReferrer: '',
+          acquisitionChannels: ['Referral'],
+          consentAcknowledged: true,
+          acknowledgedAt: '2026-10-01',
+          primarySignatureStatus: 'received',
+          validIdReceived: true,
+          reservationPaymentProofReceived: false,
+          ...extra,
+        });
+        const saveChain = async (header: Record<string, unknown>) => {
+          const res = await one<{ id: string }>(
+            'select public.save_customer_application(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, null::jsonb) as id',
+            [actor, JSON.stringify(header), JSON.stringify(chainHolder())],
+          );
+          chainApps.push(res.id);
+          return res.id;
+        };
+        const chainRow = async (id: string) =>
+          one<Record<string, string | null>>(
+            `select svd_staff_id::text, ssm_staff_id::text, sm_staff_id::text,
+                    referrer_staff_id::text, svd_name, ssm_name,
+                    sales_manager_name, vip_referrer
+             from public.customer_applications where id = $1`,
+            [id],
+          );
+
+        // Full chain: ids resolve, names snapshot from the Organization.
+        const full = await saveChain(
+          chainHeader(await mkChainCustomer('full'), {
+            svdStaffId: cvd,
+            ssmStaffId: cssm,
+            smStaffId: csm1,
+            referrerStaffId: cost,
+          }),
+        );
+        const fullRow = await chainRow(full);
+        eq('chain SVD id is stored', fullRow.svd_staff_id, cvd);
+        eq('chain SSM id is stored', fullRow.ssm_staff_id, cssm);
+        eq('chain SM id is stored', fullRow.sm_staff_id, csm1);
+        eq('chain referrer id is stored', fullRow.referrer_staff_id, cost);
+        eq('chain SVD name is snapshotted', fullRow.svd_name, 'Chain73 vd');
+        eq('chain SSM name is snapshotted', fullRow.ssm_name, 'Chain73 ssm');
+        eq('chain SM name is snapshotted', fullRow.sales_manager_name, 'Chain73 sm1');
+        eq('chain referrer name is snapshotted', fullRow.vip_referrer, 'Chain73 ost');
+
+        // A gap is allowed: SVD + SM with no SSM still agrees.
+        const gapped = await saveChain(
+          chainHeader(await mkChainCustomer('gap'), {
+            svdStaffId: cvd,
+            smStaffId: csm1,
+          }),
+        );
+        const gapRow = await chainRow(gapped);
+        eq('gapped chain keeps the SVD', gapRow.svd_staff_id, cvd);
+        eq('gapped chain keeps the SM', gapRow.sm_staff_id, csm1);
+        eq('gapped SSM stays empty', gapRow.ssm_staff_id, null);
+
+        // Legacy text without ids is stored verbatim and links nothing.
+        const legacy = await saveChain(
+          chainHeader(await mkChainCustomer('legacy'), {
+            svdName: 'Typed SVD',
+            vipReferrer: 'Typed Referrer',
+          }),
+        );
+        const legacyRow = await chainRow(legacy);
+        eq('legacy SVD text is stored', legacyRow.svd_name, 'Typed SVD');
+        eq('legacy referrer text is stored', legacyRow.vip_referrer, 'Typed Referrer');
+        eq('legacy SVD id stays empty', legacyRow.svd_staff_id, null);
+        eq('legacy referrer id stays empty', legacyRow.referrer_staff_id, null);
+
+        // Contradiction: the OST sits under sm1, not under sm2.
+        const contradicted = await throws('a disagreeing chain is refused', () =>
+          saveChain(
+            chainHeader('00000000-0000-4000-8000-000000000000', {
+              smStaffId: csm2,
+              referrerStaffId: cost,
+            }),
+          ),
+        );
+        check(
+          'contradiction names the hierarchy rule',
+          /INVALID_HIERARCHY/.test(contradicted),
+          contradicted,
+        );
+
+        // An id of the wrong role is refused before any chain check.
+        const wrongRole = await throws('a wrong-role id is refused', () =>
+          saveChain(
+            chainHeader('00000000-0000-4000-8000-000000000000', {
+              smStaffId: cost,
+            }),
+          ),
+        );
+        check(
+          'wrong role names the seller-role rule',
+          /SELLER_ROLE_NOT_A_SELLER/.test(wrongRole),
+          wrongRole,
+        );
+
+        // Inactive staff is refused even with the right history.
+        const inactive = await throws('an inactive id is refused', () =>
+          saveChain(
+            chainHeader('00000000-0000-4000-8000-000000000000', {
+              smStaffId: staff['inactive'],
+            }),
+          ),
+        );
+        check('inactive names the seller rule', /SELLER_INACTIVE/.test(inactive), inactive);
+
+        // Unknown and malformed ids are not found, never a 500.
+        const unknown = await throws('an unknown id is refused', () =>
+          saveChain(
+            chainHeader('00000000-0000-4000-8000-000000000000', {
+              smStaffId: '00000000-0000-4000-8000-000000000000',
+            }),
+          ),
+        );
+        check('unknown names the subject rule', /SUBJECT_NOT_FOUND/.test(unknown), unknown);
+        const malformedCustomer = await mkChainCustomer('malformed');
+        const malformed = await throws('a malformed id is refused', () =>
+          saveChain(chainHeader(malformedCustomer, { smStaffId: 'not-a-uuid' })),
+        );
+        check('malformed names the subject rule', /SUBJECT_NOT_FOUND/.test(malformed), malformed);
+
+        await db.query(
+          'delete from public.customer_application_holders where application_id = any($1::uuid[])',
+          [chainApps],
+        );
+        await db.query('delete from public.customer_applications where id = any($1::uuid[])', [
+          chainApps,
+        ]);
+        await db.query('delete from public.customers where id = any($1::uuid[])', [
+          chainCustomers,
+        ]);
+        const chainRemaining = await one<{ n: number }>(
+          'select count(*)::int as n from public.customer_applications where id = any($1::uuid[])',
+          [chainApps],
+        );
+        eq('section rows are removed', chainRemaining.n, 0);
+      }
+
+      section('74. customer SSOT alignment: landlines, address parts, register copy, per-key merge');
+      /* ---------------------------------------------------------------- */
+      // The company master list added PRIMARY/SUPPLEMENTARY LANDLINE and
+      // split address parts (PERMANENT ADDRESS LINE 2, BARANGGAY, POSTAL
+      // CODE) that the record either did not store or silently dropped. This
+      // section proves, on real PostgreSQL, that the alignment migration
+      // (20261203000001):
+      //   1. adds the two landline columns (nullable, no defaults, no
+      //      browser column grants);
+      //   2. registers new customers from applications with the holder's
+      //      SUFFIX, SEX, LANDLINE and BARANGGAY;
+      //   3. persists landlines, supplementary singles and full address
+      //      parts on import CREATE;
+      //   4. merges address parts PER KEY on import UPDATE instead of the
+      //      old replace-only-when-line1-present clobber.
+      {
+        const landCols = await db.query<{
+          column_name: string;
+          is_nullable: string;
+          column_default: string | null;
+        }>(
+          `select column_name, is_nullable, column_default from information_schema.columns
+           where table_schema = 'public' and table_name = 'customers'
+             and column_name in ('landline', 'supplementary_landline')`,
+        );
+        eq('both landline columns exist', landCols.rowCount, 2);
+        for (const col of landCols.rows)
+          check(
+            `${col.column_name} is nullable with no default`,
+            col.is_nullable === 'YES' && col.column_default === null,
+          );
+        eq(
+          'no browser column grant on the new contact columns',
+          (
+            await one<{ n: number }>(
+              // Owner rows always appear in the grants view (implicit
+              // ownership, not a GRANT); only browser-role rows would be a
+              // posture break, exactly as rls_invariants.sql checks.
+              `select count(*)::int as n from information_schema.role_column_grants
+               where table_schema = 'public' and table_name = 'customers'
+                 and column_name in ('landline', 'supplementary_landline')
+                 and grantee in ('anon', 'authenticated', 'PUBLIC')`,
+            )
+          ).n,
+          0,
+        );
+
+        const ssotActor = staff['super-admin']!;
+        const ssotPlanId = (
+          await one<{ id: string }>(`select id from public.card_plans where code = 'BRONZE'`)
+        ).id;
+
+        // 2. Register-from-application copies the holder basics onto the record.
+        const ssotHolderEmail = `${RUN}-ssot74-holder@example.invalid`;
+        const ssotAppId = (
+          await one<{ id: string }>(
+            'select public.register_customer_application_once($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null) as id',
+            [
+              uuidFor('import:ssot74:request'),
+              ssotActor,
+              JSON.stringify({
+                planId: ssotPlanId,
+                paymentScheme: 'spot_cash',
+                salesManagerName: '',
+                vipRecommenderName: '',
+                recommenderContact: '',
+                recommenderEmail: '',
+                vipReferrer: '',
+                acquisitionChannels: ['Referral'],
+                consentAcknowledged: true,
+                acknowledgedAt: '2026-10-01',
+                primarySignatureStatus: 'received',
+                validIdReceived: true,
+                reservationPaymentProofReceived: false,
+              }),
+              JSON.stringify({
+                lastName: 'Master',
+                firstName: 'Lisa',
+                middleName: '',
+                suffix: 'Jr.',
+                birthDate: '1990-04-05',
+                sex: 'Female',
+                citizenship: '',
+                civilStatus: '',
+                permanentAddressLine1: '1 SSOT Street',
+                permanentAddressLine2: 'Unit 7',
+                cityMunicipality: 'Calamba',
+                province: 'Laguna',
+                barangay: 'Parian',
+                // Barangay text requires the verified code triple (holder
+                // CHECK); the register copy reads the text, not the codes.
+                provinceCode: '1000000001',
+                cityMunicipalityCode: '1000000002',
+                barangayCode: '1000000003',
+                postalCode: '4027',
+                landline: '(049) 555-1234',
+                mobile: '09170000074',
+                email: ssotHolderEmail,
+                tinNumber: '',
+                occupationBusinessName: '',
+                officeBusinessAddress: '',
+                businessIndustry: '',
+                employedPosition: '',
+                printedName: 'Lisa Master',
+              }),
+            ],
+          )
+        ).id;
+        createdApplicationIds.push(ssotAppId);
+        const registered = await one<{
+          id: string;
+          suffix: string | null;
+          gender: string | null;
+          landline: string | null;
+          address: Record<string, string | null>;
+        }>(
+          'select id, suffix, gender, landline, address from public.customers where email = $1',
+          [ssotHolderEmail],
+        );
+        createdCustomerIds.push(registered.id);
+        eq('register copies the holder suffix', registered.suffix, 'Jr.');
+        eq('register copies sex lowercased into gender', registered.gender, 'female');
+        eq('register copies the holder landline', registered.landline, '(049) 555-1234');
+        eq('register copies barangay into the address', registered.address?.barangay, 'Parian');
+        eq('register copies line2 into the address', registered.address?.line2, 'Unit 7');
+        eq('register copies the postal code', registered.address?.postalCode, '4027');
+
+        // 3. Import CREATE persists landlines, supplementary singles and parts.
+        const ssotJob = uuidFor('import:job74');
+        await db.query(
+          `insert into public.customer_import_jobs
+           (id, source_type, source_name, status, total_rows, valid_rows, created_by, validated_at)
+           values ($1, 'csv', 'section-74.csv', 'ready', 1, 1, $2, now())`,
+          [ssotJob, ssotActor],
+        );
+        const ssotEmail = `${RUN}-sec74@example.invalid`;
+        const ssotSupEmail = `${RUN}-sec74-sup@example.invalid`;
+        const created = (
+          await one<{ out: { customerId: string; saleId: null; membershipId: null } }>(
+            'select public.import_legacy_member($1::uuid, $2::uuid, $3::jsonb, null, $4::jsonb, null, false) as out',
+            [
+              ssotJob,
+              ssotActor,
+              JSON.stringify({
+                firstName: 'Master',
+                lastName: 'List',
+                middleName: null,
+                suffix: null,
+                birthDate: '1988-02-02',
+                gender: null,
+                email: ssotEmail,
+                phone: '+639170000074',
+                landline: '(02) 8123-4567',
+                address: {
+                  line1: '9 SSOT Ave',
+                  line2: 'Floor 3',
+                  city: 'Calamba',
+                  province: 'Laguna',
+                  barangay: 'Parian',
+                  postalCode: '4027',
+                  countryCode: 'PH',
+                },
+                customerStatus: 'prospect',
+                notes: null,
+                secondaryNote: null,
+                company: {
+                  raNumber: 'RA-74',
+                  supplementaryFullName: 'Sam List',
+                  supplementaryAddress: '1 Side St, Biñan',
+                  supplementaryBirthday: '1990-03-03',
+                  supplementaryGender: 'male',
+                  supplementaryMobile: '+639180000074',
+                  supplementaryEmail: ssotSupEmail,
+                  supplementaryLandline: '(02) 8999-0000',
+                },
+              }),
+              JSON.stringify([]),
+            ],
+          )
+        ).out;
+        createdCustomerIds.push(created.customerId);
+        const stored = await one<{
+          landline: string | null;
+          address: Record<string, string | null>;
+          ra_number: string | null;
+          supplementary_full_name: string | null;
+          supplementary_address: string | null;
+          supplementary_birthday: string | null;
+          supplementary_gender: string | null;
+          supplementary_mobile: string | null;
+          supplementary_email: string | null;
+          supplementary_landline: string | null;
+        }>(
+          `select landline, address, ra_number, supplementary_full_name, supplementary_address,
+                  supplementary_birthday::text, supplementary_gender, supplementary_mobile,
+                  supplementary_email, supplementary_landline
+           from public.customers where id = $1`,
+          [created.customerId],
+        );
+        eq('import CREATE persists the primary landline', stored.landline, '(02) 8123-4567');
+        eq('import CREATE persists line2', stored.address?.line2, 'Floor 3');
+        eq('import CREATE persists barangay', stored.address?.barangay, 'Parian');
+        eq('import CREATE persists the postal code', stored.address?.postalCode, '4027');
+        eq('import CREATE persists ra_number', stored.ra_number, 'RA-74');
+        eq(
+          'import CREATE persists the supplementary landline',
+          stored.supplementary_landline,
+          '(02) 8999-0000',
+        );
+        eq(
+          'import CREATE persists the supplementary mobile',
+          stored.supplementary_mobile,
+          '+639180000074',
+        );
+        eq('import CREATE persists the supplementary email', stored.supplementary_email, ssotSupEmail);
+        eq(
+          'import CREATE persists the supplementary birthday',
+          stored.supplementary_birthday,
+          '1990-03-03',
+        );
+        eq('import CREATE persists the supplementary name', stored.supplementary_full_name, 'Sam List');
+        eq(
+          'import CREATE persists the supplementary address',
+          stored.supplementary_address,
+          '1 Side St, Biñan',
+        );
+
+        // 4. Import UPDATE merges address parts per key: a city-only
+        // correction changes the city and keeps every other stored part; a
+        // blank landline keeps the stored value, a filled one replaces it.
+        const mergeId = uuidFor('cust:ssot74:merge');
+        const mergeNumber = (
+          await one<{ customer_number: string }>('select * from public.next_customer_number()')
+        ).customer_number;
+        const mergeEmail = `${RUN}-sec74-merge@example.invalid`;
+        await db.query(
+          `insert into public.customers
+           (id, customer_number, first_name, last_name, email, phone, landline, address, status)
+           values ($1, $2, 'Merge', 'Test', $3, '+639170000075', '(049) 111-1111',
+             '{"line1":"Old Line","city":"Old City","province":"Old Prov","barangay":"Old Bgy","postalCode":"4000","countryCode":"PH"}',
+             'active')`,
+          [mergeId, mergeNumber, mergeEmail],
+        );
+        createdCustomerIds.push(mergeId);
+        let ssotRowNumber = 0;
+        const mergeRow = async (label: string, raw: Record<string, unknown>, personLandline?: string) => {
+          const id = uuidFor(`import:row74:${label}`);
+          ssotRowNumber += 1;
+          await db.query(
+            'insert into public.customer_import_rows(id, import_job_id, customer_id, row_number, validation_status, action, normalized_data, raw_data) values($1,$2,$3,$4,\'valid\',\'UPDATE\',$5,$6)',
+            [
+              id,
+              ssotJob,
+              mergeId,
+              ssotRowNumber,
+              JSON.stringify({
+                category: 'ACTIVE',
+                customerStatus: 'active',
+                person: {
+                  firstName: 'Merge',
+                  lastName: 'Test',
+                  email: mergeEmail,
+                  phone: '+639170000075',
+                  ...(personLandline !== undefined ? { landline: personLandline } : {}),
+                },
+                company: {},
+              }),
+              JSON.stringify(raw),
+            ],
+          );
+          return (
+            await one<{ out: { customerId: string } }>(
+              'select public.commit_customer_import_row($1, $2) as out',
+              [id, ssotActor],
+            )
+          ).out;
+        };
+        const merged = await mergeRow('city-only', {
+          address_line_1: '',
+          address_line_2: '',
+          city: 'New City',
+          province: '',
+          barangay: '',
+          postal_code: '',
+          country: '',
+          notes: '',
+        });
+        eq('UPDATE routes to the existing customer', merged.customerId, mergeId);
+        const afterCity = await one<{ address: Record<string, string | null>; landline: string | null }>(
+          'select address, landline from public.customers where id = $1',
+          [mergeId],
+        );
+        eq('a city-only correction changes the city', afterCity.address?.city, 'New City');
+        eq('blank line1 keeps the stored line1', afterCity.address?.line1, 'Old Line');
+        eq('blank province keeps the stored province', afterCity.address?.province, 'Old Prov');
+        eq('blank barangay keeps the stored barangay', afterCity.address?.barangay, 'Old Bgy');
+        eq('blank postal keeps the stored code', afterCity.address?.postalCode, '4000');
+        eq('blank landline content keeps the stored landline', afterCity.landline, '(049) 111-1111');
+        // A filled landline replaces; a row that says nothing about it keeps it.
+        await mergeRow(
+          'landline-set',
+          {
+            address_line_1: '',
+            address_line_2: '',
+            city: '',
+            province: '',
+            barangay: '',
+            postal_code: '',
+            country: '',
+            notes: '',
+          },
+          '(049) 222-2222',
+        );
+        eq(
+          'a filled landline replaces the stored value',
+          (
+            await one<{ landline: string | null }>(
+              'select landline from public.customers where id = $1',
+              [mergeId],
+            )
+          ).landline,
+          '(049) 222-2222',
+        );
+        await mergeRow('landline-silent', {
+          address_line_1: '',
+          address_line_2: '',
+          city: '',
+          province: '',
+          barangay: '',
+          postal_code: '',
+          country: '',
+          notes: '',
+        });
+        eq(
+          'an untouched landline survives a later row',
+          (
+            await one<{ landline: string | null }>(
+              'select landline from public.customers where id = $1',
+              [mergeId],
+            )
+          ).landline,
+          '(049) 222-2222',
+        );
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -15658,10 +16238,6 @@ async function main(): Promise<void> {
         ))!.rows.map((r) => r.id);
 
         await db?.query('begin');
-        await db?.query(
-          `delete from private.business_id_aliases where entity_type='customer' and entity_id=any($1::uuid[])`,
-          [[...new Set([...custSet, ...createdCustomerIds])]],
-        );
         await db?.query('delete from private.mutation_requests where actor_id = any($1::uuid[])', [
           staffSet,
         ]);
@@ -15702,10 +16278,6 @@ async function main(): Promise<void> {
         // Reservation-origin payments are protected history, so the owner-only cleanup
         // escape is armed before this delete, not just before the evidence one.
         await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
-        await db?.query(
-          `delete from private.purchase_document_evidence where payment_id in (select id from public.payments where customer_id=any($1::uuid[])) or membership_id in (select id from public.memberships where customer_id=any($1::uuid[])) or sale_id in (select id from public.card_sales where customer_id=any($1::uuid[]))`,
-          [custSet],
-        );
         await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
           custSet,
         ]);
@@ -15816,17 +16388,9 @@ async function main(): Promise<void> {
            (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
           [custSet],
         );
-        await db?.query(
-          'update public.customer_applications set sale_id=null where customer_id=any($1::uuid[])',
-          [custSet],
-        );
         await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
           custSet,
         ]);
-        await db?.query(
-          'delete from private.vip_control_numbers where customer_id=any($1::uuid[])',
-          [custSet],
-        );
         // Customer-application rows reference synthetic customers (and synthetic
         // sales, already removed above). Holders go before headers; headers go
         // before the customer row itself. Documents were removed with payments.
@@ -15997,11 +16561,6 @@ async function main(): Promise<void> {
         ).rows[0]!.n;
         if (requestsRemaining !== baseline.get('private.mutation_requests'))
           leaks.push('private.mutation_requests: cleanup mismatch');
-        const vipRemaining = (
-          await db.query<{ n: number }>('select count(*)::int n from private.vip_control_numbers')
-        ).rows[0]!.n;
-        if (vipRemaining !== baseline.get('private.vip_control_numbers'))
-          leaks.push('private.vip_control_numbers: cleanup mismatch');
         for (const table of BASELINE_TABLES) {
           const after = await db?.query<{ n: number }>(
             `select count(*)::int as n from public.${table}`,

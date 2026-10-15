@@ -30,6 +30,22 @@ export function normalizePersonName(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
 
+/**
+ * Readable casing for text a person reads as words: the first letter of every
+ * whitespace-separated word is upper-cased and the rest lower-cased, so
+ * `jUAN dela CRUZ` reads `Juan Dela Cruz`.
+ *
+ * This is a DISPLAY/storage convention for human-entered names and street
+ * lines only - never apply it to emails, tokens, technical identifiers, or to
+ * authority-published geographic names, whose spelling is the record.
+ */
+export function toTitleCase(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
 /** Uppercase a human-readable address/business field for storage. */
 export function normalizeAddressField(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toUpperCase();

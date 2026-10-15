@@ -238,7 +238,6 @@ function matches(row: FakeRow, ops: Op[]): boolean {
 }
 
 export class FakeSupabase {
-  private submissionReceipts = new Map<string, { payload: string; id: unknown }>();
   tables: FakeTables;
   tokens: Record<string, FakeAuthUser>;
   errors: Record<string, { code?: string; message: string }>;
@@ -856,124 +855,6 @@ export class FakeSupabase {
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
     if (!entry && fn === 'afhomes_admin_mfa_required') return { data: false, error: null };
-    if (!entry && fn === 'create_customer_once') {
-      const key = `${fn}:${String(args.p_actor_id)}:${String(args.p_request_id)}`;
-      const payload = JSON.stringify(args.p_input);
-      const prior = this.submissionReceipts.get(key);
-      if (prior)
-        return prior.payload === payload
-          ? { data: prior.id, error: null }
-          : { data: null, error: { message: 'MUTATION_PAYLOAD_CONFLICT' } };
-      const snapshot = structuredClone(this.tables);
-      const sequence = (await this.rpc('next_customer_number')) as {
-        data: { customer_number?: string }[] | { customer_number?: string } | null;
-        error: { message: string } | null;
-      };
-      if (sequence.error) return sequence;
-      if (Array.isArray(sequence.data) && sequence.data.length !== 1)
-        return { data: null, error: { message: 'Customer number generation failed' } };
-      const number = Array.isArray(sequence.data)
-        ? sequence.data[0]?.customer_number
-        : sequence.data?.customer_number;
-      if (!number?.trim())
-        return { data: null, error: { message: 'Customer number generation failed' } };
-      const row = args.p_input as FakeRow;
-      const inserted = await this.from('customers')
-        .insert({ ...row, customer_number: number })
-        .select('*')
-        .single();
-      if (inserted.error || !inserted.data) return inserted;
-      const event = await this.from('audit_events').insert({
-        actor_id: args.p_actor_id,
-        action: 'CUSTOMER_CREATED',
-        entity_type: 'customer',
-        entity_id: inserted.data.id,
-        after_data: { customerNumber: number, email: row.email, createdBy: args.p_actor_id },
-      });
-      if (event.error) {
-        this.tables = snapshot;
-        return event;
-      }
-      this.submissionReceipts.set(key, { payload, id: inserted.data.id });
-      return { data: inserted.data.id, error: null };
-    }
-    if (!entry && fn === 'submit_card_sale_once') {
-      const key = `${fn}:${String(args.p_actor_id)}:${String(args.p_request_id)}`;
-      const payload = JSON.stringify(args.p_input);
-      const prior = this.submissionReceipts.get(key);
-      if (prior)
-        return prior.payload === payload
-          ? { data: prior.id, error: null }
-          : { data: null, error: { message: 'MUTATION_PAYLOAD_CONFLICT' } };
-      const snapshot = structuredClone(this.tables);
-      const sequence = (await this.rpc('next_sale_number')) as {
-        data: { sale_number?: string }[] | { sale_number?: string } | null;
-        error: { code?: string; message: string } | null;
-      };
-      if (sequence.error) return sequence;
-      if (Array.isArray(sequence.data) && sequence.data.length !== 1)
-        return { data: null, error: { message: 'Sale number generation failed' } };
-      const number = Array.isArray(sequence.data)
-        ? sequence.data[0]?.sale_number
-        : sequence.data?.sale_number;
-      if (!number?.trim())
-        return { data: null, error: { message: 'Sale number generation failed' } };
-      const row = args.p_sale as FakeRow;
-      const plan = this.rows('card_plans').find((p) => p.id === row.plan_id);
-      const tiers: Record<string, string> = { GOLD: 'G1', SILVER: 'S1', BRONZE: 'B1' };
-      const tier = tiers[String(plan?.code)];
-      if (!tier) return { data: null, error: { message: 'VIP_TIER_NOT_APPROVED' } };
-      const paymentCode =
-        row.payment_scheme === 'spot_cash'
-          ? 'C01'
-          : `T${String(row.installment_months_snapshot).padStart(2, '0')}`;
-      const inserted = await this.from('card_sales')
-        .insert({
-          ...row,
-          sale_number: number,
-          official_vip_number: `26101400001${tier}${paymentCode}S`,
-        })
-        .select('*')
-        .single();
-      if (inserted.error || !inserted.data) return inserted;
-      const sale = inserted.data;
-      const commission = await this.from('commissions').insert({
-        sale_id: sale.id,
-        ost_id: null,
-        beneficiary_type: 'staff',
-        beneficiary_staff_id: row.seller_staff_id,
-        amount: row.expected_commission_snapshot,
-        rate_snapshot: row.commission_rate_snapshot,
-        basis_amount_snapshot: row.commission_base_snapshot,
-        commission_rule_id: row.commission_rule_id,
-        status: 'pending',
-      });
-      if (commission.error) {
-        this.tables = snapshot;
-        return commission;
-      }
-      const event = await this.from('audit_events').insert({
-        actor_id: args.p_actor_id,
-        action: 'APPLICATION_SUBMITTED',
-        entity_type: 'card_sale',
-        entity_id: sale.id,
-        after_data: {
-          saleNumber: number,
-          customerId: row.customer_id,
-          productId: row.plan_id,
-          sellerStaffId: row.seller_staff_id,
-          paymentScheme: row.payment_scheme,
-          frozenTotal: row.cash_price_snapshot,
-          expectedCommission: row.expected_commission_snapshot,
-        },
-      });
-      if (event.error) {
-        this.tables = snapshot;
-        return event;
-      }
-      this.submissionReceipts.set(key, { payload, id: sale.id });
-      return { data: sale.id, error: null };
-    }
     // Directory behavior is a handler fixture only; real SQL is separately executed.
     if (!entry && fn === 'match_import_emails') {
       const emails = Array.isArray(args.p_emails)

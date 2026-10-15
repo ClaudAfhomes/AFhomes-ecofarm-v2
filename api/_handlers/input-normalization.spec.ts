@@ -134,8 +134,11 @@ describe('other writers normalize through the same contracts', () => {
             lastName: 'jimenez',
             firstName: 'claud',
             middleName: 'mars',
-            suffix: 'jr',
+            suffix: 'Jr.',
             birthDate: '1990-05-04',
+            sex: 'Male',
+            civilStatus: 'Married',
+            citizenship: 'Filipino',
             permanentAddressLine1: '123 main st',
             permanentAddressLine2: 'unit 2, 123 rizal st.',
             officeBusinessAddress: 'office at rizal st.',
@@ -163,21 +166,23 @@ describe('other writers normalize through the same contracts', () => {
     );
     const primary = (call?.arg as Record<string, Record<string, unknown>>).p_primary;
     expect(primary).toMatchObject({
-      lastName: 'jimenez',
-      firstName: 'claud',
-      middleName: 'mars',
-      suffix: 'jr',
-      // Geographic names keep their casing. They are official reference values
-      // selected from the authority's list, so upper-casing them would store a
-      // spelling the authority never published. Every field below is still
-      // user-entered text and still upper-cased, which is the point of the split.
+      // Names and street lines are Title Case now; the city/province names keep
+      // the authority's own casing and the upper-cased work fields keep theirs.
+      lastName: 'Jimenez',
+      firstName: 'Claud',
+      middleName: 'Mars',
+      suffix: 'Jr.',
+      sex: 'Male',
+      civilStatus: 'Married',
+      citizenship: 'Filipino',
       cityMunicipality: 'quezon city',
       province: 'metro manila',
-      permanentAddressLine2: 'UNIT 2, 123 RIZAL ST.',
+      permanentAddressLine1: '123 Main St',
+      permanentAddressLine2: 'Unit 2, 123 Rizal St.',
       officeBusinessAddress: 'OFFICE AT RIZAL ST.',
       occupationBusinessName: 'SARI-SARI STORE OWNER',
       employedPosition: 'STORE KEEPER',
-      printedName: 'claud jimenez',
+      printedName: 'Claud Jimenez',
       mobile: '+639171234567',
       email: 'claud@example.com',
     });

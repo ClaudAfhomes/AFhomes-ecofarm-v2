@@ -104,7 +104,7 @@ async function createSale(productId: string, saleNumber: string) {
     method: 'POST',
     path: '',
     token: TOKEN.admin,
-    body: { requestId: crypto.randomUUID(), customerId: CUSTOMER.prospect, productId },
+    body: { customerId: CUSTOMER.prospect, productId },
   });
   expect(state.status).toBe(201);
   return state;
@@ -269,9 +269,9 @@ describe('creating a card plan', () => {
     expect(state.status).toBe(201);
     // JADE carries the default reservation fee (10000.00 fixtures omit it).
     expect(state.body).toMatchObject({ minimumDownPayment: '10000.00' });
-    expect(db.rows('card_plans').find((r) => r.code === 'NOFLOOR')!.minimum_down_payment).toBe(
-      '10000.00',
-    );
+    expect(
+      db.rows('card_plans').find((r) => r.code === 'NOFLOOR')!.minimum_down_payment,
+    ).toBe('10000.00');
   });
 
   it('rejects negative yearly points with 400', async () => {
@@ -329,7 +329,9 @@ describe('editing a card plan', () => {
     });
     expect(state.status).toBe(200);
     expect(state.body).toMatchObject({ yearlyPoints: 45000, description: 'Updated copy.' });
-    expect(db.rows('audit_events').some((e) => e.action === 'CARD_PLAN_UPDATED')).toBe(true);
+    expect(
+      db.rows('audit_events').some((e) => e.action === 'CARD_PLAN_UPDATED'),
+    ).toBe(true);
   });
 
   it('clears the description back to null', async () => {
@@ -429,11 +431,7 @@ describe('activate and deactivate', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.silver,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.silver },
     });
     expect(sale.status).toBe(409);
   });

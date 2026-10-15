@@ -284,12 +284,12 @@ export default function App() {
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
               <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
               <Route
-                path="/admin/customers/import-export"
-                element={protectedPage(<CustomerImportExportPage />)}
-              />
-              <Route
                 path="/admin/customers/applications"
                 element={protectedPage(<CustomerApplicationsPage />)}
+              />
+              <Route
+                path="/admin/customers/applications/import-export"
+                element={protectedPage(<CustomerImportExportPage />)}
               />
               <Route
                 path="/admin/customers/applications/new"

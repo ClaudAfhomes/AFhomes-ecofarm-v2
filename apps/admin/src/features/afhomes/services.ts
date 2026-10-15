@@ -65,6 +65,9 @@ export const getAfHomesStaffAudit = (id: string) =>
   requestList(`/admin/afhomes/staff/${id}/audit`, auditEventSchema);
 export const getAfHomesRoleById = (id: string): Promise<AfHomesRole> =>
   request(`/admin/afhomes/roles/${id}`, afHomesRoleSchema);
+const roleDeletionSchema = z.object({ deleted: z.literal(true) });
+export const deleteAfHomesRole = (id: string) =>
+  request(`/admin/afhomes/roles/${id}`, roleDeletionSchema, { method: 'DELETE' });
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
   requestList('/admin/afhomes/staff?includeAccreditation=1', afHomesStaffSchema);
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>

@@ -15,9 +15,10 @@ describe('AFHomes navigation', () => {
     const grants = [
       permission('dashboard.view'),
       permission('operations.redemption'),
+      permission('operations.customer_lookup'),
       permission('sales.id_documents'),
     ];
-    const items = navItemsForPermissions(grants, 'employee');
+    const items = navItemsForPermissions(grants);
     expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'Customer Lookup']);
     expect(items.map((item) => item.label)).not.toContain('Membership Lookup');
     expect(JSON.stringify(items)).not.toContain('/admin/documents');
@@ -30,10 +31,11 @@ describe('AFHomes navigation', () => {
     // The member lookup shows Membership Codes, so it must not be presented as a
     // system-wide general lookup. It belongs under Redemption, next to the action
     // that follows it.
-    const items = navItemsForPermissions(
-      [permission('dashboard.view'), permission('operations.redemption')],
-      'employee',
-    );
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('operations.redemption'),
+      permission('operations.customer_lookup'),
+    ]);
     const topLevel = items.filter((item) => !item.dropdown).map((item) => item.to);
     expect(topLevel).not.toContain('/admin/member-lookup');
     expect(topLevel).toContain('/admin/customer-lookup');
@@ -46,15 +48,14 @@ describe('AFHomes navigation', () => {
     expect(redemptionTargets).not.toContain('/admin/member-lookup');
   });
 
-  it('reserves Customer Lookup to the operations.redemption grant', () => {
-    // The employee/GSD role holds `operations.redemption` and no `sales.customers`
-    // row, so this is the check that keeps the GSD desk reachable without widening
-    // anyone's permissions.
-    const employee = [permission('dashboard.view'), permission('operations.redemption')];
-    expect(canAccessNavTarget(employee, '/admin/customer-lookup')).toBe(true);
-    // A dropdown child may be a divider rather than a link, so narrow before reading
-    // `to` instead of asserting on the union.
-    const targets = navItemsForPermissions(employee, 'employee').flatMap((item) =>
+  it('reserves Customer Lookup to its own grant, not the till key', () => {
+    // The screen has its own module (`operations.customer_lookup`, seeded by
+    // 20261131000003 for employee and admin). Visibility is permission-driven:
+    // that grant shows the entry, the till key alone does not, and the route
+    // guard tracks the same key so hiding and refusing cannot disagree.
+    const lookupGrant = [permission('dashboard.view'), permission('operations.customer_lookup')];
+    expect(canAccessNavTarget(lookupGrant, '/admin/customer-lookup')).toBe(true);
+    const targets = navItemsForPermissions(lookupGrant).flatMap((item) =>
       item.dropdown
         ? item.dropdown.flatMap((child) => ('to' in child ? [child.to] : []))
         : [item.to],
@@ -62,28 +63,21 @@ describe('AFHomes navigation', () => {
     expect(targets.filter((to) => to?.includes('customer-lookup'))).toEqual([
       '/admin/customer-lookup',
     ]);
-  });
-  it.each([
-    'super_admin',
-    'admin',
-    'finance',
-    'hr',
-    'vice_director',
-    'senior_sales_manager',
-    'sales_manager',
-    'ost',
-    'customer',
-    undefined,
-  ])('hides the standalone lookup for %s even with a view grant', (role) => {
-    const grants = [permission('operations.redemption')];
+
+    // The till permission is NOT enough: neither the entry nor the URL. The
+    // viewer's role is not consulted at all - the effective permission is the
+    // whole rule - which is why every "role" case below is the same call.
+    const tillOnly = [permission('dashboard.view'), permission('operations.redemption')];
+    expect(canAccessNavTarget(tillOnly, '/admin/customer-lookup')).toBe(false);
     expect(
-      navItemsForPermissions(grants, role).some((item) => item.to === '/admin/customer-lookup'),
+      navItemsForPermissions(tillOnly).some((item) => item.to === '/admin/customer-lookup'),
     ).toBe(false);
-    // Sidebar visibility must not revoke existing support-route authorization.
-    expect(canAccessNavTarget(grants, '/admin/customer-lookup')).toBe(true);
+    expect(
+      navItemsForPermissions(lookupGrant).some((item) => item.to === '/admin/customer-lookup'),
+    ).toBe(true);
   });
   it('does not grant employee lookup without its effective permission', () => {
-    expect(navItemsForPermissions([], 'employee')).toEqual([]);
+    expect(navItemsForPermissions([])).toEqual([]);
     expect(canAccessNavTarget([], '/admin/customer-lookup')).toBe(false);
     expect(canAccessNavTarget([permission('dashboard.view')], '/admin/customer-lookup')).toBe(
       false,

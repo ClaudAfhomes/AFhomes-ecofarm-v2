@@ -2,14 +2,38 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 -- Last updated: 2026-10-15 (UTC)
--- Source: supabase/migrations on origin/claud/develop (81 files, sorted A-Z = apply order).
+-- Source: supabase/migrations (81 files, sorted A-Z = apply order).
 -- Authoritative DDL lives in supabase/migrations/*.sql — read the defining file
 -- listed per table below for the full column list. This file is an index only
 -- (table inventory + migration manifest) so it cannot drift from the migrations.
--- Live verification: shared project history holds 77 applied versions including
--- 20261203000002_afhomes_official_aa_numbering.sql (verified read-only; see notes).
+-- Update workflow: say "update schema" to regenerate this index from supabase/migrations.
 -- This file is never read by pnpm db:migrate and never applied to any database.
 --
+-- AGENT DIRECTIVE — AUTO-UPDATE ON TRIGGER (read this when this file is attached):
+-- Trigger phrases (any of these require a full refresh of THIS file):
+--   "update schema"
+--   "update schema @docs/supabase/CURRENT-SCHEMA.sql"
+-- On trigger, the agent MUST do all of the following before replying:
+--   1. VERIFY MIGRATIONS: list + read every file in supabase/migrations/ sorted
+--      A-Z (this is apply order). Confirm the count and filenames for Section 1.
+--      Fail closed if any file does not start with a valid afhomes_ prefix or
+--      breaks the one-idempotent-migration-per-change rule.
+--   2. VERIFY RELATED DB FILES: read supabase/security/rls_invariants.sql,
+--      supabase/apply-migrations.ts, supabase/db-testing/supabase-shim.sql,
+--      and any supabase/*-integration.ts / supabase/db-integration.ts present.
+--      Note any new tables, RLS policies, SECURITY DEFINER functions, storage
+--      buckets, or column-grant changes they introduce.
+--   3. RE-SCAN TABLES: grep `create table` (case-insensitive) across all
+--      supabase/migrations/*.sql. Record `table <= first-defined-in file`
+--      (first win). Then grep `alter table ... add column` deltas for the
+--      NOTES section when a referenced delta exists.
+--   4. REWRITE THIS FILE: update `Last updated` (UTC date), the file count in
+--      the Source line + Section 1 title, the full Section 1 manifest, the full
+--      Section 2 inventory, and the Section 3 delta notes. Never paste full
+--      DDL bodies here — index only, full DDL stays in the migration files.
+--   5. REPORT: reply with file count + table count + which migrations/tables
+--      were added/removed since the previous snapshot, or "no changes".
+
 -- ============================================================================
 -- 1. MIGRATION MANIFEST (81 files)
 -- ============================================================================
@@ -86,35 +110,34 @@
 -- 20261128000002_afhomes_self_search_path_hardening.sql
 -- 20261129000001_afhomes_document_scope_security.sql
 -- 20261129000002_afhomes_staff_business_security.sql
+-- 20261130000001_afhomes_membership_company_fields.sql
 -- 20261130000001_afhomes_sale_team_accreditation.sql
 -- 20261130000002_afhomes_archive_orphan_commission_rules.sql
+-- 20261131000001_afhomes_application_referral_chain.sql
+-- 20261131000002_afhomes_application_referral_staff.sql
+-- 20261131000003_afhomes_customer_lookup_module.sql
 -- 20261201000001_afhomes_normalization_integrity.sql
 -- 20261202000001_afhomes_private_profile_photos.sql
--- 20261203000001_afhomes_application_hierarchy_recommender.sql
--- 20261203000002_afhomes_official_aa_numbering.sql
--- 20261204000001_afhomes_official_customer_numbering.sql
--- 20261204000002_afhomes_official_vip_numbering.sql
---
+
 -- ============================================================================
--- 2. TABLE INVENTORY (73 tables: table <= first-defined-in migration)
+-- 2. TABLE INVENTORY (70 tables: table <= first-defined-in migration)
 -- Later migrations may ALTER these tables (add columns, tighten CHECKs, add
 -- RLS/policies/indexes). Read the defining file for base DDL, then grep later
 -- files for `alter table <name>` for the delta.
+-- NOTE: two files share the 20261130000001 timestamp prefix; A-Z sort applies
+-- membership_company_fields before sale_team_accreditation.
 -- ============================================================================
 -- private.business_id_aliases <= 20261027000001_afhomes_legacy_business_id_upgrade.sql
 -- private.commission_rule_archive <= 20261130000002_afhomes_archive_orphan_commission_rules.sql
 -- private.mutation_requests <= 20261022000001_afhomes_mutation_idempotency.sql
--- private.official_id_counters <= 20261204000001_afhomes_official_customer_numbering.sql
 -- private.ost_accreditation_renewals <= 20261023000001_afhomes_ost_accreditation_workflow.sql
 -- private.ost_accreditation_terms <= 20261023000001_afhomes_ost_accreditation_workflow.sql
 -- private.ost_import_jobs <= 20261023000001_afhomes_ost_accreditation_workflow.sql
 -- private.ost_import_rows <= 20261023000001_afhomes_ost_accreditation_workflow.sql
 -- private.ost_registration_details <= 20261023000001_afhomes_ost_accreditation_workflow.sql
 -- private.purchase_document_evidence <= 20261101000001_afhomes_application_purchase_flow.sql
--- private.sale_team_aa_counters <= 20261203000002_afhomes_official_aa_numbering.sql
 -- private.sale_team_accreditations <= 20261130000001_afhomes_sale_team_accreditation.sql
 -- private.staff_security_policy <= 20261129000002_afhomes_staff_business_security.sql
--- private.vip_control_numbers <= 20261204000002_afhomes_official_vip_numbering.sql
 -- public.audit_events <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.card_categories <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.card_plans <= 20260926023325_afhomes_phase1_foundation.sql
@@ -174,36 +197,33 @@
 -- public.staff_role_assignments <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.staff_users <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.tier_points_config <= 20261104000001_afhomes_points_rebuild.sql
---
+
 -- ============================================================================
 -- 3. NOTES
 -- ============================================================================
--- * Live history (verified read-only): 77 applied versions. All 81 tree
---   files at or below 20261203000002 are applied EXCEPT these 5, which remain
---   intentionally unapplied and are NOT bundled with any AA release:
---   20261030000001_afhomes_customer_directory_id_filter.sql,
---   20261031000001_afhomes_customer_directory_payment_filter.sql,
---   20261127000001_afhomes_catalog_policy_management.sql,
---   20261204000001_afhomes_official_customer_numbering.sql,
---   20261204000002_afhomes_official_vip_numbering.sql.
--- * Live-only version with no tree file: 20261012075439 (out-of-band fix;
---   provenance recorded in the numbering review; no action in this file).
--- * AA numbering (20261203000002, applied; file SHA-256 recorded in release packet):
---   - private.sale_team_aa_counters(accreditation_month PK, last_value 1..9999),
---     RLS enabled, zero grants to anon/authenticated/service_role (verified).
---   - private.next_sale_team_aa_number(text,date): typed monthly allocator;
---     the zero-argument legacy allocator is retained untouched.
---   - public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date):
---     signature unchanged; body re-delivered for official issuance; EXECUTE
---     service_role only (verified).
---   - public.get_sale_team_accreditation(uuid) and
---     public.search_sale_team_accreditation(text): NOT redefined by the subject
---     migration; bodies and grants byte-stable across the apply (verified).
---   - sale_team_aa_format CHECK: allows legacy AA- (6 letters + 6 digits) and
---     official AAI/AAO YYMM + nonzero sequence with kind/prefix match; validated.
---   - sale_team_aa_identity_immutable trigger (BEFORE UPDATE): staff_id,
---     aa_number and kind are immutable (verified in rehearsal).
---   - ost_accreditation_issue_aa trigger untouched: approved OST terms still
---     auto-issue through manage_sale_team_accreditation.
--- * RLS invariants (supabase/security/rls_invariants.sql): zero rows post-apply.
--- * No credentials, data rows, personal information, or secrets are stored here.
+-- * Previous snapshot (2026-10-15): 77 files, 68 tables. This refresh adds
+--   4 migrations and 2 tables:
+--   - 20261130000001_afhomes_sale_team_accreditation.sql: NEW private table
+--     private.sale_team_accreditations (staff_id PK, aa_number unique,
+--     kind IST/OST, status active/revoked, starts_on/expires_on, approved_by/at,
+--     revoked_by/at) + private.next_sale_team_aa_number(). RLS enabled, revoke
+--     all incl. service_role (browser-inaccessible). NOTE: shares the
+--     20261130000001 timestamp prefix with membership_company_fields; A-Z sort
+--     applies membership_company_fields first.
+--   - 20261130000002_afhomes_archive_orphan_commission_rules.sql: NEW private
+--     table private.commission_rule_archive (rule_id PK, rule_snapshot jsonb,
+--     snapshot_sha256, archived_at, reason, migration_version). RLS enabled,
+--     revoke all incl. service_role; immutable archive for 2 reviewed orphans.
+--   - 20261201000001_afhomes_normalization_integrity.sql: no new tables.
+--     Preflight blocks on orphan commission targets; adds generated stored
+--     columns commission_rules.target_role_id/target_staff_id/target_ost_id
+--     + real FKs + canonical email checks. Fix callers forward, no rewrites.
+--   - 20261202000001_afhomes_private_profile_photos.sql: no new tables. New
+--     private storage bucket afhomes-profile-photos (public=false, 500 KB,
+--     image/jpeg only, one object per Auth account, no browser write policy).
+-- * Related DB files verified: supabase/security/rls_invariants.sql,
+--   supabase/apply-migrations.ts, supabase/db-testing/supabase-shim.sql,
+--   supabase/db-integration.ts + integration suites — present, no conflicting
+--   grants. After an authorized apply, re-run rls_invariants.sql (empty=PASS).
+-- * Generation: `node -e` scan of `create table` across supabase/migrations,
+--   first-defined-in wins. Re-run on "update schema".

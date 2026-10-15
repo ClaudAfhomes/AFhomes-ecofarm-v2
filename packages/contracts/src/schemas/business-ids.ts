@@ -57,30 +57,22 @@ export const AF_SUFFIX_LENGTH: Record<AfBusinessPrefix, number> = {
   [AF_CODE_PREFIX]: 8,
 };
 
-/** Annual customer numbers and previously issued random AF identifiers. */
+/** Strict `PREFIX-XXXXX` (or `AF-CC-XXXXXXXX`) matcher. Legacy numbers never match. */
 export const afIdPattern = (prefix: AfBusinessPrefix): RegExp =>
-  new RegExp(
-    prefix === 'AF-CUS'
-      ? `^AF-CUS-(?:[${AF_ID_ALPHABET}]{5}|[1-9][0-9]{3}-(?!000000)[0-9]{6})$`
-      : `^${prefix}-[${AF_ID_ALPHABET}]{${AF_SUFFIX_LENGTH[prefix]}}$`,
-  );
+  new RegExp(`^${prefix}-[${AF_ID_ALPHABET}]{${AF_SUFFIX_LENGTH[prefix]}}$`);
 
 export const isAfId = (prefix: AfBusinessPrefix, value: unknown): boolean =>
   typeof value === 'string' && afIdPattern(prefix).test(value);
 
 /** Response field: present once the business-ids migration has run. */
 export const afBusinessIdSchema = (prefix: AfBusinessPrefix) =>
-  z.string().regex(afIdPattern(prefix)).nullish();
+  z
+    .string()
+    .regex(afIdPattern(prefix))
+    .nullish();
 
 /** Customer Code field. Additive and nullish so a pre-migration payload parses. */
 export const customerCodeSchema = afBusinessIdSchema(AF_CODE_PREFIX);
-
-/** Separate from the sale reference; issued only by a committed purchase transaction. */
-export const officialVipNumberSchema = z
-  .string()
-  .regex(
-    /^[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])(?!00000)[0-9]{5}(B1|S1|G1)(C01|T(0[1-9]|[1-9][0-9]))S$/,
-  );
 
 /**
  * Search matching shared by client and handler tests: case-insensitive

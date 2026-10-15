@@ -1,4 +1,3 @@
-import { officialVipNumberSchema } from './business-ids.js';
 /**
  * AFHomes Phase 2 - card products, customers, sales, and referrals.
  *
@@ -13,6 +12,7 @@ import {
   emailSchema,
   normalizeAddressField,
   nullablePersonNameSchema,
+  optionalLandlineSchema,
   optionalPersonNameSchema,
   optionalPhoneSchema,
   personNameSchema,
@@ -307,17 +307,20 @@ export const customerAddressSchema = z
       .min(1)
       .max(100)
       .transform((v) => normalizeAddressField(v)),
+    barangay: z.string().trim().max(100).transform(normalizeAddressField).optional(),
     postalCode: z.string().trim().max(20).optional(),
     countryCode: z.string().trim().toUpperCase().length(2).default('PH'),
   })
   .refine((v) => !v.line2 || v.line2.trim().length > 0, {
     message: 'line2 must be omitted rather than blank',
+  })
+  .refine((v) => !v.barangay || v.barangay.trim().length > 0, {
+    message: 'barangay must be omitted rather than blank',
   });
 export type CustomerAddress = z.infer<typeof customerAddressSchema>;
 
 /** `governmentIdNumber` is accepted on write and never returned on read. */
 export const createCustomerSchema = z.object({
-  requestId: z.string().uuid().optional(),
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
   lastName: personNameSchema,
@@ -326,11 +329,59 @@ export const createCustomerSchema = z.object({
   gender: genderSchema.optional(),
   email: emailSchema,
   phone: phoneSchema,
+  landline: optionalLandlineSchema,
   address: customerAddressSchema,
   governmentIdType: governmentIdTypeSchema.optional(),
   governmentIdNumber: z.string().trim().min(4).max(40).optional(),
   referralCode: z.string().trim().max(40).optional(),
   notes: z.string().trim().max(1000).optional(),
+  // Company-stated membership fields, stored verbatim (see migration
+  // 20261130000001). None participates in calculations; TIN is write-only.
+  raNumber: z.string().trim().max(120).optional(),
+  companyStatus: z.string().trim().max(120).optional(),
+  citizenship: z.string().trim().max(100).optional(),
+  civilStatus: z.string().trim().max(100).optional(),
+  tinNumber: z.string().trim().max(40).optional(),
+  occupationBusinessName: z.string().trim().max(200).optional(),
+  officeBusinessAddress: z.string().trim().max(200).optional(),
+  employedPosition: z.string().trim().max(100).optional(),
+  supplementaryFullName: personNameSchema.optional(),
+  supplementaryAddress: z.string().trim().max(200).optional(),
+  supplementaryBirthday: dateOfBirthSchema.optional(),
+  supplementaryGender: genderSchema.optional(),
+  supplementaryCitizenship: z.string().trim().max(100).optional(),
+  supplementaryCivilStatus: z.string().trim().max(100).optional(),
+  supplementaryTinNumber: z.string().trim().max(40).optional(),
+  supplementaryMobile: optionalPhoneSchema,
+  supplementaryEmail: emailSchema.optional(),
+  supplementaryLandline: optionalLandlineSchema,
+  supplementaryOccupationBusinessName: z.string().trim().max(200).optional(),
+  supplementaryOfficeAddress: z.string().trim().max(200).optional(),
+  supplementaryPosition: z.string().trim().max(100).optional(),
+  ostIstName: z.string().trim().max(120).optional(),
+  svdName: z.string().trim().max(120).optional(),
+  ssmName: z.string().trim().max(120).optional(),
+  smName: z.string().trim().max(120).optional(),
+  referrerName: z.string().trim().max(120).optional(),
+  vipRecommenderName: z.string().trim().max(120).optional(),
+  relatedContactNo: optionalPhoneSchema,
+  relatedEmail: emailSchema.optional(),
+  // Company-stated package/payment facts, stored verbatim (migration
+  // 20261130000001). Never inputs to server-computed totals; the stated date
+  // is a calendar date only, never a birth-date plausibility check.
+  statedVipPackage: z.string().trim().max(120).optional(),
+  statedPaymentTerms: z.string().trim().max(120).optional(),
+  statedRegularPrice: z.string().trim().max(40).optional(),
+  statedDiscount: z.string().trim().max(40).optional(),
+  statedTotalAmount: z.string().trim().max(40).optional(),
+  statedRf: z.string().trim().max(120).optional(),
+  statedPaymentType: z.string().trim().max(120).optional(),
+  statedRefNo: z.string().trim().max(120).optional(),
+  statedPaymentDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
+    .optional(),
 });
 export type CreateCustomerRequest = z.infer<typeof createCustomerSchema>;
 
@@ -343,11 +394,55 @@ export const updateCustomerSchema = z
     gender: genderSchema.nullable().optional(),
     email: emailSchema.optional(),
     phone: optionalPhoneSchema,
+    landline: optionalLandlineSchema.nullable().optional(),
     address: customerAddressSchema.optional(),
     governmentIdType: governmentIdTypeSchema.nullable().optional(),
     governmentIdNumber: z.string().trim().min(4).max(40).nullable().optional(),
     status: customerStatusSchema.optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
+    raNumber: z.string().trim().max(120).nullable().optional(),
+    companyStatus: z.string().trim().max(120).nullable().optional(),
+    citizenship: z.string().trim().max(100).nullable().optional(),
+    civilStatus: z.string().trim().max(100).nullable().optional(),
+    tinNumber: z.string().trim().max(40).nullable().optional(),
+    occupationBusinessName: z.string().trim().max(200).nullable().optional(),
+    officeBusinessAddress: z.string().trim().max(200).nullable().optional(),
+    employedPosition: z.string().trim().max(100).nullable().optional(),
+    supplementaryFullName: personNameSchema.nullable().optional(),
+    supplementaryAddress: z.string().trim().max(200).nullable().optional(),
+    supplementaryBirthday: dateOfBirthSchema.nullable().optional(),
+    supplementaryGender: genderSchema.nullable().optional(),
+    supplementaryCitizenship: z.string().trim().max(100).nullable().optional(),
+    supplementaryCivilStatus: z.string().trim().max(100).nullable().optional(),
+    supplementaryTinNumber: z.string().trim().max(40).nullable().optional(),
+    supplementaryMobile: optionalPhoneSchema.nullable().optional(),
+    supplementaryEmail: emailSchema.nullable().optional(),
+    supplementaryLandline: optionalLandlineSchema.nullable().optional(),
+    supplementaryOccupationBusinessName: z.string().trim().max(200).nullable().optional(),
+    supplementaryOfficeAddress: z.string().trim().max(200).nullable().optional(),
+    supplementaryPosition: z.string().trim().max(100).nullable().optional(),
+    ostIstName: z.string().trim().max(120).nullable().optional(),
+    svdName: z.string().trim().max(120).nullable().optional(),
+    ssmName: z.string().trim().max(120).nullable().optional(),
+    smName: z.string().trim().max(120).nullable().optional(),
+    referrerName: z.string().trim().max(120).nullable().optional(),
+    vipRecommenderName: z.string().trim().max(120).nullable().optional(),
+    relatedContactNo: optionalPhoneSchema.nullable().optional(),
+    relatedEmail: emailSchema.nullable().optional(),
+    statedVipPackage: z.string().trim().max(120).nullable().optional(),
+    statedPaymentTerms: z.string().trim().max(120).nullable().optional(),
+    statedRegularPrice: z.string().trim().max(40).nullable().optional(),
+    statedDiscount: z.string().trim().max(40).nullable().optional(),
+    statedTotalAmount: z.string().trim().max(40).nullable().optional(),
+    statedRf: z.string().trim().max(120).nullable().optional(),
+    statedPaymentType: z.string().trim().max(120).nullable().optional(),
+    statedRefNo: z.string().trim().max(120).nullable().optional(),
+    statedPaymentDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
+      .nullable()
+      .optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;
@@ -363,13 +458,57 @@ export const customerSchema = z.object({
    */
   customerCode: z.string().nullish(),
   fullName: z.string(),
+  firstName: z.string().nullable().optional(),
+  middleName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  suffix: z.string().nullable().optional(),
   email: z.string(),
   phone: z.string(),
+  landline: z.string().nullable().optional(),
   dateOfBirth: z.string().nullable(),
   gender: z.string().nullable(),
   address: z.unknown().nullable(),
   governmentIdType: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
+  /** Company-stated TIN, masked like the government ID. Never the raw value. */
+  tinNumberMasked: z.string().nullable().optional(),
+  raNumber: z.string().nullable().optional(),
+  companyStatus: z.string().nullable().optional(),
+  citizenship: z.string().nullable().optional(),
+  civilStatus: z.string().nullable().optional(),
+  occupationBusinessName: z.string().nullable().optional(),
+  officeBusinessAddress: z.string().nullable().optional(),
+  employedPosition: z.string().nullable().optional(),
+  supplementaryFullName: z.string().nullable().optional(),
+  supplementaryAddress: z.string().nullable().optional(),
+  supplementaryBirthday: z.string().nullable().optional(),
+  supplementaryGender: z.string().nullable().optional(),
+  supplementaryCitizenship: z.string().nullable().optional(),
+  supplementaryCivilStatus: z.string().nullable().optional(),
+  supplementaryTinNumberMasked: z.string().nullable().optional(),
+  supplementaryMobile: z.string().nullable().optional(),
+  supplementaryEmail: z.string().nullable().optional(),
+  supplementaryLandline: z.string().nullable().optional(),
+  supplementaryOccupationBusinessName: z.string().nullable().optional(),
+  supplementaryOfficeAddress: z.string().nullable().optional(),
+  supplementaryPosition: z.string().nullable().optional(),
+  ostIstName: z.string().nullable().optional(),
+  svdName: z.string().nullable().optional(),
+  ssmName: z.string().nullable().optional(),
+  smName: z.string().nullable().optional(),
+  referrerName: z.string().nullable().optional(),
+  vipRecommenderName: z.string().nullable().optional(),
+  relatedContactNo: z.string().nullable().optional(),
+  relatedEmail: z.string().nullable().optional(),
+  statedVipPackage: z.string().nullable().optional(),
+  statedPaymentTerms: z.string().nullable().optional(),
+  statedRegularPrice: z.string().nullable().optional(),
+  statedDiscount: z.string().nullable().optional(),
+  statedTotalAmount: z.string().nullable().optional(),
+  statedRf: z.string().nullable().optional(),
+  statedPaymentType: z.string().nullable().optional(),
+  statedRefNo: z.string().nullable().optional(),
+  statedPaymentDate: z.string().nullable().optional(),
   status: customerStatusSchema,
   /** Safe lifecycle flags; auth user IDs and membership rows are never exposed. */
   hasActiveMembership: z.boolean().optional(),
@@ -409,7 +548,6 @@ export function maskGovernmentId(value: string | null | undefined): string | nul
 /* ================================================================== */
 
 export const createSaleSchema = z.object({
-  requestId: z.string().uuid(),
   customerId: z.string().uuid(),
   productId: z.string().uuid(),
   /**
@@ -427,13 +565,11 @@ export const createSaleSchema = z.object({
    */
   paymentScheme: paymentSchemeSchema.default('spot_cash'),
 });
-/** Keep this UUID for every retry of the same purchase submission. */
 export type CreateSaleRequest = z.infer<typeof createSaleSchema>;
 
 export const saleSchema = z.object({
   id: z.string().uuid(),
   saleNumber: z.string(),
-  officialVipNumber: officialVipNumberSchema.nullish(),
   customerId: z.string().uuid(),
   customerName: z.string(),
   productId: z.string().uuid(),

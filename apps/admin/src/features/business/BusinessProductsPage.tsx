@@ -209,25 +209,22 @@ function validatePlanForm(form: PlanForm): string | null {
   if (!form.name.trim()) return 'Name is required';
   if (!form.code.trim()) return 'Code is required';
   if (!form.categoryId) return 'Category is required';
-  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0)
-    return 'Spot cash price must be greater than zero';
-  if (!/^\d+$/.test(form.points)) return 'Yearly points must be a whole number';
+  if (!MONEY_RE.test(form.price) || Number(form.price) <= 0) return 'Spot price must exceed zero.';
+  if (!/^\d+$/.test(form.points)) return 'Points must be whole.';
   if (!RATE_RE.test(form.rate) || Number(form.rate) < 0 || Number(form.rate) > 1)
-    return 'Commission rate must be between 0 and 1 (0.04 = 4%)';
+    return 'Rate stays within 0-1.';
   if (!MONEY_RE.test(form.installment) || Number(form.installment) <= 0)
-    return 'Installment price must be greater than zero';
-  if (!MONEY_RE.test(form.reservation)) return 'Reservation fee must be a valid amount';
-  if (Number(form.reservation) > Number(form.price))
-    return 'Reservation fee cannot exceed the spot cash price';
+    return 'Installment must exceed zero.';
+  if (!MONEY_RE.test(form.reservation)) return 'Reservation must be valid.';
+  if (Number(form.reservation) > Number(form.price)) return 'Reservation cannot exceed spot.';
   if (Number(form.reservation) > Number(form.installment))
-    return 'Reservation fee cannot exceed the installment price';
-  if (!/^\d+$/.test(form.spotDays) || Number(form.spotDays) <= 0)
-    return 'Spot cash days must be a positive whole number';
+    return 'Reservation cannot exceed installment.';
+  if (!/^\d+$/.test(form.spotDays) || Number(form.spotDays) <= 0) return 'Spot days stay positive.';
   if (!/^\d+$/.test(form.installMonths) || Number(form.installMonths) <= 0)
-    return 'Standard installment months must be a positive whole number';
+    return 'Installment months stay positive.';
   if (!/^\d+$/.test(form.validityYears) || Number(form.validityYears) <= 0)
-    return 'Validity years must be a positive whole number';
-  if (!/^-?\d+$/.test(form.sortOrder)) return 'Display order must be a whole number';
+    return 'Validity stays positive whole.';
+  if (!/^-?\d+$/.test(form.sortOrder)) return 'Order must be whole.';
   return null;
 }
 
@@ -502,317 +499,315 @@ export function BusinessProductsPage() {
 
           {tabSwitcher}
 
-
-      {detailPlan ? (
-        <Dialog
-          open
-          title={detailPlan.name}
-          onClose={() => setDetailPlan(null)}
-          footer={
-            <div className={styles.dialogActions}>
-              <Button
-                onClick={() => {
-                  openEditPlan(detailPlan);
-                  setDetailPlan(null);
-                }}
-              >
-                Edit plan
-              </Button>
-              <Button
-                variant={detailPlan.isActive ? 'danger' : 'secondary'}
-                disabled={togglePlan.isPending}
-                onClick={() =>
-                  togglePlan.mutate(
-                    { id: detailPlan.id, isActive: !detailPlan.isActive },
-                    { onSuccess: () => setDetailPlan(null) },
-                  )
-                }
-              >
-                {detailPlan.isActive ? 'Deactivate' : 'Activate'}
-              </Button>
-              <span className={styles.dialogActionsSpacer} />
-              <Button variant="ghost" onClick={() => setDetailPlan(null)}>
-                Close
-              </Button>
-            </div>
-          }
-        >
-          <div className={styles.dialogHero}>
-            {['GOLD', 'SILVER', 'BRONZE'].includes(detailPlan.code.trim().toUpperCase()) ? (
-              <div className={styles.dialogHeroArt}>
-                <img className={styles.dialogHeroImage} {...tierArtwork(detailPlan.code)} />
-              </div>
-            ) : null}
-            <div className={styles.dialogHeroBody}>
-              <div className={styles.chipRow}>
-                <span className={`${styles.chip} ${styles.chipStrong}`}>{detailPlan.code}</span>
-                <StatusChip
-                  label={detailPlan.isActive ? 'Active' : 'Inactive'}
-                  tone={detailPlan.isActive ? 'success' : 'neutral'}
-                />
-              </div>
-              <p className={styles.dialogHeroName}>{detailPlan.name}</p>
-              <p className={styles.detailNote}>
-                {detailPlan.categoryName || 'Uncategorised'}
-                {detailPlan.description ? ` · ${detailPlan.description}` : ''}
-              </p>
-            </div>
-          </div>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Pricing</h2>
-            <dl className={styles.facts}>
-              <div>
-                <dt>Spot Cash</dt>
-                <dd>{formatMoneyOrDash(detailPlan.cashPrice)}</dd>
-              </div>
-              <div>
-                <dt>Installment</dt>
-                <dd>{formatMoneyOrDash(detailPlan.installmentPrice)}</dd>
-              </div>
-              <div>
-                <dt>Reservation</dt>
-                <dd>{formatMoneyOrDash(detailPlan.reservationFee)}</dd>
-              </div>
-            </dl>
-          </section>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Membership</h2>
-            <dl className={styles.facts}>
-              <div>
-                <dt>Validity</dt>
-                <dd>
-                  {detailPlan.validityYears} years ({detailPlan.baseValidityYears} +{' '}
-                  {detailPlan.validityExtensionYears})
-                </dd>
-              </div>
-              <div>
-                <dt>Cardholder limit</dt>
-                <dd>{detailPlan.cardholderLimit}</dd>
-              </div>
-              <div>
-                <dt>Yearly points</dt>
-                <dd>
-                  {formatCountOrDash(detailPlan.yearlyPoints)} × {detailPlan.annualPointsTranches}
-                </dd>
-              </div>
-              <div>
-                <dt>Total loyalty value</dt>
-                <dd>{formatMoneyOrDash(detailPlan.totalLoyaltyValue)}</dd>
-              </div>
-            </dl>
-          </section>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Benefits</h2>
-            <div className={styles.chipRow}>
-              <span className={styles.chip}>{detailPlan.discountPercent}% discount</span>
-              <span className={styles.chip}>
-                {detailPlan.priorityReservation ? 'Priority reservation' : 'Standard reservation'}
-              </span>
-              <span className={styles.chip}>
-                {detailPlan.noMonthlyAnnualDues ? 'No monthly/annual dues' : 'Dues apply'}
-              </span>
-            </div>
-          </section>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Payment options</h2>
-            <div className={styles.chipRow}>
-              <span className={styles.chip}>
-                Spot Cash · {detailPlan.spotCashDays} days
-              </span>
-              <span className={styles.chip}>
-                Standard · {detailPlan.standardInstallmentMonths} months
-              </span>
-              {detailPlan.moveAEnabled ? (
-                <span className={styles.chip}>Move A</span>
-              ) : null}
-              {detailPlan.moveB1Enabled ? (
-                <span className={styles.chip}>B1 · 40% DP</span>
-              ) : null}
-              {detailPlan.moveB2Enabled ? (
-                <span className={styles.chip}>B2 · 25% DP</span>
-              ) : null}
-            </div>
-          </section>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Commission</h2>
-            <p className={styles.detailNote}>
-              Plan default: {formatRate(detailPlan.commissionRate)}. Effective rules are resolved by
-              the server when a sale is created.
-            </p>
-          </section>
-          <section className={styles.detailSection}>
-            <h2 className={styles.detailTitle}>Status / Display order</h2>
-            <div>
-              <StatusChip label={detailPlan.isActive ? 'Active' : 'Inactive'} />
-            </div>
-            <p className={styles.detailNote}>Display order: {detailPlan.sortOrder}</p>
-          </section>
-        </Dialog>
-      ) : null}
-      {tab === 'plans' ? (
-        <>
-          {/* Live search: the debounced term drives the query directly, so there
-              is no submit button to press and the form wrapper has no job. */}
-          <FilterBar
-            search={
-              <SearchField
-                label="Search card plans"
-                placeholder="Name or code"
-                value={search}
-                onChange={setSearch}
-                busy={refreshing}
-              />
-            }
-            filters={
-              <Select
-                aria-label="Filter by status"
-                value={visibility}
-                onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
-                options={[
-                  { value: 'active', label: 'Active' },
-                  { value: 'inactive', label: 'Inactive' },
-                  { value: 'all', label: 'All' },
-                ]}
-              />
-            }
-          />
-
-          {plans.isError ? (
-            <ErrorState error={plans.error} onRetry={plans.refetch} />
-          ) : plans.data?.length === 0 ? (
-            <EmptyState
-              title={appliedSearch ? 'No matching records.' : 'No card plans'}
-              description={
-                appliedSearch || visibility !== 'active'
-                  ? 'No card plans match the current filters.'
-                  : 'Create the first plan to start selling.'
+          {detailPlan ? (
+            <Dialog
+              open
+              title={detailPlan.name}
+              onClose={() => setDetailPlan(null)}
+              footer={
+                <div className={styles.dialogActions}>
+                  <Button
+                    onClick={() => {
+                      openEditPlan(detailPlan);
+                      setDetailPlan(null);
+                    }}
+                  >
+                    Edit plan
+                  </Button>
+                  <Button
+                    variant={detailPlan.isActive ? 'danger' : 'secondary'}
+                    disabled={togglePlan.isPending}
+                    onClick={() =>
+                      togglePlan.mutate(
+                        { id: detailPlan.id, isActive: !detailPlan.isActive },
+                        { onSuccess: () => setDetailPlan(null) },
+                      )
+                    }
+                  >
+                    {detailPlan.isActive ? 'Deactivate' : 'Activate'}
+                  </Button>
+                  <span className={styles.dialogActionsSpacer} />
+                  <Button variant="ghost" onClick={() => setDetailPlan(null)}>
+                    Close
+                  </Button>
+                </div>
               }
-            />
-          ) : (
-            <div className={styles.grid} aria-label="VIP card plans">
-              {plans.data?.map((product) => (
-                <article key={product.id} className={styles.card}>
-                  {['GOLD', 'SILVER', 'BRONZE'].includes(product.code.trim().toUpperCase()) ? (
-                    <div className={styles.cardArtworkWrap}>
-                      <img className={styles.artwork} {...tierArtwork(product.code)} />
-                    </div>
-                  ) : null}
-                  <div className={styles.cardBody}>
-                    <div className={styles.cardHead}>
-                      <h2 className={styles.cardTitle}>{product.name}</h2>
-                      <StatusChip label={product.isActive ? 'Active' : 'Inactive'} />
-                    </div>
-                    <dl className={styles.facts}>
-                      <div>
-                        <dt>Spot Cash</dt>
-                        <dd>{formatMoneyOrDash(product.cashPrice)}</dd>
-                      </div>
-                      <div>
-                        <dt>Installment</dt>
-                        <dd>{formatMoneyOrDash(product.installmentPrice)}</dd>
-                      </div>
-                      <div>
-                        <dt>Discount</dt>
-                        <dd>{product.discountPercent}%</dd>
-                      </div>
-                      <div>
-                        <dt>Points / Year</dt>
-                        <dd>{formatCountOrDash(product.yearlyPoints)}</dd>
-                      </div>
-                      <div>
-                        <dt>Validity</dt>
-                        <dd>{product.validityYears} years</dd>
-                      </div>
-                      <div>
-                        <dt>Cardholders</dt>
-                        <dd>{product.cardholderLimit}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  <div className={styles.cardFooter}>
-                    <Button variant="secondary" onClick={() => setDetailPlan(product)}>
-                      View details
-                    </Button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-          {togglePlan.isError ? <p role="alert">{togglePlan.error.message}</p> : null}
-        </>
-      ) : (
-        <>
-          {categories.isError ? (
-            <ErrorState error={categories.error} onRetry={categories.refetch} />
-          ) : categories.data?.length === 0 ? (
-            <EmptyState
-              title="No card categories"
-              description="Create the first category to organise plans."
-            />
-          ) : (
-            <div
-              role="region"
-              aria-label="Scrollable records"
-              tabIndex={0}
-              className={`table-scroll ${styles.categoriesWrap}`}
             >
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Slug</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    <th>Sort Order</th>
-                    <th>Plans</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categories.data?.map((category) => (
-                    <tr key={category.id}>
-                      <td data-label="Name">{category.name}</td>
-                      <td data-label="Slug">{category.slug}</td>
-                      <td data-label="Description">{category.description ?? '—'}</td>
-                      <td data-label="Status">
-                        <StatusChip
-                          label={category.isActive ? 'Active' : 'Inactive'}
-                          tone={category.isActive ? 'success' : 'neutral'}
-                        />
-                      </td>
-                      <td data-label="Sort Order">{category.sortOrder}</td>
-                      <td data-label="Plans">{category.planCount ?? '—'}</td>
-                      <td data-label="Actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEditCategory(category)}
-                        >
-                          Edit
-                        </Button>{' '}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={toggleCategory.isPending}
-                          onClick={() =>
-                            toggleCategory.mutate({
-                              id: category.id,
-                              isActive: !category.isActive,
-                            })
-                          }
-                        >
-                          {category.isActive ? 'Deactivate' : 'Activate'}
+              <div className={styles.dialogHero}>
+                {['GOLD', 'SILVER', 'BRONZE'].includes(detailPlan.code.trim().toUpperCase()) ? (
+                  <div className={styles.dialogHeroArt}>
+                    <img className={styles.dialogHeroImage} {...tierArtwork(detailPlan.code)} />
+                  </div>
+                ) : null}
+                <div className={styles.dialogHeroBody}>
+                  <div className={styles.chipRow}>
+                    <span className={`${styles.chip} ${styles.chipStrong}`}>{detailPlan.code}</span>
+                    <StatusChip
+                      label={detailPlan.isActive ? 'Active' : 'Inactive'}
+                      tone={detailPlan.isActive ? 'success' : 'neutral'}
+                    />
+                  </div>
+                  <p className={styles.dialogHeroName}>{detailPlan.name}</p>
+                  <p className={styles.detailNote}>
+                    {detailPlan.categoryName || 'Uncategorised'}
+                    {detailPlan.description ? ` · ${detailPlan.description}` : ''}
+                  </p>
+                </div>
+              </div>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Pricing</h2>
+                <dl className={styles.facts}>
+                  <div>
+                    <dt>Spot Cash</dt>
+                    <dd>{formatMoneyOrDash(detailPlan.cashPrice)}</dd>
+                  </div>
+                  <div>
+                    <dt>Installment</dt>
+                    <dd>{formatMoneyOrDash(detailPlan.installmentPrice)}</dd>
+                  </div>
+                  <div>
+                    <dt>Reservation</dt>
+                    <dd>{formatMoneyOrDash(detailPlan.reservationFee)}</dd>
+                  </div>
+                </dl>
+              </section>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Membership</h2>
+                <dl className={styles.facts}>
+                  <div>
+                    <dt>Validity</dt>
+                    <dd>
+                      {detailPlan.validityYears} years ({detailPlan.baseValidityYears} +{' '}
+                      {detailPlan.validityExtensionYears})
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Cardholder limit</dt>
+                    <dd>{detailPlan.cardholderLimit}</dd>
+                  </div>
+                  <div>
+                    <dt>Yearly points</dt>
+                    <dd>
+                      {formatCountOrDash(detailPlan.yearlyPoints)} ×{' '}
+                      {detailPlan.annualPointsTranches}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Total loyalty value</dt>
+                    <dd>{formatMoneyOrDash(detailPlan.totalLoyaltyValue)}</dd>
+                  </div>
+                </dl>
+              </section>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Benefits</h2>
+                <div className={styles.chipRow}>
+                  <span className={styles.chip}>{detailPlan.discountPercent}% discount</span>
+                  <span className={styles.chip}>
+                    {detailPlan.priorityReservation
+                      ? 'Priority reservation'
+                      : 'Standard reservation'}
+                  </span>
+                  <span className={styles.chip}>
+                    {detailPlan.noMonthlyAnnualDues ? 'No monthly/annual dues' : 'Dues apply'}
+                  </span>
+                </div>
+              </section>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Payment options</h2>
+                <div className={styles.chipRow}>
+                  <span className={styles.chip}>Spot Cash · {detailPlan.spotCashDays} days</span>
+                  <span className={styles.chip}>
+                    Standard · {detailPlan.standardInstallmentMonths} months
+                  </span>
+                  {detailPlan.moveAEnabled ? <span className={styles.chip}>Move A</span> : null}
+                  {detailPlan.moveB1Enabled ? (
+                    <span className={styles.chip}>B1 · 40% DP</span>
+                  ) : null}
+                  {detailPlan.moveB2Enabled ? (
+                    <span className={styles.chip}>B2 · 25% DP</span>
+                  ) : null}
+                </div>
+              </section>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Commission</h2>
+                <p className={styles.detailNote}>
+                  Plan default: {formatRate(detailPlan.commissionRate)}. Effective rules are
+                  resolved by the server when a sale is created.
+                </p>
+              </section>
+              <section className={styles.detailSection}>
+                <h2 className={styles.detailTitle}>Status / Display order</h2>
+                <div>
+                  <StatusChip label={detailPlan.isActive ? 'Active' : 'Inactive'} />
+                </div>
+                <p className={styles.detailNote}>Display order: {detailPlan.sortOrder}</p>
+              </section>
+            </Dialog>
+          ) : null}
+          {tab === 'plans' ? (
+            <>
+              {/* Live search: the debounced term drives the query directly, so there
+              is no submit button to press and the form wrapper has no job. */}
+              <FilterBar
+                search={
+                  <SearchField
+                    label="Search card plans"
+                    placeholder="Name or code"
+                    value={search}
+                    onChange={setSearch}
+                    busy={refreshing}
+                  />
+                }
+                filters={
+                  <Select
+                    aria-label="Filter by status"
+                    value={visibility}
+                    onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
+                    options={[
+                      { value: 'active', label: 'Active' },
+                      { value: 'inactive', label: 'Inactive' },
+                      { value: 'all', label: 'All' },
+                    ]}
+                  />
+                }
+              />
+
+              {plans.isError ? (
+                <ErrorState error={plans.error} onRetry={plans.refetch} />
+              ) : plans.data?.length === 0 ? (
+                <EmptyState
+                  title={appliedSearch ? 'No matching records.' : 'No card plans'}
+                  description={
+                    appliedSearch || visibility !== 'active'
+                      ? 'No card plans match the current filters.'
+                      : 'Create the first plan to start selling.'
+                  }
+                />
+              ) : (
+                <div className={styles.grid} aria-label="VIP card plans">
+                  {plans.data?.map((product) => (
+                    <article key={product.id} className={styles.card}>
+                      {['GOLD', 'SILVER', 'BRONZE'].includes(product.code.trim().toUpperCase()) ? (
+                        <div className={styles.cardArtworkWrap}>
+                          <img className={styles.artwork} {...tierArtwork(product.code)} />
+                        </div>
+                      ) : null}
+                      <div className={styles.cardBody}>
+                        <div className={styles.cardHead}>
+                          <h2 className={styles.cardTitle}>{product.name}</h2>
+                          <StatusChip label={product.isActive ? 'Active' : 'Inactive'} />
+                        </div>
+                        <dl className={styles.facts}>
+                          <div>
+                            <dt>Spot Cash</dt>
+                            <dd>{formatMoneyOrDash(product.cashPrice)}</dd>
+                          </div>
+                          <div>
+                            <dt>Installment</dt>
+                            <dd>{formatMoneyOrDash(product.installmentPrice)}</dd>
+                          </div>
+                          <div>
+                            <dt>Discount</dt>
+                            <dd>{product.discountPercent}%</dd>
+                          </div>
+                          <div>
+                            <dt>Points / Year</dt>
+                            <dd>{formatCountOrDash(product.yearlyPoints)}</dd>
+                          </div>
+                          <div>
+                            <dt>Validity</dt>
+                            <dd>{product.validityYears} years</dd>
+                          </div>
+                          <div>
+                            <dt>Cardholders</dt>
+                            <dd>{product.cardholderLimit}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div className={styles.cardFooter}>
+                        <Button variant="secondary" onClick={() => setDetailPlan(product)}>
+                          View details
                         </Button>
-                      </td>
-                    </tr>
+                      </div>
+                    </article>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+              {togglePlan.isError ? <p role="alert">{togglePlan.error.message}</p> : null}
+            </>
+          ) : (
+            <>
+              {categories.isError ? (
+                <ErrorState error={categories.error} onRetry={categories.refetch} />
+              ) : categories.data?.length === 0 ? (
+                <EmptyState
+                  title="No card categories"
+                  description="Create the first category to organise plans."
+                />
+              ) : (
+                <div
+                  role="region"
+                  aria-label="Scrollable records"
+                  tabIndex={0}
+                  className={`table-scroll ${styles.categoriesWrap}`}
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Slug</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Sort Order</th>
+                        <th>Plans</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categories.data?.map((category) => (
+                        <tr key={category.id}>
+                          <td data-label="Name">{category.name}</td>
+                          <td data-label="Slug">{category.slug}</td>
+                          <td data-label="Description">{category.description ?? '—'}</td>
+                          <td data-label="Status">
+                            <StatusChip
+                              label={category.isActive ? 'Active' : 'Inactive'}
+                              tone={category.isActive ? 'success' : 'neutral'}
+                            />
+                          </td>
+                          <td data-label="Sort Order">{category.sortOrder}</td>
+                          <td data-label="Plans">{category.planCount ?? '—'}</td>
+                          <td data-label="Actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => openEditCategory(category)}
+                            >
+                              Edit
+                            </Button>{' '}
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={toggleCategory.isPending}
+                              onClick={() =>
+                                toggleCategory.mutate({
+                                  id: category.id,
+                                  isActive: !category.isActive,
+                                })
+                              }
+                            >
+                              {category.isActive ? 'Deactivate' : 'Activate'}
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {toggleCategory.isError ? <p role="alert">{toggleCategory.error.message}</p> : null}
+            </>
           )}
-          {toggleCategory.isError ? <p role="alert">{toggleCategory.error.message}</p> : null}
-        </>
-      )}
         </>
       )}
 
@@ -836,135 +831,152 @@ export function BusinessProductsPage() {
       >
         <div className={styles.formGrid}>
           <p className={styles.formNote}>
-            Changing these values affects only <strong>future</strong> sales. Existing sales retain
-            their frozen pricing: scheme, total, reservation, schedule, validity and commission stay
-            exactly as created. MASTER CONFIGURATION below never rewrites TRANSACTION SNAPSHOTS.
-            Benefit edits require Admin/Super Admin, are audited before/after, and apply
-            prospectively only.
+            Affects future sales only. Existing snapshots stay frozen.
           </p>
-          <TextField
-            id="plan-name"
-            name="planName"
-            label="Name"
-            optional
-            value={planForm.name}
-            onChange={(value) => setPlanForm({ ...planForm, name: value })}
-          />
-          <TextField
-            id="plan-code"
-            name="planCode"
-            label="Code"
-            optional
-            value={planForm.code}
-            onChange={(value) => setPlanForm({ ...planForm, code: value })}
-          />
-          <label className={styles.field}>
-            Category
-            <Select
-              value={planForm.categoryId}
-              onChange={(e) => setPlanForm({ ...planForm, categoryId: e.target.value })}
-              options={[
-                { value: '', label: 'Select a category' },
-                ...activeCategories.map((category) => ({
-                  value: category.id,
-                  label: category.name,
-                })),
-                ...(planCategoryInactive
-                  ? [
-                      {
-                        value: planForm.categoryId,
-                        label: `${editingPlan?.categoryName ?? 'Inactive category'} (inactive)`,
-                        disabled: true,
-                      },
-                    ]
-                  : []),
-              ]}
+          <fieldset className={styles.formSection}>
+            <legend>Identity</legend>
+            <p className={styles.sectionHint}>Name, code and category.</p>
+            <div className={styles.sectionGrid}>
+              <TextField
+                id="plan-name"
+                name="planName"
+                label="Name"
+                optional
+                value={planForm.name}
+                onChange={(value) => setPlanForm({ ...planForm, name: value })}
+              />
+              <TextField
+                id="plan-code"
+                name="planCode"
+                label="Code"
+                optional
+                value={planForm.code}
+                onChange={(value) => setPlanForm({ ...planForm, code: value })}
+              />
+            </div>
+            <label className={styles.field}>
+              Category
+              <Select
+                value={planForm.categoryId}
+                onChange={(e) => setPlanForm({ ...planForm, categoryId: e.target.value })}
+                options={[
+                  { value: '', label: 'Select a category' },
+                  ...activeCategories.map((category) => ({
+                    value: category.id,
+                    label: category.name,
+                  })),
+                  ...(planCategoryInactive
+                    ? [
+                        {
+                          value: planForm.categoryId,
+                          label: `${editingPlan?.categoryName ?? 'Inactive category'} (inactive)`,
+                          disabled: true,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </label>
+            {planCategoryInactive ? (
+              <p role="note" className={styles.formNote}>
+                Category is inactive. Reactivate it to proceed.
+              </p>
+            ) : null}
+            <TextAreaField
+              id="plan-description"
+              name="planDescription"
+              label="Description"
+              optional
+              rows={3}
+              value={planForm.description}
+              onChange={(value) => setPlanForm({ ...planForm, description: value })}
             />
-          </label>
-          {planCategoryInactive ? (
-            <p role="note" className={styles.formNote}>
-              This plan sits under an inactive category. Reactivate the category first to move other
-              plans into it.
-            </p>
-          ) : null}
-          <TextAreaField
-            id="plan-description"
-            name="planDescription"
-            label="Description"
-            optional
-            rows={3}
-            value={planForm.description}
-            onChange={(value) => setPlanForm({ ...planForm, description: value })}
-          />
-          <TextField
-            id="plan-price"
-            name="price"
-            label="Spot cash price"
-            optional
-            inputMode="decimal"
-            value={planForm.price}
-            onChange={(value) => setPlanForm({ ...planForm, price: value })}
-          />
-          <TextField
-            id="plan-installment"
-            name="installment"
-            label="4-month installment price"
-            optional
-            inputMode="decimal"
-            value={planForm.installment}
-            onChange={(value) => setPlanForm({ ...planForm, installment: value })}
-          />
-          <TextField
-            id="plan-reservation"
-            name="reservation"
-            label="Reservation fee (included in every total)"
-            optional
-            inputMode="decimal"
-            value={planForm.reservation}
-            onChange={(value) => setPlanForm({ ...planForm, reservation: value })}
-          />
-          <TextField
-            id="plan-spot-days"
-            name="spotDays"
-            label="Spot cash days"
-            optional
-            inputMode="numeric"
-            value={planForm.spotDays}
-            onChange={(value) =>
-              setPlanForm({ ...planForm, spotDays: value.replace(/\D/g, '') })
-            }
-          />
-          <TextField
-            id="plan-install-months"
-            name="installMonths"
-            label="Standard installment months"
-            optional
-            inputMode="numeric"
-            value={planForm.installMonths}
-            onChange={(value) =>
-              setPlanForm({ ...planForm, installMonths: value.replace(/\D/g, '') })
-            }
-          />
-          <TextField
-            id="plan-validity-years"
-            name="validityYears"
-            label="Validity years"
-            optional
-            inputMode="numeric"
-            value={planForm.validityYears}
-            onChange={(value) =>
-              setPlanForm({ ...planForm, validityYears: value.replace(/\D/g, '') })
-            }
-          />
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend>Pricing</legend>
+            <p className={styles.sectionHint}>Totals include reservation fee.</p>
+            <div className={styles.sectionGrid}>
+              <TextField
+                id="plan-price"
+                name="price"
+                label="Spot cash price"
+                optional
+                inputMode="decimal"
+                value={planForm.price}
+                onChange={(value) => setPlanForm({ ...planForm, price: value })}
+              />
+              <TextField
+                id="plan-installment"
+                name="installment"
+                label="4-month installment price"
+                optional
+                inputMode="decimal"
+                value={planForm.installment}
+                onChange={(value) => setPlanForm({ ...planForm, installment: value })}
+              />
+              <TextField
+                id="plan-reservation"
+                name="reservation"
+                label="Reservation fee (in every total)"
+                optional
+                inputMode="decimal"
+                value={planForm.reservation}
+                onChange={(value) => setPlanForm({ ...planForm, reservation: value })}
+              />
+            </div>
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend>Terms</legend>
+            <p className={styles.sectionHint}>Windows and validity periods.</p>
+            <div className={styles.sectionGrid}>
+              <TextField
+                id="plan-spot-days"
+                name="spotDays"
+                label="Spot cash days"
+                optional
+                inputMode="numeric"
+                value={planForm.spotDays}
+                onChange={(value) =>
+                  setPlanForm({ ...planForm, spotDays: value.replace(/\D/g, '') })
+                }
+              />
+              <TextField
+                id="plan-install-months"
+                name="installMonths"
+                label="Standard installment months"
+                optional
+                inputMode="numeric"
+                value={planForm.installMonths}
+                onChange={(value) =>
+                  setPlanForm({ ...planForm, installMonths: value.replace(/\D/g, '') })
+                }
+              />
+              <TextField
+                id="plan-validity-years"
+                name="validityYears"
+                label="Validity years"
+                optional
+                inputMode="numeric"
+                value={planForm.validityYears}
+                onChange={(value) =>
+                  setPlanForm({ ...planForm, validityYears: value.replace(/\D/g, '') })
+                }
+              />
+            </div>
+          </fieldset>
           <fieldset className={styles.formSection}>
             <legend>Allowed internal moves</legend>
+            <p className={styles.sectionHint}>Enable each allowed move.</p>
             <label className={styles.checkRow}>
               <input
                 type="checkbox"
                 checked={planForm.moveA}
                 onChange={(e) => setPlanForm({ ...planForm, moveA: e.target.checked })}
               />
-              Move A: pay over 4 months
+              <span className={styles.moveLabel}>
+                <strong>Move A</strong>
+                <small className={styles.moveHint}>Pay over 4 months</small>
+              </span>
             </label>
             <label className={styles.checkRow}>
               <input
@@ -972,7 +984,10 @@ export function BusinessProductsPage() {
                 checked={planForm.moveB1}
                 onChange={(e) => setPlanForm({ ...planForm, moveB1: e.target.checked })}
               />
-              Move B1: 40% DP + 12 months
+              <span className={styles.moveLabel}>
+                <strong>Move B1</strong>
+                <small className={styles.moveHint}>40% DP, 12 months</small>
+              </span>
             </label>
             <label className={styles.checkRow}>
               <input
@@ -980,50 +995,57 @@ export function BusinessProductsPage() {
                 checked={planForm.moveB2}
                 onChange={(e) => setPlanForm({ ...planForm, moveB2: e.target.checked })}
               />
-              Move B2: 25% DP + 12 months
+              <span className={styles.moveLabel}>
+                <strong>Move B2</strong>
+                <small className={styles.moveHint}>25% DP, 12 months</small>
+              </span>
             </label>
           </fieldset>
-          <TextField
-            id="plan-points"
-            name="yearlyPoints"
-            label="Yearly points"
-            optional
-            inputMode="numeric"
-            value={planForm.points}
-            onChange={(value) =>
-              setPlanForm({ ...planForm, points: value.replace(/\D/g, '') })
-            }
-          />
-          <TextField
-            id="plan-rate"
-            name="commissionRate"
-            label="Commission rate (0.04 = 4%)"
-            optional
-            inputMode="decimal"
-            value={planForm.rate}
-            onChange={(value) => setPlanForm({ ...planForm, rate: value })}
-          />
-          <TextField
-            id="plan-sort-order"
-            name="planSortOrder"
-            label="Display order"
-            optional
-            inputMode="numeric"
-            value={planForm.sortOrder}
-            onChange={(value) =>
-              setPlanForm({ ...planForm, sortOrder: value.replace(/[^0-9-]/g, '') })
-            }
-          />
-          {creatingPlan ? (
-            <label className={`${styles.checkRow} ${styles.fieldWide}`}>
-              <input
-                type="checkbox"
-                checked={planForm.isActive}
-                onChange={(e) => setPlanForm({ ...planForm, isActive: e.target.checked })}
+          <fieldset className={styles.formSection}>
+            <legend>Rewards and display</legend>
+            <p className={styles.sectionHint}>Points, commission and order.</p>
+            <div className={styles.sectionGrid}>
+              <TextField
+                id="plan-points"
+                name="yearlyPoints"
+                label="Yearly points"
+                optional
+                inputMode="numeric"
+                value={planForm.points}
+                onChange={(value) => setPlanForm({ ...planForm, points: value.replace(/\D/g, '') })}
               />
-              Active (available for new applications)
-            </label>
-          ) : null}
+              <TextField
+                id="plan-rate"
+                name="commissionRate"
+                label="Commission rate (0.04 = 4%)"
+                optional
+                inputMode="decimal"
+                value={planForm.rate}
+                onChange={(value) => setPlanForm({ ...planForm, rate: value })}
+              />
+              <TextField
+                id="plan-sort-order"
+                name="planSortOrder"
+                label="Display order"
+                optional
+                inputMode="numeric"
+                value={planForm.sortOrder}
+                onChange={(value) =>
+                  setPlanForm({ ...planForm, sortOrder: value.replace(/[^0-9-]/g, '') })
+                }
+              />
+            </div>
+            {creatingPlan ? (
+              <label className={`${styles.checkRow} ${styles.fieldWide}`}>
+                <input
+                  type="checkbox"
+                  checked={planForm.isActive}
+                  onChange={(e) => setPlanForm({ ...planForm, isActive: e.target.checked })}
+                />
+                Active (available for new applications)
+              </label>
+            ) : null}
+          </fieldset>
           {planError ? (
             <p role="alert" className={styles.formAlert}>
               {planError}

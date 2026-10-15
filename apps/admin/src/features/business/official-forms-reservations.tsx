@@ -47,7 +47,6 @@ import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
 import { ReservationStatusBadge } from './ReservationStatusBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { normalizeLiveHumanField } from '../../lib/normalize';
 import {
   createReservationAgreement,
   decideReservationAgreement,
@@ -81,6 +80,7 @@ import {
   asBase64,
   formatFileSize,
   fieldLabel,
+  filterReservationFieldInput,
   VIP_TIER_FIELD_OPTIONS,
   isVipTier,
   Field,
@@ -562,8 +562,7 @@ export function ReservationAgreementEditorPage() {
   const save = useBusinessMutation({
     mutationFn: () =>
       runReservationSave(() => {
-        if (!id && !customerApplicationId)
-          throw new Error('Choose an eligible Customer Application before creating a reservation.');
+        if (!id && !customerApplicationId) throw new Error('Choose eligible application first.');
         if (applicationOrigin) {
           if (id) {
             const fields = agreedFields();
@@ -576,12 +575,8 @@ export function ReservationAgreementEditorPage() {
           // the offer body: it is an identifier, and the server revalidates it
           // against the immutable row before writing anything.
           const termsId = sourceApplication.data?.purchaseTermsId;
-          if (!termsId)
-            throw new Error(
-              'This application has no captured purchase terms. An authorized review is required first.',
-            );
-          if (!proposal.data)
-            throw new Error('Load the current offer before creating the agreement.');
+          if (!termsId) throw new Error('No captured purchase terms. Review required first.');
+          if (!proposal.data) throw new Error('Load current offer first.');
           return createReservationAgreement({
             origin: 'application',
             requestId: reservationRequest.forPayload({ application: customerApplicationId }),
@@ -666,7 +661,7 @@ export function ReservationAgreementEditorPage() {
       ...prev,
       name: prev.name || sale.customerName,
     }));
-    setMessage('Known sale/customer data pre-filled — please verify before saving.');
+    setMessage('Prefilled from sale. Verify before saving.');
   };
   const importIstFile = async (file: File) => {
     const preview = await previewOfficialFormImport('reservation_agreement', await asBase64(file));
@@ -711,7 +706,7 @@ export function ReservationAgreementEditorPage() {
       paymentDate: f.schedule_payment_date || prev.paymentDate,
       remarks: f.schedule_remarks || prev.remarks,
     }));
-    setMessage('Imported candidates populated — please verify every field before saving.');
+    setMessage('Imported candidates ready. Verify every field.');
   };
   const editable = !existing.data || existing.data.status === 'draft';
   const salePlan = plans.data?.find((p) => p.id === summary.data?.saleId);
@@ -728,11 +723,6 @@ export function ReservationAgreementEditorPage() {
       />
       {existing.data ? (
         <p className={styles.stateSummary}>
-          {existing.data.officialVipNumber ? (
-            <>
-              <strong>Official VIP number:</strong> {existing.data.officialVipNumber} ·{' '}
-            </>
-          ) : null}
           <strong>Status:</strong> {existing.data.status} · <strong>Tier:</strong>{' '}
           {existing.data.tier} · <strong>Total:</strong> {existing.data.totalPrice}
           {!applicationOrigin ? (
@@ -753,22 +743,15 @@ export function ReservationAgreementEditorPage() {
             {formatMoneyOrDash(summary.data.verifiedTotal)}, balance{' '}
             {formatMoneyOrDash(summary.data.remainingBalance)}.
           </span>
-          <span>
-            Schedule rows below are obligations only — actual cash lives in the payments table.
-          </span>
+          <span>Schedule shows obligations only. Cash lives in payments ledger.</span>
         </p>
       ) : null}
       {salePlan ? (
-        <p className={styles.note}>
-          Official {salePlan.code} benefits apply prospectively; this agreement freezes its own
-          snapshot at creation.
-        </p>
+        <p className={styles.note}>Benefits apply prospectively. Snapshot freezes at creation.</p>
       ) : null}
       {reviewRequired ? (
         <Alert variant="warning">
-          <strong>Purchase Terms Review Required.</strong> This application has no captured purchase
-          terms, so no agreement can be created from it yet. An authorized reviewer must confirm the
-          current server offer and record a reason first.{' '}
+          <strong>Review required first.</strong> Confirm server offer with reason.{' '}
           <Link to={`/admin/sales/applications/${customerApplicationId}`}>
             Open the application review
           </Link>
@@ -777,11 +760,8 @@ export function ReservationAgreementEditorPage() {
       ) : null}
       {applicationOrigin && proposal.data ? (
         <section className={styles.panel} aria-label="Frozen purchase terms">
-          <h2 className={styles.panelTitle}>Server-authoritative offer</h2>
-          <p className={styles.panelNote}>
-            These figures are read-only. They are frozen purchase terms, not an editable quote, and
-            the server revalidates them at save.
-          </p>
+          <h2 className={styles.panelTitle}>Server offer</h2>
+          <p className={styles.panelNote}>Read-only frozen terms. Server revalidates on save.</p>
           <dl className={styles.snapshotGrid}>
             <div className={styles.snapshotField}>
               <dt>Card tier</dt>
@@ -835,9 +815,7 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-source-heading" className={styles.panelTitle}>
             1. Source &amp; references
           </h2>
-          <p className={styles.panelNote}>
-            Link the customer application or an existing card sale this reservation belongs to.
-          </p>
+          <p className={styles.panelNote}>Link application or sale here.</p>
           <div className={styles.editorGrid}>
             {/* Application-origin reservations have NO sale: the agreement comes
                 first and the sale arrives at finalization. */}
@@ -894,13 +872,7 @@ export function ReservationAgreementEditorPage() {
           </div>
           {sourceApplication.data ? (
             <p className={styles.note}>
-              Applicant and holders copied from {sourceApplication.data.applicationNumber}.{' '}
-              {sourceApplication.data.tier} ·{' '}
-              {paymentSchemeLabel(sourceApplication.data.paymentScheme)} · Frozen VIP amount{' '}
-              {formatMoneyOrDash(sourceApplication.data.vipAmount)}.
-              {applicationOrigin
-                ? ' No card sale is needed: this reservation is the first commercial record.'
-                : ' Select the matching existing card sale if the application has not yet been linked.'}
+              Copied from {sourceApplication.data.applicationNumber}. Verify before saving.
             </p>
           ) : null}
         </section>
@@ -908,7 +880,7 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-dates-heading" className={styles.panelTitle}>
             2. Agreement dates
           </h2>
-          <p className={styles.panelNote}>Effective dates that bound this reservation agreement.</p>
+          <p className={styles.panelNote}>Dates bounding this agreement.</p>
           <div className={styles.editorGrid}>
             {Object.entries(dates).map(([key, value]) => (
               <Field
@@ -929,7 +901,7 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-primary-heading" className={styles.panelTitle}>
             3. Primary cardholder
           </h2>
-          <p className={styles.panelNote}>The cardholder who signs and owns this reservation.</p>
+          <p className={styles.panelNote}>Signing owner of this reservation.</p>
           <div className={styles.editorGrid}>
             {Object.entries(primary)
               .filter(([key]) => key !== 'holderType')
@@ -938,7 +910,7 @@ export function ReservationAgreementEditorPage() {
                   key={key}
                   label={fieldLabel(key)}
                   value={value}
-                  normalize={(v) => normalizeLiveHumanField(key, v)}
+                  normalize={(v) => filterReservationFieldInput(key, v)}
                   onChange={(v) => setPrimary({ ...primary, [key]: v })}
                 />
               ))}
@@ -983,7 +955,7 @@ export function ReservationAgreementEditorPage() {
                     key={key}
                     label={fieldLabel(key)}
                     value={value}
-                    normalize={(v) => normalizeLiveHumanField(key, v)}
+                    normalize={(v) => filterReservationFieldInput(key, v)}
                     onChange={(v) => setSecondary({ ...secondary, [key]: v })}
                   />
                 ))}
@@ -995,7 +967,7 @@ export function ReservationAgreementEditorPage() {
             5. Payment plan schedule
           </h2>
           <p className={styles.panelNote}>
-            An obligation plan — not an actual payment. Cash is recorded in the payments ledger.
+            Obligations only, not payments. Cash lives in payments ledger.
           </p>
           <div className={styles.editorGrid}>
             {Object.entries(schedule).map(([key, value]) => (
@@ -1013,17 +985,14 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-import-heading" className={styles.panelTitle}>
             6. Bulk import
           </h2>
-          <p className={styles.panelNote}>
-            Pull candidates from an official IST workbook, then verify every field before saving.
-          </p>
+          <p className={styles.panelNote}>Import workbook candidates. Verify every field.</p>
           <div className={styles.importCard} data-selected={istFile ? 'true' : 'false'}>
             <div className={styles.importHead}>
               <span className={styles.importTitle} id={istImportLabelId}>
                 Import IST XLSX
               </span>
               <span className={styles.importHint}>
-                Choose an official workbook. Imported values are suggestions only, never saved until
-                you verify them.
+                Choose official workbook. Verify imported values.
               </span>
             </div>
             <div className={styles.importControls}>

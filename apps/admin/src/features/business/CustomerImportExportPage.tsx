@@ -263,8 +263,8 @@ export function CustomerImportExportPage() {
           title="Customer Import / Export"
           description="Bulk customer migration is restricted to authorized Admin accounts."
           actions={
-            <Button variant="secondary" onClick={() => navigate('/admin/customers')}>
-              Back to customers
+            <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+              Back to applications
             </Button>
           }
         />
@@ -309,18 +309,15 @@ export function CustomerImportExportPage() {
     <section className={styles.workspace}>
       <PageHeader
         title="Customer Import / Export"
-        description="Migrate existing customer records from Excel, CSV, or a link-readable Google Sheet. Valid rows are written only after explicit confirmation, one transaction per row."
+        description="Migrate customer records in bulk."
         actions={
-          <Button variant="secondary" onClick={() => navigate('/admin/customers')}>
-            Back to customers
+          <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
+            Back to applications
           </Button>
         }
       />
       <Alert variant="warning" title="Historical data rules">
-        Active VIP imports require the actual historical sale total, payment amount, date, method
-        and scheme. Reservation and down-payment categories need their historical fee snapshots.
-        Only one historical payment per member is supported; use the normal payment workflow for
-        multiple payments. Secondary holder imported as legacy reference only.
+        History needs real payment facts.
       </Alert>
       {message ? <Alert variant={tone}>{message}</Alert> : null}
 
@@ -336,80 +333,94 @@ export function CustomerImportExportPage() {
             <h2 id={`${TAB_BASE_ID}-template-heading`} className={styles.panelTitle}>
               1. Download a template
             </h2>
-            <div className={styles.actions}>
-              <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
-              <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
-                Download CSV template
-              </Button>
+            <div className={styles.templateGrid}>
+              <div className={styles.templateCard}>
+                <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
+                <p className={styles.templateDesc}>Four tabs guide entry. Dropdowns included.</p>
+                <div className={styles.actions}>
+                  <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
+                </div>
+              </div>
+              <div className={styles.templateCard}>
+                <h3 className={styles.templateName}>Plain text (.csv)</h3>
+                <p className={styles.templateDesc}>One file. No dropdowns.</p>
+                <div className={styles.actions}>
+                  <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
+                    Download CSV template
+                  </Button>
+                </div>
+              </div>
             </div>
           </section>
 
           <section className={styles.panel} aria-labelledby={`${TAB_BASE_ID}-upload-heading`}>
             <h2 id={`${TAB_BASE_ID}-upload-heading`} className={styles.panelTitle}>
-              2. Upload and preview (nothing is written yet)
+              2. Upload and preview
             </h2>
             <div className={styles.fileRow}>
-              <div className={styles.filePicker}>
-                <input
-                  ref={excelInput}
-                  hidden
-                  aria-label="Import Excel (.xlsx)"
-                  type="file"
-                  accept=".xlsx"
-                  disabled={parse.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void upload('excel', file);
-                    e.target.value = '';
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={parse.isPending}
-                  onClick={() => excelInput.current?.click()}
-                >
-                  Choose Excel file
-                </Button>
-                {chosenFile?.kind === 'excel' ? (
-                  <span role="status" className={styles.fileName}>
-                    {parse.isPending
-                      ? `Reading ${chosenFile.name}…`
-                      : `Selected: ${chosenFile.name}`}
-                  </span>
-                ) : null}
-              </div>
-              <div className={styles.filePicker}>
-                <input
-                  ref={csvInput}
-                  hidden
-                  aria-label="Import CSV (UTF-8)"
-                  type="file"
-                  accept=".csv"
-                  disabled={parse.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void upload('csv', file);
-                    e.target.value = '';
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={parse.isPending}
-                  onClick={() => csvInput.current?.click()}
-                >
-                  Choose CSV file
-                </Button>
-                {chosenFile?.kind === 'csv' ? (
-                  <span role="status" className={styles.fileName}>
-                    {parse.isPending
-                      ? `Reading ${chosenFile.name}…`
-                      : `Selected: ${chosenFile.name}`}
-                  </span>
-                ) : null}
+              <div className={styles.filePickers}>
+                <div className={styles.filePicker}>
+                  <input
+                    ref={excelInput}
+                    hidden
+                    aria-label="Import Excel (.xlsx)"
+                    type="file"
+                    accept=".xlsx"
+                    disabled={parse.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void upload('excel', file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={parse.isPending}
+                    onClick={() => excelInput.current?.click()}
+                  >
+                    Choose Excel file
+                  </Button>
+                  {chosenFile?.kind === 'excel' ? (
+                    <span role="status" className={styles.fileName}>
+                      {parse.isPending
+                        ? `Reading ${chosenFile.name}…`
+                        : `Selected: ${chosenFile.name}`}
+                    </span>
+                  ) : null}
+                </div>
+                <div className={styles.filePicker}>
+                  <input
+                    ref={csvInput}
+                    hidden
+                    aria-label="Import CSV (UTF-8)"
+                    type="file"
+                    accept=".csv"
+                    disabled={parse.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void upload('csv', file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={parse.isPending}
+                    onClick={() => csvInput.current?.click()}
+                  >
+                    Choose CSV file
+                  </Button>
+                  {chosenFile?.kind === 'csv' ? (
+                    <span role="status" className={styles.fileName}>
+                      {parse.isPending
+                        ? `Reading ${chosenFile.name}…`
+                        : `Selected: ${chosenFile.name}`}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className={styles.sheetRow}>
                 <label className={styles.sheetField}>
-                  Import Google Sheet (link-readable URL)
+                  Import Google Sheet
                   <input
                     value={sheetUrl}
                     placeholder="https://docs.google.com/spreadsheets/d/…"
@@ -430,10 +441,6 @@ export function CustomerImportExportPage() {
                 </Button>
               </div>
             </div>
-            <p className={styles.hint}>
-              Private sheets need Google OAuth/service credentials (not configured): only
-              link-readable sheets can be imported. No Google secrets belong in browser code.
-            </p>
           </section>
 
           {preview ? (

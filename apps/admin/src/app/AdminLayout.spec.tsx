@@ -14,7 +14,15 @@ const USER: SessionUser = {
   roleSlug: 'admin',
   roleName: 'Admin',
   status: 'active',
-  afHomesPermissions: [],
+  afHomesPermissions: [
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+  ],
 };
 
 function renderLayout() {
@@ -47,5 +55,22 @@ describe('AdminLayout sidebar sign-out', () => {
     expect(screen.getByText('Sign out?')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByText('Sign out?')).toBeNull();
+  });
+
+  it('renders a standalone denied page without sidebar or topbar', () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/staff" element={<AdminLayout />}>
+          <Route index element={<p>Page content</p>} />
+        </Route>
+      </Routes>,
+      { route: '/admin/staff', user: USER },
+    );
+    expect(screen.getByRole('heading', { name: 'Access denied' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('complementary', { name: 'AFHomes administration' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Go back' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
   });
 });

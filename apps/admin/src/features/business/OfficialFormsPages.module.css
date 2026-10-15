@@ -399,6 +399,23 @@
   border-radius: var(--radius-control);
 }
 
+/* Large ID thumbnail: filename, size and zoom hint under the image. */
+.thumbnailLarge {
+  width: min(100%, 20rem);
+  height: auto;
+  max-height: 14rem;
+  object-fit: cover;
+  border-radius: var(--radius-control);
+}
+
+.thumbnailZoom {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .previewImage {
   width: 100%;
   height: auto;
@@ -512,6 +529,91 @@
 
 .buttonRow > .spacer {
   flex: 1 1 auto;
+}
+
+/* Application record status: lifecycle state plus the linked records on one
+   card, so reviewers stop hunting a flat text line for timestamps. */
+.statusHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* Record actions on the application detail screen: decision, data,
+   lifecycle, next-step and export controls grouped under their own headings
+   instead of one undifferentiated run of buttons. */
+.recordGroups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.actionGroup {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.actionGroupTitle {
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+/* Purchase workflow: compact progress checklist plus the one next action. */
+.workflowSteps {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workflowStep {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.workflowStep[data-state='done'],
+.workflowStep[data-state='current'] {
+  color: var(--color-text-primary);
+}
+
+.workflowStep[data-state='current'] {
+  font-weight: 600;
+}
+
+.workflowMark {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.workflowStep[data-state='done'] .workflowMark {
+  color: var(--color-success);
+}
+
+.workflowStep[data-state='current'] .workflowMark {
+  color: var(--color-brand-primary);
+}
+
+/* The workflow's single next action, set off from the checklist. */
+.workflowNext {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.workflowNext h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body);
 }
 
 /* Payments ledger on the reservation detail screen. */
@@ -705,6 +807,159 @@
   background-color: var(--color-state-disabled-bg);
   border-color: var(--color-border-default);
   color: var(--color-state-disabled-text);
+}
+
+/* Stepper: progress through the long application form. */
+.stepper {
+  margin: 0;
+}
+
+.stepperList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.stepperItem {
+  flex: 1 1 8rem;
+}
+
+.stepperLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-surface-raised);
+  text-decoration: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+}
+
+.stepperItem[data-done='true'] .stepperLink {
+  border-color: color-mix(in srgb, var(--color-success) 45%, white);
+  background-color: color-mix(in srgb, var(--color-success) 8%, white);
+  color: var(--color-text-primary);
+}
+
+.stepperItem[data-current='true'] .stepperLink {
+  border-color: var(--color-brand-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
+  color: var(--color-text-primary);
+}
+
+/* The stepper renders buttons, not links: reset native chrome. */
+button.stepperLink {
+  font: inherit;
+  cursor: pointer;
+}
+
+button.stepperLink:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.stepperIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background-color: var(--color-bg-sunken);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.stepperItem[data-done='true'] .stepperIndex {
+  background-color: var(--color-success);
+  color: #fff;
+}
+
+.stepperLabel {
+  white-space: nowrap;
+}
+
+/* Enhanced plan benefits card: tier identity, stat tiles. */
+.planBenefits {
+  border-width: 2px;
+  overflow: hidden;
+}
+
+.planGOLD {
+  border-color: #c9a227;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 45%, var(--color-bg-surface) 100%);
+}
+
+.planSILVER {
+  border-color: #9aa3ad;
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 45%, var(--color-bg-surface) 100%);
+}
+
+.planBRONZE {
+  border-color: #b0793a;
+  background: linear-gradient(135deg, #fdf0e0 0%, #f5d6a8 45%, var(--color-bg-surface) 100%);
+}
+
+/* Official card artwork banner: the physical card, full width. */
+.planArt {
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgb(28 43 58 / 0.06), transparent);
+}
+
+.planArtImage {
+  display: block;
+  width: min(100%, 22rem);
+  height: auto;
+  aspect-ratio: 1.58;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 24px rgb(28 43 58 / 0.25));
+}
+
+.planBenefitsHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.planEyebrow {
+  margin: 0 0 4px;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.planTitle {
+  margin: 0;
+}
+
+.planGrid {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.idReady {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.idReadyActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* Section lede under a panel title. */

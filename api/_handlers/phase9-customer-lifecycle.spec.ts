@@ -260,11 +260,7 @@ describe('card plan selection and frozen snapshots', () => {
       method: 'POST',
       path: '',
       token: TOKEN2.salesManager,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(201);
     expect(state.body).toMatchObject({
@@ -294,11 +290,7 @@ describe('card plan selection and frozen snapshots', () => {
       method: 'POST',
       path: '',
       token: TOKEN2.salesManager,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(409);
     expect(db.rows('card_sales')).toHaveLength(before);

@@ -20,6 +20,7 @@ import {
   customerOnboardingRecoverySchema,
   customerSchema,
   createCustomerSchema,
+  updateCustomerSchema,
   financeQueueItemSchema,
   financeCollectionQueueItemSchema,
   purchasePaymentSchema,
@@ -60,6 +61,7 @@ import {
   type CreateCardCategoryRequest,
   type CreateCardProductRequest,
   type CreateCustomerRequest,
+  type UpdateCustomerRequest,
   type CreateSaleRequest,
   type Customer,
   type FinanceQueueItem,
@@ -181,6 +183,10 @@ export const createCustomer = (input: CreateCustomerRequest): Promise<Customer> 
 
 export const getCustomerById = (id: string): Promise<Customer> =>
   request(`/customers/${id}`, customerSchema);
+
+/** Full customer update (company-stated fields included). Audited as CUSTOMER_EDITED. */
+export const updateCustomer = (id: string, input: UpdateCustomerRequest): Promise<Customer> =>
+  patch(`/customers/${id}`, customerSchema, updateCustomerSchema.parse(input));
 
 /** Change a customer's lifecycle status. Audited server-side as CUSTOMER_EDITED. */
 export const updateCustomerStatus = (
@@ -512,18 +518,12 @@ export const exportReservationAgreement = (id: string, format: 'xlsx' | 'pdf') =
 /* ------------------------------------------------------------------ */
 
 export const getSales = (
-  params: {
-    status?: string;
-    customerId?: string;
-    productId?: string;
-    officialVipNumber?: string;
-  } = {},
+  params: { status?: string; customerId?: string; productId?: string } = {},
 ): Promise<Sale[]> => {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.customerId) query.set('customerId', params.customerId);
   if (params.productId) query.set('productId', params.productId);
-  if (params.officialVipNumber) query.set('officialVipNumber', params.officialVipNumber);
   const suffix = query.toString();
   return requestList(`/sales${suffix ? `?${suffix}` : ''}`, saleSchema);
 };

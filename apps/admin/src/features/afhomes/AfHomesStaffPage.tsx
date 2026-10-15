@@ -11,6 +11,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  Icon,
   notifySuccess,
   PageHeader,
   Pagination,
@@ -21,7 +22,7 @@ import {
   StatusChip,
   TextField,
 } from '@afhomes/ui';
-import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
+import { PERSON_NAME_RE, groupedModuleCatalog, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
@@ -81,6 +82,18 @@ export function AfHomesStaffPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [editing, setEditing] = useState<AfHomesStaff | null>(null);
   const [restrictions, setRestrictions] = useState<Restriction[]>([]);
+  // Same disclosure pattern as the role access dialog: group dropdowns, opened
+  // for groups where an override is already set (and reset per member below).
+  const [expandedRestrictionGroups, setExpandedRestrictionGroups] = useState<Set<string>>(
+    new Set(),
+  );
+  const toggleRestrictionGroup = (group: string) =>
+    setExpandedRestrictionGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
   const [accountAction, setAccountAction] = useState<{
     kind: 'deactivate' | 'delete';
     staff: AfHomesStaff;
@@ -185,28 +198,64 @@ export function AfHomesStaffPage() {
   const safePage = Math.min(page, pageCount);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const activeRoles = roles.data?.filter((role) => role.isActive && role.slug !== 'customer') ?? [];
+  const selectedRole = activeRoles.find((role) => role.id === roleId);
+  const selectedRoleDescription = selectedRole
+    ? selectedRole.description?.trim() || `${selectedRole.assignedCount} staff hold this role.`
+    : null;
   const filtersActive = search !== '' || status !== 'all' || roleFilter !== 'all';
   const openRestrictions = (member: AfHomesStaff) => {
     const role = roles.data?.find((item) => item.id === member.roleId);
-    setRestrictions(
-      (role?.permissions ?? [])
-        .filter((p) => p.canView)
-        .map(
-          (p) =>
-            member.restrictions.find((r) => r.moduleKey === p.moduleKey) ?? {
-              moduleKey: p.moduleKey,
+    const next = (role?.permissions ?? [])
+      .filter((p) => p.canView)
+      .map(
+        (p) =>
+          member.restrictions.find((r) => r.moduleKey === p.moduleKey) ?? {
+            moduleKey: p.moduleKey,
+            denyView: false,
+            denyCreate: false,
+            denyUpdate: false,
+            denyDelete: false,
+          },
+      );
+    setRestrictions(next);
+    // Open exactly the groups this member already overrides, so the dialog
+    // shows current overrides immediately and keeps the rest tidy.
+    const denied = new Set(
+      next
+        .filter((r) => r.denyView || r.denyCreate || r.denyUpdate || r.denyDelete)
+        .map((r) => r.moduleKey),
+    );
+    setExpandedRestrictionGroups(
+      new Set(
+        groupedModuleCatalog()
+          .filter((bucket) => bucket.modules.some((module) => denied.has(module.key)))
+          .map((bucket) => bucket.group),
+      ),
+    );
+    setEditing(member);
+  };
+  /**
+   * The ONE deny control per page. Checking denies the page outright
+   * (denyView, which the server resolves as removing every action too);
+   * clearing it removes every deny flag, restoring exactly what the role
+   * grants. A page already carrying a finer deny reads as checked and clears
+   * the same way, so the single control is always the whole truth.
+   */
+  const toggle = (key: string) =>
+    setRestrictions((current) =>
+      current.map((item) => {
+        if (item.moduleKey !== key) return item;
+        const denied = item.denyView || item.denyCreate || item.denyUpdate || item.denyDelete;
+        return denied
+          ? {
+              moduleKey: item.moduleKey,
               denyView: false,
               denyCreate: false,
               denyUpdate: false,
               denyDelete: false,
-            },
-        ),
-    );
-    setEditing(member);
-  };
-  const toggle = (key: string, field: keyof Omit<Restriction, 'moduleKey'>) =>
-    setRestrictions((current) =>
-      current.map((item) => (item.moduleKey === key ? { ...item, [field]: !item[field] } : item)),
+            }
+          : { ...item, denyView: true };
+      }),
     );
   const clearFilters = () => {
     setSearch('');
@@ -218,7 +267,7 @@ export function AfHomesStaffPage() {
     <section className={styles.page}>
       <PageHeader
         title="Staff"
-        description="Admin users and their roles (role changes are audited)"
+        description="Staff accounts and assigned roles."
         actions={
           <Button
             onClick={() => {
@@ -435,69 +484,89 @@ export function AfHomesStaffPage() {
           </>
         }
       >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <TextField
-            id="staff-name"
-            name="staff-name"
-            label="Full name"
-            value={fullName}
-            suggestName
-            normalize={(value) => normalizeLiveHumanField('fullName', value)}
-            onChange={setFullName}
-            error={createErrors.fullName}
-            autoComplete="name"
-          />
-          <TextField
-            id="staff-email"
-            name="staff-email"
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-            error={createErrors.email}
-          />
-          <label>
-            Department
-            <Select
-              value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
-              options={[
-                { value: '', label: 'Unassigned' },
-                ...(departments.data ?? [])
-                  .filter((d) => d.isActive)
-                  .map((d) => ({ value: d.id, label: d.name })),
-              ]}
-            />
-          </label>
-          <label>
-            Role
-            <Select
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-              options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
-            />
-          </label>
-          <PasswordField
-            id="staff-temp-password"
-            label="Temporary password"
-            value={temporaryPassword}
-            onChange={setTemporaryPassword}
-            autoComplete="new-password"
-            hint="At least 8 characters. Share it with the new member directly - it is never emailed or stored."
-            error={createErrors.temporaryPassword}
-          />
-          <PasswordField
-            id="staff-temp-password-confirm"
-            label="Confirm temporary password"
-            value={confirmPassword}
-            onChange={setConfirmPassword}
-            autoComplete="new-password"
-            error={createErrors.confirmPassword}
-          />
+        <div className={styles.dialogBody}>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>Identity</legend>
+            <p className={styles.sectionHint}>Who this account belongs to.</p>
+            <div className={styles.formFields}>
+              <TextField
+                id="staff-name"
+                name="staff-name"
+                label="Full name"
+                value={fullName}
+                suggestName
+                normalize={(value) => normalizeLiveHumanField('fullName', value)}
+                onChange={setFullName}
+                error={createErrors.fullName}
+                autoComplete="name"
+              />
+              <TextField
+                id="staff-email"
+                name="staff-email"
+                label="Email"
+                type="email"
+                value={email}
+                onChange={setEmail}
+                autoComplete="email"
+                error={createErrors.email}
+              />
+            </div>
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>Assignment</legend>
+            <p className={styles.sectionHint}>Exactly one role and one department.</p>
+            <div className={styles.formFields}>
+              <label className={styles.fieldLabel}>
+                Department
+                <Select
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  options={[
+                    { value: '', label: 'Unassigned' },
+                    ...(departments.data ?? [])
+                      .filter((d) => d.isActive)
+                      .map((d) => ({ value: d.id, label: d.name })),
+                  ]}
+                />
+              </label>
+              <label className={styles.fieldLabel}>
+                Role
+                <Select
+                  value={roleId}
+                  onChange={(e) => setRoleId(e.target.value)}
+                  options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
+                />
+              </label>
+              {selectedRoleDescription ? (
+                <p className={styles.roleHint}>{selectedRoleDescription}</p>
+              ) : null}
+            </div>
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>First sign-in</legend>
+            <p className={styles.sectionHint}>Member sets own password later.</p>
+            <div className={styles.formFields}>
+              <PasswordField
+                id="staff-temp-password"
+                label="Temporary password"
+                value={temporaryPassword}
+                onChange={setTemporaryPassword}
+                autoComplete="new-password"
+                hint="At least 8 characters. Share it privately only."
+                error={createErrors.temporaryPassword}
+              />
+              <PasswordField
+                id="staff-temp-password-confirm"
+                label="Confirm temporary password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
+                error={createErrors.confirmPassword}
+              />
+            </div>
+          </fieldset>
           <Alert variant="info" title="First login">
-            The new member signs in with this password and must set their own before the admin panel
-            unlocks.
+            First sign-in needs password change.
           </Alert>
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
@@ -517,40 +586,73 @@ export function AfHomesStaffPage() {
           </>
         }
       >
-        <p>Overrides can only remove access granted by the role.</p>
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Module</th>
-                <th>Deny view</th>
-                <th>Deny create</th>
-                <th>Deny update</th>
-                <th>Deny delete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {restrictions.map((r) => (
-                <tr key={r.moduleKey}>
-                  <td>{r.moduleKey}</td>
-                  {(['denyView', 'denyCreate', 'denyUpdate', 'denyDelete'] as const).map(
-                    (field) => (
-                      <td key={field}>
-                        <input
-                          type="checkbox"
-                          aria-label={`${r.moduleKey} ${field}`}
-                          checked={r[field]}
-                          onChange={() => toggle(r.moduleKey, field)}
-                        />
-                      </td>
-                    ),
+        <div className={styles.dialogBody}>
+          <Alert variant="info" title="Deny-only overrides">
+            Overrides remove access only. Nothing grants access here.
+          </Alert>
+          {/* Same shape as the role access dialog: one "Deny access" control per
+              page, grouped into dropdowns. Denying removes the page AND every
+              action right on it; clearing the box restores whatever the role
+              already grants. */}
+          <ul className={styles.moduleList}>
+            {groupedModuleCatalog().map((bucket) => {
+              const byKey = new Map(restrictions.map((r) => [r.moduleKey, r]));
+              const entries = bucket.modules
+                .map((module) => ({ module, restriction: byKey.get(module.key) }))
+                .filter((entry) => entry.restriction);
+              if (entries.length === 0) return null;
+              const isDenied = (restriction: Restriction) =>
+                restriction.denyView ||
+                restriction.denyCreate ||
+                restriction.denyUpdate ||
+                restriction.denyDelete;
+              const deniedCount = entries.filter((entry) => isDenied(entry.restriction!)).length;
+              const singleModule = entries.length === 1;
+              const expanded = singleModule || expandedRestrictionGroups.has(bucket.group);
+              return (
+                <li key={bucket.group} className={styles.groupBlock}>
+                  {singleModule ? null : (
+                    <button
+                      type="button"
+                      className={styles.groupToggleButton}
+                      aria-expanded={expanded}
+                      onClick={() => toggleRestrictionGroup(bucket.group)}
+                    >
+                      <span className={styles.chevron} data-open={expanded}>
+                        <Icon name="chevron-right" size={14} />
+                      </span>
+                      <span className={styles.groupName}>{bucket.group}</span>
+                      <span
+                        className={deniedCount > 0 ? styles.groupCountOn : styles.groupCount}
+                        title={`${deniedCount} of ${entries.length} pages denied`}
+                      >
+                        {deniedCount}/{entries.length}
+                      </span>
+                    </button>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  {expanded ? (
+                    <ul className={styles.moduleRows}>
+                      {entries.map(({ module, restriction }) => (
+                        <li key={module.key} className={styles.moduleRow}>
+                          <label className={styles.moduleCheck}>
+                            <input
+                              aria-label={`${module.label} deny access`}
+                              type="checkbox"
+                              checked={isDenied(restriction!)}
+                              onChange={() => toggle(module.key)}
+                            />
+                            <span className={styles.moduleName}>{module.label}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          {update.error ? <p role="alert">{update.error.message}</p> : null}
         </div>
-        {update.error ? <p role="alert">{update.error.message}</p> : null}
       </Dialog>
       <ConfirmDialog
         open={accountAction !== null}
@@ -568,8 +670,8 @@ export function AfHomesStaffPage() {
           <div>
             <p>
               {accountAction?.kind === 'delete'
-                ? 'This action permanently removes the login/account if no protected business records exist. This cannot be undone.'
-                : 'This user will no longer be able to access the AFHomes staff system. Historical records will remain.'}
+                ? 'Remove login if records allow. This cannot be undone.'
+                : 'Block staff access now. Keep history records intact.'}
             </p>
             {accountAction?.kind === 'delete' ? (
               <TextField
@@ -598,16 +700,11 @@ export function AfHomesStaffPage() {
         title="Purge Test Account"
         message={
           <div>
-            <p>
-              TEST DATA PURGE. This permanently deletes the test account
-              {purgeTarget ? ` ${purgeTarget.email}` : ''} and related test records. This action
-              cannot be undone. Real business data is never purged: anything shared or non-test
-              blocks the purge instead.
-            </p>
+            <p>Delete test account now. Real data never purged.</p>
             <TextField
               id="staff-purge-confirm"
               name="purgeConfirm"
-              label="Type PURGE to confirm test account purge"
+              label="Type PURGE to confirm purge"
               value={purgeConfirmation}
               onChange={setPurgeConfirmation}
             />

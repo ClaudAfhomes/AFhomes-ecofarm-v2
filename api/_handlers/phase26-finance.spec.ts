@@ -1007,11 +1007,7 @@ describe('D-12 one membership per customer at sale creation', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.active,
-        productId: PRODUCT.gold,
-      },
+      body: { customerId: CUSTOMER.active, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(409);
     expect(JSON.stringify(state.body)).toMatch(/already has an active membership/);
@@ -1024,11 +1020,7 @@ describe('D-12 one membership per customer at sale creation', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(201);
   });
@@ -1039,7 +1031,6 @@ describe('D-12 one membership per customer at sale creation', () => {
       path: '',
       token: TOKEN2.salesManager,
       body: {
-        requestId: crypto.randomUUID(),
         customerId: CUSTOMER.active,
         productId: PRODUCT.silver,
         sellerStaffId: STAFF2.salesManager,

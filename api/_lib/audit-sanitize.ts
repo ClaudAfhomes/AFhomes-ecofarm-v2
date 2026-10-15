@@ -10,7 +10,7 @@
  */
 
 const SENSITIVE_KEY =
-  /(token|secret|password|passwd|hash|qr_?token|fallback|government|gov_?id|otp|reset|private|storage_?path|receipt|ocr|raw_?text|auth_?user|service_?role|signing|api_?key|credential|code_hint)/i;
+  /(token|secret|password|passwd|hash|qr_?token|fallback|government|gov_?id|tin|tax_?id|otp|reset|private|storage_?path|receipt|ocr|raw_?text|auth_?user|service_?role|signing|api_?key|credential|code_hint)/i;
 
 const MAX_DEPTH = 4;
 const MAX_KEYS = 30;

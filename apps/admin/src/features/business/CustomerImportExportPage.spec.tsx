@@ -80,6 +80,17 @@ describe('CustomerImportExportPage export filters', () => {
 });
 
 describe('CustomerImportExportPage workspace tabs', () => {
+  it('presents one download card per template format with guidance', async () => {
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    expect(await screen.findByText('1. Download a template')).toBeInTheDocument();
+    expect(screen.getByText('Excel workbook (.xlsx)')).toBeInTheDocument();
+    expect(screen.getByText('Plain text (.csv)')).toBeInTheDocument();
+    expect(screen.queryByText('5 sheets · color headers · no data')).not.toBeInTheDocument();
+    expect(screen.queryByText(/columns · .* · no data/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download XLSX template' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download CSV template' })).toBeInTheDocument();
+  });
+
   it('switches between Import, Export, and Job history panels', async () => {
     const user = userEvent.setup();
     renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
@@ -96,8 +107,10 @@ describe('CustomerImportExportPage workspace tabs', () => {
 
   it('offers button-styled file pickers backed by hidden labeled inputs', async () => {
     renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
-    expect(await screen.findByRole('button', { name: 'Choose Excel file' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Choose CSV file' })).toBeInTheDocument();
+    const excelBtn = await screen.findByRole('button', { name: 'Choose Excel file' });
+    const csvBtn = screen.getByRole('button', { name: 'Choose CSV file' });
+    // One shared row holds both pickers side by side.
+    expect(excelBtn.parentElement?.parentElement).toBe(csvBtn.parentElement?.parentElement);
     const excel = document.querySelector('input[accept=".xlsx"]');
     const csv = document.querySelector('input[accept=".csv"]');
     expect(excel?.getAttribute('aria-label')).toBe('Import Excel (.xlsx)');
@@ -106,9 +119,7 @@ describe('CustomerImportExportPage workspace tabs', () => {
 
   it('hides the review and confirm steps until a preview exists', async () => {
     renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
-    expect(
-      await screen.findByText('2. Upload and preview (nothing is written yet)'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('2. Upload and preview')).toBeInTheDocument();
     expect(screen.queryByText('3. Review preview')).not.toBeInTheDocument();
     expect(screen.queryByText('4. Confirm import')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Confirm Import/ })).not.toBeInTheDocument();

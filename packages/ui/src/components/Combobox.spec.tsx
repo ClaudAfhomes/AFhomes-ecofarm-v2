@@ -28,25 +28,6 @@ function setup(overrides: Partial<Parameters<typeof Combobox>[0]> = {}) {
 const box = () => screen.getByRole('combobox', { name: 'Province' });
 
 describe('Combobox accessibility', () => {
-  it('requests server search without committing typed input and selects newly returned options', async () => {
-    const onSearch = vi.fn();
-    const { user, onSelect, rerender } = setup({ options: [], onSearch });
-    await user.type(box(), 'Remote');
-    expect(onSearch).toHaveBeenLastCalledWith('Remote');
-    expect(onSelect).not.toHaveBeenCalled();
-    rerender(
-      <Combobox
-        id="province"
-        label="Province"
-        value={null}
-        options={[{ code: 'remote-id', name: 'Remote Province' }]}
-        onSearch={onSearch}
-        onSelect={onSelect}
-      />,
-    );
-    await user.click(screen.getByRole('option', { name: 'Remote Province' }));
-    expect(onSelect).toHaveBeenCalledWith({ code: 'remote-id', name: 'Remote Province' });
-  });
   it('is a labelled combobox, not a free-text box', () => {
     setup();
     expect(box()).toBeInTheDocument();
@@ -94,7 +75,10 @@ describe('Combobox browsing and searching', () => {
 
     await user.click(box());
 
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Laguna', 'Batangas']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Laguna',
+      'Batangas',
+    ]);
   });
 
   it('ranks an exact match above a merely-starting one', async () => {
@@ -125,7 +109,10 @@ describe('Combobox browsing and searching', () => {
 
     await user.click(box());
 
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Laguna', 'Batangas']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Laguna',
+      'Batangas',
+    ]);
   });
 
   it('still filters as soon as the user searches', async () => {

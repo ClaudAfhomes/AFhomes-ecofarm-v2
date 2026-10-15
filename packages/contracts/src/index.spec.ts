@@ -82,8 +82,8 @@ describe('exact decimal money', () => {
 });
 
 describe('afHomesModuleKeySchema', () => {
-  it('exposes the base keys plus CMS, bulk import, and the two Operational Services keys', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(31);
+  it('exposes the base keys plus CMS, bulk import, and the Operational Services keys', () => {
+    expect(afHomesModuleKeySchema.options).toHaveLength(32);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
@@ -105,6 +105,10 @@ describe('afHomesModuleKeySchema', () => {
     // receipt does NOT ride on the VIP-card `finance.payment_verification` key:
     // the two payment workflows must not authorise each other.
     expect(keys).toContain('operations.payments');
+    // Customer Lookup for the GSD desk, seeded by 20261131000003. It exists so
+    // the read-only lookup screen is its own grantable permission instead of
+    // riding on the `operations.redemption` till key.
+    expect(keys).toContain('operations.customer_lookup');
   });
 
   it('covers every seeded module group', () => {

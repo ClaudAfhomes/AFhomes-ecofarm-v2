@@ -441,6 +441,33 @@
   color: var(--color-text-secondary);
 }
 
+/* Two-column control grid inside a form section. */
+.sectionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3);
+}
+
+/* One-line lede under a section legend. */
+.sectionHint {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Move option: bold scheme name over its plain-terms hint. */
+.moveLabel {
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.moveHint {
+  font-size: var(--text-caption);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
 .checkRow {
   display: flex;
   align-items: center;

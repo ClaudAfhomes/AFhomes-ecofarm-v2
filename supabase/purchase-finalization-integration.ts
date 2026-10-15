@@ -238,28 +238,6 @@ const saleRowsFor = (customerId: string) =>
   const sale = sales[0]!;
   check('the sale carries an AF-CSALE business number', /^AF-CSALE-[A-HJ-NP-Z2-9]{5}$/.test(sale.sale_number), sale.sale_number);
   check('the finalized sale is payment_verified, never active', sale.status === 'payment_verified');
-  const vipLinks = (
-    await db.query<{ reservation: string; sale: string }>(
-      `select ra.official_vip_number reservation,cs.official_vip_number sale
-     from public.reservation_agreements ra join public.card_sales cs on cs.id=ra.sale_id where ra.id=$1`,
-      [good.reservationId],
-    )
-  ).rows[0]!;
-  check(
-    'reservation and resulting sale share one official VIP identity',
-    Boolean(vipLinks.reservation) && vipLinks.reservation === vipLinks.sale,
-  );
-  check(
-    'execution evidence froze the same official VIP number',
-    (
-      await db.query<{ number: string }>(
-        `select fields->>'officialVipNumber' number
-       from private.purchase_document_evidence where kind='reservation' and reservation_id=$1
-       order by revision desc limit 1`,
-        [good.reservationId],
-      )
-    ).rows[0]?.number === vipLinks.reservation,
-  );
 
   /* 7. Replay by the same request id. */
   check(
@@ -618,15 +596,6 @@ const saleRowsFor = (customerId: string) =>
     () => finalize(randomUUID()),
   );
   const draftApp = await world.reserved();
-  check(
-    'saving a draft does not issue an official VIP number',
-    (
-      await db.query<{ number: string | null }>(
-        'select official_vip_number number from public.reservation_agreements where id=$1',
-        [draftApp.reservationId],
-      )
-    ).rows[0]?.number === null,
-  );
   await fails(
     'a DRAFT reservation cannot finalize',
     /RESERVATION_NOT_EXECUTED/,
@@ -634,7 +603,7 @@ const saleRowsFor = (customerId: string) =>
   );
   await fails(
     'a sale link without the finalization stamp is refused by the schema',
-    /reservation_finalization_check|VIP_PURCHASE_IDENTITY_CONFLICT/,
+    /reservation_finalization_check/,
     () =>
       db.query(
         `update public.reservation_agreements set sale_id=$1 where id=$2`,
@@ -667,13 +636,6 @@ const saleRowsFor = (customerId: string) =>
       )
     ).rows.map((row) => row.id);
     const saleIds = ownedSales;
-    const vipCleanupNumbers = (
-      await db.query<{ control_number: string }>(
-        `select control_number from private.vip_control_numbers where original_reservation_id=any($1::uuid[]) or original_sale_id=any($2::uuid[])`,
-        [reservationIds, saleIds],
-      )
-    ).rows.map((row) => row.control_number);
-
     await db.query(
       `delete from private.purchase_document_evidence
         where reservation_id = any($1::uuid[]) or sale_id = any($2::uuid[])
@@ -722,9 +684,6 @@ const saleRowsFor = (customerId: string) =>
       [world.createdCustomers],
     );
     await db.query(`delete from public.card_sales where id = any($1::uuid[])`, [saleIds]);
-    await db.query('delete from private.vip_control_numbers where control_number=any($1::text[])', [
-      vipCleanupNumbers,
-    ]);
     await db.query('commit');
   } catch (error) {
     await db.query('rollback');

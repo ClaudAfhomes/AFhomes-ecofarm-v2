@@ -14,11 +14,12 @@ export type AdminNavItem = {
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: 'home', end: true, module: 'dashboard.view' },
   {
-    // General Customer Lookup, for the GSD/Employee desk. Keyed on
-    // `operations.redemption` because that is what `employee` already holds - see
-    // `role-baseline.ts`, where employee deliberately has NO `sales.customers` row.
-    // Reusing the existing key keeps this a read-only screen without inventing a
-    // module or widening a role.
+    // General Customer Lookup, for the GSD/Employee desk. Keyed on its OWN
+    // module (`operations.customer_lookup`), seeded by 20261131000003 with
+    // view grants for `employee` and `admin`, so the permission list shows the
+    // screen by name instead of borrowing `operations.redemption`. The nav is
+    // permission-driven: any role granted that view sees this entry, and no
+    // role can reach the screen without it.
     //
     // It REPLACES the old top-level "VIP Member Lookup", which presented a member
     // TRANSACTION screen as a system-wide general lookup and displayed Membership
@@ -27,7 +28,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     to: '/admin/customer-lookup',
     label: 'Customer Lookup',
     icon: 'search',
-    module: 'operations.redemption',
+    module: 'operations.customer_lookup',
   },
   {
     to: '/admin/sales',
@@ -212,12 +213,8 @@ const REPORT_MODULES: readonly AfHomesModuleKey[] = [
 const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
   REPORT_MODULES.some((key) => canViewModule(permissions, key));
 
-export function navItemsForPermissions(
-  permissions?: readonly AfHomesPermission[],
-  roleSlug?: string,
-): SidebarItem[] {
+export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
   return ADMIN_NAV_ITEMS.flatMap((item) => {
-    if (item.to === '/admin/customer-lookup' && roleSlug !== 'employee') return [];
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
@@ -232,23 +229,40 @@ export function navItemsForPermissions(
   });
 }
 
+/**
+ * Explicit path -> module gate for console screens that are NOT (or not only)
+ * nav entries: `/admin/member-lookup` is reached from Redemption, the documents
+ * screens are compatibility-only after leaving the sidebar, and the customer
+ * import/export workspace is reached from the Applications list action.
+ *
+ * ONE table, so the guard below and the coverage spec cannot drift: every
+ * module referenced here is asserted to exist in the module catalog, which is
+ * what keeps every page in the Roles listing.
+ */
+export const EXTRA_GATED_ROUTES: readonly {
+  pathPrefix: string;
+  module: AfHomesModuleKey;
+}[] = [
+  { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
+  { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
+  { pathPrefix: '/admin/documents', module: 'sales.id_documents' },
+  {
+    pathPrefix: '/admin/customers/applications/import-export',
+    module: 'governance.customer_import',
+  },
+];
+
 export function canAccessNavTarget(
   permissions: readonly AfHomesPermission[] | undefined,
   pathname: string,
 ): boolean {
-  if (pathname === '/admin/member-lookup')
-    return canViewModule(permissions, 'operations.redemption');
+  // `/admin/reports` is visible on ANY report permission, not one key: the
+  // screen then offers only the reports the session allows.
   if (pathname === '/admin/reports') return canViewReports(permissions);
-  if (pathname === '/admin/customer-lookup')
-    return canViewModule(permissions, 'operations.redemption');
-  // Compatibility-only document routes remain protected after removing navigation.
-  if (pathname === '/admin/documents' || pathname.startsWith('/admin/documents/'))
-    return canViewModule(permissions, 'sales.id_documents');
-  // Customer import/export is reached from the Customers page action, not the
-  // sidebar, but the direct URL keeps its own permission gate so hiding the
-  // link and refusing the URL cannot disagree.
-  if (pathname === '/admin/customers/import-export')
-    return canViewModule(permissions, 'governance.customer_import');
+  const extra = EXTRA_GATED_ROUTES.find(
+    (entry) => pathname === entry.pathPrefix || pathname.startsWith(`${entry.pathPrefix}/`),
+  );
+  if (extra) return canViewModule(permissions, extra.module);
   const sub = findNavSubItem(pathname);
   const item = findNavItem(pathname);
   const key = sub?.sub.module ?? item?.module;

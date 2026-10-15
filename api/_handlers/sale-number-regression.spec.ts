@@ -41,10 +41,9 @@ vi.mock('../_lib/rest.js', () => ({
 const handlers = {
   customers: (await import('./customers.js')).default,
   sales: (await import('./sales.js')).default,
-  forms: (await import('./official-forms.js')).default,
 };
 
-function install(rpcs: { fn: string; result: unknown }[], rpcErrors = {}, errors = {}) {
+function install(rpcs: { fn: string; result: unknown }[], rpcErrors = {}) {
   holder.db = new FakeSupabase({
     tables: phase2World(),
     tokens: phase2WorldTokens(),
@@ -52,7 +51,6 @@ function install(rpcs: { fn: string; result: unknown }[], rpcErrors = {}, errors
     links: LINKS as never,
     rpcs,
     rpcErrors,
-    errors,
   });
   return holder.db as FakeSupabase;
 }
@@ -61,13 +59,7 @@ type State = { status: number; body: unknown };
 
 async function call(
   family: keyof typeof handlers,
-  options: {
-    path: string;
-    method?: string;
-    token?: string;
-    body?: unknown;
-    query?: Record<string, string>;
-  },
+  options: { path: string; method?: string; token?: string; body?: unknown },
 ): Promise<State> {
   const { res, state } = makeRes();
   await handlers[family](
@@ -76,7 +68,6 @@ async function call(
       familyPath: options.path,
       body: options.body,
       token: options.token,
-      query: options.query,
     }) as never,
     res as never,
   );
@@ -100,125 +91,10 @@ const GOLD_SALE = {
   method: 'POST',
   path: '',
   token: TOKEN.admin,
-  body: { requestId: crypto.randomUUID(), customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
+  body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
 } as const;
 
 const err = (body: unknown) => (body as { error: { code: string; message: string } }).error;
-
-const missingRpc = (name: string) => ({
-  code: 'PGRST202',
-  message: `Could not find the function public.${name}() in the schema cache`,
-});
-const legacyColumns = {
-  'card_sales.official_vip_number': {
-    code: '42703',
-    message: 'column card_sales.official_vip_number does not exist',
-  },
-};
-
-describe('pre-migration compatibility fails closed after SQL becomes available', () => {
-  it.each(['sales', 'forms'] as const)(
-    'returns an empty official-number search before migration: %s',
-    async (family) => {
-      install([], {}, legacyColumns);
-      const state = await call(family, {
-        path: family === 'forms' ? 'reservations' : '',
-        token: TOKEN.admin,
-        query:
-          family === 'forms'
-            ? { search: '26101400001G1C01S' }
-            : { officialVipNumber: '26101400001G1C01S' },
-      });
-      expect(state.status).toBe(200);
-      expect(state.body).toMatchObject({ data: [], meta: { total: 0 } });
-    },
-  );
-  it('preserves legacy sale submission before migration without inventing an official number', async () => {
-    const db = install(
-      [{ fn: 'next_sale_number', result: [{ sale_number: 'SALE-700001' }] }],
-      { submit_card_sale_once: missingRpc('submit_card_sale_once') },
-      legacyColumns,
-    );
-    const commissions = db.rows('commissions').length;
-    const state = await call('sales', GOLD_SALE);
-    expect(state.status).toBe(201);
-    expect((state.body as Record<string, unknown>).saleNumber).toBe('SALE-700001');
-    expect((state.body as Record<string, unknown>).officialVipNumber).toBeNull();
-    expect(db.rows('commissions')).toHaveLength(commissions + 1);
-    expect(db.rows('audit_events').some((r) => r.action === 'APPLICATION_SUBMITTED')).toBe(true);
-  });
-
-  it('does not use legacy issuance when the new column exists but the RPC cache is stale', async () => {
-    const db = install([], { submit_card_sale_once: missingRpc('submit_card_sale_once') });
-    const before = db.rows('card_sales').length;
-    expect((await call('sales', GOLD_SALE)).status).toBeGreaterThanOrEqual(400);
-    expect(db.rows('card_sales')).toHaveLength(before);
-    expect(db.calls.some((c) => c.table === 'next_sale_number')).toBe(false);
-  });
-
-  it.each([
-    { code: '42501', message: 'permission denied' },
-    { code: '55000', message: 'STAFF_PASSWORD_CHANGE_REQUIRED' },
-    { code: '42883', message: 'function private.missing_dependency() does not exist' },
-    missingRpc('another_function'),
-  ])('never bypasses a denial or dependency failure: $code / $message', async (failure) => {
-    const db = install([], { submit_card_sale_once: failure }, legacyColumns);
-    const before = db.rows('card_sales').length;
-    expect((await call('sales', GOLD_SALE)).status).toBeGreaterThanOrEqual(400);
-    expect(db.rows('card_sales')).toHaveLength(before);
-    expect(db.calls.some((c) => c.table === 'next_sale_number')).toBe(false);
-  });
-
-  it.each(
-    [[], [{ sale_number: '' }], [{ sale_number: 'A' }, { sale_number: 'B' }]].map((result) => [
-      result,
-    ]),
-  )('rejects malformed legacy sale-number responses', async (result) => {
-    const db = install(
-      [{ fn: 'next_sale_number', result }],
-      { submit_card_sale_once: missingRpc('submit_card_sale_once') },
-      legacyColumns,
-    );
-    const before = db.rows('card_sales').length;
-    expect((await call('sales', GOLD_SALE)).status).toBe(500);
-    expect(db.rows('card_sales')).toHaveLength(before);
-  });
-
-  it('preserves legacy customer creation and masks the government ID', async () => {
-    const db = install(
-      [{ fn: 'next_customer_number', result: [{ customer_number: 'AF-CUS-ABC123' }] }],
-      { create_customer_once: missingRpc('create_customer_once') },
-    );
-    const state = await call('customers', {
-      path: '',
-      method: 'POST',
-      token: TOKEN.admin,
-      body: VALID_CUSTOMER,
-    });
-    expect(state.status).toBe(201);
-    expect((state.body as Record<string, unknown>).customerNumber).toBe('AF-CUS-ABC123');
-    expect(JSON.stringify(state.body)).not.toContain(VALID_CUSTOMER.governmentIdNumber);
-    expect(JSON.stringify(db.rows('audit_events'))).not.toContain(
-      VALID_CUSTOMER.governmentIdNumber,
-    );
-  });
-
-  it('rejects stale customer RPC caches after the annual allocator is installed', async () => {
-    const db = install(
-      [{ fn: 'next_customer_number', result: [{ customer_number: 'AF-CUS-2026-000001' }] }],
-      { create_customer_once: missingRpc('create_customer_once') },
-    );
-    const before = db.rows('customers').length;
-    const state = await call('customers', {
-      path: '',
-      method: 'POST',
-      token: TOKEN.admin,
-      body: VALID_CUSTOMER,
-    });
-    expect(state.status).toBe(503);
-    expect(db.rows('customers')).toHaveLength(before);
-  });
-});
 
 describe('sale-number extraction follows the live PostgREST shape', () => {
   beforeEach(() => {
@@ -230,35 +106,9 @@ describe('sale-number extraction follows the live PostgREST shape', () => {
     const state = await call('sales', { ...GOLD_SALE });
     expect(state.status).toBe(201);
     expect((state.body as Record<string, unknown>).saleNumber).toBe('SALE-700001');
-    const sale = db
-      .rows('card_sales')
-      .find((r) => r.id !== undefined && r.sale_number === 'SALE-700001');
+    const sale = db.rows('card_sales').find((r) => r.id !== undefined && r.sale_number === 'SALE-700001');
     expect(sale).toBeDefined();
     expect(sale!.sale_number).toBe('SALE-700001');
-  });
-
-  it('rejects a submission without a durable request UUID before writing', async () => {
-    const db = install([]);
-    const before = db.rows('card_sales').length;
-    const state = await call('sales', {
-      ...GOLD_SALE,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(400);
-    expect(db.rows('card_sales')).toHaveLength(before);
-  });
-
-  it('returns the same sale on a lost-response retry without a second commission', async () => {
-    const db = install([{ fn: 'next_sale_number', result: [{ sale_number: 'SALE-700001' }] }]);
-    const first = await call('sales', GOLD_SALE);
-    const sales = db.rows('card_sales').length;
-    const commissions = db.rows('commissions').length;
-    const retry = await call('sales', GOLD_SALE);
-    expect(first.status).toBe(201);
-    expect(retry.status).toBe(201);
-    expect(retry.body).toEqual(first.body);
-    expect(db.rows('card_sales')).toHaveLength(sales);
-    expect(db.rows('commissions')).toHaveLength(commissions);
   });
 
   it('fails closed on an empty array and inserts nothing', async () => {
@@ -272,18 +122,18 @@ describe('sale-number extraction follows the live PostgREST shape', () => {
     expect(db.rows('commissions')).toHaveLength(commissionsBefore);
   });
 
-  it.each([
-    ['empty string', ''],
-    ['whitespace', '   '],
-  ])('fails closed on a blank (%s) number and inserts nothing', async (_name, blank) => {
-    const db = install([{ fn: 'next_sale_number', result: [{ sale_number: blank }] }]);
-    const salesBefore = db.rows('card_sales').length;
-    const state = await call('sales', { ...GOLD_SALE });
-    expect(state.status).toBe(500);
-    expect(err(state.body).code).toBe('INTERNAL');
-    expect(db.rows('card_sales')).toHaveLength(salesBefore);
-    expect(db.rows('card_sales').some((r) => r.sale_number === '')).toBe(false);
-  });
+  it.each([['empty string', ''], ['whitespace', '   ']])(
+    'fails closed on a blank (%s) number and inserts nothing',
+    async (_name, blank) => {
+      const db = install([{ fn: 'next_sale_number', result: [{ sale_number: blank }] }]);
+      const salesBefore = db.rows('card_sales').length;
+      const state = await call('sales', { ...GOLD_SALE });
+      expect(state.status).toBe(500);
+      expect(err(state.body).code).toBe('INTERNAL');
+      expect(db.rows('card_sales')).toHaveLength(salesBefore);
+      expect(db.rows('card_sales').some((r) => r.sale_number === '')).toBe(false);
+    },
+  );
 
   it('fails closed on multiple unexpected rows and inserts nothing', async () => {
     const db = install([
@@ -322,9 +172,9 @@ describe('sale-number extraction follows the live PostgREST shape', () => {
 
   it('an SM sale carries a non-blank number with the same server snapshot', async () => {
     const db = install([{ fn: 'next_sale_number', result: [{ sale_number: 'SALE-700003' }] }]);
-    db
-      .rows('staff_role_assignments')
-      .find((assignment) => assignment.staff_id === UUID.viewerStaff)!.role_id = UUID.role.custom;
+    db.rows('staff_role_assignments').find(
+      (assignment) => assignment.staff_id === UUID.viewerStaff,
+    )!.role_id = UUID.role.custom;
     db.rows('role_permissions').push({
       role_id: UUID.role.custom,
       module_id: 'module:sales.card_sales',
@@ -337,11 +187,7 @@ describe('sale-number extraction follows the live PostgREST shape', () => {
       method: 'POST',
       path: '',
       token: TOKEN.viewer,
-      body: {
-        requestId: crypto.randomUUID(),
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-      },
+      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(201);
     expect(state.body).toMatchObject({
@@ -358,9 +204,7 @@ describe('sale-number extraction follows the live PostgREST shape', () => {
 
 describe('sibling sequence RPCs follow the same live shape', () => {
   it('uses the customer number from a one-row array response', async () => {
-    const db = install([
-      { fn: 'next_customer_number', result: [{ customer_number: 'CUS-700001' }] },
-    ]);
+    const db = install([{ fn: 'next_customer_number', result: [{ customer_number: 'CUS-700001' }] }]);
     const state = await call('customers', {
       method: 'POST',
       path: '',

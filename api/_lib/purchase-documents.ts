@@ -38,10 +38,7 @@ type Row = [string, string];
 
 const text = (value: unknown): string => {
   if (value === null || value === undefined) return '';
-  if (Array.isArray(value))
-    return value
-      .map((item) => String((item as Record<string, unknown>)?.particular ?? item))
-      .join('; ');
+  if (Array.isArray(value)) return value.map((item) => String((item as Record<string, unknown>)?.particular ?? item)).join('; ');
   if (typeof value === 'object') {
     const items = value as Record<string, unknown>;
     if (Array.isArray(items.items)) return String(items.items.length) + ' item(s)';
@@ -55,8 +52,6 @@ const push = (rows: Row[], label: string, value: unknown) => {
 };
 
 const identity = (rows: Row[], fields: Record<string, unknown>) => {
-  if (fields.officialVipNumber) push(rows, 'Official VIP control number', fields.officialVipNumber);
-  if (fields.linkedVipNumber) push(rows, 'VIP / accredited seller', fields.linkedVipNumber);
   push(rows, 'Reservation (AF-RES)', fields.reservationNumber);
   push(rows, 'Sale (AF-CSALE)', fields.saleNumber);
   push(rows, 'Application (AF-APP)', fields.applicationNumber);

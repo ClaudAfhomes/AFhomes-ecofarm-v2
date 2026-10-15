@@ -221,8 +221,80 @@ describe('applicationHolderSchema geographic fields', () => {
     ).toBe('City of Biñan');
   });
 
-  it('still upper-cases a typed street line, which is the existing convention', () => {
-    expect(applicationHolderSchema.parse(holderBase).permanentAddressLine1).toBe('1 RPC STREET');
+  it('title-cases a typed street line', () => {
+    // Street lines follow the same readability rule as names now: words start
+    // upper-case, everything else lower-case.
+    expect(applicationHolderSchema.parse(holderBase).permanentAddressLine1).toBe('1 Rpc Street');
+    expect(
+      applicationHolderSchema.parse({
+        ...holderBase,
+        permanentAddressLine1: '123 sampaguita street',
+      }).permanentAddressLine1,
+    ).toBe('123 Sampaguita Street');
+  });
+
+  it('title-cases holder names and keeps the name rule', () => {
+    const parsed = applicationHolderSchema.parse({
+      ...holderBase,
+      lastName: 'dela cruz',
+      firstName: 'jUAN',
+      printedName: 'juan dela cruz',
+    });
+    expect(parsed.lastName).toBe('Dela Cruz');
+    expect(parsed.firstName).toBe('Juan');
+    expect(parsed.printedName).toBe('Juan Dela Cruz');
+    // Digits are still never part of a name.
+    expect(applicationHolderSchema.safeParse({ ...holderBase, firstName: 'Ju4n' }).success).toBe(
+      false,
+    );
+  });
+
+  it('accepts only the fixed pick-list values for suffix, sex, citizenship and civil status', () => {
+    const parsed = applicationHolderSchema.parse({
+      ...holderBase,
+      suffix: 'Jr.',
+      sex: 'Male',
+      citizenship: 'Filipino',
+      civilStatus: 'Married',
+    });
+    expect(parsed).toMatchObject({
+      suffix: 'Jr.',
+      sex: 'Male',
+      citizenship: 'Filipino',
+      civilStatus: 'Married',
+    });
+    // Blank is "not provided", not an invalid choice.
+    const blank = applicationHolderSchema.parse({
+      ...holderBase,
+      suffix: '',
+      sex: '',
+      citizenship: '',
+      civilStatus: '',
+    });
+    expect(blank.suffix).toBeUndefined();
+    expect(blank.sex).toBeUndefined();
+    // Anything off the list is refused.
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success,
+    ).toBe(false);
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, civilStatus: 'Single-ish' }).success,
+    ).toBe(false);
+  });
+
+  it('accepts only a real TIN shape', () => {
+    expect(applicationHolderSchema.parse({ ...holderBase, tinNumber: '123-456-789' }).tinNumber).toBe(
+      '123-456-789',
+    );
+    expect(applicationHolderSchema.parse({ ...holderBase, tinNumber: '123456789' }).tinNumber).toBe(
+      '123456789',
+    );
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, tinNumber: 'ABC-456-789' }).success,
+    ).toBe(false);
+    expect(applicationHolderSchema.safeParse({ ...holderBase, tinNumber: '12345' }).success).toBe(
+      false,
+    );
   });
 
   it('collapses stray whitespace in a geographic name without touching its casing', () => {

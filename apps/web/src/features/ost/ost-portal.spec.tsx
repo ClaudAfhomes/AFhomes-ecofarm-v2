@@ -67,7 +67,7 @@ function installFetch() {
   routes.set(
     '/sale-team/me',
     ok({
-      aaNumber: 'AAO26090001',
+      aaNumber: 'AA-J6P3N8V5C2S0',
       kind: 'OST',
       fullName: 'Ollie Seller',
       status: 'accredited',
@@ -155,7 +155,7 @@ describe('OST login', () => {
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect(await screen.findByText('OST-000007')).toBeInTheDocument();
-    expect(await screen.findByText('AAO26090001')).toBeInTheDocument();
+    expect(await screen.findByText('AA-J6P3N8V5C2S0')).toBeInTheDocument();
     expect(screen.getByText('2027-09-01')).toBeInTheDocument();
     expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
   });

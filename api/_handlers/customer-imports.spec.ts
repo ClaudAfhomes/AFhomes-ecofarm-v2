@@ -185,15 +185,24 @@ describe('customer import/export handler', () => {
     ).toBe(403);
   });
 
-  it('serves stable XLSX and CSV templates', async () => {
+  it('serves the sectioned membership template as XLSX and banded CSV', async () => {
     const xlsx = await call({ path: 'template/xlsx' });
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
+    expect((xlsx.body as { filename: string }).filename).toBe('membership-template.xlsx');
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);
-    expect(
-      Buffer.from((csv.body as { content: string }).content, 'base64').toString('utf8'),
-    ).toContain('membership_number');
+    expect((csv.body as { mime: string }).mime).toBe('text/csv');
+    expect((csv.body as { filename: string }).filename).toBe('membership-template.csv');
+    const lines = Buffer.from((csv.body as { content: string }).content, 'base64')
+      .toString('utf8')
+      .replace(/^\ufeff/, '')
+      .split('\r\n');
+    expect(lines[0]).toContain('Primary');
+    expect(lines[0]).toContain('Package');
+    expect(lines[1]).toContain('FIRST NAME');
+    expect(lines[1]).toContain('BARANGGAY');
+    expect(lines[1]).toContain('SVD (NAME)');
   });
 
   it('parses a valid XLSX into a committable preview without writing customers', async () => {

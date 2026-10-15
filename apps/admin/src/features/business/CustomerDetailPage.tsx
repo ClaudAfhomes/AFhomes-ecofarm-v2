@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import type { Sale } from '@afhomes/contracts';
 import {
+  Button,
   DetailCard,
   DetailCardTitle,
   DetailField,
@@ -19,10 +20,12 @@ import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts
 
 import { formatDate, formatDateTime } from '../../lib/format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import { useSession } from '../../lib/session';
 import { getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
 import { formatMoneyOrDash } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
+import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
@@ -71,6 +74,13 @@ function describeSalesLoadError(error: unknown): string | undefined {
  */
 export function CustomerDetailPage() {
   const { id } = useParams();
+  const { user } = useSession();
+  const [editing, setEditing] = useState(false);
+  const canEditCompany =
+    user?.roleSlug === 'super_admin' ||
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
+    ) === true;
   const customer = useQuery({
     queryKey: businessKeys.customer(id),
     queryFn: () => getCustomerById(id ?? ''),
@@ -138,6 +148,26 @@ export function CustomerDetailPage() {
     );
 
   const record = customer.data;
+  // Company-stated age is never stored (it goes stale); both AGE fields derive
+  // from the stored birthdays so the display can never disagree with them.
+  const ageOn = (iso: string | null | undefined): string => {
+    if (!iso) return '—';
+    const born = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(born.valueOf())) return '—';
+    const now = new Date();
+    let age = now.getFullYear() - born.getFullYear();
+    if (
+      now.getMonth() < born.getMonth() ||
+      (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())
+    )
+      age -= 1;
+    return age < 0 ? '—' : String(age);
+  };
+  const addressPartOf = (address: unknown, key: string): string => {
+    if (!address || typeof address !== 'object') return '';
+    const part = (address as Record<string, unknown>)[key];
+    return typeof part === 'string' ? part.trim() : '';
+  };
   const groups: Array<{ title: string; fields: Array<[string, ReactNode]>; columns?: 2 }> = [
     {
       title: 'Customer',
@@ -178,6 +208,96 @@ export function CustomerDetailPage() {
       ],
     },
     {
+      // Company-stated primary-member facts, SSOT order (see
+      // customer-ssot.ts). STATUS here is the verbatim company value;
+      // lifecycle state stays under Customer above. TIN is masked like the
+      // government ID; AGE derives from the birthday, never stored.
+      title: 'Primary Member',
+      columns: 2,
+      fields: [
+        ['RA NO', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
+        ['STATUS', record.companyStatus ?? '—'],
+        ['FIRST NAME', record.firstName ?? '—'],
+        ['LAST NAME', record.lastName ?? '—'],
+        ['MIDDLE NAME', record.middleName ?? '—'],
+        ['SUFFIX', record.suffix ?? '—'],
+        ['BIRTHDAY', record.dateOfBirth ?? '—'],
+        ['GENDER', record.gender ?? '—'],
+        ['AGE', ageOn(record.dateOfBirth)],
+        ['CITIZENSHIP', record.citizenship ?? '—'],
+        ['CIVIL STATUS', record.civilStatus ?? '—'],
+        ['PERMANENT ADDRESS LINE 1', addressPartOf(record.address, 'line1') || '—'],
+        ['PERMANENT ADDRESS LINE 2', addressPartOf(record.address, 'line2') || '—'],
+        ['PROVINCE', addressPartOf(record.address, 'province') || '—'],
+        ['CITY', addressPartOf(record.address, 'city') || '—'],
+        ['BARANGGAY', addressPartOf(record.address, 'barangay') || '—'],
+        ['POSTAL CODE', addressPartOf(record.address, 'postalCode') || '—'],
+        ['LANDLINE', record.landline ?? '—'],
+        ['EMAIL', record.email],
+        ['TIN NO.', record.tinNumberMasked ?? '—'],
+        ['MOBILE NO.', record.phone],
+        ['OCCUPATION / BUSINESS NAME', record.occupationBusinessName ?? '—'],
+        ['OFFICE / BUSINESS ADDRESS', record.officeBusinessAddress ?? '—'],
+        ['EMPLOYED POSITION', record.employedPosition ?? '—'],
+      ],
+    },
+    {
+      // Supplementary block, SSOT order. Names and address are stored joined
+      // (single text columns) and display as the two stored fields; AGE
+      // derives from the supplementary birthday.
+      title: 'Supplementary Member',
+      columns: 2,
+      fields: [
+        ['SUPPLEMENTARY FULL NAME', record.supplementaryFullName ?? '—'],
+        ['SUPPLEMENTARY ADDRESS', record.supplementaryAddress ?? '—'],
+        ['BIRTHDAY', record.supplementaryBirthday ?? '—'],
+        ['GENDER', record.supplementaryGender ?? '—'],
+        ['AGE', ageOn(record.supplementaryBirthday)],
+        ['CITIZENSHIP', record.supplementaryCitizenship ?? '—'],
+        ['CIVIL STATUS', record.supplementaryCivilStatus ?? '—'],
+        ['TIN NO.', record.supplementaryTinNumberMasked ?? '—'],
+        ['LANDLINE', record.supplementaryLandline ?? '—'],
+        ['MOBILE NO.', record.supplementaryMobile ?? '—'],
+        ['EMAIL', record.supplementaryEmail ?? '—'],
+        ['OCCUPATION / BUSINESS NAME', record.supplementaryOccupationBusinessName ?? '—'],
+        ['OFFICE / BUSINESS ADDRESS', record.supplementaryOfficeAddress ?? '—'],
+        ['EMPLOYED POSITION', record.supplementaryPosition ?? '—'],
+      ],
+    },
+    {
+      // Stored verbatim as stated. These names do not assert reporting lines;
+      // referral_relationships remains the only genealogy authority.
+      title: 'Related Persons and Referral',
+      columns: 2,
+      fields: [
+        ['OST/IST NAME', record.ostIstName ?? '—'],
+        ['SVD (NAME)', record.svdName ?? '—'],
+        ['SSM (NAME)', record.ssmName ?? '—'],
+        ['SM (NAME)', record.smName ?? '—'],
+        ['REFERRER (NAME)', record.referrerName ?? '—'],
+        ['VIP RECOMMENDER (NAME)', record.vipRecommenderName ?? '—'],
+        ['CONTACT NO.', record.relatedContactNo ?? '—'],
+        ['EMAIL ADDRESS', record.relatedEmail ?? '—'],
+      ],
+    },
+    {
+      // Company-stated figures, verbatim. Server-computed money (verified
+      // payments, snapshots, commissions) never reads these columns.
+      title: 'Package and Payment — company stated',
+      columns: 2,
+      fields: [
+        ['VIP PACKAGE', record.statedVipPackage ?? '—'],
+        ['PAYMENT TERMS', record.statedPaymentTerms ?? '—'],
+        ['REGULAR PRICE', record.statedRegularPrice ?? '—'],
+        ['DISCOUNT', record.statedDiscount ?? '—'],
+        ['TOTAL AMOUNT', record.statedTotalAmount ?? '—'],
+        ['RF', record.statedRf ?? '—'],
+        ['PAYMENT TYPE', record.statedPaymentType ?? '—'],
+        ['REF NO', record.statedRefNo ?? '—'],
+        ['DATE', record.statedPaymentDate ?? '—'],
+      ],
+    },
+    {
       // Same facts as general Customer Lookup, kept separate like there: an
       // active customer can hold a suspended membership, and conflating the
       // two tells the operator the wrong thing about the record.
@@ -198,7 +318,25 @@ export function CustomerDetailPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title={record.fullName} description="Customer record and card sales." />
+      <PageHeader
+        title={record.fullName}
+        description="Customer record and card sales."
+        actions={
+          canEditCompany ? (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit company record
+            </Button>
+          ) : undefined
+        }
+      />
+      {editing ? (
+        <CustomerCompanyEditDialog
+          customer={record}
+          open={editing}
+          onClose={() => setEditing(false)}
+          onSaved={() => void customer.refetch()}
+        />
+      ) : null}
       <DetailGrid className={styles.topGrid}>
         {groups.map((group) => (
           <DetailCard key={group.title}>
@@ -277,11 +415,6 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
         <DetailField label="Sale number">
           <DetailMono>{sale.saleNumber}</DetailMono>
         </DetailField>
-        {sale.officialVipNumber ? (
-          <DetailField label="Official VIP number">
-            <DetailMono>{sale.officialVipNumber}</DetailMono>
-          </DetailField>
-        ) : null}
         <DetailField label="Card">{sale.productName}</DetailField>
         <DetailField label="Scheme">{paymentSchemeLabel(sale.paymentScheme)}</DetailField>
         <DetailField label="Seller">{sale.sellerName ?? '—'}</DetailField>

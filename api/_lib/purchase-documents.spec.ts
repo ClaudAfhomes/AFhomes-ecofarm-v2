@@ -45,19 +45,6 @@ const common = {
 };
 
 describe('historical purchase documents', () => {
-  it('renders the frozen VIP and seller AA alongside the preserved references', () => {
-    const rendered = visible(
-      evidence('reservation', {
-        ...common,
-        officialVipNumber: '26101400001G1C01S',
-        sellerAaNumber: 'AAI26100001',
-        linkedVipNumber: '26101400001G1C01S - AAI26100001',
-      }),
-    );
-    expect(rendered).toContain('26101400001G1C01S');
-    expect(rendered).toContain('AAI26100001');
-    expect(rendered).toContain(common.reservationNumber);
-  });
   it('renders a non-empty PDF for every required record kind', () => {
     const kinds: PurchaseDocumentKind[] = [
       'reservation',
@@ -167,7 +154,9 @@ describe('historical purchase documents', () => {
     // Simulate every live edit a business might make months later: today's price,
     // today's seller, today's commission, today's balance. The renderer takes
     // none of them as input, so the page cannot change.
-    const second = visible(JSON.parse(JSON.stringify(captured)) as PurchaseDocumentEvidence);
+    const second = visible(
+      JSON.parse(JSON.stringify(captured)) as PurchaseDocumentEvidence,
+    );
     expect(stripTimestamp(second)).toBe(stripTimestamp(first));
   });
 

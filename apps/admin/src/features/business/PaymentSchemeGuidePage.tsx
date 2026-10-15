@@ -114,7 +114,7 @@ export function PaymentSchemeGuidePage() {
     <section className={styles.page}>
       <PageHeader
         title="Payment Scheme Guide"
-        description="Standard offer first, then the authorized internal move. Reservation is always included in the total."
+        description="Standard first, internal moves, reservation included."
         actions={
           <Button variant="secondary" onClick={() => window.print()}>
             Print guide
@@ -125,8 +125,8 @@ export function PaymentSchemeGuidePage() {
           a warning about what this page contains must be visible from the first
           paint, never gated behind the data it warns about. */}
       <Alert variant="warning" title="Internal sales team use only">
-        Do not share this page, its figures, or the move playbook with clients. Clients see only
-        the standard offer for their own tier and their own agreed scheme.
+        Do not share this page, its figures, or the move playbook with clients. Clients see only the
+        standard offer for their own tier and their own agreed scheme.
       </Alert>
       {plans.isPending ? (
         <GuideSkeleton />
@@ -144,7 +144,12 @@ export function PaymentSchemeGuidePage() {
             title="Standard offer"
             hint="The tier's published price list. Every authorized move below preserves one of these totals."
           >
-            <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className="table-scroll"
+            >
               <Table>
                 <TableCaption>
                   Standard published figures per active tier, taken live from the card plan
@@ -169,7 +174,11 @@ export function PaymentSchemeGuidePage() {
                       <TableCell label="Spot Cash" align="right" className={styles.numeric}>
                         {formatMoney(plan.cashPrice)}
                       </TableCell>
-                      <TableCell label="4-Month Installment" align="right" className={styles.numeric}>
+                      <TableCell
+                        label="4-Month Installment"
+                        align="right"
+                        className={styles.numeric}
+                      >
                         {formatMoney(plan.installmentPrice)}
                       </TableCell>
                       <TableCell label="Monthly" align="right" className={styles.numeric}>
@@ -257,7 +266,12 @@ export function PaymentSchemeGuidePage() {
             title="Sample schedules"
             hint="Worked examples for each authorized scheme, per tier. These are obligations only; real cash is recorded in the payments ledger."
           >
-            <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+            <div
+              role="region"
+              aria-label="Scrollable records"
+              tabIndex={0}
+              className="table-scroll"
+            >
               <Table>
                 <TableCaption>
                   Sample upfront and monthly figures for every authorized scheme. Actual sale terms

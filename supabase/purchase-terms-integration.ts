@@ -867,12 +867,6 @@ export async function runPurchaseTermsChecks({
   await db.query('begin');
   try {
     await db.query(`set local afhomes.allow_purchase_test_cleanup='on'`);
-    const vipCleanupNumbers = (
-      await db.query<{ control_number: string }>(
-        `select control_number from private.vip_control_numbers where original_reservation_id in (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`,
-        [createdApplications],
-      )
-    ).rows.map((row) => row.control_number);
     await db.query(
       `delete from private.purchase_document_evidence where actor_id = any($1::uuid[])`,
       [[actor, superAdmin]],
@@ -900,9 +894,6 @@ export async function runPurchaseTermsChecks({
     );
     await db.query('delete from public.customer_applications where id = any($1::uuid[])', [
       createdApplications,
-    ]);
-    await db.query('delete from private.vip_control_numbers where control_number=any($1::text[])', [
-      vipCleanupNumbers,
     ]);
     await db.query('commit');
   } catch (error) {

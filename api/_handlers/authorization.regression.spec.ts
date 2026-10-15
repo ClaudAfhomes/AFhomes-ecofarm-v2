@@ -376,8 +376,8 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
   );
   beforeEach(() => install());
 
-  it('exposes no delete route for a system role', async () => {
-    for (const method of ['DELETE', 'PUT']) {
+  it('refuses to delete a system role', async () => {
+    for (const method of ['PUT']) {
       const state = await call({
         method,
         afPath: `roles/${UUID.role.superAdmin}`,
@@ -386,6 +386,13 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
       });
       expect(state.status, method).toBe(404);
     }
+    // DELETE is a real route, so it reaches the protection guard rather than 404.
+    const del = await call({
+      method: 'DELETE',
+      afPath: `roles/${UUID.role.superAdmin}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(del.status).toBe(403);
     // PATCH is a real route, so it reaches the protection guard rather than 404.
     const patch = await call({
       method: 'PATCH',
@@ -396,13 +403,35 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
     expect(patch.status).toBe(403);
   });
 
-  it('exposes no delete route for a custom role either (deletion is not a Phase 1 surface)', async () => {
-    const state = await call({
+  it('deletes an unassigned custom role and refuses an assigned one', async () => {
+    const db = install();
+    // Fixture custom role is unassigned: safe delete succeeds and audits.
+    const before = db.rows('roles').length;
+    const del = await call({
       method: 'DELETE',
       afPath: `roles/${UUID.role.custom}`,
       token: TOKEN.superAdmin,
     });
-    expect(state.status).toBe(404);
+    expect(del.status).toBe(200);
+    expect(db.rows('roles').length).toBe(before - 1);
+    expect(db.rows('audit_events').some((e) => e.action === 'ROLE_DELETED')).toBe(true);
+    // An assigned custom role is refused without deleting.
+    const assigned = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.superAdmin,
+      body: { name: 'Assigned Temp Role', isActive: true, permissions: [] },
+    });
+    expect(assigned.status).toBe(201);
+    const newId = (assigned.body as { id: string }).id;
+    db.rows('staff_role_assignments').push({ staff_id: UUID.viewerStaff, role_id: newId });
+    const refused = await call({
+      method: 'DELETE',
+      afPath: `roles/${newId}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(refused.status).toBe(409);
+    expect(db.rows('roles').some((r) => r.id === newId)).toBe(true);
   });
 
   it('refuses to change system access through a display-title edit', async () => {

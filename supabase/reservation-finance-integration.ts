@@ -571,13 +571,6 @@ check(
         [world.createdCustomers],
       )
     ).rows.map((row) => row.id);
-    const vipCleanupNumbers = (
-      await db.query<{ control_number: string }>(
-        `select control_number from private.vip_control_numbers where original_reservation_id=any($1::uuid[])`,
-        [reservationIds],
-      )
-    ).rows.map((row) => row.control_number);
-
     await db.query(`delete from private.purchase_document_evidence where reservation_id = any($1::uuid[])`, [
       reservationIds,
     ]);
@@ -613,9 +606,6 @@ check(
     await db.query(`delete from public.customer_application_purchase_terms where application_id in
                       (select id from public.customer_applications where customer_id = any($1::uuid[]))`, [
       world.createdCustomers,
-    ]);
-    await db.query('delete from private.vip_control_numbers where control_number=any($1::text[])', [
-      vipCleanupNumbers,
     ]);
     await db.query('commit');
   } catch (error) {

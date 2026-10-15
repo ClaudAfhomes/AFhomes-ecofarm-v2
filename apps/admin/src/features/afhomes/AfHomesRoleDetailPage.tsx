@@ -8,13 +8,13 @@ import {
   DetailCardTitle,
   DetailField,
   DetailFieldGrid,
-  DetailMono,
   EmptyState,
   ErrorState,
   PageHeader,
   Skeleton,
   StatusChip,
 } from '@afhomes/ui';
+import { groupedModuleCatalog } from '@afhomes/contracts';
 import {
   getAfHomesRoleAudit,
   getAfHomesRoleById,
@@ -27,7 +27,8 @@ import {
   type RoleFormInput,
 } from './AfHomesRoleFormDialog';
 import { useSession } from '../../lib/session';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTime, humanizeToken } from '../../lib/format';
+import styles from './AfHomesRoleDetailPage.module.css';
 
 export function AfHomesRoleDetailPage() {
   const { user } = useSession();
@@ -77,9 +78,10 @@ export function AfHomesRoleDetailPage() {
   if (role.isError) return <ErrorState error={role.error} onRetry={role.refetch} />;
   const record = role.data;
   const assigned = staff.data?.filter((s) => s.roleId === record.id) ?? [];
+  const viewableCount = record.permissions.filter((p) => p.canView).length;
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title={record.name}
         description="Role definition, assignments, and change history"
@@ -96,13 +98,28 @@ export function AfHomesRoleDetailPage() {
           </>
         }
       />
-      <div style={{ display: 'grid', gap: 16 }}>
+      <section className={styles.hero} aria-label="Role summary">
+        <div className={styles.heroText}>
+          <h2 className={styles.heroName}>{record.name}</h2>
+          {record.description ? <p className={styles.heroMeta}>{record.description}</p> : null}
+        </div>
+        <div className={styles.heroChips}>
+          <StatusChip
+            label={record.isSystem ? 'System' : 'Custom'}
+            tone={record.isSystem ? 'neutral' : 'info'}
+          />
+          <StatusChip
+            label={record.isActive ? 'Active' : 'Inactive'}
+            tone={record.isActive ? 'success' : 'neutral'}
+          />
+          <StatusChip label={`${viewableCount} modules`} tone="info" />
+          <StatusChip label={`${record.assignedCount} staff`} tone="neutral" />
+        </div>
+      </section>
+      <div className={styles.cardStack}>
         <DetailCard>
           <DetailCardTitle>Role</DetailCardTitle>
           <DetailFieldGrid>
-            <DetailField label="Key">
-              <DetailMono>{record.slug}</DetailMono>
-            </DetailField>
             <DetailField label="Name">{record.name}</DetailField>
             <DetailField label="Description">{record.description ?? '-'}</DetailField>
             <DetailField label="Type">
@@ -119,44 +136,48 @@ export function AfHomesRoleDetailPage() {
             </DetailField>
           </DetailFieldGrid>
           {record.isSystem ? (
-            <p>System roles are protected: they cannot be renamed, defanged, or deleted.</p>
+            <p className={styles.cardHint}>
+              System roles are protected: they cannot be renamed, defanged, or deleted.
+            </p>
           ) : null}
         </DetailCard>
 
         <DetailCard>
           <DetailCardTitle>Permissions</DetailCardTitle>
           {record.isSystem && record.slug === 'super_admin' ? (
-            <p>All modules - granted by slug, not by row.</p>
+            <p className={styles.cardHint}>All pages - granted by slug, not by row.</p>
           ) : (
-            <div
-              role="region"
-              aria-label="Scrollable records"
-              tabIndex={0}
-              className="table-scroll"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>Module</th>
-                    <th>View</th>
-                    <th>Create</th>
-                    <th>Update</th>
-                    <th>Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {record.permissions.map((p) => (
-                    <tr key={p.moduleKey}>
-                      <td data-label="Module">{p.moduleKey}</td>
-                      <td data-label="View">{p.canView ? 'Yes' : '-'}</td>
-                      <td data-label="Create">{p.canCreate ? 'Yes' : '-'}</td>
-                      <td data-label="Update">{p.canUpdate ? 'Yes' : '-'}</td>
-                      <td data-label="Delete">{p.canDelete ? 'Yes' : '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <p className={styles.cardHint}>
+                {viewableCount} of {groupedModuleCatalog().flatMap((b) => b.modules).length} pages
+                accessible to this role.
+              </p>
+              {/* Access is per PAGE. The finer action rights still exist in the
+                  data and are enforced by the server; they are not what this
+                  list is about. */}
+              <ul className={styles.pageList}>
+                {groupedModuleCatalog().map((bucket) => {
+                  const accessible = bucket.modules.filter((module) =>
+                    record.permissions.some(
+                      (permission) => permission.moduleKey === module.key && permission.canView,
+                    ),
+                  );
+                  if (accessible.length === 0) return null;
+                  return (
+                    <li key={bucket.group} className={styles.pageGroup}>
+                      <p className={styles.pageGroupName}>{bucket.group}</p>
+                      <ul className={styles.pageRows}>
+                        {accessible.map((module) => (
+                          <li key={module.key} className={styles.pageRow}>
+                            {module.label}
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </DetailCard>
 
@@ -170,10 +191,21 @@ export function AfHomesRoleDetailPage() {
           ) : assigned.length === 0 ? (
             <EmptyState title="No staff assigned" description="No staff hold this role." />
           ) : (
-            <ul>
+            <ul className={styles.staffList}>
               {assigned.map((s) => (
-                <li key={s.id}>
-                  <Link to={`/admin/staff/${s.id}`}>{s.fullName}</Link> · {s.email} · {s.status}
+                <li key={s.id} className={styles.staffItem}>
+                  <Link to={`/admin/staff/${s.id}`}>{s.fullName}</Link>
+                  <span className={styles.staffMeta}>{s.email}</span>
+                  <StatusChip
+                    label={s.status}
+                    tone={
+                      s.status === 'active'
+                        ? 'success'
+                        : s.status === 'suspended'
+                          ? 'danger'
+                          : 'neutral'
+                    }
+                  />
                 </li>
               ))}
             </ul>
@@ -190,15 +222,18 @@ export function AfHomesRoleDetailPage() {
           ) : history.isError ? (
             <ErrorState error={history.error} onRetry={history.refetch} />
           ) : history.data?.length ? (
-            <ul>
+            <ul className={styles.historyList}>
               {history.data.map((event) => (
-                <li key={String(event.id)}>
-                  {event.action} · {formatDateTime(event.created_at)}
+                <li key={String(event.id)} className={styles.historyItem}>
+                  <span className={styles.historyAction} title={event.action}>
+                    {humanizeToken(event.action)}
+                  </span>
+                  <span className={styles.historyTime}>{formatDateTime(event.created_at)}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p>No role changes recorded yet.</p>
+            <p className={styles.cardHint}>No role changes recorded yet.</p>
           )}
         </DetailCard>
       </div>

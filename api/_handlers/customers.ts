@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { customerDirectory } from '../_lib/customer-directory.js';
 /**
  * AFHomes customer master records.
@@ -29,7 +28,6 @@ import {
   deny,
   fail,
   isoOrNull,
-  isUnavailableRpc,
   jsonBody,
   type Db,
   list,
@@ -71,14 +69,59 @@ const toCustomer = (row: Record<string, unknown>) => ({
   // Returned to authorized staff only; it authorizes nothing.
   customerCode: (row.customer_code as string | null | undefined) ?? null,
   fullName: fullName(row),
+  firstName: isoOrNull(row.first_name),
+  middleName: isoOrNull(row.middle_name),
+  lastName: isoOrNull(row.last_name),
+  suffix: isoOrNull(row.suffix),
   email: row.email,
   phone: row.phone,
+  landline: isoOrNull(row.landline),
   dateOfBirth: isoOrNull(row.birth_date),
   gender: isoOrNull(row.gender),
   address: row.address ?? null,
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked:
     isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
+  // Company-stated membership fields. TIN values are masked exactly like the
+  // government ID: the raw numbers never leave the database through this API.
+  tinNumberMasked: maskGovernmentId(isoOrNull(row.tin_number)),
+  raNumber: isoOrNull(row.ra_number),
+  companyStatus: isoOrNull(row.company_status),
+  citizenship: isoOrNull(row.citizenship),
+  civilStatus: isoOrNull(row.civil_status),
+  occupationBusinessName: isoOrNull(row.occupation_business_name),
+  officeBusinessAddress: isoOrNull(row.office_business_address),
+  employedPosition: isoOrNull(row.employed_position),
+  supplementaryFullName: isoOrNull(row.supplementary_full_name),
+  supplementaryAddress: isoOrNull(row.supplementary_address),
+  supplementaryBirthday: isoOrNull(row.supplementary_birthday),
+  supplementaryGender: isoOrNull(row.supplementary_gender),
+  supplementaryCitizenship: isoOrNull(row.supplementary_citizenship),
+  supplementaryCivilStatus: isoOrNull(row.supplementary_civil_status),
+  supplementaryTinNumberMasked: maskGovernmentId(isoOrNull(row.supplementary_tin_number)),
+  supplementaryMobile: isoOrNull(row.supplementary_mobile),
+  supplementaryEmail: isoOrNull(row.supplementary_email),
+  supplementaryLandline: isoOrNull(row.supplementary_landline),
+  supplementaryOccupationBusinessName: isoOrNull(row.supplementary_occupation_business_name),
+  supplementaryOfficeAddress: isoOrNull(row.supplementary_office_address),
+  supplementaryPosition: isoOrNull(row.supplementary_position),
+  ostIstName: isoOrNull(row.ost_ist_name),
+  svdName: isoOrNull(row.svd_name),
+  ssmName: isoOrNull(row.ssm_name),
+  smName: isoOrNull(row.sm_name),
+  referrerName: isoOrNull(row.referrer_name),
+  vipRecommenderName: isoOrNull(row.vip_recommender_name),
+  relatedContactNo: isoOrNull(row.related_contact_no),
+  relatedEmail: isoOrNull(row.related_email),
+  statedVipPackage: isoOrNull(row.stated_vip_package),
+  statedPaymentTerms: isoOrNull(row.stated_payment_terms),
+  statedRegularPrice: isoOrNull(row.stated_regular_price),
+  statedDiscount: isoOrNull(row.stated_discount),
+  statedTotalAmount: isoOrNull(row.stated_total_amount),
+  statedRf: isoOrNull(row.stated_rf),
+  statedPaymentType: isoOrNull(row.stated_payment_type),
+  statedRefNo: isoOrNull(row.stated_ref_no),
+  statedPaymentDate: isoOrNull(row.stated_payment_date),
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
   // Membership facts mirrored from general Customer Lookup. The directory RPC
@@ -158,15 +201,25 @@ async function hasReference(db: Db, table: string, column: string, id: string) {
 }
 
 async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
+  // Every table with a RESTRICT (or NO ACTION) foreign key to customers(id).
+  // customer_onboarding_tokens is deliberately absent: those ephemeral rows
+  // are removed by the delete handler itself before the customer row goes.
+  // An incomplete list fails loudly as a raw 23503 instead of the 409 below,
+  // which is why this list must track every inbound customer FK in
+  // supabase/migrations.
   const checks: Array<[string, string, string]> = [
     ['sales', 'card_sales', 'customer_id'],
     ['payments', 'payments', 'customer_id'],
     ['memberships', 'memberships', 'customer_id'],
     ['redemptions', 'redemptions', 'customer_id'],
     ['documents', 'identity_documents', 'customer_id'],
-    ['customer applications', 'customer_applications', 'customer_id'],
-    ['customer applications', 'customer_applications', 'recommender_customer_id'],
-    ['reservation agreements', 'reservation_agreements', 'customer_id'],
+    ['applications', 'customer_applications', 'customer_id'],
+    ['purchase_terms', 'customer_application_purchase_terms', 'customer_id'],
+    ['reservations', 'reservation_agreements', 'customer_id'],
+    ['imports', 'customer_import_rows', 'customer_id'],
+    ['purchases', 'purchases', 'customer_id'],
+    ['earning_claims', 'earning_claims', 'customer_id'],
+    ['redemption_approvals', 'redemption_quotes', 'approval_customer_id'],
   ];
   const results = await Promise.all(
     checks.map(async ([label, table, column]) => ({
@@ -238,7 +291,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer details', 400);
       const input = parsed.data;
 
+      // BR-RATE-06: invalid inputs generate no customer number. A duplicate
+      // government ID or email is checked before the sequence is consumed, so
+      // a rejected registration burns no number. The unique constraint on the
+      // insert below stays as the race net for concurrent duplicates.
+      if (input.governmentIdNumber) {
+        const { data: govDup, error: govError } = await db
+          .from('customers')
+          .select('id')
+          .eq('government_id_number', input.governmentIdNumber)
+          .maybeSingle();
+        if (govError) throw govError;
+        if (govDup)
+          return fail(
+            res,
+            'CONFLICT',
+            'A customer with that government ID or email already exists',
+            409,
+          );
+      }
+      if (input.email) {
+        const { data: emailDup, error: emailError } = await db
+          .from('customers')
+          .select('id')
+          .eq('email', input.email)
+          .maybeSingle();
+        if (emailError) throw emailError;
+        if (emailDup)
+          return fail(
+            res,
+            'CONFLICT',
+            'A customer with that government ID or email already exists',
+            409,
+          );
+      }
+
+      const { data: sequence, error: seqError } = await db.rpc('next_customer_number');
+      if (seqError) return mapRpcError(res, seqError);
+      // next_customer_number() is RETURNS TABLE, so live PostgREST answers
+      // with a one-row array. Fail BEFORE the insert, never persist a blank.
+      const customerNumber = singleRpcText(sequence, 'customer_number');
+      if (!customerNumber) return fail(res, 'INTERNAL', 'Customer number generation failed', 500);
+
       const row = {
+        customer_number: customerNumber,
         first_name: input.firstName,
         middle_name: input.middleName === undefined ? null : normalizePersonName(input.middleName),
         last_name: input.lastName,
@@ -247,6 +343,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         gender: input.gender ?? null,
         email: input.email,
         phone: input.phone,
+        landline: input.landline ?? null,
         address: {
           ...input.address,
           postalCode: input.address.postalCode
@@ -255,6 +352,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         government_id_type: input.governmentIdType ?? null,
         government_id_number: input.governmentIdNumber ?? null,
+        // Company-stated membership fields, stored verbatim (migration
+        // 20261130000001). TIN values are write-only: masked on read, never
+        // logged (see toCustomer + audit call below).
+        ra_number: input.raNumber ?? null,
+        company_status: input.companyStatus ?? null,
+        citizenship: input.citizenship ?? null,
+        civil_status: input.civilStatus ?? null,
+        tin_number: input.tinNumber ?? null,
+        occupation_business_name: input.occupationBusinessName ?? null,
+        office_business_address: input.officeBusinessAddress ?? null,
+        employed_position: input.employedPosition ?? null,
+        supplementary_full_name:
+          input.supplementaryFullName === undefined
+            ? null
+            : normalizePersonName(input.supplementaryFullName),
+        supplementary_address: input.supplementaryAddress ?? null,
+        supplementary_birthday: input.supplementaryBirthday ?? null,
+        supplementary_gender: input.supplementaryGender ?? null,
+        supplementary_citizenship: input.supplementaryCitizenship ?? null,
+        supplementary_civil_status: input.supplementaryCivilStatus ?? null,
+        supplementary_tin_number: input.supplementaryTinNumber ?? null,
+        supplementary_mobile:
+          input.supplementaryMobile === undefined
+            ? null
+            : (normalizePhilippinePhone(input.supplementaryMobile) ?? input.supplementaryMobile),
+        supplementary_email: input.supplementaryEmail ?? null,
+        supplementary_landline: input.supplementaryLandline ?? null,
+        supplementary_occupation_business_name: input.supplementaryOccupationBusinessName ?? null,
+        supplementary_office_address: input.supplementaryOfficeAddress ?? null,
+        supplementary_position: input.supplementaryPosition ?? null,
+        ost_ist_name: input.ostIstName ?? null,
+        svd_name: input.svdName ?? null,
+        ssm_name: input.ssmName ?? null,
+        sm_name: input.smName ?? null,
+        referrer_name: input.referrerName ?? null,
+        vip_recommender_name: input.vipRecommenderName ?? null,
+        related_contact_no:
+          input.relatedContactNo === undefined
+            ? null
+            : (normalizePhilippinePhone(input.relatedContactNo) ?? input.relatedContactNo),
+        related_email: input.relatedEmail ?? null,
+        // Company-stated package/payment facts, verbatim. Never inputs to
+        // server-computed totals; activation and verification read payment
+        // rows only (migration 20261130000001).
+        stated_vip_package: input.statedVipPackage ?? null,
+        stated_payment_terms: input.statedPaymentTerms ?? null,
+        stated_regular_price: input.statedRegularPrice ?? null,
+        stated_discount: input.statedDiscount ?? null,
+        stated_total_amount: input.statedTotalAmount ?? null,
+        stated_rf: input.statedRf ?? null,
+        stated_payment_type: input.statedPaymentType ?? null,
+        stated_ref_no: input.statedRefNo ?? null,
+        stated_payment_date: input.statedPaymentDate ?? null,
         registration_source: 'seller_created',
         created_by: auth.userId,
         // The registering seller is the referrer of record. Server-resolved
@@ -266,50 +416,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: 'prospect',
       };
 
-      const { data: customerId, error } = await db.rpc('create_customer_once', {
-        p_request_id: input.requestId ?? randomUUID(),
-        p_actor_id: auth.userId,
-        p_input: row,
-      });
-      if (isUnavailableRpc(error, 'create_customer_once')) {
-        const sequence = await db.rpc('next_customer_number');
-        if (sequence.error) return mapRpcError(res, sequence.error);
-        const number = singleRpcText(sequence.data, 'customer_number');
-        if (!number) return fail(res, 'INTERNAL', 'Customer number generation failed', 500);
-        if (/^AF-CUS-\d{4}-\d{6}$/.test(number))
-          return fail(res, 'INTERNAL', 'Customer numbering migration is not available yet', 503);
-        // shortcut: legacy writes remain non-atomic until the approved numbering RPC is deployed.
-        const inserted = await db
-          .from('customers')
-          .insert({ ...row, customer_number: number })
-          .select('*')
-          .single();
-        if (inserted.error) return mapRpcError(res, inserted.error);
-        await audit(db, auth.userId, 'CUSTOMER_CREATED', 'customer', inserted.data.id, null, {
-          customerNumber: number,
-          email: input.email,
-          createdBy: auth.userId,
-        });
-        return res.status(201).json(toCustomer(inserted.data));
-      }
+      const { data, error } = await db.from('customers').insert(row).select('*').single();
       if (error) {
-        if (error.code === '23505')
+        if ((error as { code?: string }).code === '23505')
           return fail(
             res,
             'CONFLICT',
             'A customer with that government ID or email already exists',
             409,
           );
-        return mapRpcError(res, error);
+        throw error;
       }
-      if (typeof customerId !== 'string' || !customerId)
-        return fail(res, 'INTERNAL', 'Customer creation failed', 500);
-      const { data, error: readError } = await db
-        .from('customers')
-        .select('*')
-        .eq('id', customerId)
-        .single();
-      if (readError) throw readError;
+
+      await audit(
+        db,
+        auth.userId,
+        'CUSTOMER_CREATED',
+        'customer',
+        String((data as { id: string }).id),
+        null,
+        // Never place the government ID number in the audit trail.
+        { customerNumber, email: input.email, createdBy: auth.userId },
+      );
       return res.status(201).json(toCustomer(data as Record<string, unknown>));
     }
 
@@ -353,6 +481,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.gender !== undefined) patch.gender = p.gender;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
+      if (p.landline !== undefined) patch.landline = p.landline;
       if (p.address !== undefined)
         patch.address = {
           ...p.address,
@@ -362,6 +491,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       if (p.governmentIdType !== undefined) patch.government_id_type = p.governmentIdType;
       if (p.governmentIdNumber !== undefined) patch.government_id_number = p.governmentIdNumber;
+      if (p.raNumber !== undefined) patch.ra_number = p.raNumber;
+      if (p.companyStatus !== undefined) patch.company_status = p.companyStatus;
+      if (p.citizenship !== undefined) patch.citizenship = p.citizenship;
+      if (p.civilStatus !== undefined) patch.civil_status = p.civilStatus;
+      if (p.tinNumber !== undefined) patch.tin_number = p.tinNumber;
+      if (p.occupationBusinessName !== undefined)
+        patch.occupation_business_name = p.occupationBusinessName;
+      if (p.officeBusinessAddress !== undefined)
+        patch.office_business_address = p.officeBusinessAddress;
+      if (p.employedPosition !== undefined) patch.employed_position = p.employedPosition;
+      if (p.supplementaryFullName !== undefined)
+        patch.supplementary_full_name =
+          p.supplementaryFullName === null ? null : normalizePersonName(p.supplementaryFullName);
+      if (p.supplementaryAddress !== undefined) patch.supplementary_address = p.supplementaryAddress;
+      if (p.supplementaryBirthday !== undefined)
+        patch.supplementary_birthday = p.supplementaryBirthday;
+      if (p.supplementaryGender !== undefined) patch.supplementary_gender = p.supplementaryGender;
+      if (p.supplementaryCitizenship !== undefined)
+        patch.supplementary_citizenship = p.supplementaryCitizenship;
+      if (p.supplementaryCivilStatus !== undefined)
+        patch.supplementary_civil_status = p.supplementaryCivilStatus;
+      if (p.supplementaryTinNumber !== undefined)
+        patch.supplementary_tin_number = p.supplementaryTinNumber;
+      if (p.supplementaryMobile !== undefined)
+        patch.supplementary_mobile =
+          p.supplementaryMobile === null
+            ? null
+            : (normalizePhilippinePhone(p.supplementaryMobile) ?? p.supplementaryMobile);
+      if (p.supplementaryEmail !== undefined) patch.supplementary_email = p.supplementaryEmail;
+      if (p.supplementaryLandline !== undefined)
+        patch.supplementary_landline = p.supplementaryLandline;
+      if (p.supplementaryOccupationBusinessName !== undefined)
+        patch.supplementary_occupation_business_name = p.supplementaryOccupationBusinessName;
+      if (p.supplementaryOfficeAddress !== undefined)
+        patch.supplementary_office_address = p.supplementaryOfficeAddress;
+      if (p.supplementaryPosition !== undefined)
+        patch.supplementary_position = p.supplementaryPosition;
+      if (p.ostIstName !== undefined) patch.ost_ist_name = p.ostIstName;
+      if (p.svdName !== undefined) patch.svd_name = p.svdName;
+      if (p.ssmName !== undefined) patch.ssm_name = p.ssmName;
+      if (p.smName !== undefined) patch.sm_name = p.smName;
+      if (p.referrerName !== undefined) patch.referrer_name = p.referrerName;
+      if (p.vipRecommenderName !== undefined) patch.vip_recommender_name = p.vipRecommenderName;
+      if (p.relatedContactNo !== undefined)
+        patch.related_contact_no =
+          p.relatedContactNo === null
+            ? null
+            : (normalizePhilippinePhone(p.relatedContactNo) ?? p.relatedContactNo);
+      if (p.relatedEmail !== undefined) patch.related_email = p.relatedEmail;
+      if (p.statedVipPackage !== undefined) patch.stated_vip_package = p.statedVipPackage;
+      if (p.statedPaymentTerms !== undefined) patch.stated_payment_terms = p.statedPaymentTerms;
+      if (p.statedRegularPrice !== undefined) patch.stated_regular_price = p.statedRegularPrice;
+      if (p.statedDiscount !== undefined) patch.stated_discount = p.statedDiscount;
+      if (p.statedTotalAmount !== undefined) patch.stated_total_amount = p.statedTotalAmount;
+      if (p.statedRf !== undefined) patch.stated_rf = p.statedRf;
+      if (p.statedPaymentType !== undefined) patch.stated_payment_type = p.statedPaymentType;
+      if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
+      if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 
@@ -562,12 +749,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           suffix: null,
           email: `deleted+${suffix}@invalid.local`,
           phone: '0000000',
+          landline: null,
           birth_date: null,
           gender: null,
           address: {},
           government_id_type: null,
           government_id_number: null,
           notes: null,
+          // Company-stated fields are customer PII too: anonymize clears them
+          // so an anonymized record cannot keep a TIN, a related-person
+          // contact or stated figures behind.
+          ra_number: null,
+          company_status: null,
+          citizenship: null,
+          civil_status: null,
+          tin_number: null,
+          occupation_business_name: null,
+          office_business_address: null,
+          employed_position: null,
+          supplementary_full_name: null,
+          supplementary_address: null,
+          supplementary_birthday: null,
+          supplementary_gender: null,
+          supplementary_citizenship: null,
+          supplementary_civil_status: null,
+          supplementary_tin_number: null,
+          supplementary_mobile: null,
+          supplementary_email: null,
+          supplementary_landline: null,
+          supplementary_occupation_business_name: null,
+          supplementary_office_address: null,
+          supplementary_position: null,
+          ost_ist_name: null,
+          svd_name: null,
+          ssm_name: null,
+          sm_name: null,
+          referrer_name: null,
+          vip_recommender_name: null,
+          related_contact_no: null,
+          related_email: null,
+          stated_vip_package: null,
+          stated_payment_terms: null,
+          stated_regular_price: null,
+          stated_discount: null,
+          stated_total_amount: null,
+          stated_rf: null,
+          stated_payment_type: null,
+          stated_ref_no: null,
+          stated_payment_date: null,
           auth_user_id: null,
           status: 'cancelled',
           updated_at: new Date().toISOString(),
@@ -587,6 +816,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         {
           status: 'cancelled',
           directProfilePiiRemoved: true,
+          companyStatedFieldsRemoved: true,
           identityDocumentsRetainedPendingPolicy: true,
         },
       );

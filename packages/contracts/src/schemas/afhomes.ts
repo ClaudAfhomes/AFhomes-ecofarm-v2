@@ -47,6 +47,11 @@ export const afHomesModuleKeySchema = z.enum([
   // the two payment systems are independent, and neither key authorises the other.
   // `employee` holds no row here at all, so a GSD can never verify a receipt.
   'operations.payments',
+  // The GSD/Employee desk's Customer Lookup screen. It replaced the pragmatic
+  // reuse of `operations.redemption` (a TILL permission) for a read-only
+  // customer-search screen, so the permission now names the capability:
+  // holding the till key no longer opens the lookup, and vice versa.
+  'operations.customer_lookup',
   'governance.audit',
   'governance.customer_import',
   'governance.config',
@@ -56,6 +61,160 @@ export const afHomesModuleKeySchema = z.enum([
   'cms.history',
 ]);
 export type AfHomesModuleKey = z.infer<typeof afHomesModuleKeySchema>;
+
+/** One module entry as the console presents it: label, group and display order. */
+export interface AfHomesModuleDescriptor {
+  key: AfHomesModuleKey;
+  /** Human-readable name shown instead of the raw key. */
+  label: string;
+  /** Group heading the module is listed under. */
+  group: string;
+  /** Ascending display order, mirroring `public.modules.sort_order`. */
+  sortOrder: number;
+}
+
+/**
+ * The module catalog, human-readable.
+ *
+ * Mirrors the `public.modules` seed (name, group_name, sort_order) so the
+ * console can present "Dashboard" instead of "dashboard.view" without a
+ * round-trip: the roles and staff screens need names for every key, including
+ * keys the viewer's own session does not hold. The DATABASE stays the runtime
+ * authority - `private.has_permission()` and the per-request principal never
+ * read this list - so a drifting label can mislabel a screen but can never
+ * grant or deny anything.
+ *
+ * Ordering is the seed's sort_order, so the Roles screen lists modules in the
+ * same order as the permission baseline.
+ */
+export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
+  { key: 'dashboard.view', label: 'Dashboard', group: 'Dashboard', sortOrder: 10 },
+  { key: 'organization.staff', label: 'Staff', group: 'Organization', sortOrder: 20 },
+  { key: 'organization.departments', label: 'Departments', group: 'Organization', sortOrder: 21 },
+  {
+    key: 'organization.roles',
+    label: 'Roles & Permissions',
+    group: 'Organization',
+    sortOrder: 22,
+  },
+  { key: 'sales.card_sales', label: 'Card Sales', group: 'Sales & Customers', sortOrder: 30 },
+  { key: 'sales.card_plans', label: 'Card Plans', group: 'Sales & Customers', sortOrder: 31 },
+  { key: 'sales.customers', label: 'Customers', group: 'Sales & Customers', sortOrder: 32 },
+  {
+    key: 'sales.id_documents',
+    label: 'ID Scan / OCR',
+    group: 'Sales & Customers',
+    sortOrder: 33,
+  },
+  {
+    key: 'sales.uplines',
+    label: 'Upline Assignment',
+    group: 'Sales & Customers',
+    sortOrder: 34,
+  },
+  {
+    key: 'finance.payment_verification',
+    label: 'Payment Verification',
+    group: 'Finance',
+    sortOrder: 40,
+  },
+  {
+    key: 'finance.card_activation',
+    label: 'Card Activation',
+    group: 'Finance',
+    sortOrder: 41,
+  },
+  {
+    key: 'finance.final_qualification',
+    label: 'Final Qualification',
+    group: 'Finance',
+    sortOrder: 42,
+  },
+  {
+    key: 'finance.commission_payouts',
+    label: 'Commission Payouts',
+    group: 'Finance',
+    sortOrder: 43,
+  },
+  { key: 'finance.points', label: 'Points Ledger', group: 'Finance', sortOrder: 44 },
+  {
+    key: 'network.ost_registrations',
+    label: 'OST Registrations',
+    group: 'Network',
+    sortOrder: 50,
+  },
+  { key: 'network.ost_members', label: 'OST Members', group: 'Network', sortOrder: 51 },
+  { key: 'network.genealogy', label: 'Genealogy', group: 'Network', sortOrder: 52 },
+  { key: 'network.referrals', label: 'Referral & QR Codes', group: 'Network', sortOrder: 53 },
+  { key: 'network.commissions', label: 'Commissions', group: 'Network', sortOrder: 54 },
+  { key: 'network.withdrawals', label: 'OST Withdrawals', group: 'Network', sortOrder: 55 },
+  {
+    key: 'operations.redemption',
+    label: 'Redemption / POS',
+    group: 'Operations',
+    sortOrder: 60,
+  },
+  {
+    key: 'operations.catalog',
+    label: 'Service & Point Catalog',
+    group: 'Operations',
+    sortOrder: 61,
+  },
+  {
+    key: 'operations.sales',
+    label: 'Operational Services Sales',
+    group: 'Operations',
+    sortOrder: 62,
+  },
+  {
+    key: 'operations.payments',
+    label: 'Operational Services Payments',
+    group: 'Operations',
+    sortOrder: 63,
+  },
+  {
+    key: 'operations.customer_lookup',
+    label: 'Customer Lookup',
+    group: 'Operations',
+    sortOrder: 64,
+  },
+  { key: 'governance.audit', label: 'Audit Log', group: 'Governance', sortOrder: 70 },
+  { key: 'governance.config', label: 'System Configuration', group: 'Governance', sortOrder: 71 },
+  {
+    key: 'governance.customer_import',
+    label: 'Customer Import',
+    group: 'Governance',
+    sortOrder: 72,
+  },
+  { key: 'cms.pages', label: 'Website Pages and Content', group: 'Website', sortOrder: 100 },
+  { key: 'cms.media', label: 'Website Media', group: 'Website', sortOrder: 101 },
+  { key: 'cms.settings', label: 'Website Settings and SEO', group: 'Website', sortOrder: 102 },
+  { key: 'cms.history', label: 'Website History', group: 'Website', sortOrder: 103 },
+];
+
+/** Flat key -> label view of the catalog. */
+export const MODULE_LABELS = Object.fromEntries(
+  MODULE_CATALOG.map((entry) => [entry.key, entry.label]),
+) as Record<AfHomesModuleKey, string>;
+
+/**
+ * The human-readable name for a module key. An unknown key falls back to the
+ * key itself so a module can never disappear from a screen just because the
+ * catalog is behind it.
+ */
+export const moduleLabel = (key: string): string =>
+  (MODULE_LABELS as Record<string, string | undefined>)[key] ?? key;
+
+/** The catalog grouped for display, in catalog (sort) order. */
+export function groupedModuleCatalog(): { group: string; modules: AfHomesModuleDescriptor[] }[] {
+  const groups: { group: string; modules: AfHomesModuleDescriptor[] }[] = [];
+  for (const entry of MODULE_CATALOG) {
+    const bucket = groups.find((candidate) => candidate.group === entry.group);
+    if (bucket) bucket.modules.push(entry);
+    else groups.push({ group: entry.group, modules: [entry] });
+  }
+  return groups;
+}
 
 export const afHomesPermissionSchema = z.object({
   moduleKey: afHomesModuleKeySchema,

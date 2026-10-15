@@ -52,10 +52,58 @@
   margin-top: var(--space-3);
 }
 
+/* Template download cards: one option per file format, shared panel styles. */
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.templateCard {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.templateName {
+  margin: 0;
+  font-size: var(--text-h4, var(--text-body));
+  font-weight: 600;
+}
+
+.templateDesc {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.templateMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.templateCard .actions {
+  margin-top: var(--space-2);
+}
+
 .fileRow {
   display: grid;
   gap: var(--space-3);
   margin-top: var(--space-3);
+}
+
+/* File pickers sit side by side in one row. */
+.filePickers {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .filePicker {
