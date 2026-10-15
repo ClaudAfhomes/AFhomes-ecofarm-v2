@@ -83,7 +83,7 @@ describe('exact decimal money', () => {
 
 describe('afHomesModuleKeySchema', () => {
   it('exposes the base keys plus CMS, bulk import, and the Operational Services keys', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(32);
+    expect(afHomesModuleKeySchema.options).toHaveLength(33);
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
@@ -109,6 +109,11 @@ describe('afHomesModuleKeySchema', () => {
     // the read-only lookup screen is its own grantable permission instead of
     // riding on the `operations.redemption` till key.
     expect(keys).toContain('operations.customer_lookup');
+    // Sales-network Members, seeded by 20261205000001. It exists so
+    // hierarchy-seller onboarding is its own grantable permission instead of
+    // riding on `organization.staff` (whole-directory) or `network.genealogy`
+    // (read-only structure).
+    expect(keys).toContain('network.members');
   });
 
   it('covers every seeded module group', () => {
@@ -174,9 +179,9 @@ describe('afHomesSessionSchema', () => {
   });
 
   it('accepts a forced-change session', () => {
-    expect(
-      afHomesSessionSchema.safeParse({ ...session, mustChangePassword: true }).success,
-    ).toBe(true);
+    expect(afHomesSessionSchema.safeParse({ ...session, mustChangePassword: true }).success).toBe(
+      true,
+    );
   });
 
   it('rejects a session without the forced-change flag', () => {
@@ -199,9 +204,10 @@ describe('afHomesRoleSchema', () => {
     id: UUID_A,
     slug: 'sales_manager',
     name: 'Sales Manager',
-    description: null,
     isSystem: false,
     isActive: true,
+    departmentId: null,
+    departmentName: null,
     assignedCount: 2,
     permissions: [{ moduleKey: 'sales.card_sales', ...viewAll }],
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -249,20 +255,35 @@ describe('afHomesStaffSchema', () => {
 });
 
 describe('createAfHomesRoleSchema', () => {
+  const departmentId = '11111111-1111-4111-8111-111111111111';
+
   it('defaults isActive to true', () => {
     const parsed = createAfHomesRoleSchema.safeParse({
       name: 'Finance Reviewer',
+      departmentId,
       permissions: [{ moduleKey: 'finance.payment_verification', ...viewAll }],
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.isActive).toBe(true);
   });
 
+  it('requires a department', () => {
+    expect(
+      createAfHomesRoleSchema.safeParse({
+        name: 'Finance Reviewer',
+        permissions: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects a too-short name and an empty permission set', () => {
-    expect(createAfHomesRoleSchema.safeParse({ name: 'A', permissions: [] }).success).toBe(false);
-    expect(createAfHomesRoleSchema.safeParse({ name: 'Valid Name', permissions: [] }).success).toBe(
-      true,
-    );
+    expect(
+      createAfHomesRoleSchema.safeParse({ name: 'A', departmentId, permissions: [] }).success,
+    ).toBe(false);
+    expect(
+      createAfHomesRoleSchema.safeParse({ name: 'Valid Name', departmentId, permissions: [] })
+        .success,
+    ).toBe(true);
   });
 });
 
@@ -303,9 +324,9 @@ describe('createAfHomesStaffSchema', () => {
 
   it('rejects a missing or weak temporary password', () => {
     expect(createAfHomesStaffSchema.safeParse(base).success).toBe(false);
-    expect(createAfHomesStaffSchema.safeParse({ ...base, temporaryPassword: 'short' }).success).toBe(
-      false,
-    );
+    expect(
+      createAfHomesStaffSchema.safeParse({ ...base, temporaryPassword: 'short' }).success,
+    ).toBe(false);
   });
 });
 

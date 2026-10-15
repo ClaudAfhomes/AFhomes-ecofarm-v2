@@ -11,12 +11,12 @@ pnpm + Turborepo. `apps/web` (:5173; marketing + `/customer/**` + `/ost/**`) |
 `apps/admin` (:5174, `/admin/`) | single Vercel Function `api/router.ts` →
 `api/_lib/router.ts` → `api/_handlers/**` → Supabase Postgres + Auth.
 `packages/contracts` (Zod SSOT; `lifecycle.ts` owns statuses; `afhomes.ts` owns
-the module catalog; NEW `customer-ssot.ts` owns the 62-column customer master
+the module catalog; `customer-ssot.ts` owns the 62-column customer master
 list) | `packages/shared` (BigInt money) | `packages/config` (`VITE_`-only) |
 `packages/ui` (tokens + primitives). `SESSION.md`, `docs/security/`, untracked
 `docs/testing/` are user items — do not touch. `docs/supabase/CURRENT-SCHEMA.sql`
-was refreshed BY AGENT on explicit "update schema" trigger this session (83
-files); its own header documents the re-run workflow.
+was refreshed BY AGENT on explicit "update schema" trigger (83 files); its own
+header documents the re-run workflow.
 
 ## Standing user preferences (apply without asking)
 
@@ -42,78 +42,83 @@ files); its own header documents the re-run workflow.
   has no file import; bulk entry lives in the Import/Export workspace).
 - Guards ship with failing-first evidence; flakes: jsdom timing + zip-bomb
   timeout under parallel load → `--maxWorkers=2`; never adjust assertions to
-  force a pass.
+  force a pass. Never run two admin suites in parallel in one workspace.
 - Prettier is NOT a gate: `--check` warns on unmodified files too (CRLF
   checkout artifact). Gate on `tsc` + `eslint`. Never `--write` pre-existing
   formatting; on files that carry user WIP, diff against `prettier <file>` with
   line endings normalized to see only your own lines.
 - The user edits files in parallel with the agent. Re-read shared files before
   editing; leave diffs that are not yours alone.
+- Version control (AGENTS.md): never stage/commit/push/branch/tag/stash/reset
+  or any GitHub action unless explicitly commanded in the current session.
+  Working-tree edits are normal work; moving them into git is not.
 
-## This session's work (UNCOMMITTED) — customer-record SSOT alignment (largest)
+## This session's work (UNCOMMITTED) — three builds on top of SSOT
 
-User supplied the company master list (Primary 24 / Supplementary 22 / OST-IST
-7 / VIP Package 9 = 62 cols). Decisions locked: ONE mobile field (MOBILE NO.),
-headers verbatim (BARANGGAY, SVD (NAME)…), supplementary address stays JOINED
-text, exports renamed to SSOT vocabulary + system columns, anonymize clears
-company columns, register copies holder basics, legacy B-day redirected,
-primary address editable in company dialog.
+### A. Template README acceptable values
+- `api/_lib/customer-import.ts`: NEW `membershipTemplateV2ReadmeRows()`
+  derives all lists from `MEMBERSHIP_TEMPLATE_V2_SECTIONS` (never hardcoded):
+  7 guide rows + `CSV has no dropdowns` note + `Allowed values` header + 8
+  field rows (STATUS, SUFFIX, GENDER, CITIZENSHIP, CIVIL STATUS, VIP PACKAGE,
+  PAYMENT TERMS, PAYMENT TYPE). `membershipTemplateV2SectionedXlsx()` consumes
+  it. CSV byte-identical (band + headers).
+- Spec: README body equals builder rows, order/values match registry,
+  guide sentences ≤6 words (`customer-import.spec.ts`, 76 tests).
 
-- NEW `packages/contracts/src/schemas/customer-ssot.ts` (exported from index):
-  `CUSTOMER_SSOT_SECTIONS/COLUMNS/SECTION_BANDS`, vocabularies moved here from
-  `api/_lib/customer-import.ts` (re-exported under old names). Registry pins
-  order, targets, joins, dropdowns; `customer-ssot.spec.ts` (8) pins the
-  verbatim blocks, key coverage, join shape, vocab-only dropdowns.
-- Contracts: `barangay` into `CUSTOMER_IMPORT_COLUMNS`; `supplementary_mobile/`
-  `email/landline` into extras; legacy position 17 → `supplementary_birthday`;
-  `CUSTOMER_EXPORT_COLUMNS` rebuilt (SSOT order + 12 system columns);
-  `sales.ts` +`barangay` address key, +`landline`/`supplementaryLandline`,
-  read model +`firstName/middleName/lastName/suffix`.
-- NEW migration `20261204000001_afhomes_customer_ssot_alignment.sql`
-  (renumbered — first cut as …03000001 collided with the user's parallel
-  `…_remove_test_customer` file; runner needs one file per version):
-  `customers.landline` + `supplementary_landline` (nullable, no grants);
-  register copies suffix/sex/landline/barangay; import CREATE persists
-  landlines + line2/barangay/postalCode; UPDATE merges address PER KEY (no
-  more 'Imported' clobber, no line1-gating).
-- `api/_lib/customer-import.ts`: sections now re-export the registry; landline
-  + supplementary singles validated/normalized (`company` object);
-  hasSecondary Gold-guard covers supplementary keys (error names the used
-  block); interim-52-col layout recognized (`isInterimV2Flat`,
-  `workbookLooksInterimV2`, band strip) → handler fails it with "older
-  template" message. `mergeV2SectionedTemplateSheets` matches TAB NAME first
-  (Supplementary headers ⊆ Primary headers — pure header matching aliased
-  both tabs to Primary; proven RED, fixed, green).
-- `api/_handlers/customer-imports.ts`: interim interception (flat + sectioned);
-  `buildExportRows` rebuilt (SSOT order, masked TINs, derived AGE, address
-  parts, system columns).
-- `api/_handlers/customers.ts`: read/create/update landline +
-  supplementaryLandline; anonymize now NULLS all 37 company columns + landline
-  (audit `companyStatedFieldsRemoved: true`).
-- Admin: `CustomerDetailPage` Primary 24 + Supplementary 14 + Related `(NAME)`
-  labels in exact SSOT order (`addressPartOf` per-key display);
-  `CustomerCompanyEditDialog` edits line1/line2/province/city/barangay/postal/
-  landline (falls back to stored on blank; TIN stays write-only); specs assert
-  full label order + new fields.
-- `supabase/db-integration.ts` NEW section 74 (30 checks): column
-  existence/grants, register copy, CREATE persistence, per-key UPDATE merge,
-  filled-vs-silent landline. Two execution-found fixes inside it: holder
-  BARANGAY needs the code triple (holder CHECK), import rows need distinct
-  row_numbers per job.
-- `docs/supabase/CURRENT-SCHEMA.sql` refreshed on trigger: 83 files, 70
-  tables (+2 migrations, +0 tables).
+### B. Lookup ↔ application ↔ reservation connected flow
+- Contracts `customerLookupSchema` + `customerLookupFromDirectory` now carry
+  `customerId` UUID (from `customer_directory.id`, already in `c.*`; no
+  migration). Still no Membership Code field by design.
+- `CustomerLookupPage`: card resolves LIVE from latest fetch by
+  `customerNumber` (was frozen snapshot); new `Open record` →
+  `/admin/customers/:uuid` and `View forms` →
+  `/admin/customers/applications?search=<number>` buttons (≤2 words, router).
+  `CustomerApplicationsPage` boots `search` from `?search=`.
+- Back-link fixed: `official-forms-reservations.tsx` review alert pointed at
+  nonexistent `/admin/sales/applications/:id` → `/admin/customers/applications/:id`.
+- Reservation queue gained `from/to` DateFields: `reservationKeys.list` now
+  `(status,tier,search,from,to,workOnly,page)` + service passthrough (service
+  already accepted them). `queryKeys.spec` pin updated.
+- `today()` (`official-forms-fields.tsx`) is now browser-zone (was UTC
+  `toISOString`), matching console display.
+- NEW `membershipKeys.customerLookupScope = ['customer-lookup']` (prefix pin
+  in spec). App decide/review/reopen/submit invalidate reservation scope +
+  lookup scope + reports; reservation save/submit/decide/reopen invalidate app
+  scope + lookup scope (+ queue/reports on decide). Proposal double-key kept
+  (no rename); picker still pages 200 (not switched to lookup search).
+- Specs: lookup nav (2 LocationProbe cases, 25 tests), reservation back-link
+  (1 case, 22 tests), `customer-lookup-authorization.spec` asserts `customerId`.
 
-## Earlier uncommitted work (still in tree, superseded where noted)
+### C. Departments rework (ID + Name, no Code, full CRUD)
+- Page (`AfHomesDepartmentsPage.tsx` rewritten): table ID + Department Name +
+  Actions only; Code/Staff/Status columns gone; shared create/edit dialog with
+  Department Name field only; Delete via ConfirmDialog, disabled with
+  "Reassign staff before deleting." when `staffCount > 0`. NEW
+  `AfHomesDepartmentsPage.spec.tsx` (4 cases).
+- API (`admin/afhomes.ts`): POST accepts name-only, derives hidden `code`
+  slug server-side (`deriveDepartmentCode`, rename leaves code untouched);
+  NEW `PATCH departments/:id` (update) and `DELETE departments/:id` (delete,
+  409 when staff assigned); all audited
+  (`DEPARTMENT_CREATED/UPDATED/DELETED`) with per-action authorize
+  (create/update/delete). No migration: `code` stays NOT NULL in storage.
+- Specs rewritten in `afhomes.spec.ts` (create/409/denial/rename/404/rename-
+  denial/delete/409/delete-denial + audit-write-500 body fix). Grants
+  untouched: Admin holds create/update per baseline; delete is Super Admin
+  (same as roles pattern). Test fixture admin lacks `can_delete` on
+  departments, so DELETE specs use `TOKEN.superAdmin`.
 
-- Interim 52-col guided template (FIRST NAME…, ADDRESS LINE 1, CITY /
-  MUNICIPALITY, EMAIL ADDRESS…) is SUPERSEDED by the 62-col SSOT — do not
-  reintroduce its headers; old §A handoff text describing it is stale.
-- Register save fix (`official-forms-applications.tsx` register-branch
-  validation) and the application detail redesign (workflow panel, buttons,
-  `application-actions.spec.tsx` LocationProbe pattern) still stand.
-- User refinements preserved: OfficialForms status card/record-groups CSS +
-  spec, hint-line formatting, `phase2.spec.ts` FK-blocker rows, untracked
-  `20261203000001_remove_test_customer…` migration, `docs/testing/`.
+## Earlier uncommitted work (still in tree)
+
+- Customer-record SSOT alignment (62-col registry, migration
+  `20261204000001_afhomes_customer_ssot_alignment.sql`, import/handler/admin
+  updates, db-integration §74 with 30 checks). Full detail in prior handoff;
+  condensed here to keep this file dense.
+- Interim 52-col guided template SUPERSEDED by 62-col SSOT — do not reintroduce.
+- Register save fix + application detail redesign (workflow panel, buttons,
+  LocationProbe pattern) still stand.
+- User items preserved: OfficialForms CSS + spec, hint-line formatting,
+  `phase2.spec.ts` FK-blocker rows, untracked `20261203000001` migration,
+  `docs/testing/`.
 
 ## Test patterns worth reusing
 
@@ -127,6 +132,8 @@ primary address editable in company dialog.
   `grantee in ('anon','authenticated','PUBLIC')`, like `rls_invariants.sql`.
 - Holder `barangay` text needs the full 10-digit code triple or the holder
   CHECK fails; `customer_import_rows` needs distinct row_numbers per job.
+- Query-key scopes: every scope must be a prefix of the keys it clears (pinned
+  in `queryKeys.spec.ts`); detail keys sit outside list scope by design.
 - Shared files with user WIP: `prettier <file> | tr -d '\r'` vs file diff;
   touch only your own hunks.
 
@@ -147,6 +154,12 @@ primary address editable in company dialog.
   (storage has no parts to split back).
 - Migration versions are unique; A-Z = apply order; the 20261130000001 pair
   is pre-existing.
+- README value rows derive from the registry; CSV stays band+headers only.
+- Lookup carries `customerId` but never a Membership Code (type-enforced).
+- Departments: Code hidden from UI, server-derived immutable slug; no DROP
+  COLUMN without approved migration. Admin delete-grant question left open.
+- Reservation `from/to` keys are positional `(status,tier,search,from,to,
+  workOnly,page)`; `today()` is browser-zone.
 
 ## Blocked / needs user action
 
@@ -154,12 +167,13 @@ primary address editable in company dialog.
   `0003` (carried; Customer Lookup breaks until `…0003` applied + deployed),
   user's `20261203000001_remove_test_customer`, mine `20261204000001`. Then
   `rls_invariants.sql` (empty = PASS). Nothing this session applied anywhere.
-- Dev API restart / redeploy for handler + template + export changes.
-- `docs/testing/membership-template.xlsx` is now TWO layouts old — re-download
-  the guided template and refill.
-- Micro-call left open: single MOBILE NO. kept its listed slot (after TIN
-  NO.); move beside LANDLINE only on request.
-- Two identical "Create Reservation" buttons — user may want one removed.
+- Dev API restart / redeploy for handler + template + lookup + departments
+  changes.
+- `docs/testing/membership-template.xlsx` is now THREE layouts old —
+  re-download the guided template (now with README values) and refill.
+- Open: Admin `organization.departments` delete grant (Super Admin only
+  today); single MOBILE NO. slot (after TIN); two identical
+  "Create Reservation" buttons — user may want one removed.
 
 ## Carried open threads (older sessions, still unanswered)
 
@@ -172,25 +186,27 @@ primary address editable in company dialog.
 - Tech debt: `toXlsxMulti` float/date handling mirrors pre-existing `toXlsx`;
   `CustomerCompanyEditDialog` reuses the detail CSS module;
   `updateCustomer` duplication (`services.ts` vs `services-customers.ts`);
-  `StatedPackage` object; stated money-schema question.
+  `StatedPackage` object; stated money-schema question; reservation proposal
+  double-key; application picker still pages 200 instead of lookup search.
 
 ## Verify (from root)
 
 ```sh
-pnpm --filter ./apps/admin exec vitest run --maxWorkers=2   # 82 files / 806 tests
+pnpm --filter ./api exec vitest run --maxWorkers=2          # 117 files / 2262 tests
 pnpm --filter ./packages/contracts exec vitest run          # 20 files / 259 tests
-pnpm --filter ./api exec vitest run --maxWorkers=2          # 116 files / 2241 tests
-pnpm --filter ./packages/ui exec vitest run                 # 215
-pnpm --filter ./apps/web exec vitest run --maxWorkers=2     # 20 files / 250 tests
+pnpm --filter ./apps/admin exec vitest run src/features/afhomes --maxWorkers=2  # 7 / 59
 pnpm typecheck                                              # turbo 7 + tsc -p supabase
 pnpm check:env
 pnpm lint                                                   # 0 errors
-pnpm test:db:local                                          # 2525 checks incl. new §74
+pnpm test:db:local                                          # 2525 checks incl. §74
 pnpm test:db:harness                                        # 13/13
 ```
 
-Last verified (after migration renumber): ALL green — admin 806, contracts
-259, api 2241, ui 215, web 250; `typecheck` 7/7; `check:env` PASS; `lint` 0
-errors; `test:db:local` 2525/2525 (cleanup PASS, tables restored);
-`test:db:harness` 13/13. Evidence: merge-alias + grant-form + barangay-CHECK
-+ row-number failures all proven RED on disposable PG, fixed, green.
+Last verified: ALL green — api 2262 (117 files); admin afhomes 59,
+queryKeys 6, lookup 25, reservation-detail 22, OfficialForms 34,
+application-actions 20, finance-queue 11; `tsc` clean (admin/api/
+contracts); `lint` 0 errors. Full admin suite (82 files) not re-run this
+session — run before release. Evidence: audit-500 body (strict schema
+rejects extra `code`), fixture admin lacks departments `can_delete`
+(specs use superAdmin), parallel admin suites exhaust workers (reran
+sequentially).

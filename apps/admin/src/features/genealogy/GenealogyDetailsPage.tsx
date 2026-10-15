@@ -107,36 +107,33 @@ export function GenealogyDetailsPage() {
             <dt>Direct downline</dt>
             <dd>{formatCountOrDash(node.data.directDownlineCount)}</dd>
           </div>
-          <div>
-            <dt>Total descendants</dt>
-            <dd>{formatCountOrDash(node.data.totalDescendantCount)}</dd>
-          </div>
         </dl>
       </section>
 
-      <section className={styles.panel} aria-label="Upperline chain">
-        <h2 className={styles.panelTitle}>Upperline chain</h2>
+      <section className={styles.panel} aria-label="Head">
+        <h2 className={styles.panelTitle}>Head</h2>
         {chain.isPending ? (
           <p role="status">
             <Skeleton style={{ height: 64 }} />
-            <span className="sr-only">Loading upperline…</span>
+            <span className="sr-only">Loading head…</span>
           </p>
         ) : chain.isError ? (
           <ErrorState
             error={chain.error}
-            title="Upperline could not be loaded"
+            title="Head could not be loaded"
             message={describeSellerLoadError(chain.error)}
             onRetry={() => void chain.refetch()}
           />
         ) : chain.data.length ? (
-          <ol className={styles.chain}>
-            {chain.data.map((n) => (
-              <li key={n.staffId}>
-                <Link to={`/admin/genealogy/${n.staffId}`}>{n.fullName}</Link>
-                <StatusChip label={humanizeCode(n.role)} />
-              </li>
-            ))}
-          </ol>
+          <p className={styles.panelNote}>
+            <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`}>
+              {chain.data[0]!.fullName}
+            </Link>{' '}
+            <StatusChip label={humanizeCode(chain.data[0]!.role)} />
+            {chain.data.length > 1 ? (
+              <span className={styles.panelNote}> · reads through an unavailable head</span>
+            ) : null}
+          </p>
         ) : (
           <p className={styles.panelNote}>Top-level seller</p>
         )}
@@ -156,16 +153,11 @@ export function GenealogyDetailsPage() {
             message={describeSellerLoadError(summary.error)}
             onRetry={() => void summary.refetch()}
           />
-        ) : summary.data.totalDirectDownline === 0 && summary.data.totalDescendants === 0 ? (
+        ) : summary.data.totalDirectDownline === 0 ? (
           <>
             <div className={styles.badges}>
               <StatusChip
                 label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
-                tone="neutral"
-                icon="users"
-              />
-              <StatusChip
-                label={`Total descendants: ${formatCountOrDash(summary.data.totalDescendants)}`}
                 tone="neutral"
                 icon="users"
               />
@@ -189,11 +181,6 @@ export function GenealogyDetailsPage() {
           <div className={styles.badges}>
             <StatusChip
               label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
-              tone="neutral"
-              icon="users"
-            />
-            <StatusChip
-              label={`Total descendants: ${formatCountOrDash(summary.data.totalDescendants)}`}
               tone="neutral"
               icon="users"
             />

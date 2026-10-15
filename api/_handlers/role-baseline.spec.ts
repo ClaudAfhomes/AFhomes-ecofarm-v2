@@ -80,6 +80,7 @@ const roleId = (slug: string) => `10000000-0000-4000-8000-0000000000${SLUG_INDEX
 const staffId = (slug: string) => `20000000-0000-4000-8000-0000000000${SLUG_INDEX[slug]!}`;
 const OUTSIDER_ID = '20000000-0000-4000-8000-000000000099';
 const tokenFor = (slug: string) => `tok-${slug}`;
+const BASELINE_DEPARTMENT_ID = '30000000-0000-4000-8000-000000000001';
 
 const ROLE_NAMES: Record<string, string> = {
   super_admin: 'Super Admin',
@@ -145,7 +146,16 @@ function baselineTables() {
     modules,
     roles,
     role_permissions,
-    departments: [],
+    departments: [
+      {
+        id: BASELINE_DEPARTMENT_ID,
+        code: 'BASELINE',
+        name: 'Baseline',
+        is_active: true,
+        created_at: '2026-09-01T00:00:00.000Z',
+        updated_at: '2026-09-01T00:00:00.000Z',
+      },
+    ],
     staff_users,
     staff_role_assignments,
     staff_permission_restrictions: [],
@@ -213,8 +223,7 @@ async function call(options: {
   return state;
 }
 
-const permsOf = (body: unknown) =>
-  (body as { permissions: AfHomesPermission[] }).permissions;
+const permsOf = (body: unknown) => (body as { permissions: AfHomesPermission[] }).permissions;
 const byKey = (body: unknown) =>
   new Map(permsOf(body).map((permission) => [permission.moduleKey, permission]));
 /** Shorthand permission literals for role-creation bodies. */
@@ -283,24 +292,24 @@ describe('effective permissions match the matrix', () => {
   it.each(Object.keys(DEFAULT_ROLE_BASELINE))(
     'resolves %s to exactly its matrix rows',
     async (slug) => {
-    const state = await call({ afPath: 'session', token: tokenFor(slug) });
-    expect(state.status).toBe(200);
-    const actual = byKey(state.body);
-    expect(actual.size).toBe(ALL_KEYS.length);
-    const grants = new Map(
-      DEFAULT_ROLE_BASELINE[slug as keyof typeof DEFAULT_ROLE_BASELINE].map((grant) => [
-        grant.moduleKey,
-        grant,
-      ]),
-    );
-    for (const key of ALL_KEYS) {
-      const permission = actual.get(key)!;
-      const grant = grants.get(key);
-      expect(permission.canView, `${slug} ${key} view`).toBe(grant?.canView === true);
-      expect(permission.canCreate, `${slug} ${key} create`).toBe(grant?.canCreate === true);
-      expect(permission.canUpdate, `${slug} ${key} update`).toBe(grant?.canUpdate === true);
-      expect(permission.canDelete, `${slug} ${key} delete`).toBe(false);
-    }
+      const state = await call({ afPath: 'session', token: tokenFor(slug) });
+      expect(state.status).toBe(200);
+      const actual = byKey(state.body);
+      expect(actual.size).toBe(ALL_KEYS.length);
+      const grants = new Map(
+        DEFAULT_ROLE_BASELINE[slug as keyof typeof DEFAULT_ROLE_BASELINE].map((grant) => [
+          grant.moduleKey,
+          grant,
+        ]),
+      );
+      for (const key of ALL_KEYS) {
+        const permission = actual.get(key)!;
+        const grant = grants.get(key);
+        expect(permission.canView, `${slug} ${key} view`).toBe(grant?.canView === true);
+        expect(permission.canCreate, `${slug} ${key} create`).toBe(grant?.canCreate === true);
+        expect(permission.canUpdate, `${slug} ${key} update`).toBe(grant?.canUpdate === true);
+        expect(permission.canDelete, `${slug} ${key} delete`).toBe(false);
+      }
     },
   );
 
@@ -457,6 +466,7 @@ describe('privilege-subset enforcement on the baseline', () => {
       token: tokenFor('admin'),
       body: {
         name: 'Config Club',
+        departmentId: BASELINE_DEPARTMENT_ID,
         permissions: [viewOnly('dashboard.view'), viewOnly('governance.config')],
       },
     });
@@ -481,6 +491,7 @@ describe('privilege-subset enforcement on the baseline', () => {
       token: tokenFor('hr'),
       body: {
         name: 'Seller Plus',
+        departmentId: BASELINE_DEPARTMENT_ID,
         permissions: [full('sales.customers')],
       },
     });
@@ -494,6 +505,7 @@ describe('privilege-subset enforcement on the baseline', () => {
       token: tokenFor('admin'),
       body: {
         name: 'Dashboard Watcher',
+        departmentId: BASELINE_DEPARTMENT_ID,
         permissions: [viewOnly('dashboard.view')],
       },
     });

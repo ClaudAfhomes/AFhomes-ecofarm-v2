@@ -59,16 +59,25 @@ async function audit(
 }
 
 async function roleCatalog(db: Db) {
-  const [{ data: roles, error }, { data: modules }, { data: grants }, { data: assignments }] =
-    await Promise.all([
-      db.from('roles').select('*').order('name'),
-      db.from('modules').select('id,key').eq('is_active', true),
-      db.from('role_permissions').select('*'),
-      db.from('staff_role_assignments').select('role_id'),
-    ]);
+  const [
+    { data: roles, error },
+    { data: modules },
+    { data: grants },
+    { data: assignments },
+    { data: departments },
+  ] = await Promise.all([
+    db.from('roles').select('*').order('name'),
+    db.from('modules').select('id,key').eq('is_active', true),
+    db.from('role_permissions').select('*'),
+    db.from('staff_role_assignments').select('role_id'),
+    db.from('departments').select('id,name'),
+  ]);
   if (error) throw error;
   const moduleById = new Map(
     (modules ?? []).map((m: { id: string; key: string }) => [m.id, m.key]),
+  );
+  const deptById = new Map(
+    (departments ?? []).map((d: { id: string; name: string }) => [String(d.id), d.name]),
   );
   const counts = new Map<string, number>();
   for (const row of assignments ?? []) counts.set(row.role_id, (counts.get(row.role_id) ?? 0) + 1);
@@ -76,9 +85,10 @@ async function roleCatalog(db: Db) {
     id: role.id,
     slug: role.slug,
     name: role.name,
-    description: role.description ?? null,
     isSystem: role.is_system,
     isActive: role.is_active,
+    departmentId: (role.department_id as string | null | undefined) ?? null,
+    departmentName: deptById.get(String(role.department_id)) ?? null,
     assignedCount: counts.get(String(role.id)) ?? 0,
     permissions: (grants ?? [])
       .filter((g: Record<string, unknown>) => g.role_id === role.id)
@@ -544,6 +554,28 @@ async function staffRole(db: Db, id: string) {
   return role;
 }
 
+/**
+ * Head departure: a suspended, inactive or deactivated head stops being
+ * anyone's upline. Their direct downline edges are retired (is_active=false)
+ * so the genealogy display walks through to the next higher ACTIVE head
+ * (OST -> SM -> SVD when the SSM leaves). The stored upline is kept, so a
+ * reinstated head reappears without reassignment and the upline desk can
+ * re-point anyone deliberately. One way only: returning heads never pull
+ * reassigned sellers back.
+ *
+ * Returns the retired edge count for the audit trail.
+ */
+async function retireDownlineEdges(db: Db, staffId: string): Promise<number> {
+  const { data, error } = await db
+    .from('referral_relationships')
+    .update({ is_active: false })
+    .eq('upline_staff_id', staffId)
+    .eq('is_active', true)
+    .select('subject_staff_id');
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
 function cents(values: unknown[]) {
   let total = 0n;
   for (const value of values) {
@@ -839,6 +871,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid role input', 400);
       if (!permissionsAreSubset(parsed.data.permissions, auth.permissions))
         return fail(res, 'FORBIDDEN', 'Cannot grant permissions you do not possess', 403);
+      const { data: department } = await db
+        .from('departments')
+        .select('id')
+        .eq('id', parsed.data.departmentId)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!department) return fail(res, 'VALIDATION_ERROR', 'Unknown department', 400);
       const slug = parsed.data.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
@@ -848,7 +887,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .insert({
           slug,
           name: parsed.data.name,
-          description: parsed.data.description ?? null,
+          department_id: parsed.data.departmentId,
           is_system: false,
           is_active: parsed.data.isActive,
         })
@@ -882,7 +921,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Role not found', 404);
       if (before.is_system) {
         const title = z
-          .object({ name: z.string().trim().min(1).max(100) })
+          .object({
+            name: z.string().trim().min(1).max(100),
+            departmentId: z.string().uuid().optional(),
+          })
           .strict()
           .safeParse(req.body);
         if (
@@ -896,9 +938,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'System access and protected role titles cannot be changed',
             403,
           );
+        if (title.data.departmentId) {
+          const { data: department } = await db
+            .from('departments')
+            .select('id')
+            .eq('id', title.data.departmentId)
+            .eq('is_active', true)
+            .maybeSingle();
+          if (!department) return fail(res, 'VALIDATION_ERROR', 'Unknown department', 400);
+        }
         const { error } = await db
           .from('roles')
-          .update({ name: title.data.name, updated_at: new Date().toISOString() })
+          .update({
+            name: title.data.name,
+            department_id: title.data.departmentId ?? before.department_id ?? null,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', id);
         if (error) throw error;
         await audit(
@@ -907,8 +962,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'ROLE_DISPLAY_TITLE_UPDATED',
           'role',
           id,
-          { name: before.name },
-          { name: title.data.name },
+          { name: before.name, department_id: before.department_id ?? null },
+          {
+            name: title.data.name,
+            department_id: title.data.departmentId ?? before.department_id ?? null,
+          },
         );
         return res
           .status(200)
@@ -1002,32 +1060,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
       );
     }
+    /**
+     * Departments are named by operators; the `code` column is a derived
+     * slug the UI never shows. It stays in storage (NOT NULL UNIQUE) but is
+     * never accepted from the client: create derives it from the name and
+     * rename leaves it untouched, so a rename can never collide or orphan.
+     */
+    const toDepartmentRow = (
+      d: Record<string, unknown>,
+      staff: { department_id: string }[] | null,
+    ) => ({
+      id: d.id,
+      code: d.code,
+      name: d.name,
+      isActive: d.is_active,
+      staffCount: (staff ?? []).filter((s) => s.department_id === d.id).length,
+      createdAt: d.created_at,
+      updatedAt: d.updated_at,
+    });
+    const deriveDepartmentCode = (name: string): string | null => {
+      const slug = name
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 32);
+      const code = /^[A-Z]/.test(slug) ? slug : `DEPT_${slug}`;
+      return /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : null;
+    };
     if (path === 'departments' && method === 'POST') {
       const auth = await authorizeAfHomes(req, 'organization.departments', 'create');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
       const parsed = z
-        .object({
-          code: z.string().regex(/^[A-Z][A-Z0-9_]{1,31}$/),
-          name: z.string().trim().min(2).max(80),
-        })
+        .object({ name: z.string().trim().min(2).max(80) })
+        .strict()
         .safeParse(req.body);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
+      const code = deriveDepartmentCode(parsed.data.name);
+      if (!code) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
       const { data, error } = await db
         .from('departments')
-        .insert({ ...parsed.data, is_active: true })
+        .insert({ code, name: parsed.data.name, is_active: true })
         .select('*')
         .single();
-      if (error) return fail(res, 'CONFLICT', 'Department code or name already exists', 409);
-      await audit(db, auth.userId, 'DEPARTMENT_CREATED', 'department', data.id, null, parsed.data);
-      return res.status(201).json({
-        id: data.id,
-        code: data.code,
+      if (error) return fail(res, 'CONFLICT', 'Department name already exists', 409);
+      await audit(db, auth.userId, 'DEPARTMENT_CREATED', 'department', data.id, null, {
         name: data.name,
-        isActive: data.is_active,
-        staffCount: 0,
-        createdAt: data.created_at,
-        updatedAt: data.updated_at,
       });
+      const { data: staff } = await db.from('staff_users').select('department_id');
+      return res.status(201).json(toDepartmentRow(data, staff as { department_id: string }[]));
+    }
+    const departmentMatch = path.match(/^departments\/([0-9a-f-]+)$/);
+    if (departmentMatch && method === 'PATCH') {
+      const auth = await authorizeAfHomes(req, 'organization.departments', 'update');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = departmentMatch[1]!;
+      const parsed = z
+        .object({ name: z.string().trim().min(2).max(80) })
+        .strict()
+        .safeParse(req.body);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
+      const { data: before } = await db.from('departments').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Department not found', 404);
+      const { data, error } = await db
+        .from('departments')
+        .update({ name: parsed.data.name, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (error) return fail(res, 'CONFLICT', 'Department name already exists', 409);
+      await audit(db, auth.userId, 'DEPARTMENT_UPDATED', 'department', id, before, {
+        name: parsed.data.name,
+      });
+      const { data: staff } = await db.from('staff_users').select('department_id');
+      return res.status(200).json(toDepartmentRow(data, staff as { department_id: string }[]));
+    }
+    if (departmentMatch && method === 'DELETE') {
+      const auth = await authorizeAfHomes(req, 'organization.departments', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = departmentMatch[1]!;
+      const { data: before } = await db.from('departments').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Department not found', 404);
+      const { data: assigned } = await db.from('staff_users').select('id').eq('department_id', id);
+      if ((assigned ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Department has assigned staff', 409);
+      const { data: assignedRoles } = await db.from('roles').select('id').eq('department_id', id);
+      if ((assignedRoles ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Department has assigned roles', 409);
+      const { error } = await db.from('departments').delete().eq('id', id);
+      if (error) throw error;
+      await audit(db, auth.userId, 'DEPARTMENT_DELETED', 'department', id, before, null);
+      return res.status(200).json({ deleted: true });
     }
     if (path === 'staff' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'organization.staff');
@@ -1204,6 +1326,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         profilePatch.department_id = parsed.data.departmentId;
       if (parsed.data.status !== undefined) profilePatch.status = parsed.data.status;
       await db.from('staff_users').update(profilePatch).eq('id', id);
+      // Leaving heads retire their downline edges (see retireDownlineEdges):
+      // the genealogy then reads through to the next higher active head.
+      let retiredEdges = 0;
+      if (parsed.data.status !== undefined && parsed.data.status !== 'active') {
+        retiredEdges = await retireDownlineEdges(db, id);
+      }
       if (parsed.data.restrictions) {
         const { data: modules } = await db.from('modules').select('id,key');
         const idByKey = new Map(
@@ -1231,7 +1359,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (error) throw error;
         }
       }
-      await audit(db, auth.userId, 'STAFF_ACCESS_UPDATED', 'staff_user', id, before, parsed.data);
+      await audit(db, auth.userId, 'STAFF_ACCESS_UPDATED', 'staff_user', id, before, {
+        ...parsed.data,
+        retiredDownlineEdges: retiredEdges,
+      });
       return res
         .status(200)
         .json((await staffCatalog(db)).find((staff: { id: string }) => staff.id === id));
@@ -1264,8 +1395,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update({ status: 'inactive', updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) throw error;
+      const retiredEdges = await retireDownlineEdges(db, id);
       await audit(db, auth.userId, 'STAFF_DEACTIVATED', 'staff_user', id, before, {
         status: 'inactive',
+        retiredDownlineEdges: retiredEdges,
       });
       return res.status(200).json({ deactivated: true });
     }

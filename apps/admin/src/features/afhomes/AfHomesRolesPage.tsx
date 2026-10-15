@@ -21,6 +21,7 @@ import { MODULE_CATALOG, type AfHomesRole } from '@afhomes/contracts';
 import {
   createAfHomesRole,
   deleteAfHomesRole,
+  getAfHomesDepartments,
   getAfHomesRoles,
   updateAfHomesRole,
 } from './services';
@@ -57,7 +58,6 @@ const RoleRow = memo(function RoleRow({
     >
       <td data-label="Role">
         <span className={styles.roleLink}>{role.name}</span>
-        {role.description ? <span className={styles.description}>{role.description}</span> : null}
       </td>
       <td data-label="Type">
         <StatusChip
@@ -71,6 +71,7 @@ const RoleRow = memo(function RoleRow({
           tone={role.isActive ? 'success' : 'neutral'}
         />
       </td>
+      <td data-label="Department">{role.departmentName ?? 'Unassigned'}</td>
       <td data-label="Assigned staff">{role.assignedCount}</td>
       <td data-label="Permissions">
         {role.isSystem && role.slug === 'super_admin' ? (
@@ -99,7 +100,13 @@ const RoleRow = memo(function RoleRow({
           <Button size="sm" variant="secondary" onClick={() => onEdit(role)}>
             Edit
           </Button>{' '}
-          <Button size="sm" variant="danger" onClick={() => onDelete(role)}>
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={() => onDelete(role)}
+            disabled={role.assignedCount > 0}
+            title={role.assignedCount > 0 ? 'Reassign staff before deleting.' : 'Delete this role.'}
+          >
             Delete
           </Button>
         </span>
@@ -116,6 +123,12 @@ export function AfHomesRolesPage() {
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
+  const departments = useQuery({
+    queryKey: ['afhomes', 'departments'],
+    queryFn: getAfHomesDepartments,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
   const [editing, setEditing] = useState<AfHomesRole | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<AfHomesRole | null>(null);
@@ -124,6 +137,7 @@ export function AfHomesRolesPage() {
   const debouncedSearch = useDebouncedValue(search);
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [page, setPage] = useState(1);
 
   const resetPage = useCallback(() => setPage(1), []);
@@ -138,10 +152,20 @@ export function AfHomesRolesPage() {
   );
 
   const mutation = useBusinessMutation({
-    mutationFn: async (input: RoleFormInput) =>
-      editing
-        ? updateAfHomesRole(editing.id, input)
-        : createAfHomesRole({ ...input, description: input.description || undefined }),
+    mutationFn: async (input: RoleFormInput) => {
+      if (editing) {
+        // System roles accept only the display title + department server-side
+        // (strict schema), so narrow the payload instead of sending the full
+        // form and eating a 403.
+        return editing.isSystem
+          ? updateAfHomesRole(editing.id, {
+              name: input.name,
+              departmentId: input.departmentId,
+            })
+          : updateAfHomesRole(editing.id, input);
+      }
+      return createAfHomesRole(input);
+    },
     onSuccess: async (saved) => {
       const wasEditing = editing !== null;
       const savedName = wasEditing ? editing?.name : saved.name;
@@ -185,11 +209,15 @@ export function AfHomesRolesPage() {
         (role) =>
           (typeFilter === 'all' || (typeFilter === 'system') === role.isSystem) &&
           (statusFilter === 'all' || (statusFilter === 'active') === Boolean(role.isActive)) &&
-          `${role.name} ${role.slug} ${role.description ?? ''}`
+          (departmentFilter === 'all' ||
+            (departmentFilter === 'unassigned'
+              ? role.departmentId === null
+              : role.departmentId === departmentFilter)) &&
+          `${role.name} ${role.slug}`
             .toLowerCase()
             .includes(debouncedSearch.trim().toLowerCase()),
       ),
-    [listed, typeFilter, statusFilter, debouncedSearch],
+    [listed, typeFilter, statusFilter, departmentFilter, debouncedSearch],
   );
   const summary = useMemo(
     () => ({
@@ -207,11 +235,15 @@ export function AfHomesRolesPage() {
   const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
 
   const filtersActive =
-    debouncedSearch.trim() !== '' || typeFilter !== 'all' || statusFilter !== 'all';
+    debouncedSearch.trim() !== '' ||
+    typeFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    departmentFilter !== 'all';
   const clearFilters = useCallback(() => {
     setSearch('');
     setTypeFilter('all');
     setStatusFilter('all');
+    setDepartmentFilter('all');
     resetPage();
   }, [resetPage]);
 
@@ -309,6 +341,19 @@ export function AfHomesRolesPage() {
                     { value: 'inactive', label: 'Inactive' },
                   ]}
                 />
+                <Select
+                  aria-label="Filter department"
+                  value={departmentFilter}
+                  onChange={(event) => {
+                    setDepartmentFilter(event.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: 'all', label: 'All departments' },
+                    { value: 'unassigned', label: 'Unassigned' },
+                    ...(departments.data ?? []).map((d) => ({ value: d.id, label: d.name })),
+                  ]}
+                />
                 {filtersActive ? (
                   <Button variant="secondary" onClick={clearFilters}>
                     Clear
@@ -333,6 +378,7 @@ export function AfHomesRolesPage() {
                       <th>Role</th>
                       <th>Type</th>
                       <th>Status</th>
+                      <th>Department</th>
                       <th>Assigned staff</th>
                       <th>Permissions</th>
                       <th>Actions</th>
@@ -369,6 +415,7 @@ export function AfHomesRolesPage() {
         key={creating ? 'new-role' : (editing?.id ?? 'closed')}
         open={creating || editing !== null}
         role={editing}
+        departments={departments.data ?? []}
         saving={mutation.isPending}
         error={mutation.error}
         onClose={() => {

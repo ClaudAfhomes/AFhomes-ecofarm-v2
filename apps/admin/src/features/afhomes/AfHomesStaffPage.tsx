@@ -4,14 +4,12 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
-  AccreditationId,
   Button,
   ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
   FilterBar,
-  Icon,
   notifySuccess,
   PageHeader,
   Pagination,
@@ -22,7 +20,7 @@ import {
   StatusChip,
   TextField,
 } from '@afhomes/ui';
-import { PERSON_NAME_RE, groupedModuleCatalog, type AfHomesStaff } from '@afhomes/contracts';
+import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
@@ -30,19 +28,21 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './AfHomesStaffPage.module.css';
 import {
   createAfHomesStaff,
-  deactivateAfHomesStaff,
   deleteAfHomesStaff,
   getAfHomesDepartments,
   getAfHomesRoles,
   getAfHomesStaff,
-  isTestStaffEmail,
-  purgeTestAfHomesStaff,
   updateAfHomesStaff,
 } from './services';
 
 const PAGE_SIZE = 10;
 
-type Restriction = AfHomesStaff['restrictions'][number];
+/**
+ * Sales-hierarchy roles live in genealogy / the sale-team desk, never in the
+ * Staff directory. They are filtered out of the list, the role filter and the
+ * create/edit role pickers. The server stays the authority; this is UX only.
+ */
+const HIERARCHY_SLUGS = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'];
 
 function statusTone(status: AfHomesStaff['status']): 'success' | 'danger' | 'neutral' {
   return status === 'active' ? 'success' : status === 'suspended' ? 'danger' : 'neutral';
@@ -80,28 +80,14 @@ export function AfHomesStaffPage() {
   const [departmentId, setDepartmentId] = useState('');
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [editing, setEditing] = useState<AfHomesStaff | null>(null);
-  const [restrictions, setRestrictions] = useState<Restriction[]>([]);
-  // Same disclosure pattern as the role access dialog: group dropdowns, opened
-  // for groups where an override is already set (and reset per member below).
-  const [expandedRestrictionGroups, setExpandedRestrictionGroups] = useState<Set<string>>(
-    new Set(),
-  );
-  const toggleRestrictionGroup = (group: string) =>
-    setExpandedRestrictionGroups((current) => {
-      const next = new Set(current);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
   const [accountAction, setAccountAction] = useState<{
-    kind: 'deactivate' | 'delete';
     staff: AfHomesStaff;
   } | null>(null);
   const [confirmation, setConfirmation] = useState('');
-  const [purgeTarget, setPurgeTarget] = useState<AfHomesStaff | null>(null);
-  const [purgeConfirmation, setPurgeConfirmation] = useState('');
-  const canPurgeTest = user?.roleSlug === 'super_admin' && user.testPurgeEnabled === true;
+  const [editor, setEditor] = useState<AfHomesStaff | null>(null);
+  const [editRoleId, setEditRoleId] = useState('');
+  const [editDepartmentId, setEditDepartmentId] = useState('');
+  const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
 
   const resetCreate = () => {
     setFullName('');
@@ -156,17 +142,9 @@ export function AfHomesStaffPage() {
       });
     },
   });
-  const update = useBusinessMutation({
-    mutationFn: () => updateAfHomesStaff(editing!.id, { restrictions }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
-      setEditing(null);
-    },
-  });
   const changeAccount = useBusinessMutation({
     mutationFn: async () => {
-      if (accountAction?.kind === 'delete') await deleteAfHomesStaff(accountAction.staff.id);
-      else await deactivateAfHomesStaff(accountAction!.staff.id);
+      await deleteAfHomesStaff(accountAction!.staff.id);
     },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
@@ -174,89 +152,59 @@ export function AfHomesStaffPage() {
       setConfirmation('');
     },
   });
-  const purgeTestAccount = useBusinessMutation({
-    mutationFn: () => purgeTestAfHomesStaff(purgeTarget!.id),
+  const saveEditor = useBusinessMutation({
+    mutationFn: () =>
+      updateAfHomesStaff(editor!.id, {
+        roleId: editRoleId,
+        departmentId: editDepartmentId || null,
+        status: editStatus,
+      }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
-      setPurgeTarget(null);
-      setPurgeConfirmation('');
+      setEditor(null);
+      notifySuccess({ title: 'Staff updated', message: 'Staff record saved.' });
     },
   });
+  const openEditor = (member: AfHomesStaff) => {
+    setEditor(member);
+    setEditRoleId(member.roleId);
+    setEditDepartmentId(member.departmentId ?? '');
+    setEditStatus(member.status === 'suspended' ? 'suspended' : 'active');
+    saveEditor.reset();
+  };
+  const roleSlugById = useMemo(
+    () => new Map((roles.data ?? []).map((role) => [role.id, role.slug] as const)),
+    [roles.data],
+  );
+  const isHierarchy = (item: AfHomesStaff) =>
+    HIERARCHY_SLUGS.includes(roleSlugById.get(item.roleId) ?? '');
+  const isSuperAdmin = (item: AfHomesStaff) => roleSlugById.get(item.roleId) === 'super_admin';
   const filtered = useMemo(
     () =>
       staff.data?.filter(
         (item) =>
+          !isHierarchy(item) &&
           (status === 'all' || item.status === status) &&
           (roleFilter === 'all' || item.roleId === roleFilter) &&
-          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''} ${item.salesNumber ?? ''} ${item.aaNumber ?? ''}`
+          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''}`
             .toLowerCase()
             .includes(debouncedSearch.toLowerCase()),
       ) ?? [],
-    [staff.data, status, roleFilter, debouncedSearch],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [staff.data, status, roleFilter, debouncedSearch, roles.data],
   );
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const activeRoles = roles.data?.filter((role) => role.isActive && role.slug !== 'customer') ?? [];
-  const selectedRole = activeRoles.find((role) => role.id === roleId);
+  // Staff pickers never offer hierarchy roles or Customer: those accounts are
+  // managed in genealogy / the sale-team desk, not here.
+  const assignableRoles = activeRoles.filter((role) => !HIERARCHY_SLUGS.includes(role.slug));
+  const selectedRole = assignableRoles.find((role) => role.id === roleId);
   const selectedRoleDescription = selectedRole
-    ? selectedRole.description?.trim() || `${selectedRole.assignedCount} staff hold this role.`
+    ? `${selectedRole.assignedCount} staff hold this role.`
     : null;
   const filtersActive = search !== '' || status !== 'all' || roleFilter !== 'all';
-  const openRestrictions = (member: AfHomesStaff) => {
-    const role = roles.data?.find((item) => item.id === member.roleId);
-    const next = (role?.permissions ?? [])
-      .filter((p) => p.canView)
-      .map(
-        (p) =>
-          member.restrictions.find((r) => r.moduleKey === p.moduleKey) ?? {
-            moduleKey: p.moduleKey,
-            denyView: false,
-            denyCreate: false,
-            denyUpdate: false,
-            denyDelete: false,
-          },
-      );
-    setRestrictions(next);
-    // Open exactly the groups this member already overrides, so the dialog
-    // shows current overrides immediately and keeps the rest tidy.
-    const denied = new Set(
-      next
-        .filter((r) => r.denyView || r.denyCreate || r.denyUpdate || r.denyDelete)
-        .map((r) => r.moduleKey),
-    );
-    setExpandedRestrictionGroups(
-      new Set(
-        groupedModuleCatalog()
-          .filter((bucket) => bucket.modules.some((module) => denied.has(module.key)))
-          .map((bucket) => bucket.group),
-      ),
-    );
-    setEditing(member);
-  };
-  /**
-   * The ONE deny control per page. Checking denies the page outright
-   * (denyView, which the server resolves as removing every action too);
-   * clearing it removes every deny flag, restoring exactly what the role
-   * grants. A page already carrying a finer deny reads as checked and clears
-   * the same way, so the single control is always the whole truth.
-   */
-  const toggle = (key: string) =>
-    setRestrictions((current) =>
-      current.map((item) => {
-        if (item.moduleKey !== key) return item;
-        const denied = item.denyView || item.denyCreate || item.denyUpdate || item.denyDelete;
-        return denied
-          ? {
-              moduleKey: item.moduleKey,
-              denyView: false,
-              denyCreate: false,
-              denyUpdate: false,
-              denyDelete: false,
-            }
-          : { ...item, denyView: true };
-      }),
-    );
   const clearFilters = () => {
     setSearch('');
     setStatus('all');
@@ -272,7 +220,7 @@ export function AfHomesStaffPage() {
           <Button
             onClick={() => {
               resetCreate();
-              setRoleId(activeRoles[0]?.id ?? '');
+              setRoleId(assignableRoles[0]?.id ?? '');
               setCreateOpen(true);
             }}
           >
@@ -284,7 +232,7 @@ export function AfHomesStaffPage() {
         search={
           <SearchField
             label="Search staff"
-            placeholder="Search name, email or AF ID"
+            placeholder="Search name, email or code"
             value={search}
             onChange={(value) => {
               setSearch(value);
@@ -304,7 +252,7 @@ export function AfHomesStaffPage() {
               }}
               options={[
                 { value: 'all', label: 'All roles' },
-                ...activeRoles.map((r) => ({ value: r.id, label: r.name })),
+                ...assignableRoles.map((r) => ({ value: r.id, label: r.name })),
               ]}
             />
             <Select
@@ -314,7 +262,7 @@ export function AfHomesStaffPage() {
                 setStatus(e.target.value);
                 setPage(1);
               }}
-              options={['all', 'invited', 'active', 'inactive', 'suspended'].map((value) => ({
+              options={['all', 'active', 'suspended'].map((value) => ({
                 value,
                 label: value[0]!.toUpperCase() + value.slice(1),
               }))}
@@ -357,9 +305,10 @@ export function AfHomesStaffPage() {
             <table>
               <thead>
                 <tr>
+                  <th>Code</th>
                   <th>Name</th>
+                  <th>Email</th>
                   <th>Role</th>
-                  <th>AA Number</th>
                   <th>Status</th>
                   <th>Added</th>
                   <th>Actions</th>
@@ -378,34 +327,22 @@ export function AfHomesStaffPage() {
                     }}
                     className={styles.clickable}
                   >
+                    <td data-label="Code">
+                      <span className={styles.codeCell}>{item.employeeNumber ?? '—'}</span>
+                    </td>
                     <td data-label="Name">
                       <span className={styles.identityCell}>
                         <span className={styles.identityAvatar} aria-hidden="true">
                           {(item.fullName.trim().charAt(0) || '-').toUpperCase()}
                         </span>
-                        <span>
-                          <span className={styles.identityName}>{item.fullName}</span>
-                          <small className={styles.identityMeta}>{item.email}</small>
-                          {item.employeeNumber ? (
-                            <small className={styles.identityMeta}>{item.employeeNumber}</small>
-                          ) : null}
-                          {item.salesNumber ? (
-                            <small className={styles.identityMeta}>{item.salesNumber}</small>
-                          ) : null}
-                        </span>
+                        <span className={styles.identityName}>{item.fullName}</span>
                       </span>
+                    </td>
+                    <td data-label="Email">
+                      <span className={styles.emailCell}>{item.email}</span>
                     </td>
                     <td data-label="Role">
                       <StatusChip label={item.roleName} tone="neutral" />
-                    </td>
-                    <td data-label="AA Number">
-                      {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
-                        roles.data?.find((role) => role.id === item.roleId)?.slug ?? '',
-                      ) ? (
-                        <AccreditationId value={item.aaNumber} />
-                      ) : (
-                        '—'
-                      )}
                     </td>
                     <td data-label="Status">
                       <StatusChip label={item.status} tone={statusTone(item.status)} />
@@ -418,38 +355,22 @@ export function AfHomesStaffPage() {
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
                     >
-                      <Button size="sm" variant="secondary" onClick={() => openRestrictions(item)}>
-                        Restrictions
-                      </Button>
-                      {item.id !== user?.id && item.status !== 'inactive' ? (
+                      {!(isSuperAdmin(item) && user?.roleSlug !== 'super_admin') ? (
+                        <Button size="sm" variant="secondary" onClick={() => openEditor(item)}>
+                          Edit
+                        </Button>
+                      ) : null}
+                      {user?.roleSlug === 'super_admin' &&
+                      item.id !== user.id &&
+                      !isSuperAdmin(item) ? (
                         <>
                           {' '}
                           <Button
                             size="sm"
                             variant="danger"
-                            onClick={() => setAccountAction({ kind: 'deactivate', staff: item })}
+                            onClick={() => setAccountAction({ staff: item })}
                           >
-                            Deactivate
-                          </Button>
-                        </>
-                      ) : null}
-                      {user?.roleSlug === 'super_admin' && item.id !== user.id ? (
-                        <>
-                          {' '}
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => setAccountAction({ kind: 'delete', staff: item })}
-                          >
-                            Delete Permanently
-                          </Button>
-                        </>
-                      ) : null}
-                      {canPurgeTest && item.id !== user?.id && isTestStaffEmail(item.email) ? (
-                        <>
-                          {' '}
-                          <Button size="sm" variant="danger" onClick={() => setPurgeTarget(item)}>
-                            Purge Test Account
+                            Delete
                           </Button>
                         </>
                       ) : null}
@@ -534,7 +455,7 @@ export function AfHomesStaffPage() {
                 <Select
                   value={roleId}
                   onChange={(e) => setRoleId(e.target.value)}
-                  options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
+                  options={assignableRoles.map((r) => ({ value: r.id, label: r.name }))}
                 />
               </label>
               {selectedRoleDescription ? (
@@ -572,86 +493,62 @@ export function AfHomesStaffPage() {
         </div>
       </Dialog>
       <Dialog
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        title={`Restrict ${editing?.fullName ?? 'staff access'}`}
+        open={editor !== null}
+        onClose={() => setEditor(null)}
+        title={`Edit ${editor?.fullName ?? 'staff'}`}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setEditing(null)}>
+            <Button variant="secondary" onClick={() => setEditor(null)}>
               Cancel
             </Button>
-            <Button disabled={update.isPending} onClick={() => update.mutate()}>
-              Save restrictions
+            <Button
+              disabled={saveEditor.isPending || !editRoleId}
+              onClick={() => saveEditor.mutate()}
+            >
+              Save
             </Button>
           </>
         }
       >
         <div className={styles.dialogBody}>
-          <Alert variant="info" title="Deny-only overrides">
-            Overrides remove access only. Nothing grants access here.
-          </Alert>
-          {/* Same shape as the role access dialog: one "Deny access" control per
-              page, grouped into dropdowns. Denying removes the page AND every
-              action right on it; clearing the box restores whatever the role
-              already grants. */}
-          <ul className={styles.moduleList}>
-            {groupedModuleCatalog().map((bucket) => {
-              const byKey = new Map(restrictions.map((r) => [r.moduleKey, r]));
-              const entries = bucket.modules
-                .map((module) => ({ module, restriction: byKey.get(module.key) }))
-                .filter((entry) => entry.restriction);
-              if (entries.length === 0) return null;
-              const isDenied = (restriction: Restriction) =>
-                restriction.denyView ||
-                restriction.denyCreate ||
-                restriction.denyUpdate ||
-                restriction.denyDelete;
-              const deniedCount = entries.filter((entry) => isDenied(entry.restriction!)).length;
-              const singleModule = entries.length === 1;
-              const expanded = singleModule || expandedRestrictionGroups.has(bucket.group);
-              return (
-                <li key={bucket.group} className={styles.groupBlock}>
-                  {singleModule ? null : (
-                    <button
-                      type="button"
-                      className={styles.groupToggleButton}
-                      aria-expanded={expanded}
-                      onClick={() => toggleRestrictionGroup(bucket.group)}
-                    >
-                      <span className={styles.chevron} data-open={expanded}>
-                        <Icon name="chevron-right" size={14} />
-                      </span>
-                      <span className={styles.groupName}>{bucket.group}</span>
-                      <span
-                        className={deniedCount > 0 ? styles.groupCountOn : styles.groupCount}
-                        title={`${deniedCount} of ${entries.length} pages denied`}
-                      >
-                        {deniedCount}/{entries.length}
-                      </span>
-                    </button>
-                  )}
-                  {expanded ? (
-                    <ul className={styles.moduleRows}>
-                      {entries.map(({ module, restriction }) => (
-                        <li key={module.key} className={styles.moduleRow}>
-                          <label className={styles.moduleCheck}>
-                            <input
-                              aria-label={`${module.label} deny access`}
-                              type="checkbox"
-                              checked={isDenied(restriction!)}
-                              onChange={() => toggle(module.key)}
-                            />
-                            <span className={styles.moduleName}>{module.label}</span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          {update.error ? <p role="alert">{update.error.message}</p> : null}
+          <div className={styles.formFields}>
+            <label className={styles.fieldLabel}>
+              Role
+              <Select
+                aria-label="Edit role"
+                value={editRoleId}
+                onChange={(e) => setEditRoleId(e.target.value)}
+                options={assignableRoles.map((r) => ({ value: r.id, label: r.name }))}
+              />
+            </label>
+            <label className={styles.fieldLabel}>
+              Department
+              <Select
+                aria-label="Edit department"
+                value={editDepartmentId}
+                onChange={(e) => setEditDepartmentId(e.target.value)}
+                options={[
+                  { value: '', label: 'Unassigned' },
+                  ...(departments.data ?? [])
+                    .filter((d) => d.isActive)
+                    .map((d) => ({ value: d.id, label: d.name })),
+                ]}
+              />
+            </label>
+            <label className={styles.fieldLabel}>
+              Status
+              <Select
+                aria-label="Edit status"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value as 'active' | 'suspended')}
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'suspended', label: 'Suspended' },
+                ]}
+              />
+            </label>
+          </div>
+          {saveEditor.error ? <p role="alert">{saveEditor.error.message}</p> : null}
         </div>
       </Dialog>
       <ConfirmDialog
@@ -661,60 +558,24 @@ export function AfHomesStaffPage() {
           setConfirmation('');
         }}
         onConfirm={() => changeAccount.mutate()}
-        title={
-          accountAction?.kind === 'delete'
-            ? 'Permanently Delete Staff Account'
-            : 'Deactivate Staff Account'
-        }
+        title="Delete Staff Account"
         message={
           <div>
-            <p>
-              {accountAction?.kind === 'delete'
-                ? 'Remove login if records allow. This cannot be undone.'
-                : 'Block staff access now. Keep history records intact.'}
-            </p>
-            {accountAction?.kind === 'delete' ? (
-              <TextField
-                id="staff-delete-confirm"
-                name="deleteConfirm"
-                label="Type DELETE to confirm staff deletion"
-                value={confirmation}
-                onChange={setConfirmation}
-              />
-            ) : null}
+            <p>Remove login if records allow. This cannot be undone.</p>
+            <TextField
+              id="staff-delete-confirm"
+              name="deleteConfirm"
+              label="Type DELETE to confirm staff deletion"
+              value={confirmation}
+              onChange={setConfirmation}
+            />
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>
         }
         danger
-        confirmLabel={accountAction?.kind === 'delete' ? 'Delete Permanently' : 'Confirm'}
-        confirmDisabled={accountAction?.kind === 'delete' && confirmation !== 'DELETE'}
+        confirmLabel="Delete"
+        confirmDisabled={confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}
-      />
-      <ConfirmDialog
-        open={purgeTarget !== null}
-        onCancel={() => {
-          setPurgeTarget(null);
-          setPurgeConfirmation('');
-        }}
-        onConfirm={() => purgeTestAccount.mutate()}
-        title="Purge Test Account"
-        message={
-          <div>
-            <p>Delete test account now. Real data never purged.</p>
-            <TextField
-              id="staff-purge-confirm"
-              name="purgeConfirm"
-              label="Type PURGE to confirm purge"
-              value={purgeConfirmation}
-              onChange={setPurgeConfirmation}
-            />
-            {purgeTestAccount.error ? <p role="alert">{purgeTestAccount.error.message}</p> : null}
-          </div>
-        }
-        danger
-        confirmLabel="Purge Test Account"
-        confirmDisabled={purgeConfirmation !== 'PURGE'}
-        confirmLoading={purgeTestAccount.isPending}
       />
     </section>
   );

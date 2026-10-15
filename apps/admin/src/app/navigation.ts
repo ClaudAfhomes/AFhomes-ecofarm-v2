@@ -138,13 +138,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     module: 'network.genealogy',
     dropdown: [
       { to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' },
-      {
-        to: '/admin/ost/applications',
-        label: 'OST Applications',
-        module: 'network.ost_registrations',
-      },
-      { to: '/admin/ost/members', label: 'OST Members', module: 'network.ost_members' },
-      { to: '/admin/ost/referral-code', label: 'Referral Code', module: 'network.referrals' },
+      { to: '/admin/network/members', label: 'Members', module: 'network.members' },
     ],
   },
   {

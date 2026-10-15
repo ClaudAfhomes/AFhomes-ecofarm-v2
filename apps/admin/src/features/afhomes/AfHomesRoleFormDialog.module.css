@@ -62,6 +62,12 @@
   font-weight: 600;
 }
 
+.fieldLabel {
+  display: grid;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+
 .permissionHead {
   display: flex;
   flex-wrap: wrap;
@@ -213,4 +219,3 @@
   background-color: var(--color-accent-soft);
   color: var(--color-accent-strong);
 }
-

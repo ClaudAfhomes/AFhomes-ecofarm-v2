@@ -36,11 +36,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order('role_id'),
       ),
       readSearchRows(db.from('roles').select('id,slug').eq('is_active', true).order('id')),
+      // Every edge, active or retired: the display head walks THROUGH a
+      // departed (non-active) head to the next higher active one, so a
+      // resignation reads as OST -> SM -> SVD without rewriting history.
+      // A manually reassigned seller keeps its active edge, which always wins.
       readSearchRows(
         db
           .from('referral_relationships')
-          .select('subject_staff_id,upline_staff_id')
-          .eq('is_active', true)
+          .select('subject_staff_id,upline_staff_id,is_active')
           .order('subject_staff_id')
           .order('upline_staff_id'),
       ),
@@ -60,7 +63,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .parse(assignRows);
     const roles = z.array(z.object({ id: z.string(), slug: z.string() })).parse(roleRows);
     const rels = z
-      .array(z.object({ subject_staff_id: z.string(), upline_staff_id: z.string() }))
+      .array(
+        z.object({
+          subject_staff_id: z.string(),
+          upline_staff_id: z.string(),
+          is_active: z.boolean(),
+        }),
+      )
       .parse(relRows);
     const ost = z
       .array(z.object({ id: z.string(), status: z.enum(['active', 'inactive', 'suspended']) }))
@@ -74,12 +83,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         roleById.get(a.role_id),
       ]),
     );
-    const parent = new Map<string, string>(
-      (rels ?? []).map((r: { subject_staff_id: string; upline_staff_id: string }) => [
-        r.subject_staff_id,
-        r.upline_staff_id,
-      ]),
+    const activeParent = new Map<string, string>();
+    const storedUplines = new Map<string, string[]>();
+    for (const r of rels ?? []) {
+      const list = storedUplines.get(r.subject_staff_id) ?? [];
+      list.push(r.upline_staff_id);
+      storedUplines.set(r.subject_staff_id, list);
+      if (r.is_active === true && !activeParent.has(r.subject_staff_id)) {
+        activeParent.set(r.subject_staff_id, r.upline_staff_id);
+      }
+    }
+    const statusByStaff = new Map<string, string>(
+      (staff ?? []).map((s: { id: string; status: string }) => [s.id, s.status]),
     );
+    /**
+     * Display head: the nearest ACTIVE ancestor. A departed head's retired
+     * edge is walked through, never resurrected as an authority - the walk
+     * only ever RETURNS an active head. Cycle-guarded.
+     */
+    const displayParent = (id: string): string | null => {
+      const seen = new Set([id]);
+      let cursor =
+        (activeParent.has(id) ? activeParent.get(id) : storedUplines.get(id)?.[0]) ?? null;
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        if (statusByStaff.get(cursor) === 'active') return cursor;
+        cursor =
+          (activeParent.has(cursor) ? activeParent.get(cursor) : storedUplines.get(cursor)?.[0]) ??
+          null;
+      }
+      return null;
+    };
+    const parent = new Map<string, string>();
+    for (const s of staff ?? []) {
+      const head = displayParent((s as { id: string }).id);
+      if (head) parent.set((s as { id: string }).id, head);
+    }
     const children = new Map<string, string[]>();
     for (const [child, p] of parent) {
       children.set(p, [...(children.get(p) ?? []), child]);

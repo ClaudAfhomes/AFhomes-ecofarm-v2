@@ -874,8 +874,17 @@ export class FakeSupabase {
       if (this.writeErrors.role_permissions || this.writeErrors.roles)
         return { data: null, error: this.writeErrors.role_permissions ?? this.writeErrors.roles };
       if (input.name !== undefined) role.name = input.name;
-      if (input.description !== undefined) role.description = input.description;
       if (input.isActive !== undefined) role.is_active = input.isActive;
+      if (input.departmentId !== undefined) {
+        if (input.departmentId !== null) {
+          const department = this.rows('departments').find(
+            (d) => d.id === input.departmentId && d.is_active,
+          );
+          if (!department)
+            return { data: null, error: { message: 'VALIDATION_ERROR: Unknown department' } };
+        }
+        role.department_id = input.departmentId;
+      }
       if (Array.isArray(input.permissions)) {
         this.tables.role_permissions = this.rows('role_permissions').filter(
           (p) => p.role_id !== args.p_role,

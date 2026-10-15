@@ -741,3 +741,12 @@ typechecking.
 
 **Do not deploy, run migrations against production, or trigger remote crons
 without explicit approval.**
+
+## Version control
+
+The agent must never stage, commit, push, publish, or otherwise alter git
+state — no `git add`, `git commit`, `git push`, branch, tag, stash, reset, or
+GitHub action (PRs, merges, releases) of any kind — unless the user has
+explicitly commanded it in the current session. Reading history, status, and
+diffs is always allowed. File edits in the working tree are normal work; moving
+them into git is not.

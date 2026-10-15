@@ -31,6 +31,7 @@ export const afHomesModuleKeySchema = z.enum([
   'finance.points',
   'network.ost_registrations',
   'network.ost_members',
+  'network.members',
   'network.genealogy',
   'network.referrals',
   'network.commissions',
@@ -148,6 +149,7 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
   { key: 'network.referrals', label: 'Referral & QR Codes', group: 'Network', sortOrder: 53 },
   { key: 'network.commissions', label: 'Commissions', group: 'Network', sortOrder: 54 },
   { key: 'network.withdrawals', label: 'OST Withdrawals', group: 'Network', sortOrder: 55 },
+  { key: 'network.members', label: 'Members', group: 'Network', sortOrder: 56 },
   {
     key: 'operations.redemption',
     label: 'Redemption / POS',
@@ -229,9 +231,11 @@ export const afHomesRoleSchema = z.object({
   id: z.string().uuid(),
   slug: z.string(),
   name: z.string(),
-  description: z.string().nullable(),
   isSystem: z.boolean(),
   isActive: z.boolean(),
+  /** Owning department. Null for rows created before the role-department link. */
+  departmentId: z.string().uuid().nullable(),
+  departmentName: z.string().nullable(),
   assignedCount: z.number().int().nonnegative(),
   permissions: z.array(afHomesPermissionSchema),
   createdAt: z.string(),
@@ -372,8 +376,9 @@ export type AfHomesDashboard = z.infer<typeof afHomesDashboardSchema>;
 
 export const createAfHomesRoleSchema = z.object({
   name: z.string().trim().min(2).max(80),
-  description: z.string().trim().max(500).optional(),
   isActive: z.boolean().default(true),
+  /** Owning department. Required: a role is always created inside a department. */
+  departmentId: z.string().uuid(),
   permissions: z.array(afHomesPermissionSchema),
 });
 export const inviteAfHomesStaffSchema = z.object({

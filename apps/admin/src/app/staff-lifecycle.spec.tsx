@@ -47,7 +47,6 @@ import {
   getAfHomesStaff,
   getAfHomesStaffAudit,
   getAfHomesStaffById,
-  purgeTestAfHomesStaff,
 } from '../features/afhomes/services';
 
 const grant = (
@@ -115,9 +114,10 @@ const ROLE_ROW = {
   id: 'r-admin',
   slug: 'qa_custom_role',
   name: 'QA Custom Role',
-  description: 'Operations admin',
   isSystem: false,
   isActive: true,
+  departmentId: 'd-1',
+  departmentName: 'Executive',
   assignedCount: 1,
   permissions: [grant('dashboard.view'), grant('organization.staff')],
   createdAt: '2026-09-01T00:00:00.000Z',
@@ -254,12 +254,12 @@ describe('temporary-password staff creation', () => {
 describe('permanent staff deletion', () => {
   async function confirmPermanentDelete() {
     await screen.findByText('Ana Reyes');
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete Permanently' });
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
     fireEvent.click(deleteButtons[deleteButtons.length - 1]!);
     fireEvent.change(screen.getByLabelText('Type DELETE to confirm staff deletion'), {
       target: { value: 'DELETE' },
     });
-    const confirmButtons = screen.getAllByRole('button', { name: 'Delete Permanently' });
+    const confirmButtons = screen.getAllByRole('button', { name: 'Delete' });
     fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
   }
 
@@ -299,190 +299,56 @@ describe('permanent staff deletion', () => {
   });
 });
 
-describe('test-account purge', () => {
-  const PURGE_RESULT = {
-    purged: true as const,
-    counts: {
-      staff: 1,
-      restrictions: 0,
-      assignments: 1,
-      invitations: 0,
-      sales: 0,
-      customers: 0,
-      payments: 0,
-      memberships: 0,
-      history: 0,
-    },
-    authUserDeleted: true,
-  };
-
-  async function confirmTestPurge() {
-    await screen.findByText('Ana Reyes');
-    const purgeButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
-    fireEvent.click(purgeButtons[purgeButtons.length - 1]!);
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
-      target: { value: 'PURGE' },
-    });
-    const confirmButtons = screen.getAllByRole('button', { name: 'Purge Test Account' });
-    fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
-  }
-
-  it('shows Purge Test Account for a test-domain row when the flag is on', async () => {
-    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-    await screen.findByText('Ana Reyes');
-    // ana@afhomes.test is RFC-reserved: eligible. The normal delete stays too.
-    expect(screen.getAllByRole('button', { name: 'Purge Test Account' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(0);
-  });
-
-  it('hides Purge Test Account for a real-domain row', async () => {
-    vi.mocked(getAfHomesStaff).mockResolvedValue([
-      { ...STAFF_ROW, email: 'ana.reyes@afhomes.ph' },
-    ] as never);
-    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-    await screen.findByText('Ana Reyes');
-    expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Delete Permanently' }).length).toBeGreaterThan(0);
-  });
-
-  it('hides Purge Test Account when the server flag is off', async () => {
-    renderWithProviders(<App />, {
-      route: '/admin/staff',
-      user: { ...SUPER, testPurgeEnabled: false },
-    });
-    await screen.findByText('Ana Reyes');
-    expect(screen.queryByRole('button', { name: 'Purge Test Account' })).toBeNull();
-  });
-
-  it('requires the exact PURGE confirmation and removes the row on success', async () => {
-    vi.mocked(purgeTestAfHomesStaff).mockResolvedValueOnce(PURGE_RESULT);
-    vi.mocked(getAfHomesStaff)
-      .mockResolvedValueOnce([STAFF_ROW] as never)
-      .mockResolvedValueOnce([] as never);
-    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-    await screen.findByText('Ana Reyes');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Purge Test Account' })[0]!);
-    // Any other confirmation text keeps the destructive action disabled.
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
-      target: { value: 'DELETE' },
-    });
-    const confirm = screen.getAllByRole('button', { name: 'Purge Test Account' }).pop()!;
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Type PURGE to confirm purge'), {
-      target: { value: 'PURGE' },
-    });
-    fireEvent.click(confirm);
-    await waitFor(() => expect(purgeTestAfHomesStaff).toHaveBeenCalledWith(STAFF_ROW.id));
-    await waitFor(() => expect(screen.queryByText('Ana Reyes')).toBeNull());
-  });
-
-  it('surfaces a non-test refusal without a generic error', async () => {
-    vi.mocked(purgeTestAfHomesStaff).mockRejectedValueOnce(
-      new Error('Only test accounts can be purged.'),
-    );
-    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-    await confirmTestPurge();
-    expect(await screen.findByRole('alert')).toHaveTextContent('Only test accounts can be purged.');
-  });
-});
-
-describe('staff restrictions module dropdowns', () => {
-  const openRestrictions = async (member: Record<string, unknown>) => {
-    vi.mocked(getAfHomesStaff).mockResolvedValue([member] as never);
-    vi.mocked(getAfHomesRoles).mockResolvedValue([
-      {
-        ...ROLE_ROW,
-        permissions: [
-          grant('dashboard.view'),
-          grant('sales.customers'),
-          grant('finance.points'),
-          grant('finance.card_activation'),
-        ],
-      },
-    ] as never);
-    renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-    fireEvent.click(await screen.findByRole('button', { name: 'Restrictions' }));
-    return screen.getByRole('dialog', { name: 'Restrict Ana Reyes' });
-  };
-
-  it('renders Dashboard as a single row and keeps other groups collapsed', async () => {
-    await openRestrictions(STAFF_ROW);
-    // Dashboard owns one module, so it is its own row - no one-item dropdown.
-    expect(await screen.findByLabelText('Dashboard deny access')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Dashboard/ })).toBeNull();
-    // Sales & Customers has a single granted module here, so it is flat too: a
-    // one-row group never needs a disclosure.
-    expect(screen.getByLabelText('Customers deny access')).toBeInTheDocument();
-    // Finance has two, so it is a collapsed dropdown until asked.
-    const finance = await screen.findByRole('button', { name: /Finance/ });
-    expect(finance).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByLabelText('Points Ledger deny access')).toBeNull();
-    fireEvent.click(finance);
-    expect(screen.getByLabelText('Points Ledger deny access')).toBeInTheDocument();
-  });
-
-  it('opens a group that already carries an override', async () => {
-    await openRestrictions({
-      ...STAFF_ROW,
-      restrictions: [
-        {
-          moduleKey: 'finance.points',
-          denyView: true,
-          denyCreate: false,
-          denyUpdate: false,
-          denyDelete: false,
-        },
-      ],
-    });
-    const finance = await screen.findByRole('button', { name: /Finance/ });
-    expect(finance).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByLabelText('Points Ledger deny access')).toBeChecked();
-  });
-});
-
 describe('staff and role detail pages', () => {
   it('navigates from the staff list to a real detail page', async () => {
     renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
     await screen.findByText('Ana Reyes');
     fireEvent.click(screen.getByRole('link', { name: 'View staff member Ana Reyes' }));
-    expect(await screen.findByText('Staff information')).toBeTruthy();
-    expect(screen.getByText('Account state')).toBeTruthy();
-    expect(screen.getByText('Audit history')).toBeTruthy();
+    expect(await screen.findByText('Identity')).toBeTruthy();
+    expect(screen.getByText('Assignment')).toBeTruthy();
+    expect(screen.queryByText('Account state')).toBeNull();
+    expect(screen.queryByText('Audit history')).toBeNull();
   });
 
-  it('blocks self-assignment edits on the own detail page', async () => {
+  it('blocks self edits on the own detail page', async () => {
     const self: SessionUser = { ...SUPER, id: 's-1', name: 'Ana Reyes' };
     renderWithProviders(<App />, { route: '/admin/staff/s-1', user: self });
-    await screen.findByText('Staff information');
+    await screen.findByText('Identity');
     expect(
-      await screen.findByText('You cannot edit your own assignment. Ask another administrator.'),
+      await screen.findByText('You cannot edit your own account. Ask another administrator.'),
     ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Save assignment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
 
-  it('renders the role detail with permissions and history', async () => {
+  it('renders the role detail with permissions and staff', async () => {
     renderWithProviders(<App />, { route: '/admin/roles/r-admin', user: SUPER });
     expect(await screen.findByText('Permissions')).toBeTruthy();
     expect(screen.getByText('Assigned staff (1)')).toBeTruthy();
-    expect(screen.getByText('Audit history')).toBeTruthy();
+    expect(screen.queryByText('Audit history')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Edit role' }));
     expect(await screen.findByText('Save role')).toBeTruthy();
   });
 });
 
-it('shows and searches the exact stored IST accreditation ID in the staff directory', async () => {
-  vi.mocked(getAfHomesRoles).mockResolvedValue([
-    { ...ROLE_ROW, slug: 'vice_director', name: 'Vice Director' },
-  ]);
-  vi.mocked(getAfHomesStaff).mockResolvedValue([
-    { ...STAFF_ROW, status: 'active', aaNumber: 'AAI26100001' },
-  ]);
-  renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
-  expect(await screen.findByText('AAI26100001')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Copy ID AAI26100001' })).toBeInTheDocument();
-  const input = screen.getByRole('searchbox');
-  fireEvent.change(input, { target: { value: 'aai26100001' } });
-  await waitFor(() => expect(screen.getByText('Ana Reyes')).toBeInTheDocument());
-  fireEvent.change(input, { target: { value: 'aai26109999' } });
-  expect(await screen.findByText('No staff found')).toBeInTheDocument();
+it('edits assignment from the detail page with Delete and Edit only', async () => {
+  const { updateAfHomesStaff } = await import('../features/afhomes/services');
+  renderWithProviders(<App />, { route: '/admin/staff/s-1', user: SUPER });
+  await screen.findByText('Identity');
+  expect(screen.queryByText('Invited')).toBeNull();
+  expect(screen.queryByText('Activated')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Back to staff' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('Edit Ana Reyes');
+  fireEvent.change(screen.getByLabelText('Edit status'), {
+    target: { value: 'suspended' },
+  });
+  vi.mocked(updateAfHomesStaff).mockResolvedValueOnce({ ...STAFF_ROW } as never);
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(updateAfHomesStaff).toHaveBeenCalledWith(
+      STAFF_ROW.id,
+      expect.objectContaining({ status: 'suspended' }),
+    ),
+  );
 });

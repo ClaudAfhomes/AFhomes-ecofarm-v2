@@ -34,7 +34,7 @@ describe('admin session restoration', () => {
 
     expect(await screen.findByRole('status')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New Staff' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete Permanently' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Suspend' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 });

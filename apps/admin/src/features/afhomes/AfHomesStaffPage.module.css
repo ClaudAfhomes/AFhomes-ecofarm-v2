@@ -83,6 +83,18 @@
   color: var(--color-text-secondary);
 }
 
+.codeCell {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.emailCell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+
 @media (max-width: 639px) {
   div.tableWrap.tableWrap > table {
     min-width: 0;

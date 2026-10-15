@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Button, Dialog, Icon, StatusChip, TextAreaField, TextField } from '@afhomes/ui';
+import { Button, Dialog, Icon, Select, StatusChip, TextField } from '@afhomes/ui';
 import {
   MODULE_CATALOG,
   afHomesModuleKeySchema,
   groupedModuleCatalog,
+  type AfHomesDepartment,
   type AfHomesPermission,
   type AfHomesRole,
 } from '@afhomes/contracts';
-import { useSession } from '../../lib/session';
 import styles from './AfHomesRoleFormDialog.module.css';
 
 const MODULES = afHomesModuleKeySchema.options;
@@ -49,14 +49,16 @@ export function isRoleAccessProtected(
 
 export interface RoleFormInput {
   name: string;
-  description: string;
   isActive: boolean;
+  /** Owning department. Required on every save. */
+  departmentId: string;
   permissions: AfHomesPermission[];
 }
 
 export function AfHomesRoleFormDialog({
   open,
   role,
+  departments,
   saving,
   error,
   onClose,
@@ -64,23 +66,33 @@ export function AfHomesRoleFormDialog({
 }: {
   open: boolean;
   role: AfHomesRole | null;
+  departments: Pick<AfHomesDepartment, 'id' | 'name' | 'isActive'>[];
   saving: boolean;
   error: Error | null;
   onClose: () => void;
   onSave: (input: RoleFormInput) => void;
 }) {
-  const { user } = useSession();
-  const titleEditable =
-    role?.isSystem &&
-    user?.roleSlug === 'super_admin' &&
-    !['admin', 'super_admin', 'customer'].includes(role.slug);
-  const protectedAccess = isRoleAccessProtected(role, user?.roleSlug);
+  // Edit always exposes every field (Name, Active, Department, Page
+  // Access). The server stays authoritative: protected/system roles are
+  // still refused there (`api/_handlers/admin/afhomes.ts` +
+  // `update_operational_role`), so a forbidden save surfaces as a 403 rather
+  // than a hidden control.
+  const titleEditable = role?.isSystem && !['admin', 'super_admin', 'customer'].includes(role.slug);
   // Form state mounts fresh per open session: callers pass a `key` that
   // changes with each open (new vs. which role), so initializers below run
   // exactly on open and no effect-sync is needed.
   const [name, setName] = useState(role?.name ?? '');
-  const [description, setDescription] = useState(role?.description ?? '');
   const [active, setActive] = useState(role?.isActive ?? true);
+  const [departmentId, setDepartmentId] = useState(role?.departmentId ?? '');
+  // The role's current department stays selectable even when inactive, so an
+  // assigned role never opens with a blank picker it cannot keep.
+  const departmentOptions = useMemo(() => {
+    const options = departments
+      .filter((d) => d.isActive || d.id === role?.departmentId)
+      .map((d) => ({ value: d.id, label: d.name }));
+    return [{ value: '', label: 'Select a department' }, ...options];
+  }, [departments, role?.departmentId]);
+  const canSave = name.trim().length > 0 && departmentId.length > 0 && !saving;
   const [permissions, setPermissions] = useState<AfHomesPermission[]>(() =>
     role
       ? MODULES.map(
@@ -165,26 +177,20 @@ export function AfHomesRoleFormDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={
-        role
-          ? protectedAccess
-            ? `View ${role.name} access`
-            : `Edit ${role.name} access`
-          : 'Create custom role'
-      }
+      title={role ? `Edit ${role.name} access` : 'Create custom role'}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             {role?.isSystem ? 'Close' : 'Cancel'}
           </Button>
-          {!protectedAccess ? (
-            <Button
-              disabled={!name.trim() || saving}
-              onClick={() => onSave({ name, description, isActive: active, permissions })}
-            >
-              {saving ? 'Saving…' : 'Save role'}
-            </Button>
-          ) : null}
+          <Button
+            disabled={!canSave}
+            onClick={() =>
+              onSave({ name, isActive: active, departmentId, permissions })
+            }
+          >
+            {saving ? 'Saving…' : 'Save role'}
+          </Button>
         </>
       }
     >
@@ -206,8 +212,8 @@ export function AfHomesRoleFormDialog({
             </div>
           </div>
         ) : null}
-        <fieldset disabled={protectedAccess || saving} className={styles.accessFieldset}>
-          <legend>{protectedAccess ? 'Protected access — read only' : 'Role access'}</legend>
+        <fieldset disabled={saving} className={styles.accessFieldset}>
+          <legend>Role access</legend>
           <div className={styles.formGrid}>
             <TextField
               id="role-name"
@@ -217,14 +223,18 @@ export function AfHomesRoleFormDialog({
               value={name}
               onChange={setName}
             />
-            <TextAreaField
-              id="role-description"
-              name="description"
-              label="Description"
-              optional
-              value={description}
-              onChange={setDescription}
-            />
+            <label className={styles.fieldLabel}>
+              Department
+              <Select
+                aria-label="Role department"
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+                options={departmentOptions}
+              />
+            </label>
+            {departmentOptions.length <= 1 ? (
+              <p className={styles.permissionCount}>Create a department first.</p>
+            ) : null}
             <label className={styles.activeRow}>
               <input
                 type="checkbox"

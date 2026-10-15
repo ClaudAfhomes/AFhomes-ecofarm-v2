@@ -40,22 +40,29 @@ function renderDetails() {
     { route: `/admin/genealogy/${node.staffId}` },
   );
 }
-it('renders the returned upperline in an ordered list and the scoped summary badges', async () => {
+it('renders the head with scoped summary badges, never the full chain', async () => {
   vi.mocked(getGenealogyUpline).mockResolvedValue([
     {
       ...node,
       staffId: '22222222-2222-4222-8222-222222222222',
-      fullName: 'QA UPPERLINE',
+      fullName: 'QA HEAD',
       role: 'senior_sales_manager',
+    },
+    {
+      ...node,
+      staffId: '33333333-3333-4333-8333-333333333333',
+      fullName: 'QA GRANDHEAD',
+      role: 'vice_director',
     },
   ]);
   renderDetails();
-  expect(await screen.findByRole('link', { name: 'QA UPPERLINE' })).toHaveAttribute(
+  expect(await screen.findByRole('link', { name: 'QA HEAD' })).toHaveAttribute(
     'href',
     '/admin/genealogy/22222222-2222-4222-8222-222222222222',
   );
-  expect(screen.getByRole('list').tagName).toBe('OL');
-  expect(await screen.findByText('Total descendants: 3')).toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'QA GRANDHEAD' })).toBeNull();
+  expect(screen.queryByText('Total descendants: 3')).toBeNull();
+  expect(await screen.findByText('Direct downline: 1')).toBeInTheDocument();
 });
 it('shows a retryable upperline error instead of claiming the seller is top-level', async () => {
   vi.mocked(getGenealogyUpline).mockRejectedValue(new Error('Private SQL'));

@@ -96,6 +96,14 @@ export const BUSINESS_FAMILIES = [
   },
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
   { prefix: 'genealogy', module: 'genealogy', load: () => import('../_handlers/genealogy.js') },
+  // Sales-network Members: hierarchy sellers with a linked profile record.
+  // Own module key (`network.members`); the handler authorizes list, uplines,
+  // create and update separately.
+  {
+    prefix: 'members',
+    module: 'network.members',
+    load: () => import('../_handlers/members.js'),
+  },
   { prefix: 'analytics', module: 'analytics', load: () => import('../_handlers/analytics.js') },
   // Phase 15 Reports and Audit Center. One family for the ten scoped reports
   // plus the audit log; the handler authorizes each report against its own
