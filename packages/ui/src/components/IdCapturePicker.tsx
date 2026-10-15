@@ -17,10 +17,17 @@ export function IdCapturePicker({
   onFile,
   disabled = false,
   resetVersion = 0,
+  onCancel,
+  cancelLabel = 'Cancel selection',
+  showCancel = false,
 }: {
   onFile: (file: File | null) => void;
   disabled?: boolean;
   resetVersion?: number;
+  /** Clears the pending selection. Shown beside Take photo when set. */
+  onCancel?: () => void;
+  cancelLabel?: string;
+  showCancel?: boolean;
 }) {
   const upload = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
@@ -92,6 +99,11 @@ export function IdCapturePicker({
       >
         Take a photo
       </Button>
+      {showCancel && onCancel ? (
+        <Button type="button" variant="danger" disabled={disabled} onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+      ) : null}
 
       <Dialog
         open={sheetOpen}

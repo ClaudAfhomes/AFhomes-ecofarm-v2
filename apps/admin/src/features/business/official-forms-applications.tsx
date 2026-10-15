@@ -55,6 +55,7 @@ import {
   TextAreaField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
+import { tierArtwork } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
@@ -90,6 +91,7 @@ import {
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
   RecommenderFields,
+  formatFileSize,
 } from './official-forms-fields';
 
 export function CustomerApplicationsPage() {
@@ -592,6 +594,12 @@ export function CustomerApplicationEditorPage() {
   }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  // Steps unlock only by moving forward. Going back is always free; jumping
+  // ahead never is, so an operator cannot skip a step's own checks. Existing
+  // records open unlocked: their data was entered before, or the form below
+  // is read-only review anyway.
+  const [maxReached, setMaxReached] = useState(() => (id ? 5 : 0));
   const uploadPendingId = useCallback(
     async (targetCustomerId: string, file: File, type: string) => {
       const mime = ACCEPTED_MIME.find((value) => value === file.type);
@@ -968,18 +976,54 @@ export function CustomerApplicationEditorPage() {
       Save &amp; Submit
     </Button>
   );
+  const primaryComplete = [
+    primary.firstName,
+    primary.lastName,
+    primary.birthDate,
+    primary.mobile,
+    primary.email,
+    primary.printedName,
+  ].every((field) => field.trim() !== '');
+  // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
+  // the final authority, and Next can never refuse what Save allows.
+  const stepBlockers: (string | null)[] = [
+    !planId ? 'Select a VIP plan.' : null,
+    !serverCurrentDocument?.reviewedFields?.idType && !idFile
+      ? 'Upload a valid ID and choose its ID type.'
+      : idFile && !idType
+        ? 'Choose ID type first.'
+        : null,
+    Object.values(invalidFields).some(Boolean)
+      ? 'Correct the highlighted fields.'
+      : !primaryComplete
+        ? 'Complete primary holder fields.'
+        : null,
+    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
+    null,
+    null,
+  ];
   const steps = [
-    { id: 'step-application', label: 'Application', done: Boolean(planId && customerId) },
+    { id: 'step-application', label: 'Application', done: Boolean(planId) },
     {
       id: 'step-identity',
       label: 'Identity',
       done: Boolean(serverCurrentDocument?.reviewedFields?.idType || idFile),
     },
-    { id: 'step-primary', label: 'Primary', done: Boolean(primary.firstName && primary.lastName) },
+    { id: 'step-holders', label: 'Holders', done: primaryComplete },
     { id: 'step-recommender', label: 'Recommender', done: Boolean(meta.acknowledgedAt) },
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
+  const goStep = (index: number) => {
+    if (index < 0 || index > steps.length - 1 || index > maxReached) return;
+    setActiveStep(index);
+  };
+  const goNext = () => {
+    if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
+    const next = activeStep + 1;
+    setMaxReached((reached) => Math.max(reached, next));
+    setActiveStep(next);
+  };
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section className={styles.editorSection}>
@@ -1000,16 +1044,31 @@ export function CustomerApplicationEditorPage() {
         </Alert>
         <nav aria-label="Application steps" className={styles.stepper}>
           <ol className={styles.stepperList}>
-            {steps.map((step, index) => (
-              <li key={step.id} className={styles.stepperItem} data-done={step.done}>
-                <a href={`#${step.id}`} className={styles.stepperLink}>
-                  <span className={styles.stepperIndex} aria-hidden="true">
-                    {step.done ? '✓' : index + 1}
-                  </span>
-                  <span className={styles.stepperLabel}>{step.label}</span>
-                </a>
-              </li>
-            ))}
+            {steps.map((step, index) => {
+              const current = index === activeStep;
+              const reachable = index <= maxReached;
+              return (
+                <li
+                  key={step.id}
+                  className={styles.stepperItem}
+                  data-done={step.done}
+                  data-current={current}
+                >
+                  <button
+                    type="button"
+                    className={styles.stepperLink}
+                    disabled={!reachable}
+                    aria-current={current ? 'step' : undefined}
+                    onClick={() => goStep(index)}
+                  >
+                    <span className={styles.stepperIndex} aria-hidden="true">
+                      {step.done ? '✓' : index + 1}
+                    </span>
+                    <span className={styles.stepperLabel}>{step.label}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ol>
         </nav>
         {existing.data ? (
@@ -1124,6 +1183,11 @@ export function CustomerApplicationEditorPage() {
               </div>
               <TierBadge tier={selectedPlan.code} />
             </div>
+            {['GOLD', 'SILVER', 'BRONZE'].includes(selectedPlan.code.trim().toUpperCase()) ? (
+              <div className={styles.planArt}>
+                <img {...tierArtwork(selectedPlan.code)} className={styles.planArtImage} />
+              </div>
+            ) : null}
             <DetailFieldGrid className={styles.planGrid}>
               <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
               <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
@@ -1141,6 +1205,7 @@ export function CustomerApplicationEditorPage() {
           </DetailCard>
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
+          {activeStep === 0 && (
           <section
             id="step-application"
             className={styles.panel}
@@ -1219,6 +1284,8 @@ export function CustomerApplicationEditorPage() {
               </label>
             </div>
           </section>
+          )}
+          {activeStep === 1 && (
           <section
             id="step-identity"
             className={styles.panel}
@@ -1248,6 +1315,7 @@ export function CustomerApplicationEditorPage() {
               ) : null}
               {idFile ? (
                 <div role="status" className={styles.idReady}>
+                  <p className={styles.hint}>Ready to upload on save.</p>
                   {idPreviewUrl ? (
                     <button
                       type="button"
@@ -1258,25 +1326,17 @@ export function CustomerApplicationEditorPage() {
                       <img
                         src={idPreviewUrl}
                         alt="ID preview thumbnail"
-                        className={styles.thumbnail}
+                        className={styles.thumbnailLarge}
                       />
+                      <span className={styles.thumbnailZoom}>
+                        {idFile.name} · {formatFileSize(idFile.size)} · Click to enlarge
+                      </span>
                     </button>
                   ) : (
-                    <p className={styles.hint}>Ready to upload on save.</p>
+                    <p className={styles.hint}>
+                      {idFile.name} · {formatFileSize(idFile.size)}
+                    </p>
                   )}
-                  <div className={styles.idReadyActions}>
-                    <span className={styles.hint}>Ready to upload on save.</span>
-                    <Button
-                      variant="secondary"
-                      disabled={saveAndSubmit.isPending}
-                      onClick={() => {
-                        setIdFile(null);
-                        setPickerVersion((version) => version + 1);
-                      }}
-                    >
-                      Cancel selection
-                    </Button>
-                  </div>
                 </div>
               ) : null}
               <label className={styles.filterLabel}>
@@ -1301,6 +1361,11 @@ export function CustomerApplicationEditorPage() {
                 onFile={setIdFile}
                 disabled={saveAndSubmit.isPending}
                 resetVersion={pickerVersion}
+                showCancel={Boolean(idFile)}
+                onCancel={() => {
+                  setIdFile(null);
+                  setPickerVersion((version) => version + 1);
+                }}
               />
               <Dialog
                 open={previewOpen && Boolean(idPreviewUrl)}
@@ -1316,9 +1381,10 @@ export function CustomerApplicationEditorPage() {
               ) : null}
             </fieldset>
           </section>
-          <div id="step-primary">
+          )}
+          {activeStep === 2 && (
+          <div id="step-holders">
             <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
-          </div>
           <label className={styles.checkRow}>
             <input
               type="checkbox"
@@ -1330,13 +1396,16 @@ export function CustomerApplicationEditorPage() {
           </label>
           {secondary ? (
             <HolderFields
-              title="4. Secondary holder (gold optional)"
+              title="Secondary holder (gold optional)"
               value={secondary}
               onChange={setSecondary}
             />
           ) : null}
+          </div>
+          )}
+          {activeStep === 3 && (
           <fieldset id="step-recommender" className={styles.panel}>
-            <legend className={styles.panelTitle}>5. Recommender details</legend>
+            <legend className={styles.panelTitle}>4. Recommender details</legend>
             <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
             <div className={styles.editorGrid}>
               <RecommenderFields
@@ -1347,8 +1416,10 @@ export function CustomerApplicationEditorPage() {
               />
             </div>
           </fieldset>
+          )}
+          {activeStep === 4 && (
           <fieldset id="step-channel" className={styles.panel}>
-            <legend className={styles.panelTitle}>6. Acquisition channel</legend>
+            <legend className={styles.panelTitle}>5. Acquisition channel</legend>
             {[
               'CMP',
               'DRP',
@@ -1374,8 +1445,10 @@ export function CustomerApplicationEditorPage() {
               </label>
             ))}
           </fieldset>
+          )}
+          {activeStep === 5 && (
           <fieldset id="step-cert" className={styles.panel}>
-            <legend className={styles.panelTitle}>7. Certification</legend>
+            <legend className={styles.panelTitle}>6. Certification</legend>
             <label className={styles.checkRow}>
               <input
                 type="checkbox"
@@ -1393,6 +1466,7 @@ export function CustomerApplicationEditorPage() {
               Valid government ID with specimen signatures received
             </label>
           </fieldset>
+          )}
         </fieldset>
         {blockers.length > 0 ? (
           <Alert variant="warning" title="Cannot save and submit yet:">
@@ -1404,7 +1478,28 @@ export function CustomerApplicationEditorPage() {
           </Alert>
         ) : null}
         <div className={styles.stickyFooter}>
-          <div className={styles.stickyFooterActions}>{saveAction}</div>
+          <div className={styles.stickyFooterActions}>
+            {activeStep > 0 ? (
+              <Button variant="secondary" onClick={() => goStep(activeStep - 1)}>
+                Back
+              </Button>
+            ) : null}
+            {activeStep < steps.length - 1 ? (
+              <Button
+                onClick={goNext}
+                disabled={stepBlockers[activeStep] !== null}
+                title={stepBlockers[activeStep] ?? undefined}
+              >
+                Next
+              </Button>
+            ) : null}
+            {saveAction}
+          </div>
+          {activeStep < steps.length - 1 && stepBlockers[activeStep] ? (
+            <p className={styles.hint} role="status">
+              Next needs: {stepBlockers[activeStep]}
+            </p>
+          ) : null}
         </div>
         <p>
           {' '}

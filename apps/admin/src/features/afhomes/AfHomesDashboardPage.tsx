@@ -113,10 +113,9 @@ const METRIC_PRESENTATION: Record<string, { icon: IconName; description: string 
   'Total Customers': { icon: 'users', description: 'Customers in your authorized scope' },
   'New Applications': { icon: 'user-plus', description: 'New in the selected period' },
   'Card Sales': { icon: 'file-text', description: 'Sales in the selected period' },
-  'Total Sales': { icon: 'wallet', description: 'Frozen sale value in the selected period' },
+  'Total Sales': { icon: 'wallet', description: 'Frozen sales in selected period.' },
   'Card sales': { icon: 'file-text', description: '' },
   'My sales': { icon: 'file-text', description: 'Sales you recorded in period' },
-  'Frozen sale value': { icon: 'wallet', description: '' },
   'New customers': { icon: 'user-plus', description: '' },
   'Direct reports': { icon: 'users', description: 'Your first-level team' },
   Descendants: { icon: 'users', description: 'Everyone below you' },
@@ -440,7 +439,7 @@ export function AfHomesDashboardPage() {
                       <TableRow>
                         <TableHeaderCell>Scheme</TableHeaderCell>
                         <TableHeaderCell align="right">Sales</TableHeaderCell>
-                        <TableHeaderCell align="right">Frozen value</TableHeaderCell>
+                        <TableHeaderCell align="right">Total Sales</TableHeaderCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -459,7 +458,7 @@ export function AfHomesDashboardPage() {
                             {formatCount(entry.count)}
                           </TableCell>
                           <ShareCell
-                            label="Frozen value"
+                            label="Total Sales"
                             value={entry.value}
                             largest={largestSchemeValue}
                             tone={styles[SCHEME_TONE[entry.scheme] ?? 'toneNeutral']}
@@ -480,7 +479,7 @@ export function AfHomesDashboardPage() {
                       <TableRow>
                         <TableHeaderCell>Plan</TableHeaderCell>
                         <TableHeaderCell align="right">Sales</TableHeaderCell>
-                        <TableHeaderCell align="right">Frozen value</TableHeaderCell>
+                        <TableHeaderCell align="right">Total Sales</TableHeaderCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -499,7 +498,7 @@ export function AfHomesDashboardPage() {
                             {formatCount(plan.count)}
                           </TableCell>
                           <ShareCell
-                            label="Frozen value"
+                            label="Total Sales"
                             value={plan.value}
                             largest={largestPlanValue}
                             tone={styles[planTone(plan.planName)]}

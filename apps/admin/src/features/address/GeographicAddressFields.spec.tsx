@@ -254,6 +254,56 @@ describe('GeographicAddressFields cascade', () => {
   });
 });
 
+describe('GeographicAddressFields postal code', () => {
+  const SAN_PABLO = {
+    code: '0403424000',
+    name: 'City of San Pablo',
+    type: 'city' as const,
+    provinceCode: LAGUNA.code,
+    postalCode: '4000',
+  };
+  // Magdalena publishes no zip upstream: absence is data, not a failure.
+  const MAGDALENA = {
+    code: '0403415000',
+    name: 'Magdalena',
+    type: 'municipality' as const,
+    provinceCode: LAGUNA.code,
+  };
+
+  it('emits the published postal code when the locality is chosen', async () => {
+    vi.spyOn(services, 'getAddressLocalities').mockResolvedValue([SAN_PABLO]);
+    const { user, onChange } = setup();
+
+    await choose(user, province(), 'Laguna');
+    await choose(user, locality(), /San Pablo/);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cityMunicipality: 'City of San Pablo',
+        cityMunicipalityCode: SAN_PABLO.code,
+        postalCode: '4000',
+      }),
+    );
+  });
+
+  it('clears postal when the newly chosen locality publishes no zip', async () => {
+    vi.spyOn(services, 'getAddressLocalities').mockResolvedValue([SAN_PABLO, MAGDALENA]);
+    const { user, onChange } = setup();
+
+    await choose(user, province(), 'Laguna');
+    await choose(user, locality(), /San Pablo/);
+    await choose(user, locality(), /Magdalena/);
+
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cityMunicipality: 'Magdalena',
+        cityMunicipalityCode: MAGDALENA.code,
+        postalCode: undefined,
+      }),
+    );
+  });
+});
+
 describe('GeographicAddressFields failure states', () => {
   it('offers a retry when the localities cannot be loaded', async () => {
     vi.spyOn(services, 'getAddressLocalities').mockRejectedValue(new Error('down'));
