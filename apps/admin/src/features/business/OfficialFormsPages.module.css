@@ -399,6 +399,23 @@
   border-radius: var(--radius-control);
 }
 
+/* Large ID thumbnail: filename, size and zoom hint under the image. */
+.thumbnailLarge {
+  width: min(100%, 20rem);
+  height: auto;
+  max-height: 14rem;
+  object-fit: cover;
+  border-radius: var(--radius-control);
+}
+
+.thumbnailZoom {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .previewImage {
   width: 100%;
   height: auto;
@@ -745,6 +762,23 @@
   color: var(--color-text-primary);
 }
 
+.stepperItem[data-current='true'] .stepperLink {
+  border-color: var(--color-brand-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
+  color: var(--color-text-primary);
+}
+
+/* The stepper renders buttons, not links: reset native chrome. */
+button.stepperLink {
+  font: inherit;
+  cursor: pointer;
+}
+
+button.stepperLink:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .stepperIndex {
   display: inline-flex;
   align-items: center;
@@ -774,17 +808,36 @@
 
 .planGOLD {
   border-color: #c9a227;
-  background: linear-gradient(180deg, #fffdf3 0%, var(--color-bg-surface) 60%);
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 45%, var(--color-bg-surface) 100%);
 }
 
 .planSILVER {
   border-color: #9aa3ad;
-  background: linear-gradient(180deg, #f8fafc 0%, var(--color-bg-surface) 60%);
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 45%, var(--color-bg-surface) 100%);
 }
 
 .planBRONZE {
   border-color: #b0793a;
-  background: linear-gradient(180deg, #fdf6ec 0%, var(--color-bg-surface) 60%);
+  background: linear-gradient(135deg, #fdf0e0 0%, #f5d6a8 45%, var(--color-bg-surface) 100%);
+}
+
+/* Official card artwork banner: the physical card, full width. */
+.planArt {
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgb(28 43 58 / 0.06), transparent);
+}
+
+.planArtImage {
+  display: block;
+  width: min(100%, 22rem);
+  height: auto;
+  aspect-ratio: 1.58;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 24px rgb(28 43 58 / 0.25));
 }
 
 .planBenefitsHead {

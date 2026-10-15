@@ -143,7 +143,7 @@ export function ReportsPage() {
     return String(value);
   };
   const summaryKeyLabel = (key: string): string => {
-    if (key === 'grossFrozenValue') return 'Gross Sales Value';
+    if (key === 'grossFrozenValue') return 'Total Sales';
     if (key === 'verifiedPaid') return 'Verified Paid';
     if (key === 'remaining') return 'Remaining Balance';
     return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());

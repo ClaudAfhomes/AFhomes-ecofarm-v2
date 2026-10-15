@@ -163,7 +163,6 @@ const CUSTOMER_ADMIN: SessionUser = {
   ],
 };
 
-
 afterEach(() => vi.clearAllMocks());
 
 beforeEach(() => {
@@ -433,11 +432,15 @@ describe('Card Plans states', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), { target: { value: '80000.00' } });
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), {
+      target: { value: '80000.00' },
+    });
     fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '100000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), { target: { value: '80000' } });
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), {
+      target: { value: '80000' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Create plan' }));
 
     await waitFor(() => expect(mockedCreateCardProduct).toHaveBeenCalled());
@@ -461,18 +464,21 @@ describe('Card Plans states', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), { target: { value: '5000.00' } });
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), {
+      target: { value: '5000.00' },
+    });
     fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '12000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), { target: { value: '80000' } });
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Reservation fee cannot exceed the spot cash price',
-    );
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), {
+      target: { value: '80000' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Reservation cannot exceed spot.');
     expect(mockedCreateCardProduct).not.toHaveBeenCalled();
   });
 
-  it('deactivates a plan through the row action', async () => {    mockedGetCardProducts.mockResolvedValue([GOLD]);
+  it('deactivates a plan through the row action', async () => {
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedUpdateCardProduct.mockResolvedValue({ ...GOLD, isActive: false });
     renderWithProviders(<BusinessProductsPage />);
     await screen.findByRole('heading', { name: 'Gold' });
@@ -585,9 +591,11 @@ describe('live plan management search', () => {
     await user.type(input, 'gol');
     expect(input).toHaveFocus();
     // Still the same live node after the debounce re-keys the query.
-    await waitFor(() => expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
-      expect.objectContaining({ search: 'gol' }),
-    ));
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'gol' }),
+      ),
+    );
     expect(screen.getByLabelText('Search card plans')).toBe(input);
     expect(input).toHaveFocus();
 

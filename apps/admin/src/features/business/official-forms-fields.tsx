@@ -385,7 +385,11 @@ export function HolderFields({
             value={value.postalCode ?? ''}
             onFocus={(event) => event.currentTarget.select()}
           />
-          <small>Filled automatically from the city / municipality.</small>
+          {value.cityMunicipalityCode && !value.postalCode ? (
+            <small>No published code. Leave blank.</small>
+          ) : (
+            <small>Fills from the city selected.</small>
+          )}
         </label>
         <Field
           label="Landline"
