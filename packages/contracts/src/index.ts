@@ -657,4 +657,6 @@ export * from './schemas/point-approvals.js';
 
 export * from './schemas/service-refunds.js';
 
+export * from './schemas/sale-team.js';
+
 export { servicePolicyManagementResultSchema } from './schemas/points.js';

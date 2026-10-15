@@ -82,6 +82,11 @@ const routes = [
     'Contact AFhomes',
     'Contact the AFhomes team about resort, wellness, dining, VIP and reservation inquiries.',
   ],
+  [
+    '/sale-team-search',
+    'Verify a sales team member',
+    'Verify current IST and OST accreditation using an AA number.',
+  ],
 ];
 
 const globalSeo = { ...defaults };

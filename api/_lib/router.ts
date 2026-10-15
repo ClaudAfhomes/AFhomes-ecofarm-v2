@@ -58,6 +58,7 @@ export const BUSINESS_FAMILIES = [
     module: 'ost-accreditation',
     load: () => import('../_handlers/ost-accreditation.js'),
   },
+  { prefix: 'sale-team', module: 'sale-team', load: () => import('../_handlers/sale-team.js') },
   { prefix: 'card-products', module: 'cards', load: () => import('../_handlers/cards.js') },
   {
     prefix: 'card-categories',
