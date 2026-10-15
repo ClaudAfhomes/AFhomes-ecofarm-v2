@@ -472,6 +472,16 @@ describe('application private ID intake', () => {
     expect(putUploadBytes).not.toHaveBeenCalled();
   });
 
+  it('leaves Recommender unchecked until recommender details are entered', async () => {
+    // acknowledgedAt ships pre-filled with today, so it must never mark the
+    // step done on its own: a fresh form shows the step number, not a check.
+    await setup();
+    const nav = screen.getByRole('navigation', { name: 'Application steps' });
+    const item = within(nav).getByText('Recommender').closest('li')!;
+    expect(item).toHaveAttribute('data-done', 'false');
+    expect(within(item).getByText('4')).toBeInTheDocument();
+  });
+
   it('shows the recorded ID type of the current document and prompts when missing', async () => {
     await setup(document('completed'));
     expect(await screen.findByText(/ID type: passport/)).toBeInTheDocument();

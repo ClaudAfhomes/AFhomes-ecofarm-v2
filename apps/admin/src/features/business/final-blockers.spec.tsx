@@ -270,9 +270,12 @@ it('actual IST tier is a closed dropdown, not a free-text box', async () => {
   const view = mount();
   const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
   expect(select.tagName).toBe('SELECT');
-  expect(
-    [...select.options].map((option) => option.value),
-  ).toEqual(['', 'BRONZE', 'SILVER', 'GOLD']);
+  expect([...select.options].map((option) => option.value)).toEqual([
+    '',
+    'BRONZE',
+    'SILVER',
+    'GOLD',
+  ]);
   await view.user.selectOptions(select, 'GOLD');
   expect(select.value).toBe('GOLD');
 });
@@ -400,15 +403,30 @@ it.each(['Silver', 'Bronze', 'Select plan'])(
     await user.click(screen.getByLabelText(/Add optional Gold secondary/));
     expect(screen.getByRole('group', { name: /Secondary holder/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await user.selectOptions(
       screen.getByLabelText('VIP plan'),
       screen.getByRole('option', { name: label }),
     );
+    // Clearing the plan locks step 0 (nothing to proceed with), so re-pick
+    // Gold to observe the cleared secondary state on the Holders step. A
+    // stale secondary would still render its group there.
+    const reselected = label === 'Select plan';
+    if (reselected) {
+      await user.selectOptions(
+        screen.getByLabelText('VIP plan'),
+        screen.getByRole('option', { name: 'Gold' }),
+      );
+    }
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByLabelText(/Add optional Gold secondary/);
     expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
-    expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    if (reselected) {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeEnabled();
+    } else {
+      expect(screen.getByLabelText(/Add optional Gold secondary/)).toBeDisabled();
+    }
     expect(screen.queryByRole('group', { name: /Secondary holder/ })).not.toBeInTheDocument();
   },
 );

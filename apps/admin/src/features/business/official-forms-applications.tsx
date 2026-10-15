@@ -1013,7 +1013,21 @@ export function CustomerApplicationEditorPage() {
       done: Boolean(serverCurrentDocument?.reviewedFields?.idType || idFile),
     },
     { id: 'step-holders', label: 'Holders', done: primaryComplete },
-    { id: 'step-recommender', label: 'Recommender', done: Boolean(meta.acknowledgedAt) },
+    {
+      id: 'step-recommender',
+      label: 'Recommender',
+      // acknowledgedAt ships pre-filled with today, so it can never mark the
+      // step done on its own: only entered chain or contact details count.
+      done: [
+        meta.svdStaffId,
+        meta.ssmStaffId,
+        meta.smStaffId,
+        meta.referrerStaffId,
+        meta.vipRecommenderName,
+        meta.recommenderContact,
+        meta.recommenderEmail,
+      ].some((field) => field.trim() !== ''),
+    },
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
@@ -1226,266 +1240,266 @@ export function CustomerApplicationEditorPage() {
         ) : null}
         <fieldset disabled={!editable} className={styles.formRoot}>
           {(!isNew || activeStep === 0) && (
-          <section
-            id="step-application"
-            className={styles.panel}
-            aria-labelledby="application-panel-heading"
-          >
-            <h2 id="application-panel-heading" className={styles.panelTitle}>
-              1. Application
-            </h2>
-            <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
-            <div className={styles.editorGrid}>
-              <div className={styles.pickerWrap}>
+            <section
+              id="step-application"
+              className={styles.panel}
+              aria-labelledby="application-panel-heading"
+            >
+              <h2 id="application-panel-heading" className={styles.panelTitle}>
+                1. Application
+              </h2>
+              <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+              <div className={styles.editorGrid}>
+                <div className={styles.pickerWrap}>
+                  <label className={styles.filterLabel}>
+                    Customer
+                    <Select
+                      aria-label="Customer"
+                      value={customerId}
+                      disabled={saveAndSubmit.isPending}
+                      onChange={(e) => pickCustomer(e.target.value)}
+                      options={[
+                        { value: '', label: 'New Register' },
+                        ...(customerOptions.data?.data.map((c) => ({
+                          value: c.id,
+                          label: c.fullName,
+                        })) ?? []),
+                      ]}
+                    />
+                  </label>
+                  {customerOptions.isPending ? (
+                    <div role="status" aria-label="Searching customers">
+                      <Skeleton style={{ height: 40 }} />
+                    </div>
+                  ) : null}
+                  {customerId && !linkedCustomer.data ? (
+                    <p role="status" className={styles.pickedLine}>
+                      Loading customer…
+                    </p>
+                  ) : null}
+                </div>
                 <label className={styles.filterLabel}>
-                  Customer
+                  VIP plan
                   <Select
-                    aria-label="Customer"
-                    value={customerId}
-                    disabled={saveAndSubmit.isPending}
-                    onChange={(e) => pickCustomer(e.target.value)}
+                    aria-label="VIP plan"
+                    value={planId}
+                    onChange={(e) => {
+                      const plan = plans.data?.find((p) => p.id === e.target.value);
+                      setPlanId(e.target.value);
+                      if (plan) setTier(plan.code as typeof tier);
+                      else setTier('BRONZE');
+                      if (plan?.code !== 'GOLD') setSecondary(null);
+                    }}
                     options={[
-                      { value: '', label: 'New Register' },
-                      ...(customerOptions.data?.data.map((c) => ({
-                        value: c.id,
-                        label: c.fullName,
-                      })) ?? []),
+                      { value: '', label: 'Select plan' },
+                      ...(plans.data
+                        ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
+                        .map((p) => ({ value: p.id, label: p.name })) ?? []),
                     ]}
                   />
                 </label>
-                {customerOptions.isPending ? (
-                  <div role="status" aria-label="Searching customers">
-                    <Skeleton style={{ height: 40 }} />
-                  </div>
-                ) : null}
-                {customerId && !linkedCustomer.data ? (
-                  <p role="status" className={styles.pickedLine}>
-                    Loading customer…
-                  </p>
-                ) : null}
+                <label className={styles.filterLabel}>
+                  Payment scheme
+                  <Select
+                    aria-label="Payment scheme"
+                    value={paymentScheme}
+                    onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
+                    options={[
+                      'spot_cash',
+                      'move_a',
+                      'installment_4_month',
+                      'move_b1_40_12',
+                      'move_b2_25_12',
+                    ].map((scheme) => ({
+                      value: scheme,
+                      label: paymentSchemeLabel(scheme as typeof paymentScheme),
+                    }))}
+                  />
+                </label>
               </div>
-              <label className={styles.filterLabel}>
-                VIP plan
-                <Select
-                  aria-label="VIP plan"
-                  value={planId}
-                  onChange={(e) => {
-                    const plan = plans.data?.find((p) => p.id === e.target.value);
-                    setPlanId(e.target.value);
-                    if (plan) setTier(plan.code as typeof tier);
-                    else setTier('BRONZE');
-                    if (plan?.code !== 'GOLD') setSecondary(null);
-                  }}
-                  options={[
-                    { value: '', label: 'Select plan' },
-                    ...(plans.data
-                      ?.filter((p) => ['BRONZE', 'SILVER', 'GOLD'].includes(p.code))
-                      .map((p) => ({ value: p.id, label: p.name })) ?? []),
-                  ]}
-                />
-              </label>
-              <label className={styles.filterLabel}>
-                Payment scheme
-                <Select
-                  aria-label="Payment scheme"
-                  value={paymentScheme}
-                  onChange={(e) => setPaymentScheme(e.target.value as typeof paymentScheme)}
-                  options={[
-                    'spot_cash',
-                    'move_a',
-                    'installment_4_month',
-                    'move_b1_40_12',
-                    'move_b2_25_12',
-                  ].map((scheme) => ({
-                    value: scheme,
-                    label: paymentSchemeLabel(scheme as typeof paymentScheme),
-                  }))}
-                />
-              </label>
-            </div>
-          </section>
+            </section>
           )}
           {(!isNew || activeStep === 1) && (
-          <section
-            id="step-identity"
-            className={styles.panel}
-            aria-labelledby="identity-panel-heading"
-          >
-            <h2 id="identity-panel-heading" className={styles.panelTitle}>
-              2. Identity
-            </h2>
-            <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
-            <fieldset className={styles.subGroup}>
-              <legend className={styles.subGroupTitle}>Valid ID</legend>
-              <p>
-                <StatusChip
-                  label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
-                  tone={validId ? 'success' : 'warning'}
-                />
-              </p>
-              {serverCurrentDocument ? (
-                <>
-                  <p>Current ID: {serverCurrentDocument.originalFilename}</p>
-                  <p>
-                    ID type:{' '}
-                    {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                      'Missing: choose the type and upload again'}
-                  </p>
-                </>
-              ) : null}
-              {idFile ? (
-                <div role="status" className={styles.idReady}>
-                  <p className={styles.hint}>Ready to upload on save.</p>
-                  {idPreviewUrl ? (
-                    <button
-                      type="button"
-                      className={styles.thumbnailButton}
-                      onClick={() => setPreviewOpen(true)}
-                      aria-label="Open full ID preview"
-                    >
-                      <img
-                        src={idPreviewUrl}
-                        alt="ID preview thumbnail"
-                        className={styles.thumbnailLarge}
-                      />
-                      <span className={styles.thumbnailZoom}>
-                        {idFile.name} · {formatFileSize(idFile.size)} · Click to enlarge
-                      </span>
-                    </button>
-                  ) : (
-                    <p className={styles.hint}>
-                      {idFile.name} · {formatFileSize(idFile.size)}
+            <section
+              id="step-identity"
+              className={styles.panel}
+              aria-labelledby="identity-panel-heading"
+            >
+              <h2 id="identity-panel-heading" className={styles.panelTitle}>
+                2. Identity
+              </h2>
+              <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
+              <fieldset className={styles.subGroup}>
+                <legend className={styles.subGroupTitle}>Valid ID</legend>
+                <p>
+                  <StatusChip
+                    label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
+                    tone={validId ? 'success' : 'warning'}
+                  />
+                </p>
+                {serverCurrentDocument ? (
+                  <>
+                    <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                    <p>
+                      ID type:{' '}
+                      {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
+                        'Missing: choose the type and upload again'}
                     </p>
-                  )}
-                </div>
-              ) : null}
-              <label className={styles.filterLabel}>
-                ID Type *
-                <Select
-                  aria-label="ID Type"
-                  value={idType}
-                  disabled={saveAndSubmit.isPending}
-                  onChange={(event) => setIdType(event.target.value)}
-                  options={[
-                    { value: '', label: 'Select ID type' },
-                    ...governmentIdTypeSchema.options.map((value) => ({
-                      value,
-                      label: value
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
-                    })),
-                  ]}
-                />
-              </label>
-              <IdCapturePicker
-                onFile={setIdFile}
-                disabled={saveAndSubmit.isPending}
-                resetVersion={pickerVersion}
-                showCancel={Boolean(idFile)}
-                onCancel={() => {
-                  setIdFile(null);
-                  setPickerVersion((version) => version + 1);
-                }}
-              />
-              <Dialog
-                open={previewOpen && Boolean(idPreviewUrl)}
-                onClose={() => setPreviewOpen(false)}
-                title="ID preview"
-              >
-                {idPreviewUrl ? (
-                  <img src={idPreviewUrl} alt="Full ID preview" className={styles.previewImage} />
+                  </>
                 ) : null}
-              </Dialog>
-              {currentDocument.isError ? (
-                <p role="status">Current ID could not be loaded. Retry before saving.</p>
-              ) : null}
-            </fieldset>
-          </section>
+                {idFile ? (
+                  <div role="status" className={styles.idReady}>
+                    <p className={styles.hint}>Ready to upload on save.</p>
+                    {idPreviewUrl ? (
+                      <button
+                        type="button"
+                        className={styles.thumbnailButton}
+                        onClick={() => setPreviewOpen(true)}
+                        aria-label="Open full ID preview"
+                      >
+                        <img
+                          src={idPreviewUrl}
+                          alt="ID preview thumbnail"
+                          className={styles.thumbnailLarge}
+                        />
+                        <span className={styles.thumbnailZoom}>
+                          {idFile.name} · {formatFileSize(idFile.size)} · Click to enlarge
+                        </span>
+                      </button>
+                    ) : (
+                      <p className={styles.hint}>
+                        {idFile.name} · {formatFileSize(idFile.size)}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                <label className={styles.filterLabel}>
+                  ID Type *
+                  <Select
+                    aria-label="ID Type"
+                    value={idType}
+                    disabled={saveAndSubmit.isPending}
+                    onChange={(event) => setIdType(event.target.value)}
+                    options={[
+                      { value: '', label: 'Select ID type' },
+                      ...governmentIdTypeSchema.options.map((value) => ({
+                        value,
+                        label: value
+                          .replace(/_/g, ' ')
+                          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                      })),
+                    ]}
+                  />
+                </label>
+                <IdCapturePicker
+                  onFile={setIdFile}
+                  disabled={saveAndSubmit.isPending}
+                  resetVersion={pickerVersion}
+                  showCancel={Boolean(idFile)}
+                  onCancel={() => {
+                    setIdFile(null);
+                    setPickerVersion((version) => version + 1);
+                  }}
+                />
+                <Dialog
+                  open={previewOpen && Boolean(idPreviewUrl)}
+                  onClose={() => setPreviewOpen(false)}
+                  title="ID preview"
+                >
+                  {idPreviewUrl ? (
+                    <img src={idPreviewUrl} alt="Full ID preview" className={styles.previewImage} />
+                  ) : null}
+                </Dialog>
+                {currentDocument.isError ? (
+                  <p role="status">Current ID could not be loaded. Retry before saving.</p>
+                ) : null}
+              </fieldset>
+            </section>
           )}
           {(!isNew || activeStep === 2) && (
-          <div id="step-holders">
-            <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
-          <label className={styles.checkRow}>
-            <input
-              type="checkbox"
-              checked={Boolean(secondary)}
-              disabled={tier !== 'GOLD'}
-              onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
-            />{' '}
-            Add optional Gold secondary cardholder
-          </label>
-          {secondary ? (
-            <HolderFields
-              title="Secondary holder (gold optional)"
-              value={secondary}
-              onChange={setSecondary}
-            />
-          ) : null}
-          </div>
-          )}
-          {(!isNew || activeStep === 3) && (
-          <fieldset id="step-recommender" className={styles.panel}>
-            <legend className={styles.panelTitle}>4. Recommender details</legend>
-            <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
-            <div className={styles.editorGrid}>
-              <RecommenderFields
-                meta={meta}
-                chainNames={chainNames}
-                onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
-                onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
-              />
-            </div>
-          </fieldset>
-          )}
-          {(!isNew || activeStep === 4) && (
-          <fieldset id="step-channel" className={styles.panel}>
-            <legend className={styles.panelTitle}>5. Acquisition channel</legend>
-            {[
-              'CMP',
-              'DRP',
-              'GDP Corporate',
-              'Walk-In',
-              'GDP Public Servant',
-              'Referral',
-              'FB Ads',
-            ].map((channel) => (
-              <label key={channel} className={styles.checkRow}>
+            <div id="step-holders">
+              <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+              <label className={styles.checkRow}>
                 <input
                   type="checkbox"
-                  checked={channels.includes(channel)}
-                  onChange={(e) =>
-                    setChannels(
-                      e.target.checked
-                        ? [...channels, channel]
-                        : channels.filter((v) => v !== channel),
-                    )
-                  }
-                />
-                {channel}
+                  checked={Boolean(secondary)}
+                  disabled={tier !== 'GOLD'}
+                  onChange={(e) => setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)}
+                />{' '}
+                Add optional Gold secondary cardholder
               </label>
-            ))}
-          </fieldset>
+              {secondary ? (
+                <HolderFields
+                  title="Secondary holder (gold optional)"
+                  value={secondary}
+                  onChange={setSecondary}
+                />
+              ) : null}
+            </div>
+          )}
+          {(!isNew || activeStep === 3) && (
+            <fieldset id="step-recommender" className={styles.panel}>
+              <legend className={styles.panelTitle}>4. Recommender details</legend>
+              <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
+              <div className={styles.editorGrid}>
+                <RecommenderFields
+                  meta={meta}
+                  chainNames={chainNames}
+                  onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
+                  onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
+                />
+              </div>
+            </fieldset>
+          )}
+          {(!isNew || activeStep === 4) && (
+            <fieldset id="step-channel" className={styles.panel}>
+              <legend className={styles.panelTitle}>5. Acquisition channel</legend>
+              {[
+                'CMP',
+                'DRP',
+                'GDP Corporate',
+                'Walk-In',
+                'GDP Public Servant',
+                'Referral',
+                'FB Ads',
+              ].map((channel) => (
+                <label key={channel} className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={channels.includes(channel)}
+                    onChange={(e) =>
+                      setChannels(
+                        e.target.checked
+                          ? [...channels, channel]
+                          : channels.filter((v) => v !== channel),
+                      )
+                    }
+                  />
+                  {channel}
+                </label>
+              ))}
+            </fieldset>
           )}
           {(!isNew || activeStep === 5) && (
-          <fieldset id="step-cert" className={styles.panel}>
-            <legend className={styles.panelTitle}>6. Certification</legend>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-              />{' '}
-              I certify the information and consent to verification and processing under RA 10173.
-            </label>
-            <label className={styles.checkRow}>
-              <input
-                type="checkbox"
-                checked={validId}
-                onChange={(e) => setValidId(e.target.checked)}
-              />{' '}
-              Valid government ID with specimen signatures received
-            </label>
-          </fieldset>
+            <fieldset id="step-cert" className={styles.panel}>
+              <legend className={styles.panelTitle}>6. Certification</legend>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                />{' '}
+                I certify the information and consent to verification and processing under RA 10173.
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={validId}
+                  onChange={(e) => setValidId(e.target.checked)}
+                />{' '}
+                Valid government ID with specimen signatures received
+              </label>
+            </fieldset>
           )}
         </fieldset>
         {blockers.length > 0 ? (
