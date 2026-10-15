@@ -19,6 +19,22 @@ const record = {
 beforeEach(() => {
   api.request.mockReset();
 });
+it.each([
+  ['AAI26100001', 'IST'],
+  ['AAO26100002', 'OST'],
+])('submits an official %s number and displays the verified seller', async (aaNumber, kind) => {
+  api.request.mockResolvedValue({ ...record, aaNumber, kind });
+  renderWithProviders(<SaleTeamSearch />);
+  await userEvent.type(screen.getByLabelText('AA number'), aaNumber.toLowerCase());
+  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+  expect(await screen.findByText(aaNumber)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy ID ' + aaNumber })).toBeInTheDocument();
+  expect(api.request).toHaveBeenCalledWith(
+    `/sale-team/search?aaNumber=${aaNumber}`,
+    expect.anything(),
+    expect.objectContaining({ signal: expect.anything() }),
+  );
+});
 it('searches only on submit and clears a stale verification when input changes', async () => {
   api.request.mockResolvedValue(record);
   renderWithProviders(<SaleTeamSearch />);

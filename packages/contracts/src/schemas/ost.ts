@@ -178,6 +178,7 @@ export const ostMemberSchema = z.object({
   sponsorStaffId: z.string().uuid(),
   sponsorName: z.string(),
   ostNumber: z.string(),
+  aaNumber: z.string().nullable().optional(),
   fullName: z.string(),
   email: z.string(),
   phone: z.string(),

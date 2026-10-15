@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { phase2World, phase2WorldTokens, TOKEN, UUID } from '../_lib/testing/phase2-fixtures.js';
+import {
+  phase2World,
+  phase2WorldTokens,
+  TOKEN,
+  UUID,
+  STAFF2,
+} from '../_lib/testing/phase2-fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 import { ostFileSchema } from '@afhomes/contracts';
+import { OST_IMPORT_COLUMNS } from '../_lib/ost-import.js';
+import { toCsv } from '../_lib/report-export.js';
 const holder = vi.hoisted(() => ({ db: null as FakeSupabase | null }));
 vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
 const handler = (await import('./ost-accreditation.js')).default;
@@ -37,6 +45,84 @@ async function call(path: string, body: unknown, token?: string) {
   return state;
 }
 describe('official OST handler boundary', () => {
+  it.each(['sponsors', 'imports/parse'])(
+    'uses the member role relationship and accepts its one-to-one shape: %s',
+    async (path) => {
+      const tables = phase2World({});
+      for (const assignment of tables.staff_role_assignments ?? [])
+        assignment.roles = tables.roles?.find((role) => role.id === assignment.role_id);
+      const db = new FakeSupabase({
+        tables,
+        tokens: phase2WorldTokens(),
+        errors: {
+          'staff_users.id,full_name,status,staff_role_assignments(roles(slug,is_active))': {
+            code: 'PGRST201',
+            message: 'Ambiguous sponsor relationship',
+          },
+          'staff_users.id,status,staff_role_assignments(roles(slug,is_active))': {
+            code: 'PGRST201',
+            message: 'Ambiguous sponsor relationship',
+          },
+        },
+        links: [
+          { child: 'staff_role_assignments', parent: 'staff_users', fk: 'assigned_by' },
+          { child: 'staff_role_assignments', parent: 'staff_users', fk: 'staff_id' },
+        ],
+        rpcs: [
+          { fn: 'stage_ost_import', result: UUID.viewerStaff },
+          { fn: 'ost_import_preview', result: { id: UUID.viewerStaff } },
+        ],
+      });
+      holder.db = db;
+      const fields: Record<string, string> = {
+        first_name: 'QA',
+        last_name: 'TESTER',
+        email: 'new-sponsor-check@example.invalid',
+        mobile: '09171234567',
+        birth_date: '1990-01-01',
+        address: 'QA STREET',
+        city: 'QA CITY',
+        province: 'QA PROVINCE',
+        sponsor_staff_id: STAFF2.salesManager,
+        date_applied: '2026-01-01',
+        program_category: 'non_vip',
+        sex: 'male',
+        civil_status: 'single',
+        government_id_type: 'QA',
+        government_id_number: 'SYNTHETIC',
+      };
+      const { res, state } = makeRes();
+      await handler(
+        makeReq({
+          familyPath: path,
+          token: TOKEN.superAdmin,
+          method: path === 'sponsors' ? 'GET' : 'POST',
+          body: {
+            source: 'csv',
+            sourceName: 'qa.csv',
+            mime: 'text/csv',
+            contentBase64: Buffer.from(
+              toCsv(
+                [...OST_IMPORT_COLUMNS],
+                [OST_IMPORT_COLUMNS.map((column) => fields[column] ?? '')],
+              ),
+            ).toString('base64'),
+          },
+        }),
+        res,
+      );
+      expect(state.status).toBe(path === 'sponsors' ? 200 : 201);
+      if (path === 'sponsors')
+        expect(state.body).toMatchObject({
+          data: expect.arrayContaining([expect.objectContaining({ id: STAFF2.salesManager })]),
+        });
+      else
+        expect(db.calls.find((call) => call.table === 'stage_ost_import')?.arg).toMatchObject({
+          p_rows: [expect.objectContaining({ status: 'valid', errors: [] })],
+        });
+      expect(db.calls.some((call) => call.op === 'insert' || call.op === 'update')).toBe(false);
+    },
+  );
   it.each([
     ['template', 'csv', 'text/csv;charset=utf-8', '.csv'],
     [

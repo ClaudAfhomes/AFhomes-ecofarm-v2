@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, ErrorState, StatusChip } from '@afhomes/ui';
+import { AccreditationId, Button, ErrorState, StatusChip } from '@afhomes/ui';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
@@ -57,11 +57,13 @@ export function OstDashboardPage() {
           <Field
             label="AA number"
             value={
-              accreditation.isPending
-                ? 'Loading accreditation'
-                : accreditation.isError
-                  ? 'Accreditation unavailable'
-                  : (accreditation.data?.aaNumber ?? 'AA number not yet issued')
+              accreditation.isPending ? (
+                'Loading accreditation'
+              ) : accreditation.isError ? (
+                'Accreditation unavailable'
+              ) : (
+                <AccreditationId value={accreditation.data?.aaNumber ?? null} />
+              )
             }
           />
           {accreditation.data ? (

@@ -4,6 +4,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
+  AccreditationId,
   Button,
   ConfirmDialog,
   Dialog,
@@ -187,7 +188,7 @@ export function AfHomesStaffPage() {
         (item) =>
           (status === 'all' || item.status === status) &&
           (roleFilter === 'all' || item.roleId === roleFilter) &&
-          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''} ${item.salesNumber ?? ''}`
+          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''} ${item.salesNumber ?? ''} ${item.aaNumber ?? ''}`
             .toLowerCase()
             .includes(debouncedSearch.toLowerCase()),
       ) ?? [],
@@ -358,6 +359,7 @@ export function AfHomesStaffPage() {
                 <tr>
                   <th>Name</th>
                   <th>Role</th>
+                  <th>AA Number</th>
                   <th>Status</th>
                   <th>Added</th>
                   <th>Actions</th>
@@ -395,6 +397,15 @@ export function AfHomesStaffPage() {
                     </td>
                     <td data-label="Role">
                       <StatusChip label={item.roleName} tone="neutral" />
+                    </td>
+                    <td data-label="AA Number">
+                      {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
+                        roles.data?.find((role) => role.id === item.roleId)?.slug ?? '',
+                      ) ? (
+                        <AccreditationId value={item.aaNumber} />
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td data-label="Status">
                       <StatusChip label={item.status} tone={statusTone(item.status)} />

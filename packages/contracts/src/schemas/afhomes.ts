@@ -271,6 +271,8 @@ export const afHomesStaffSchema = z.object({
   employeeNumber: z.string().nullish(),
   /** Sales-person ID (AF-SALES-XXXXX). Null for never-sales staff. */
   salesNumber: z.string().nullish(),
+  /** Exact saved accreditation number. Absent on older API responses. */
+  aaNumber: z.string().nullable().optional(),
   restrictions: z.array(afHomesRestrictionSchema),
   mustChangePassword: z.boolean(),
   invitedAt: z.string().nullable(),

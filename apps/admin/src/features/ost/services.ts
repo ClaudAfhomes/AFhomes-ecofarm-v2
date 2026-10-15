@@ -103,12 +103,16 @@ export const requestOstApplicationChanges = (id: string, notes: string): Promise
 
 export const getOstMembers = (search = ''): Promise<OstMember[]> =>
   requestList(
-    '/ost/members' + (search ? '?search=' + encodeURIComponent(search) : ''),
+    '/ost/members?includeAccreditation=1' + (search ? '&search=' + encodeURIComponent(search) : ''),
     ostMemberSchema,
   );
 
 export const getMyReferralCodes = (sponsorStaffId?: string): Promise<OstReferralCodeRecord[]> =>
-  requestList('/ost/referral-codes/me' + (sponsorStaffId ? '?sponsorStaffId=' + encodeURIComponent(sponsorStaffId) : ''), ostReferralCodeRecordSchema);
+  requestList(
+    '/ost/referral-codes/me' +
+      (sponsorStaffId ? '?sponsorStaffId=' + encodeURIComponent(sponsorStaffId) : ''),
+    ostReferralCodeRecordSchema,
+  );
 
 export const createReferralCode = (
   input: CreateOstReferralCodeRequest,

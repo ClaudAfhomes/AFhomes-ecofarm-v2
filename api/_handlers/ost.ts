@@ -1,3 +1,4 @@
+import { storedAccreditationNumbers } from '../_lib/accreditation-numbers.js';
 import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
 import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
@@ -712,6 +713,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const membersPath = subPath(req);
     const memberSingle = membersPath.match(/^members\/([0-9a-f-]+)$/);
     if ((membersPath === 'members' || memberSingle) && method(req) === 'GET') {
+      const includeAccreditation = req.query.includeAccreditation === '1';
+      const addNumbers = async <T extends { id: unknown }>(
+        rows: T[],
+      ): Promise<(T & { aaNumber?: string | null })[]> => {
+        if (!includeAccreditation) return rows;
+        const numbers = await storedAccreditationNumbers(
+          db,
+          rows.map((row) => String(row.id)),
+        );
+        return rows.map((row) => ({ ...row, aaNumber: numbers.get(String(row.id)) ?? null }));
+      };
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal) return deny(res, principal);
       const single = memberSingle;
@@ -741,7 +753,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('id', data.sponsor_staff_id)
           .maybeSingle();
         if (sponsorError) throw sponsorError;
-        return res.status(200).json(toMember(data, String(sponsor?.full_name ?? '')));
+        return res
+          .status(200)
+          .json((await addNumbers([toMember(data, String(sponsor?.full_name ?? ''))]))[0]);
       }
 
       // OST without the module grant still reads exactly one row: itself.
@@ -768,7 +782,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (sponsorError) throw sponsorError;
         const search = String(req.query.search ?? '').trim();
         if (search.length > 120) return fail(res, 'VALIDATION_ERROR', 'Search is too long', 400);
-        const row = toMember(data, String(sponsor?.full_name ?? ''));
+        const row = (await addNumbers([toMember(data, String(sponsor?.full_name ?? ''))]))[0]!;
         return list(
           res,
           matchesSearch(search, [
@@ -776,6 +790,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             row.email,
             row.phone,
             row.ostNumber,
+            row.aaNumber,
             row.sponsorName,
             row.status,
           ])
@@ -801,18 +816,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       return list(
         res,
-        rows
-          .map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? ''))
-          .filter((row) =>
-            matchesSearch(search, [
-              row.fullName,
-              row.email,
-              row.phone,
-              row.ostNumber,
-              row.sponsorName,
-              row.status,
-            ]),
-          ),
+        (
+          await addNumbers(rows.map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? '')))
+        ).filter((row) =>
+          matchesSearch(search, [
+            row.fullName,
+            row.email,
+            row.phone,
+            row.ostNumber,
+            row.aaNumber,
+            row.sponsorName,
+            row.status,
+          ]),
+        ),
       );
     }
 

@@ -469,3 +469,20 @@ describe('staff and role detail pages', () => {
     expect(await screen.findByText('Save role')).toBeTruthy();
   });
 });
+
+it('shows and searches the exact stored IST accreditation ID in the staff directory', async () => {
+  vi.mocked(getAfHomesRoles).mockResolvedValue([
+    { ...ROLE_ROW, slug: 'vice_director', name: 'Vice Director' },
+  ]);
+  vi.mocked(getAfHomesStaff).mockResolvedValue([
+    { ...STAFF_ROW, status: 'active', aaNumber: 'AAI26100001' },
+  ]);
+  renderWithProviders(<App />, { route: '/admin/staff', user: SUPER });
+  expect(await screen.findByText('AAI26100001')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy ID AAI26100001' })).toBeInTheDocument();
+  const input = screen.getByRole('searchbox');
+  fireEvent.change(input, { target: { value: 'aai26100001' } });
+  await waitFor(() => expect(screen.getByText('Ana Reyes')).toBeInTheDocument());
+  fireEvent.change(input, { target: { value: 'aai26109999' } });
+  expect(await screen.findByText('No staff found')).toBeInTheDocument();
+});

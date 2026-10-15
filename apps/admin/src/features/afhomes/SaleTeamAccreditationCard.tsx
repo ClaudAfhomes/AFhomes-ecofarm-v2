@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { saleTeamLookupSchema, type SaleTeamAccreditation } from '@afhomes/contracts';
 import {
   Alert,
+  AccreditationId,
   Button,
   ConfirmDialog,
   DateField,
@@ -71,7 +72,7 @@ export function SaleTeamAccreditationCard({
       ) : (
         <DetailFieldGrid>
           <DetailField label="AA number">
-            {value?.aaNumber ?? 'AA number not yet issued'}
+            <AccreditationId value={value?.aaNumber ?? null} />
           </DetailField>
           {value ? <DetailField label="Accredited name">{value.fullName}</DetailField> : null}
           <DetailField label="Accreditation">

@@ -50,7 +50,12 @@ function grant(
   });
 }
 
-function install() {
+function install(
+  options: {
+    errors?: Record<string, { code: string; message: string }>;
+    links?: { child: string; parent: string; fk: string }[];
+  } = {},
+) {
   const now = new Date().toISOString();
   const tables = phase2World({
     card_sales: [
@@ -244,7 +249,7 @@ function install() {
       },
     ],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens(), ...options });
   const db = holder.db as FakeSupabase;
   // Production-baseline grants the shared fixtures predate or narrow down.
   for (const role of [ROLE2.viceDirector, ROLE2.seniorSalesManager, ROLE2.salesManager]) {
@@ -656,6 +661,28 @@ describe('exports from the scoped query', () => {
 });
 
 describe('audit center', () => {
+  it('resolves the actor role through staff_id even when assigned_by points to the same staff table', async () => {
+    const db = install({
+      errors: {
+        'staff_users.id,full_name,staff_role_assignments(roles(name))': {
+          code: 'PGRST201',
+          message: 'Ambiguous staff role relationship',
+        },
+      },
+      links: [
+        { child: 'staff_role_assignments', parent: 'staff_users', fk: 'assigned_by' },
+        { child: 'staff_role_assignments', parent: 'staff_users', fk: 'staff_id' },
+        { child: 'staff_role_assignments', parent: 'roles', fk: 'role_id' },
+      ],
+    });
+    for (const assignment of db.rows('staff_role_assignments'))
+      assignment.roles = db.rows('roles').find((role) => role.id === assignment.role_id);
+    const state = await get('audit', TOKEN.superAdmin, { actor: UUID.superAdminStaff });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      data: [expect.objectContaining({ actorRole: 'Super Admin' })],
+    });
+  });
   it('opens for Super Admin and explicitly granted Admin, nobody else', async () => {
     expect((await get('audit', TOKEN.superAdmin)).status).toBe(200);
     expect((await get('audit', TOKEN.admin)).status).toBe(200);

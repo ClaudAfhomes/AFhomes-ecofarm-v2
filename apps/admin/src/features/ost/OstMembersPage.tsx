@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import {
   Alert,
+  AccreditationId,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -146,6 +147,7 @@ export function OstMembersPage() {
           <Table>
             <TableHead>
               <TableRow>
+                <TableHeaderCell>AA Number</TableHeaderCell>
                 <TableHeaderCell>OST number</TableHeaderCell>
                 <TableHeaderCell>Name</TableHeaderCell>
                 <TableHeaderCell>Email</TableHeaderCell>
@@ -158,6 +160,9 @@ export function OstMembersPage() {
             <TableBody>
               {visible.map((member) => (
                 <TableRow key={member.id}>
+                  <TableCell label="AA Number">
+                    <AccreditationId value={member.aaNumber} />
+                  </TableCell>
                   <TableCell label="OST number">
                     <span className={styles.memberRef}>{member.ostNumber}</span>
                   </TableCell>
