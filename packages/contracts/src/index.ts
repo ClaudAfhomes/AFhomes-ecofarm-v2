@@ -656,5 +656,6 @@ export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.j
 export * from './schemas/point-approvals.js';
 
 export * from './schemas/service-refunds.js';
+export * from './schemas/customer-workbook.js';
 
 export { servicePolicyManagementResultSchema } from './schemas/points.js';

@@ -27,6 +27,7 @@ import {
 } from '@afhomes/contracts';
 
 import { AddressProviderError, type AddressProvider } from './address-provider.js';
+import { resolvePostalCode } from './postal-reference.js';
 
 const PSGC_CLOUD_BASE = 'https://psgc.cloud/api/v2';
 
@@ -141,19 +142,25 @@ export const psgcCloudAddressProvider: AddressProvider = {
   },
 
   async localities(provinceCode: string): Promise<Locality[]> {
-    const raw = rows(
-      await getJson(`/provinces/${segment(provinceCode)}/cities-municipalities`),
-    );
+    const raw = rows(await getJson(`/provinces/${segment(provinceCode)}/cities-municipalities`));
     return raw.map((row) => {
       // `provinceCode` is not in the provider payload; it is the scope we asked
       // for, which is what makes the parent link explicit and checkable.
       const type = LOCALITY_TYPE_BY_PROVIDER[String(row.type)];
       if (!type) throw new AddressProviderError('PROVIDER_BAD_RESPONSE');
+      // `zip_code` is published for most localities and blank for some; a
+      // blank is "no published zip", never an empty code to store.
+      const postal =
+        typeof row.province === 'string'
+          ? resolvePostalCode(String(officialName(row.province)), String(officialName(row.name)))
+          : null;
+      const postalCode = postal?.status === 'matched' ? postal.postalCode : '';
       return parseRow(localitySchema, {
         code: row.code,
         name: officialName(row.name),
         type,
         provinceCode,
+        ...(postalCode ? { postalCode } : {}),
       });
     });
   },

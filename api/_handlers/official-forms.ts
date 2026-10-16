@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { workbookApplicationPrefill } from '../_lib/customer-workbook.js';
 import { z } from 'zod';
 import { currentIdForSubject } from './documents.js';
 import { governmentIdTypeSchema } from '@afhomes/contracts';
@@ -26,6 +27,7 @@ import {
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { addressProvider } from '../_lib/address-source.js';
 import { verifyAddressHierarchy } from '../_lib/address-provider.js';
+import { resolvePostalCode } from '../_lib/postal-reference.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
@@ -180,7 +182,21 @@ async function resolveHolderLocation(holder: HolderLocation): Promise<LocationRe
     barangayCode: barangayCode!,
   });
 
-  if (check.valid)
+  if (check.valid) {
+    const postal = resolvePostalCode(
+      check.hierarchy.province.name,
+      check.hierarchy.locality.name,
+      check.hierarchy.barangay.name,
+    );
+    if (postal.status !== 'matched')
+      return {
+        ok: false,
+        refusal: {
+          status: 400,
+          message:
+            'Postal reference requires review for this location. No unverified ZIP was saved.',
+        },
+      };
     return {
       ok: true,
       holder: {
@@ -191,8 +207,10 @@ async function resolveHolderLocation(holder: HolderLocation): Promise<LocationRe
         provinceCode: check.hierarchy.province.code,
         cityMunicipalityCode: check.hierarchy.locality.code,
         barangayCode: check.hierarchy.barangay.code,
+        postalCode: postal.postalCode,
       },
     };
+  }
 
   switch (check.reason) {
     case 'PROVIDER_UNAVAILABLE':
@@ -996,6 +1014,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   try {
     const path = subPath(req);
+    const importPrefill = route(req, 'GET', /^customer-import-prefill\/([0-9a-f-]+)$/);
+    if (importPrefill) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
+      if ('error' in auth) return deny(res, auth);
+      const importAccess = await authorizeAfHomes(req, 'governance.customer_import');
+      if ('error' in importAccess) return deny(res, importAccess);
+      const id = z.string().uuid().safeParse(importPrefill[1]);
+      if (!id.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer', 400);
+      const { data, error } = await db
+        .from('customer_import_rows')
+        .select('raw_data,committed_at')
+        .eq('customer_id', id.data)
+        .order('committed_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      const imported = (
+        (data ?? []) as { raw_data: Record<string, string>; committed_at: string | null }[]
+      ).find((r) => r.committed_at && r.raw_data.workbook_format === 'company_v1');
+      if (!imported)
+        return fail(
+          res,
+          'NOT_FOUND',
+          'No committed company workbook details for this customer',
+          404,
+        );
+      return res.status(200).json(workbookApplicationPrefill(imported.raw_data));
+    }
     if (method(req) === 'GET' && path === 'customer/template') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);

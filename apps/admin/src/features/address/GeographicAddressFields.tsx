@@ -37,6 +37,12 @@ export interface AddressGeography {
   cityMunicipalityCode?: string;
   barangay?: string;
   barangayCode?: string;
+  /**
+   * The locality's published postal code. Derived from the chosen city /
+   * municipality (or absent when the source publishes none) - never typed,
+   * which is why nothing here accepts it as free text.
+   */
+  postalCode?: string;
 }
 
 export interface GeographicAddressFieldsProps {
@@ -52,7 +58,14 @@ const clearedBelow = (): AddressGeography => ({
   cityMunicipalityCode: undefined,
   barangay: undefined,
   barangayCode: undefined,
+  postalCode: undefined,
 });
+
+/** The postal code carried by a locality option, when the source has one. */
+const postalOf = (option: unknown): string | undefined => {
+  const value = (option as { postalCode?: unknown } | null | undefined)?.postalCode;
+  return typeof value === 'string' ? value : undefined;
+};
 
 /**
  * Show a stored name even when it has no code. The empty code marks it
@@ -127,7 +140,8 @@ export function GeographicAddressFields({
         onRetry={() => void localities.refetch()}
         value={localityOption}
         options={localities.data ?? []}
-        onSelect={(option) =>
+        onSelect={(option) => {
+          const postalCode = postalOf(option);
           onChange({
             province: value.province,
             provinceCode: value.provinceCode,
@@ -135,8 +149,11 @@ export function GeographicAddressFields({
             cityMunicipalityCode: option?.code || undefined,
             barangay: undefined,
             barangayCode: undefined,
-          })
-        }
+            // A locality switch replaces the postal code outright, including
+            // clearing it when the new locality has none published.
+            postalCode,
+          });
+        }}
       />
       {value.cityMunicipality && !value.cityMunicipalityCode ? <Unverified /> : null}
 

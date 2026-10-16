@@ -12,6 +12,7 @@ import {
   CustomerApplicationEditorPage,
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
+vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
 const calls = vi.hoisted(() => ({
   application: vi.fn<(input: CreateCustomerApplicationRequest) => Promise<never>>(),
   reservation: vi.fn<(input: CreateReservationAgreementRequest) => Promise<never>>(),
@@ -236,9 +237,12 @@ it('actual IST tier is a closed dropdown, not a free-text box', async () => {
   const view = mount();
   const select = screen.getByLabelText<HTMLSelectElement>('Imported Tier');
   expect(select.tagName).toBe('SELECT');
-  expect(
-    [...select.options].map((option) => option.value),
-  ).toEqual(['', 'BRONZE', 'SILVER', 'GOLD']);
+  expect([...select.options].map((option) => option.value)).toEqual([
+    '',
+    'BRONZE',
+    'SILVER',
+    'GOLD',
+  ]);
   await view.user.selectOptions(select, 'GOLD');
   expect(select.value).toBe('GOLD');
 });

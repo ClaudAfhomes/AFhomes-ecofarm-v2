@@ -1,18 +1,26 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AfHomesPermission } from '@afhomes/contracts';
+import { customerImportParseResponseSchema } from '@afhomes/contracts';
 
 import { CustomerImportExportPage } from './CustomerImportExportPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
-import { exportCustomers, getCustomerImportJobs } from './services';
+import {
+  exportCustomers,
+  getCustomerImportJobs,
+  parseCustomerImport,
+  confirmCustomerImport,
+  getCustomerImportJob,
+} from './services';
 
 vi.mock('./services', () => ({
   cancelCustomerImport: vi.fn(),
   confirmCustomerImport: vi.fn(),
   exportCustomers: vi.fn(),
   getCustomerImportJobs: vi.fn(),
+  getCustomerImportJob: vi.fn(),
   getCustomerImportTemplate: vi.fn(),
   parseCustomerImport: vi.fn(),
 }));
@@ -42,6 +50,9 @@ const IMPORTER: SessionUser = {
 };
 
 beforeEach(() => {
+  vi.mocked(parseCustomerImport).mockReset();
+  vi.mocked(confirmCustomerImport).mockReset();
+  vi.mocked(getCustomerImportJob).mockReset();
   vi.mocked(getCustomerImportJobs).mockResolvedValue([]);
   vi.mocked(exportCustomers).mockReset();
   vi.mocked(exportCustomers).mockResolvedValue({
@@ -51,6 +62,119 @@ beforeEach(() => {
   } as never);
   URL.createObjectURL = vi.fn(() => 'blob:mock');
   URL.revokeObjectURL = vi.fn();
+});
+
+const previewFixture = (total = 1) =>
+  customerImportParseResponseSchema.parse({
+    job: {
+      id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      sourceType: 'excel',
+      sourceName: 'synthetic.xlsm',
+      googleSheetId: null,
+      status: 'ready',
+      totalRows: total,
+      validRows: total,
+      invalidRows: 0,
+      insertedRows: 0,
+      updatedRows: 0,
+      skippedRows: 0,
+      createdAt: '2026-10-16',
+      validatedAt: '2026-10-16',
+      committedAt: null,
+      cancelledAt: null,
+    },
+    pageSize: 10,
+    rows: Array.from({ length: Math.min(total, 10) }, (_, i) => ({
+      id: 'bbbbbbbb-0000-4000-8000-' + String(i + 1).padStart(12, '0'),
+      rowNumber: i + 2,
+      fields: {
+        workbook_format: 'company_v1',
+        first_name: 'Synthetic',
+        last_name: 'Customer',
+        email: `synthetic${i}@example.invalid`,
+        mobile: '09123456789',
+        tin: 'SYNTHETIC-PRIVATE-TIN',
+      },
+      normalized: { category: 'PENDING' },
+      validation: 'warning',
+      errors: [],
+      warnings: [],
+      action: 'CREATE',
+      customerId: null,
+      membershipId: null,
+    })),
+  });
+
+describe('company workbook review', () => {
+  it('accepts XLSM, displays mapped fields without TIN and gates confirmation by update permission', async () => {
+    const user = userEvent.setup();
+    const preview = previewFixture();
+    vi.mocked(parseCustomerImport).mockResolvedValue(preview);
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    await user.upload(
+      screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+      new File(['synthetic'], 'synthetic.xlsm'),
+    );
+    expect(await screen.findByText('Review mapped fields')).toBeInTheDocument();
+    expect(screen.getByText('Primary!U2 (MOBILE NO.)')).toBeInTheDocument();
+    expect(screen.queryByText('SYNTHETIC-PRIVATE-TIN')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm Import (1 rows)' })).toBeDisabled();
+  });
+  it('loads later preview pages through the existing job API', async () => {
+    const user = userEvent.setup();
+    const preview = previewFixture(11);
+    vi.mocked(parseCustomerImport).mockResolvedValue(preview);
+    vi.mocked(getCustomerImportJob).mockResolvedValue({
+      job: preview.job,
+      rows: [
+        {
+          ...preview.rows[0]!,
+          rowNumber: 12,
+          fields: { first_name: 'Last', last_name: 'Customer', email: 'last@example.invalid' },
+        },
+      ],
+    });
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    await user.upload(
+      screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+      new File(['synthetic'], 'synthetic.xlsm'),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Next preview page' }));
+    expect(await screen.findByText(/Last Customer/)).toBeInTheDocument();
+    expect(getCustomerImportJob).toHaveBeenCalledWith(preview.job.id, 10, 10);
+  });
+  it('confirms authorized imports through bounded requests until the job completes', async () => {
+    const user = userEvent.setup();
+    const preview = previewFixture();
+    vi.mocked(parseCustomerImport).mockResolvedValue(preview);
+    vi.mocked(confirmCustomerImport)
+      .mockResolvedValueOnce({
+        job: { ...preview.job, status: 'committing' },
+        committed: 0,
+        failed: 0,
+        rowResults: [],
+      })
+      .mockResolvedValueOnce({
+        job: { ...preview.job, status: 'completed', insertedRows: 1 },
+        committed: 1,
+        failed: 0,
+        rowResults: [],
+      });
+    renderWithProviders(<CustomerImportExportPage />, {
+      user: {
+        ...IMPORTER,
+        afHomesPermissions: IMPORTER.afHomesPermissions.map((p) => ({ ...p, canUpdate: true })),
+      },
+    });
+    await user.upload(
+      screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+      new File(['synthetic'], 'synthetic.xlsm'),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Confirm Import (1 rows)' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(confirmCustomerImport).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Import committed: 1 written/)).toBeInTheDocument();
+  });
 });
 
 describe('CustomerImportExportPage export filters', () => {
@@ -98,9 +222,9 @@ describe('CustomerImportExportPage workspace tabs', () => {
     renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
     expect(await screen.findByRole('button', { name: 'Choose Excel file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Choose CSV file' })).toBeInTheDocument();
-    const excel = document.querySelector('input[accept=".xlsx"]');
+    const excel = document.querySelector('input[accept*=".xlsm"]');
     const csv = document.querySelector('input[accept=".csv"]');
-    expect(excel?.getAttribute('aria-label')).toBe('Import Excel (.xlsx)');
+    expect(excel?.getAttribute('aria-label')).toBe('Import Excel (.xlsx or .xlsm)');
     expect(csv?.getAttribute('aria-label')).toBe('Import CSV (UTF-8)');
   });
 

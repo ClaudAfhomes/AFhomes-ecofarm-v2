@@ -82,6 +82,7 @@ import {
   getCustomerApplications,
   getCustomerApplicationsPage,
   getCustomerById,
+  getCustomerImportPrefill,
   getCustomersPage,
   getOfficialFormTemplate,
   getPurchaseTermsProposal,
@@ -925,6 +926,11 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
 }
 
 export function CustomerApplicationEditorPage() {
+  const { user: applicationUser } = useSession();
+  const mayLoadImport =
+    applicationUser?.afHomesPermissions.some(
+      (p) => p.moduleKey === 'governance.customer_import' && p.canView,
+    ) ?? false;
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
     setInvalidFields((current) =>
@@ -951,6 +957,8 @@ export function CustomerApplicationEditorPage() {
   });
   const [applicationSearch] = useSearchParams();
   const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
+  const selectedCustomerRef = useRef(customerId);
+  const [prefilledCustomerId, setPrefilledCustomerId] = useState<string | null>(null);
   const [planId, setPlanId] = useState('');
   const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('BRONZE');
   const [paymentScheme, setPaymentScheme] = useState<
@@ -1016,7 +1024,65 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerById(customerId),
     enabled: Boolean(customerId),
   });
+  const importPrefill = useMutation({
+    mutationFn: (selectedCustomer: string) => getCustomerImportPrefill(selectedCustomer),
+    onSuccess: (data, selectedCustomer) => {
+      if (selectedCustomer !== selectedCustomerRef.current) return;
+      setPrefilledCustomerId(selectedCustomer);
+      setConsent(false);
+      setValidId(false);
+      setPaymentProof(false);
+      setChannels([]);
+      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setSecondary(
+        data.secondary
+          ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
+          : null,
+      );
+      const plan = plans.data?.find((p) => p.code === data.tier);
+      if (plan && data.tier) {
+        setPlanId(plan.id);
+        setTier(data.tier);
+      }
+      if (data.paymentScheme) setPaymentScheme(data.paymentScheme);
+      setMeta((current) => ({
+        ...current,
+        vipRecommenderName: data.recommenderName,
+        recommenderContact: data.recommenderContact,
+        recommenderEmail: data.recommenderEmail,
+        salesManagerName: data.salesManagerName,
+        vipReferrer: data.referrerName,
+      }));
+      setMessage(
+        'Imported details loaded for review. Still required: ' +
+          data.missingFields.join(', ') +
+          '.',
+      );
+    },
+    onError: (error) =>
+      setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
+  });
   const pickCustomer = (next: string) => {
+    selectedCustomerRef.current = next;
+    if (prefilledCustomerId && next !== prefilledCustomerId) {
+      setPrimary(emptyHolder('PRIMARY'));
+      setSecondary(null);
+      setPrefilledCustomerId(null);
+      setPlanId('');
+      setTier('BRONZE');
+      setPaymentScheme('spot_cash');
+      setConsent(false);
+      setPaymentProof(false);
+      setChannels([]);
+      setMeta((current) => ({
+        ...current,
+        salesManagerName: '',
+        vipRecommenderName: '',
+        recommenderContact: '',
+        recommenderEmail: '',
+        vipReferrer: '',
+      }));
+    }
     setCustomerId(next);
     setOcrFile(null);
     setPickerVersion((version) => version + 1);
@@ -1589,10 +1655,27 @@ export function CustomerApplicationEditorPage() {
                     <Skeleton style={{ height: 40 }} />
                   </div>
                 ) : null}
-                {customerId && !linkedCustomer.data ? (
+                {customerId && linkedCustomer.isPending ? (
                   <p role="status" className={styles.pickedLine}>
                     Loading customer…
                   </p>
+                ) : null}
+                {customerId && linkedCustomer.isError ? (
+                  <Alert variant="danger">
+                    Customer details could not be loaded.{' '}
+                    <Button variant="secondary" onClick={() => void linkedCustomer.refetch()}>
+                      Retry customer details
+                    </Button>
+                  </Alert>
+                ) : null}
+                {!id && customerId && mayLoadImport ? (
+                  <Button
+                    variant="secondary"
+                    loading={importPrefill.isPending}
+                    onClick={() => importPrefill.mutate(customerId)}
+                  >
+                    Load imported customer details
+                  </Button>
                 ) : null}
               </div>
               <label className={styles.filterLabel}>
@@ -2771,7 +2854,9 @@ export function ReservationAgreementEditorPage() {
             {formatMoney(summary.data.verifiedTotal)}, balance{' '}
             {formatMoney(summary.data.remainingBalance)}.
           </span>
-          <span>Schedule rows below are obligations only — actual cash lives in the payments table.</span>
+          <span>
+            Schedule rows below are obligations only — actual cash lives in the payments table.
+          </span>
         </p>
       ) : null}
       {salePlan ? (
@@ -2924,9 +3009,7 @@ export function ReservationAgreementEditorPage() {
           <h2 id="reservation-dates-heading" className={styles.panelTitle}>
             2. Agreement dates
           </h2>
-          <p className={styles.panelNote}>
-            Effective dates that bound this reservation agreement.
-          </p>
+          <p className={styles.panelNote}>Effective dates that bound this reservation agreement.</p>
           <div className={styles.editorGrid}>
             {Object.entries(dates).map(([key, value]) => (
               <Field
@@ -3328,8 +3411,8 @@ function ApplicationOriginAgreementPanel({
         <p className={styles.moneyNote}>
           <StatusChip label="Fully paid" tone="success" />
           <span>
-            Verified {formatMoney(money.verifiedTotal)} against{' '}
-            {formatMoney(money.totalPrice)}. Ready to finalize.
+            Verified {formatMoney(money.verifiedTotal)} against {formatMoney(money.totalPrice)}.
+            Ready to finalize.
           </span>
         </p>
       ) : null}
@@ -3471,9 +3554,7 @@ function MembershipConfirmation({
             </div>
             <div className={styles.snapshotField}>
               <dt>{result ? 'Points allocated' : 'Points balance'}</dt>
-              <dd>
-                {formatPoints(result?.pointsAllocated ?? persisted?.pointsBalance)}
-              </dd>
+              <dd>{formatPoints(result?.pointsAllocated ?? persisted?.pointsBalance)}</dd>
             </div>
             <div className={styles.snapshotField}>
               <dt>Card Sale</dt>

@@ -70,7 +70,13 @@ describe('psgcCloudAddressProvider.localities', () => {
     );
 
     expect(await psgcCloudAddressProvider.localities('0403400000')).toEqual([
-      { code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000' },
+      {
+        code: '0403406000',
+        name: 'Calauan',
+        type: 'municipality',
+        provinceCode: '0403400000',
+        postalCode: '4012',
+      },
     ]);
   });
 
@@ -188,9 +194,7 @@ describe('psgcCloudAddressProvider failure modes', () => {
       throw error;
     });
 
-    const error = await psgcCloudAddressProvider
-      .provinces()
-      .catch((e: AddressProviderError) => e);
+    const error = await psgcCloudAddressProvider.provinces().catch((e: AddressProviderError) => e);
     expect(error).toBeInstanceOf(AddressProviderError);
     expect((error as AddressProviderError).code).toBe('PROVIDER_TIMEOUT');
   });

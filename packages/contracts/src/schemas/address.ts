@@ -1,7 +1,7 @@
 /**
  * Normalized Philippine address vocabulary.
  *
- * These types are the AF Homes contract, deliberately NOT a mirror of any
+ * These types are the AFHomes contract, deliberately NOT a mirror of any
  * provider's response shape. A provider adapter owns every source-specific
  * field name; application code sees only `code`/`name`/`type`.
  *
@@ -39,6 +39,15 @@ export const localitySchema = z.object({
   name: z.string().trim().min(1),
   type: localityTypeSchema,
   provinceCode: geographicCodeSchema,
+  /**
+   * The locality's postal code, when the source publishes one. Absence is
+   * honest - several municipalities have no published zip - so a missing
+   * value is never defaulted or invented.
+   */
+  postalCode: z
+    .string()
+    .regex(/^\d{4}$/, 'Use a four-digit reference postal code')
+    .optional(),
 });
 export type Locality = z.infer<typeof localitySchema>;
 

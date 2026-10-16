@@ -7,6 +7,8 @@
  * small, exact, and have no native code, no font downloads, and no network.
  */
 
+import { deflateRawSync } from 'node:zlib';
+
 export type XlsxColumnType = 'text' | 'number' | 'money' | 'date';
 export type XlsxColumn = { label: string; type: XlsxColumnType; width?: number };
 
@@ -69,14 +71,17 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(data: Uint8Array): number {
+export function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;
   for (let i = 0; i < data.length; i += 1) crc = CRC_TABLE[(crc ^ data[i]!) & 0xff]! ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
 
 /** Minimal stored (method 0) ZIP writer - valid for any reader. */
-function zipStored(files: { name: string; data: Uint8Array }[]): Uint8Array {
+export function zipStored(
+  files: { name: string; data: Uint8Array }[],
+  compress = false,
+): Uint8Array {
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
@@ -99,6 +104,7 @@ function zipStored(files: { name: string; data: Uint8Array }[]): Uint8Array {
     return b;
   };
   for (const file of files) {
+    const payload = compress ? deflateRawSync(file.data) : file.data;
     const name = encoder.encode(file.name);
     const crc = crc32(file.data);
     const local = new Uint8Array(30 + name.length);
@@ -106,29 +112,29 @@ function zipStored(files: { name: string; data: Uint8Array }[]): Uint8Array {
     view.setUint32(0, 0x04034b50, true);
     view.setUint16(4, 20, true);
     view.setUint16(6, 0x0800, true);
-    view.setUint16(8, 0, true);
+    view.setUint16(8, compress ? 8 : 0, true);
     view.setUint16(10, dosTime, true);
     view.setUint16(12, dosDate, true);
     view.setUint32(14, crc, true);
-    view.setUint32(18, file.data.length, true);
+    view.setUint32(18, payload.length, true);
     view.setUint32(22, file.data.length, true);
     view.setUint16(26, name.length, true);
     view.setUint16(28, 0, true);
     local.set(name, 30);
     const headerOffset = offset;
     push(local);
-    push(file.data);
+    push(payload);
     const head = new Uint8Array(46 + name.length);
     const cview = new DataView(head.buffer);
     cview.setUint32(0, 0x02014b50, true);
     cview.setUint16(4, 20, true);
     cview.setUint16(6, 20, true);
     cview.setUint16(8, 0x0800, true);
-    cview.setUint16(10, 0, true);
+    cview.setUint16(10, compress ? 8 : 0, true);
     cview.setUint16(12, dosTime, true);
     cview.setUint16(14, dosDate, true);
     cview.setUint32(16, crc, true);
-    cview.setUint32(20, file.data.length, true);
+    cview.setUint32(20, payload.length, true);
     cview.setUint32(24, file.data.length, true);
     cview.setUint16(28, name.length, true);
     cview.setUint16(30, 0, true);

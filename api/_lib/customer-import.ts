@@ -1,4 +1,4 @@
-import {
+﻿import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
@@ -13,8 +13,9 @@ import {
   mapSourceStatus,
   normalizeAddressField,
   normalizeEmail,
-  normalizePersonName,
-  normalizePhilippinePhone,
+  normalizeWorkbookName,
+  workbookContactSchema,
+  completedAge,
   normalizeTier,
   parseGoogleSheetUrl,
   resolveCustomerCategory,
@@ -108,6 +109,8 @@ export function matrixToRecords(matrix: string[][]): {
 } {
   const known = new Set<string>(CUSTOMER_IMPORT_COLUMNS);
   const headers = (matrix[0] ?? []).map((h) => h.trim().toLowerCase());
+  if (new Set(headers.filter(Boolean)).size !== headers.filter(Boolean).length)
+    throw new Error('Duplicate spreadsheet column headers are unsupported');
   if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
   const unknownHeaders = headers.filter((h) => h !== '' && !known.has(h));
   const rows: ImportFieldRow[] = [];
@@ -115,7 +118,16 @@ export function matrixToRecords(matrix: string[][]): {
     if (cells.every((c) => (c ?? '').trim() === '')) return;
     const fields: Record<string, string> = {};
     headers.forEach((header, i) => {
-      if (header !== '') fields[header] = (cells[i] ?? '').trim();
+      if (header !== '')
+        fields[header] = [
+          'mobile',
+          'secondary_mobile',
+          'landline',
+          'secondary_landline',
+          'recommender_contact',
+        ].includes(header)
+          ? (cells[i] ?? '')
+          : (cells[i] ?? '').trim();
     });
     rows.push({ rowNumber: index + 2, fields });
   });
@@ -228,6 +240,11 @@ export type ImportContext = {
   membershipByNumber: Map<string, { id: string; customerId: string }>;
   referralStaffByCode: Map<string, string>;
   seenMembershipNumbers: Map<string, number>;
+  companySnapshots?: Map<
+    string,
+    { fields: Record<string, string>; current: Record<string, string> }
+  >;
+  customerIdentityById?: Map<string, Record<string, string | null>>;
 };
 
 export type NormalizedImportRow = {
@@ -310,9 +327,13 @@ export function validateImportRow(
     err('suffix', 'Use letters, spaces, apostrophes and hyphens only');
   if (!nonEmpty(get('email'))) err('email', 'Required');
   else if (!emailSchema.safeParse(get('email')).success) err('email', 'Invalid email');
-  const mobile = normalizePhilippinePhone(get('mobile'));
+  const mobile = workbookContactSchema.safeParse(fields.mobile ?? '');
   if (!nonEmpty(get('mobile'))) err('mobile', 'Required');
-  else if (mobile === null) err('mobile', 'Invalid phone');
+  else if (!mobile.success)
+    err('mobile', 'Use exactly 11 digits, including the leading zero; no spaces or separators');
+  for (const field of ['landline', 'secondary_landline', 'recommender_contact'])
+    if (fields[field] && !workbookContactSchema.safeParse(fields[field]).success)
+      err(field, 'Use exactly 11 digits, including the leading zero; no spaces or separators');
   if (nonEmpty(get('birth_date')) && !dateOfBirthSchema.safeParse(get('birth_date')).success)
     err('birth_date', 'Use a real past birth date within 120 years');
   for (const key of [
@@ -352,9 +373,16 @@ export function validateImportRow(
       err(field, 'Use letters, spaces, apostrophes and hyphens only');
   if (nonEmpty(get('secondary_email')) && !emailSchema.safeParse(get('secondary_email')).success)
     err('secondary_email', 'Invalid email');
-  const secondaryMobileRaw = get('secondary_mobile');
-  const secondaryMobile = secondaryMobileRaw ? normalizePhilippinePhone(secondaryMobileRaw) : null;
-  if (secondaryMobileRaw && secondaryMobile === null) err('secondary_mobile', 'Invalid phone');
+  const secondaryMobileRaw = fields.secondary_mobile ?? '';
+  const secondaryMobile =
+    secondaryMobileRaw && workbookContactSchema.safeParse(secondaryMobileRaw).success
+      ? secondaryMobileRaw
+      : null;
+  if (secondaryMobileRaw && secondaryMobile === null)
+    err(
+      'secondary_mobile',
+      'Use exactly 11 digits, including the leading zero; no spaces or separators',
+    );
   if (
     nonEmpty(get('secondary_birth_date')) &&
     !dateOfBirthSchema.safeParse(get('secondary_birth_date')).success
@@ -508,6 +536,34 @@ export function validateImportRow(
     customerId = matchedEmail.id;
     action = 'UPDATE';
   }
+  const existingIdentity = customerId ? ctx.customerIdentityById?.get(customerId) : undefined;
+  if (action === 'UPDATE' && ctx.customerIdentityById) {
+    if (!existingIdentity) err('_identity', 'Existing customer identity requires manual review');
+    else {
+      const identityKey = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+      for (const field of [
+        'first_name',
+        'middle_name',
+        'last_name',
+        'suffix',
+        'email',
+        'birth_date',
+        'mobile',
+      ]) {
+        const stored =
+          field === 'mobile'
+            ? existingIdentity.phone?.replace(/^\+63(?=9\d{9}$)/, '0')
+            : existingIdentity[field];
+        if (get(field) && stored && identityKey(get(field)) !== identityKey(stored))
+          err(
+            field,
+            'Existing customer identity differs; review changes in Customers before importing',
+          );
+      }
+      if (!existingIdentity.first_name || !existingIdentity.last_name)
+        err('_identity', 'Existing customer identity could not be verified');
+    }
+  }
   if (action === 'UPDATE' && hasPayment)
     err(
       'payment_amount',
@@ -551,17 +607,17 @@ export function validateImportRow(
     tier,
     customerStatus: customerStatusForCategory(category!),
     person: {
-      firstName: normalizePersonName(get('first_name')),
-      middleName: nonEmpty(get('middle_name')) ? normalizePersonName(get('middle_name')) : null,
-      lastName: normalizePersonName(get('last_name')),
-      suffix: nonEmpty(get('suffix')) ? normalizePersonName(get('suffix')) : null,
+      firstName: normalizeWorkbookName(get('first_name')),
+      middleName: nonEmpty(get('middle_name')) ? normalizeWorkbookName(get('middle_name')) : null,
+      lastName: normalizeWorkbookName(get('last_name')),
+      suffix: nonEmpty(get('suffix')) ? normalizeWorkbookName(get('suffix')) : null,
       birthDate: get('birth_date') || null,
       gender: (() => {
         const g = get('sex').toLowerCase();
         return g === 'male' || g === 'female' || g === 'other' || g === 'undisclosed' ? g : null;
       })(),
       email: normalizeEmail(get('email')) ?? get('email'),
-      phone: mobile ?? get('mobile'),
+      phone: mobile.success ? mobile.data : (fields.mobile ?? ''),
     },
     payment,
     historicalSaleTotal: nonEmpty(get('historical_sale_total'))
@@ -583,15 +639,25 @@ export function validateImportRow(
         ? [
             [get('secondary_first_name'), get('secondary_middle_name'), get('secondary_last_name')]
               .filter(Boolean)
-              .map((part) => normalizePersonName(part))
+              .map((part) => normalizeWorkbookName(part))
               .join(' '),
             normalizeEmail(get('secondary_email')) ?? get('secondary_email'),
             secondaryMobile ?? secondaryMobileRaw,
           ]
             .filter(Boolean)
-            .join(' · ') || null
+            .join(' Â· ') || null
         : null,
   };
+  if (existingIdentity && action === 'UPDATE') {
+    normalized.person.firstName = existingIdentity.first_name;
+    normalized.person.lastName = existingIdentity.last_name;
+    normalized.person.middleName = existingIdentity.middle_name;
+    normalized.person.suffix = existingIdentity.suffix;
+    normalized.person.phone = existingIdentity.phone;
+    normalized.person.birthDate = existingIdentity.birth_date;
+  }
+  if (normalized.person.birthDate)
+    normalized.person.age = String(completedAge(normalized.person.birthDate, today));
   if (tier && !hasSecondary && nonEmpty(get('vip_tier')) && category !== 'ACTIVE_VIP')
     warn('vip_tier', 'Tier is informational without a membership or payment intent');
   if (balance !== null && balance > 0 && !normalized.requireMember)
