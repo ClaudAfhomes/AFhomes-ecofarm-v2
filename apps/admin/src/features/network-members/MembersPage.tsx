@@ -181,7 +181,15 @@ export function MembersPage() {
                     onClick={() => setViewing(member)}
                   >
                     <TableCell label="Code">
-                      <span className={styles.codeCell}>{member.employeeNumber ?? '—'}</span>
+                      <span
+                        className={
+                          member.employeeNumber
+                            ? styles.codeChip
+                            : `${styles.codeChip} ${styles.codeEmpty}`
+                        }
+                      >
+                        {member.employeeNumber ?? '—'}
+                      </span>
                     </TableCell>
                     <TableCell label="Name">
                       <span className={styles.identityCell}>

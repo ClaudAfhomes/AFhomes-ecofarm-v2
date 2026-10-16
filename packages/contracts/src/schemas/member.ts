@@ -3,14 +3,30 @@ import { z } from 'zod';
 import {
   dateOfBirthSchema,
   emailSchema,
-  normalizeAddressField,
   normalizePersonName,
   optionalLandlineSchema,
   PERSON_NAME_RE,
   phoneSchema,
+  toTitleCase,
 } from './input.js';
-import { tinNumberSchema } from './official-forms.js';
+import { geographicCodeSchema } from './address.js';
 import { governmentIdTypeSchema } from './sales.js';
+
+/**
+ * Member TIN: exactly 9 digits, no dashes or branch suffixes. Stricter than
+ * the shared application TIN on purpose: the member form filters to
+ * digits-only live, so the contract matches the field instead of disagreeing
+ * with it.
+ */
+const memberTinSchema = z.preprocess(
+  (value) =>
+    value == null || (typeof value === 'string' && value.trim() === '') ? undefined : value,
+  z
+    .string()
+    .trim()
+    .regex(/^\d{9}$/, 'Use the 9-digit TIN')
+    .optional(),
+);
 
 /**
  * AFHomes sales-network Members: hierarchy sellers (Vice Director, Senior
@@ -68,6 +84,22 @@ export type MemberSex = z.infer<typeof memberSexSchema>;
 export const memberCivilStatusSchema = z.enum(['Single', 'Married', 'Widowed', 'Separated']);
 export type MemberCivilStatus = z.infer<typeof memberCivilStatusSchema>;
 
+/** How the AA number is set: system-issued or operator-typed. */
+export const aaNumberModeSchema = z.enum(['auto', 'manual']);
+export type AaNumberMode = z.infer<typeof aaNumberModeSchema>;
+
+/**
+ * Operator-typed AA number: `AA` plus 4 to 12 uppercase letters/digits
+ * (6 to 14 characters total, no separators). Composition is the generator's
+ * business, not a rejection rule: typed numbers are checked for shape and
+ * uniqueness, never for internal arrangement.
+ */
+export const manualAaNumberSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^AA[A-Z0-9]{4,12}$/, 'Use AA plus up to 12 letters/digits');
+
 /** Staff display name: letters/spaces/apostrophes/hyphens, stored UPPERCASE. */
 const memberFullNameSchema = z
   .string()
@@ -83,7 +115,7 @@ const addressText = (max: number) =>
     .trim()
     .min(1)
     .max(max)
-    .transform((value) => normalizeAddressField(value));
+    .transform((value) => toTitleCase(value));
 
 /**
  * The linked profile record. TIN and the government ID number are write-only:
@@ -101,12 +133,17 @@ export const memberProfileSchema = z.object({
   telNo: optionalLandlineSchema,
   mobileNo: phoneSchema,
   fbMessenger: z.string().trim().max(80).optional(),
-  tin: tinNumberSchema,
+  tin: memberTinSchema,
   employerName: z.string().trim().min(1).max(120),
   employerAddress: addressText(200),
   jobPosition: z.string().trim().min(1).max(80),
   governmentIdType: governmentIdTypeSchema,
-  governmentIdNumber: z.string().trim().min(4).max(32),
+  governmentIdNumber: z
+    .string()
+    .trim()
+    .min(4)
+    .max(16)
+    .regex(/^[A-Za-z0-9-]+$/, 'Use letters, digits and dashes only'),
   /** Immediate-upline link. Head changes go through the upline desk. */
   referrerStaffId: z.string().uuid().nullable().optional(),
   /**
@@ -131,6 +168,12 @@ export const createMemberSchema = memberProfileSchema
     temporaryPassword: z.string().min(8).max(128),
     departmentId: z.string().uuid(),
     position: memberPositionSchema,
+    aaNumberMode: aaNumberModeSchema.default('auto'),
+    aaNumber: manualAaNumberSchema.optional(),
+    // PSGC codes chosen from the reference lists. Required together: the
+    // server re-resolves the pair and stores the authority's own names.
+    provinceCode: geographicCodeSchema,
+    cityMunicipalityCode: geographicCodeSchema,
   })
   .superRefine((value, ctx) => {
     if (value.position === 'vice_director') {
@@ -142,16 +185,42 @@ export const createMemberSchema = memberProfileSchema
     if (value.position !== 'sales_manager' && value.ostReferrerStaffId) {
       ctx.addIssue({ code: 'custom', message: 'An OST referrer is for Sales Managers only' });
     }
+    if (value.position === 'ost' && value.aaNumberMode === 'manual') {
+      ctx.addIssue({ code: 'custom', message: 'OST numbers ride the approval flow' });
+    } else if (value.aaNumberMode === 'manual' && !value.aaNumber) {
+      ctx.addIssue({ code: 'custom', message: 'Type the AA number' });
+    } else if (value.aaNumberMode === 'auto' && value.aaNumber) {
+      ctx.addIssue({ code: 'custom', message: 'Automatic mode issues the number' });
+    }
   });
 export type CreateMember = z.infer<typeof createMemberSchema>;
 
 /** Profile update. The head link is deliberately absent (upline desk owns it). */
 export const updateMemberProfileSchema = memberProfileSchema
   .omit({ referrerStaffId: true })
+  .extend({ fullName: memberFullNameSchema.optional() })
   .partial();
 export type UpdateMemberProfile = z.infer<typeof updateMemberProfileSchema>;
 
-/** Read model. Secrets are masked; the plaintext exists only at submission. */
+/**
+ * Issue a missing AA number (never a renumber: the handler refuses a member
+ * that already holds one). Same AUTO/MANUAL rules as creation.
+ */
+export const issueAccreditationSchema = z
+  .object({
+    aaNumberMode: aaNumberModeSchema.default('auto'),
+    aaNumber: manualAaNumberSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.aaNumberMode === 'manual' && !value.aaNumber) {
+      ctx.addIssue({ code: 'custom', message: 'Type the AA number' });
+    } else if (value.aaNumberMode === 'auto' && value.aaNumber) {
+      ctx.addIssue({ code: 'custom', message: 'Automatic mode issues the number' });
+    }
+  });
+export type IssueAccreditation = z.infer<typeof issueAccreditationSchema>;
+
+/** List-shaped read model. Secrets are masked; the plaintext exists only at submission. */
 export const memberSchema = z.object({
   id: z.string().uuid(),
   employeeNumber: z.string().nullable(),
@@ -183,6 +252,18 @@ export const memberSchema = z.object({
   createdAt: z.string(),
 });
 export type Member = z.infer<typeof memberSchema>;
+
+/**
+ * Single-member read for the members console. Unlike the list, it carries the
+ * two identification fields an administrator typed so the operator can verify
+ * them. The read stays behind the members permission; neither value ever
+ * reaches an audit payload.
+ */
+export const memberDetailSchema = memberSchema.extend({
+  tin: z.string().nullable(),
+  governmentIdNumber: z.string().nullable(),
+});
+export type MemberDetail = z.infer<typeof memberDetailSchema>;
 
 export const memberListQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),

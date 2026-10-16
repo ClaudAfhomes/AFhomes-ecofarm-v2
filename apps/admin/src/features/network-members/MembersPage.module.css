@@ -66,6 +66,24 @@
   white-space: nowrap;
 }
 
+.codeChip {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-sunken);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.codeEmpty {
+  border-style: dashed;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
 .identityCell {
   display: inline-flex;
   align-items: center;

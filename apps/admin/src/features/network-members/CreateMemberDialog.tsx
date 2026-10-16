@@ -4,26 +4,42 @@ import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
+  Combobox,
   DateField,
   Dialog,
   PasswordField,
   Select,
   TextField,
+  notifyError,
   notifySuccess,
 } from '@afhomes/ui';
 import {
   MEMBER_POSITION_LABELS,
   MEMBER_POSITIONS,
   MEMBER_UPLINE_ROLE,
+  GOVERNMENT_ID_TYPE_LABELS,
+  createMemberSchema,
   governmentIdTypeSchema,
   type MemberPosition,
 } from '@afhomes/contracts';
-import { normalizeLiveHumanField } from '../../lib/normalize';
+import type { ComboboxOption } from '@afhomes/ui';
+import {
+  filterGovernmentIdInput,
+  filterHolderAddressInput,
+  filterHolderNameInput,
+  filterLandlineInput,
+  filterMemberTinInput,
+  filterMobileInput,
+} from '../../lib/normalize';
+import { useLocalitiesQuery, useProvincesQuery } from '../address/useAddressHierarchy.js';
+import { ApiError, errorFieldEntries } from '../../lib/api/errors';
 import {
   createMember,
   getMemberDepartments,
   getMemberOstReferrers,
   getMemberUplines,
+  AA_MANUAL_RE,
+  withAaPrefix,
 } from './services';
 import styles from './MembersPage.module.css';
 
@@ -42,6 +58,12 @@ function ageOf(dateOfBirth: string): number | null {
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+// OST joins through OST registration, never here: the create picker offers
+// hierarchy positions only (the server still validates the slug).
+const CREATE_POSITIONS: readonly MemberPosition[] = MEMBER_POSITIONS.filter(
+  (value) => value !== 'ost',
+);
+
 /**
  * Member onboarding form. Sections mirror the stated paper fields. The
  * department is fixed in Sales; every position except Vice Director names
@@ -58,7 +80,7 @@ export function CreateMemberDialog({
   onCreated: () => void;
 }) {
   const departments = useQuery({
-    queryKey: ['afhomes', 'departments'],
+    queryKey: ['network', 'members', 'departments'],
     queryFn: getMemberDepartments,
     placeholderData: keepPreviousData,
     enabled: open,
@@ -79,6 +101,8 @@ export function CreateMemberDialog({
   const [streetNo, setStreetNo] = useState('');
   const [cityMunicipality, setCityMunicipality] = useState('');
   const [province, setProvince] = useState('');
+  const [provinceCode, setProvinceCode] = useState('');
+  const [localityCode, setLocalityCode] = useState('');
   const [zipCode, setZipCode] = useState('');
   const [telNo, setTelNo] = useState('');
   const [mobileNo, setMobileNo] = useState('');
@@ -94,6 +118,8 @@ export function CreateMemberDialog({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [headStaffId, setHeadStaffId] = useState('');
   const [ostReferrerStaffId, setOstReferrerStaffId] = useState('');
+  const [aaMode, setAaMode] = useState<'auto' | 'manual'>('auto');
+  const [aaNumber, setAaNumber] = useState('');
 
   const uplineRole = MEMBER_UPLINE_ROLE[position];
   const heads = useQuery({
@@ -109,11 +135,39 @@ export function CreateMemberDialog({
     enabled: open && position === 'sales_manager',
   });
 
+  // Province and city come from the PSGC reference, never typed: the
+  // combobox draft never commits, so state only ever holds a listed value.
+  // The ZIP follows the chosen locality and locks; when the source publishes
+  // no postal code the field stays hand-typed.
+  const provinces = useProvincesQuery(open);
+  const localities = useLocalitiesQuery(provinceCode || undefined);
+  const selectedLocality =
+    (localities.data ?? []).find((locality) => locality.code === localityCode) ?? null;
+  const zipPublished = selectedLocality?.postalCode != null;
+
+  const pickProvince = (option: ComboboxOption | null) => {
+    setProvince(option?.name ?? '');
+    setProvinceCode(option?.code ?? '');
+    setCityMunicipality('');
+    setLocalityCode('');
+    setZipCode('');
+  };
+  const pickLocality = (option: ComboboxOption | null) => {
+    const full = (localities.data ?? []).find((locality) => locality.code === option?.code);
+    setCityMunicipality(full?.name ?? '');
+    setLocalityCode(full?.code ?? '');
+    setZipCode(full?.postalCode ?? '');
+  };
+
   const age = ageOf(dateOfBirth);
 
   const save = useBusinessMutation({
-    mutationFn: () =>
-      createMember({
+    mutationFn: () => {
+      // Client-side first net: the SAME contract the server enforces, so a
+      // mistyped field is named before the request leaves (the server stays
+      // authoritative and re-checks everything, including head, department
+      // and duplicates, which only it can judge).
+      const payload = {
         fullName: fullName.trim(),
         email: email.trim(),
         temporaryPassword,
@@ -125,6 +179,8 @@ export function CreateMemberDialog({
         streetNo: streetNo.trim(),
         cityMunicipality: cityMunicipality.trim(),
         province: province.trim(),
+        provinceCode,
+        cityMunicipalityCode: localityCode,
         zipCode: zipCode.trim(),
         telNo: telNo.trim() || undefined,
         mobileNo: mobileNo.trim(),
@@ -142,10 +198,37 @@ export function CreateMemberDialog({
         governmentIdNumber: governmentIdNumber.trim(),
         referrerStaffId: headStaffId || null,
         ostReferrerStaffId: position === 'sales_manager' ? ostReferrerStaffId || null : null,
-      }),
+        aaNumberMode: aaMode,
+        aaNumber: aaMode === 'manual' ? aaNumber.trim().toUpperCase() || undefined : undefined,
+      };
+      const checked = createMemberSchema.safeParse(payload);
+      if (!checked.success) {
+        const details: Record<string, string> = {};
+        for (const issue of checked.error.issues.slice(0, 8))
+          details[issue.path.map(String).join('.') || 'form'] = issue.message;
+        throw new ApiError({
+          code: 'VALIDATION_ERROR',
+          message: 'Some fields need attention',
+          status: 400,
+          details,
+        });
+      }
+      return createMember(checked.data);
+    },
     onSuccess: (created) => {
       notifySuccess({ title: 'Member created', message: `${created.fullName} was added.` });
       onCreated();
+    },
+    // A centered modal, not just an inline line: a failed save must be
+    // impossible to miss, wherever the dialog has scrolled.
+    onError: (error) => {
+      const fields = errorFieldEntries(error);
+      notifyError({
+        title: 'Member not created',
+        message: error.message,
+        ...(fields.length > 0
+          ? { detail: fields.map(([field, reason]) => `${field}: ${reason}`).join('\n') } : {}),
+      });
     },
   });
 
@@ -170,7 +253,44 @@ export function CreateMemberDialog({
     temporaryPassword.length >= 8 &&
     temporaryPassword === confirmPassword &&
     (uplineRole === null || headStaffId !== '');
-  const canSave = requiredFilled && !save.isPending;
+  const manualAaOk = aaMode === 'auto' || AA_MANUAL_RE.test(aaNumber.trim().toUpperCase());
+  const canSave = requiredFilled && manualAaOk && !save.isPending;
+
+  // The Create button is gated, never silent: the first unmet requirement
+  // reads as guidance so a dead button always explains itself.
+  function disabledReason(): string | null {
+    if (save.isPending || canSave) return null;
+    if (departments.isPending) return 'Loading sales team…';
+    if (salesDepartment === null)
+      return departments.error instanceof ApiError && departments.error.status === 403
+        ? 'Department access required.'
+        : 'Sales team unavailable. Reload.';
+    if (fullName.trim().length <= 1) return 'Enter the full name.';
+    if (dateOfBirth.length !== 10 || age === null) return 'Enter a valid birth date.';
+    if (sex === '') return 'Pick a sex.';
+    if (civilStatus === '') return 'Pick a civil status.';
+    if (
+      streetNo.trim() === '' ||
+      cityMunicipality.trim() === '' ||
+      province.trim() === '' ||
+      zipCode.trim() === ''
+    )
+      return 'Complete the home address.';
+    if (mobileNo.trim() === '') return 'Enter the mobile number.';
+    if (employerName.trim() === '' || employerAddress.trim() === '' || jobPosition.trim() === '')
+      return 'Complete the work details.';
+    if (governmentIdType === '' || governmentIdNumber.trim() === '')
+      return 'Pick an ID type and number.';
+    if (email.trim() === '') return 'Enter the email address.';
+    if (temporaryPassword.length < 8) return 'Password needs 8+ characters.';
+    if (temporaryPassword !== confirmPassword) return 'Passwords must match.';
+    if (aaMode === 'manual' && !AA_MANUAL_RE.test(aaNumber.trim().toUpperCase()))
+      return 'Type a valid AA number.';
+    if (uplineRole !== null && headStaffId === '') return 'Pick a head to continue.';
+    return null;
+  }
+  const blockedWhy = disabledReason();
+  const serverFields = errorFieldEntries(save.error);
 
   const reset = () => {
     setPosition('sales_manager');
@@ -181,6 +301,8 @@ export function CreateMemberDialog({
     setStreetNo('');
     setCityMunicipality('');
     setProvince('');
+    setProvinceCode('');
+    setLocalityCode('');
     setZipCode('');
     setTelNo('');
     setMobileNo('');
@@ -196,6 +318,8 @@ export function CreateMemberDialog({
     setConfirmPassword('');
     setHeadStaffId('');
     setOstReferrerStaffId('');
+    setAaMode('auto');
+    setAaNumber('');
     save.reset();
   };
 
@@ -253,13 +377,20 @@ export function CreateMemberDialog({
                     setHeadStaffId('');
                     setOstReferrerStaffId('');
                   }}
-                  options={MEMBER_POSITIONS.map((value) => ({
+                  options={CREATE_POSITIONS.map((value) => ({
                     value,
                     label: MEMBER_POSITION_LABELS[value],
                   }))}
                 />
               </label>
             </div>
+            {salesDepartment === null && !departments.isPending ? (
+              <p role="alert">
+                {departments.error instanceof ApiError && departments.error.status === 403
+                  ? 'Department access required.'
+                  : 'Sales team unavailable. Reload.'}
+              </p>
+            ) : null}
           </div>
         </fieldset>
 
@@ -272,7 +403,7 @@ export function CreateMemberDialog({
               label="Full Name"
               value={fullName}
               suggestName
-              normalize={(value) => normalizeLiveHumanField('fullName', value)}
+              normalize={filterHolderNameInput}
               onChange={setFullName}
               autoComplete="name"
             />
@@ -336,25 +467,39 @@ export function CreateMemberDialog({
               name="member-street"
               label="No. / Street"
               value={streetNo}
+              normalize={filterHolderAddressInput}
               onChange={setStreetNo}
               autoComplete="street-address"
             />
             <div className={styles.inlinePair}>
-              <TextField
-                id="member-city"
-                name="member-city"
-                label="City / Municipality"
-                value={cityMunicipality}
-                onChange={setCityMunicipality}
-                autoComplete="address-level2"
-              />
-              <TextField
+              <Combobox
                 id="member-province"
-                name="member-province"
                 label="Province"
-                value={province}
-                onChange={setProvince}
-                autoComplete="address-level1"
+                required
+                loading={provinces.isFetching}
+                loadingLabel="Loading provinces"
+                error={provinces.isError ? 'Unable to load provinces. Try again.' : null}
+                onRetry={() => void provinces.refetch()}
+                value={provinceCode ? { code: provinceCode, name: province } : null}
+                options={provinces.data ?? []}
+                onSelect={pickProvince}
+              />
+              <Combobox
+                id="member-city"
+                label="City / Municipality"
+                required
+                disabled={!provinceCode}
+                loading={localities.isFetching}
+                loadingLabel="Loading cities and municipalities"
+                error={
+                  provinceCode && localities.isError
+                    ? 'Unable to load cities. Try again.'
+                    : null
+                }
+                onRetry={() => void localities.refetch()}
+                value={localityCode ? { code: localityCode, name: cityMunicipality } : null}
+                options={localities.data ?? []}
+                onSelect={pickLocality}
               />
             </div>
             <TextField
@@ -362,9 +507,15 @@ export function CreateMemberDialog({
               name="member-zip"
               label="ZIP Code"
               value={zipCode}
-              onChange={setZipCode}
+              onChange={(value) => {
+                if (!zipPublished) setZipCode(value);
+              }}
               autoComplete="postal-code"
+              readOnly={zipPublished}
             />
+            {localityCode && !zipPublished ? (
+              <p className={styles.sectionHint}>No published ZIP. Type one.</p>
+            ) : null}
           </div>
         </fieldset>
 
@@ -377,7 +528,7 @@ export function CreateMemberDialog({
                 name="member-tel"
                 label="Tel No."
                 value={telNo}
-                onChange={setTelNo}
+                onChange={(value) => setTelNo(filterLandlineInput(value))}
                 autoComplete="tel"
                 optional
               />
@@ -386,7 +537,7 @@ export function CreateMemberDialog({
                 name="member-mobile"
                 label="Mobile No."
                 value={mobileNo}
-                onChange={setMobileNo}
+                onChange={(value) => setMobileNo(filterMobileInput(value))}
                 autoComplete="tel-national"
               />
             </div>
@@ -444,9 +595,7 @@ export function CreateMemberDialog({
                     { value: '', label: 'Select ID type' },
                     ...governmentIdTypeSchema.options.map((value) => ({
                       value,
-                      label: value
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                      label: GOVERNMENT_ID_TYPE_LABELS[value],
                     })),
                   ]}
                 />
@@ -456,7 +605,7 @@ export function CreateMemberDialog({
                 name="member-govid"
                 label="Government ID Number"
                 value={governmentIdNumber}
-                onChange={setGovernmentIdNumber}
+                onChange={(value) => setGovernmentIdNumber(filterGovernmentIdInput(value))}
               />
             </div>
             <TextField
@@ -464,7 +613,7 @@ export function CreateMemberDialog({
               name="member-tin"
               label="TIN"
               value={tin}
-              onChange={setTin}
+              onChange={(value) => setTin(filterMemberTinInput(value))}
               optional
             />
           </div>
@@ -480,7 +629,7 @@ export function CreateMemberDialog({
               label="Email"
               type="email"
               value={email}
-              onChange={setEmail}
+              onChange={(value) => setEmail(value.toLowerCase().replace(/\s+/g, ''))}
               autoComplete="email"
             />
             <div className={styles.inlinePair}>
@@ -524,6 +673,12 @@ export function CreateMemberDialog({
                   ]}
                 />
               </label>
+              {heads.isError ? <p role="alert">Heads failed to load. Retry.</p> : null}
+              {!heads.isPending && !heads.isError && (heads.data ?? []).length === 0 ? (
+                <Alert variant="info" title="No heads found">
+                  Add a {MEMBER_POSITION_LABELS[uplineRole]} first.
+                </Alert>
+              ) : null}
             </div>
           </fieldset>
         ) : (
@@ -556,10 +711,56 @@ export function CreateMemberDialog({
           </fieldset>
         ) : null}
 
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>AA Number</legend>
+          <p className={styles.sectionHint}>System issues it, or type one.</p>
+          <div className={styles.formFields}>
+            <label className={styles.fieldLabel}>
+              AA Number Source
+              <Select
+                aria-label="AA Number Source"
+                value={aaMode}
+                onChange={(e) => {
+                  setAaMode(e.target.value as 'auto' | 'manual');
+                  setAaNumber('AA');
+                }}
+                options={[
+                  { value: 'auto', label: 'Automatic' },
+                  { value: 'manual', label: 'Manual' },
+                ]}
+              />
+            </label>
+            {aaMode === 'manual' ? (
+              <TextField
+                id="member-aa-number"
+                name="member-aa-number"
+                label="AA Number"
+                value={aaNumber}
+                onChange={(value) => setAaNumber(withAaPrefix(value))}
+                placeholder="AAXXXXXXXXXXXX"
+              />
+            ) : null}
+          </div>
+        </fieldset>
+
         <Alert variant="info" title="First login">
           First sign-in needs password change.
         </Alert>
-        {save.error ? <p role="alert">{save.error.message}</p> : null}
+        {blockedWhy ? <p className={styles.sectionHint}>{blockedWhy}</p> : null}
+        {save.error ? (
+          <div role="alert">
+            <p>{save.error.message}</p>
+            {serverFields.length > 0 ? (
+              <ul>
+                {serverFields.map(([field, reason]) => (
+                  <li key={field}>
+                    {field}: {reason}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </Dialog>
   );

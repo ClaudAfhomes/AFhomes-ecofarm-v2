@@ -84,31 +84,20 @@ describe('genealogy head and tree', () => {
     vi.mocked(getGenealogy).mockReset().mockResolvedValue([vd, sm, ost]);
   });
 
-  it('shows the head first, tree after View Genealogy', async () => {
+  it('shows the head card with a per-card View Genealogy action', async () => {
     renderWithProviders(<GenealogyPage />);
     await screen.findByText('VD TOP HEAD');
     expect(screen.getByText('Network head')).toBeInTheDocument();
+    // Only the head shows; the rest of the network opens from a card.
     expect(screen.queryByText('SM DOWN ONE')).toBeNull();
-    expect(screen.queryByLabelText('Genealogy tree')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'View Genealogy' }));
-    expect(await screen.findByLabelText('Genealogy tree')).toBeInTheDocument();
-    expect(screen.getByText('SM DOWN ONE')).toBeInTheDocument();
-    expect(screen.getByText('OST DOWN TWO')).toBeInTheDocument();
-    expect(screen.getByLabelText('Level 1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Level 3')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'View genealogy of VD TOP HEAD' }),
+    ).toBeInTheDocument();
+    // The old standalone toggle is gone.
+    expect(screen.queryByRole('button', { name: 'View Genealogy' })).toBeNull();
   });
 
-  it('toggles the tree closed again', async () => {
-    renderWithProviders(<GenealogyPage />);
-    await screen.findByText('VD TOP HEAD');
-    fireEvent.click(screen.getByRole('button', { name: 'View Genealogy' }));
-    await screen.findByLabelText('Genealogy tree');
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Genealogy' }));
-    await waitFor(() => expect(screen.queryByLabelText('Genealogy tree')).toBeNull());
-    expect(screen.getByText('VD TOP HEAD')).toBeInTheDocument();
-  });
-
-  it('offers View Genealogy on each head record', async () => {
+  it('opens the seller record from the card button', async () => {
     const Probe = () => {
       const location = useLocation();
       return (
@@ -126,6 +115,31 @@ describe('genealogy head and tree', () => {
     );
     await screen.findByText('VD TOP HEAD');
     fireEvent.click(screen.getByRole('button', { name: 'View genealogy of VD TOP HEAD' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('route')).toHaveTextContent(
+        '/admin/genealogy/00000000-0000-4000-8000-0000000000a1',
+      ),
+    );
+  });
+
+  it('opens the detail record from each head name link', async () => {
+    const Probe = () => {
+      const location = useLocation();
+      return (
+        <p role="status" aria-label="route">
+          {location.pathname}
+        </p>
+      );
+    };
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/genealogy" element={<GenealogyPage />} />
+        <Route path="*" element={<Probe />} />
+      </Routes>,
+      { route: '/admin/genealogy' },
+    );
+    await screen.findByText('VD TOP HEAD');
+    fireEvent.click(screen.getByRole('link', { name: 'VD TOP HEAD' }));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent(
         '/admin/genealogy/00000000-0000-4000-8000-0000000000a1',

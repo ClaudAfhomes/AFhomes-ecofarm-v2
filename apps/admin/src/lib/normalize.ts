@@ -48,6 +48,22 @@ export const filterHolderAddressInput = (value: string): string => titleCaseLive
 /** Live filter for TIN input: digits and dashes only. */
 export const filterTinInput = (value: string): string => value.replace(/[^\d-]/g, '').slice(0, 15);
 
+/** Live filter for member TIN input: digits only, max 9. */
+export const filterMemberTinInput = (value: string): string =>
+  value.replace(/\D/g, '').slice(0, 9);
+
+/** Live filter for Philippine mobile input: digits only, max 11. */
+export const filterMobileInput = (value: string): string =>
+  value.replace(/\D/g, '').slice(0, 11);
+
+/** Live filter for landline input: digits and dialing punctuation only. */
+export const filterLandlineInput = (value: string): string =>
+  value.replace(/[^0-9+().\- ]/g, '').slice(0, 20);
+
+/** Live filter for government ID numbers: letters, digits and dashes, max 16. */
+export const filterGovernmentIdInput = (value: string): string =>
+  value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 16);
+
 // Live editing preserves whitespace and cursor positions; trimming belongs to
 // submission. Technical fields deliberately have no entry in this allowlist.
 const LIVE_UPPERCASE_FIELDS = new Set([

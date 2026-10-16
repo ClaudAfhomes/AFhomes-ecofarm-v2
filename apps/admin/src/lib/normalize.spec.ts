@@ -4,6 +4,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  filterGovernmentIdInput,
+  filterLandlineInput,
+  filterMemberTinInput,
+  filterMobileInput,
   normalizeCustomerApplicationRequest,
   normalizeCustomerRequest,
   normalizeProfileName,
@@ -48,6 +52,27 @@ describe('live field normalization', () => {
 
   it.each(['email', 'recommenderEmail'])('lowercases live field %s while typing', (field) => {
     expect(normalizeLiveHumanField(field, 'Claud@Example.COM')).toBe('claud@example.com');
+  });
+
+  it('keeps mobiles digit-only at 11', () => {
+    expect(filterMobileInput('+639171234567')).toBe('63917123456');
+    expect(filterMobileInput('0917-123-4567')).toBe('09171234567');
+    expect(filterMobileInput('abc')).toBe('');
+  });
+
+  it('blocks letters from landlines but keeps dialing punctuation', () => {
+    expect(filterLandlineInput('(02) 8123-4567')).toBe('(02) 8123-4567');
+    expect(filterLandlineInput('abc123')).toBe('123');
+  });
+
+  it('keeps member TINs digit-only at 9', () => {
+    expect(filterMemberTinInput('123-456-789')).toBe('123456789');
+    expect(filterMemberTinInput('1234567890')).toBe('123456789');
+  });
+
+  it('keeps government IDs alphanumeric at 16', () => {
+    expect(filterGovernmentIdInput('p 123/456!')).toBe('p123456');
+    expect(filterGovernmentIdInput('ABCDEFGHIJKLMNOPQRS')).toBe('ABCDEFGHIJKLMNOP');
   });
 });
 

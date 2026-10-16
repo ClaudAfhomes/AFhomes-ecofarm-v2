@@ -1,8 +1,8 @@
 -- AF Homes Ecofarm — Current Database Schema Snapshot
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
--- Last updated: 2026-10-15 (UTC)
--- Source: supabase/migrations (83 files, sorted A-Z = apply order).
+-- Last updated: 2026-10-16 (UTC)
+-- Source: supabase/migrations (89 files, sorted A-Z = apply order).
 -- Authoritative DDL lives in supabase/migrations/*.sql — read the defining file
 -- listed per table below for the full column list. This file is an index only
 -- (table inventory + migration manifest) so it cannot drift from the migrations.
@@ -35,7 +35,7 @@
 --      were added/removed since the previous snapshot, or "no changes".
 
 -- ============================================================================
--- 1. MIGRATION MANIFEST (83 files)
+-- 1. MIGRATION MANIFEST (89 files)
 -- ============================================================================
 -- 20260926023325_afhomes_phase1_foundation.sql
 -- 20260926025313_afhomes_phase1_advisor_indexes.sql
@@ -120,9 +120,15 @@
 -- 20261202000001_afhomes_private_profile_photos.sql
 -- 20261203000001_afhomes_remove_test_customer_af_cus_7epwn.sql
 -- 20261204000001_afhomes_customer_ssot_alignment.sql
+-- 20261205000001_afhomes_network_members.sql
+-- 20261206000001_afhomes_role_department.sql
+-- 20261206000002_afhomes_role_drop_description_admins.sql
+-- 20261206000003_afhomes_network_members_link_reconcile.sql
+-- 20261206000004_afhomes_sale_team_manual_aa.sql
+-- 20261206000005_afhomes_network_member_address_codes.sql
 
 -- ============================================================================
--- 2. TABLE INVENTORY (70 tables: table <= first-defined-in migration)
+-- 2. TABLE INVENTORY (71 tables: table <= first-defined-in migration)
 -- Later migrations may ALTER these tables (add columns, tighten CHECKs, add
 -- RLS/policies/indexes). Read the defining file for base DDL, then grep later
 -- files for `alter table <name>` for the delta.
@@ -167,6 +173,7 @@
 -- public.identity_documents <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.memberships <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.modules <= 20260926023325_afhomes_phase1_foundation.sql
+-- public.network_member_profiles <= 20261205000001_afhomes_network_members.sql
 -- public.ost_applications <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.ost_members <= 20260926023325_afhomes_phase1_foundation.sql
 -- public.payments <= 20260926023325_afhomes_phase1_foundation.sql
@@ -203,31 +210,89 @@
 -- ============================================================================
 -- 3. NOTES
 -- ============================================================================
--- * Previous snapshot: 81 files, 70 tables. This refresh adds 2 migrations,
---   0 tables (inventory in Section 2 unchanged, verified by re-scan):
---   - 20261203000001_afhomes_remove_test_customer_af_cus_7epwn.sql: no new
---     tables. One-off row deletion (anonymized test customer AF-CUS-7EPWN +
---     its test application + purchase-terms rows), preflight-guarded,
---     forward-only. Audit rows retained by design.
---   - 20261204000001_afhomes_customer_ssot_alignment.sql: no new tables.
---     Adds public.customers.landline + supplementary_landline (nullable, no
---     defaults, no browser column grants); re-delivers
---     register_customer_application_once (holder SUFFIX/SEX/LANDLINE/BARANGGAY
---     copied onto new customers), import_legacy_member (new columns on
---     CREATE) and commit_customer_import_row (address line2/barangay/
---     postalCode persisted; UPDATE merges address parts per key; landline +
---     supplementary_landline preserve-when-blank).
+-- * Previous snapshot: 88 files, 71 tables. This refresh adds 1 migration,
+--   0 tables (Section 2 first-win re-scan: mappings verified unchanged):
+--   - 20261206000005_afhomes_network_member_address_codes.sql: no new
+--     tables. UNAPPLIED (created 2026-10-16, needs approved apply). Adds
+--     nullable province_code + city_municipality_code (10-digit PSGC) to
+--     network_member_profiles (21 → 23 columns); the create handler
+--     re-resolves the pair server-side and stores the authority's names,
+--     codes and postal. PROVEN on disposable PostgreSQL: test:db:local
+--     2551/2551 incl. §75 (18/18, codes round-trip).
 --   - Version hygiene: every file matches ^[0-9]{14}_afhomes_*.sql (verified,
 --     0 violations). The only shared version remains the pre-existing
 --     20261130000001 pair (membership_company_fields +
 --     sale_team_accreditation; A-Z sort applies membership_company_fields
---     first) — a same-date SSOT/remove_test_customer collision was resolved
---     by renumbering the SSOT file to 20261204000001 before apply.
--- * Related DB files verified: supabase/security/rls_invariants.sql,
---   supabase/apply-migrations.ts, supabase/db-testing/supabase-shim.sql,
---   supabase/db-integration.ts — present, no new tables/policies/functions/
---   buckets/grants introduced outside the migrations above. db-integration
---   adds test section 74 (SSOT alignment proof, synthetic rows only).
---   After an authorized apply, re-run rls_invariants.sql (empty=PASS).
+--     first).
+-- * Previous snapshot: 87 files, 71 tables. The 88-file refresh added 1 migration,
+--   - 20261206000004_afhomes_sale_team_manual_aa.sql: no new tables.
+--     UNAPPLIED (created 2026-10-16, needs approved apply). Replaces the
+--     6-argument manage_sale_team_accreditation with a 7-argument version
+--     carrying optional p_aa_number (replace, not overload: same-prefix
+--     overloads differing only by trailing defaults resolve AMBIGUOUS and
+--     broke the 4-argument OST trigger call — caught by test:db:local §51).
+--     Typed numbers are shape-checked (AA plus 4–12 letters/digits, no
+--     separators), unique (TAKEN, no silent re-mint), and never renumber
+--     (IMMUTABLE). PROVEN on disposable
+--     PostgreSQL: test:db:local 2548/2548 incl. new §76 (8/8) and §51 (55/55).
+--   - Version hygiene: every file matches ^[0-9]{14}_afhomes_*.sql (verified,
+--     0 violations). The only shared version remains the pre-existing
+--     20261130000001 pair (membership_company_fields +
+--     sale_team_accreditation; A-Z sort applies membership_company_fields
+--     first).
+-- * Previous snapshot: 83 files, 70 tables. The 87-file refresh added 4 migrations,
+--   1 table (Section 2 first-win re-scan: only public.network_member_profiles
+--   is new; all other mappings verified unchanged):
+--   - 20261205000001_afhomes_network_members.sql: 1 new table,
+--     public.network_member_profiles (21 columns: staff_id PK/FK, profile
+--     fields, referrer_staff_id + ost_referrer_staff_id links, timestamps).
+--     RLS enabled with revoke-all from anon/authenticated (staff-only, no
+--     browser policies, no browser column grants). Module row
+--     network.members (Members/Network/56) plus grants: admin
+--     view/create/update; vice_director, senior_sales_manager, sales_manager
+--     and ost view. SUPERSEDED by the live cross-check below: the reported
+--     database now carries both link columns, so the PGRST204 was cache (or
+--     target) drift, not schema drift; 20261206000003 applies as a no-op.
+--   - 20261206000001_afhomes_role_department.sql: no new tables. Adds
+--     public.roles.department_id (nullable FK to departments, on delete set
+--     null) plus index; extends update_operational_role with the validated
+--     departmentId branch (same transaction as the permission rewrite).
+--   - 20261206000002_afhomes_role_drop_description_admins.sql: no new
+--     tables. Seeds the ADMINS department, defaults admin/super_admin onto
+--     it (null links only), drops public.roles.description, and restores
+--     update_operational_role without the description branch.
+--   - 20261206000003_afhomes_network_members_link_reconcile.sql: no new
+--     tables. UNAPPLIED (created 2026-10-16, needs approved apply).
+--     Idempotent add-column-if-not-exists for referrer_staff_id and
+--     ost_referrer_staff_id on network_member_profiles; the forward-only
+--     answer to the recorded-version drift above.
+--   - Version hygiene: every file matches ^[0-9]{14}_afhomes_*.sql (verified,
+--     0 violations). The only shared version remains the pre-existing
+--     20261130000001 pair (membership_company_fields +
+--     sale_team_accreditation; A-Z sort applies membership_company_fields
+--     first).
+-- * Related DB files verified: supabase/security/rls_invariants.sql (generic
+--   zero-row scans — no per-table entries, so the staff-only new table is
+--   covered without a file change), supabase/apply-migrations.ts (history in
+--   supabase_migrations.schema_migrations, recorded versions skipped),
+--   supabase/db-testing/supabase-shim.sql (platform objects only, no member
+--   fixture), supabase/db-integration.ts (§75 members proof plus new §76
+--   manual-AA proof: overload count, verbatim store, TAKEN/INVALID/IMMUTABLE,
+--   explicit accreditation cleanup). No new storage buckets,
+--   no browser column grants, no new SECURITY DEFINER functions outside the
+--   migrations above. After an authorized apply, re-run rls_invariants.sql
+--   (empty=PASS) and pnpm test:db:local.
+-- * Live cross-check 2026-10-16 (user-supplied public-schema export):
+--   60/60 public tables present, exact set match, zero table drift (private.*
+--   tables are not in the export, as expected). network_member_profiles is
+--   live at the full 21 columns WITH referrer_staff_id + ost_referrer_staff_id
+--   FKs; roles carries department_id with description already dropped
+--   (0001+0002 applied); customers carries landline + supplementary_landline
+--   (SSOT applied). Consequence: the earlier PGRST204 on ost_referrer_staff_id
+--   does not match the current live columns — it was a stale PostgREST schema
+--   cache (or a different database than this export) at error time, not a
+--   missing column now. 20261206000003 stays a safe no-op. If PGRST204 recurs
+--   despite the column existing, reload the PostgREST schema cache
+--   (NOTIFY pgrst, 'reload schema') instead of changing DDL, then retry.
 -- * Generation: `create table` scan across supabase/migrations,
---   first-defined-in wins (70 tables). Re-run on "update schema".
+--   first-defined-in wins (71 tables). Re-run on "update schema".
