@@ -304,6 +304,14 @@ export class FakeSupabase {
     ];
   }
 
+  /** An admin email rotation keeps the synthetic GoTrue directory consistent. */
+  private applyAuthEmail(id: string, email: string): void {
+    const seeded = this.seededAuthUsers.find((u) => u.id === id);
+    if (seeded) seeded.email = email;
+    const created = this.createdAuthUsers.find((u) => u.id === id);
+    if (created) created.email = email;
+  }
+
   /** Every row currently in a table (live reference - mutate via helpers). */
   rows(table: string): FakeRow[] {
     return (this.tables[table] ??= []);
@@ -446,16 +454,43 @@ export class FakeSupabase {
        * GoTrue's admin password/metadata rotation. The secret is captured in
        * `passwordsSeen` only (the same test-only point as `createUser`); the
        * recorded call arg carries the id and non-secret flags so "no password
-       * in logs/calls" assertions remain possible.
+       * in logs/calls" assertions remain possible. An email rotation keeps the
+       * synthetic directory consistent (and refuses an address another account
+       * already holds, like live GoTrue).
        */
-      updateUserById: async (id: string, attrs: { password?: string; user_metadata?: unknown }) => {
+      updateUserById: async (
+        id: string,
+        attrs: {
+          password?: string;
+          email?: string;
+          email_confirm?: boolean;
+          user_metadata?: unknown;
+        },
+      ) => {
         this.calls.push({
           op: 'updateUserById',
           table: 'auth',
-          arg: { id, hasUserMetadata: attrs.user_metadata !== undefined },
+          arg: {
+            id,
+            hasUserMetadata: attrs.user_metadata !== undefined,
+            hasEmail: attrs.email !== undefined,
+            emailConfirmed: attrs.email_confirm === true,
+          },
         });
         if (attrs.password !== undefined) this.passwordsSeen.push(attrs.password);
         if (this.updateUserImpl) return this.updateUserImpl(id, attrs);
+        if (attrs.email !== undefined) {
+          const wanted = attrs.email.trim().toLowerCase();
+          const taken = this.authUsers().some(
+            (u) => u.id !== id && u.email.trim().toLowerCase() === wanted,
+          );
+          if (taken)
+            return {
+              data: { user: null },
+              error: authError('A user with this email address has already been registered'),
+            };
+          this.applyAuthEmail(id, attrs.email);
+        }
         return { data: { user: { id } }, error: null };
       },
     },

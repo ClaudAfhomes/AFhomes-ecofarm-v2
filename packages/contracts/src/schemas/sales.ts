@@ -284,6 +284,15 @@ export const governmentIdTypeSchema = z.enum([
 ]);
 export type GovernmentIdType = z.infer<typeof governmentIdTypeSchema>;
 
+/** Display labels for ID types. Slugs never render raw. */
+export const GOVERNMENT_ID_TYPE_LABELS: Record<GovernmentIdType, string> = {
+  philippine_id: 'Philippine ID',
+  drivers_license: "Driver's License",
+  passport: 'Passport',
+  tax_id: 'Tax ID',
+  other: 'Other',
+};
+
 export const genderSchema = z.enum(['male', 'female', 'other', 'undisclosed']);
 
 export const customerAddressSchema = z

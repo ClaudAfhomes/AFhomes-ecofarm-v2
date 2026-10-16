@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
-import { startDisposablePostgres } from './lib/local-postgres.mjs';
+import { listMigrations, startDisposablePostgres } from './lib/local-postgres.mjs';
 
 let postgres;
 let checks = 0;
@@ -22,6 +22,10 @@ try {
   postgres.applied.push(migration);
   await db.query(migrationSql);
   check((await db.query("select pg_get_functiondef('private.commit_customer_import_legacy_row(uuid,uuid)'::regprocedure) definition")).rows[0].definition.includes('COWORKER-PRESERVATION-PROBE'), 'idempotent dispatcher migration preserves preceding legacy implementation');
+  for (const later of listMigrations().filter((name) => name > migration)) {
+    await db.query(readFileSync(new URL('../../../supabase/migrations/' + later, import.meta.url), 'utf8'));
+    postgres.applied.push(later);
+  }
   const actor = randomUUID();
   await db.query('insert into auth.users(id,email) values($1,$2)', [
     actor,

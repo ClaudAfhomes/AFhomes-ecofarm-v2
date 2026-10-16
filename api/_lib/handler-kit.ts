@@ -19,8 +19,9 @@ export function fail(
   code: FailureCode,
   message: string,
   status: number,
+  details?: unknown,
 ): void {
-  const envelope = toErrorEnvelope(code, message, status);
+  const envelope = toErrorEnvelope(code, message, status, details);
   res.status(envelope.status).json({ error: envelope.error });
 }
 

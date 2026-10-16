@@ -16211,14 +16211,14 @@ async function main(): Promise<void> {
       // network.members module mirroring the genealogy audience.
       {
         eq(
-          'network_member_profiles has 21 columns',
+          'network_member_profiles has 23 columns',
           (
             await one<{ n: number }>(
               `select count(*)::int as n from information_schema.columns
                where table_schema = 'public' and table_name = 'network_member_profiles'`,
             )
           ).n,
-          21,
+          23,
         );
         eq(
           'RLS is enabled on network_member_profiles',
@@ -16310,15 +16310,17 @@ async function main(): Promise<void> {
         );
 
         // Round-trip on synthetic hierarchy staff, then remove the row so the
-        // fixture staff is untouched and reruns stay green.
+        // fixture staff is untouched and reruns stay green. Codes ride along
+        // so the saved address stays aligned with the reference.
         await db.query(
           `insert into public.network_member_profiles
            (staff_id, date_of_birth, sex, civil_status, street_no, city_municipality,
-            province, zip_code, tel_no, mobile_no, fb_messenger, tin, employer_name,
+            province, province_code, city_municipality_code, zip_code, tel_no, mobile_no,
+            fb_messenger, tin, employer_name,
             employer_address, job_position, government_id_type, government_id_number,
             referrer_staff_id)
-           values ($1, '1990-02-02', 'Female', 'Single', '2 Main St', 'Quezon City',
-            'Metro Manila', '1100', null, '+639172222222', null, '123-456-789', 'AF Homes',
+           values ($1, '1990-02-02', 'Female', 'Single', '2 Main St', 'Calauan',
+            'Laguna', '0403400000', '0403406000', '4012', null, '+639172222222', null, '123456789', 'AF Homes',
             'Ecofarm', 'Sales Manager', 'drivers_license', 'D7654321', $2)`,
           [staff['sm'], staff['ssm']],
         );
@@ -16328,8 +16330,12 @@ async function main(): Promise<void> {
           tin: string | null;
           government_id_number: string | null;
           referrer: string | null;
+          province_code: string | null;
+          city_municipality_code: string | null;
+          zip_code: string;
         }>(
-          `select p.sex, p.mobile_no, p.tin, p.government_id_number, s.full_name as referrer
+          `select p.sex, p.mobile_no, p.tin, p.government_id_number, s.full_name as referrer,
+            p.province_code, p.city_municipality_code, p.zip_code
            from public.network_member_profiles p
            left join public.staff_users s on s.id = p.referrer_staff_id
            where p.staff_id = $1`,
@@ -16337,13 +16343,16 @@ async function main(): Promise<void> {
         );
         eq('profile sex round-trips', stored.sex, 'Female');
         eq('profile mobile round-trips', stored.mobile_no, '+639172222222');
-        eq('TIN is stored verbatim (masked only on read)', stored.tin, '123-456-789');
+        eq('TIN is stored verbatim (masked only on read)', stored.tin, '123456789');
         eq(
           'government ID is stored verbatim (masked only on read)',
           stored.government_id_number,
           'D7654321',
         );
         eq('referrer resolves to the upline name', stored.referrer, 'Synthetic ssm');
+        eq('province code round-trips', stored.province_code, '0403400000');
+        eq('city code round-trips', stored.city_municipality_code, '0403406000');
+        eq('ZIP follows the chosen city', stored.zip_code, '4012');
         await db.query('delete from public.network_member_profiles where staff_id = $1', [
           staff['sm'],
         ]);
@@ -16356,6 +16365,84 @@ async function main(): Promise<void> {
             )
           ).n,
           0,
+        );
+      }
+      section('76. sale-team accreditation: operator-supplied AA numbers');
+      /* ---------------------------------------------------------------- */
+      // The manual-AA replacement (migration 20261206000004): typed numbers are
+      // shape-checked, unique, and never renumber an issued record. AUTO
+      // behavior is untouched (covered by the member onboarding path).
+      {
+        eq(
+          'manage_sale_team_accreditation is one 7-argument function',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from pg_proc p
+               join pg_namespace n on n.oid = p.pronamespace
+               where n.nspname = 'public' and p.proname = 'manage_sale_team_accreditation'`,
+            )
+          ).n,
+          1,
+        );
+        // Local maker: mkStaff lives in an earlier block, so this section
+        // repeats its three inserts (auth row, staff row, assignment) with
+        // RUN-prefixed emails, so section 21 cleanup resolves every id.
+        const mkManualTarget = async (label: string, role: string) => {
+          const id = uuidFor(`staff:${label}`);
+          const email = `${RUN}-${label}@example.invalid`;
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status)
+             values ($1, $2, $3, 'active')`,
+            [id, email, `Synthetic ${label}`],
+          );
+          await db.query(
+            'insert into public.staff_role_assignments (staff_id, role_id) values ($1, $2)',
+            [id, roles[role]],
+          );
+          createdStaffIds.push(id);
+          return id;
+        };
+        const manualTarget = await mkManualTarget('manual-aa', 'sales_manager');
+        const manualTarget2 = await mkManualTarget('manual-aa-2', 'sales_manager');
+        // The delete first keeps reruns green (a crashed run may have left
+        // accreditation rows behind, which would read as TAKEN below).
+        await db.query(
+          'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
+          [[manualTarget, manualTarget2]],
+        );
+        const approveManual = (actor: string, target: string, number: string | null) =>
+          one<{ aaNumber: string }>(
+            `select public.manage_sale_team_accreditation($1, $2, 'IST', 'approve',
+              current_date, current_date + 365, $3)->>'aaNumber' as "aaNumber"`,
+            [actor, target, number],
+          );
+        const issued = await approveManual(staff['admin']!, manualTarget, 'AATEST76AABBCC');
+        eq('typed number is stored verbatim', issued.aaNumber, 'AATEST76AABBCC');
+        // A taken number, a malformed number and a renumber each fail closed.
+        const takenMsg = await throwsIsolated('taken number raises TAKEN', () =>
+          approveManual(staff['admin']!, manualTarget2, 'AATEST76AABBCC'),
+        );
+        check('taken error names the conflict', takenMsg.includes('ACCREDITATION_NUMBER_TAKEN'));
+        const malformedMsg = await throwsIsolated('malformed number raises INVALID', () =>
+          approveManual(staff['admin']!, manualTarget2, 'NOPE'),
+        );
+        check(
+          'malformed error names the format rule',
+          malformedMsg.includes('INVALID_ACCREDITATION_NUMBER'),
+        );
+        const renumberMsg = await throwsIsolated('renumber raises IMMUTABLE', () =>
+          approveManual(staff['admin']!, manualTarget, 'AATEST76CCDDEE'),
+        );
+        check(
+          'renumber error names immutability',
+          renumberMsg.includes('ACCREDITATION_NUMBER_IMMUTABLE'),
+        );
+        // Explicit cleanup: accreditation rows reference staff_users (RESTRICT),
+        // so section 21 cannot remove the targets while they exist.
+        await db.query(
+          'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
+          [[manualTarget, manualTarget2]],
         );
       }
     } catch (error) {

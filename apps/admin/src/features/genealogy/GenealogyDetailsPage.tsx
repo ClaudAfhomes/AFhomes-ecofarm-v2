@@ -84,30 +84,38 @@ export function GenealogyDetailsPage() {
       <PageHeader
         title="Seller Record"
         description={`${node.data.fullName} · ${humanizeCode(node.data.role)}`}
+        actions={
+          <Button variant="secondary" onClick={() => navigate('/admin/genealogy')}>
+            Back
+          </Button>
+        }
       />
-      <p className={styles.backRow}>
-        <Link to="/admin/genealogy">← Back to sales network</Link>
-      </p>
 
-      <section className={styles.panel} aria-label="Seller identity">
-        <h2 className={styles.panelTitle}>{node.data.fullName}</h2>
-        <StatusChip label={humanizeCode(node.data.ostStatus ?? node.data.status)} />
-        <dl className={styles.facts}>
-          <div>
-            <dt>Role</dt>
-            <dd>{humanizeCode(node.data.role)}</dd>
+      <section className={styles.hero} aria-label="Seller identity">
+        <span className={styles.heroAvatar} aria-hidden="true">
+          {(node.data.fullName.trim().charAt(0) || '•').toUpperCase()}
+        </span>
+        <div className={styles.heroText}>
+          <div className={styles.heroNameRow}>
+            <h2 className={styles.heroName}>{node.data.fullName}</h2>
           </div>
-          <div>
-            <dt>Staff status</dt>
-            <dd>
-              <StatusChip label={humanizeCode(node.data.status)} />
-            </dd>
-          </div>
-          <div>
-            <dt>Direct downline</dt>
-            <dd>{formatCountOrDash(node.data.directDownlineCount)}</dd>
-          </div>
-        </dl>
+          <dl className={styles.facts}>
+            <div>
+              <dt>Role</dt>
+              <dd>{humanizeCode(node.data.role)}</dd>
+            </div>
+            <div>
+              <dt>Staff status</dt>
+              <dd>
+                <StatusChip label={humanizeCode(node.data.status)} />
+              </dd>
+            </div>
+            <div>
+              <dt>Direct downline</dt>
+              <dd>{formatCountOrDash(node.data.directDownlineCount)}</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <section className={styles.panel} aria-label="Head">
@@ -125,15 +133,22 @@ export function GenealogyDetailsPage() {
             onRetry={() => void chain.refetch()}
           />
         ) : chain.data.length ? (
-          <p className={styles.panelNote}>
-            <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`}>
-              {chain.data[0]!.fullName}
-            </Link>{' '}
-            <StatusChip label={humanizeCode(chain.data[0]!.role)} />
-            {chain.data.length > 1 ? (
-              <span className={styles.panelNote}> · reads through an unavailable head</span>
-            ) : null}
-          </p>
+          <article className={styles.headCard} aria-label="Immediate head">
+            <span className={styles.headAvatar} aria-hidden="true">
+              {(chain.data[0]!.fullName.trim().charAt(0) || '•').toUpperCase()}
+            </span>
+            <div className={styles.headText}>
+              <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`} className={styles.headName}>
+                {chain.data[0]!.fullName}
+              </Link>
+              <p className={styles.headMeta}>
+                <StatusChip label={humanizeCode(chain.data[0]!.role)} />
+                {chain.data.length > 1 ? (
+                  <span className={styles.panelNote}> · reads through an unavailable head</span>
+                ) : null}
+              </p>
+            </div>
+          </article>
         ) : (
           <p className={styles.panelNote}>Top-level seller</p>
         )}
@@ -172,29 +187,46 @@ export function GenealogyDetailsPage() {
                 icon="user-x"
               />
             </div>
-            <EmptyState
-              title="No downline yet"
-              description="Sellers recruited under this account appear here."
-            />
+            <div className={styles.emptyWrap}>
+              <EmptyState title="No downline yet" description="New recruits appear here." />
+            </div>
           </>
         ) : (
-          <div className={styles.badges}>
-            <StatusChip
-              label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
-              tone="neutral"
-              icon="users"
-            />
-            <StatusChip
-              label={`Active sellers: ${formatCountOrDash(summary.data.activeSellerCount)}`}
-              tone="success"
-              icon="user-check"
-            />
-            <StatusChip
-              label={`Inactive sellers: ${formatCountOrDash(summary.data.inactiveSellerCount)}`}
-              tone="neutral"
-              icon="user-x"
-            />
-          </div>
+          <>
+            <div className={styles.badges}>
+              <StatusChip
+                label={`Direct downline: ${formatCountOrDash(summary.data.totalDirectDownline)}`}
+                tone="neutral"
+                icon="users"
+              />
+              <StatusChip
+                label={`Active sellers: ${formatCountOrDash(summary.data.activeSellerCount)}`}
+                tone="success"
+                icon="user-check"
+              />
+              <StatusChip
+                label={`Inactive sellers: ${formatCountOrDash(summary.data.inactiveSellerCount)}`}
+                tone="neutral"
+                icon="user-x"
+              />
+            </div>
+            <h3 className={styles.subTitle}>Team mix</h3>
+            <ul className={styles.mix}>
+              {(
+                [
+                  'vice_director',
+                  'senior_sales_manager',
+                  'sales_manager',
+                  'ost',
+                ] as const
+              ).map((role) => (
+                <li key={role}>
+                  <span>{humanizeCode(role)}</span>
+                  <strong>{formatCountOrDash(summary.data.roleCounts[role])}</strong>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
     </section>

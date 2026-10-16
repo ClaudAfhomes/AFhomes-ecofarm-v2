@@ -18,7 +18,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@afhomes/ui';
-import { MEMBER_POSITION_LABELS, type Member, type MemberPosition } from '@afhomes/contracts';
+import { MEMBER_POSITION_LABELS, type MemberPosition } from '@afhomes/contracts';
 import { formatCountOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -47,7 +47,7 @@ export function MembersPage() {
   const [position, setPosition] = useState<'all' | MemberPosition>('all');
   const [page, setPage] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
-  const [viewing, setViewing] = useState<Member | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const settled = useDebouncedValue(search.trim(), 300, () => setPage(0));
   const query = useQuery({
     queryKey: networkMemberKeys.list(settled, position),
@@ -56,6 +56,9 @@ export function MembersPage() {
     refetchInterval: 30_000,
   });
   const rows = query.data ?? [];
+  // The open record reads from the list, so a refetch (an issue, a save, the
+  // 30s poll) updates the dialog instead of leaving a stale snapshot.
+  const viewing = viewingId ? (rows.find((member) => member.id === viewingId) ?? null) : null;
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -150,9 +153,17 @@ export function MembersPage() {
         />
       ) : rows.length === 0 ? (
         <EmptyState
-          title={settled || position !== 'all' ? 'No matching records.' : 'No members'}
-          description="Create Member provisions the staff login."
-          action={<Button onClick={() => setCreateOpen(true)}>Create Member</Button>}
+          title={filtersActive ? 'No matching records.' : 'No members'}
+          description={
+            filtersActive
+              ? 'No members match these filters.'
+              : 'Create Member provisions the staff login.'
+          }
+          action={
+            filtersActive ? undefined : (
+              <Button onClick={() => setCreateOpen(true)}>Create Member</Button>
+            )
+          }
         />
       ) : (
         <>
@@ -178,10 +189,18 @@ export function MembersPage() {
                   <TableRow
                     key={member.id}
                     className={styles.clickable}
-                    onClick={() => setViewing(member)}
+                    onClick={() => setViewingId(member.id)}
                   >
                     <TableCell label="Code">
-                      <span className={styles.codeCell}>{member.employeeNumber ?? '—'}</span>
+                      <span
+                        className={
+                          member.employeeNumber
+                            ? styles.codeChip
+                            : `${styles.codeChip} ${styles.codeEmpty}`
+                        }
+                      >
+                        {member.employeeNumber ?? '—'}
+                      </span>
                     </TableCell>
                     <TableCell label="Name">
                       <span className={styles.identityCell}>
@@ -233,7 +252,7 @@ export function MembersPage() {
       {viewing ? (
         <MemberDetailDialog
           member={viewing}
-          onClose={() => setViewing(null)}
+          onClose={() => setViewingId(null)}
           onChanged={() => {
             void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
           }}

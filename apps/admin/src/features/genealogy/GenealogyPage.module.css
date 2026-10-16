@@ -105,68 +105,12 @@
   margin-left: auto;
 }
 
-.treeToggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.treeHint {
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-}
-
 .flatList {
   list-style: none;
   display: grid;
   gap: var(--space-2);
   margin: 0;
   padding: 0;
-}
-
-.tree {
-  display: grid;
-  gap: 0;
-}
-
-.level {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
-  position: relative;
-}
-
-.level + .level {
-  border-top: 2px solid var(--color-border-default);
-}
-
-.level + .level::before {
-  content: '';
-  position: absolute;
-  top: -13px;
-  left: 50%;
-  width: 2px;
-  height: 12px;
-  background-color: var(--color-brand-secondary);
-}
-
-.levelLabel {
-  margin: 0;
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.levelRow {
-  list-style: none;
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
 }
 
 .nodeCard {
@@ -230,6 +174,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nodeActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
 .filterLabel {

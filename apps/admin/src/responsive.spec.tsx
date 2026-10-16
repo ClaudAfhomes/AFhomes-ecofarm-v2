@@ -531,15 +531,14 @@ describe('Phase 33 tables scroll instead of breaking', () => {
     expect(document.querySelector('.table-scroll')).not.toBeNull();
   });
 
-  it('/admin/genealogy shows the head first, tree on demand', async () => {
+  it('/admin/genealogy shows the head card with a View Genealogy action', async () => {
     atWidth(390, false);
     renderApp('/admin/genealogy');
     expect(await screen.findByText('SM Ana Santos')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'View Genealogy' })).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'View genealogy of SM Ana Santos' }),
+    ).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Hide Genealogy' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'View Genealogy' }));
-    expect(await screen.findByRole('button', { name: 'Hide Genealogy' })).not.toBeNull();
-    expect(screen.getByRole('region', { name: 'Genealogy tree' })).not.toBeNull();
   });
 
   it('reports and audit tables scroll with filters and export reachable', async () => {

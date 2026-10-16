@@ -152,8 +152,8 @@ for (const skipped of originals) {
     // Model the observed live contract: only the seven-argument RPC remains,
     // alongside a newer numbering overload. These synthetic bodies are test markers.
     await db.query(`
-      drop function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date);
-      create function public.manage_sale_team_accreditation(
+      drop function if exists public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date);
+      create or replace function public.manage_sale_team_accreditation(
         p_actor_id uuid,p_staff_id uuid,p_kind text,p_action text,
         p_starts_on date default null,p_expires_on date default null,p_aa_number text default null
       ) returns jsonb language sql security definer set search_path=pg_catalog,pg_temp as

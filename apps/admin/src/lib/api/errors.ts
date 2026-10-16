@@ -96,3 +96,29 @@ export async function emptyOnForbidden<T>(load: () => Promise<T[]>): Promise<T[]
     throw e;
   }
 }
+
+/**
+ * Field-keyed validation reasons carried by an ApiError's `details`
+ * (handlers send `error.details` as `{ field: reason }`). Capped so one bad
+ * payload cannot flood the dialog. Empty when the error carries none.
+ */
+export function errorFieldEntries(error: unknown): Array<[string, string]> {
+  if (!(error instanceof ApiError)) return [];
+  const details = error.details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return [];
+  return (Object.entries(details) as Array<[string, unknown]>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .slice(0, 4);
+}
+
+/**
+ * Delete-blocker labels carried by a 409 PROTECTED_HISTORY response
+ * (`details.blockers`). Lets a confirm dialog say WHY deletion is refused
+ * instead of showing the generic paragraph alone.
+ */
+export function errorBlockers(error: unknown): string[] {
+  if (!(error instanceof ApiError)) return [];
+  const details = error.details as { blockers?: unknown } | null;
+  if (!details || !Array.isArray(details.blockers)) return [];
+  return details.blockers.filter((b): b is string => typeof b === 'string').slice(0, 6);
+}

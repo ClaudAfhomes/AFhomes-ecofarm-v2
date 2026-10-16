@@ -5,7 +5,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 88. Public table inventory: 60.
+-- Migration count: 92. Public table inventory: 60.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -26,6 +26,9 @@
 -- Reconciliation is idempotent and preserves existing customer facts, AA numbers and approvals.
 -- Complete accreditation installations retain their existing RPC signatures/overloads, ACLs and trigger.
 -- Only a wholly absent accreditation feature is installed; partial schemas stop for review.
+-- Two immutable files also share 20261206000003 (company workbook and network links).
+-- 20261206000006 reconciles either skipped feature without replacing complete workbook RPCs.
+-- This reconciliation is not claimed live-applied; inspect target history before any authorized apply.
 -- Manifest (sorted):
 --   20260926023325_afhomes_phase1_foundation.sql
 --   20260926025313_afhomes_phase1_advisor_indexes.sql
@@ -115,6 +118,10 @@
 --   20261206000001_afhomes_role_department.sql
 --   20261206000002_afhomes_role_drop_description_admins.sql
 --   20261206000003_afhomes_company_customer_workbook.sql
+--   20261206000003_afhomes_network_members_link_reconcile.sql
+--   20261206000004_afhomes_sale_team_manual_aa.sql
+--   20261206000005_afhomes_network_member_address_codes.sql
+--   20261206000006_afhomes_reconcile_workbook_network_version.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

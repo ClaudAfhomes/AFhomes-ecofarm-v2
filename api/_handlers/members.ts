@@ -9,9 +9,12 @@
  * never here.
  *
  * Sensitivity follows the customer record: TIN and the government ID number
- * are accepted on write, stored, masked on every read, and never appear in an
- * audit payload. The client sends the position slug; the server resolves the
- * role row, so a tampered role id cannot escalate.
+ * are accepted on write, masked on every list-shaped read, and never appear in
+ * an audit payload. The single-member read additionally returns the two
+ * fields in clear so the members console can show the administrator what was
+ * recorded; that read stays behind the members permission. The client sends
+ * the position slug; the server resolves the role row, so a tampered role id
+ * cannot escalate.
  */
 import {
   MEMBER_POSITION_LABELS,
@@ -19,16 +22,21 @@ import {
   afHomesModuleKeySchema,
   createMemberSchema,
   hierarchyAllowsUpline,
+  issueAccreditationSchema,
   maskGovernmentId,
+  memberDetailSchema,
   memberListQuerySchema,
   memberSchema,
   updateMemberProfileSchema,
   type AfHomesPermission,
+  type CreateMember,
   type Member,
   type MemberPosition,
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes, permissionsAreSubset } from '../_lib/afhomes-access.js';
+import { AddressProviderError } from '../_lib/address-provider.js';
+import { addressProvider } from '../_lib/address-source.js';
 import {
   audit,
   deny,
@@ -38,6 +46,7 @@ import {
   list,
   method,
   route,
+  singleRpcRow,
   subPath,
   type Db,
 } from '../_lib/handler-kit.js';
@@ -58,15 +67,11 @@ function accreditationWindow(now = new Date()): { startsOn: string; expiresOn: s
   return { startsOn, expiresOn: expires.toISOString().slice(0, 10) };
 }
 
-async function accreditationNumber(
-  db: Db,
-  staffId: string,
-): Promise<string | null> {
+async function accreditationNumber(db: Db, staffId: string): Promise<string | null> {
   const { data, error } = await db.rpc('get_sale_team_accreditation', { p_staff_id: staffId });
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
-  const number =
-    row && typeof row === 'object' ? (row as Record<string, unknown>).aaNumber : null;
+  const number = row && typeof row === 'object' ? (row as Record<string, unknown>).aaNumber : null;
   return typeof number === 'string' ? number : null;
 }
 
@@ -78,10 +83,127 @@ type RoleRow = {
   permissions: AfHomesPermission[];
 };
 
+/**
+ * Map an accreditation RPC failure onto a client error. Returns true when
+ * handled (response already written). Raw driver text never reaches the
+ * client; the caller logs it via mapRpcError-style console output.
+ */
+function accreditationFailure(
+  res: VercelResponse,
+  error: { message?: string } | null,
+  manual: string | null,
+): boolean {
+  const message = String(error?.message ?? '');
+  const [code] = message.split(':');
+  if (code === 'ACCREDITATION_NUMBER_TAKEN') {
+    fail(res, 'CONFLICT', 'This AA number is already issued', 409);
+    return true;
+  }
+  if (code === 'INVALID_ACCREDITATION_NUMBER') {
+    fail(res, 'VALIDATION_ERROR', 'Use AA plus up to 12 letters/digits', 400);
+    return true;
+  }
+  // The 7-argument function lives in the manual-AA migration: without it the
+  // manual call cannot resolve, while AUTO keeps working on any database.
+  if (manual && /does not exist|PGRST204|could not find|schema cache/i.test(message)) {
+    fail(res, 'INTERNAL', 'Manual AA numbers are not enabled yet', 500);
+    return true;
+  }
+  return false;
+}
+
+/** Friendly duplicate check for a typed AA number, before any write. */
+async function aaNumberTaken(db: Db, aaNumber: string): Promise<boolean> {
+  const { data, error } = await db.rpc('search_sale_team_accreditation', {
+    p_aa_number: aaNumber,
+  });
+  return !error && singleRpcRow(data) !== null;
+}
+
+type ResolvedMemberLocation =
+  | {
+      ok: true;
+      province: string;
+      cityMunicipality: string;
+      provinceCode: string;
+      cityMunicipalityCode: string;
+      zipCode: string;
+    }
+  | { ok: false; status: number; message: string };
+
+/**
+ * Re-resolve a submitted province/city pair against the PSGC reference and
+ * align the saved address to authority names and codes. A hand-crafted body
+ * that pairs a province with another province's city is refused, like the
+ * application flow - the browser is not the boundary. An outage is not an
+ * approval: an unverifiable pair is refused rather than saved unverified.
+ *
+ * The ZIP is the operator's, not the reference's. PSGC publishes a wrong postal
+ * code often enough to matter (Victoria, Laguna is 4011 and it answers 4018)
+ * and publishes none for a third of localities, so its value is only ever a
+ * suggestion the browser prefills: a sent ZIP wins, and the published one is
+ * the fallback for a payload that carried none.
+ */
+async function resolveMemberLocation(
+  input: Pick<
+    CreateMember,
+    'province' | 'cityMunicipality' | 'provinceCode' | 'cityMunicipalityCode' | 'zipCode'
+  >,
+): Promise<ResolvedMemberLocation> {
+  const refused = (status: number, message: string): ResolvedMemberLocation => ({
+    ok: false,
+    status,
+    message,
+  });
+  const provider = addressProvider();
+  let provinces: Awaited<ReturnType<typeof provider.provinces>>;
+  let localities: Awaited<ReturnType<typeof provider.localities>>;
+  try {
+    [provinces, localities] = await Promise.all([
+      provider.provinces(),
+      provider.localities(input.provinceCode),
+    ]);
+  } catch (error) {
+    if (error instanceof AddressProviderError)
+      return refused(503, 'The address list is temporarily unavailable. Try again shortly.');
+    throw error;
+  }
+  const province = provinces.find((p) => p.code === input.provinceCode) ?? null;
+  const locality = localities.find((l) => l.code === input.cityMunicipalityCode) ?? null;
+  if (!province || !locality || locality.provinceCode !== province.code)
+    return refused(400, 'Choose the province and city from the list.');
+  return {
+    ok: true,
+    province: province.name,
+    cityMunicipality: locality.name,
+    provinceCode: province.code,
+    cityMunicipalityCode: locality.code,
+    zipCode: input.zipCode || locality.postalCode || '',
+  };
+}
+
+/**
+ * Flatten a Zod safeParse failure into field-keyed messages for the client.
+ * Capped so one bad payload cannot produce an unbounded envelope. The server
+ * message stays generic; the details carry the per-field reasons.
+ */
+function fieldDetails(parsed: {
+  error?: { issues?: Array<{ path: Array<string | number | symbol>; message: string }> };
+}): Record<string, string> {
+  const details: Record<string, string> = {};
+  for (const issue of parsed.error?.issues ?? []) {
+    if (Object.keys(details).length >= 8) break;
+    details[issue.path.map(String).join('.') || 'form'] = issue.message;
+  }
+  return details;
+}
+
 async function roleCatalog(db: Db): Promise<RoleRow[]> {
   const [{ data: roles }, { data: grants }, { data: modules }] = await Promise.all([
     db.from('roles').select('id,slug,name,is_active'),
-    db.from('role_permissions').select('role_id,module_id,can_view,can_create,can_update,can_delete'),
+    db
+      .from('role_permissions')
+      .select('role_id,module_id,can_view,can_create,can_update,can_delete'),
     db.from('modules').select('id,key'),
   ]);
   const keyById = new Map<string, string>(
@@ -116,7 +238,6 @@ async function roleCatalog(db: Db): Promise<RoleRow[]> {
 function toMember(
   staff: Record<string, unknown>,
   profile: Record<string, unknown> | null,
-  roleName: string | null,
   position: MemberPosition,
   departmentName: string | null,
   referrerName: string | null,
@@ -134,13 +255,19 @@ function toMember(
     status: String(staff.status),
     referrerName,
     ostReferrerName,
+    referrerStaffId: (profile?.referrer_staff_id as string | undefined) ?? null,
+    ostReferrerStaffId: (profile?.ost_referrer_staff_id as string | undefined) ?? null,
     aaNumber,
-    dateOfBirth: isoOrNull(profile?.date_of_birth) ? String(profile?.date_of_birth).slice(0, 10) : null,
+    dateOfBirth: isoOrNull(profile?.date_of_birth)
+      ? String(profile?.date_of_birth).slice(0, 10)
+      : null,
     sex: (profile?.sex as string | undefined) ?? null,
     civilStatus: (profile?.civil_status as string | undefined) ?? null,
     streetNo: (profile?.street_no as string | undefined) ?? null,
     cityMunicipality: (profile?.city_municipality as string | undefined) ?? null,
     province: (profile?.province as string | undefined) ?? null,
+    provinceCode: (profile?.province_code as string | undefined) ?? null,
+    cityMunicipalityCode: (profile?.city_municipality_code as string | undefined) ?? null,
     zipCode: (profile?.zip_code as string | undefined) ?? null,
     telNo: (profile?.tel_no as string | undefined) ?? null,
     mobileNo: (profile?.mobile_no as string | undefined) ?? null,
@@ -165,14 +292,16 @@ async function roleHolders(
   db: Db,
   position: MemberPosition,
   asUpline: boolean,
-): Promise<{ id: string; fullName: string; employeeNumber: string | null; positionLabel: string }[]> {
+): Promise<
+  { id: string; fullName: string; employeeNumber: string | null; positionLabel: string }[]
+> {
   const slug = asUpline ? MEMBER_UPLINE_ROLE[position] : position;
   if (!slug) return [];
   const roles = await roleCatalog(db);
   const target = roles.find((r) => r.slug === slug);
   if (!target) return [];
   const [{ data: assignments }, { data: staff }] = await Promise.all([
-    db.from('staff_role_assignments').select('*').eq('role_id', target.id),
+    db.from('staff_role_assignments').select('staff_id,role_id').eq('role_id', target.id),
     db.from('staff_users').select('id,full_name,status,employee_number'),
   ]);
   const ids = new Set(
@@ -191,9 +320,16 @@ async function roleHolders(
 async function memberRows(db: Db, search: string, position?: MemberPosition) {
   const [{ data: staff }, { data: assignments }, { data: profiles }, { data: departments }] =
     await Promise.all([
-      db.from('staff_users').select('*').order('created_at', { ascending: false }),
-      db.from('staff_role_assignments').select('*'),
-      db.from('network_member_profiles').select('*'),
+      db
+        .from('staff_users')
+        .select('id,email,full_name,status,department_id,employee_number,created_at')
+        .order('created_at', { ascending: false }),
+      db.from('staff_role_assignments').select('staff_id,role_id'),
+      db
+        .from('network_member_profiles')
+        .select(
+          'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,province_code,city_municipality_code,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
+        ),
       db.from('departments').select('id,name'),
     ]);
   const roles = await roleCatalog(db);
@@ -245,14 +381,16 @@ async function memberRows(db: Db, search: string, position?: MemberPosition) {
     const row = toMember(
       s,
       profile as Record<string, unknown> | null,
-      roleById.get(assignmentByStaff.get(String(s.id)) ?? '')?.name ?? null,
       memberPosition,
       s.department_id ? (deptById.get(String(s.department_id)) ?? null) : null,
       referrerName,
       ostReferrerName,
       numbers.get(String(s.id)) ?? null,
     );
-    if (term && !`${row.fullName} ${row.email} ${row.employeeNumber ?? ''}`.toLowerCase().includes(term))
+    if (
+      term &&
+      !`${row.fullName} ${row.email} ${row.employeeNumber ?? ''}`.toLowerCase().includes(term)
+    )
       return [];
     return [row];
   });
@@ -290,6 +428,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return list(res, await memberRows(db, parsed.data.search ?? '', parsed.data.position));
   }
 
+  /* ---------------- issue a missing AA number (never a renumber) ---------------- */
+  const issue = route(req, 'POST', /^([0-9a-f-]+)\/accreditation$/);
+  if (issue) {
+    const id = issue[1]!;
+    const auth = await authorizeAfHomes(req, 'network.members', 'update');
+    if ('error' in auth) return deny(res, auth);
+    const parsed = issueAccreditationSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
+    const manual = parsed.data.aaNumberMode === 'manual' ? (parsed.data.aaNumber ?? null) : null;
+    const { data: profile, error: profileError } = await db
+      .from('network_member_profiles')
+      .select('staff_id')
+      .eq('staff_id', id)
+      .maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    // Hierarchy sellers only: OST numbers ride the approval flow.
+    const roles = await roleCatalog(db);
+    const { data: assignment } = await db
+      .from('staff_role_assignments')
+      .select('role_id')
+      .eq('staff_id', id)
+      .maybeSingle();
+    const slug = roles.find(
+      (r) => r.id === String((assignment as { role_id?: string } | null)?.role_id),
+    )?.slug;
+    if (slug !== 'vice_director' && slug !== 'senior_sales_manager' && slug !== 'sales_manager')
+      return fail(res, 'VALIDATION_ERROR', 'Only hierarchy sellers hold an AA number', 400);
+    const { data: existing, error: existingError } = await db.rpc('get_sale_team_accreditation', {
+      p_staff_id: id,
+    });
+    if (existingError) throw existingError;
+    if (singleRpcRow(existing)) return fail(res, 'CONFLICT', 'AA number already issued', 409);
+    if (manual && (await aaNumberTaken(db, manual)))
+      return fail(res, 'CONFLICT', 'This AA number is already issued', 409);
+    const { startsOn, expiresOn } = accreditationWindow();
+    const baseArgs = {
+      p_actor_id: auth.userId,
+      p_staff_id: id,
+      p_kind: 'IST',
+      p_action: 'approve',
+      p_starts_on: startsOn,
+      p_expires_on: expiresOn,
+    };
+    const { error: accreditationError } = await db.rpc(
+      'manage_sale_team_accreditation',
+      manual ? { ...baseArgs, p_aa_number: manual } : baseArgs,
+    );
+    if (accreditationError) {
+      if (accreditationFailure(res, accreditationError as { message?: string }, manual)) return;
+      throw accreditationError;
+    }
+    await audit(db, auth.userId, 'MEMBER_ACCREDITATION_ISSUED', 'network_member', id, null, {
+      aaNumberMode: parsed.data.aaNumberMode,
+    });
+    const rows = await memberRows(db, '', undefined);
+    const row = rows.find((r: Member) => r.id === id);
+    if (!row) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    return res.status(200).json(row);
+  }
+
   const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
   const patch = route(req, 'PATCH', /^([0-9a-f-]+)$/);
   if (detail || patch) {
@@ -300,22 +500,284 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const rows = await memberRows(db, '', undefined);
       const row = rows.find((r: Member) => r.id === id);
       if (!row) return fail(res, 'NOT_FOUND', 'Member not found', 404);
-      return res.status(200).json(row);
+      // The console's single-record read carries the identification fields in
+      // clear so an operator can verify the recorded values; every list-shaped
+      // read keeps the masks. The detail read is the only place they surface.
+      const { data: secrets, error: secretsError } = await db
+        .from('network_member_profiles')
+        .select('tin,government_id_number')
+        .eq('staff_id', id)
+        .maybeSingle();
+      if (secretsError) throw secretsError;
+      const secretRow = secrets as Record<string, unknown> | null;
+      return res.status(200).json(
+        memberDetailSchema.parse({
+          ...row,
+          tin: isoOrNull(secretRow?.tin),
+          governmentIdNumber: isoOrNull(secretRow?.government_id_number),
+        }),
+      );
     }
     const auth = await authorizeAfHomes(req, 'network.members', 'update');
     if ('error' in auth) return deny(res, auth);
     const parsed = updateMemberProfileSchema.safeParse(jsonBody(req));
     if (!parsed.success || Object.keys(parsed.data).length === 0)
-      return fail(res, 'VALIDATION_ERROR', 'Invalid member update', 400);
+      return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
     const { data: profile, error: profileError } = await db
       .from('network_member_profiles')
-      .select('staff_id')
+      .select('staff_id,referrer_staff_id,ost_referrer_staff_id')
       .eq('staff_id', id)
       .maybeSingle();
     if (profileError) throw profileError;
     if (!profile) return fail(res, 'NOT_FOUND', 'Member not found', 404);
-    const { tin, governmentIdNumber, ...rest } = input;
+    const profileRow = profile as Record<string, unknown>;
+    const {
+      tin,
+      governmentIdNumber,
+      fullName,
+      email,
+      temporaryPassword,
+      position,
+      referrerStaffId,
+      headChangeReason,
+      ostReferrerStaffId,
+      provinceCode,
+      cityMunicipalityCode,
+      ...rest
+    } = input;
+
+    // --- position and head ------------------------------------------------
+    // The position IS the role assignment; a change re-resolves the role (a
+    // tampered slug cannot escalate: the target's permissions must be a subset
+    // of the caller's) and re-runs the head rules creation enforces, because
+    // every level names a different immediate upline. A head move carries a
+    // reason and is audited; the database trigger stays the final authority
+    // on direction and cycles.
+    const roles = await roleCatalog(db);
+    const { data: assignment } = await db
+      .from('staff_role_assignments')
+      .select('role_id')
+      .eq('staff_id', id)
+      .maybeSingle();
+    const currentSlug = roles.find(
+      (r) => r.id === String((assignment as { role_id?: string } | null)?.role_id),
+    )?.slug;
+    const currentHead = (profileRow.referrer_staff_id as string | undefined) ?? null;
+    const currentOst = (profileRow.ost_referrer_staff_id as string | undefined) ?? null;
+
+    const positionChanged = position !== undefined && position !== currentSlug;
+    let effectivePosition = (position ?? currentSlug) as MemberPosition | undefined;
+    let targetRole: RoleRow | undefined;
+    if (positionChanged) {
+      targetRole = roles.find((r) => r.slug === position);
+      if (!targetRole?.is_active) return fail(res, 'VALIDATION_ERROR', 'Position is not active', 400);
+      if (!permissionsAreSubset(targetRole.permissions, auth.permissions))
+        return fail(res, 'FORBIDDEN', 'Cannot assign a position you do not possess', 403);
+      effectivePosition = position;
+    }
+    const expectedUpline = effectivePosition ? MEMBER_UPLINE_ROLE[effectivePosition] : null;
+
+    /** undefined = leave the link alone; null = a position without a head. */
+    const headDecision = referrerStaffId !== undefined ? (referrerStaffId ?? null) : undefined;
+    let nextHead: string | null | undefined;
+    if (positionChanged) {
+      if (!expectedUpline) {
+        if (headDecision) return fail(res, 'VALIDATION_ERROR', 'A Vice Director has no head', 400);
+        nextHead = null;
+      } else {
+        if (!headDecision) return fail(res, 'VALIDATION_ERROR', 'A head is required', 400);
+        nextHead = headDecision;
+      }
+    } else if (headDecision !== undefined) {
+      if (headDecision === null && expectedUpline)
+        return fail(res, 'VALIDATION_ERROR', 'A head is required', 400);
+      nextHead = headDecision;
+    }
+
+    let headReason: string | undefined;
+    const headWillChange = nextHead !== undefined && nextHead !== currentHead;
+    if (nextHead !== undefined && nextHead !== null) {
+      if (nextHead === id)
+        return fail(res, 'VALIDATION_ERROR', 'A member cannot be their own head', 400);
+      const [{ data: candidate }, { data: candidateAssignment }] = await Promise.all([
+        db.from('staff_users').select('id,status').eq('id', nextHead).maybeSingle(),
+        db.from('staff_role_assignments').select('role_id').eq('staff_id', nextHead).maybeSingle(),
+      ]);
+      if (!candidate) return fail(res, 'NOT_FOUND', 'Head not found', 404);
+      if ((candidate as { status?: string }).status !== 'active')
+        return fail(res, 'CONFLICT', 'Head is not active', 409);
+      const candidateSlug = roles.find(
+        (r) => r.id === String((candidateAssignment as { role_id?: string } | null)?.role_id),
+      )?.slug;
+      if (!hierarchyAllowsUpline(effectivePosition as never, (candidateSlug ?? '') as never))
+        return fail(res, 'VALIDATION_ERROR', 'Head must be the immediate upline', 400);
+    }
+    if (headWillChange) {
+      const reason = (headChangeReason ?? '').trim();
+      if (reason.length < 3)
+        return fail(res, 'VALIDATION_ERROR', 'A head change needs a reason', 400, {
+          headChangeReason: 'A head change needs a reason',
+        });
+      headReason = reason;
+    }
+
+    // The OST referrer is informational (Sales Managers only): leaving the
+    // seat retires it, and it must always name an active OST.
+    let nextOst: string | null | undefined;
+    if (ostReferrerStaffId !== undefined) {
+      if (ostReferrerStaffId !== null && effectivePosition !== 'sales_manager')
+        return fail(res, 'VALIDATION_ERROR', 'An OST referrer is for Sales Managers only', 400);
+      if (ostReferrerStaffId !== null) {
+        const ostRole = roles.find((r) => r.slug === 'ost');
+        const [{ data: ostCandidate }, { data: ostAssignment }] = await Promise.all([
+          db.from('staff_users').select('id,status').eq('id', ostReferrerStaffId).maybeSingle(),
+          db
+            .from('staff_role_assignments')
+            .select('role_id')
+            .eq('staff_id', ostReferrerStaffId)
+            .maybeSingle(),
+        ]);
+        if (
+          !ostCandidate ||
+          (ostCandidate as { status?: string }).status !== 'active' ||
+          String((ostAssignment as { role_id?: string } | null)?.role_id) !== ostRole?.id
+        )
+          return fail(res, 'VALIDATION_ERROR', 'OST referrer must be an active OST', 400);
+      }
+      nextOst = ostReferrerStaffId ?? null;
+    } else if (positionChanged && effectivePosition !== 'sales_manager' && currentOst) {
+      nextOst = null;
+    }
+
+    // --- address ----------------------------------------------------------
+    // Codes travel as a pair: when both are present the reference re-resolves
+    // them and owns the saved names and codes, while the ZIP stays the
+    // operator's (see resolveMemberLocation). Without them the typed text is
+    // saved for legacy rows that were never verified.
+    let location: ResolvedMemberLocation | null = null;
+    if (provinceCode !== undefined || cityMunicipalityCode !== undefined) {
+      if (!provinceCode || !cityMunicipalityCode)
+        return fail(res, 'VALIDATION_ERROR', 'Choose the province and city from the list.', 400);
+      location = await resolveMemberLocation({
+        province: rest.province ?? '',
+        cityMunicipality: rest.cityMunicipality ?? '',
+        provinceCode,
+        cityMunicipalityCode,
+        zipCode: rest.zipCode ?? '',
+      });
+      if (!location.ok)
+        return fail(
+          res,
+          location.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+          location.message,
+          location.status,
+        );
+    }
+
+    // --- sign-in account (email and/or administrator password reset) ------
+    const { data: staffRow, error: staffError } = await db
+      .from('staff_users')
+      .select('id,email')
+      .eq('id', id)
+      .maybeSingle();
+    if (staffError) throw staffError;
+    if (!staffRow) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    const currentEmail = String((staffRow as { email?: string }).email ?? '').toLowerCase();
+    const emailChanged = email !== undefined && email !== currentEmail;
+    if (emailChanged) {
+      const { data: duplicate } = await db
+        .from('staff_users')
+        .select('id')
+        .eq('email', email)
+        .limit(1);
+      if ((duplicate ?? []).some((row: { id?: string }) => String(row.id) !== id))
+        return fail(res, 'CONFLICT', 'A staff member with this email already exists', 409);
+    }
+    if (emailChanged || temporaryPassword !== undefined) {
+      const { error: authUpdateError } = await db.auth.admin.updateUserById(id, {
+        ...(emailChanged ? { email, email_confirm: true } : {}),
+        ...(temporaryPassword !== undefined ? { password: temporaryPassword } : {}),
+      });
+      if (authUpdateError) {
+        const raw = String((authUpdateError as { message?: string }).message ?? '').toLowerCase();
+        if (emailChanged && /already.*(registered|exists|in use)|duplicate/i.test(raw))
+          return fail(res, 'CONFLICT', 'An account with this email already exists', 409);
+        return fail(res, 'INTERNAL', 'Unable to update the sign-in account', 500);
+      }
+    }
+
+    // --- writes -----------------------------------------------------------
+    const now = new Date().toISOString();
+    if (fullName !== undefined || emailChanged || temporaryPassword !== undefined) {
+      const { error: staffWriteError } = await db
+        .from('staff_users')
+        .update({
+          ...(fullName !== undefined ? { full_name: fullName } : {}),
+          ...(emailChanged ? { email } : {}),
+          // An administrator reset puts the account back on a temporary
+          // password: the next sign-in forces a change.
+          ...(temporaryPassword !== undefined ? { must_change_password: true } : {}),
+          updated_at: now,
+        })
+        .eq('id', id);
+      if (staffWriteError) throw staffWriteError;
+    }
+    if (positionChanged && targetRole) {
+      const { error: roleError } = await db
+        .from('staff_role_assignments')
+        .update({ role_id: targetRole.id, assigned_by: auth.userId })
+        .eq('staff_id', id);
+      if (roleError) throw roleError;
+    }
+    if (headWillChange) {
+      const { data: active, error: activeError } = await db
+        .from('referral_relationships')
+        .select('id')
+        .eq('subject_staff_id', id)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (activeError) throw activeError;
+      if (active) {
+        const { error: retireError } = await db
+          .from('referral_relationships')
+          .update({ is_active: false, updated_at: now })
+          .eq('id', String((active as { id?: string }).id));
+        if (retireError) throw retireError;
+      }
+      if (nextHead !== null) {
+        const { error: linkError } = await db.from('referral_relationships').insert({
+          subject_staff_id: id,
+          upline_staff_id: nextHead,
+          hierarchy_role: effectivePosition,
+          is_authoritative: true,
+          is_active: true,
+          assigned_by: auth.userId,
+        });
+        if (linkError) {
+          const raw = String((linkError as { message?: string }).message ?? '');
+          if (/GENEALOGY_CYCLE/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'That head would create a cycle', 400);
+          if (/SUBJECT_ROLE_MISMATCH|INVALID_HIERARCHY_DIRECTION|HIERARCHY_ROLE_REQUIRED/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'Head must be the immediate upline', 400);
+          if (/UPLINE_SELF_REFERENCE/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'A member cannot be their own head', 400);
+          if ((linkError as { code?: string }).code === '23505')
+            return fail(res, 'CONFLICT', 'That person already has an active upline', 409);
+          throw linkError;
+        }
+      }
+      await audit(
+        db,
+        auth.userId,
+        'UPLINE_CORRECTED',
+        'referral_relationship',
+        id,
+        { uplineStaffId: currentHead },
+        { uplineStaffId: nextHead },
+        { reason: headReason },
+      );
+    }
     const { error: updateError } = await db
       .from('network_member_profiles')
       .update({
@@ -325,9 +787,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
             value ?? null,
           ]),
         ),
+        ...(location && location.ok
+          ? {
+              province: location.province,
+              city_municipality: location.cityMunicipality,
+              province_code: location.provinceCode,
+              city_municipality_code: location.cityMunicipalityCode,
+              zip_code: location.zipCode,
+            }
+          : {}),
         ...(tin !== undefined ? { tin } : {}),
         ...(governmentIdNumber !== undefined ? { government_id_number: governmentIdNumber } : {}),
-        updated_at: new Date().toISOString(),
+        ...(nextHead !== undefined ? { referrer_staff_id: nextHead } : {}),
+        ...(nextOst !== undefined ? { ost_referrer_staff_id: nextOst } : {}),
+        updated_at: now,
       })
       .eq('staff_id', id);
     if (updateError) throw updateError;
@@ -346,7 +819,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const auth = await authorizeAfHomes(req, 'network.members', 'create');
     if ('error' in auth) return deny(res, auth);
     const parsed = createMemberSchema.safeParse(jsonBody(req));
-    if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid member details', 400);
+    if (!parsed.success)
+      return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
 
     const roles = await roleCatalog(db);
@@ -371,8 +845,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const expectedUpline = MEMBER_UPLINE_ROLE[input.position];
     let referrer: { id: string } | null = null;
     if (input.referrerStaffId) {
-      if (!expectedUpline)
-        return fail(res, 'VALIDATION_ERROR', 'A Vice Director has no head', 400);
+      if (!expectedUpline) return fail(res, 'VALIDATION_ERROR', 'A Vice Director has no head', 400);
       const { data: candidate } = await db
         .from('staff_users')
         .select('id,status')
@@ -419,6 +892,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const email = input.email.toLowerCase();
+    // The saved address follows the reference for names and codes; the ZIP is
+    // whatever the body carried.
+    const location = await resolveMemberLocation(input);
+    if (!location.ok)
+      return fail(
+        res,
+        location.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+        location.message,
+        location.status,
+      );
+    // A typed AA number is checked before any write: the friendly conflict
+    // arrives with no side effects (a race is still possible and maps to the
+    // same 409 at the accreditation step).
+    const manualAa = input.aaNumberMode === 'manual' ? (input.aaNumber ?? null) : null;
+    if (manualAa && (await aaNumberTaken(db, manualAa)))
+      return fail(res, 'CONFLICT', 'This AA number is already issued', 409);
     const { data: duplicate } = await db
       .from('staff_users')
       .select('id')
@@ -433,8 +922,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       email_confirm: true,
       user_metadata: { full_name: input.fullName },
     });
-    if (createError || !created?.user)
-      return fail(res, 'CONFLICT', 'Unable to create an account for this email address', 409);
+    if (createError || !created?.user) {
+      // A duplicate address is a conflict; anything else (weak password,
+      // provider failure) is a server error, never a misleading conflict.
+      const raw = String((createError as { message?: string } | null)?.message ?? '').toLowerCase();
+      if (/already.*(registered|exists)|duplicate/i.test(raw))
+        return fail(res, 'CONFLICT', 'An account with this email already exists', 409);
+      return fail(res, 'INTERNAL', 'Account provisioning failed', 500);
+    }
+    /**
+     * Best-effort reverse-order compensation for a failed create. The tree
+     * has no cross-system transaction between PostgREST and GoTrue, so every
+     * step is attempted and none throws: a partial member must never survive
+     * its failed request (the next retry would 409 on the orphan forever).
+     * Staff rows are deleted BEFORE the Auth user: `staff_users.id`
+     * references `auth.users(id)` on delete restrict, so deleting the login
+     * first fails while the profile still references it.
+     */
+    const compensate = async () => {
+      const id = created.user.id as string;
+      const ignore = async (work: Promise<unknown>) => {
+        try {
+          await work;
+        } catch {
+          /* best-effort: keep compensating */
+        }
+      };
+      await ignore(db.from('referral_relationships').delete().eq('subject_staff_id', id));
+      await ignore(db.from('network_member_profiles').delete().eq('staff_id', id));
+      await ignore(db.from('staff_role_assignments').delete().eq('staff_id', id));
+      await ignore(db.from('staff_users').delete().eq('id', id));
+      await ignore(db.auth.admin.deleteUser(id));
+    };
+    const insertError = (label: string, error: { message?: string; code?: string } | null) =>
+      new Error(
+        `${label} insert failed [${error?.code ?? 'unknown'}]: ${error?.message ?? 'unknown'}`,
+      );
     try {
       const now = new Date().toISOString();
       const { error: staffError } = await db.from('staff_users').insert({
@@ -446,23 +969,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         must_change_password: true,
         activated_at: now,
       });
-      if (staffError) throw new Error(`staff_users insert failed: ${staffError.message}`);
+      if (staffError) throw insertError('staff_users', staffError);
       const { error: assignmentError } = await db.from('staff_role_assignments').insert({
         staff_id: created.user.id,
         role_id: target.id,
         assigned_by: auth.userId,
       });
-      if (assignmentError)
-        throw new Error(`staff_role_assignments insert failed: ${assignmentError.message}`);
+      if (assignmentError) throw insertError('staff_role_assignments', assignmentError);
       const { error: profileError } = await db.from('network_member_profiles').insert({
         staff_id: created.user.id,
         date_of_birth: input.dateOfBirth,
         sex: input.sex,
         civil_status: input.civilStatus,
         street_no: input.streetNo,
-        city_municipality: input.cityMunicipality,
-        province: input.province,
-        zip_code: input.zipCode,
+        city_municipality: location.cityMunicipality,
+        province: location.province,
+        province_code: location.provinceCode,
+        city_municipality_code: location.cityMunicipalityCode,
+        zip_code: location.zipCode,
         tel_no: input.telNo ?? null,
         mobile_no: input.mobileNo,
         fb_messenger: input.fbMessenger || null,
@@ -475,7 +999,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         referrer_staff_id: referrer?.id ?? null,
         ost_referrer_staff_id: ostReferrer?.id ?? null,
       });
-      if (profileError) throw new Error(`network_member_profiles insert failed: ${profileError.message}`);
+      if (profileError) throw insertError('network_member_profiles', profileError);
       if (referrer) {
         const { error: referralError } = await db.from('referral_relationships').insert({
           subject_staff_id: created.user.id,
@@ -486,14 +1010,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           assigned_by: auth.userId,
         });
         if (referralError) {
+          await compensate();
           if ((referralError as { code?: string }).code === '23505')
-            throw new Error('That person already has an active upline');
+            return fail(res, 'CONFLICT', 'That person already has an active upline', 409);
           throw referralError;
         }
-        await audit(db, auth.userId, 'UPLINE_ASSIGNED', 'referral_relationship', created.user.id, null, {
-          uplineStaffId: referrer.id,
-          hierarchyRole: input.position,
-        });
+        await audit(
+          db,
+          auth.userId,
+          'UPLINE_ASSIGNED',
+          'referral_relationship',
+          created.user.id,
+          null,
+          {
+            uplineStaffId: referrer.id,
+            hierarchyRole: input.position,
+          },
+        );
       }
       // Identity only: the temporary password, TIN and government ID never
       // enter the audit trail.
@@ -502,30 +1035,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         fullName: input.fullName,
         departmentId: input.departmentId,
         position: input.position,
+        aaNumberMode: input.aaNumberMode,
         referrerStaffId: referrer?.id ?? null,
         ostReferrerStaffId: ostReferrer?.id ?? null,
       });
       // The AA number is issued with the account for hierarchy sellers (IST
-      // accreditation, one year). OST accreditation rides on the OST approval
+      // accreditation, one year). AUTO omits the number, so it works on any
+      // database; MANUAL passes it to the 7-argument function from the
+      // manual-AA migration. OST accreditation rides on the OST approval
       // flow, so OST members gain their number there, not here.
       if (input.position !== 'ost') {
         const { startsOn, expiresOn } = accreditationWindow();
-        const { error: accreditationError } = await db.rpc('manage_sale_team_accreditation', {
+        const baseArgs = {
           p_actor_id: auth.userId,
           p_staff_id: created.user.id,
           p_kind: 'IST',
           p_action: 'approve',
           p_starts_on: startsOn,
           p_expires_on: expiresOn,
-        });
+        };
+        const { error: accreditationError } = await db.rpc(
+          'manage_sale_team_accreditation',
+          manualAa ? { ...baseArgs, p_aa_number: manualAa } : baseArgs,
+        );
         if (accreditationError) {
+          await compensate();
+          if (accreditationFailure(res, accreditationError as { message?: string }, manualAa))
+            return;
           throw new Error(
             `sale team accreditation failed: ${(accreditationError as { message?: string }).message ?? 'unknown'}`,
           );
         }
       }
     } catch (error) {
-      await db.auth.admin.deleteUser(created.user.id);
+      await compensate();
+      // A concurrent duplicate (unique violation mid-create) is a conflict,
+      // never a 500: without this the retry loop can never succeed.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/23505|duplicate key|already exists/i.test(message))
+        return fail(res, 'CONFLICT', 'A record with these details already exists', 409);
       throw error;
     }
     const rows = await memberRows(db, '', undefined);

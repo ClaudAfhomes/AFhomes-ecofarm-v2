@@ -26,23 +26,20 @@ const ROLES = ['all', 'vice_director', 'senior_sales_manager', 'sales_manager', 
 const STATUSES = ['all', 'active', 'inactive', 'invited', 'suspended'];
 
 /**
- * Head first, tree on demand.
- *
- * Only the top head shows at first. "View Genealogy"
- * opens the full tree, top to bottom. Search and
- * filters narrow the tree without refetching.
+ * Head first. Search and filters narrow the list
+ * without refetching; each card opens that seller's
+ * genealogy record.
  */
 export function GenealogyPage() {
   const query = useQuery({
     queryKey: genealogyKeys.tree,
     queryFn: getGenealogy,
-    // The authorized tree stays on screen while a background refresh reloads.
+    // The authorized network stays on screen while a background refresh reloads.
     placeholderData: keepPreviousData,
   });
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('all');
   const [status, setStatus] = useState('all');
-  const [expanded, setExpanded] = useState(false);
   const debouncedSearch = useDebouncedValue(search);
   const filtering = debouncedSearch.trim() !== '' || role !== 'all' || status !== 'all';
   const rows = useMemo(
@@ -66,10 +63,8 @@ export function GenealogyPage() {
     return (query.data ?? []).filter((n) => !n.uplineStaffId || !ids.has(n.uplineStaffId));
   }, [query.data]);
 
-  const levels = useMemo(() => buildLevels(rows), [rows]);
-
   // First load skeletonizes the whole page so no static content flashes
-  // before the tree it describes. Refetches keep the tree visible and never
+  // before the list it describes. Refetches keep the list visible and never
   // reach this branch. The sr-only line keeps the exact pending copy.
   if (query.isPending)
     return (
@@ -104,7 +99,7 @@ export function GenealogyPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title="Sales Network" description="Head first. Open full tree." />
+      <PageHeader title="Sales Network" description="Head first. Open a seller." />
 
       <div className={styles.badges} aria-label="Network summary">
         <StatusChip
@@ -181,37 +176,11 @@ export function GenealogyPage() {
           ))}
         </ul>
       ) : (
-        <>
-          <div className={styles.heads} aria-label="Network heads">
-            {heads.length === 0
-              ? rows.slice(0, 1).map((n) => <HeadCard key={n.staffId} node={n} />)
-              : heads.map((n) => <HeadCard key={n.staffId} node={n} />)}
-          </div>
-          <div className={styles.treeToggle}>
-            <Button variant="secondary" onClick={() => setExpanded((open) => !open)}>
-              {expanded ? 'Hide Genealogy' : 'View Genealogy'}
-            </Button>
-            <span className={styles.treeHint}>
-              {`${levels.length} ${levels.length === 1 ? 'level' : 'levels'}`}
-            </span>
-          </div>
-          {expanded ? (
-            <div className={styles.tree} role="region" aria-label="Genealogy tree">
-              {levels.map((level, index) => (
-                <section key={index} className={styles.level} aria-label={`Level ${index + 1}`}>
-                  <p className={styles.levelLabel}>Level {index + 1}</p>
-                  <ul className={styles.levelRow}>
-                    {level.map((n) => (
-                      <li key={n.staffId}>
-                        <NodeCard node={n} />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
-          ) : null}
-        </>
+        <div className={styles.heads} aria-label="Network heads">
+          {heads.length === 0
+            ? rows.slice(0, 1).map((n) => <HeadCard key={n.staffId} node={n} />)
+            : heads.map((n) => <HeadCard key={n.staffId} node={n} />)}
+        </div>
       )}
     </section>
   );
@@ -250,6 +219,7 @@ function HeadCard({ node }: { node: GenealogyNode }) {
 }
 
 function NodeCard({ node }: { node: GenealogyNode }) {
+  const navigate = useNavigate();
   return (
     <article className={styles.nodeCard}>
       <span className={styles.nodeAvatar} aria-hidden="true">
@@ -263,38 +233,19 @@ function NodeCard({ node }: { node: GenealogyNode }) {
           {humanizeCode(node.role)} | {formatCountOrDash(node.directDownlineCount)} direct
         </p>
       </div>
-      <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+      <div className={styles.nodeActions}>
+        <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label={`View genealogy of ${node.fullName}`}
+          onClick={() => navigate(`/admin/genealogy/${node.staffId}`)}
+        >
+          View Genealogy
+        </Button>
+      </div>
     </article>
   );
-}
-
-/**
- * Level order from heads down. Links resolve
- * through upline ids, orphans join heads.
- */
-function buildLevels(rows: GenealogyNode[]): GenealogyNode[][] {
-  const ids = new Set(rows.map((n) => n.staffId));
-  const children = new Map<string, GenealogyNode[]>();
-  const heads = rows.filter((n) => !n.uplineStaffId || !ids.has(n.uplineStaffId));
-  for (const n of rows) {
-    if (!n.uplineStaffId || !ids.has(n.uplineStaffId)) continue;
-    const list = children.get(n.uplineStaffId) ?? [];
-    list.push(n);
-    children.set(n.uplineStaffId, list);
-  }
-  const levels: GenealogyNode[][] = [];
-  let current = heads;
-  const seen = new Set<string>();
-  while (current.length > 0) {
-    const fresh = current.filter((n) => !seen.has(n.staffId));
-    if (fresh.length === 0) break;
-    fresh.forEach((n) => seen.add(n.staffId));
-    levels.push(fresh);
-    current = fresh.flatMap((n) => children.get(n.staffId) ?? []);
-  }
-  const leftovers = rows.filter((n) => !seen.has(n.staffId));
-  if (leftovers.length > 0) levels.push(leftovers);
-  return levels;
 }
 
 /**
