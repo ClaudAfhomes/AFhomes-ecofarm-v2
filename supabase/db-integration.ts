@@ -1956,7 +1956,8 @@ async function main(): Promise<void> {
           ) ||
           /search_path\s*=\s*pg_catalog,\s*public,\s*(extensions,\s*)?(private,\s*)?pg_temp/.test(
             config,
-          ),
+          ) ||
+          /^search_path=pg_catalog,\s*private,\s*public,\s*pg_temp$/.test(config),
         config,
       );
     }
@@ -8287,11 +8288,14 @@ async function main(): Promise<void> {
           "insert into customer_import_rows(id,import_job_id,row_number,validation_status,action,customer_id,membership_id,normalized_data,raw_data) select $1,import_job_id,$3,'valid','UPDATE',customer_id,membership_id,normalized_data,jsonb_build_object('customer_number',$4::text) from customer_import_rows where id=$2",
           [contradictory, id, ++serial, otherNumber],
         );
+        const contradictoryMessage = await throws('cross-link rejected', () =>
+          commit(contradictory),
+        );
         check(
           'contradictory customer number rejected',
-          (await throws('cross-link rejected', () => commit(contradictory))).includes(
-            'IMPORT_IDENTIFIER_CONFLICT',
-          ),
+          contradictoryMessage.includes('IMPORT_IDENTIFIER_CONFLICT'),
+          // Report the actual error when the rejection is the WRONG rejection.
+          contradictoryMessage.split('\n')[0]!.slice(0, 200),
         );
         const next = (
           await one<{ n: string }>('select (last_value+1)::text as n from membership_number_seq')

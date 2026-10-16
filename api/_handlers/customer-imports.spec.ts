@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toXlsx } from '../_lib/report-export.js';
+import { companyWorkbook } from '../_lib/customer-workbook-export.js';
 import { CUSTOMER_IMPORT_COLUMNS } from '@afhomes/contracts';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
@@ -95,9 +96,164 @@ const pendingRow = (overrides: Record<string, string> = {}) => ({
   first_name: 'Juan',
   last_name: 'Cruz',
   email: 'juan.cruz@example.com',
-  mobile: '+639171234567',
+  mobile: '09171234567',
   source_status: 'Pending',
   ...overrides,
+});
+
+describe('company XLSX/XLSM preview', () => {
+  it('marks a failed preview persistence job as failed without writing customers', async () => {
+    const db = install();
+    db.writeErrors.customer_import_rows = { message: 'synthetic row storage failure' };
+    const response = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'csv',
+        contentBase64: b64(
+          Buffer.from(
+            'first_name,last_name,email,mobile,source_status\nSynthetic,Customer,synthetic@example.invalid,09123456789,Pending\n',
+          ),
+        ),
+      },
+    });
+    expect(response.status).toBe(500);
+    expect(db.tables.customer_import_jobs[0]).toMatchObject({ status: 'failed' });
+    expect(db.tables.customers).toHaveLength(0);
+  });
+  it('persists 5,000 rows in batches and serves bounded preview pages', async () => {
+    const db = install();
+    const rows = Array.from({ length: 5000 }, (_, i) => ({
+      first_name: 'Synthetic',
+      last_name: 'Customer',
+      email: `synthetic${i}@example.invalid`,
+      mobile: '09123456789',
+      stated_status: 'Pending',
+    }));
+    const response = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'excel', contentBase64: b64(companyWorkbook(rows)) },
+    });
+    expect(response.status).toBe(201);
+    const body = response.body as { job: { id: string; totalRows: number }; rows: unknown[] };
+    expect(body.job.totalRows).toBe(5000);
+    expect(body.rows).toHaveLength(10);
+    expect(db.tables.customer_import_rows).toHaveLength(5000);
+    const page = await call({
+      path: 'jobs/' + body.job.id,
+      query: { offset: '4990', limit: '10' },
+    });
+    expect(page.status).toBe(200);
+    expect((page.body as { rows: { rowNumber: number }[] }).rows.at(-1)?.rowNumber).toBe(5001);
+  }, 30000);
+  it.each(['xlsx', 'xlsm'])(
+    'previews an aligned %s company workbook with no financial instructions',
+    async (extension) => {
+      const db = install();
+      const response = await call({
+        path: 'parse',
+        method: 'POST',
+        body: {
+          source: 'excel',
+          sourceName: 'synthetic.' + extension,
+          contentBase64: b64(
+            companyWorkbook([
+              {
+                ...pendingRow({ mobile: '09123456789' }),
+                stated_status: 'Fully Paid',
+                stated_total: '60000.00',
+                stated_rf: '5000.00',
+                stated_payment_method: 'Gcash',
+                suffix: 'N/A',
+              },
+            ]),
+          ),
+        },
+      });
+      expect(response.status).toBe(201);
+      expect(response.body).toMatchObject({
+        job: { totalRows: 1, validRows: 1 },
+        rows: [
+          {
+            rowNumber: 2,
+            action: 'CREATE',
+            normalized: {
+              payment: null,
+              requireMember: false,
+              customerStatus: 'prospect',
+              person: { phone: '09123456789', suffix: null },
+            },
+          },
+        ],
+      });
+      expect(db.tables.customers).toHaveLength(0);
+      expect(db.tables.payments).toHaveLength(0);
+    },
+  );
+  it('marks both rows conflicting when one file repeats a strong customer identity', async () => {
+    install();
+    const row = { ...pendingRow({ mobile: '09123456789' }), stated_status: 'Pending' };
+    const response = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'excel', contentBase64: b64(companyWorkbook([row, row])) },
+    });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      job: { totalRows: 2, validRows: 0, invalidRows: 2 },
+      rows: [{ action: 'CONFLICT' }, { action: 'CONFLICT' }],
+    });
+  });
+});
+
+it('confirms at most 100 pending rows per request and safely resumes without replaying committed work', async () => {
+  const job = 'aaaaaaaa-0000-4000-8000-000000000099';
+  const customerId = 'cccccccc-0000-4000-8000-000000000001';
+  const db = install({
+    customer_import_jobs: [
+      {
+        id: job,
+        source_type: 'excel',
+        source_name: 'synthetic.xlsm',
+        status: 'ready',
+        total_rows: 101,
+        valid_rows: 101,
+        created_at: '2026-10-16',
+        validated_at: '2026-10-16',
+      },
+    ],
+    customer_import_rows: Array.from({ length: 101 }, (_, i) => ({
+      id: 'bbbbbbbb-0000-4000-8000-' + String(i + 1).padStart(12, '0'),
+      import_job_id: job,
+      row_number: i + 2,
+      action: 'CREATE',
+      validation_status: 'valid',
+      raw_data: {},
+      normalized_data: {},
+    })),
+  });
+  let calls = 0;
+  db.rpcs.push({
+    fn: 'commit_customer_import_row',
+    result: (args: Record<string, unknown>) => {
+      calls++;
+      const row = db.tables.customer_import_rows!.find((r) => r.id === args.p_row_id)!;
+      row.committed_at = '2026-10-16T00:00:00Z';
+      row.customer_id = customerId;
+      return { customerId, membershipId: null, saleId: null };
+    },
+  });
+  const first = await call({ path: 'jobs/' + job + '/confirm', method: 'POST' });
+  expect(first.body).toMatchObject({
+    job: { status: 'committing', insertedRows: 100, committedAt: null },
+  });
+  expect(calls).toBe(100);
+  const second = await call({ path: 'jobs/' + job + '/confirm', method: 'POST' });
+  expect(second.body).toMatchObject({ job: { status: 'completed', insertedRows: 101 } });
+  expect(calls).toBe(101);
+  await call({ path: 'jobs/' + job + '/confirm', method: 'POST' });
+  expect(calls).toBe(101);
 });
 
 describe('every import transport uses the canonical row validator', () => {
@@ -110,7 +266,7 @@ describe('every import transport uses the canonical row validator', () => {
           first_name: 'claud',
           email: 'CLAUD@Example.COM',
           vip_tier: 'GOLD',
-          secondary_mobile: '0917-123-4567',
+          secondary_mobile: '09171234567',
         }),
         pendingRow({ birth_date: '2099-01-01', email: 'future@example.com' }),
         pendingRow({
@@ -148,11 +304,11 @@ describe('every import transport uses the canonical row validator', () => {
         rows: [
           expect.objectContaining({
             fields: expect.objectContaining({
-              first_name: 'claud',
+              first_name: 'Claud',
               email: 'claud@example.com',
-              secondary_mobile: '+639171234567',
+              secondary_mobile: '09171234567',
             }),
-            validation: 'warning',
+            validation: 'valid',
           }),
           ...Array.from({ length: 4 }, () => expect.objectContaining({ validation: 'error' })),
         ],
@@ -225,7 +381,7 @@ describe('customer import/export handler', () => {
   it('parses CSV with UTF-8 names and surfaces per-field errors', async () => {
     const csv = b64(
       Buffer.from(
-        'first_name,last_name,email,mobile,source_status,vip_tier\nMaría,DELA PEÑA,bad-email,12,Active,Diamond\n',
+        'first_name,last_name,email,mobile,source_status,vip_tier\nMarÃ­a,DELA PEÃ‘A,bad-email,12,Active,Diamond\n',
         'utf8',
       ),
     );
@@ -286,7 +442,7 @@ describe('customer import/export handler', () => {
           ok: true,
           headers: { get: () => 'text/csv' },
           body: new Response(
-            'first_name,last_name,email,mobile,source_status\nSheet,User,sheet.user@example.com,0917000001,Pending\n',
+            'first_name,last_name,email,mobile,source_status\nSheet,User,sheet.user@example.com,09170000001,Pending\n',
           ).body,
         };
       }),
@@ -329,7 +485,7 @@ describe('customer import/export handler', () => {
         source: 'csv',
         contentBase64: b64(
           Buffer.from(
-            'first_name,last_name,email,mobile,source_status\nJuan,Cruz,j@example.com,0917000001,Pending\nBad,Row,not-an-email,1,Pending\n',
+            'first_name,last_name,email,mobile,source_status\nJuan,Cruz,j@example.com,09170000001,Pending\nBad,Row,not-an-email,1,Pending\n',
             'utf8',
           ),
         ),
@@ -352,7 +508,7 @@ describe('customer import/export handler', () => {
         source: 'csv',
         contentBase64: b64(
           Buffer.from(
-            'first_name,last_name,email,mobile,source_status\nJuan,Cruz,j@example.com,0917000001,Pending\n',
+            'first_name,last_name,email,mobile,source_status\nJuan,Cruz,j@example.com,09170000001,Pending\n',
             'utf8',
           ),
         ),
@@ -466,7 +622,15 @@ it('resumes a committing job and reports 495 successes plus 5 invalid rows consi
       ],
     },
   );
-  const response = await call({ path: `jobs/${job}/confirm`, method: 'POST' });
+  db.rpcs[0]!.result = (args: Record<string, unknown>) => {
+    const row = db.tables.customer_import_rows!.find((entry) => entry.id === args.p_row_id)!;
+    row.committed_at = '2026-10-16T00:00:00Z';
+    row.customer_id = 'cccccccc-0000-4000-8000-000000000001';
+    return { customerId: row.customer_id, membershipId: null, saleId: null };
+  };
+  let response = await call({ path: `jobs/${job}/confirm`, method: 'POST' });
+  while ((response.body as { job: { status: string } }).job.status === 'committing')
+    response = await call({ path: `jobs/${job}/confirm`, method: 'POST' });
   expect(response.status).toBe(200);
   expect(response.body).toMatchObject({
     committed: 495,

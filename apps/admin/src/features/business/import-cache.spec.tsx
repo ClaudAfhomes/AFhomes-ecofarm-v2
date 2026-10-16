@@ -8,7 +8,16 @@ import { confirmCustomerImport, parseCustomerImport } from './services';
 
 vi.mock('../../lib/session', () => ({
   useSession: () => ({
-    user: { afHomesPermissions: [{ moduleKey: 'governance.customer_import', canCreate: true }] },
+    user: {
+      afHomesPermissions: [
+        {
+          moduleKey: 'governance.customer_import',
+          canView: true,
+          canCreate: true,
+          canUpdate: true,
+        },
+      ],
+    },
   }),
 }));
 vi.mock('../../lib/api/client', () => ({ requestList: async () => [] }));

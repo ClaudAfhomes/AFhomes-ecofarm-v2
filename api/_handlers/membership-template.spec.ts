@@ -32,8 +32,8 @@ import {
   MEMBERSHIP_TEMPLATE_V2_SECTIONS,
   isInterimV2Flat,
   mergeSectionedTemplateSheets,
-  parseXlsxSheets,
 } from '../_lib/customer-import.js';
+import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
 import { toCsv, toXlsxMulti } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown }));
@@ -188,14 +188,30 @@ describe('company membership template', () => {
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
     const bytes = Buffer.from((xlsx.body as { content: string }).content, 'base64');
-    const sheets = parseXlsxSheets(new Uint8Array(bytes));
-    expect(sheets.map((s) => s.name)).toEqual([
+    const parts = readWorkbookParts(new Uint8Array(bytes));
+    const meta = new TextDecoder().decode(parts.get('xl/workbook.xml'));
+    // The download is the sanitized company workbook: the README guide, the
+    // four entry tabs, and the five PSGC reference tabs its postal lookup
+    // reads. The reference lists exceed the import row budget by design, so
+    // entry tabs are read by name - exactly as a filled download is imported.
+    expect([...meta.matchAll(/<sheet name="([^"]+)"/g)].map((match) => match[1])).toEqual([
       'README',
       'Primary',
       'Supplementary',
       'Related',
       'Package',
+      'PSGC_ProvinceList',
+      'PSGC_CityList',
+      'PSGC_BarangayList',
+      'PSGC_ProvinceIndex',
+      'PSGC_CityIndex',
     ]);
+    const sheets = [
+      ...readWorkbook(
+        parts,
+        ['README', ...MEMBERSHIP_TEMPLATE_V2_SECTIONS.map((section) => section.sheet)],
+      ),
+    ].map(([name, matrix]) => ({ name, matrix }));
     const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
     for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
       expect(byName.get(section.sheet)).toEqual([
@@ -203,11 +219,15 @@ describe('company membership template', () => {
       ]);
     // FULL NAME left the download: names are the operator's own split.
     for (const sheet of sheets) expect(sheet.matrix[0]).not.toContain('FULL NAME');
-    // Dropdowns live in the worksheet XML; ZIP entries are stored
-    // uncompressed, so the validation list is readable in the raw bytes.
-    const xml = bytes.toString('latin1');
-    expect(xml).toContain('<dataValidation type="list"');
-    expect(xml).toContain('GOLD,SILVER,BRONZE');
+    // Dropdowns live in the worksheet XML. The company download is a real
+    // Excel file (deflated parts), so the validation list is read from the
+    // decompressed worksheets rather than the raw archive bytes.
+    const worksheetXml = [...parts]
+      .filter(([name]) => name.startsWith('xl/worksheets/'))
+      .map(([, data]) => new TextDecoder().decode(data))
+      .join('\n');
+    expect(worksheetXml).toContain('<dataValidation type="list"');
+    expect(worksheetXml).toContain('GOLD,SILVER,BRONZE');
 
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);

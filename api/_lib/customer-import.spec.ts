@@ -1,4 +1,4 @@
-import { deflateRawSync } from 'node:zlib';
+﻿import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   CUSTOMER_CATEGORY_LABELS,
@@ -71,7 +71,7 @@ const baseFields = (overrides: Record<string, string> = {}): Record<string, stri
   first_name: 'Juan',
   last_name: 'Cruz',
   email: 'juan.cruz@example.com',
-  mobile: '+639171234567',
+  mobile: '09171234567',
   payment_scheme: 'spot_cash',
   historical_sale_total: '312000.00',
   payment_date: '2025-01-01',
@@ -81,6 +81,32 @@ const baseFields = (overrides: Record<string, string> = {}): Record<string, stri
 });
 
 describe('canonical import birth dates and secondary contacts', () => {
+  it('holds conflicting registered identity and retains verified spelling on matching updates', () => {
+    const identity = {
+      first_name: 'JUAN',
+      last_name: 'CRUZ',
+      middle_name: null,
+      suffix: null,
+      email: 'juan.cruz@example.com',
+      phone: '09171234567',
+      birth_date: null,
+    };
+    const context = ctx({
+      customerByEmail: new Map([['juan.cruz@example.com', { id: 'customer' }]]),
+      customerIdentityById: new Map([['customer', identity]]),
+    });
+    const unchanged = validateImportRow(2, baseFields(), context, TODAY);
+    expect(unchanged.errors).toEqual([]);
+    expect(unchanged.normalized?.person.firstName).toBe('JUAN');
+    const disagreement = validateImportRow(
+      2,
+      baseFields({ first_name: 'Different' }),
+      context,
+      TODAY,
+    );
+    expect(disagreement.action).toBe('CONFLICT');
+    expect(disagreement.errors.some((error) => error.field === 'first_name')).toBe(true);
+  });
   it.each(['2099-01-01', `${new Date().getUTCFullYear() - 121}-01-01`, '1990-02-30'])(
     'rejects invalid primary and secondary DOB %s',
     (birthDate) => {
@@ -96,33 +122,38 @@ describe('canonical import birth dates and secondary contacts', () => {
       }
     },
   );
-  it.each(['09ABC123456', 'PHONE123', '0917TEST'])(
-    'rejects secondary phone %s as an error',
-    (phone) => {
-      const row = validateImportRow(
-        2,
-        baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
-        ctx(),
-        TODAY,
-      );
-      expect(row.errors).toContainEqual({ field: 'secondary_mobile', message: 'Invalid phone' });
-      expect(row.normalized).toBeNull();
-    },
-  );
-  it.each(['09171234567', '0917-123-4567', '+639171234567'])(
-    'canonicalizes valid secondary phone %s',
-    (phone) => {
-      const row = validateImportRow(
-        2,
-        baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
-        ctx(),
-        TODAY,
-      );
-      expect(row.errors).toEqual([]);
-      expect(row.fields.secondary_mobile).toBe('+639171234567');
-      expect(row.normalized?.secondaryNote).toContain('+639171234567');
-    },
-  );
+  it.each([
+    '09ABC123456',
+    'PHONE123',
+    '0917TEST',
+    '0917-123-4567',
+    '+639171234567',
+    '09171234567 ',
+    '9171234567',
+  ])('rejects secondary phone %s as an error', (phone) => {
+    const row = validateImportRow(
+      2,
+      baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.errors).toContainEqual({
+      field: 'secondary_mobile',
+      message: 'Use exactly 11 digits, including the leading zero; no spaces or separators',
+    });
+    expect(row.normalized).toBeNull();
+  });
+  it.each(['09171234567'])('preserves the leading zero of valid secondary phone %s', (phone) => {
+    const row = validateImportRow(
+      2,
+      baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.errors).toEqual([]);
+    expect(row.fields.secondary_mobile).toBe('09171234567');
+    expect(row.normalized?.secondaryNote).toContain('09171234567');
+  });
   it('uses canonical name length/email rules and normalized preview fields', () => {
     expect(
       validateImportRow(2, baseFields({ first_name: 'A'.repeat(81) }), ctx(), TODAY).validation,
@@ -136,7 +167,7 @@ describe('canonical import birth dates and secondary contacts', () => {
       ctx(),
       TODAY,
     );
-    expect(row.fields.first_name).toBe('claud');
+    expect(row.fields.first_name).toBe('Claud');
     expect(row.fields.email).toBe('claud@example.com');
   });
 });
@@ -254,8 +285,8 @@ describe('CSV matrix reader', () => {
     ]);
   });
   it('preserves UTF-8 names and strips the BOM', () => {
-    const matrix = parseCsvMatrix('﻿first_name,last_name\nMaría,DELA PEÑA\n');
-    expect(matrix[1]).toEqual(['María', 'DELA PEÑA']);
+    const matrix = parseCsvMatrix('ï»¿first_name,last_name\nMarÃ­a,DELA PEÃ‘A\n');
+    expect(matrix[1]).toEqual(['MarÃ­a', 'DELA PEÃ‘A']);
   });
   it('rejects an unterminated quoted field', () => {
     expect(() => parseCsvMatrix('a,b\n"oops\n')).toThrow();
@@ -559,7 +590,10 @@ describe('row validation', () => {
     expect(v.errors).toContainEqual({ field: 'first_name', message: 'Required' });
     expect(v.errors).toContainEqual({ field: 'last_name', message: 'Required' });
     expect(v.errors).toContainEqual({ field: 'email', message: 'Invalid email' });
-    expect(v.errors).toContainEqual({ field: 'mobile', message: 'Invalid phone' });
+    expect(v.errors).toContainEqual({
+      field: 'mobile',
+      message: 'Use exactly 11 digits, including the leading zero; no spaces or separators',
+    });
     expect(v.action).toBe('CONFLICT');
   });
   it('demands tier and payment history for Active VIP, never inventing them', () => {
