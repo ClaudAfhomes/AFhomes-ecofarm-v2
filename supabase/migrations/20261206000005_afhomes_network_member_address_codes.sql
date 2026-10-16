@@ -6,10 +6,16 @@
 -- the authority never published and nothing could re-check it. These two
 -- nullable code columns align the saved record with the reference: the
 -- create handler re-resolves the pair server-side and stores the authority's
--- own names, codes and postal code (a hand-crafted body that pairs a Laguna
--- province with a Batangas municipality is refused, like the application
--- flow). Updates never touch the address: head and address changes belong to
--- their own desks, so the update contract omits both columns.
+-- own names and codes (a hand-crafted body that pairs a Laguna province with
+-- a Batangas municipality is refused, like the application flow). Edits
+-- follow the same rule: when the code pair travels the update handler
+-- re-resolves it and the reference owns the saved names and codes, and a
+-- mismatched pair is refused. The ZIP is NOT the reference's: PSGC publishes
+-- a wrong value for some localities (Victoria, Laguna is 4011 and it answers
+-- 4018) and none at all for a third of them, so the chosen locality only
+-- prefills it and the operator's value is what is stored. Without codes the
+-- typed text saves as-is, so legacy rows that predate verification stay
+-- editable.
 --
 -- forward-only, idempotent: add column if not exists. Existing rows read NULL
 -- (unverified legacy text) until re-recorded. Re-running changes nothing.

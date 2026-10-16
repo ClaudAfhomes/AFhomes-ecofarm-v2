@@ -133,12 +133,16 @@ type ResolvedMemberLocation =
 
 /**
  * Re-resolve a submitted province/city pair against the PSGC reference and
- * align the saved address to it: authority names and codes, plus the
- * locality's published postal code (a locality with none keeps the typed
- * ZIP). A hand-crafted body that pairs a province with another province's
- * city is refused, like the application flow - the browser is not the
- * boundary. An outage is not an approval: an unverifiable pair is refused
- * rather than saved unverified.
+ * align the saved address to authority names and codes. A hand-crafted body
+ * that pairs a province with another province's city is refused, like the
+ * application flow - the browser is not the boundary. An outage is not an
+ * approval: an unverifiable pair is refused rather than saved unverified.
+ *
+ * The ZIP is the operator's, not the reference's. PSGC publishes a wrong postal
+ * code often enough to matter (Victoria, Laguna is 4011 and it answers 4018)
+ * and publishes none for a third of localities, so its value is only ever a
+ * suggestion the browser prefills: a sent ZIP wins, and the published one is
+ * the fallback for a payload that carried none.
  */
 async function resolveMemberLocation(
   input: Pick<
@@ -174,7 +178,7 @@ async function resolveMemberLocation(
     cityMunicipality: locality.name,
     provinceCode: province.code,
     cityMunicipalityCode: locality.code,
-    zipCode: locality.postalCode ?? input.zipCode,
+    zipCode: input.zipCode || locality.postalCode || '',
   };
 }
 
@@ -251,6 +255,8 @@ function toMember(
     status: String(staff.status),
     referrerName,
     ostReferrerName,
+    referrerStaffId: (profile?.referrer_staff_id as string | undefined) ?? null,
+    ostReferrerStaffId: (profile?.ost_referrer_staff_id as string | undefined) ?? null,
     aaNumber,
     dateOfBirth: isoOrNull(profile?.date_of_birth)
       ? String(profile?.date_of_birth).slice(0, 10)
@@ -260,6 +266,8 @@ function toMember(
     streetNo: (profile?.street_no as string | undefined) ?? null,
     cityMunicipality: (profile?.city_municipality as string | undefined) ?? null,
     province: (profile?.province as string | undefined) ?? null,
+    provinceCode: (profile?.province_code as string | undefined) ?? null,
+    cityMunicipalityCode: (profile?.city_municipality_code as string | undefined) ?? null,
     zipCode: (profile?.zip_code as string | undefined) ?? null,
     telNo: (profile?.tel_no as string | undefined) ?? null,
     mobileNo: (profile?.mobile_no as string | undefined) ?? null,
@@ -320,7 +328,7 @@ async function memberRows(db: Db, search: string, position?: MemberPosition) {
       db
         .from('network_member_profiles')
         .select(
-          'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
+          'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,province_code,city_municipality_code,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
         ),
       db.from('departments').select('id,name'),
     ]);
@@ -518,19 +526,257 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const input = parsed.data;
     const { data: profile, error: profileError } = await db
       .from('network_member_profiles')
-      .select('staff_id')
+      .select('staff_id,referrer_staff_id,ost_referrer_staff_id')
       .eq('staff_id', id)
       .maybeSingle();
     if (profileError) throw profileError;
     if (!profile) return fail(res, 'NOT_FOUND', 'Member not found', 404);
-    const { tin, governmentIdNumber, fullName, ...rest } = input;
-    // The display name lives on the staff account, not the profile row.
-    if (fullName !== undefined) {
-      const { error: nameError } = await db
+    const profileRow = profile as Record<string, unknown>;
+    const {
+      tin,
+      governmentIdNumber,
+      fullName,
+      email,
+      temporaryPassword,
+      position,
+      referrerStaffId,
+      headChangeReason,
+      ostReferrerStaffId,
+      provinceCode,
+      cityMunicipalityCode,
+      ...rest
+    } = input;
+
+    // --- position and head ------------------------------------------------
+    // The position IS the role assignment; a change re-resolves the role (a
+    // tampered slug cannot escalate: the target's permissions must be a subset
+    // of the caller's) and re-runs the head rules creation enforces, because
+    // every level names a different immediate upline. A head move carries a
+    // reason and is audited; the database trigger stays the final authority
+    // on direction and cycles.
+    const roles = await roleCatalog(db);
+    const { data: assignment } = await db
+      .from('staff_role_assignments')
+      .select('role_id')
+      .eq('staff_id', id)
+      .maybeSingle();
+    const currentSlug = roles.find(
+      (r) => r.id === String((assignment as { role_id?: string } | null)?.role_id),
+    )?.slug;
+    const currentHead = (profileRow.referrer_staff_id as string | undefined) ?? null;
+    const currentOst = (profileRow.ost_referrer_staff_id as string | undefined) ?? null;
+
+    const positionChanged = position !== undefined && position !== currentSlug;
+    let effectivePosition = (position ?? currentSlug) as MemberPosition | undefined;
+    let targetRole: RoleRow | undefined;
+    if (positionChanged) {
+      targetRole = roles.find((r) => r.slug === position);
+      if (!targetRole?.is_active) return fail(res, 'VALIDATION_ERROR', 'Position is not active', 400);
+      if (!permissionsAreSubset(targetRole.permissions, auth.permissions))
+        return fail(res, 'FORBIDDEN', 'Cannot assign a position you do not possess', 403);
+      effectivePosition = position;
+    }
+    const expectedUpline = effectivePosition ? MEMBER_UPLINE_ROLE[effectivePosition] : null;
+
+    /** undefined = leave the link alone; null = a position without a head. */
+    const headDecision = referrerStaffId !== undefined ? (referrerStaffId ?? null) : undefined;
+    let nextHead: string | null | undefined;
+    if (positionChanged) {
+      if (!expectedUpline) {
+        if (headDecision) return fail(res, 'VALIDATION_ERROR', 'A Vice Director has no head', 400);
+        nextHead = null;
+      } else {
+        if (!headDecision) return fail(res, 'VALIDATION_ERROR', 'A head is required', 400);
+        nextHead = headDecision;
+      }
+    } else if (headDecision !== undefined) {
+      if (headDecision === null && expectedUpline)
+        return fail(res, 'VALIDATION_ERROR', 'A head is required', 400);
+      nextHead = headDecision;
+    }
+
+    let headReason: string | undefined;
+    const headWillChange = nextHead !== undefined && nextHead !== currentHead;
+    if (nextHead !== undefined && nextHead !== null) {
+      if (nextHead === id)
+        return fail(res, 'VALIDATION_ERROR', 'A member cannot be their own head', 400);
+      const [{ data: candidate }, { data: candidateAssignment }] = await Promise.all([
+        db.from('staff_users').select('id,status').eq('id', nextHead).maybeSingle(),
+        db.from('staff_role_assignments').select('role_id').eq('staff_id', nextHead).maybeSingle(),
+      ]);
+      if (!candidate) return fail(res, 'NOT_FOUND', 'Head not found', 404);
+      if ((candidate as { status?: string }).status !== 'active')
+        return fail(res, 'CONFLICT', 'Head is not active', 409);
+      const candidateSlug = roles.find(
+        (r) => r.id === String((candidateAssignment as { role_id?: string } | null)?.role_id),
+      )?.slug;
+      if (!hierarchyAllowsUpline(effectivePosition as never, (candidateSlug ?? '') as never))
+        return fail(res, 'VALIDATION_ERROR', 'Head must be the immediate upline', 400);
+    }
+    if (headWillChange) {
+      const reason = (headChangeReason ?? '').trim();
+      if (reason.length < 3)
+        return fail(res, 'VALIDATION_ERROR', 'A head change needs a reason', 400, {
+          headChangeReason: 'A head change needs a reason',
+        });
+      headReason = reason;
+    }
+
+    // The OST referrer is informational (Sales Managers only): leaving the
+    // seat retires it, and it must always name an active OST.
+    let nextOst: string | null | undefined;
+    if (ostReferrerStaffId !== undefined) {
+      if (ostReferrerStaffId !== null && effectivePosition !== 'sales_manager')
+        return fail(res, 'VALIDATION_ERROR', 'An OST referrer is for Sales Managers only', 400);
+      if (ostReferrerStaffId !== null) {
+        const ostRole = roles.find((r) => r.slug === 'ost');
+        const [{ data: ostCandidate }, { data: ostAssignment }] = await Promise.all([
+          db.from('staff_users').select('id,status').eq('id', ostReferrerStaffId).maybeSingle(),
+          db
+            .from('staff_role_assignments')
+            .select('role_id')
+            .eq('staff_id', ostReferrerStaffId)
+            .maybeSingle(),
+        ]);
+        if (
+          !ostCandidate ||
+          (ostCandidate as { status?: string }).status !== 'active' ||
+          String((ostAssignment as { role_id?: string } | null)?.role_id) !== ostRole?.id
+        )
+          return fail(res, 'VALIDATION_ERROR', 'OST referrer must be an active OST', 400);
+      }
+      nextOst = ostReferrerStaffId ?? null;
+    } else if (positionChanged && effectivePosition !== 'sales_manager' && currentOst) {
+      nextOst = null;
+    }
+
+    // --- address ----------------------------------------------------------
+    // Codes travel as a pair: when both are present the reference re-resolves
+    // them and owns the saved names and codes, while the ZIP stays the
+    // operator's (see resolveMemberLocation). Without them the typed text is
+    // saved for legacy rows that were never verified.
+    let location: ResolvedMemberLocation | null = null;
+    if (provinceCode !== undefined || cityMunicipalityCode !== undefined) {
+      if (!provinceCode || !cityMunicipalityCode)
+        return fail(res, 'VALIDATION_ERROR', 'Choose the province and city from the list.', 400);
+      location = await resolveMemberLocation({
+        province: rest.province ?? '',
+        cityMunicipality: rest.cityMunicipality ?? '',
+        provinceCode,
+        cityMunicipalityCode,
+        zipCode: rest.zipCode ?? '',
+      });
+      if (!location.ok)
+        return fail(
+          res,
+          location.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+          location.message,
+          location.status,
+        );
+    }
+
+    // --- sign-in account (email and/or administrator password reset) ------
+    const { data: staffRow, error: staffError } = await db
+      .from('staff_users')
+      .select('id,email')
+      .eq('id', id)
+      .maybeSingle();
+    if (staffError) throw staffError;
+    if (!staffRow) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    const currentEmail = String((staffRow as { email?: string }).email ?? '').toLowerCase();
+    const emailChanged = email !== undefined && email !== currentEmail;
+    if (emailChanged) {
+      const { data: duplicate } = await db
         .from('staff_users')
-        .update({ full_name: fullName, updated_at: new Date().toISOString() })
+        .select('id')
+        .eq('email', email)
+        .limit(1);
+      if ((duplicate ?? []).some((row: { id?: string }) => String(row.id) !== id))
+        return fail(res, 'CONFLICT', 'A staff member with this email already exists', 409);
+    }
+    if (emailChanged || temporaryPassword !== undefined) {
+      const { error: authUpdateError } = await db.auth.admin.updateUserById(id, {
+        ...(emailChanged ? { email, email_confirm: true } : {}),
+        ...(temporaryPassword !== undefined ? { password: temporaryPassword } : {}),
+      });
+      if (authUpdateError) {
+        const raw = String((authUpdateError as { message?: string }).message ?? '').toLowerCase();
+        if (emailChanged && /already.*(registered|exists|in use)|duplicate/i.test(raw))
+          return fail(res, 'CONFLICT', 'An account with this email already exists', 409);
+        return fail(res, 'INTERNAL', 'Unable to update the sign-in account', 500);
+      }
+    }
+
+    // --- writes -----------------------------------------------------------
+    const now = new Date().toISOString();
+    if (fullName !== undefined || emailChanged || temporaryPassword !== undefined) {
+      const { error: staffWriteError } = await db
+        .from('staff_users')
+        .update({
+          ...(fullName !== undefined ? { full_name: fullName } : {}),
+          ...(emailChanged ? { email } : {}),
+          // An administrator reset puts the account back on a temporary
+          // password: the next sign-in forces a change.
+          ...(temporaryPassword !== undefined ? { must_change_password: true } : {}),
+          updated_at: now,
+        })
         .eq('id', id);
-      if (nameError) throw nameError;
+      if (staffWriteError) throw staffWriteError;
+    }
+    if (positionChanged && targetRole) {
+      const { error: roleError } = await db
+        .from('staff_role_assignments')
+        .update({ role_id: targetRole.id, assigned_by: auth.userId })
+        .eq('staff_id', id);
+      if (roleError) throw roleError;
+    }
+    if (headWillChange) {
+      const { data: active, error: activeError } = await db
+        .from('referral_relationships')
+        .select('id')
+        .eq('subject_staff_id', id)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (activeError) throw activeError;
+      if (active) {
+        const { error: retireError } = await db
+          .from('referral_relationships')
+          .update({ is_active: false, updated_at: now })
+          .eq('id', String((active as { id?: string }).id));
+        if (retireError) throw retireError;
+      }
+      if (nextHead !== null) {
+        const { error: linkError } = await db.from('referral_relationships').insert({
+          subject_staff_id: id,
+          upline_staff_id: nextHead,
+          hierarchy_role: effectivePosition,
+          is_authoritative: true,
+          is_active: true,
+          assigned_by: auth.userId,
+        });
+        if (linkError) {
+          const raw = String((linkError as { message?: string }).message ?? '');
+          if (/GENEALOGY_CYCLE/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'That head would create a cycle', 400);
+          if (/SUBJECT_ROLE_MISMATCH|INVALID_HIERARCHY_DIRECTION|HIERARCHY_ROLE_REQUIRED/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'Head must be the immediate upline', 400);
+          if (/UPLINE_SELF_REFERENCE/.test(raw))
+            return fail(res, 'VALIDATION_ERROR', 'A member cannot be their own head', 400);
+          if ((linkError as { code?: string }).code === '23505')
+            return fail(res, 'CONFLICT', 'That person already has an active upline', 409);
+          throw linkError;
+        }
+      }
+      await audit(
+        db,
+        auth.userId,
+        'UPLINE_CORRECTED',
+        'referral_relationship',
+        id,
+        { uplineStaffId: currentHead },
+        { uplineStaffId: nextHead },
+        { reason: headReason },
+      );
     }
     const { error: updateError } = await db
       .from('network_member_profiles')
@@ -541,9 +787,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
             value ?? null,
           ]),
         ),
+        ...(location && location.ok
+          ? {
+              province: location.province,
+              city_municipality: location.cityMunicipality,
+              province_code: location.provinceCode,
+              city_municipality_code: location.cityMunicipalityCode,
+              zip_code: location.zipCode,
+            }
+          : {}),
         ...(tin !== undefined ? { tin } : {}),
         ...(governmentIdNumber !== undefined ? { government_id_number: governmentIdNumber } : {}),
-        updated_at: new Date().toISOString(),
+        ...(nextHead !== undefined ? { referrer_staff_id: nextHead } : {}),
+        ...(nextOst !== undefined ? { ost_referrer_staff_id: nextOst } : {}),
+        updated_at: now,
       })
       .eq('staff_id', id);
     if (updateError) throw updateError;
@@ -635,8 +892,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const email = input.email.toLowerCase();
-    // The saved address follows the reference: authority names, codes and
-    // postal code replace whatever the body carried.
+    // The saved address follows the reference for names and codes; the ZIP is
+    // whatever the body carried.
     const location = await resolveMemberLocation(input);
     if (!location.ok)
       return fail(

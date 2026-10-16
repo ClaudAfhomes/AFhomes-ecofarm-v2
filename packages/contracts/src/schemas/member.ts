@@ -144,7 +144,11 @@ export const memberProfileSchema = z.object({
     .min(4)
     .max(16)
     .regex(/^[A-Za-z0-9-]+$/, 'Use letters, digits and dashes only'),
-  /** Immediate-upline link. Head changes go through the upline desk. */
+  /**
+   * Immediate-upline link. A move must name the immediate upline of the
+   * (possibly new) position, carries a reason and is audited; the database
+   * trigger re-validates direction and cycles.
+   */
   referrerStaffId: z.string().uuid().nullable().optional(),
   /**
    * Informational OST referrer, Sales Manager onboarding only. Never a
@@ -195,10 +199,27 @@ export const createMemberSchema = memberProfileSchema
   });
 export type CreateMember = z.infer<typeof createMemberSchema>;
 
-/** Profile update. The head link is deliberately absent (upline desk owns it). */
+/**
+ * Profile update. Every field the create form owns can be corrected here, so
+ * an administrator edits a member in ONE form: position (the server
+ * re-resolves the role and re-checks the hierarchy), head (a move carries a
+ * reason and is audited), email (the login identity) and a temporary password
+ * (an administrator reset that forces a change at the next sign-in). Address
+ * codes travel together: when both are present the server re-resolves the
+ * pair against the PSGC reference; without them the typed text is saved for
+ * legacy rows that were never verified.
+ */
 export const updateMemberProfileSchema = memberProfileSchema
-  .omit({ referrerStaffId: true })
-  .extend({ fullName: memberFullNameSchema.optional() })
+  .extend({
+    fullName: memberFullNameSchema,
+    email: emailSchema,
+    temporaryPassword: z.string().min(8).max(128),
+    position: memberPositionSchema,
+    /** Required by the server whenever the head link actually moves. */
+    headChangeReason: z.string().trim().min(3).max(200),
+    provinceCode: geographicCodeSchema,
+    cityMunicipalityCode: geographicCodeSchema,
+  })
   .partial();
 export type UpdateMemberProfile = z.infer<typeof updateMemberProfileSchema>;
 
@@ -232,6 +253,9 @@ export const memberSchema = z.object({
   status: z.string(),
   referrerName: z.string().nullable(),
   ostReferrerName: z.string().nullable(),
+  /** Immediate-upline and OST-referrer links, for the edit form's prefills. */
+  referrerStaffId: z.string().uuid().nullable(),
+  ostReferrerStaffId: z.string().uuid().nullable(),
   aaNumber: z.string().nullable(),
   dateOfBirth: z.string().nullable(),
   sex: z.string().nullable(),
@@ -239,6 +263,9 @@ export const memberSchema = z.object({
   streetNo: z.string().nullable(),
   cityMunicipality: z.string().nullable(),
   province: z.string().nullable(),
+  /** PSGC codes chosen from the reference; null on legacy unverified rows. */
+  provinceCode: z.string().nullable(),
+  cityMunicipalityCode: z.string().nullable(),
   zipCode: z.string().nullable(),
   telNo: z.string().nullable(),
   mobileNo: z.string().nullable(),

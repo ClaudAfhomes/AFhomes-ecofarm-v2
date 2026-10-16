@@ -61,6 +61,8 @@ const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const SSM_ID = '22222222-2222-4222-8222-222222222222';
 const SM_ID = '33333333-3333-4333-8333-333333333333';
 const OST_ID = '44444444-4444-4444-8444-444444444444';
+const VD_ID = '66666666-6666-4666-8666-666666666666';
+const SSM2_ID = '77777777-7777-4777-8777-777777777777';
 const ADMIN_TOKEN = 'admin-token';
 
 const MEMBERS_MODULE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -425,14 +427,17 @@ describe('POST /members', () => {
     expect(state.status).toBe(400);
   });
 
-  it('stores the authority-aligned address with codes and postal', async () => {
+  // The reference supplies the names and codes. Its postal code is only a
+  // suggestion: PSGC answers 4018 for Victoria, Laguna, whose ZIP is 4011, so
+  // a record that could not carry the operator's 4011 would be wrong forever.
+  it('keeps the operator\u2019s ZIP while aligning the names and codes', async () => {
     const state = await call({
       method: 'POST',
       body: createBody({
         email: 'aligned@afhomes.test',
         cityMunicipality: 'WRONG',
         province: 'WRONG',
-        zipCode: '0000',
+        zipCode: '4011',
       }),
       token: ADMIN_TOKEN,
     });
@@ -444,7 +449,7 @@ describe('POST /members', () => {
     expect(profile?.province).toBe('Laguna');
     expect(profile?.province_code).toBe(LAGUNA.code);
     expect(profile?.city_municipality_code).toBe(CALAUAN.code);
-    expect(profile?.zip_code).toBe('4012');
+    expect(profile?.zip_code).toBe('4011');
   });
 
   it('refuses a province paired with another province city', async () => {
@@ -834,5 +839,279 @@ describe('PATCH /members/:id', () => {
     expect((state.body as Record<string, unknown>).fullName).toBe('Renamed Seller');
     const db = holder.db as unknown as { rows: (table: string) => Row[] };
     expect(db.rows('staff_users').find((s) => s.id === SM_ID)?.full_name).toBe('Renamed Seller');
+  });
+
+  /** A synthetic hierarchy member with no profile: invisible to member lists. */
+  function addStaff(
+    tables: Record<string, Row[]>,
+    person: { id: string; email: string; fullName: string; roleId: string; status?: string },
+  ) {
+    tables.staff_users!.push({
+      id: person.id,
+      email: person.email,
+      full_name: person.fullName,
+      status: person.status ?? 'active',
+      department_id: DEPT_SALES,
+      employee_number: null,
+      created_at: '2026-09-05T00:00:00.000Z',
+    });
+    tables.staff_role_assignments!.push({ staff_id: person.id, role_id: person.roleId });
+  }
+
+  it('moves the position, re-resolves the role and the head, and retires the OST referrer', async () => {
+    const tables = baseTables();
+    addStaff(tables, { id: VD_ID, email: 'vd@afhomes.test', fullName: 'VICE DIRECTOR', roleId: ROLE_VD });
+    install(tables);
+    const state = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: {
+        position: 'senior_sales_manager',
+        referrerStaffId: VD_ID,
+        headChangeReason: 'Promoted to Senior Sales Manager',
+      },
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Record<string, unknown>).position).toBe('senior_sales_manager');
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === SM_ID)?.role_id).toBe(
+      ROLE_SSM,
+    );
+    const profile = db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)!;
+    expect(profile.referrer_staff_id).toBe(VD_ID);
+    // Leaving the Sales Manager seat retires the informational OST referrer.
+    expect(profile.ost_referrer_staff_id).toBeNull();
+    // The new genealogy edge carries the NEW position; nothing else is active.
+    const edges = db.rows('referral_relationships');
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({
+      subject_staff_id: SM_ID,
+      upline_staff_id: VD_ID,
+      hierarchy_role: 'senior_sales_manager',
+      is_active: true,
+    });
+    const audits = JSON.stringify(db.rows('audit_events'));
+    expect(audits).toContain('UPLINE_CORRECTED');
+    expect(audits).toContain('Promoted to Senior Sales Manager');
+  });
+
+  it('requires a head for the new position and none for a Vice Director', async () => {
+    const missing = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { position: 'senior_sales_manager' },
+      token: ADMIN_TOKEN,
+    });
+    expect(missing.status).toBe(400);
+    const refused = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { position: 'vice_director', referrerStaffId: SSM_ID },
+      token: ADMIN_TOKEN,
+    });
+    expect(refused.status).toBe(400);
+    // Neither refusal wrote anything.
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    expect(db.rows('staff_role_assignments').find((r) => r.staff_id === SM_ID)?.role_id).toBe(
+      ROLE_SM,
+    );
+  });
+
+  it('requires a reason when the head moves, then audits the move', async () => {
+    const tables = baseTables();
+    addStaff(tables, {
+      id: SSM2_ID,
+      email: 'ssm2@afhomes.test',
+      fullName: 'SECOND SENIOR MANAGER',
+      roleId: ROLE_SSM,
+    });
+    install(tables);
+    const noReason = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: SSM2_ID },
+      token: ADMIN_TOKEN,
+    });
+    expect(noReason.status).toBe(400);
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    expect(
+      db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)?.referrer_staff_id,
+    ).toBe(SSM_ID);
+
+    const moved = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: SSM2_ID, headChangeReason: 'Reassigned the book' },
+      token: ADMIN_TOKEN,
+    });
+    expect(moved.status).toBe(200);
+    expect(
+      db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)?.referrer_staff_id,
+    ).toBe(SSM2_ID);
+    const active = db.rows('referral_relationships').filter((r) => r.is_active === true);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({
+      subject_staff_id: SM_ID,
+      upline_staff_id: SSM2_ID,
+      hierarchy_role: 'sales_manager',
+    });
+    expect(JSON.stringify(db.rows('audit_events'))).toContain('Reassigned the book');
+  });
+
+  it('treats a re-picked current head as no change and refuses a bad candidate', async () => {
+    const tables = baseTables();
+    addStaff(tables, {
+      id: VD_ID,
+      email: 'vd@afhomes.test',
+      fullName: 'VICE DIRECTOR',
+      roleId: ROLE_VD,
+    });
+    addStaff(tables, {
+      id: SSM2_ID,
+      email: 'ssm2@afhomes.test',
+      fullName: 'INACTIVE SENIOR MANAGER',
+      roleId: ROLE_SSM,
+      status: 'inactive',
+    });
+    install(tables);
+    // Same head, no reason: allowed, and no edge is written.
+    const same = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: SSM_ID },
+      token: ADMIN_TOKEN,
+    });
+    expect(same.status).toBe(200);
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    expect(db.rows('referral_relationships')).toHaveLength(0);
+    expect(JSON.stringify(db.rows('audit_events'))).not.toContain('UPLINE_CORRECTED');
+
+    // A level that is not the immediate upline.
+    const offLevel = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: VD_ID, headChangeReason: 'trying it on' },
+      token: ADMIN_TOKEN,
+    });
+    expect(offLevel.status).toBe(400);
+    // The member cannot be their own head.
+    const self = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: SM_ID, headChangeReason: 'trying it on' },
+      token: ADMIN_TOKEN,
+    });
+    expect(self.status).toBe(400);
+    // An inactive candidate.
+    const inactive = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { referrerStaffId: SSM2_ID, headChangeReason: 'trying it on' },
+      token: ADMIN_TOKEN,
+    });
+    expect(inactive.status).toBe(409);
+  });
+
+  it('keeps the OST referrer to active OSTs of Sales Managers', async () => {
+    const state = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { ostReferrerStaffId: SSM_ID },
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(400);
+  });
+
+  it('rotates the login email and resets the password as a temporary one', async () => {
+    install(undefined, { authUsers: [{ id: SM_ID, email: 'sm@afhomes.test' }] });
+    const state = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { email: 'New.Address@Example.com', temporaryPassword: 'TempPass456' },
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Record<string, unknown>).email).toBe('new.address@example.com');
+    const db = holder.db as unknown as {
+      rows: (table: string) => Row[];
+      calls: { op: string; table: string; arg?: Record<string, unknown> }[];
+      authUsers: () => { id: string; email: string }[];
+    };
+    const staff = db.rows('staff_users').find((s) => s.id === SM_ID)!;
+    expect(staff.email).toBe('new.address@example.com');
+    // The administrator reset puts the account back on a temporary password.
+    expect(staff.must_change_password).toBe(true);
+    expect(db.authUsers().find((u) => u.id === SM_ID)?.email).toBe('new.address@example.com');
+    const authCall = db.calls.find((c) => c.op === 'updateUserById');
+    expect(authCall?.arg).toMatchObject({ id: SM_ID, hasEmail: true, emailConfirmed: true });
+    // The password reached GoTrue; the audit trail holds neither secret.
+    expect(
+      (holder.db as unknown as { passwordsSeen: string[] }).passwordsSeen,
+    ).toContain('TempPass456');
+    const audits = JSON.stringify(db.rows('audit_events'));
+    expect(audits).not.toContain('TempPass456');
+    expect(audits).not.toContain('new.address@example.com');
+  });
+
+  it('refuses an email another staff member holds without touching anything', async () => {
+    const state = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { email: 'ssm@afhomes.test' },
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(409);
+    const db = holder.db as unknown as {
+      rows: (table: string) => Row[];
+      calls: { op: string; table: string }[];
+    };
+    expect(db.rows('staff_users').find((s) => s.id === SM_ID)?.email).toBe('sm@afhomes.test');
+    expect(db.calls.some((c) => c.op === 'updateUserById')).toBe(false);
+  });
+
+  it('re-verifies the address when the codes travel, and refuses a half pair', async () => {
+    const ok = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: {
+        province: 'WRONG',
+        cityMunicipality: 'WRONG',
+        provinceCode: LAGUNA.code,
+        cityMunicipalityCode: CALAUAN.code,
+        zipCode: '4011',
+      },
+      token: ADMIN_TOKEN,
+    });
+    expect(ok.status).toBe(200);
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    const profile = db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)!;
+    // The reference owns the saved names and codes; the ZIP stays the operator's.
+    expect(profile.province).toBe('Laguna');
+    expect(profile.city_municipality).toBe('Calauan');
+    expect(profile.province_code).toBe(LAGUNA.code);
+    expect(profile.city_municipality_code).toBe(CALAUAN.code);
+    expect(profile.zip_code).toBe('4011');
+
+    const half = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { provinceCode: LAGUNA.code },
+      token: ADMIN_TOKEN,
+    });
+    expect(half.status).toBe(400);
+  });
+
+  it('falls back to the published ZIP only when the body carried none', async () => {
+    const ok = await call({
+      method: 'PATCH',
+      familyPath: SM_ID,
+      body: { provinceCode: LAGUNA.code, cityMunicipalityCode: CALAUAN.code },
+      token: ADMIN_TOKEN,
+    });
+    expect(ok.status).toBe(200);
+    const db = holder.db as unknown as { rows: (table: string) => Row[] };
+    const profile = db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)!;
+    expect(profile.zip_code).toBe('4012');
   });
 });

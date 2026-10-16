@@ -1,8 +1,10 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import Swal from 'sweetalert2';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MembersPage } from './MembersPage';
 import { renderWithProviders } from '../../test/utils';
+import { ApiError } from '../../lib/api/errors';
 
 vi.mock('./services', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services')>();
@@ -75,6 +77,8 @@ const ROW = {
   status: 'active',
   referrerName: 'SENIOR MANAGER',
   ostReferrerName: null,
+  referrerStaffId: '33333333-3333-4333-8333-333333333333',
+  ostReferrerStaffId: null,
   aaNumber: 'AA-ABC123',
   dateOfBirth: '1990-02-02',
   sex: 'Female',
@@ -82,6 +86,8 @@ const ROW = {
   streetNo: '2 Main St',
   cityMunicipality: 'Quezon City',
   province: 'Metro Manila',
+  provinceCode: null,
+  cityMunicipalityCode: null,
   zipCode: '1100',
   telNo: null,
   mobileNo: '+639172222222',
@@ -108,6 +114,22 @@ const SALES_DEPT = {
 /** The single-member read adds the identification fields in clear. */
 const DETAIL = { ...ROW, tin: '123456789', governmentIdNumber: 'D7654321' };
 
+/** The Senior Sales Manager every head picker resolves for a Sales Manager. */
+const SSM_UPLINE = {
+  id: '33333333-3333-4333-8333-333333333333',
+  fullName: 'SENIOR MANAGER',
+  employeeNumber: null,
+  positionLabel: 'Senior Sales Manager',
+};
+
+/** A Sales Vice Director: the head a Senior Sales Manager serves under. */
+const VD_UPLINE = {
+  id: '66666666-6666-4666-8666-666666666666',
+  fullName: 'VICE DIRECTOR',
+  employeeNumber: 'AF-EMP-00001',
+  positionLabel: 'Sales Vice Director',
+};
+
 function showList() {
   vi.mocked(getMembers).mockResolvedValue([ROW] as never);
   renderWithProviders(<MembersPage />);
@@ -116,14 +138,7 @@ function showList() {
 function showCreate() {
   vi.mocked(getMembers).mockResolvedValue([]);
   vi.mocked(getMemberDepartments).mockResolvedValue([SALES_DEPT] as never);
-  vi.mocked(getMemberUplines).mockResolvedValue([
-    {
-      id: '33333333-3333-4333-8333-333333333333',
-      fullName: 'SENIOR MANAGER',
-      employeeNumber: null,
-      positionLabel: 'Senior Sales Manager',
-    },
-  ] as never);
+  vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
   vi.mocked(getMemberOstReferrers).mockResolvedValue([] as never);
   vi.mocked(createMember).mockReset();
   renderWithProviders(<MembersPage />);
@@ -382,16 +397,18 @@ describe('Members page', () => {
     expect(screen.getByLabelText('Email')).toHaveValue('john@example.com');
   });
 
-  it('fills the ZIP from the chosen city and locks it', async () => {
+  it('prefills the ZIP from the chosen city without locking it', async () => {
     showCreate();
     await screen.findByText('No members');
     await openCreate();
     await chooseFromList(/^Province/, 'Laguna');
     await chooseFromList(/City \/ Municipality/, /^Calauan/);
     expect(screen.getByLabelText('ZIP Code')).toHaveValue('4012');
-    // A locked ZIP ignores typing: the reference owns it.
-    fireEvent.change(screen.getByLabelText('ZIP Code'), { target: { value: '9999' } });
-    expect(screen.getByLabelText('ZIP Code')).toHaveValue('4012');
+    // The reference only suggests it: PSGC answers 4018 for Victoria, Laguna,
+    // whose ZIP is 4011, so the operator has to be able to correct it.
+    expect(screen.getByText('Suggested ZIP. Edit if wrong.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('ZIP Code'), { target: { value: '4011' } });
+    expect(screen.getByLabelText('ZIP Code')).toHaveValue('4011');
   });
 
   it('leaves the ZIP hand-typed when the source publishes none', async () => {
@@ -464,5 +481,233 @@ describe('Members page', () => {
     // An untouched secret is omitted, never nulled.
     const sent = vi.mocked(updateMember).mock.calls[0]?.[1];
     expect(sent).not.toHaveProperty('governmentIdNumber');
+  });
+
+  it('renders the same form as Create in Edit, with the issued AA locked', async () => {
+    showList();
+    vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
+    await screen.findByText('SALES MANAGER');
+    fireEvent.click(screen.getByText('SALES MANAGER'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    // The same sections creation renders, in the same order.
+    for (const section of [
+      'Assignment',
+      'Identity',
+      'Home Address',
+      'Contact',
+      'Work',
+      'Government IDs',
+      'Account',
+      'Head',
+      'Referrer Details',
+    ])
+      expect(screen.getByText(section)).toBeInTheDocument();
+    // The same controls, prefilled from the record.
+    expect(screen.getByLabelText('Department')).toBeDisabled();
+    expect(screen.getByLabelText('Position')).toHaveValue('sales_manager');
+    expect(screen.getByLabelText('Email')).toHaveValue('sm@afhomes.test');
+    expect(screen.getByLabelText('Temporary password')).toHaveValue('');
+    expect(screen.getByLabelText('Confirm password')).toHaveValue('');
+    await screen.findByRole('option', { name: /SENIOR MANAGER/ });
+    expect(screen.getByLabelText('Head')).toHaveValue(SSM_UPLINE.id);
+    expect(screen.getByRole('combobox', { name: /^Province/ })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /City \/ Municipality/ })).toBeInTheDocument();
+    // The issued AA reads as issued; it can never be re-numbered.
+    expect(screen.getByLabelText('AA Number(Optional)')).toHaveValue('AA-ABC123');
+    expect(screen.getByLabelText('AA Number(Optional)')).toHaveAttribute('readonly');
+    expect(screen.queryByLabelText('AA Number Source')).toBeNull();
+    // An unmoved head needs no reason, and Save is live.
+    expect(screen.queryByLabelText('Reason for head change')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('saves a position move with its head reason, the email and a temporary password', async () => {
+    vi.mocked(getMembers).mockResolvedValue([ROW] as never);
+    vi.mocked(getMemberUplines).mockResolvedValue([VD_UPLINE] as never);
+    const { updateMember } = await import('./services');
+    vi.mocked(updateMember).mockResolvedValue(ROW as never);
+    renderWithProviders(<MembersPage />);
+    fireEvent.click(await screen.findByText('SALES MANAGER'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    // Moving the position clears the head; the new level asks for its own.
+    fireEvent.change(screen.getByLabelText('Position'), {
+      target: { value: 'senior_sales_manager' },
+    });
+    expect(screen.getByLabelText('Head')).toHaveValue('');
+    await screen.findByRole('option', { name: /VICE DIRECTOR/ });
+    fireEvent.change(screen.getByLabelText('Head'), { target: { value: VD_UPLINE.id } });
+    // The move is explained, and Save refuses until it is.
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    expect(screen.getByText('Explain the head change.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reason for head change'), {
+      target: { value: 'Promoted to Senior Sales Manager' },
+    });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'New.SM@Afhomes.test' } });
+    fireEvent.change(screen.getByLabelText('Temporary password'), {
+      target: { value: 'TempPass456' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm password'), {
+      target: { value: 'TempPass456' },
+    });
+    await waitFor(() => expect(save).not.toBeDisabled());
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(updateMember).toHaveBeenCalledWith(
+        ROW.id,
+        expect.objectContaining({
+          position: 'senior_sales_manager',
+          referrerStaffId: VD_UPLINE.id,
+          headChangeReason: 'Promoted to Senior Sales Manager',
+          ostReferrerStaffId: null,
+          email: 'new.sm@afhomes.test',
+          temporaryPassword: 'TempPass456',
+        }),
+      ),
+    );
+    // Unchanged facts stay home: no address codes, no untouched secrets.
+    const sent = vi.mocked(updateMember).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('provinceCode');
+    expect(sent).not.toHaveProperty('governmentIdNumber');
+  });
+
+  it('issues a missing AA number from the Edit form too', async () => {
+    vi.mocked(getMembers).mockResolvedValue([{ ...ROW, aaNumber: null }] as never);
+    const { issueMemberAccreditation } = await import('./services');
+    vi.mocked(issueMemberAccreditation).mockResolvedValue(ROW as never);
+    renderWithProviders(<MembersPage />);
+    fireEvent.click(await screen.findByText('SALES MANAGER'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(await screen.findByLabelText('AA Number Source')).toHaveValue('auto');
+    fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
+    await waitFor(() =>
+      expect(issueMemberAccreditation).toHaveBeenCalledWith(
+        ROW.id,
+        expect.objectContaining({ aaNumberMode: 'auto' }),
+      ),
+    );
+  });
+
+  it('surfaces a failed save as a popup and an inline alert', async () => {
+    showList();
+    vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
+    const { updateMember } = await import('./services');
+    vi.mocked(updateMember).mockRejectedValue(
+      new ApiError({
+        code: 'CONFLICT',
+        message: 'A staff member with this email already exists',
+        status: 409,
+      }),
+    );
+    await screen.findByText('SALES MANAGER');
+    fireEvent.click(screen.getByText('SALES MANAGER'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'taken@afhomes.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // Impossible to miss: a centered modal plus the inline alert. While the
+    // modal is up SweetAlert marks the rest of the page inert, so the form's
+    // own alert is reachable after dismissing it.
+    expect(await screen.findByText('Member not saved')).toBeInTheDocument();
+    Swal.close();
+    const alert = await screen.findByRole('alert');
+    expect(
+      within(alert).getByText('A staff member with this email already exists'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open, and Cancel disabled, while a save is in flight', async () => {
+    showCreate();
+    await screen.findByText('No members');
+    let release: (value: unknown) => void = () => {};
+    vi.mocked(createMember).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }) as never,
+    );
+    await openCreate();
+    fillRequired();
+    await fillAddress();
+    fireEvent.change(screen.getByLabelText('Head'), {
+      target: { value: '33333333-3333-4333-8333-333333333333' },
+    });
+    const create = screen.getByRole('button', { name: 'Create' });
+    await waitFor(() => expect(create).not.toBeDisabled());
+    fireEvent.click(create);
+    // In flight: the button owns an accessible busy state and the dialog cannot
+    // be dismissed, so a create can never land after the operator "cancelled".
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled());
+    expect(create).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByLabelText('Full Name')).toBeInTheDocument();
+    release(ROW);
+    await waitFor(() => expect(createMember).toHaveBeenCalled());
+    Swal.close();
+  });
+
+  it('offers a Retry when the head list fails to load', async () => {
+    showCreate();
+    await screen.findByText('No members');
+    vi.mocked(getMemberUplines).mockRejectedValue(
+      new ApiError({ code: 'INTERNAL', message: 'boom', status: 500 }),
+    );
+    await openCreate();
+    expect(await screen.findByText('Heads failed to load')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('offers a Retry when the OST referrer list fails to load', async () => {
+    showCreate();
+    await screen.findByText('No members');
+    vi.mocked(getMemberOstReferrers).mockRejectedValue(
+      new ApiError({ code: 'INTERNAL', message: 'boom', status: 500 }),
+    );
+    await openCreate();
+    expect(await screen.findByText('OST referrers failed to load')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('does not offer Create when a filter found nothing', async () => {
+    vi.mocked(getMembers).mockResolvedValue([] as never);
+    renderWithProviders(<MembersPage />);
+    await screen.findByText('No members');
+    fireEvent.change(screen.getByLabelText('Search members'), { target: { value: 'zzz' } });
+    expect(screen.getByText('No members match these filters.')).toBeInTheDocument();
+    // Only the page header keeps the action; the empty state drops it.
+    expect(screen.getAllByRole('button', { name: 'Create Member' })).toHaveLength(1);
+  });
+
+  it('surfaces a refused delete as a popup and inline blockers', async () => {
+    vi.mocked(getMembers).mockResolvedValue([ROW] as never);
+    const { deleteAfHomesStaff } = await import('../afhomes/services');
+    vi.mocked(deleteAfHomesStaff).mockRejectedValue(
+      new ApiError({
+        code: 'PROTECTED_HISTORY',
+        message: 'This member cannot be deleted',
+        status: 409,
+        details: { blockers: ['Has an active sale'] },
+      }),
+    );
+    renderWithProviders(<MembersPage />, {
+      user: {
+        id: '99999999-9999-4999-8999-999999999999',
+        name: 'Super Admin',
+        email: 'super@afhomes.test',
+        roleId: 'role-super',
+        roleSlug: 'super_admin',
+        roleName: 'Super Admin',
+        afHomesPermissions: [],
+        status: 'active',
+      },
+    });
+    fireEvent.click(await screen.findByText('SALES MANAGER'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    fireEvent.change(screen.getByLabelText('Type DELETE to confirm'), {
+      target: { value: 'DELETE' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByText('Member not deleted')).toBeInTheDocument();
+    Swal.close();
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Has an active sale')).toBeInTheDocument();
   });
 });

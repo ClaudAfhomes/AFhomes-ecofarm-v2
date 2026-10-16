@@ -189,6 +189,24 @@ describe('member contracts', () => {
     expect(updateMemberProfileSchema.safeParse({ fullName: 'N1' }).success).toBe(false);
   });
 
+  it('updates carry the position, head, email and an administrator password reset', () => {
+    const parsed = updateMemberProfileSchema.safeParse({
+      position: 'senior_sales_manager',
+      referrerStaffId: '33333333-3333-4333-8333-333333333333',
+      headChangeReason: 'Promoted to the next level',
+      email: 'New.Address@Example.COM',
+      temporaryPassword: 'TempPass123',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.email).toBe('new.address@example.com');
+    // The head reason, the password floor and the position catalogue all hold.
+    expect(updateMemberProfileSchema.safeParse({ headChangeReason: 'no' }).success).toBe(false);
+    expect(updateMemberProfileSchema.safeParse({ temporaryPassword: 'short' }).success).toBe(false);
+    expect(updateMemberProfileSchema.safeParse({ position: 'employee' }).success).toBe(false);
+    expect(updateMemberProfileSchema.safeParse({ position: 'ost' }).success).toBe(true);
+    expect(updateMemberProfileSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+  });
+
   it('keeps the list shape masked and the single read clear', () => {
     const row = {
       id: '33333333-3333-4333-8333-333333333333',
@@ -201,6 +219,8 @@ describe('member contracts', () => {
       status: 'active',
       referrerName: null,
       ostReferrerName: null,
+      referrerStaffId: null,
+      ostReferrerStaffId: null,
       aaNumber: 'AA-ABC123',
       dateOfBirth: '1990-02-02',
       sex: 'Female',
@@ -208,6 +228,8 @@ describe('member contracts', () => {
       streetNo: '2 Main St',
       cityMunicipality: 'Quezon City',
       province: 'Metro Manila',
+      provinceCode: null,
+      cityMunicipalityCode: null,
       zipCode: '1100',
       telNo: null,
       mobileNo: '+639172222222',
