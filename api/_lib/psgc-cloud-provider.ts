@@ -2,11 +2,18 @@
  * PSGC Cloud v2 adapter.
  *
  * This is the ONLY module that knows PSGC Cloud's URLs and field names. Verified
- * against the live service on 2026-10-08:
+ * against the live service on 2026-10-16:
  *
  *   GET /provinces                              -> { data: [{ code, name, region }] }
+ *   GET /regions                                -> { data: [{ code, name }] }
+ *   GET /regions/{code}/provinces               -> { data: [{ code, name, region }] }
  *   GET /provinces/{code}/cities-municipalities  -> { data: [{ code, name, type, ... }] }
+ *   GET /regions/{code}/cities-municipalities    -> { data: [{ code, name, type, ... }] }
  *   GET /cities-municipalities/{code}/barangays  -> { data: [{ code, name, ... }] }
+ *
+ * Metro Manila is reachable ONLY through the region paths: the National Capital
+ * Region has no provinces, so it is absent from `/provinces` and
+ * `/provinces/1300000000/cities-municipalities` answers 404.
  *
  * Codes are 10 digits at every level. Names are the authority's own spelling and
  * are never re-cased, trimmed of meaning, or "tidied". The ONE thing this module
@@ -35,9 +42,16 @@ const PSGC_CLOUD_BASE = 'https://psgc.cloud/api/v2';
 const REQUEST_TIMEOUT_MS = 8_000;
 
 /**
- * The service reports city vs municipality as `City` / `Mun`. Mapping exactly
- * these two strings (rather than anything "city-like") keeps an unrecognised
- * value a loud failure instead of a silently mislabelled locality.
+ * The service reports city vs municipality as `City` / `Mun`. It also emits
+ * `SubMun` (a sub-municipality - the districts of the City of Manila, which
+ * PSGC additionally mis-parents under other provinces) and `SGU` (a BARMM
+ * special geographic unit). Neither is a city or municipality, so neither is
+ * offered here.
+ *
+ * Mapping exactly these two strings keeps a district from being stored as a
+ * municipality. An unmapped row is SKIPPED rather than fatal: one such row used
+ * to fail the whole province, which left Sarangani and Maguindanao del Sur with
+ * no cities to choose from at all.
  */
 const LOCALITY_TYPE_BY_PROVIDER: Record<string, 'city' | 'municipality'> = {
   City: 'city',
@@ -132,39 +146,100 @@ function parseRow<T>(schema: { parse: (v: unknown) => T }, row: unknown): T {
   }
 }
 
+/**
+ * NCR's region code. The National Capital Region nests no provinces, so it is
+ * the one region that has to stand in for a province - otherwise Metro Manila
+ * can never be chosen, and no NCR address can be entered at all. It is labelled
+ * the way Philippine addresses write it, which is the value the member record
+ * stores as the province.
+ */
+const METRO_MANILA_REGION_CODE = '1300000000';
+const METRO_MANILA_LABEL = 'Metro Manila';
+
+/**
+ * Every province, plus any region that nests none.
+ *
+ * A region with no provinces cannot be reached through `/provinces` at all, so
+ * offering it as a province-scope is the only way to address its cities. Each
+ * candidate is confirmed against `/regions/{code}/provinces` before it is
+ * offered: a region whose name merely failed to match a province's `region`
+ * string must not smuggle a whole region into the province list.
+ */
+async function provinceScopes(): Promise<Province[]> {
+  const provinceRows = rows(await getJson('/provinces'));
+  const provinces = provinceRows.map((row) =>
+    parseRow(provinceSchema, { code: row.code, name: officialName(row.name) }),
+  );
+
+  const namedByAnyProvince = new Set(provinceRows.map((row) => String(row.region)));
+  const candidates = rows(await getJson('/regions')).filter(
+    (row) => !namedByAnyProvince.has(String(row.name)),
+  );
+
+  const orphanRegions: Province[] = [];
+  for (const row of candidates) {
+    const code = String(row.code);
+    const nested = rows(await getJson(`/regions/${segment(code)}/provinces`));
+    if (nested.length > 0) continue;
+    orphanRegions.push(
+      parseRow(provinceSchema, {
+        code,
+        name: code === METRO_MANILA_REGION_CODE ? METRO_MANILA_LABEL : officialName(row.name),
+      }),
+    );
+  }
+  return [...provinces, ...orphanRegions];
+}
+
+/**
+ * A scope's city/municipality rows.
+ *
+ * PSGC nests a province's cities under the province. A province-less region has
+ * no such path - `/provinces/{code}/cities-municipalities` answers 404 and its
+ * cities hang off the region instead - so the region path is the fallback. The
+ * province path is tried first because a province is the common case.
+ */
+async function localityRows(scopeCode: string): Promise<Record<string, unknown>[]> {
+  try {
+    return rows(await getJson(`/provinces/${segment(scopeCode)}/cities-municipalities`));
+  } catch (error) {
+    if (!(error instanceof AddressProviderError) || error.code !== 'PROVIDER_NOT_FOUND')
+      throw error;
+    return rows(await getJson(`/regions/${segment(scopeCode)}/cities-municipalities`));
+  }
+}
+
 export const psgcCloudAddressProvider: AddressProvider = {
   name: 'psgc-cloud-v2',
 
-  async provinces(): Promise<Province[]> {
-    return rows(await getJson('/provinces')).map((row) =>
-      parseRow(provinceSchema, { code: row.code, name: officialName(row.name) }),
-    );
-  },
+  provinces: provinceScopes,
 
-  async localities(provinceCode: string): Promise<Locality[]> {
-    const raw = rows(await getJson(`/provinces/${segment(provinceCode)}/cities-municipalities`));
-    return raw.map((row) => {
+  async localities(scopeCode: string): Promise<Locality[]> {
+    const raw = await localityRows(scopeCode);
+    return raw.flatMap((row) => {
+      const type = LOCALITY_TYPE_BY_PROVIDER[String(row.type)];
+      // A district or special unit, not a city or municipality: skip it rather
+      // than fail the province. See LOCALITY_TYPE_BY_PROVIDER.
+      if (!type) return [];
       // `provinceCode` is not in the provider payload; it is the scope we asked
       // for, which is what makes the parent link explicit and checkable.
-      const type = LOCALITY_TYPE_BY_PROVIDER[String(row.type)];
-      if (!type) throw new AddressProviderError('PROVIDER_BAD_RESPONSE');
-      // The provider's own `zip_code` is NOT trusted: it disagrees with the
-      // postal authority (e.g. Victoria, Laguna: 4018 vs the official 4011).
-      // A locality's postal code comes only from the compiled national
-      // reference, and only when resolution is unique; otherwise it is absent
-      // (absence is honest - a wrong code is not).
+      // Upstream ZIP values can be wrong; publish only a unique pinned-reference match.
+      const postalProvince =
+        scopeCode === METRO_MANILA_REGION_CODE ? METRO_MANILA_LABEL : officialName(row.province);
       const postal =
-        typeof row.province === 'string'
-          ? resolvePostalCode(String(officialName(row.province)), String(officialName(row.name)))
+        typeof postalProvince === 'string'
+          ? resolvePostalCode(postalProvince, String(officialName(row.name)))
           : null;
       const postalCode = postal?.status === 'matched' ? postal.postalCode : '';
-      return parseRow(localitySchema, {
-        code: row.code,
-        name: officialName(row.name),
-        type,
-        provinceCode,
-        ...(postalCode ? { postalCode } : {}),
-      });
+      return [
+        parseRow(localitySchema, {
+          code: row.code,
+          name: officialName(row.name),
+          type,
+          provinceCode: scopeCode,
+          ...(postalCode ? { postalCode } : {}),
+        }),
+      ];
     });
   },
 
