@@ -11,7 +11,7 @@
 import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
@@ -75,6 +75,7 @@ import {
   getCustomerApplication,
   getCustomerApplicationsPage,
   getCustomerById,
+  getCustomerImportPrefill,
   getCustomersPage,
   getPurchaseTermsProposal,
   getReservationAgreements,
@@ -532,6 +533,11 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
 }
 
 export function CustomerApplicationEditorPage() {
+  const { user: applicationUser } = useSession();
+  const mayLoadImport =
+    applicationUser?.afHomesPermissions.some(
+      (p) => p.moduleKey === 'governance.customer_import' && p.canView,
+    ) ?? false;
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
     setInvalidFields((current) =>
@@ -558,6 +564,10 @@ export function CustomerApplicationEditorPage() {
   });
   const [applicationSearch] = useSearchParams();
   const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
+  // The picker resolves against the authoritative record, and a prefill click
+  // is only accepted for the customer it was started for.
+  const selectedCustomerRef = useRef(customerId);
+  const [prefilledCustomerId, setPrefilledCustomerId] = useState<string | null>(null);
   const [planId, setPlanId] = useState('');
   const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('BRONZE');
   const [paymentScheme, setPaymentScheme] = useState<
@@ -653,7 +663,63 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerById(customerId),
     enabled: Boolean(customerId),
   });
+  const importPrefill = useMutation({
+    mutationFn: (selectedCustomer: string) => getCustomerImportPrefill(selectedCustomer),
+    onSuccess: (data, selectedCustomer) => {
+      if (selectedCustomer !== selectedCustomerRef.current) return;
+      setPrefilledCustomerId(selectedCustomer);
+      setConsent(false);
+      setValidId(false);
+      setPaymentProof(false);
+      setChannels([]);
+      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setSecondary(
+        data.secondary
+          ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
+          : null,
+      );
+      const plan = plans.data?.find((p) => p.code === data.tier);
+      if (plan && data.tier) {
+        setPlanId(plan.id);
+        setTier(data.tier);
+      }
+      if (data.paymentScheme) setPaymentScheme(data.paymentScheme);
+      // The related-party panel is staff-linked on this form, so the imported
+      // names/contacts land only where the form still edits free text.
+      setMeta((current) => ({
+        ...current,
+        vipRecommenderName: data.recommenderName,
+        recommenderContact: data.recommenderContact,
+        recommenderEmail: data.recommenderEmail,
+      }));
+      setMessage(
+        'Imported details loaded for review. Still required: ' +
+          data.missingFields.join(', ') +
+          '.',
+      );
+    },
+    onError: (error) =>
+      setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
+  });
   const pickCustomer = (next: string) => {
+    selectedCustomerRef.current = next;
+    if (prefilledCustomerId && next !== prefilledCustomerId) {
+      setPrimary(emptyHolder('PRIMARY'));
+      setSecondary(null);
+      setPrefilledCustomerId(null);
+      setPlanId('');
+      setTier('BRONZE');
+      setPaymentScheme('spot_cash');
+      setConsent(false);
+      setPaymentProof(false);
+      setChannels([]);
+      setMeta((current) => ({
+        ...current,
+        vipRecommenderName: '',
+        recommenderContact: '',
+        recommenderEmail: '',
+      }));
+    }
     setCustomerId(next);
     setIdFile(null);
     setPickerVersion((version) => version + 1);
@@ -1382,10 +1448,27 @@ export function CustomerApplicationEditorPage() {
                       <Skeleton style={{ height: 40 }} />
                     </div>
                   ) : null}
-                  {customerId && !linkedCustomer.data ? (
+                  {customerId && linkedCustomer.isPending ? (
                     <p role="status" className={styles.pickedLine}>
                       Loading customer…
                     </p>
+                  ) : null}
+                  {customerId && linkedCustomer.isError ? (
+                    <Alert variant="danger">
+                      Customer details could not be loaded.{' '}
+                      <Button variant="secondary" onClick={() => void linkedCustomer.refetch()}>
+                        Retry customer details
+                      </Button>
+                    </Alert>
+                  ) : null}
+                  {!id && customerId && mayLoadImport ? (
+                    <Button
+                      variant="secondary"
+                      loading={importPrefill.isPending}
+                      onClick={() => importPrefill.mutate(customerId)}
+                    >
+                      Load imported customer details
+                    </Button>
                   ) : null}
                 </div>
                 <label className={styles.filterLabel}>

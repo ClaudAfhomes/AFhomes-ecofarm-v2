@@ -44,7 +44,10 @@ export const localitySchema = z.object({
    * honest - several municipalities have no published zip - so a missing
    * value is never defaulted or invented.
    */
-  postalCode: z.string().trim().min(1).max(10).optional(),
+  postalCode: z
+    .string()
+    .regex(/^\d{4}$/, 'Use a four-digit reference postal code')
+    .optional(),
 });
 export type Locality = z.infer<typeof localitySchema>;
 

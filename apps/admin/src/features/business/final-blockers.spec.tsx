@@ -12,6 +12,7 @@ import {
   CustomerApplicationEditorPage,
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
+vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
 const calls = vi.hoisted(() => ({
   application: vi.fn<(input: CreateCustomerApplicationRequest) => Promise<never>>(),
   reservation: vi.fn<(input: CreateReservationAgreementRequest) => Promise<never>>(),

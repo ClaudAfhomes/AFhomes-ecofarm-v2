@@ -188,7 +188,7 @@ describe('other writers normalize through the same contracts', () => {
     });
   });
 
-  it('import rows uppercase names and canonicalize phones', () => {
+  it('import rows use Proper Case and preserve eleven-digit phones', () => {
     const ctx = {
       membershipByNumber: new Map(),
       customerByNumber: new Map(),
@@ -208,10 +208,10 @@ describe('other writers normalize through the same contracts', () => {
       '2026-10-02',
     );
     expect(v.errors).toEqual([]);
-    expect(v.normalized?.person.firstName).toBe('juan');
-    expect(v.normalized?.person.lastName).toBe('dela cruz');
+    expect(v.normalized?.person.firstName).toBe('Juan');
+    expect(v.normalized?.person.lastName).toBe('Dela Cruz');
     expect(v.normalized?.person.email).toBe('juan@example.com');
-    expect(v.normalized?.person.phone).toBe('+639185550101');
+    expect(v.normalized?.person.phone).toBe('09185550101');
     const bad = validateImportRow(
       3,
       {

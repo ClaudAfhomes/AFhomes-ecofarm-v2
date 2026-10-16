@@ -612,6 +612,7 @@ export type CustomerImportRow = z.infer<typeof customerImportRowSchema>;
 export const customerImportParseResponseSchema = z.object({
   job: customerImportJobSchema,
   rows: z.array(customerImportRowSchema),
+  pageSize: z.number().int().positive().optional(),
 });
 export type CustomerImportParseResponse = z.infer<typeof customerImportParseResponseSchema>;
 

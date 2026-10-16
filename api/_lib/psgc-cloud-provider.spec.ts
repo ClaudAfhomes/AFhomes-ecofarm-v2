@@ -16,6 +16,27 @@ const stubFetch = (impl: (url: string) => Promise<Response> | Response) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe('psgcCloudAddressProvider.provinces', () => {
+  it('offers province-less NCR and confirms other unmatched regions before offering them', async () => {
+    stubFetch((url) => {
+      if (url.endsWith('/provinces/')) throw new Error('Unexpected path');
+      if (url.endsWith('/regions/1300000000/provinces')) return json({ data: [] });
+      if (url.endsWith('/regions/0400000000/provinces'))
+        return json({ data: [{ code: '0403400000', name: 'Laguna' }] });
+      if (url.endsWith('/regions'))
+        return json({
+          data: [
+            { code: '1300000000', name: 'National Capital Region' },
+            { code: '0400000000', name: 'Different regional spelling' },
+          ],
+        });
+      return json({ data: [{ code: '0403400000', name: 'Laguna', region: 'CALABARZON' }] });
+    });
+    expect(await psgcCloudAddressProvider.provinces()).toEqual([
+      { code: '0403400000', name: 'Laguna' },
+      { code: '1300000000', name: 'Metro Manila' },
+    ]);
+  });
+
   it('normalizes the provider payload to { code, name }', async () => {
     stubFetch((url) =>
       json({
@@ -120,7 +141,13 @@ describe('psgcCloudAddressProvider.localities', () => {
     );
 
     expect(await psgcCloudAddressProvider.localities('0403400000')).toEqual([
-      { code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000' },
+      {
+        code: '0403406000',
+        name: 'Calauan',
+        type: 'municipality',
+        provinceCode: '0403400000',
+        postalCode: '4012',
+      },
     ]);
   });
 
@@ -136,6 +163,69 @@ describe('psgcCloudAddressProvider.localities', () => {
 
     const types = (await psgcCloudAddressProvider.localities('0403400000')).map((l) => l.type);
     expect(types).toEqual(['city', 'municipality']);
+  });
+
+  it('skips districts and special units while retaining real municipalities', async () => {
+    stubFetch(() =>
+      json({
+        data: [
+          { code: '1380600000', name: 'District', type: 'SubMun' },
+          { code: '1900000000', name: 'Special unit', type: 'SGU' },
+          { code: '0403406000', name: 'Calauan', type: 'Mun', province: 'Laguna' },
+        ],
+      }),
+    );
+    expect(
+      (await psgcCloudAddressProvider.localities('0403400000')).map((row) => row.name),
+    ).toEqual(['Calauan']);
+  });
+
+  it('falls back to the NCR region path and holds ambiguous city ZIPs', async () => {
+    const seen: string[] = [];
+    stubFetch((url) => {
+      seen.push(url);
+      if (url.includes('/provinces/')) return json({}, 404);
+      return json({
+        data: [
+          { code: '1381400000', name: 'City of San Juan', type: 'City', zip_code: '9999' },
+          { code: '1380600000', name: 'City of Manila', type: 'City', zip_code: '1000' },
+        ],
+      });
+    });
+    const result = await psgcCloudAddressProvider.localities('1300000000');
+    expect(seen).toEqual([
+      'https://psgc.cloud/api/v2/provinces/1300000000/cities-municipalities',
+      'https://psgc.cloud/api/v2/regions/1300000000/cities-municipalities',
+    ]);
+    expect(result[0]).toMatchObject({ provinceCode: '1300000000' });
+    expect(result[0]).not.toHaveProperty('postalCode');
+    expect(result[1]).not.toHaveProperty('postalCode');
+  });
+
+  it('keeps the corrected Victoria ZIP even when upstream publishes the wrong code', async () => {
+    stubFetch(() =>
+      json({
+        data: [
+          {
+            code: '0403429000',
+            name: 'Victoria',
+            type: 'Mun',
+            province: 'Laguna',
+            zip_code: '4018',
+          },
+        ],
+      }),
+    );
+    expect((await psgcCloudAddressProvider.localities('0403400000'))[0]?.postalCode).toBe('4011');
+  });
+
+  it('does not fall back to a region when the provider fails', async () => {
+    const fetcher = vi.fn(() => json({}, 500));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(psgcCloudAddressProvider.localities('1300000000')).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   // Sarangani's list carried Manila's `SubMun` districts and Maguindanao del
@@ -272,9 +362,7 @@ describe('psgcCloudAddressProvider failure modes', () => {
       throw error;
     });
 
-    const error = await psgcCloudAddressProvider
-      .provinces()
-      .catch((e: AddressProviderError) => e);
+    const error = await psgcCloudAddressProvider.provinces().catch((e: AddressProviderError) => e);
     expect(error).toBeInstanceOf(AddressProviderError);
     expect((error as AddressProviderError).code).toBe('PROVIDER_TIMEOUT');
   });

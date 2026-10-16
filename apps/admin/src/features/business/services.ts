@@ -19,6 +19,7 @@ import {
   customerImportRowSchema,
   customerOnboardingRecoverySchema,
   customerSchema,
+  companyApplicationPrefillSchema,
   createCustomerSchema,
   updateCustomerSchema,
   financeQueueItemSchema,
@@ -331,6 +332,9 @@ export const getCustomerApplicationsPage = (
 };
 export const getCustomerApplication = (id: string): Promise<CustomerApplication> =>
   request(`/official-forms/customer-applications/${id}`, customerApplicationSchema);
+
+export const getCustomerImportPrefill = (id: string) =>
+  request(`/official-forms/customer-import-prefill/${id}`, companyApplicationPrefillSchema);
 export const registerCustomerApplication = (
   input: import('@afhomes/contracts').RegisterCustomerApplicationRequest,
 ) =>
@@ -753,9 +757,11 @@ export const getCustomerImportJobs = (): Promise<CustomerImportJob[]> =>
 
 export const getCustomerImportJob = (
   id: string,
+  offset = 0,
+  limit = 10,
 ): Promise<{ job: CustomerImportJob; rows: CustomerImportRow[] }> =>
   request(
-    `/customer-imports/jobs/${id}`,
+    `/customer-imports/jobs/${id}?offset=${offset}&limit=${limit}`,
     z.object({ job: customerImportJobSchema, rows: z.array(customerImportRowSchema) }),
   );
 

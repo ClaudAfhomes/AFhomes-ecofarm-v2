@@ -34,6 +34,7 @@ import {
 } from '@afhomes/contracts';
 
 import { AddressProviderError, type AddressProvider } from './address-provider.js';
+import { resolvePostalCode } from './postal-reference.js';
 
 const PSGC_CLOUD_BASE = 'https://psgc.cloud/api/v2';
 
@@ -222,9 +223,14 @@ export const psgcCloudAddressProvider: AddressProvider = {
       if (!type) return [];
       // `provinceCode` is not in the provider payload; it is the scope we asked
       // for, which is what makes the parent link explicit and checkable.
-      // `zip_code` is published for most localities and blank for some; a
-      // blank is "no published zip", never an empty code to store.
-      const postalCode = typeof row.zip_code === 'string' ? row.zip_code.trim() : '';
+      // Upstream ZIP values can be wrong; publish only a unique pinned-reference match.
+      const postalProvince =
+        scopeCode === METRO_MANILA_REGION_CODE ? METRO_MANILA_LABEL : officialName(row.province);
+      const postal =
+        typeof postalProvince === 'string'
+          ? resolvePostalCode(postalProvince, String(officialName(row.name)))
+          : null;
+      const postalCode = postal?.status === 'matched' ? postal.postalCode : '';
       return [
         parseRow(localitySchema, {
           code: row.code,

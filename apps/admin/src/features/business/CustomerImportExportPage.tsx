@@ -2,7 +2,13 @@ import { useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useNavigate } from 'react-router';
-import { CUSTOMER_CATEGORY_LABELS, customerSellerOptionSchema } from '@afhomes/contracts';
+import {
+  CUSTOMER_CATEGORY_LABELS,
+  customerSellerOptionSchema,
+  CUSTOMER_WORKBOOK_FIELDS,
+  CUSTOMER_WORKBOOK_HEADERS,
+  CUSTOMER_WORKBOOK_SHEETS,
+} from '@afhomes/contracts';
 import type { CustomerImportParseResponse, ImportJobStatus } from '@afhomes/contracts';
 import {
   Alert,
@@ -13,7 +19,6 @@ import {
   ErrorState,
   FilterBar,
   PageHeader,
-  Pagination,
   SearchField,
   Select,
   Skeleton,
@@ -30,6 +35,7 @@ import {
   confirmCustomerImport,
   exportCustomers,
   getCustomerImportJobs,
+  getCustomerImportJob,
   getCustomerImportTemplate,
   parseCustomerImport,
 } from './services';
@@ -93,7 +99,19 @@ function describeJobsLoadError(error: unknown): string | undefined {
   return undefined;
 }
 
-const renderRowErrors = (errors: CustomerImportParseResponse['rows'][number]['errors']) => {
+const workbookFieldLabel = (field: string, rowNumber?: number) => {
+  if (rowNumber === undefined) return field;
+  for (const sheet of CUSTOMER_WORKBOOK_SHEETS) {
+    const column = CUSTOMER_WORKBOOK_FIELDS[sheet]!.indexOf(field);
+    if (column >= 0)
+      return `${sheet}!${String.fromCharCode(65 + column)}${rowNumber} (${CUSTOMER_WORKBOOK_HEADERS[sheet][column]})`;
+  }
+  return field;
+};
+const renderRowErrors = (
+  errors: CustomerImportParseResponse['rows'][number]['errors'],
+  rowNumber?: number,
+) => {
   if (errors.length === 0) return '✓';
   const shown = errors.slice(0, 2);
   const hidden = errors.length - shown.length;
@@ -102,7 +120,7 @@ const renderRowErrors = (errors: CustomerImportParseResponse['rows'][number]['er
     <ul title={full}>
       {shown.map((error, i) => (
         <li key={i}>
-          {error.field}: {error.message}
+          {workbookFieldLabel(error.field, rowNumber)}: {error.message}
         </li>
       ))}
       {hidden > 0 ? <li className={styles.errorMore}>+{hidden} more</li> : null}
@@ -126,6 +144,10 @@ export function CustomerImportExportPage() {
   const mayImport =
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'governance.customer_import' && permission.canCreate,
+    ) === true;
+  const mayConfirm =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'governance.customer_import' && permission.canUpdate,
     ) === true;
   const [tab, setTab] = useState<WorkspaceTab>('import');
   const [preview, setPreview] = useState<CustomerImportParseResponse | null>(null);
@@ -169,6 +191,12 @@ export function CustomerImportExportPage() {
     enabled: mayImport,
     queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
   });
+  const previewQuery = useQuery({
+    queryKey: ['customer-import-preview', preview?.job.id, previewPage],
+    queryFn: () =>
+      getCustomerImportJob(preview!.job.id, previewPage * PREVIEW_PAGE_SIZE, PREVIEW_PAGE_SIZE),
+    enabled: Boolean(preview?.pageSize && previewPage > 0),
+  });
   const parse = useBusinessMutation({
     mutationFn: (input: {
       source: 'excel' | 'csv' | 'google_sheets';
@@ -199,7 +227,17 @@ export function CustomerImportExportPage() {
   });
 
   const confirm = useBusinessMutation({
-    mutationFn: (jobId: string) => confirmCustomerImport(jobId),
+    mutationFn: async (jobId: string) => {
+      let result = await confirmCustomerImport(jobId);
+      while (result.job.status === 'committing') {
+        say(
+          `Importing: ${result.job.insertedRows + result.job.updatedRows + result.job.skippedRows + result.job.failedRows} of ${result.job.totalRows} rows processed.`,
+          'info',
+        );
+        result = await confirmCustomerImport(jobId);
+      }
+      return result;
+    },
     onSuccess: (result) => {
       setConfirming(false);
       say(
@@ -274,13 +312,20 @@ export function CustomerImportExportPage() {
       </section>
     );
 
-  const previewRows = preview?.rows ?? [];
-  const previewPageCount = Math.max(1, Math.ceil(previewRows.length / PREVIEW_PAGE_SIZE));
+  const serverPagination = Boolean(preview?.pageSize);
+  const previewRows =
+    serverPagination && previewPage > 0 ? (previewQuery.data?.rows ?? []) : (preview?.rows ?? []);
+  const previewTotal = preview?.job.totalRows ?? 0;
+  const previewPageCount = Math.max(1, Math.ceil(previewTotal / PREVIEW_PAGE_SIZE));
   const safePreviewPage = Math.min(previewPage, previewPageCount - 1);
-  const previewPageRows = previewRows.slice(
-    safePreviewPage * PREVIEW_PAGE_SIZE,
-    (safePreviewPage + 1) * PREVIEW_PAGE_SIZE,
-  );
+  const previewPageRows = serverPagination
+    ? previewRows
+    : previewRows.slice(
+        safePreviewPage * PREVIEW_PAGE_SIZE,
+        (safePreviewPage + 1) * PREVIEW_PAGE_SIZE,
+      );
+  const previewRangeFrom = previewRows.length === 0 ? 0 : safePreviewPage * PREVIEW_PAGE_SIZE + 1;
+  const previewRangeTo = Math.min(previewTotal, (safePreviewPage + 1) * PREVIEW_PAGE_SIZE);
 
   // Tab switcher stays mounted across every state: it is navigation, not data,
   // so an operator can move between tabs while jobs are still loading. The
@@ -360,65 +405,65 @@ export function CustomerImportExportPage() {
             <div className={styles.fileRow}>
               <div className={styles.filePickers}>
                 <div className={styles.filePicker}>
-                  <input
-                    ref={excelInput}
-                    hidden
-                    aria-label="Import Excel (.xlsx)"
-                    type="file"
-                    accept=".xlsx"
-                    disabled={parse.isPending}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void upload('excel', file);
-                      e.target.value = '';
-                    }}
-                  />
-                  <Button
-                    variant="secondary"
-                    disabled={parse.isPending}
-                    onClick={() => excelInput.current?.click()}
-                  >
-                    Choose Excel file
-                  </Button>
-                  {chosenFile?.kind === 'excel' ? (
-                    <span role="status" className={styles.fileName}>
-                      {parse.isPending
-                        ? `Reading ${chosenFile.name}…`
-                        : `Selected: ${chosenFile.name}`}
-                    </span>
-                  ) : null}
-                </div>
-                <div className={styles.filePicker}>
-                  <input
-                    ref={csvInput}
-                    hidden
-                    aria-label="Import CSV (UTF-8)"
-                    type="file"
-                    accept=".csv"
-                    disabled={parse.isPending}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void upload('csv', file);
-                      e.target.value = '';
-                    }}
-                  />
-                  <Button
-                    variant="secondary"
-                    disabled={parse.isPending}
-                    onClick={() => csvInput.current?.click()}
-                  >
-                    Choose CSV file
-                  </Button>
-                  {chosenFile?.kind === 'csv' ? (
-                    <span role="status" className={styles.fileName}>
-                      {parse.isPending
-                        ? `Reading ${chosenFile.name}…`
-                        : `Selected: ${chosenFile.name}`}
-                    </span>
-                  ) : null}
-                </div>
+                <input
+                  ref={excelInput}
+                  hidden
+                  aria-label="Import Excel (.xlsx or .xlsm)"
+                  type="file"
+                  accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12"
+                  disabled={parse.isPending}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void upload('excel', file);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={parse.isPending}
+                  onClick={() => excelInput.current?.click()}
+                >
+                  Choose Excel file
+                </Button>
+                {chosenFile?.kind === 'excel' ? (
+                  <span role="status" className={styles.fileName}>
+                    {parse.isPending
+                      ? `Reading ${chosenFile.name}…`
+                      : `Selected: ${chosenFile.name}`}
+                  </span>
+                ) : null}
               </div>
-              <div className={styles.sheetRow}>
+              <div className={styles.filePicker}>
+                <input
+                  ref={csvInput}
+                  hidden
+                  aria-label="Import CSV (UTF-8)"
+                  type="file"
+                  accept=".csv"
+                  disabled={parse.isPending}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void upload('csv', file);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={parse.isPending}
+                  onClick={() => csvInput.current?.click()}
+                >
+                  Choose CSV file
+                </Button>
+                {chosenFile?.kind === 'csv' ? (
+                  <span role="status" className={styles.fileName}>
+                    {parse.isPending
+                      ? `Reading ${chosenFile.name}…`
+                      : `Selected: ${chosenFile.name}`}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className={styles.sheetRow}>
                 <label className={styles.sheetField}>
                   Import Google Sheet
                   <input
@@ -473,6 +518,15 @@ export function CustomerImportExportPage() {
                   tabIndex={0}
                   className={`table-scroll ${styles.tableWrap}`}
                 >
+                  {serverPagination && previewPage > 0 && previewQuery.isFetching ? (
+                    <p role="status">Loading preview rows…</p>
+                  ) : null}
+                  {serverPagination && previewPage > 0 && previewQuery.isError ? (
+                    <Alert variant="danger">
+                      Preview rows could not be loaded.{' '}
+                      <Button onClick={() => void previewQuery.refetch()}>Retry</Button>
+                    </Alert>
+                  ) : null}
                   <table>
                     <thead>
                       <tr>
@@ -480,6 +534,7 @@ export function CustomerImportExportPage() {
                         <th>Customer</th>
                         <th>Membership #</th>
                         <th>Tier</th>
+                        <th>Age</th>
                         <th>Source status</th>
                         <th>Category</th>
                         <th>Action</th>
@@ -495,7 +550,16 @@ export function CustomerImportExportPage() {
                           </td>
                           <td data-label="Membership #">{row.fields.membership_number || '—'}</td>
                           <td data-label="Tier">{row.fields.vip_tier || '—'}</td>
-                          <td data-label="Source status">{row.fields.source_status || '—'}</td>
+                          <td data-label="Age">
+                            {row.normalized.person &&
+                            typeof row.normalized.person === 'object' &&
+                            'age' in row.normalized.person
+                              ? String(row.normalized.person.age)
+                              : '—'}
+                          </td>
+                          <td data-label="Source status">
+                            {row.fields.stated_status || row.fields.source_status || '—'}
+                          </td>
                           <td data-label="Category">
                             {typeof row.normalized.category === 'string' &&
                             row.normalized.category in CUSTOMER_CATEGORY_LABELS
@@ -507,21 +571,95 @@ export function CustomerImportExportPage() {
                           <td data-label="Action">
                             <StatusChip label={row.action} />
                           </td>
-                          <td data-label="Errors">{renderRowErrors(row.errors)}</td>
+                          <td data-label="Errors">
+                            {row.customerId ? <span>Customer match: {row.customerId}</span> : null}
+                            {renderRowErrors(
+                              row.errors,
+                              row.fields.workbook_format === 'company_v1'
+                                ? row.rowNumber
+                                : undefined,
+                            )}
+                            {row.warnings.length ? (
+                              <div>
+                                Review:{' '}
+                                {renderRowErrors(
+                                  row.warnings,
+                                  row.fields.workbook_format === 'company_v1'
+                                    ? row.rowNumber
+                                    : undefined,
+                                )}
+                              </div>
+                            ) : null}
+                            {row.fields.workbook_format === 'company_v1' ? (
+                              <span>
+                                {row.action === 'CREATE'
+                                  ? 'Create customer identity and preserve application details; no financial changes.'
+                                  : row.action === 'SKIP'
+                                    ? 'Unchanged import; no changes.'
+                                    : 'Manual review required; existing records will be preserved.'}
+                              </span>
+                            ) : null}
+                            {row.customerId && row.action === 'CONFLICT' ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => navigate(`/admin/customers/${row.customerId}`)}
+                              >
+                                Review existing customer
+                              </Button>
+                            ) : null}
+                            {row.fields.workbook_format === 'company_v1' ? (
+                              <details>
+                                <summary>Review mapped fields</summary>
+                                <dl>
+                                  {Object.values(CUSTOMER_WORKBOOK_FIELDS)
+                                    .flat()
+                                    .filter((field) => row.fields[field])
+                                    .map((field) => (
+                                      <div key={field}>
+                                        <dt>{workbookFieldLabel(field, row.rowNumber)}</dt>
+                                        <dd>
+                                          {['tin', 'secondary_tin'].includes(field)
+                                            ? 'Provided (restricted)'
+                                            : row.fields[field]}
+                                        </dd>
+                                      </div>
+                                    ))}
+                                </dl>
+                              </details>
+                            ) : null}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {previewRows.length > PREVIEW_PAGE_SIZE ? (
-                  <div className={styles.pagination}>
-                    <Pagination
-                      page={safePreviewPage + 1}
-                      pageCount={previewPageCount}
-                      onChange={(next) => setPreviewPage(next - 1)}
-                      label="Import preview pagination"
-                    />
-                  </div>
+                {previewTotal > PREVIEW_PAGE_SIZE ? (
+                  <nav aria-label="Import preview pagination" className={styles.pagination}>
+                    <span role="status" className={styles.paginationRange}>
+                      Showing {previewRangeFrom}-{previewRangeTo} of {previewTotal}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={safePreviewPage === 0}
+                      onClick={() => setPreviewPage(Math.max(0, safePreviewPage - 1))}
+                      aria-label="Previous preview page"
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={safePreviewPage >= previewPageCount - 1}
+                      onClick={() =>
+                        setPreviewPage(Math.min(previewPageCount - 1, safePreviewPage + 1))
+                      }
+                      aria-label="Next preview page"
+                    >
+                      Next
+                    </Button>
+                  </nav>
                 ) : null}
               </section>
 
@@ -539,7 +677,7 @@ export function CustomerImportExportPage() {
                   <Button
                     loading={confirm.isPending}
                     loadingLabel="Confirming…"
-                    disabled={preview.job.validRows === 0}
+                    disabled={!mayConfirm || preview.job.validRows === 0}
                     onClick={() => setConfirming(true)}
                   >
                     Confirm Import ({preview.job.validRows} rows)
@@ -547,6 +685,8 @@ export function CustomerImportExportPage() {
                 </div>
                 <ConfirmDialog
                   open={confirming}
+                  confirmDisabled={!mayConfirm || confirm.isPending}
+                  confirmLoading={confirm.isPending}
                   onCancel={() => setConfirming(false)}
                   onConfirm={() => confirm.mutate(preview!.job.id)}
                   title="Confirm bulk import"
@@ -738,7 +878,7 @@ export function CustomerImportExportPage() {
                         <td data-label="Failed / invalid">{formatCountOrDash(job.failedRows)}</td>
                         <td data-label="Created">{formatDateTime(job.createdAt)}</td>
                         <td data-label="Actions">
-                          {job.status === 'committing' ? (
+                          {job.status === 'committing' && mayConfirm ? (
                             <Button
                               size="sm"
                               loading={confirm.isPending}
@@ -748,7 +888,7 @@ export function CustomerImportExportPage() {
                               Resume Import
                             </Button>
                           ) : null}
-                          {job.status === 'ready' || job.status === 'validated' ? (
+                          {mayConfirm && (job.status === 'ready' || job.status === 'validated') ? (
                             <Button
                               size="sm"
                               variant="secondary"
