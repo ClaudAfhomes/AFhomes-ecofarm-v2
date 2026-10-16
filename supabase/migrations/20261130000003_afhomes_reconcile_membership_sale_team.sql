@@ -6,7 +6,7 @@
 -- Only nullable company columns and the existing accreditation objects are reconciled.
 -- Do NOT replay the original import_legacy_member body: later SSOT work owns it.
 -- Idempotent: IF NOT EXISTS columns/table; existing function definitions/grants
--- are the current canonical accreditation implementation; trigger is replaced.
+-- are preserved on complete installations; a missing feature is installed once.
 -- Validation: select to_regclass('private.sale_team_accreditations'); -- non-null
 -- select count(*) from information_schema.columns where table_schema='public'
 -- and table_name='customers' and column_name in ('ra_number','stated_vip_package',
@@ -66,6 +66,31 @@ comment on column public.customers.stated_regular_price is
   'Company-stated figure, verbatim. Never an input to server-computed totals; payment verification and activation read verified payment rows only. Same for stated_discount, stated_total_amount and stated_rf.';
 
 
+-- Existing installations may have a newer seven-argument accreditation RPC.
+-- Preserve the entire complete implementation, including overloads, grants and trigger.
+-- Only a wholly absent historical accreditation feature is installed below.
+do $reconcile_accreditation$
+begin
+  if to_regclass('private.sale_team_accreditations') is not null then
+    if to_regprocedure('public.get_sale_team_accreditation(uuid)') is null
+      or to_regprocedure('public.search_sale_team_accreditation(text)') is null
+      or (to_regprocedure('public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date)') is null
+        and to_regprocedure('public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date,text)') is null)
+      or to_regprocedure('private.issue_ost_aa_on_approval()') is null
+      or (to_regprocedure('private.next_sale_team_aa_number()') is null
+        and to_regprocedure('private.next_sale_team_aa_number(text,date)') is null)
+      or not exists(select 1 from pg_trigger t where t.tgrelid='private.ost_accreditation_terms'::regclass
+        and t.tgname='ost_accreditation_issue_aa' and not t.tgisinternal)
+      or not (select c.relrowsecurity from pg_class c where c.oid='private.sale_team_accreditations'::regclass)
+    then raise exception 'ACCREDITATION_PARTIAL_SCHEMA_REQUIRES_REVIEW'; end if;
+    return;
+  end if;
+  if exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where (n.nspname='public' and p.proname in ('get_sale_team_accreditation','search_sale_team_accreditation','manage_sale_team_accreditation'))
+      or (n.nspname='private' and p.proname in ('next_sale_team_aa_number','issue_ost_aa_on_approval'))) then
+    raise exception 'ACCREDITATION_PARTIAL_SCHEMA_REQUIRES_REVIEW';
+  end if;
+  execute $install_accreditation$
 -- Requires OST accreditation workflow and 20261129000002 staff business security.
 -- CLI-created file ordered after the current repository baseline, not wall-clock order.
 -- Validate: browser table/function privileges must all be false;
@@ -213,3 +238,5 @@ revoke all on function private.issue_ost_aa_on_approval() from public,anon,authe
 drop trigger if exists ost_accreditation_issue_aa on private.ost_accreditation_terms;
 create trigger ost_accreditation_issue_aa after insert on private.ost_accreditation_terms
  for each row when(new.status='active') execute function private.issue_ost_aa_on_approval();
+$install_accreditation$;
+end $reconcile_accreditation$;

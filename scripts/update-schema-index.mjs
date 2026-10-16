@@ -43,6 +43,8 @@ writeFileSync(
     '-- Historical duplicate 20261130000001 is retained; 20261130000003 reconciles both prerequisites',
     '-- before later dependent migrations, without replacing the newer customer import RPC.',
     '-- Reconciliation is idempotent and preserves existing customer facts, AA numbers and approvals.',
+    '-- Complete accreditation installations retain their existing RPC signatures/overloads, ACLs and trigger.',
+    '-- Only a wholly absent accreditation feature is installed; partial schemas stop for review.',
     '-- Manifest (sorted):',
     ...files.map((file) => '--   ' + file),
     '-- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):',

@@ -149,6 +149,62 @@ for (const skipped of originals) {
       ).rows[0].definition === definition,
       'late repair preserves newer SSOT/import implementation',
     );
+    // Model the observed live contract: only the seven-argument RPC remains,
+    // alongside a newer numbering overload. These synthetic bodies are test markers.
+    await db.query(`
+      drop function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date);
+      create function public.manage_sale_team_accreditation(
+        p_actor_id uuid,p_staff_id uuid,p_kind text,p_action text,
+        p_starts_on date default null,p_expires_on date default null,p_aa_number text default null
+      ) returns jsonb language sql security definer set search_path=pg_catalog,pg_temp as
+        'select jsonb_build_object(''preserved_seven_argument_rpc'',true,''aaNumber'',p_aa_number)';
+      revoke all on function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date,text) from public,anon,authenticated;
+      grant execute on function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date,text) to service_role;
+      create function private.next_sale_team_aa_number(p_kind text,p_accredited_on date)
+      returns text language sql set search_path=pg_catalog,pg_temp as 'select ''PRESERVED_FIXTURE''::text';
+      revoke all on function private.next_sale_team_aa_number(text,date) from public,anon,authenticated,service_role;
+    `);
+    const newerSnapshot = async () =>
+      (
+        await db.query(`
+      select n.nspname,p.proname,p.proargtypes::text,p.prosrc,p.proacl::text,p.proconfig
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where p.proname in ('manage_sale_team_accreditation','next_sale_team_aa_number')
+        and n.nspname in ('public','private') order by n.nspname,p.proname,p.proargtypes::text
+    `)
+      ).rows;
+    const newer = await newerSnapshot();
+    await db.query(sql(repair));
+    assert.deepEqual(
+      await newerSnapshot(),
+      newer,
+      'newer function bodies, signatures, ACLs and search paths remain unchanged',
+    );
+    checks++;
+    check(
+      !(
+        await db.query(
+          "select to_regprocedure('public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date)') old",
+        )
+      ).rows[0].old,
+      'repair does not introduce an ambiguous six-argument overload',
+    );
+    check(
+      (
+        await db.query(
+          "select public.manage_sale_team_accreditation(null,null,'IST','approve',null,null) result",
+        )
+      ).rows[0].result.preserved_seven_argument_rpc,
+      'six supplied arguments still resolve to the newer RPC default',
+    );
+    await db.query('begin');
+    await db.query('drop trigger ost_accreditation_issue_aa on private.ost_accreditation_terms');
+    await assert.rejects(
+      () => db.query(sql(repair)),
+      /ACCREDITATION_PARTIAL_SCHEMA_REQUIRES_REVIEW/,
+    );
+    checks++;
+    await db.query('rollback');
     const invariants = await db.query(
       readFileSync(
         new URL('../../../supabase/security/rls_invariants.sql', import.meta.url),

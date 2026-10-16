@@ -22,6 +22,8 @@
 -- Historical duplicate 20261130000001 is retained; 20261130000003 reconciles both prerequisites
 -- before later dependent migrations, without replacing the newer customer import RPC.
 -- Reconciliation is idempotent and preserves existing customer facts, AA numbers and approvals.
+-- Complete accreditation installations retain their existing RPC signatures/overloads, ACLs and trigger.
+-- Only a wholly absent accreditation feature is installed; partial schemas stop for review.
 -- Manifest (sorted):
 --   20260926023325_afhomes_phase1_foundation.sql
 --   20260926025313_afhomes_phase1_advisor_indexes.sql
