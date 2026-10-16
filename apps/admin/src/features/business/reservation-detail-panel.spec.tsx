@@ -24,6 +24,8 @@ const calls = {
   reopen: vi.fn(),
   activate: vi.fn(),
   finalize: vi.fn(),
+  application: vi.fn(async () => null as unknown as null),
+  proposal: vi.fn(async () => ({}) as unknown as never),
   preview: vi.fn(async () => ({
     kind: 'reservation_agreement' as const,
     fields: {},
@@ -154,7 +156,8 @@ vi.mock('./services', async (importOriginal) => {
     getSales: async () => [],
     getCardProducts: async () => [],
     getCustomerApplications: async () => [],
-    getCustomerApplication: async () => null,
+    getCustomerApplication: calls.application,
+    getPurchaseTermsProposal: calls.proposal,
     getOfficialFormTemplate: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
     previewOfficialFormImport: calls.preview,
     exportReservationAgreement: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
@@ -199,6 +202,8 @@ beforeEach(() => {
     errors: [],
     requiresReview: true,
   });
+  calls.application.mockReset().mockResolvedValue(null);
+  calls.proposal.mockReset().mockRejectedValue(new Error('PURCHASE_TERMS_REVIEW_REQUIRED'));
   current = agreement();
   finance = {
     ...finance,
@@ -225,6 +230,21 @@ const renderDetail = (user: SessionUser = FINANCE) =>
   );
 
 describe('Application-origin reservation detail', () => {
+  it('links the review-required alert to the customer application editor', async () => {
+    const appId = 'aaaaaaaa-0000-4000-8000-000000000001';
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/admin/sales/reservations/new"
+          element={<ReservationAgreementEditorPage />}
+        />
+      </Routes>,
+      { route: `/admin/sales/reservations/new?application=${appId}`, user: FINANCE },
+    );
+    const link = await screen.findByRole('link', { name: 'Open the application review' });
+    expect(link).toHaveAttribute('href', `/admin/customers/applications/${appId}`);
+  });
+
   it('shows the AF-RES, the lifecycle state and NO sale before finalization', async () => {
     renderDetail();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();

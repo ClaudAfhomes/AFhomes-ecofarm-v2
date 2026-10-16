@@ -1,11 +1,12 @@
 import { useId, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   customerLookupSchema,
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
 } from '@afhomes/contracts';
-import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon, Button } from '@afhomes/ui';
 import type { IconName } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
@@ -104,6 +105,7 @@ function HighlightedName({ name, term }: { name: string; term: string }) {
 }
 
 function CustomerCard({ customer }: { customer: CustomerLookup }) {
+  const navigate = useNavigate();
   const tier = tierKey(customer.tier);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
   return (
@@ -175,6 +177,24 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             </div>
           </div>
         </dl>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+          <Button
+            variant="secondary"
+            onClick={() => navigate(`/admin/customers/${customer.customerId}`)}
+          >
+            Open record
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              navigate(
+                `/admin/customers/applications?search=${encodeURIComponent(customer.customerNumber)}`,
+              )
+            }
+          >
+            View forms
+          </Button>
+        </div>
       </div>
     </article>
   );
@@ -258,13 +278,15 @@ export function CustomerLookupPage() {
       ? optionId(activeIndex)
       : undefined;
 
-  // The picked record. Cards render for this and nothing else: clearing it
-  // (by typing on) takes the card back off screen.
-  const [selected, setSelected] = useState<CustomerLookup | null>(null);
+  // The picked record number. The card resolves live from the latest
+  // fetched page, so a 30s refetch refreshes the shown card too.
+  const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
+  const selected =
+    (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
-    setSelected(row);
+    setSelectedNumber(row.customerNumber);
     setActiveIndex(-1);
     setSuggestOpen(false);
   };
@@ -333,7 +355,7 @@ export function CustomerLookupPage() {
             onChange={(value) => {
               setSearch(value);
               // Typing on unpicks: the card below belongs to the last pick.
-              setSelected(null);
+              setSelectedNumber(null);
               setActiveIndex(-1);
               setSuggestOpen(true);
             }}

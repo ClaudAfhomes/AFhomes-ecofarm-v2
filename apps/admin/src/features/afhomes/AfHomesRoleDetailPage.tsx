@@ -16,22 +16,15 @@ import {
 } from '@afhomes/ui';
 import { groupedModuleCatalog } from '@afhomes/contracts';
 import {
-  getAfHomesRoleAudit,
+  getAfHomesDepartments,
   getAfHomesRoleById,
   getAfHomesStaff,
   updateAfHomesRole,
 } from './services';
-import {
-  AfHomesRoleFormDialog,
-  isRoleAccessProtected,
-  type RoleFormInput,
-} from './AfHomesRoleFormDialog';
-import { useSession } from '../../lib/session';
-import { formatDateTime, humanizeToken } from '../../lib/format';
+import { AfHomesRoleFormDialog, type RoleFormInput } from './AfHomesRoleFormDialog';
 import styles from './AfHomesRoleDetailPage.module.css';
 
 export function AfHomesRoleDetailPage() {
-  const { user } = useSession();
   const { id } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -41,14 +34,16 @@ export function AfHomesRoleDetailPage() {
     queryFn: () => getAfHomesRoleById(id!),
     enabled: Boolean(id),
   });
-  const history = useQuery({
-    queryKey: ['afhomes', 'roles', id, 'audit'],
-    queryFn: () => getAfHomesRoleAudit(id!),
-    enabled: Boolean(id),
-  });
   const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
+  const departments = useQuery({
+    queryKey: ['afhomes', 'departments'],
+    queryFn: getAfHomesDepartments,
+  });
   const mutation = useBusinessMutation({
-    mutationFn: (input: RoleFormInput) => updateAfHomesRole(id!, input),
+    mutationFn: (input: RoleFormInput) =>
+      role.data?.isSystem
+        ? updateAfHomesRole(id!, { name: input.name, departmentId: input.departmentId })
+        : updateAfHomesRole(id!, input),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
       setEditing(false);
@@ -84,24 +79,25 @@ export function AfHomesRoleDetailPage() {
     <section className={styles.page}>
       <PageHeader
         title={record.name}
-        description="Role definition, assignments, and change history"
+        description="Role definition and assignments"
         actions={
-          <>
-            {
-              <Button variant="ghost" onClick={() => setEditing(true)}>
-                {isRoleAccessProtected(record, user?.roleSlug) ? 'View access' : 'Edit role'}
-              </Button>
-            }{' '}
+          <div className={styles.headerActions}>
+            <Button variant="ghost" onClick={() => setEditing(true)}>
+              Edit role
+            </Button>
             <Button variant="secondary" onClick={() => navigate('/admin/roles')}>
               Back to roles
             </Button>
-          </>
+          </div>
         }
       />
       <section className={styles.hero} aria-label="Role summary">
+        <span className={styles.heroBadge} aria-hidden="true">
+          {record.name.trim().charAt(0).toUpperCase() || '•'}
+        </span>
         <div className={styles.heroText}>
           <h2 className={styles.heroName}>{record.name}</h2>
-          {record.description ? <p className={styles.heroMeta}>{record.description}</p> : null}
+          <p className={styles.heroMeta}>{record.departmentName ?? 'Unassigned'}</p>
         </div>
         <div className={styles.heroChips}>
           <StatusChip
@@ -121,7 +117,7 @@ export function AfHomesRoleDetailPage() {
           <DetailCardTitle>Role</DetailCardTitle>
           <DetailFieldGrid>
             <DetailField label="Name">{record.name}</DetailField>
-            <DetailField label="Description">{record.description ?? '-'}</DetailField>
+            <DetailField label="Department">{record.departmentName ?? 'Unassigned'}</DetailField>
             <DetailField label="Type">
               <StatusChip
                 label={record.isSystem ? 'System' : 'Custom'}
@@ -194,8 +190,17 @@ export function AfHomesRoleDetailPage() {
             <ul className={styles.staffList}>
               {assigned.map((s) => (
                 <li key={s.id} className={styles.staffItem}>
-                  <Link to={`/admin/staff/${s.id}`}>{s.fullName}</Link>
-                  <span className={styles.staffMeta}>{s.email}</span>
+                  <span className={styles.staffAvatar} aria-hidden="true">
+                    {s.fullName.trim().charAt(0).toUpperCase() || '•'}
+                  </span>
+                  <span className={styles.staffText}>
+                    <Link to={`/admin/staff/${s.id}`} className={styles.staffName}>
+                      {s.fullName}
+                    </Link>
+                    <span className={styles.staffMeta}>
+                      {[s.email, s.departmentName ?? 'Unassigned'].filter(Boolean).join('  |  ')}
+                    </span>
+                  </span>
                   <StatusChip
                     label={s.status}
                     tone={
@@ -211,41 +216,13 @@ export function AfHomesRoleDetailPage() {
             </ul>
           )}
         </DetailCard>
-
-        <DetailCard>
-          <DetailCardTitle>Audit history</DetailCardTitle>
-          {history.isPending ? (
-            <div role="status" aria-label="Loading audit history">
-              <Skeleton style={{ height: 44 }} />
-              <Skeleton style={{ height: 44 }} />
-            </div>
-          ) : history.isError ? (
-            <ErrorState error={history.error} onRetry={history.refetch} />
-          ) : history.data?.length ? (
-            <ul className={styles.historyList}>
-              {history.data.map((event) => (
-                <li key={String(event.id)} className={styles.historyItem}>
-                  <span className={styles.historyAction} title={event.action}>
-                    {humanizeToken(event.action)}
-                  </span>
-                  <span className={styles.historyTime}>{formatDateTime(event.created_at)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className={styles.cardHint}>No role changes recorded yet.</p>
-          )}
-        </DetailCard>
       </div>
-
-      <p>
-        <Link to="/admin/roles">Back to roles</Link>
-      </p>
 
       <AfHomesRoleFormDialog
         key={editing ? `edit-${record.id}-${record.updatedAt}` : 'closed'}
         open={editing}
         role={record}
+        departments={departments.data ?? []}
         saving={mutation.isPending}
         error={mutation.error}
         onClose={() => {

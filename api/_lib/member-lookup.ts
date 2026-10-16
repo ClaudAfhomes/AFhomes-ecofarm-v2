@@ -30,6 +30,7 @@ export function memberLookupFromDirectory(r: Record<string, unknown>) {
  */
 export function customerLookupFromDirectory(r: Record<string, unknown>) {
   return customerLookupSchema.parse({
+    customerId: r.id,
     customerNumber: r.customer_number,
     customerCode: r.customer_code ?? null,
     fullName: r.full_name,

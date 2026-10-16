@@ -137,17 +137,20 @@ import {
 } from './features/business/points-services';
 
 vi.mock('./features/business/points-services', async (original) => {
-const purchases=vi.fn();const claims=vi.fn();return ({
-  ...(await original<typeof import('./features/business/points-services')>()),
-  listPurchasesPage: purchases,
-  listPurchases: purchases,
-  listFinancePurchases: vi.fn(),
-  listClaimsPage: claims,
-  listClaims: claims,
-  listReceipts: vi.fn(),
-  getPurchaseSummary: vi.fn(),
-  getSettlement: vi.fn(),
-});});
+  const purchases = vi.fn();
+  const claims = vi.fn();
+  return {
+    ...(await original<typeof import('./features/business/points-services')>()),
+    listPurchasesPage: purchases,
+    listPurchases: purchases,
+    listFinancePurchases: vi.fn(),
+    listClaimsPage: claims,
+    listClaims: claims,
+    listReceipts: vi.fn(),
+    getPurchaseSummary: vi.fn(),
+    getSettlement: vi.fn(),
+  };
+});
 
 const view = (moduleKey: string) => ({
   moduleKey: moduleKey as never,
@@ -198,17 +201,17 @@ const STAFF_ROW = {
   fullName: 'Ana Reyes Santos Dela Cruz',
   email: 'ana.reyes.santos.delacruz@example.invalid',
   departmentName: 'Sales',
-  roleName: 'Sales Manager',
-  roleId: 'r-sm',
+  roleName: 'Employee',
+  roleId: 'r-emp',
   status: 'active',
   restrictions: [],
 };
 
 const ROLE_ROW = {
-  id: 'r-sm',
-  name: 'Sales Manager',
-  description: 'Sellers',
-  slug: 'sales_manager',
+  id: 'r-emp',
+  name: 'Employee',
+  description: 'Staff',
+  slug: 'employee',
   isActive: true,
   isSystem: false,
   assignedCount: 12,
@@ -515,11 +518,10 @@ describe('Phase 33 viewport smoke: shell renders at every target width', () => {
 describe('Phase 33 tables scroll instead of breaking', () => {
   it.each([
     ['/admin/staff', 'Ana Reyes Santos Dela Cruz'],
-    ['/admin/roles', 'Sales Manager'],
+    ['/admin/roles', 'Employee'],
     ['/admin/finance/payments', 'SALE-000001'],
     ['/admin/memberships', 'MBS-000001'],
     ['/admin/finance/commissions', 'SALE-000001'],
-    ['/admin/genealogy', 'SM Ana Santos'],
     ['/admin/ost/applications', 'Applicant Ana Santos Del Rosario'],
     ['/admin/cms/pages', 'Ecofarm Story'],
   ])('%s wraps its wide table in .table-scroll at 390px', async (route, marker) => {
@@ -527,6 +529,17 @@ describe('Phase 33 tables scroll instead of breaking', () => {
     renderApp(route);
     expect(await screen.findByText(marker)).not.toBeNull();
     expect(document.querySelector('.table-scroll')).not.toBeNull();
+  });
+
+  it('/admin/genealogy shows the head first, tree on demand', async () => {
+    atWidth(390, false);
+    renderApp('/admin/genealogy');
+    expect(await screen.findByText('SM Ana Santos')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'View Genealogy' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Hide Genealogy' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View Genealogy' }));
+    expect(await screen.findByRole('button', { name: 'Hide Genealogy' })).not.toBeNull();
+    expect(screen.getByRole('region', { name: 'Genealogy tree' })).not.toBeNull();
   });
 
   it('reports and audit tables scroll with filters and export reachable', async () => {

@@ -1134,6 +1134,36 @@ export function workbookLooksInterimV2(
 }
 
 /**
+ * README rows for the guided workbook. Fixed-value lists are derived from
+ * the SSOT registry (`MEMBERSHIP_TEMPLATE_V2_SECTIONS`), so the README can
+ * never drift from the dropdowns. One row per distinct header; a header
+ * shared by both member blocks lists once.
+ */
+export function membershipTemplateV2ReadmeRows(): string[][] {
+  const seen = new Set<string>();
+  const allowed: string[][] = [];
+  for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS) {
+    for (const column of section.columns) {
+      if (!column.values || seen.has(column.header)) continue;
+      seen.add(column.header);
+      allowed.push([column.header, [...column.values].join(', ')]);
+    }
+  }
+  return [
+    ['Primary', 'Names, birth, contact, address, work.'],
+    ['Supplementary', 'Second cardholder. Blank when none.'],
+    ['Related', 'Referral chain, verbatim.'],
+    ['Package', 'Prices, terms, payment facts.'],
+    ['Dropdowns', 'Pick only listed values.'],
+    ['Dates', 'Use YYYY-MM-DD.'],
+    ['Rows', 'Keep same order on every tab.'],
+    ['CSV', 'CSV has no dropdowns. See lists below.'],
+    ['Allowed values', 'Use only these values.'],
+    ...allowed,
+  ];
+}
+
+/**
  * Guided workbook download: README + the four entry tabs, dropdowns on
  * every fixed-value column. Prepared blank rows make the grid fill-ready;
  * uploads are read for cells only, so the validations never gate import.
@@ -1146,15 +1176,7 @@ export const membershipTemplateV2SectionedXlsx = () =>
         { label: 'Tab', type: 'text' as const, width: 18 },
         { label: 'Fill guide', type: 'text' as const, width: 44 },
       ],
-      rows: [
-        ['Primary', 'Names, birth, contact, address, work.'],
-        ['Supplementary', 'Second cardholder. Blank when none.'],
-        ['Related', 'Referral chain, verbatim.'],
-        ['Package', 'Prices, terms, payment facts.'],
-        ['Dropdowns', 'Pick only listed values.'],
-        ['Dates', 'Use YYYY-MM-DD.'],
-        ['Rows', 'Keep same order on every tab.'],
-      ],
+      rows: membershipTemplateV2ReadmeRows(),
       headerTone: 'slate' as const,
       filter: false,
       wrapBody: true,

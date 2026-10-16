@@ -1350,6 +1350,17 @@ describe('roles', () => {
     expect(state.status).toBe(401);
   });
 
+  it('defaults the admin and super admin roles to the Admins department', async () => {
+    const state = await call({ afPath: 'roles', token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    const rows = (state.body as { data: Json[] }).data;
+    for (const slug of ['admin', 'super_admin']) {
+      const row = rows.find((r) => r.slug === slug)!;
+      expect(row.departmentId).toBe(UUID.department.admins);
+      expect(row.departmentName).toBe('Admins');
+    }
+  });
+
   it('creates a custom role with a permission subset the actor holds', async () => {
     const db = install();
     const state = await call({
@@ -1358,7 +1369,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Sales Reviewer',
-        description: 'Read sales only',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'sales.card_sales',
@@ -1372,10 +1383,38 @@ describe('roles', () => {
     });
     expect(state.status).toBe(201);
     expect((state.body as Json).slug).toBe('sales_reviewer');
+    expect((state.body as Json).departmentId).toBe(UUID.department.sales);
+    expect((state.body as Json).departmentName).toBe('Sales');
     expect(
       db.rows('role_permissions').filter((r) => r.role_id === (state.body as Json).id),
     ).toHaveLength(1);
     expect(db.rows('audit_events').some((e) => e.action === 'ROLE_CREATED')).toBe(true);
+  });
+
+  it('refuses role creation without a department', async () => {
+    const state = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.admin,
+      body: { name: 'No Department Role', permissions: [] },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('refuses role creation with an unknown department', async () => {
+    const state = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.admin,
+      body: {
+        name: 'Ghost Department Role',
+        departmentId: '00000000-0000-4000-8000-000000009999',
+        permissions: [],
+      },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.message).toMatch(/department/i);
   });
 
   it('refuses to grant a permission the acting user does not hold (Invariant B)', async () => {
@@ -1385,6 +1424,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Escalation Attempt',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'governance.config',
@@ -1436,6 +1476,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Rollback Me',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'sales.card_sales',
@@ -1460,6 +1501,29 @@ describe('roles', () => {
     });
     expect(state.status).toBe(200);
     expect((state.body as Json).name).toBe('Regional Sales Manager');
+  });
+
+  it('moves a custom role to another department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.admin,
+      body: { departmentId: UUID.department.executive },
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Json).departmentId).toBe(UUID.department.executive);
+    expect((state.body as Json).departmentName).toBe('Executive');
+  });
+
+  it('refuses a role move to an unknown department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.admin,
+      body: { departmentId: '00000000-0000-4000-8000-000000009999' },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
   });
 
   it('refuses to edit a protected system role (Invariant D)', async () => {
@@ -1541,7 +1605,12 @@ describe('roles', () => {
       method: 'POST',
       afPath: 'roles',
       token: TOKEN.superAdmin,
-      body: { name: 'Temp Delete Role', isActive: true, permissions: [] },
+      body: {
+        name: 'Temp Delete Role',
+        isActive: true,
+        departmentId: UUID.department.sales,
+        permissions: [],
+      },
     });
     expect(created.status).toBe(201);
     const id = (created.body as { id: string }).id;
@@ -1593,7 +1662,7 @@ describe('departments', () => {
     const state = await call({ afPath: 'departments', token: TOKEN.admin });
     expect(state.status).toBe(200);
     const rows = data(state.body) as Json[];
-    expect(rows.map((r) => r.code).sort()).toEqual(['EXECUTIVE', 'LEGACY', 'SALES']);
+    expect(rows.map((r) => r.code).sort()).toEqual(['ADMINS', 'EXECUTIVE', 'LEGACY', 'SALES']);
     expect(rows.find((r) => r.code === 'SALES')!.staffCount).toBe(2);
     expect(rows.find((r) => r.code === 'LEGACY')!.isActive).toBe(false);
   });
@@ -1609,32 +1678,33 @@ describe('departments', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'FINANCE', name: 'Finance' },
+      body: { name: 'Finance' },
     });
     expect(state.status).toBe(201);
+    expect((state.body as Json).name).toBe('Finance');
     expect((state.body as Json).code).toBe('FINANCE');
-    expect(db.rows('departments').some((d) => d.code === 'FINANCE')).toBe(true);
+    expect(db.rows('departments').some((d) => d.name === 'Finance')).toBe(true);
     expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_CREATED')).toBe(true);
   });
 
-  it('rejects a malformed department code', async () => {
-    for (const code of ['finance', '1FIN', 'F', '']) {
+  it('rejects a short or missing department name', async () => {
+    for (const name of ['F', '', '  ']) {
       const state = await call({
         method: 'POST',
         afPath: 'departments',
         token: TOKEN.admin,
-        body: { code, name: 'Finance Team' },
+        body: { name },
       });
-      expect(state.status, code).toBe(400);
+      expect(state.status, name).toBe(400);
     }
   });
 
-  it('rejects a duplicate department code with 409', async () => {
+  it('rejects a duplicate department name with 409', async () => {
     const state = await call({
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'SALES', name: 'Sales Again' },
+      body: { name: 'Sales' },
     });
     expect(state.status).toBe(409);
     expect(err(state.body)?.code).toBe('CONFLICT');
@@ -1645,7 +1715,95 @@ describe('departments', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.viewer,
-      body: { code: 'NEWDEPT', name: 'New Dept' },
+      body: { name: 'New Dept' },
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('renames a department and audits it', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'PATCH',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.admin,
+      body: { name: 'Field Sales' },
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Json).name).toBe('Field Sales');
+    expect(db.rows('departments').find((d) => d.id === target.id)!.name).toBe('Field Sales');
+    expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_UPDATED')).toBe(true);
+  });
+
+  it('returns 404 when renaming a missing department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: 'departments/00000000-0000-4000-8000-000000000000',
+      token: TOKEN.admin,
+      body: { name: 'Ghost Dept' },
+    });
+    expect(state.status).toBe(404);
+  });
+
+  it('denies renaming without organization.departments update', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'PATCH',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.viewer,
+      body: { name: 'Field Sales' },
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('deletes an unused department and audits it', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(false);
+    expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_DELETED')).toBe(true);
+  });
+
+  it('refuses to delete a department with assigned staff', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(true);
+  });
+
+  it('refuses to delete a department with assigned roles', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const role = db.rows('roles').find((r) => r.slug === 'employee')!;
+    role.department_id = target.id;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(err(state.body)?.message).toMatch(/roles/i);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(true);
+  });
+
+  it('denies deletion without organization.departments delete', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.viewer,
     });
     expect(state.status).toBe(403);
   });
@@ -2440,7 +2598,7 @@ describe('handler surface', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'AUDITLESS', name: 'Auditless' },
+      body: { name: 'Auditless' },
     });
     expect(state.status).toBe(500);
     expect(err(state.body)?.code).toBe('INTERNAL');

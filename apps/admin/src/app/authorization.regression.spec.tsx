@@ -63,6 +63,7 @@ function renderPath(permissions: AfHomesPermission[], path: string) {
 const GUARDED: { path: string; module: AfHomesPermission['moduleKey'] }[] = [
   { path: '/admin', module: 'dashboard.view' },
   { path: '/admin/staff', module: 'organization.staff' },
+  { path: '/admin/network/members', module: 'network.members' },
   { path: '/admin/departments', module: 'organization.departments' },
   { path: '/admin/roles', module: 'organization.roles' },
 ];

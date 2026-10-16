@@ -1,0 +1,239 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
+}
+
+.tableWrap {
+  margin-top: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.heroChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .clickable:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 760px;
+  }
+}
+
+.pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.codeCell {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.identityCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.identityAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.identityName {
+  min-width: 0;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identityMeta {
+  display: block;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.dialogBody {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.formSection {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.formSection > legend {
+  padding: 0 var(--space-2);
+  font-weight: 700;
+  font-size: var(--text-body-s);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-brand-primary);
+}
+
+.sectionTitle {
+  font-weight: 700;
+}
+
+.sectionHint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.formFields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.inlinePair {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+}
+
+.cardHint {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 639px) {
+  .inlinePair {
+    grid-template-columns: 1fr;
+  }
+
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    text-align: right;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+}

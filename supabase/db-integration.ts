@@ -16199,6 +16199,161 @@ async function main(): Promise<void> {
           '(049) 222-2222',
         );
       }
+      section('75. network members: linked profiles, module and grants');
+      /* ---------------------------------------------------------------- */
+      // The Members screen onboards hierarchy sellers with a full personal
+      // record (migration 20261205000001): one linked profile row per staff
+      // account, TIN/government-ID write-only, staff-only table, and the
+      // network.members module mirroring the genealogy audience.
+      {
+        eq(
+          'network_member_profiles has 21 columns',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from information_schema.columns
+               where table_schema = 'public' and table_name = 'network_member_profiles'`,
+            )
+          ).n,
+          21,
+        );
+        eq(
+          'RLS is enabled on network_member_profiles',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from pg_class c join pg_namespace n on n.oid = c.relnamespace
+               where n.nspname = 'public' and c.relname = 'network_member_profiles' and c.relrowsecurity`,
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'no browser table grant on network_member_profiles',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from information_schema.role_table_grants
+               where table_schema = 'public' and table_name = 'network_member_profiles'
+                 and grantee in ('anon', 'authenticated', 'PUBLIC')`,
+            )
+          ).n,
+          0,
+        );
+        eq(
+          'no browser column grant on network_member_profiles',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from information_schema.role_column_grants
+               where table_schema = 'public' and table_name = 'network_member_profiles'
+                 and grantee in ('anon', 'authenticated', 'PUBLIC')`,
+            )
+          ).n,
+          0,
+        );
+        const memberModule = await one<{
+          name: string;
+          group_name: string;
+          sort_order: number;
+        }>(
+          `select name, group_name, sort_order from public.modules where key = 'network.members'`,
+        );
+        eq('network.members is named Members', memberModule.name, 'Members');
+        eq('network.members group is Network', memberModule.group_name, 'Network');
+        eq('network.members sort order is 56', memberModule.sort_order, 56);
+        const memberGrants = (
+          await db.query<{
+            slug: string;
+            can_view: boolean;
+            can_create: boolean;
+            can_update: boolean;
+          }>(
+            `select r.slug, rp.can_view, rp.can_create, rp.can_update
+             from public.role_permissions rp
+             join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+             where m.key = 'network.members' order by r.slug`,
+          )
+        ).rows;
+        eq(
+          'network.members grants mirror the genealogy audience',
+          JSON.stringify(
+            memberGrants.map((g) => [g.slug, g.can_view, g.can_create, g.can_update]),
+          ),
+          JSON.stringify([
+            ['admin', true, true, true],
+            ['ost', true, false, false],
+            ['sales_manager', true, false, false],
+            ['senior_sales_manager', true, false, false],
+            ['vice_director', true, false, false],
+          ]),
+        );
+
+        // Vocabulary CHECKs refuse invented values, inside a savepoint so the
+        // aborted statement cannot poison the shared transaction. The delete
+        // first keeps reruns green (the PK is the staff id).
+        await db.query('delete from public.network_member_profiles where staff_id = $1', [
+          staff['sm'],
+        ]);
+        await throwsIsolated('sex CHECK refuses an invented value', () =>
+          db.query(
+            `insert into public.network_member_profiles
+             (staff_id, date_of_birth, sex, civil_status, street_no, city_municipality,
+              province, zip_code, mobile_no, employer_name, employer_address,
+              job_position, government_id_type, government_id_number)
+             values ($1, '1990-02-02', 'Other', 'Single', '2 Main St', 'Quezon City',
+              'Metro Manila', '1100', '+639172222222', 'AF Homes', 'Ecofarm',
+              'Sales Manager', 'passport', 'D7654321')`,
+            [staff['sm']],
+          ),
+        );
+
+        // Round-trip on synthetic hierarchy staff, then remove the row so the
+        // fixture staff is untouched and reruns stay green.
+        await db.query(
+          `insert into public.network_member_profiles
+           (staff_id, date_of_birth, sex, civil_status, street_no, city_municipality,
+            province, zip_code, tel_no, mobile_no, fb_messenger, tin, employer_name,
+            employer_address, job_position, government_id_type, government_id_number,
+            referrer_staff_id)
+           values ($1, '1990-02-02', 'Female', 'Single', '2 Main St', 'Quezon City',
+            'Metro Manila', '1100', null, '+639172222222', null, '123-456-789', 'AF Homes',
+            'Ecofarm', 'Sales Manager', 'drivers_license', 'D7654321', $2)`,
+          [staff['sm'], staff['ssm']],
+        );
+        const stored = await one<{
+          sex: string;
+          mobile_no: string;
+          tin: string | null;
+          government_id_number: string | null;
+          referrer: string | null;
+        }>(
+          `select p.sex, p.mobile_no, p.tin, p.government_id_number, s.full_name as referrer
+           from public.network_member_profiles p
+           left join public.staff_users s on s.id = p.referrer_staff_id
+           where p.staff_id = $1`,
+          [staff['sm']],
+        );
+        eq('profile sex round-trips', stored.sex, 'Female');
+        eq('profile mobile round-trips', stored.mobile_no, '+639172222222');
+        eq('TIN is stored verbatim (masked only on read)', stored.tin, '123-456-789');
+        eq(
+          'government ID is stored verbatim (masked only on read)',
+          stored.government_id_number,
+          'D7654321',
+        );
+        eq('referrer resolves to the upline name', stored.referrer, 'Synthetic ssm');
+        await db.query('delete from public.network_member_profiles where staff_id = $1', [
+          staff['sm'],
+        ]);
+        eq(
+          'profile row removed after the round-trip',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from public.network_member_profiles where staff_id = $1`,
+              [staff['sm']],
+            )
+          ).n,
+          0,
+        );
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {

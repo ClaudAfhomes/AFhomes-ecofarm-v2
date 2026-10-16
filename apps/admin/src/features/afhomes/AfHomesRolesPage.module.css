@@ -56,13 +56,6 @@
   color: var(--color-brand-secondary);
 }
 
-.description {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
-}
-
 .permissionCell {
   display: inline-grid;
   gap: 4px;

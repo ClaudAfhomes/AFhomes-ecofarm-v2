@@ -140,6 +140,7 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       token: TOKEN.admin,
       body: {
         name: 'Escalate',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'finance.commission_payouts',
@@ -164,6 +165,7 @@ describe('Invariant B - a user cannot assign a permission they do not possess', 
       token: TOKEN.admin,
       body: {
         name: 'Delete Staff Grant',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'organization.staff',
@@ -420,7 +422,12 @@ describe('Invariant D - protected system roles cannot be deleted or defanged', (
       method: 'POST',
       afPath: 'roles',
       token: TOKEN.superAdmin,
-      body: { name: 'Assigned Temp Role', isActive: true, permissions: [] },
+      body: {
+        name: 'Assigned Temp Role',
+        isActive: true,
+        departmentId: UUID.department.sales,
+        permissions: [],
+      },
     });
     expect(assigned.status).toBe(201);
     const newId = (assigned.body as { id: string }).id;

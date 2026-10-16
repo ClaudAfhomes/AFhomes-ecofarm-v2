@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import {
+  Button,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -12,6 +13,7 @@ import {
   StatusChip,
 } from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
+import type { GenealogyNode } from '@afhomes/contracts';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { getGenealogy } from './services';
@@ -24,10 +26,11 @@ const ROLES = ['all', 'vice_director', 'senior_sales_manager', 'sales_manager', 
 const STATUSES = ['all', 'active', 'inactive', 'invited', 'suspended'];
 
 /**
- * Authorized sales network: VD to SSM to SM to OST genealogy.
+ * Head first, tree on demand.
  *
- * The tree loads once and every control filters locally, so typing never
- * refetches. Historical sales attribution is unchanged by anything here.
+ * Only the top head shows at first. "View Genealogy"
+ * opens the full tree, top to bottom. Search and
+ * filters narrow the tree without refetching.
  */
 export function GenealogyPage() {
   const query = useQuery({
@@ -39,7 +42,9 @@ export function GenealogyPage() {
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('all');
   const [status, setStatus] = useState('all');
+  const [expanded, setExpanded] = useState(false);
   const debouncedSearch = useDebouncedValue(search);
+  const filtering = debouncedSearch.trim() !== '' || role !== 'all' || status !== 'all';
   const rows = useMemo(
     () =>
       (query.data ?? []).filter(
@@ -55,6 +60,13 @@ export function GenealogyPage() {
 
   const sellerCount = query.data?.length ?? 0;
   const activeCount = (query.data ?? []).filter((n) => n.status === 'active').length;
+
+  const heads = useMemo(() => {
+    const ids = new Set((query.data ?? []).map((n) => n.staffId));
+    return (query.data ?? []).filter((n) => !n.uplineStaffId || !ids.has(n.uplineStaffId));
+  }, [query.data]);
+
+  const levels = useMemo(() => buildLevels(rows), [rows]);
 
   // First load skeletonizes the whole page so no static content flashes
   // before the tree it describes. Refetches keep the tree visible and never
@@ -92,24 +104,21 @@ export function GenealogyPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader
-        title="Sales Network"
-        description="Authorized VD to SSM to SM to OST genealogy. Historical sales attribution is unchanged."
-      />
+      <PageHeader title="Sales Network" description="Head first. Open full tree." />
 
       <div className={styles.badges} aria-label="Network summary">
         <StatusChip
-          label={`Sellers in view: ${formatCountOrDash(rows.length)}`}
+          label={`In view: ${formatCountOrDash(rows.length)}`}
           tone="neutral"
           icon="users"
         />
         <StatusChip
-          label={`Active sellers: ${formatCountOrDash(activeCount)}`}
+          label={`Active: ${formatCountOrDash(activeCount)}`}
           tone="success"
           icon="user-check"
         />
         <StatusChip
-          label={`Total sellers: ${formatCountOrDash(sellerCount)}`}
+          label={`Total: ${formatCountOrDash(sellerCount)}`}
           tone="neutral"
           icon="users"
         />
@@ -163,60 +172,138 @@ export function GenealogyPage() {
         />
       ) : rows.length === 0 ? (
         <EmptyState title="No matching records." description="Adjust the current filters." />
+      ) : filtering ? (
+        <ul className={styles.flatList} aria-label="Matching sellers">
+          {rows.map((n) => (
+            <li key={n.staffId}>
+              <NodeCard node={n} />
+            </li>
+          ))}
+        </ul>
       ) : (
-        <div
-          role="region"
-          aria-label="Scrollable records"
-          tabIndex={0}
-          className={`table-scroll ${styles.tableWrap}`}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Seller</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Direct</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((n) => (
-                <tr key={n.staffId}>
-                  <td data-label="Seller" className={styles.sellerCell}>
-                    <Link to={`/admin/genealogy/${n.staffId}`}>{n.fullName}</Link>
-                  </td>
-                  <td data-label="Role">{humanizeCode(n.role)}</td>
-                  <td data-label="Status">
-                    <StatusChip label={humanizeCode(n.ostStatus ?? n.status)} />
-                  </td>
-                  <td data-label="Direct" className={styles.numeric}>
-                    {formatCountOrDash(n.directDownlineCount)}
-                  </td>
-                  <td data-label="Total" className={styles.numeric}>
-                    {formatCountOrDash(n.totalDescendantCount)}
-                  </td>
-                </tr>
+        <>
+          <div className={styles.heads} aria-label="Network heads">
+            {heads.length === 0
+              ? rows.slice(0, 1).map((n) => <HeadCard key={n.staffId} node={n} />)
+              : heads.map((n) => <HeadCard key={n.staffId} node={n} />)}
+          </div>
+          <div className={styles.treeToggle}>
+            <Button variant="secondary" onClick={() => setExpanded((open) => !open)}>
+              {expanded ? 'Hide Genealogy' : 'View Genealogy'}
+            </Button>
+            <span className={styles.treeHint}>
+              {`${levels.length} ${levels.length === 1 ? 'level' : 'levels'}`}
+            </span>
+          </div>
+          {expanded ? (
+            <div className={styles.tree} role="region" aria-label="Genealogy tree">
+              {levels.map((level, index) => (
+                <section key={index} className={styles.level} aria-label={`Level ${index + 1}`}>
+                  <p className={styles.levelLabel}>Level {index + 1}</p>
+                  <ul className={styles.levelRow}>
+                    {level.map((n) => (
+                      <li key={n.staffId}>
+                        <NodeCard node={n} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          ) : null}
+        </>
       )}
     </section>
   );
 }
 
+function HeadCard({ node }: { node: GenealogyNode }) {
+  const navigate = useNavigate();
+  return (
+    <article className={styles.headCard} aria-label="Network head">
+      <span className={styles.headAvatar} aria-hidden="true">
+        {node.fullName.trim().charAt(0).toUpperCase() || '•'}
+      </span>
+      <div className={styles.headText}>
+        <p className={styles.headEyebrow}>Network head</p>
+        <Link to={`/admin/genealogy/${node.staffId}`} className={styles.headName}>
+          {node.fullName}
+        </Link>
+        <p className={styles.headMeta}>
+          {humanizeCode(node.role)} | {formatCountOrDash(node.directDownlineCount)} direct |{' '}
+          {formatCountOrDash(node.totalDescendantCount)} total
+        </p>
+      </div>
+      <div className={styles.headChips}>
+        <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label={`View genealogy of ${node.fullName}`}
+          onClick={() => navigate(`/admin/genealogy/${node.staffId}`)}
+        >
+          View Genealogy
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function NodeCard({ node }: { node: GenealogyNode }) {
+  return (
+    <article className={styles.nodeCard}>
+      <span className={styles.nodeAvatar} aria-hidden="true">
+        {node.fullName.trim().charAt(0).toUpperCase() || '•'}
+      </span>
+      <div className={styles.nodeText}>
+        <Link to={`/admin/genealogy/${node.staffId}`} className={styles.nodeName}>
+          {node.fullName}
+        </Link>
+        <p className={styles.nodeMeta}>
+          {humanizeCode(node.role)} | {formatCountOrDash(node.directDownlineCount)} direct
+        </p>
+      </div>
+      <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+    </article>
+  );
+}
+
 /**
- * Actionable tree-load guidance per failure cause. Raw server internals are
- * never rendered (see `ErrorState`); each branch names the next step instead.
- * Returns `undefined` for unknown errors so the shared generic message applies.
+ * Level order from heads down. Links resolve
+ * through upline ids, orphans join heads.
+ */
+function buildLevels(rows: GenealogyNode[]): GenealogyNode[][] {
+  const ids = new Set(rows.map((n) => n.staffId));
+  const children = new Map<string, GenealogyNode[]>();
+  const heads = rows.filter((n) => !n.uplineStaffId || !ids.has(n.uplineStaffId));
+  for (const n of rows) {
+    if (!n.uplineStaffId || !ids.has(n.uplineStaffId)) continue;
+    const list = children.get(n.uplineStaffId) ?? [];
+    list.push(n);
+    children.set(n.uplineStaffId, list);
+  }
+  const levels: GenealogyNode[][] = [];
+  let current = heads;
+  const seen = new Set<string>();
+  while (current.length > 0) {
+    const fresh = current.filter((n) => !seen.has(n.staffId));
+    if (fresh.length === 0) break;
+    fresh.forEach((n) => seen.add(n.staffId));
+    levels.push(fresh);
+    current = fresh.flatMap((n) => children.get(n.staffId) ?? []);
+  }
+  const leftovers = rows.filter((n) => !seen.has(n.staffId));
+  if (leftovers.length > 0) levels.push(leftovers);
+  return levels;
+}
+
+/**
+ * Short failure guidance per cause. Raw server
+ * internals never render, only next steps.
  */
 function describeGenealogyLoadError(error: unknown): string | undefined {
-  if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
-  if (error instanceof ApiError && error.status === 401)
-    return 'Your session has expired. Sign in again, then retry.';
-  if (error instanceof ApiError && error.status === 403)
-    return 'Your account cannot open the sales network right now. Contact an administrator.';
+  if (error instanceof ApiNetworkError) return 'Check connection. Try again.';
+  if (error instanceof ApiError && error.status === 401) return 'Session expired. Sign in again.';
+  if (error instanceof ApiError && error.status === 403) return 'No access. Ask administrator.';
   return undefined;
 }

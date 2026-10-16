@@ -158,6 +158,9 @@ const GenealogyDetailsPage = lazy(() =>
     default: m.GenealogyDetailsPage,
   })),
 );
+const MembersPage = lazy(() =>
+  import('../features/network-members/MembersPage').then((m) => ({ default: m.MembersPage })),
+);
 const DocumentsPage = lazy(() =>
   import('../features/documents/DocumentsPage').then((m) => ({ default: m.DocumentsPage })),
 );
@@ -375,6 +378,10 @@ export default function App() {
               <Route
                 path="/admin/genealogy/:staffId"
                 element={protectedPage(<GenealogyDetailsPage />)}
+              />
+              <Route
+                path="/admin/network/members"
+                element={protectedPage(<MembersPage />)}
               />
               {/* OST onboarding. Each route is gated on its own module key via
               ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree.

@@ -485,6 +485,31 @@ export {
   genealogySummarySchema,
 } from './schemas/genealogy.js';
 export type { GenealogyNode, GenealogySummary } from './schemas/genealogy.js';
+
+/* ---- Sales-network Members: hierarchy sellers with a linked profile ---- */
+export {
+  memberPositionSchema,
+  MEMBER_POSITIONS,
+  MEMBER_POSITION_LABELS,
+  MEMBER_UPLINE_ROLE,
+  memberSexSchema,
+  memberCivilStatusSchema,
+  memberProfileSchema,
+  createMemberSchema,
+  updateMemberProfileSchema,
+  memberSchema,
+  memberListQuerySchema,
+} from './schemas/member.js';
+export type {
+  MemberPosition,
+  MemberSex,
+  MemberCivilStatus,
+  MemberProfile,
+  CreateMember,
+  UpdateMemberProfile,
+  Member,
+  MemberListQuery,
+} from './schemas/member.js';
 export {
   analyticsOverviewSchema,
   analyticsPeriodSchema,

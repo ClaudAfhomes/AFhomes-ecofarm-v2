@@ -1,5 +1,4 @@
-/* Sales network directory: page shell, summary metrics, and the shared
-   responsive table grammar (desktop scrolls, phones collapse to cards). */
+/* Sales network: head card first, full tree on demand. */
 
 .page {
   display: grid;
@@ -13,10 +12,6 @@
   .page {
     overflow-x: clip;
   }
-
-  .tableWrap.tableWrap {
-    overflow-x: clip;
-  }
 }
 
 .badges {
@@ -25,105 +20,216 @@
   gap: var(--space-2);
 }
 
-.tableWrap {
-  margin-top: var(--space-2);
+.heads {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.headCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-brand-primary) 9%, transparent),
+      transparent 65%
+    ),
+    var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.headAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow:
+    0 0 0 3px var(--color-bg-surface),
+    0 0 0 5px var(--color-brand-secondary);
+}
+
+.headText {
+  display: grid;
+  gap: 2px;
   min-width: 0;
-  max-width: 100%;
+  flex: 1 1 auto;
 }
 
-@media (min-width: 640px) {
-  .tableWrap > table {
-    min-width: 640px;
-  }
-}
-
-.sellerCell {
+.headEyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
   font-weight: 700;
-  overflow-wrap: anywhere;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
-.numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.headName {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (max-width: 639px) {
-  div.tableWrap.tableWrap > table {
-    min-width: 0;
-  }
+.headName:hover {
+  color: var(--color-brand-secondary);
+  text-decoration: underline;
+}
 
-  .tableWrap > table {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-  }
+.headMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
 
-  .tableWrap thead {
-    display: none;
-  }
+.headChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
 
-  .tableWrap tbody {
-    display: block;
-  }
+.treeToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
 
-  .tableWrap tbody > tr {
-    display: block;
-    max-width: 100%;
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-md);
-    background-color: var(--color-bg-surface-raised);
-    margin-bottom: var(--space-3);
-    padding: var(--space-2);
-  }
+.treeHint {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
 
-  .tableWrap tbody > tr:last-child {
-    margin-bottom: 0;
-  }
+.flatList {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
 
-  .tableWrap tbody > tr > td {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-2) var(--space-3);
-    text-align: right;
-    min-width: 0;
-  }
+.tree {
+  display: grid;
+  gap: 0;
+}
 
-  .tableWrap tbody > tr > td > * {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
+.level {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  position: relative;
+}
 
-  .tableWrap tbody > tr > td::before {
-    content: attr(data-label);
-    font-weight: 600;
-    font-size: var(--text-caption);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-text-muted);
-    text-align: left;
-    flex-shrink: 0;
-  }
+.level + .level {
+  border-top: 2px solid var(--color-border-default);
+}
 
-  .tableWrap tbody > tr > td:not([data-label])::before,
-  .tableWrap tbody > tr > td[data-label='']::before {
-    display: none;
-  }
+.level + .level::before {
+  content: '';
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  width: 2px;
+  height: 12px;
+  background-color: var(--color-brand-secondary);
+}
 
-  .tableWrap tbody > tr > td[data-label=''] {
-    justify-content: flex-end;
-  }
+.levelLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
 
-  .tableWrap tbody > tr > td[data-label='Seller'] {
-    justify-content: flex-start;
-    font-size: 0.95rem;
-  }
+.levelRow {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+}
 
-  .tableWrap tbody > tr > td[data-label='Seller']::before {
-    display: none;
+.nodeCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  transition: background-color var(--transition-fast);
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .nodeCard:hover {
+    background-color: var(--color-state-hover);
   }
+}
+
+.nodeAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nodeText {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.nodeName {
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeName:hover {
+  color: var(--color-brand-secondary);
+  text-decoration: underline;
+}
+
+.nodeMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .filterLabel {

@@ -132,6 +132,15 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   // gains this one for the lookup, and `admin` keeps oversight. View only -
   // the screen has no mutating endpoint to authorize.
   { moduleKey: 'operations.customer_lookup', roles: ['employee', 'admin'] },
+  // Sales-network Members, seeded by 20261205000001. `admin` manages
+  // (view/create/update: onboarding provisions the staff account); the
+  // hierarchy reads its own network, mirroring the `network.genealogy`
+  // audience. Seeded rather than folded into the matrix above because it
+  // arrived after the baseline was reviewed.
+  {
+    moduleKey: 'network.members',
+    roles: ['admin', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'],
+  },
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

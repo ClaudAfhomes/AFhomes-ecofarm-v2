@@ -27,12 +27,13 @@ import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
-import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
+import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
 import {
   notifySuccess,
   notifyWarning,
   Alert,
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -92,6 +93,8 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
@@ -106,7 +109,7 @@ export function ReservationAgreementsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: reservationKeys.list(status, tier, debouncedSearch, reservationWorkOnly, page),
+    queryKey: reservationKeys.list(status, tier, debouncedSearch, from, to, reservationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -115,6 +118,8 @@ export function ReservationAgreementsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
@@ -251,6 +256,28 @@ export function ReservationAgreementsPage() {
                 ]}
               />
             </label>
+            <DateField
+              id="reservations-from"
+              name="from"
+              label="From date"
+              optional
+              value={from}
+              onChange={(value) => {
+                setFrom(value);
+                setPage(0);
+              }}
+            />
+            <DateField
+              id="reservations-to"
+              name="to"
+              label="To date"
+              optional
+              value={to}
+              onChange={(value) => {
+                setTo(value);
+                setPage(0);
+              }}
+            />
           </>
         }
       />
@@ -608,6 +635,8 @@ export function ReservationAgreementEditorPage() {
       if (agreement.customerApplicationId)
         void client.invalidateQueries({ queryKey: applicationKeys.scope });
       void client.invalidateQueries({ queryKey: applicationKeys.reservationsScope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
+      void client.invalidateQueries({ queryKey: sharedScopes.reports });
       if (!id) navigate(`/admin/sales/reservations/${agreement.id}`, { replace: true });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Save failed.'),
@@ -618,6 +647,7 @@ export function ReservationAgreementEditorPage() {
       notifySuccess({ title: 'Success', message: 'Agreement submitted.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Submit failed.'),
   });
@@ -634,6 +664,8 @@ export function ReservationAgreementEditorPage() {
       void client.invalidateQueries({ queryKey: businessKeys.queue });
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
       void client.invalidateQueries({ queryKey: applicationKeys.reservationsScope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
+      void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
   });
@@ -643,6 +675,7 @@ export function ReservationAgreementEditorPage() {
       notifySuccess({ title: 'Success', message: 'Agreement reopened as draft.' });
       void existing.refetch();
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Reopen failed.'),
   });
@@ -752,7 +785,7 @@ export function ReservationAgreementEditorPage() {
       {reviewRequired ? (
         <Alert variant="warning">
           <strong>Review required first.</strong> Confirm server offer with reason.{' '}
-          <Link to={`/admin/sales/applications/${customerApplicationId}`}>
+          <Link to={`/admin/customers/applications/${customerApplicationId}`}>
             Open the application review
           </Link>
           .

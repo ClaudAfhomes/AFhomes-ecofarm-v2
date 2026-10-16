@@ -31,8 +31,8 @@ export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);
 export const createAfHomesRole = (input: {
   name: string;
-  description?: string;
   isActive: boolean;
+  departmentId: string;
   permissions: AfHomesPermission[];
 }) =>
   request('/admin/afhomes/roles', afHomesRoleSchema, {
@@ -43,8 +43,8 @@ export const updateAfHomesRole = (
   id: string,
   input: Partial<{
     name: string;
-    description: string;
     isActive: boolean;
+    departmentId: string;
     permissions: AfHomesPermission[];
   }>,
 ) =>
@@ -142,11 +142,19 @@ export const purgeTestAfHomesStaff = (id: string): Promise<StaffTestPurgeRespons
   });
 export const getAfHomesDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
-export const createAfHomesDepartment = (input: { code: string; name: string }) =>
+export const createAfHomesDepartment = (input: { name: string }) =>
   request('/admin/afhomes/departments', afHomesDepartmentSchema, {
     method: 'POST',
     body: JSON.stringify(input),
   });
+const departmentDeletionSchema = z.object({ deleted: z.literal(true) });
+export const updateAfHomesDepartment = (id: string, input: { name: string }) =>
+  request(`/admin/afhomes/departments/${id}`, afHomesDepartmentSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+export const deleteAfHomesDepartment = (id: string) =>
+  request(`/admin/afhomes/departments/${id}`, departmentDeletionSchema, { method: 'DELETE' });
 export const getAfHomesDashboard = (range: string): Promise<AfHomesDashboard> =>
   request(`/admin/afhomes/dashboard?range=${encodeURIComponent(range)}`, afHomesDashboardSchema);
 
