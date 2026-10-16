@@ -38,12 +38,14 @@ describe('psgcCloudAddressProvider.provinces', () => {
   });
 
   it('normalizes the provider payload to { code, name }', async () => {
-    stubFetch(() =>
+    stubFetch((url) =>
       json({
-        data: [
-          { code: '0403400000', name: 'Laguna', region: 'Region IV-A (CALABARZON)' },
-          { code: '0102800000', name: 'Ilocos Norte', region: 'Region I (Ilocos Region)' },
-        ],
+        data: url.endsWith('/regions')
+          ? []
+          : [
+              { code: '0403400000', name: 'Laguna', region: 'Region IV-A (CALABARZON)' },
+              { code: '0102800000', name: 'Ilocos Norte', region: 'Region I (Ilocos Region)' },
+            ],
       }),
     );
 
@@ -54,7 +56,9 @@ describe('psgcCloudAddressProvider.provinces', () => {
   });
 
   it('keeps the provider name verbatim rather than upper-casing it', async () => {
-    stubFetch(() => json({ data: [{ code: '0403400000', name: 'Laguna' }] }));
+    stubFetch((url) =>
+      json({ data: url.endsWith('/regions') ? [] : [{ code: '0403400000', name: 'Laguna' }] }),
+    );
     expect((await psgcCloudAddressProvider.provinces())[0]?.name).toBe('Laguna');
   });
 
@@ -66,7 +70,53 @@ describe('psgcCloudAddressProvider.provinces', () => {
     });
 
     await psgcCloudAddressProvider.provinces();
-    expect(seen[0]).not.toContain('?');
+    for (const url of seen) expect(url).not.toContain('?');
+  });
+
+  // NCR nests no provinces, so `/provinces` cannot name it and every Metro
+  // Manila address was unenterable until the region stood in for one.
+  it('offers Metro Manila, the one region that nests no provinces', async () => {
+    stubFetch((url) => {
+      if (url.endsWith('/regions/1300000000/provinces')) return json({ data: [] });
+      if (url.endsWith('/regions')) {
+        return json({
+          data: [
+            { code: '0400000000', name: 'Region IV-A (CALABARZON)' },
+            { code: '1300000000', name: 'National Capital Region (NCR)' },
+          ],
+        });
+      }
+      return json({
+        data: [{ code: '0403400000', name: 'Laguna', region: 'Region IV-A (CALABARZON)' }],
+      });
+    });
+
+    expect(await psgcCloudAddressProvider.provinces()).toEqual([
+      { code: '0403400000', name: 'Laguna' },
+      { code: '1300000000', name: 'Metro Manila' },
+    ]);
+  });
+
+  // A region whose name merely failed to match a province's `region` string
+  // must never be smuggled into a list of provinces.
+  it('refuses to offer a region that does nest provinces', async () => {
+    stubFetch((url) => {
+      if (url.endsWith('/regions/0400000000/provinces')) {
+        return json({
+          data: [{ code: '0403400000', name: 'Laguna', region: 'Region IV-A (CALABARZON)' }],
+        });
+      }
+      if (url.endsWith('/regions')) {
+        return json({ data: [{ code: '0400000000', name: 'CALABARZON' }] });
+      }
+      return json({
+        data: [{ code: '0403400000', name: 'Laguna', region: 'Region IV-A (CALABARZON)' }],
+      });
+    });
+
+    expect(await psgcCloudAddressProvider.provinces()).toEqual([
+      { code: '0403400000', name: 'Laguna' },
+    ]);
   });
 });
 
@@ -176,6 +226,48 @@ describe('psgcCloudAddressProvider.localities', () => {
       code: 'PROVIDER_UNAVAILABLE',
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  // Sarangani's list carried Manila's `SubMun` districts and Maguindanao del
+  // Sur's carried BARMM `SGU`s; one unmapped row used to fail the whole
+  // province, leaving both with no city to choose at all.
+  it('skips a district or special unit instead of failing the whole province', async () => {
+    stubFetch(() =>
+      json({
+        data: [
+          { code: '0403406000', name: 'Calauan', type: 'Mun' },
+          { code: '1380601000', name: 'Tondo I/II', type: 'SubMun' },
+          { code: '1999901000', name: 'Pikit Cluster I', type: 'SGU' },
+          { code: '0403403000', name: 'City of Binan', type: 'City' },
+        ],
+      }),
+    );
+
+    expect(await psgcCloudAddressProvider.localities('0403400000')).toEqual([
+      { code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000' },
+      { code: '0403403000', name: 'City of Binan', type: 'city', provinceCode: '0403400000' },
+    ]);
+  });
+
+  // A province-less region has no `/provinces/{code}/...` path at all.
+  it('reads a region scope\u2019s cities from the region path', async () => {
+    const seen: string[] = [];
+    stubFetch((url) => {
+      seen.push(url);
+      if (url.includes('/provinces/1300000000/'))
+        return json({ message: 'Province not found' }, 404);
+      return json({
+        data: [{ code: '1380600000', name: 'City of Manila', type: 'City', province: 'Sarangani' }],
+      });
+    });
+
+    // PSGC mis-parents every NCR row under "Sarangani"; the scope we asked for
+    // is the only trustworthy parent, and it has to win.
+    expect(await psgcCloudAddressProvider.localities('1300000000')).toEqual([
+      { code: '1380600000', name: 'City of Manila', type: 'city', provinceCode: '1300000000' },
+    ]);
+    expect(seen[0]).toContain('/provinces/1300000000/cities-municipalities');
+    expect(seen[1]).toContain('/regions/1300000000/cities-municipalities');
   });
 });
 
