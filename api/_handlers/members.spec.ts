@@ -9,7 +9,7 @@
  * (no password, masked TIN/government ID, clean audits), and hierarchy
  * sellers leave with an AA number issued.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 import { AddressProviderError } from '../_lib/address-provider.js';
@@ -245,6 +245,8 @@ function install(
     writeErrors?: Record<string, { code?: string; message: string }>;
     rpcErrors?: Record<string, { code?: string; message: string }>;
     rpcs?: { fn: string; result: unknown | ((args: Record<string, unknown>) => unknown) }[];
+    /** Id handed back by inviteUserByEmail; must be a UUID to pass contracts. */
+    inviteUserId?: string;
   },
 ) {
   holder.db = new FakeSupabase({
@@ -377,7 +379,10 @@ describe('POST /members', () => {
     expect(audits).not.toContain('P9998888');
   });
 
-  it('creates an OST under a Sales Manager without issuing IST accreditation', async () => {
+  it('refuses to create an OST through the member endpoint', async () => {
+    // OST carries its own footprint (application, sponsor edge, term) and is
+    // created through POST /members/ost, never here. The shared contract
+    // refuses the position; the handler keeps its own guard behind that.
     const state = await call({
       method: 'POST',
       body: createBody({
@@ -387,8 +392,8 @@ describe('POST /members', () => {
       }),
       token: ADMIN_TOKEN,
     });
-    expect(state.status).toBe(201);
-    expect((state.body as Record<string, unknown>).position).toBe('ost');
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
     expect(rpcCalls('manage_sale_team_accreditation')).toHaveLength(0);
   });
 
@@ -586,7 +591,7 @@ describe('POST /members', () => {
       rpcs: [
         {
           fn: 'manage_sale_team_accreditation',
-          result: { aaNumber: 'AAMANUAL1234', kind: 'IST', status: 'accredited' },
+          result: { aaNumber: 'AAI26090001', kind: 'IST', status: 'accredited' },
         },
         { fn: 'get_sale_team_accreditation', result: null },
         { fn: 'search_sale_team_accreditation', result: null },
@@ -597,14 +602,14 @@ describe('POST /members', () => {
       body: createBody({
         email: 'manual.aa@afhomes.test',
         aaNumberMode: 'manual',
-        aaNumber: 'AAMANUAL1234',
+        aaNumber: 'AAI26090001',
       }),
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(201);
     const manage = rpcArgs('manage_sale_team_accreditation');
     expect(manage).toHaveLength(1);
-    expect(manage[0]!.arg?.p_aa_number).toBe('AAMANUAL1234');
+    expect(manage[0]!.arg?.p_aa_number).toBe('AAI26090001');
   });
 
   it('refuses a taken MANUAL number before writing anything', async () => {
@@ -617,7 +622,7 @@ describe('POST /members', () => {
         { fn: 'get_sale_team_accreditation', result: null },
         {
           fn: 'search_sale_team_accreditation',
-          result: { aaNumber: 'AATAKEN123456', kind: 'IST', status: 'accredited' },
+          result: { aaNumber: 'AAI26090002', kind: 'IST', status: 'accredited' },
         },
       ],
     });
@@ -626,7 +631,7 @@ describe('POST /members', () => {
       body: createBody({
         email: 'taken.aa@afhomes.test',
         aaNumberMode: 'manual',
-        aaNumber: 'AATAKEN123456',
+        aaNumber: 'AAI26090002',
       }),
       token: ADMIN_TOKEN,
     });
@@ -646,7 +651,7 @@ describe('POST /members', () => {
       body: createBody({
         email: 'race.aa@afhomes.test',
         aaNumberMode: 'manual',
-        aaNumber: 'AARACE1234567',
+        aaNumber: 'AAI26090003',
       }),
       token: ADMIN_TOKEN,
     });
@@ -663,7 +668,7 @@ describe('POST /members', () => {
 describe('POST /members/:id/accreditation', () => {
   const manageOk = {
     fn: 'manage_sale_team_accreditation',
-    result: { aaNumber: 'AAISSUED123456', kind: 'IST', status: 'accredited' },
+    result: { aaNumber: 'AAI26090004', kind: 'IST', status: 'accredited' },
   };
   const noAccreditation = { fn: 'get_sale_team_accreditation', result: null };
   const noSearchHit = { fn: 'search_sale_team_accreditation', result: null };
@@ -688,11 +693,11 @@ describe('POST /members/:id/accreditation', () => {
     const state = await call({
       method: 'POST',
       familyPath: `${SM_ID}/accreditation`,
-      body: { aaNumberMode: 'manual', aaNumber: 'AAISSUE1234567' },
+      body: { aaNumberMode: 'manual', aaNumber: 'AAI26090005' },
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(200);
-    expect(rpcArgs('manage_sale_team_accreditation')[0]!.arg?.p_aa_number).toBe('AAISSUE1234567');
+    expect(rpcArgs('manage_sale_team_accreditation')[0]!.arg?.p_aa_number).toBe('AAI26090005');
   });
 
   it('refuses a second number for an accredited member', async () => {
@@ -709,7 +714,7 @@ describe('POST /members/:id/accreditation', () => {
     const state = await call({
       method: 'POST',
       familyPath: `${SM_ID}/accreditation`,
-      body: { aaNumberMode: 'manual', aaNumber: 'AAISSUE1234567' },
+      body: { aaNumberMode: 'manual', aaNumber: 'AAI26090005' },
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(409);
@@ -1113,5 +1118,310 @@ describe('PATCH /members/:id', () => {
     const db = holder.db as unknown as { rows: (table: string) => Row[] };
     const profile = db.rows('network_member_profiles').find((r) => r.staff_id === SM_ID)!;
     expect(profile.zip_code).toBe('4012');
+  });
+});
+
+const DIRECT_APP_ID = '11111111-2222-4333-8444-555555555555';
+const DIRECT_TERM_ID = '99999999-8888-4777-8666-555555555555';
+const DIRECT_MEMBER_ID = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+const directIdentity = {
+  firstName: 'Ostie',
+  middleName: 'R',
+  lastName: 'Member',
+  email: 'direct.ost@afhomes.test',
+  phone: '+639171111111',
+  birthDate: '1990-01-02',
+  address: {
+    line1: '1 Farm Rd',
+    city: 'Calauan',
+    province: 'Laguna',
+    postalCode: '4012',
+    countryCode: 'PH',
+  },
+};
+const directForm = {
+  dateApplied: '2026-10-01',
+  programCategory: 'non_vip',
+  vipCardType: null,
+  sex: 'male',
+  civilStatus: 'single',
+  telephone: '',
+  messenger: '',
+  tin: '',
+  employerName: '',
+  employerAddress: '',
+  jobPosition: '',
+  governmentIdType: 'passport',
+  governmentIdNumber: 'P1234567',
+  applicantSignatureStatus: 'received',
+  referrerSignatureStatus: 'received',
+  applicantSignedOn: '2026-10-01',
+  referrerSignedOn: '2026-10-01',
+  referrerSnapshot: { telephone: '', mobile: '', address: '', messenger: '' },
+};
+const directBody = (extra: Record<string, unknown> = {}) => ({
+  mode: 'complete',
+  requestId: '22222222-3333-4444-8555-666666666666',
+  sponsorStaffId: SM_ID,
+  identity: directIdentity,
+  form: directForm,
+  startsOn: '2026-10-01',
+  expiresOn: '2027-10-01',
+  ...extra,
+});
+const installDirect = (extra: Record<string, unknown> = {}) =>
+  install(undefined, {
+    inviteUserId: DIRECT_MEMBER_ID,
+    rpcs: [
+      { fn: 'submit_ost_accreditation', result: DIRECT_APP_ID },
+      { fn: 'confirm_ost_application_signatures', result: DIRECT_APP_ID },
+      { fn: 'install_direct_ost_accreditation', result: DIRECT_TERM_ID },
+    ],
+    ...extra,
+  });
+
+describe('POST /members/ost (direct OST creation)', () => {
+  const ORIGINAL_ADMIN_URL = process.env.AFHOMES_ADMIN_URL;
+  beforeEach(() => {
+    process.env.AFHOMES_ADMIN_URL = 'https://afhomes.test/admin';
+  });
+  afterAll(() => {
+    if (ORIGINAL_ADMIN_URL === undefined) delete process.env.AFHOMES_ADMIN_URL;
+    else process.env.AFHOMES_ADMIN_URL = ORIGINAL_ADMIN_URL;
+  });
+
+  it('records the application, the real signature dates and the approval in one act', async () => {
+    installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(201);
+    expect(state.body).toEqual({
+      applicationId: DIRECT_APP_ID,
+      memberId: DIRECT_MEMBER_ID,
+      status: 'approved',
+    });
+    // The submission carries the referenced sponsor and no referral code the
+    // operator could have invented.
+    const submitted = rpcArgs('submit_ost_accreditation')[0]!.arg!;
+    expect(submitted.p_sponsor_id).toBe(SM_ID);
+    expect(submitted.p_code_id).toBeNull();
+    expect(submitted.p_source).toBe('manual');
+    // The dates the operator transcribed are the dates that travel.
+    const signatures = rpcArgs('confirm_ost_application_signatures')[0]!.arg!;
+    expect(signatures.p_applicant_date).toBe('2026-10-01');
+    expect(signatures.p_referrer_date).toBe('2026-10-01');
+    // The install re-validates the sponsor in SQL and never receives a number.
+    const installed = rpcArgs('install_direct_ost_accreditation')[0]!.arg!;
+    expect(installed.p_actor_id).toBe(ADMIN_ID);
+    expect(installed.p_auth_id).toBe(DIRECT_MEMBER_ID);
+    expect(installed.p_starts_on).toBe('2026-10-01');
+    expect(installed.p_expires_on).toBe('2027-10-01');
+    expect(installed).not.toHaveProperty('p_aa_number');
+  });
+
+  it('saves the application as pending and invites nobody', async () => {
+    installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody({ mode: 'pending', startsOn: null, expiresOn: null }),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(201);
+    expect(state.body).toEqual({
+      applicationId: DIRECT_APP_ID,
+      memberId: null,
+      status: 'submitted',
+    });
+    expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
+    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(0);
+    expect(
+      (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
+        (c) => c.op === 'inviteUserByEmail',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('keeps the invitation when the install is refused', async () => {
+    installDirect({
+      rpcErrors: {
+        install_direct_ost_accreditation: { message: 'OST_SIGNATURE_EVIDENCE_REQUIRED' },
+      },
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
+    // The invitation is deliberately preserved: an invite response does not
+    // prove the account was newly created, so deleting it could destroy a
+    // pre-existing login. The operator retries from the OST queue.
+    expect(
+      (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
+        (c) => c.op === 'inviteUserByEmail',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('maps a duplicate registration to a conflict', async () => {
+    installDirect({
+      rpcErrors: { submit_ost_accreditation: { message: 'OST_DUPLICATE_ACCOUNT' } },
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody({ mode: 'pending', startsOn: null, expiresOn: null }),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(409);
+    expect(err(state.body)?.code).toBe('CONFLICT');
+  });
+
+  it('refuses an anonymous caller and a body whose sponsor is not a member', async () => {
+    installDirect();
+    const anonymous = await call({ method: 'POST', familyPath: 'ost', body: directBody() });
+    expect(anonymous.status).toBe(401);
+    const missing = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody({ sponsorStaffId: 'not-a-uuid' }),
+      token: ADMIN_TOKEN,
+    });
+    expect(missing.status).toBe(400);
+    expect(err(missing.body)?.code).toBe('VALIDATION_ERROR');
+    expect(rpcCalls('submit_ost_accreditation')).toHaveLength(0);
+  });
+});
+
+describe('POST /members/:id/transfer', () => {
+  const toOstBody = (extra: Record<string, unknown> = {}) => ({
+    direction: 'IST_TO_OST',
+    reason: 'Moved to the OST desk by management',
+    sponsorStaffId: SM_ID,
+    identity: directIdentity,
+    form: directForm,
+    startsOn: '2026-10-01',
+    expiresOn: '2027-10-01',
+    ...extra,
+  });
+  const transferRpc = (result: unknown, rpcErrors?: Record<string, { message: string }>) =>
+    install(undefined, {
+      rpcs: [
+        // The member list resolves each row's AA number; the transfer tests
+        // assert the provenance state, not the number itself.
+        {
+          fn: 'get_sale_team_accreditation',
+          result: { aaNumber: 'AAI26090001', kind: 'IST', status: 'accredited' },
+        },
+        { fn: 'transfer_sale_team_member', result },
+      ],
+      ...(rpcErrors ? { rpcErrors } : {}),
+    });
+
+  it('transfers IST to OST in one call and sends no number at all', async () => {
+    transferRpc({
+      direction: 'IST_TO_OST',
+      kind: 'OST',
+      previousAaNumber: 'AAI26090001',
+      aaNumber: 'AAO26090001',
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: `${SM_ID}/transfer`,
+      body: toOstBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Record<string, unknown>).id).toBe(SM_ID);
+    const args = rpcArgs('transfer_sale_team_member')[0]!.arg!;
+    expect(args.p_actor_id).toBe(ADMIN_ID);
+    expect(args.p_staff_id).toBe(SM_ID);
+    expect(args.p_direction).toBe('IST_TO_OST');
+    expect(args.p_reason).toBe('Moved to the OST desk by management');
+    expect(args.p_sponsor_id).toBe(SM_ID);
+    expect(args.p_starts_on).toBe('2026-10-01');
+    expect(args.p_expires_on).toBe('2027-10-01');
+    // The client never names a number: the database issues the successor.
+    expect(args).not.toHaveProperty('p_aa_number');
+    expect(args.p_target_position ?? null).toBeNull();
+    expect(args.p_head_id ?? null).toBeNull();
+  });
+
+  it('transfers OST to IST with the chosen position and head', async () => {
+    transferRpc({
+      direction: 'OST_TO_IST',
+      kind: 'IST',
+      previousAaNumber: 'AAO26090001',
+      aaNumber: 'AAI26090009',
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: `${SM_ID}/transfer`,
+      body: {
+        direction: 'OST_TO_IST',
+        reason: 'Returns to the selling hierarchy',
+        targetPosition: 'sales_manager',
+        headStaffId: SSM_ID,
+      },
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(200);
+    const args = rpcArgs('transfer_sale_team_member')[0]!.arg!;
+    expect(args.p_direction).toBe('OST_TO_IST');
+    expect(args.p_target_position).toBe('sales_manager');
+    expect(args.p_head_id).toBe(SSM_ID);
+    expect(args.p_sponsor_id ?? null).toBeNull();
+    expect(args.p_identity ?? null).toBeNull();
+    expect(args).not.toHaveProperty('p_aa_number');
+  });
+
+  it('refuses a reason-free transfer before any call reaches SQL', async () => {
+    transferRpc({});
+    const state = await call({
+      method: 'POST',
+      familyPath: `${SM_ID}/transfer`,
+      body: toOstBody({ reason: 'no' }),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+  });
+
+  it('does not transfer a member that does not exist', async () => {
+    transferRpc({});
+    const state = await call({
+      method: 'POST',
+      familyPath: '12121212-3434-4565-8787-909090909090/transfer',
+      body: toOstBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(404);
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+  });
+
+  it('maps a refused transfer to a conflict and requires authentication', async () => {
+    transferRpc({}, { transfer_sale_team_member: { message: 'OST_RENEWAL_IN_PROGRESS' } });
+    const state = await call({
+      method: 'POST',
+      familyPath: `${SM_ID}/transfer`,
+      body: toOstBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(409);
+    expect(err(state.body)?.code).toBe('CONFLICT');
+    const anonymous = await call({
+      method: 'POST',
+      familyPath: `${SM_ID}/transfer`,
+      body: toOstBody(),
+    });
+    expect(anonymous.status).toBe(401);
   });
 });

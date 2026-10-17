@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Alert,
   Button,
   ConfirmDialog,
   DetailCard,
@@ -20,6 +21,7 @@ import {
   DetailFieldGrid,
   Dialog,
   Select,
+  Spinner,
   StatusChip,
   TextField,
   notifyError,
@@ -27,6 +29,7 @@ import {
 } from '@afhomes/ui';
 import {
   GOVERNMENT_ID_TYPE_LABELS,
+  manualIstAaNumberSchema,
   toTitleCase,
   updateMemberProfileSchema,
   type Member,
@@ -41,9 +44,8 @@ import {
   getMember,
   issueMemberAccreditation,
   networkMemberKeys,
+  normalizeAaEntry,
   updateMember,
-  AA_MANUAL_RE,
-  withAaPrefix,
 } from './services';
 import styles from './MembersPage.module.css';
 
@@ -132,11 +134,7 @@ function updatePayload(member: Member, values: MemberFormValues): UpdateMemberPr
     ...(values.governmentIdNumber.trim()
       ? {
           governmentIdType: values.governmentIdType as
-            | 'philippine_id'
-            | 'drivers_license'
-            | 'passport'
-            | 'tax_id'
-            | 'other',
+            'philippine_id' | 'drivers_license' | 'passport' | 'tax_id' | 'other',
           governmentIdNumber: values.governmentIdNumber.trim(),
         }
       : {}),
@@ -164,10 +162,12 @@ export function MemberDetailDialog({
   member,
   onClose,
   onChanged,
+  onTransfer,
 }: {
   member: Member;
   onClose: () => void;
   onChanged: () => void;
+  onTransfer?: (member: Member) => void;
 }) {
   const client = useQueryClient();
   const { user } = useSession();
@@ -276,8 +276,13 @@ export function MemberDetailDialog({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
+            {onTransfer ? (
+              <Button variant="secondary" onClick={() => onTransfer(member)}>
+                Transfer
+              </Button>
+            ) : null}
             <Button
-              variant="secondary"
+              variant="primary"
               onClick={() => {
                 save.reset();
                 issue.reset();
@@ -357,13 +362,12 @@ export function MemberDetailDialog({
               </DetailField>
             </DetailFieldGrid>
             {detail.isPending ? (
-              <p className={styles.sectionHint} role="status">
+              <p className={styles.inlineStatus} role="status">
+                <Spinner size="sm" />
                 Loading full IDs…
               </p>
             ) : detail.isError ? (
-              <p className={styles.sectionHint} role="alert">
-                Full IDs failed to load. Showing masked values.
-              </p>
+              <Alert variant="warning">Full IDs failed to load. Showing masked values.</Alert>
             ) : null}
           </DetailCard>
           <DetailCard>
@@ -386,7 +390,7 @@ export function MemberDetailDialog({
                     value={aaMode}
                     onChange={(e) => {
                       setAaMode(e.target.value as 'auto' | 'manual');
-                      setAaNumber('AA');
+                      setAaNumber('');
                     }}
                     options={[
                       { value: 'auto', label: 'Automatic' },
@@ -399,16 +403,17 @@ export function MemberDetailDialog({
                     id="member-issue-aa-number"
                     name="member-issue-aa-number"
                     label="AA Number"
+                    hint="AAI plus the two-digit year, month and sequence, or an existing AA- number."
                     value={aaNumber}
-                    onChange={(value) => setAaNumber(withAaPrefix(value))}
-                    placeholder="AAXXXXXXXXXXXX"
+                    onChange={(value) => setAaNumber(normalizeAaEntry(value))}
+                    placeholder="AAI26090001"
                   />
                 ) : null}
                 <div>
                   <Button
                     disabled={
                       issue.isPending ||
-                      (aaMode === 'manual' && !AA_MANUAL_RE.test(aaNumber.trim().toUpperCase()))
+                      (aaMode === 'manual' && !manualIstAaNumberSchema.safeParse(aaNumber).success)
                     }
                     loading={issue.isPending}
                     loadingLabel="Issuing…"
@@ -427,10 +432,10 @@ export function MemberDetailDialog({
                 </div>
               </div>
               {issue.error ? (
-                <div role="alert">
-                  <p>{issue.error.message}</p>
+                <Alert variant="danger" title="AA number not issued">
+                  <p className={styles.alertText}>{issue.error.message}</p>
                   {issueFields.length > 0 ? (
-                    <ul>
+                    <ul className={styles.errorList}>
                       {issueFields.map(([field, reason]) => (
                         <li key={field}>
                           {field}: {reason}
@@ -438,7 +443,7 @@ export function MemberDetailDialog({
                       ))}
                     </ul>
                   ) : null}
-                </div>
+                </Alert>
               ) : null}
             </DetailCard>
           ) : null}
@@ -478,8 +483,10 @@ export function MemberDetailDialog({
         onConfirm={() => remove.mutate()}
         title="Delete member?"
         message={
-          <div>
-            <p>Delete {member.fullName}? This cannot be undone.</p>
+          <div className={styles.deleteBody}>
+            <p className={styles.deleteQuestion}>
+              Delete {member.fullName}? This cannot be undone.
+            </p>
             <TextField
               id="member-delete-confirm"
               name="member-delete-confirm"
@@ -488,16 +495,16 @@ export function MemberDetailDialog({
               onChange={setDeleteConfirmation}
             />
             {remove.error ? (
-              <div role="alert">
-                <p>{remove.error.message}</p>
+              <Alert variant="danger" title="Cannot delete">
+                <p className={styles.alertText}>{remove.error.message}</p>
                 {deleteBlockers.length > 0 ? (
-                  <ul>
+                  <ul className={styles.errorList}>
                     {deleteBlockers.map((blocker) => (
                       <li key={blocker}>{blocker}</li>
                     ))}
                   </ul>
                 ) : null}
-              </div>
+              </Alert>
             ) : null}
           </div>
         }
@@ -505,6 +512,7 @@ export function MemberDetailDialog({
         confirmLabel="Delete"
         confirmDisabled={deleteConfirmation !== 'DELETE'}
         confirmLoading={remove.isPending}
+        confirmLoadingLabel="Deleting…"
       />
     </>
   );

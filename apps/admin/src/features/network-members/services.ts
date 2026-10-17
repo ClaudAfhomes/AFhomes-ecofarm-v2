@@ -8,14 +8,18 @@
  */
 import {
   afHomesDepartmentSchema,
+  createOstMemberResultSchema,
   memberDetailSchema,
   memberSchema,
   type AfHomesDepartment,
   type CreateMember,
+  type CreateOstMember,
+  type CreateOstMemberResult,
   type IssueAccreditation,
   type Member,
   type MemberDetail,
   type MemberPosition,
+  type TransferMember,
   type UpdateMemberProfile,
 } from '@afhomes/contracts';
 import { z } from 'zod';
@@ -38,21 +42,14 @@ export const networkMemberKeys = {
   detail: (id: string) => ['network', 'members', 'detail', id] as const,
 };
 
-/** Typed AA numbers: AA plus 4 to 12 uppercase letters/digits, no separators. */
-export const AA_MANUAL_RE = /^AA[A-Z0-9]{4,12}$/;
-
 /**
- * The AA field always carries its prefix: typing can never remove it, and an
- * emptied field falls back to the bare prefix. Only the body after AA is
- * ever edited.
+ * AA numbers are typed as issued: the official `AAI` + YYMM + sequence shape,
+ * or an already-issued legacy `AA-` identifier (a recorded number is never
+ * renumbered). `manualIstAaNumberSchema` from the contracts is the validator;
+ * this only tidies the entry so a paste with spaces still validates.
  */
-export function withAaPrefix(value: string): string {
-  const tail = value
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 14);
-  const body = (tail.startsWith('AA') ? tail.slice(2) : tail).slice(0, 12);
-  return `AA${body}`;
+export function normalizeAaEntry(value: string): string {
+  return value.toUpperCase().replace(/\s+/g, '');
 }
 
 export const getMembers = (params: {
@@ -77,6 +74,28 @@ export const getMemberOstReferrers = (): Promise<MemberUpline[]> =>
 
 export const createMember = (input: CreateMember): Promise<Member> =>
   request('/members', memberSchema, { method: 'POST', body: JSON.stringify(input) });
+
+/**
+ * Create an OST directly: `complete` approves the accreditation in the same
+ * act, `pending` leaves the application for the sponsored workflow. Both take
+ * the same official form; neither records an endorsement.
+ */
+export const createOstMember = (input: CreateOstMember): Promise<CreateOstMemberResult> =>
+  request('/members/ost', createOstMemberResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
+/**
+ * Transfer a member between IST and OST. The server revokes the held AA
+ * number into the accreditation history and issues the successor in one
+ * transaction; the client sends no number.
+ */
+export const transferMember = (id: string, input: TransferMember): Promise<Member> =>
+  request(`/members/${id}/transfer`, memberSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 
 export const updateMember = (id: string, input: UpdateMemberProfile): Promise<Member> =>
   request(`/members/${id}`, memberSchema, { method: 'PATCH', body: JSON.stringify(input) });

@@ -22,19 +22,45 @@ export const saleTeamAccreditationSchema = z
     expiresOn: z.iso.date(),
   })
   .strict()
-  .superRefine((value, ctx) => {
-    if (
-      (value.aaNumber.startsWith('AAI') && value.kind !== 'IST') ||
-      (value.aaNumber.startsWith('AAO') && value.kind !== 'OST')
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['aaNumber'],
-        message: 'AA prefix must match seller kind.',
-      });
-    }
-  });
+  .superRefine(prefixMatchesKind);
+
+/**
+ * A number that is no longer current because its holder was transferred to the
+ * other kind. The successor is the number in force today; it is null only when
+ * the holder has since been revoked. This is the whole historical surface: no
+ * audit data, no staff id, no reason - a verification answer, not a dossier.
+ */
+export const saleTeamHistoricalAccreditationSchema = z
+  .object({
+    aaNumber: aaNumberSchema,
+    kind: saleTeamKindSchema,
+    fullName: z.string(),
+    status: z.literal('superseded'),
+    startsOn: z.iso.date(),
+    expiresOn: z.iso.date(),
+    successorAaNumber: aaNumberSchema.nullable(),
+  })
+  .strict()
+  .superRefine(prefixMatchesKind);
+
+function prefixMatchesKind(value: { aaNumber: string; kind: 'IST' | 'OST' }, ctx: z.RefinementCtx) {
+  if (
+    (value.aaNumber.startsWith('AAI') && value.kind !== 'IST') ||
+    (value.aaNumber.startsWith('AAO') && value.kind !== 'OST')
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['aaNumber'],
+      message: 'AA prefix must match seller kind.',
+    });
+  }
+}
+
 export const saleTeamLookupSchema = saleTeamAccreditationSchema.nullable();
+/** The public search answer: the current record, a superseded one, or null. */
+export const saleTeamSearchResultSchema = z
+  .union([saleTeamAccreditationSchema, saleTeamHistoricalAccreditationSchema])
+  .nullable();
 export const manageSaleTeamSchema = z
   .object({
     action: z.enum(['approve', 'revoke']),

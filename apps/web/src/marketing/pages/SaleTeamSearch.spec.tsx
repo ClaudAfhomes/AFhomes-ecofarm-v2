@@ -35,6 +35,27 @@ it.each([
     expect.objectContaining({ signal: expect.anything() }),
   );
 });
+it('explains a superseded number and shows the successor', async () => {
+  api.request.mockResolvedValue({
+    ...record,
+    status: 'superseded',
+    successorAaNumber: 'AAO26110001',
+  });
+  renderWithProviders(<SaleTeamSearch />);
+  await userEvent.type(screen.getByLabelText('AA number'), record.aaNumber);
+  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+  expect(await screen.findByText('No longer current')).toBeInTheDocument();
+  expect(screen.getByText('AAO26110001')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy ID AAO26110001' })).toBeInTheDocument();
+});
+it('stays silent about a successor when the holder was revoked', async () => {
+  api.request.mockResolvedValue({ ...record, status: 'superseded', successorAaNumber: null });
+  renderWithProviders(<SaleTeamSearch />);
+  await userEvent.type(screen.getByLabelText('AA number'), record.aaNumber);
+  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+  expect(await screen.findByText('No longer current')).toBeInTheDocument();
+  expect(screen.queryByText('Current AA number')).not.toBeInTheDocument();
+});
 it('searches only on submit and clears a stale verification when input changes', async () => {
   api.request.mockResolvedValue(record);
   renderWithProviders(<SaleTeamSearch />);
