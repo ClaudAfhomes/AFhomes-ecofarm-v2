@@ -145,7 +145,7 @@ function showCreate() {
 }
 
 const openCreate = async () => {
-  fireEvent.click(screen.getAllByRole('button', { name: 'Create Member' })[0]!);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Create IST' })[0]!);
   await screen.findByLabelText('Full Name');
   await screen.findByRole('option', { name: 'Sales' });
 };
@@ -212,6 +212,37 @@ describe('Members page', () => {
     expect(screen.getByText('AF-EMP-00010')).toBeInTheDocument();
     expect(screen.getByText('AA-ABC123')).toBeInTheDocument();
     expect(screen.queryByText('SENIOR MANAGER')).toBeNull();
+    // The success state names its own range, as the departments console does.
+    expect(screen.getByText('Showing 1-1 of 1')).toBeInTheDocument();
+  });
+
+  it('shows a loading skeleton shaped like the page before the list arrives', () => {
+    vi.mocked(getMembers).mockImplementation(() => new Promise(() => {}) as never);
+    renderWithProviders(<MembersPage />);
+    expect(screen.getByRole('status', { name: 'Loading members' })).toBeInTheDocument();
+    expect(screen.getByText('Loading members…')).toBeInTheDocument();
+  });
+
+  it('offers a retry when the list fails to load', async () => {
+    vi.mocked(getMembers)
+      .mockRejectedValueOnce(new ApiError({ code: 'INTERNAL', message: 'boom', status: 500 }))
+      .mockResolvedValueOnce([ROW] as never);
+    renderWithProviders(<MembersPage />);
+    expect(await screen.findByText('Members could not be loaded')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('SALES MANAGER')).toBeInTheDocument();
+  });
+
+  it('shows an updating indicator while a background refetch runs', async () => {
+    vi.mocked(getMembers).mockResolvedValueOnce([ROW] as never);
+    renderWithProviders(<MembersPage />);
+    await screen.findByText('SALES MANAGER');
+    // The next request never settles: the rows stay (keepPreviousData) and the
+    // page says it is refreshing instead of blanking or lying.
+    vi.mocked(getMembers).mockImplementation(() => new Promise(() => {}) as never);
+    fireEvent.change(screen.getByLabelText('Search members'), { target: { value: 'zz' } });
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
+    expect(screen.getByText('SALES MANAGER')).toBeInTheDocument();
   });
 
   it('opens the full record on row click with Edit and Delete', async () => {
@@ -336,7 +367,7 @@ describe('Members page', () => {
     await fillAddress();
     fireEvent.change(screen.getByLabelText('AA Number Source'), { target: { value: 'manual' } });
     fireEvent.change(await screen.findByLabelText('AA Number'), {
-      target: { value: 'aaabc123def4' },
+      target: { value: 'aai26090007' },
     });
     fireEvent.change(screen.getByLabelText('Head'), {
       target: { value: '33333333-3333-4333-8333-333333333333' },
@@ -346,7 +377,7 @@ describe('Members page', () => {
     fireEvent.click(create);
     await waitFor(() =>
       expect(createMember).toHaveBeenCalledWith(
-        expect.objectContaining({ aaNumberMode: 'manual', aaNumber: 'AAABC123DEF4' }),
+        expect.objectContaining({ aaNumberMode: 'manual', aaNumber: 'AAI26090007' }),
       ),
     );
   });
@@ -672,8 +703,9 @@ describe('Members page', () => {
     await screen.findByText('No members');
     fireEvent.change(screen.getByLabelText('Search members'), { target: { value: 'zzz' } });
     expect(screen.getByText('No members match these filters.')).toBeInTheDocument();
-    // Only the page header keeps the action; the empty state drops it.
-    expect(screen.getAllByRole('button', { name: 'Create Member' })).toHaveLength(1);
+    // The header keeps both actions; the empty state drops its own.
+    expect(screen.getAllByRole('button', { name: 'Create IST' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Create OST' })).toHaveLength(1);
   });
 
   it('surfaces a refused delete as a popup and inline blockers', async () => {
@@ -709,5 +741,33 @@ describe('Members page', () => {
     Swal.close();
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('Has an active sale')).toBeInTheDocument();
+  });
+
+  it('shows a deleting state while the request runs', async () => {
+    vi.mocked(getMembers).mockResolvedValue([ROW] as never);
+    const { deleteAfHomesStaff } = await import('../afhomes/services');
+    vi.mocked(deleteAfHomesStaff).mockImplementation(() => new Promise(() => {}) as never);
+    renderWithProviders(<MembersPage />, {
+      user: {
+        id: '99999999-9999-4999-8999-999999999999',
+        name: 'Super Admin',
+        email: 'super@afhomes.test',
+        roleId: 'role-super',
+        roleSlug: 'super_admin',
+        roleName: 'Super Admin',
+        afHomesPermissions: [],
+        status: 'active',
+      },
+    });
+    fireEvent.click(await screen.findByText('SALES MANAGER'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.change(screen.getByLabelText('Type DELETE to confirm'), {
+      target: { value: 'DELETE' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    // The irreversible action owns a labeled in-flight state; Cancel locks so
+    // the dialog cannot be dismissed mid-request.
+    expect(await screen.findByText('Deleting…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   });
 });

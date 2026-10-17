@@ -16401,11 +16401,12 @@ async function main(): Promise<void> {
         };
         const manualTarget = await mkManualTarget('manual-aa', 'sales_manager');
         const manualTarget2 = await mkManualTarget('manual-aa-2', 'sales_manager');
+        const manualTarget3 = await mkManualTarget('manual-aa-3', 'sales_manager');
         // The delete first keeps reruns green (a crashed run may have left
         // accreditation rows behind, which would read as TAKEN below).
         await db.query(
           'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
-          [[manualTarget, manualTarget2]],
+          [[manualTarget, manualTarget2, manualTarget3]],
         );
         const approveManual = (actor: string, target: string, number: string | null) =>
           one<{ aaNumber: string }>(
@@ -16413,11 +16414,12 @@ async function main(): Promise<void> {
               current_date, current_date + 365, $3)->>'aaNumber' as "aaNumber"`,
             [actor, target, number],
           );
-        const issued = await approveManual(staff['admin']!, manualTarget, 'AATEST76AABBCC');
-        eq('typed number is stored verbatim', issued.aaNumber, 'AATEST76AABBCC');
-        // A taken number, a malformed number and a renumber each fail closed.
+        const issued = await approveManual(staff['admin']!, manualTarget, 'AAI26120001');
+        eq('typed number is stored verbatim', issued.aaNumber, 'AAI26120001');
+        // A taken number, a malformed number, a wrong-kind prefix and a
+        // renumber each fail closed.
         const takenMsg = await throwsIsolated('taken number raises TAKEN', () =>
-          approveManual(staff['admin']!, manualTarget2, 'AATEST76AABBCC'),
+          approveManual(staff['admin']!, manualTarget2, 'AAI26120001'),
         );
         check('taken error names the conflict', takenMsg.includes('ACCREDITATION_NUMBER_TAKEN'));
         const malformedMsg = await throwsIsolated('malformed number raises INVALID', () =>
@@ -16427,18 +16429,455 @@ async function main(): Promise<void> {
           'malformed error names the format rule',
           malformedMsg.includes('INVALID_ACCREDITATION_NUMBER'),
         );
+        // The prefix encodes the kind: an OST number can never accredit an IST.
+        const kindMsg = await throwsIsolated('wrong-kind prefix raises INVALID', () =>
+          approveManual(staff['admin']!, manualTarget2, 'AAO26120001'),
+        );
+        check(
+          'wrong-kind error names the format rule',
+          kindMsg.includes('INVALID_ACCREDITATION_NUMBER'),
+        );
+        // An already-issued legacy number is recorded verbatim: a recorded
+        // identifier is never renumbered into the new shape.
+        const legacy = await approveManual(staff['admin']!, manualTarget2, 'AA-ABCDEF123456');
+        eq('legacy number is accepted verbatim', legacy.aaNumber, 'AA-ABCDEF123456');
         const renumberMsg = await throwsIsolated('renumber raises IMMUTABLE', () =>
-          approveManual(staff['admin']!, manualTarget, 'AATEST76CCDDEE'),
+          approveManual(staff['admin']!, manualTarget, 'AAI26120002'),
         );
         check(
           'renumber error names immutability',
           renumberMsg.includes('ACCREDITATION_NUMBER_IMMUTABLE'),
         );
+        // AUTO allocates the official shape from the month's shared sequence,
+        // and its stamp is the month of the accreditation, not the wall clock
+        // of some later reader.
+        const auto = await approveManual(staff['admin']!, manualTarget3, null);
+        const { stamp } = await one<{ stamp: string }>(
+          `select to_char(current_date, 'YYMM') as stamp`,
+        );
+        check('AUTO number matches the official AAI shape', /^AAI\d{8}$/.test(auto.aaNumber));
+        check('AUTO number carries the issuance month', auto.aaNumber.startsWith(`AAI${stamp}`));
         // Explicit cleanup: accreditation rows reference staff_users (RESTRICT),
         // so section 21 cannot remove the targets while they exist.
         await db.query(
           'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
-          [[manualTarget, manualTarget2]],
+          [[manualTarget, manualTarget2, manualTarget3]],
+        );
+      }
+      section('77. sale-team transfers: history, successor numbers, OST footprint');
+      {
+        // Two fresh targets: one moves IST -> OST -> IST, one proves the
+        // refusals. Section 21 also resolves staff ids, but this section's
+        // rows must be removed here because they RESTRICT the staff delete.
+        const mkTarget = async (label: string, role: string) => {
+          const id = uuidFor(`staff:${label}`);
+          const email = `${RUN}-${label}@example.invalid`;
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email]);
+          await db.query(
+            `insert into public.staff_users (id, email, full_name, status)
+             values ($1, $2, $3, 'active')`,
+            [id, email, `Synthetic ${label}`],
+          );
+          await db.query(
+            'insert into public.staff_role_assignments (staff_id, role_id) values ($1, $2)',
+            [id, roles[role]],
+          );
+          createdStaffIds.push(id);
+          return { id, email };
+        };
+        const mover = await mkTarget('transfer', 'sales_manager');
+        const blocked = await mkTarget('transfer-refused', 'sales_manager');
+        await db.query(
+          'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
+          [[mover.id, blocked.id]],
+        );
+        const { today } = await one<{ today: string }>(`select current_date::text as today`);
+        const identity = {
+          firstName: 'Syn',
+          lastName: 'Mover',
+          email: mover.email,
+          phone: '+639175550001',
+          birthDate: '1991-03-03',
+          address: {
+            line1: '9 Test St',
+            city: 'Calauan',
+            province: 'Laguna',
+            postalCode: '4012',
+            countryCode: 'PH',
+          },
+        };
+        const form = {
+          dateApplied: today,
+          programCategory: 'non_vip',
+          vipCardType: null,
+          applicantSignatureStatus: 'received',
+          referrerSignatureStatus: 'received',
+          applicantSignedOn: today,
+          referrerSignedOn: today,
+          sex: 'male',
+          civilStatus: 'single',
+          governmentIdType: 'passport',
+          governmentIdNumber: 'P7654321',
+        };
+        const istNumber = (
+          await one<{ aaNumber: string }>(
+            `select public.manage_sale_team_accreditation($1, $2, 'IST', 'approve',
+              current_date, current_date + 365, null)->>'aaNumber' as "aaNumber"`,
+            [staff['admin'], mover.id],
+          )
+        ).aaNumber;
+        check('the mover starts with an official IST number', /^AAI\d{8}$/.test(istNumber));
+        const moved = await one<{
+          out: {
+            direction: string;
+            previousAaNumber: string;
+            aaNumber: string;
+            kind: string;
+            termId: string;
+            ostNumber: string;
+            applicationId: string;
+          };
+        }>(
+          `select public.transfer_sale_team_member($1, $2, 'IST_TO_OST',
+            'Transferred at the operator desk', null, null, $3, $4::jsonb, $5::jsonb,
+            current_date, current_date + 365) as out`,
+          [staff['admin'], mover.id, staff['sm'], JSON.stringify(identity), JSON.stringify(form)],
+        );
+        eq('the transfer reports the retired number', moved.out.previousAaNumber, istNumber);
+        eq('the transfer reports the successor kind', moved.out.kind, 'OST');
+        const afterOst = await one<{ kind: string; aa_number: string; status: string }>(
+          `select kind, aa_number, status from private.sale_team_accreditations where staff_id = $1`,
+          [mover.id],
+        );
+        eq('the successor kind is OST', afterOst.kind, 'OST');
+        eq('the successor accreditation is active', afterOst.status, 'active');
+        check('the successor number is an AAO number', /^AAO\d{8}$/.test(afterOst.aa_number));
+        check('the successor number is a NEW number', afterOst.aa_number !== istNumber);
+        eq(
+          'the retired number is gone from the current table',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from private.sale_team_accreditations where aa_number = $1`,
+              [istNumber],
+            )
+          ).n,
+          0,
+        );
+        const retired = await one<{
+          aa_number: string;
+          kind: string;
+          status: string;
+          successor_aa_number: string;
+          reason: string;
+        }>(
+          `select aa_number, kind, status, successor_aa_number, reason
+             from private.sale_team_accreditation_history where staff_id = $1`,
+          [mover.id],
+        );
+        eq('history keeps the retired number', retired.aa_number, istNumber);
+        eq('history keeps the retired kind', retired.kind, 'IST');
+        eq('history records the retirement status', retired.status, 'superseded');
+        eq('history links the successor number', retired.successor_aa_number, afterOst.aa_number);
+        eq('history keeps the reason', retired.reason, 'Transferred at the operator desk');
+        const resolved = await one<{ resolved: Record<string, unknown> | null }>(
+          `select public.resolve_sale_team_accreditation_number($1) as resolved`,
+          [istNumber],
+        );
+        eq('the resolver reports the retirement', String(resolved.resolved?.status), 'superseded');
+        eq(
+          'the resolver names the successor',
+          String(resolved.resolved?.successorAaNumber),
+          afterOst.aa_number,
+        );
+        const resolvedCurrent = await one<{ resolved: unknown }>(
+          `select public.resolve_sale_team_accreditation_number($1) as resolved`,
+          [afterOst.aa_number],
+        );
+        eq('a current number is not answered from history', resolvedCurrent.resolved, null);
+        // The OST footprint is complete, not a stub: member, term, edge, role.
+        const ostMember = await one<{
+          status: string;
+          ost_number: string;
+          sponsor_staff_id: string;
+        }>(
+          `select status, ost_number, sponsor_staff_id from public.ost_members where id = $1`,
+          [mover.id],
+        );
+        eq('the OST member is active', ostMember.status, 'active');
+        eq('the OST member keeps its sponsor', ostMember.sponsor_staff_id, staff['sm']);
+        const term = await one<{ status: string; starts_on: string; expires_on: string }>(
+          `select status, starts_on::text as starts_on, expires_on::text as expires_on
+             from private.ost_accreditation_terms where ost_id = $1`,
+          [mover.id],
+        );
+        eq('the OST term is active', term.status, 'active');
+        eq('the OST term starts on the stated day', term.starts_on, today);
+        eq('the OST term runs one year', term.expires_on > term.starts_on, true);
+        eq(
+          'the member holds the OST role',
+          (
+            await one<{ slug: string }>(
+              `select r.slug from public.staff_role_assignments a
+                 join public.roles r on r.id = a.role_id where a.staff_id = $1`,
+              [mover.id],
+            )
+          ).slug,
+          'ost',
+        );
+        const edge = await one<{ upline_staff_id: string; hierarchy_role: string }>(
+          `select upline_staff_id, hierarchy_role from public.referral_relationships
+             where subject_staff_id = $1 and is_active`,
+          [mover.id],
+        );
+        eq('the sponsoring edge is the OST level', edge.hierarchy_role, 'ost');
+        eq('the sponsoring edge points at the sponsor', edge.upline_staff_id, staff['sm']);
+        eq(
+          'the application is approved',
+          (
+            await one<{ status: string }>(
+              `select status from public.ost_applications where id = $1`,
+              [moved.out.applicationId],
+            )
+          ).status,
+          'approved',
+        );
+        // The mover is an OST here, so the kind guard refuses an IST-to-OST
+        // transfer before any signature question is reached.
+        const kindTransferMsg = await throwsIsolated('a transfer for the wrong kind is refused', () =>
+          one(
+            `select public.transfer_sale_team_member($1, $2, 'IST_TO_OST',
+              'Missing signatures', null, null, $3, $4::jsonb, $5::jsonb,
+              current_date, current_date + 365)`,
+            [
+              staff['admin'],
+              mover.id,
+              staff['sm'],
+              JSON.stringify(identity),
+              JSON.stringify({ ...form, referrerSignatureStatus: 'pending' }),
+            ],
+          ),
+        );
+        check(
+          'the refusal names the kind conflict',
+          kindTransferMsg.includes('ACCREDITATION_KIND_CONFLICT'),
+          kindTransferMsg,
+        );
+        eq(
+          'a refused transfer changes nothing',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from private.sale_team_accreditations where staff_id = $1`,
+              [mover.id],
+            )
+          ).n,
+          1,
+        );
+        // Authorization and input guards.
+        const forbiddenMsg = await throwsIsolated('an unauthorized actor cannot transfer', () =>
+          one(
+            `select public.transfer_sale_team_member($1, $2, 'OST_TO_IST',
+              'Not allowed', 'sales_manager', $3, null, null, null, null, null)`,
+            [staff['ost'], mover.id, staff['ssm']],
+          ),
+        );
+        check('the refusal names the authorization guard', forbiddenMsg.includes('MUTATION_FORBIDDEN'));
+        const reasonMsg = await throwsIsolated('a transfer without a reason is refused', () =>
+          one(
+            `select public.transfer_sale_team_member($1, $2, 'OST_TO_IST',
+              'nope', 'sales_manager', $3, null, null, null, null, null)`,
+            [staff['admin'], mover.id, staff['ssm']],
+          ),
+        );
+        check('the refusal names the reason rule', reasonMsg.includes('TRANSFER_REASON_REQUIRED'));
+        // A wrong head is not a hierarchy: the transfer names the failure.
+        await db.query(
+          `insert into private.sale_team_accreditations
+             (staff_id, aa_number, public_name, kind, status, starts_on, expires_on, approved_by)
+           values ($1, 'AAO26120099', 'Synthetic blocked', 'OST', 'active',
+             current_date, current_date + 365, $2)`,
+          [blocked.id, staff['admin']],
+        );
+        const hierarchyMsg = await throwsIsolated('a wrong immediate head is refused', () =>
+          one(
+            `select public.transfer_sale_team_member($1, $2, 'OST_TO_IST',
+              'Wrong head', 'sales_manager', $3, null, null, null, null, null)`,
+            [staff['admin'], blocked.id, staff['sm']],
+          ),
+        );
+        check(
+          'the refusal names the hierarchy direction rule',
+          hierarchyMsg.includes('INVALID_HIERARCHY_DIRECTION'),
+        );
+        eq(
+          'the refused OST member keeps its number',
+          (
+            await one<{ aa_number: string }>(
+              `select aa_number from private.sale_team_accreditations where staff_id = $1`,
+              [blocked.id],
+            )
+          ).aa_number,
+          'AAO26120099',
+        );
+        // The round trip: OST -> IST retires the OST side and issues a fresh
+        // one-year IST number under the chosen head.
+        const back = await one<{
+          out: { aaNumber: string; previousAaNumber: string; kind: string; startsOn: string };
+        }>(
+          `select public.transfer_sale_team_member($1, $2, 'OST_TO_IST',
+            'Returned to the IST desk', 'sales_manager', $3, null, null, null, null, null) as out`,
+          [staff['admin'], mover.id, staff['ssm']],
+        );
+        eq('the round trip retires the OST number', back.out.previousAaNumber, afterOst.aa_number);
+        check('the IST successor is an AAI number', /^AAI\d{8}$/.test(back.out.aaNumber));
+        eq('the round trip reports the IST kind', back.out.kind, 'IST');
+        eq('the fresh IST validity starts today', back.out.startsOn, today);
+        eq(
+          'the member holds the IST role again',
+          (
+            await one<{ slug: string }>(
+              `select r.slug from public.staff_role_assignments a
+                 join public.roles r on r.id = a.role_id where a.staff_id = $1`,
+              [mover.id],
+            )
+          ).slug,
+          'sales_manager',
+        );
+        eq(
+          'the new IST head is the chosen SSM',
+          (
+            await one<{ upline_staff_id: string }>(
+              `select upline_staff_id from public.referral_relationships
+                 where subject_staff_id = $1 and is_active`,
+              [mover.id],
+            )
+          ).upline_staff_id,
+          staff['ssm'],
+        );
+        eq(
+          'the OST member is retired',
+          (
+            await one<{ status: string }>(
+              `select status from public.ost_members where id = $1`,
+              [mover.id],
+            )
+          ).status,
+          'inactive',
+        );
+        eq(
+          'the OST term is revoked',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from private.ost_accreditation_terms
+                 where ost_id = $1 and status = 'revoked'`,
+              [mover.id],
+            )
+          ).n,
+          1,
+        );
+        eq(
+          'every retirement appended exactly one history row',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from private.sale_team_accreditation_history
+                 where staff_id = $1`,
+              [mover.id],
+            )
+          ).n,
+          2,
+        );
+        const chain = await one<{ resolved: { successorAaNumber?: string } | null }>(
+          `select public.resolve_sale_team_accreditation_number($1) as resolved`,
+          [istNumber],
+        );
+        eq(
+          'the first retired number still resolves to its successor',
+          chain.resolved?.successorAaNumber,
+          afterOst.aa_number,
+        );
+        // Evidence is stated, never invented: the mover is an IST again, and a
+        // form that admits a missing signature cannot complete the transfer.
+        const evidenceMsg = await throwsIsolated('a form without both signatures is refused', () =>
+          one(
+            `select public.transfer_sale_team_member($1, $2, 'IST_TO_OST',
+              'Missing signatures', null, null, $3, $4::jsonb, $5::jsonb,
+              current_date, current_date + 365)`,
+            [
+              staff['admin'],
+              mover.id,
+              staff['sm'],
+              JSON.stringify(identity),
+              JSON.stringify({ ...form, referrerSignatureStatus: 'pending' }),
+            ],
+          ),
+        );
+        check(
+          'the refusal names the signature rule',
+          evidenceMsg.includes('OST_SIGNATURE_EVIDENCE_REQUIRED'),
+          evidenceMsg,
+        );
+        check(
+          'a refused transfer leaves the IST accreditation untouched',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from private.sale_team_accreditations
+                where staff_id = $1 and aa_number = $2`,
+              [mover.id, back.out.aaNumber],
+            )
+          ).n === 1,
+          'the IST row must survive the refusal',
+        );
+        // History is a fact: an UPDATE is refused outright.
+        const updateMsg = await throwsIsolated('history rows cannot be updated', () =>
+          db.query(
+            `update private.sale_team_accreditation_history set reason = 'rewritten'
+              where staff_id = $1`,
+            [mover.id],
+          ),
+        );
+        check(
+          'the history guard names immutability',
+          updateMsg.includes('ACCREDITATION_HISTORY_IMMUTABLE'),
+        );
+        check(
+          'the resolver is service_role only',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int as n from (values ('anon'), ('authenticated')) r(role_name)
+                where has_function_privilege(r.role_name,
+                  'public.resolve_sale_team_accreditation_number(text)', 'EXECUTE')`,
+            )
+          ).n === 0,
+        );
+        // The audit names both numbers and the reason, and carries no identity
+        // or credential.
+        const transferAudit = await one<{ n: number; payload: string }>(
+          `select count(*)::int as n,
+             coalesce(string_agg(coalesce(before_data::text, '') || coalesce(after_data::text, ''), ' '), '')
+               as payload
+           from public.audit_events
+           where entity_id = $1::text and action = 'SALE_TEAM_ACCREDITATION_TRANSFERRED'`,
+          [mover.id],
+        );
+        eq('each transfer is audited exactly once', transferAudit.n, 2);
+        check(
+          'the audit names both numbers and the reason',
+          transferAudit.payload.includes(istNumber) &&
+            transferAudit.payload.includes(afterOst.aa_number) &&
+            transferAudit.payload.includes('Returned to the IST desk'),
+        );
+        check(
+          'the audit carries no identity or credential',
+          !/passport|P7654321|password/i.test(transferAudit.payload),
+        );
+        // Section 21 removes every synthetic person; the accreditation and
+        // history rows RESTRICT that delete, so they go here.
+        await db.query(
+          'delete from private.sale_team_accreditation_history where staff_id = any($1::uuid[])',
+          [[mover.id, blocked.id]],
+        );
+        await db.query(
+          'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
+          [[mover.id, blocked.id]],
         );
       }
     } catch (error) {
@@ -16710,6 +17149,13 @@ async function main(): Promise<void> {
           `delete from private.sale_team_accreditations
            where staff_id = any($1::uuid[]) or approved_by = any($1::uuid[])
              or revoked_by = any($1::uuid[])`,
+          [staffSet],
+        );
+        // The retirement history RESTRICTs the staff delete exactly like the
+        // accreditation row it retires, so both go together.
+        await db?.query(
+          `delete from private.sale_team_accreditation_history
+           where staff_id = any($1::uuid[]) or recorded_by = any($1::uuid[])`,
           [staffSet],
         );
         await db?.query(

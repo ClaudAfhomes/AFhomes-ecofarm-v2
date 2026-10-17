@@ -11,6 +11,8 @@ import {
 } from './input.js';
 import { geographicCodeSchema } from './address.js';
 import { governmentIdTypeSchema } from './sales.js';
+import { ostIdentitySchema, ostOfficialFormSchema } from './ost-accreditation.js';
+import { ostApplicationStatusSchema } from './ost.js';
 
 /**
  * Member TIN: exactly 9 digits, no dashes or branch suffixes. Stricter than
@@ -76,6 +78,20 @@ export const MEMBER_UPLINE_ROLE: Record<MemberPosition, MemberPosition | null> =
   ost: 'sales_manager',
 };
 
+/** The three hierarchy positions. OST is not creatable here: see positionKind. */
+export const istPositionSchema = z.enum(['vice_director', 'senior_sales_manager', 'sales_manager']);
+export type IstPosition = z.infer<typeof istPositionSchema>;
+export const IST_POSITIONS: readonly MemberPosition[] = istPositionSchema.options;
+
+/**
+ * The accreditation category a position belongs to. Classification is derived
+ * from the position (the role assignment), never stored separately, so the
+ * position and its accreditation kind can never disagree.
+ */
+export function positionKind(position: MemberPosition): 'IST' | 'OST' {
+  return position === 'ost' ? 'OST' : 'IST';
+}
+
 /** Member sex pick-list: the Male/Female subset of the application vocabulary. */
 export const memberSexSchema = z.enum(['Male', 'Female']);
 export type MemberSex = z.infer<typeof memberSexSchema>;
@@ -89,16 +105,21 @@ export const aaNumberModeSchema = z.enum(['auto', 'manual']);
 export type AaNumberMode = z.infer<typeof aaNumberModeSchema>;
 
 /**
- * Operator-typed AA number: `AA` plus 4 to 12 uppercase letters/digits
- * (6 to 14 characters total, no separators). Composition is the generator's
- * business, not a rejection rule: typed numbers are checked for shape and
- * uniqueness, never for internal arrangement.
+ * Operator-typed IST AA number: the official `AAI` + YYMM + sequence shape, or
+ * an already-issued legacy `AA-` identifier. The kind prefix is mandatory for
+ * a new number, so an OST number can never be typed onto an IST seller; legacy
+ * numbers are accepted because an issued number is never renumbered.
  */
-export const manualAaNumberSchema = z
+export const manualIstAaNumberSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(/^AA[A-Z0-9]{4,12}$/, 'Use AA plus up to 12 letters/digits');
+  .refine(
+    (value) =>
+      /^AAI\d{2}(?:0[1-9]|1[0-2])(?!0000)\d{4}$/.test(value) ||
+      (/^AA-[A-Z0-9]{12}$/.test(value) && (value.slice(3).match(/[A-Z]/g) ?? []).length === 6),
+    'Use AAI + YYMM + sequence, or an existing AA number',
+  );
 
 /** Staff display name: letters/spaces/apostrophes/hyphens, stored UPPERCASE. */
 const memberFullNameSchema = z
@@ -173,13 +194,23 @@ export const createMemberSchema = memberProfileSchema
     departmentId: z.string().uuid(),
     position: memberPositionSchema,
     aaNumberMode: aaNumberModeSchema.default('auto'),
-    aaNumber: manualAaNumberSchema.optional(),
+    aaNumber: manualIstAaNumberSchema.optional(),
     // PSGC codes chosen from the reference lists. Required together: the
     // server re-resolves the pair and stores the authority's own names.
     provinceCode: geographicCodeSchema,
     cityMunicipalityCode: geographicCodeSchema,
   })
   .superRefine((value, ctx) => {
+    // OST is never created here: it carries a different accreditation
+    // footprint and its own pipeline (Create OST / a transfer).
+    if (value.position === 'ost') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['position'],
+        message: 'Use Create OST for an OST member',
+      });
+      return;
+    }
     if (value.position === 'vice_director') {
       if (value.referrerStaffId)
         ctx.addIssue({ code: 'custom', message: 'A Vice Director has no head' });
@@ -189,9 +220,7 @@ export const createMemberSchema = memberProfileSchema
     if (value.position !== 'sales_manager' && value.ostReferrerStaffId) {
       ctx.addIssue({ code: 'custom', message: 'An OST referrer is for Sales Managers only' });
     }
-    if (value.position === 'ost' && value.aaNumberMode === 'manual') {
-      ctx.addIssue({ code: 'custom', message: 'OST numbers ride the approval flow' });
-    } else if (value.aaNumberMode === 'manual' && !value.aaNumber) {
+    if (value.aaNumberMode === 'manual' && !value.aaNumber) {
       ctx.addIssue({ code: 'custom', message: 'Type the AA number' });
     } else if (value.aaNumberMode === 'auto' && value.aaNumber) {
       ctx.addIssue({ code: 'custom', message: 'Automatic mode issues the number' });
@@ -220,7 +249,18 @@ export const updateMemberProfileSchema = memberProfileSchema
     provinceCode: geographicCodeSchema,
     cityMunicipalityCode: geographicCodeSchema,
   })
-  .partial();
+  .partial()
+  .superRefine((value, ctx) => {
+    // A kind change is a transfer, never a profile edit: it must revoke the
+    // accreditation and issue the successor number in one transaction.
+    if (value.position === 'ost') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['position'],
+        message: 'Use Transfer to move a member into OST',
+      });
+    }
+  });
 export type UpdateMemberProfile = z.infer<typeof updateMemberProfileSchema>;
 
 /**
@@ -230,7 +270,7 @@ export type UpdateMemberProfile = z.infer<typeof updateMemberProfileSchema>;
 export const issueAccreditationSchema = z
   .object({
     aaNumberMode: aaNumberModeSchema.default('auto'),
-    aaNumber: manualAaNumberSchema.optional(),
+    aaNumber: manualIstAaNumberSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.aaNumberMode === 'manual' && !value.aaNumber) {
@@ -297,3 +337,128 @@ export const memberListQuerySchema = z.object({
   position: memberPositionSchema.optional(),
 });
 export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
+
+/**
+ * Direct OST creation from the Members console. The two modes are the two
+ * truthful paths: `complete` states the signature evidence, the sponsor and
+ * the approved validity in one act, and management (the operator) approves on
+ * the spot; `pending` records the application and its provenance without
+ * issuing an accreditation prematurely. Neither path records an endorsement:
+ * only the sponsor can endorse, so the direct path never claims one.
+ */
+export const createOstMemberModeSchema = z.enum(['complete', 'pending']);
+export type CreateOstMemberMode = z.infer<typeof createOstMemberModeSchema>;
+
+export const createOstMemberSchema = z
+  .object({
+    mode: createOstMemberModeSchema,
+    requestId: z.string().uuid(),
+    sponsorStaffId: z.string().uuid(),
+    identity: ostIdentitySchema,
+    form: ostOfficialFormSchema,
+    /** The management-approved validity; required to complete. */
+    startsOn: z.iso.date().nullable().default(null),
+    expiresOn: z.iso.date().nullable().default(null),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.mode !== 'complete') return;
+    if (
+      value.form.applicantSignatureStatus !== 'received' ||
+      value.form.referrerSignatureStatus !== 'received'
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['form'],
+        message: 'Both signatures are required to complete an OST',
+      });
+    if (!value.startsOn || !value.expiresOn)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expiresOn'],
+        message: 'Choose the approved start and expiry dates',
+      });
+    else if (value.expiresOn < value.startsOn)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expiresOn'],
+        message: 'Expiry must be on or after the approved start',
+      });
+  });
+export type CreateOstMember = z.infer<typeof createOstMemberSchema>;
+
+/**
+ * Direct OST creation result. `memberId` is present only once the account was
+ * installed, so a client can tell a saved application from a completed one.
+ */
+export const createOstMemberResultSchema = z
+  .object({
+    applicationId: z.string().uuid(),
+    memberId: z.string().uuid().nullable(),
+    status: ostApplicationStatusSchema,
+  })
+  .strict();
+export type CreateOstMemberResult = z.infer<typeof createOstMemberResultSchema>;
+
+/**
+ * A transfer changes the member's accreditation KIND. It is not a profile
+ * edit: it revokes the held number (kept in the accreditation history) and
+ * issues a successor in one transaction, with a reason. IST -> OST must state
+ * the full OST footprint (identity, official form, sponsor, validity);
+ * OST -> IST must name a valid IST position and its immediate head.
+ */
+const transferReasonSchema = z.string().trim().min(5).max(300);
+
+export const transferMemberToOstSchema = z
+  .object({
+    direction: z.literal('IST_TO_OST'),
+    reason: transferReasonSchema,
+    sponsorStaffId: z.string().uuid(),
+    identity: ostIdentitySchema,
+    form: ostOfficialFormSchema,
+    startsOn: z.iso.date(),
+    expiresOn: z.iso.date(),
+  })
+  .strict();
+
+export const transferMemberToIstSchema = z
+  .object({
+    direction: z.literal('OST_TO_IST'),
+    reason: transferReasonSchema,
+    targetPosition: istPositionSchema,
+    headStaffId: z.string().uuid().nullable().default(null),
+  })
+  .strict();
+
+export const transferMemberSchema = z
+  .discriminatedUnion('direction', [transferMemberToOstSchema, transferMemberToIstSchema])
+  .superRefine((value, ctx) => {
+    if (value.direction === 'IST_TO_OST') {
+      if (value.expiresOn < value.startsOn)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['expiresOn'],
+          message: 'Expiry must be on or after the approved start',
+        });
+      if (
+        value.form.applicantSignatureStatus !== 'received' ||
+        value.form.referrerSignatureStatus !== 'received'
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['form'],
+          message: 'Both signatures are required to transfer to OST',
+        });
+      return;
+    }
+    const expected = MEMBER_UPLINE_ROLE[value.targetPosition];
+    if (expected ? !value.headStaffId : value.headStaffId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['headStaffId'],
+        message: expected ? 'A head is required' : 'A Vice Director has no head',
+      });
+  });
+export type TransferMember = z.infer<typeof transferMemberSchema>;
+export type TransferMemberToOst = z.infer<typeof transferMemberToOstSchema>;
+export type TransferMemberToIst = z.infer<typeof transferMemberToIstSchema>;

@@ -10,6 +10,7 @@ import {
   SearchField,
   Select,
   Skeleton,
+  Spinner,
   StatusChip,
   Table,
   TableBody,
@@ -23,7 +24,9 @@ import { formatCountOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { CreateMemberDialog } from './CreateMemberDialog';
+import { CreateOstDialog } from './CreateOstDialog';
 import { MemberDetailDialog } from './MemberDetailDialog';
+import { TransferMemberDialog } from './TransferMemberDialog';
 import { getMembers, networkMemberKeys } from './services';
 import styles from './MembersPage.module.css';
 
@@ -47,11 +50,14 @@ export function MembersPage() {
   const [position, setPosition] = useState<'all' | MemberPosition>('all');
   const [page, setPage] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createOstOpen, setCreateOstOpen] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const [transferId, setTransferId] = useState<string | null>(null);
   const settled = useDebouncedValue(search.trim(), 300, () => setPage(0));
   const query = useQuery({
     queryKey: networkMemberKeys.list(settled, position),
-    queryFn: () => getMembers({ search: settled, position: position === 'all' ? undefined : position }),
+    queryFn: () =>
+      getMembers({ search: settled, position: position === 'all' ? undefined : position }),
     placeholderData: keepPreviousData,
     refetchInterval: 30_000,
   });
@@ -59,29 +65,46 @@ export function MembersPage() {
   // The open record reads from the list, so a refetch (an issue, a save, the
   // 30s poll) updates the dialog instead of leaving a stale snapshot.
   const viewing = viewingId ? (rows.find((member) => member.id === viewingId) ?? null) : null;
+  const transferring = transferId
+    ? (rows.find((member) => member.id === transferId) ?? null)
+    : null;
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const active = rows.filter((member) => member.status === 'active').length;
   const filtersActive = search !== '' || position !== 'all';
+  const rangeStart = rows.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const rangeEnd = Math.min((safePage + 1) * PAGE_SIZE, rows.length);
 
+  // The skeleton mirrors the real layout (header, summary chips, filters,
+  // table rows) so the page does not jump when the data lands.
   if (query.isPending) {
     return (
-      <section>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading members"
-        >
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <Skeleton style={{ height: 32, maxWidth: 260 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+      <section className={styles.page}>
+        <div className={styles.loadingStack} role="status" aria-label="Loading members">
+          <div className={styles.loadingHeader}>
+            <div className={styles.loadingHeaderText}>
+              <Skeleton className={styles.loadingTitle} />
+              <Skeleton className={styles.loadingSubtitle} />
+            </div>
+            <Skeleton className={styles.loadingAction} />
           </div>
-          <Skeleton style={{ height: 40, maxWidth: 420 }} />
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
+          <div className={styles.loadingChips}>
+            <Skeleton className={styles.loadingChip} />
+            <Skeleton className={styles.loadingChip} />
+          </div>
+          <div className={styles.loadingFilters}>
+            <Skeleton className={styles.loadingSearch} />
+            <Skeleton className={styles.loadingSelect} />
+          </div>
+          <div className={styles.loadingTable}>
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className={styles.loadingRow}>
+                <Skeleton className={styles.loadingAvatar} />
+                <Skeleton className={styles.loadingLineLong} />
+                <Skeleton className={styles.loadingLineShort} />
+              </div>
+            ))}
           </div>
           <span className="sr-only">Loading members…</span>
         </div>
@@ -93,12 +116,25 @@ export function MembersPage() {
     <section className={styles.page}>
       <PageHeader
         title="Members"
-        description="Hierarchy sellers and OSTs with their heads."
-        actions={<Button onClick={() => setCreateOpen(true)}>Create Member</Button>}
+        description="Hierarchy sellers (IST) and OSTs with their heads."
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setCreateOstOpen(true)}>
+              Create OST
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}>Create IST</Button>
+          </>
+        }
       />
       <div className={styles.badges} aria-label="Member summary">
         <StatusChip label={`Listed members: ${formatCountOrDash(rows.length)}`} tone="neutral" />
         <StatusChip label={`Active members: ${formatCountOrDash(active)}`} tone="success" />
+        {query.isFetching && !query.isPending ? (
+          <span className={styles.refreshing} role="status">
+            <Spinner size="sm" />
+            Updating…
+          </span>
+        ) : null}
       </div>
       <FilterBar
         search={
@@ -157,11 +193,11 @@ export function MembersPage() {
           description={
             filtersActive
               ? 'No members match these filters.'
-              : 'Create Member provisions the staff login.'
+              : 'Create IST provisions the staff login and its AA number; Create OST starts an OST registration.'
           }
           action={
             filtersActive ? undefined : (
-              <Button onClick={() => setCreateOpen(true)}>Create Member</Button>
+              <Button onClick={() => setCreateOpen(true)}>Create IST</Button>
             )
           }
         />
@@ -238,6 +274,9 @@ export function MembersPage() {
               onChange={(next) => setPage(next - 1)}
               label="Members pagination"
             />
+            <p role="status">
+              Showing {rangeStart}-{rangeEnd} of {rows.length}
+            </p>
           </div>
         </>
       )}
@@ -249,11 +288,34 @@ export function MembersPage() {
           void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
         }}
       />
+      <CreateOstDialog
+        open={createOstOpen}
+        onClose={() => setCreateOstOpen(false)}
+        onCreated={() => {
+          setCreateOstOpen(false);
+          void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
+        }}
+      />
       {viewing ? (
         <MemberDetailDialog
           member={viewing}
           onClose={() => setViewingId(null)}
           onChanged={() => {
+            void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
+          }}
+          onTransfer={(member) => {
+            // One modal at a time: the record view hands over to the transfer.
+            setViewingId(null);
+            setTransferId(member.id);
+          }}
+        />
+      ) : null}
+      {transferring ? (
+        <TransferMemberDialog
+          member={transferring}
+          onClose={() => setTransferId(null)}
+          onTransferred={() => {
+            setTransferId(null);
             void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
           }}
         />

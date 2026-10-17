@@ -29,6 +29,7 @@ import {
   Dialog,
   PasswordField,
   Select,
+  Spinner,
   TextField,
 } from '@afhomes/ui';
 import {
@@ -37,6 +38,7 @@ import {
   MEMBER_POSITIONS,
   MEMBER_UPLINE_ROLE,
   governmentIdTypeSchema,
+  manualIstAaNumberSchema,
   type MemberPosition,
 } from '@afhomes/contracts';
 import type { ComboboxOption } from '@afhomes/ui';
@@ -51,11 +53,10 @@ import {
 import { ApiError, errorFieldEntries } from '../../lib/api/errors';
 import { useLocalitiesQuery, useProvincesQuery } from '../address/useAddressHierarchy.js';
 import {
-  AA_MANUAL_RE,
   getMemberDepartments,
   getMemberOstReferrers,
   getMemberUplines,
-  withAaPrefix,
+  normalizeAaEntry,
 } from './services';
 import styles from './MembersPage.module.css';
 
@@ -253,7 +254,7 @@ export function MemberFormDialog({
     return options;
   }, [editing, position]);
 
-  const manualAaOk = aaMode === 'auto' || AA_MANUAL_RE.test(aaNumberInput.trim().toUpperCase());
+  const manualAaOk = aaMode === 'auto' || manualIstAaNumberSchema.safeParse(aaNumberInput).success;
   const passwordFilled = temporaryPassword !== '' || confirmPassword !== '';
   const passwordOk = editing
     ? !passwordFilled || (temporaryPassword.length >= 8 && temporaryPassword === confirmPassword)
@@ -323,7 +324,11 @@ export function MemberFormDialog({
     if (editing && headMoves && headChangeReason.trim().length < 3)
       return 'Explain the head change.';
     if (uplineRole !== null && headStaffId === '') return 'Pick a head to continue.';
-    if (!editing && aaMode === 'manual' && !AA_MANUAL_RE.test(aaNumberInput.trim().toUpperCase()))
+    if (
+      !editing &&
+      aaMode === 'manual' &&
+      !manualIstAaNumberSchema.safeParse(aaNumberInput).success
+    )
       return 'Type a valid AA number.';
     return null;
   }
@@ -379,6 +384,13 @@ export function MemberFormDialog({
       title={title}
       footer={
         <>
+          {/* The disabled-reason rides the always-visible footer: the Save
+              button and its explanation can never scroll apart. */}
+          {blockedWhy ? (
+            <p className={styles.footerHint} role="status">
+              {blockedWhy}
+            </p>
+          ) : null}
           <Button variant="secondary" onClick={requestClose} disabled={isSubmitting}>
             Cancel
           </Button>
@@ -393,7 +405,7 @@ export function MemberFormDialog({
         </>
       }
     >
-      <div className={styles.dialogBody}>
+      <div className={styles.dialogBody} aria-busy={isSubmitting || undefined}>
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>Assignment</legend>
           <div className={styles.formFields}>
@@ -434,11 +446,11 @@ export function MemberFormDialog({
               </label>
             </div>
             {!editing && salesDepartment === null && !departments.isPending ? (
-              <p role="alert">
+              <Alert variant="danger" title="Sales team unavailable">
                 {departments.error instanceof ApiError && departments.error.status === 403
-                  ? 'Department access required.'
-                  : 'Sales team unavailable. Reload.'}
-              </p>
+                  ? 'You need department access.'
+                  : 'Reload the page and try again.'}
+              </Alert>
             ) : null}
           </div>
         </fieldset>
@@ -685,7 +697,9 @@ export function MemberFormDialog({
               autoComplete="email"
             />
             {editing ? (
-              <p className={styles.sectionHint}>Leave the passwords blank to keep the current one.</p>
+              <p className={styles.sectionHint}>
+                Leave the passwords blank to keep the current one.
+              </p>
             ) : null}
             <div className={styles.inlinePair}>
               <PasswordField
@@ -729,14 +743,18 @@ export function MemberFormDialog({
                 />
               </label>
               {heads.isPending ? (
-                <p className={styles.sectionHint} role="status">
+                <p className={styles.inlineStatus} role="status">
+                  <Spinner size="sm" />
                   Loading heads…
                 </p>
               ) : heads.isError ? (
                 <Alert variant="danger" title="Heads failed to load">
-                  <Button variant="secondary" size="sm" onClick={() => void heads.refetch()}>
-                    Retry
-                  </Button>
+                  <p className={styles.alertText}>The head list is unavailable.</p>
+                  <div className={styles.alertActions}>
+                    <Button variant="secondary" size="sm" onClick={() => void heads.refetch()}>
+                      Retry
+                    </Button>
+                  </div>
                 </Alert>
               ) : (heads.data ?? []).length === 0 ? (
                 <Alert variant="info" title="No heads found">
@@ -781,18 +799,22 @@ export function MemberFormDialog({
                 />
               </label>
               {ostReferrers.isPending ? (
-                <p className={styles.sectionHint} role="status">
+                <p className={styles.inlineStatus} role="status">
+                  <Spinner size="sm" />
                   Loading OST referrers…
                 </p>
               ) : ostReferrers.isError ? (
                 <Alert variant="danger" title="OST referrers failed to load">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void ostReferrers.refetch()}
-                  >
-                    Retry
-                  </Button>
+                  <p className={styles.alertText}>The referrer list is unavailable.</p>
+                  <div className={styles.alertActions}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void ostReferrers.refetch()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
                 </Alert>
               ) : (ostReferrers.data ?? []).length === 0 ? (
                 <Alert variant="info" title="No OST referrers found">
@@ -832,7 +854,7 @@ export function MemberFormDialog({
                     value={aaMode}
                     onChange={(e) => {
                       setAaMode(e.target.value as 'auto' | 'manual');
-                      setAaNumberInput('AA');
+                      setAaNumberInput('');
                     }}
                     options={[
                       { value: 'auto', label: 'Automatic' },
@@ -845,9 +867,10 @@ export function MemberFormDialog({
                     id="member-aa-number"
                     name="member-aa-number"
                     label="AA Number"
+                    hint="AAI plus the two-digit year, month and sequence, or an existing AA- number."
                     value={aaNumberInput}
-                    onChange={(value) => setAaNumberInput(withAaPrefix(value))}
-                    placeholder="AAXXXXXXXXXXXX"
+                    onChange={(value) => setAaNumberInput(normalizeAaEntry(value))}
+                    placeholder="AAI26090001"
                   />
                 ) : null}
                 {editing ? (
@@ -874,10 +897,12 @@ export function MemberFormDialog({
             )}
           </div>
           {aaIssueError ? (
-            <div role="alert">
-              <p>{aaIssueError instanceof Error ? aaIssueError.message : 'Issue failed.'}</p>
+            <Alert variant="danger" title="AA number not issued">
+              <p className={styles.alertText}>
+                {aaIssueError instanceof Error ? aaIssueError.message : 'Issue failed.'}
+              </p>
               {aaFields.length > 0 ? (
-                <ul>
+                <ul className={styles.errorList}>
                   {aaFields.map(([field, reason]) => (
                     <li key={field}>
                       {field}: {reason}
@@ -885,7 +910,7 @@ export function MemberFormDialog({
                   ))}
                 </ul>
               ) : null}
-            </div>
+            </Alert>
           ) : null}
         </fieldset>
 
@@ -894,12 +919,13 @@ export function MemberFormDialog({
             First sign-in needs password change.
           </Alert>
         ) : null}
-        {blockedWhy ? <p className={styles.sectionHint}>{blockedWhy}</p> : null}
         {submitError ? (
-          <div role="alert">
-            <p>{submitError instanceof Error ? submitError.message : 'Save failed.'}</p>
+          <Alert variant="danger" title="Could not save">
+            <p className={styles.alertText}>
+              {submitError instanceof Error ? submitError.message : 'Save failed.'}
+            </p>
             {serverFields.length > 0 ? (
-              <ul>
+              <ul className={styles.errorList}>
                 {serverFields.map(([field, reason]) => (
                   <li key={field}>
                     {field}: {reason}
@@ -907,7 +933,7 @@ export function MemberFormDialog({
                 ))}
               </ul>
             ) : null}
-          </div>
+          </Alert>
         ) : null}
       </div>
     </Dialog>
