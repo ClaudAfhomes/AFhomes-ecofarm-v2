@@ -433,6 +433,16 @@ export type CreateOstMemberResult = z.infer<typeof createOstMemberResultSchema>;
  */
 const transferReasonSchema = z.string().trim().min(5).max(300);
 
+/** A genealogy move preserves OST identity, role, AA number and term dates. */
+export const transferOstTeamSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    sponsorStaffId: z.string().uuid(),
+    reason: transferReasonSchema,
+    managementApproved: z.literal(true),
+  })
+  .strict();
+
 export const transferMemberToOstSchema = z
   .object({
     direction: z.literal('IST_TO_OST'),

@@ -36,6 +36,19 @@ export function ostDirectFailure(
     };
   if (/ACCREDITATION_NUMBER_TAKEN/.test(message))
     return { code: 'CONFLICT', message: 'This AA number is already issued', status: 409 };
+  if (/OST_ACCREDITATION_EXPIRED_REQUIRED/.test(message))
+    return {
+      code: 'CONFLICT',
+      message: 'OST accreditation must expire before a team change can be approved.',
+      status: 409,
+    };
+  if (/OST_TRANSFER_SAME_TEAM|OST_TRANSFER_GENEALOGY_CONFLICT/.test(message))
+    return {
+      code: 'CONFLICT',
+      message:
+        'Choose a different active Sales Manager and refresh the current team before retrying.',
+      status: 409,
+    };
   if (
     /OST_ACCREDITATION_EXPIRED_REQUIRED|OST_CONVERSION_|OST_ANNUAL_VALIDITY_REQUIRED|OST_ROLE_WORKFLOW_REQUIRED|OST_TRANSFER_SPONSOR_REQUIRED/.test(
       message,

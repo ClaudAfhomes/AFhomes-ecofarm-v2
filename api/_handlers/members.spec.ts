@@ -1419,6 +1419,72 @@ describe('POST /members/ost (direct OST creation)', () => {
 });
 
 describe('POST /members/:id/transfer', () => {
+  it('reads the current OST team from genealogy even when there is no profile row', async () => {
+    const db = install();
+    db.tables.referral_relationships = [
+      {
+        subject_staff_id: OST_ID,
+        upline_staff_id: SM_ID,
+        hierarchy_role: 'ost',
+        is_active: true,
+        is_authoritative: true,
+      },
+    ];
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ position: 'ost', referrerStaffId: SM_ID });
+  });
+  it('requires explicit team approval and refuses expired-eligibility failures without kind conversion', async () => {
+    const db = install(undefined, {
+      rpcErrors: { transfer_ost_team: { message: 'OST_ACCREDITATION_EXPIRED_REQUIRED' } },
+    });
+    const body = {
+      requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
+      sponsorStaffId: SM2_ID,
+      reason: 'Management reviewed team change',
+      managementApproved: true,
+    };
+    const missingApproval = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body: { ...body, managementApproved: false },
+    });
+    expect(missingApproval.status).toBe(400);
+    expect(rpcCalls('transfer_ost_team')).toHaveLength(0);
+    const active = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body,
+    });
+    expect(active.status).toBe(409);
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+    expect(db.calls.some((c) => c.op === 'createUser' || c.op === 'inviteUserByEmail')).toBe(false);
+  });
+  it('moves an OST team through the genealogy RPC without invoking kind conversion', async () => {
+    const db = install(undefined, {
+      rpcs: [
+        { fn: 'transfer_ost_team', result: null },
+        { fn: 'get_sale_team_accreditation', result: null },
+      ],
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body: {
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
+        sponsorStaffId: SM2_ID,
+        reason: 'Management approved new team',
+        managementApproved: true,
+      },
+    });
+    expect(state.status).toBe(200);
+    expect(rpcCalls('transfer_ost_team')).toHaveLength(1);
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+    expect(db.calls.some((c) => c.op === 'createUser' || c.op === 'inviteUserByEmail')).toBe(false);
+  });
   const toOstBody = (extra: Record<string, unknown> = {}) => ({
     direction: 'IST_TO_OST',
     requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',

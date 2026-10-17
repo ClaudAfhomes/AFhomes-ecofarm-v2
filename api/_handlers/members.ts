@@ -39,6 +39,7 @@ import {
   memberListQuerySchema,
   memberSchema,
   transferMemberSchema,
+  transferOstTeamSchema,
   updateMemberProfileSchema,
   type AfHomesPermission,
   type CreateMember,
@@ -340,20 +341,38 @@ async function roleHolders(
 }
 
 async function memberRows(db: Db, search: string, position?: MemberPosition) {
-  const [{ data: staff }, { data: assignments }, { data: profiles }, { data: departments }] =
-    await Promise.all([
-      db
-        .from('staff_users')
-        .select('id,email,full_name,status,department_id,employee_number,created_at')
-        .order('created_at', { ascending: false }),
-      db.from('staff_role_assignments').select('staff_id,role_id'),
-      db
-        .from('network_member_profiles')
-        .select(
-          'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,province_code,city_municipality_code,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
-        ),
-      db.from('departments').select('id,name'),
-    ]);
+  const [
+    { data: staff },
+    { data: assignments },
+    { data: profiles },
+    { data: departments },
+    { data: ostEdges, error: ostEdgesError },
+  ] = await Promise.all([
+    db
+      .from('staff_users')
+      .select('id,email,full_name,status,department_id,employee_number,created_at')
+      .order('created_at', { ascending: false }),
+    db.from('staff_role_assignments').select('staff_id,role_id'),
+    db
+      .from('network_member_profiles')
+      .select(
+        'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,province_code,city_municipality_code,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
+      ),
+    db.from('departments').select('id,name'),
+    db
+      .from('referral_relationships')
+      .select('subject_staff_id,upline_staff_id')
+      .eq('hierarchy_role', 'ost')
+      .eq('is_active', true)
+      .eq('is_authoritative', true),
+  ]);
+  if (ostEdgesError) throw ostEdgesError;
+  const ostHeadByStaff = new Map(
+    (ostEdges ?? []).map((edge: Record<string, unknown>) => [
+      String(edge.subject_staff_id),
+      String(edge.upline_staff_id),
+    ]),
+  );
   const roles = await roleCatalog(db);
   const roleById = new Map(roles.map((r: RoleRow) => [r.id, r]));
   const assignmentByStaff = new Map(
@@ -393,7 +412,12 @@ async function memberRows(db: Db, search: string, position?: MemberPosition) {
     }),
   );
   const rows = candidates.flatMap(({ staff: s, memberPosition }) => {
-    const profile = profileByStaff.get(String(s.id)) ?? null;
+    const storedProfile = profileByStaff.get(String(s.id)) ?? null;
+    // OST genealogy is authoritative even when direct onboarding has no IST profile.
+    const profile =
+      memberPosition === 'ost'
+        ? { ...storedProfile, referrer_staff_id: ostHeadByStaff.get(String(s.id)) ?? null }
+        : storedProfile;
     const referrerName = profile?.referrer_staff_id
       ? (nameByStaff.get(String(profile.referrer_staff_id)) ?? null)
       : null;
@@ -599,7 +623,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     );
   }
 
-  /* ---------------- transfer an accredited member between kinds ---------------- */
+  /* ---------------- approved OST genealogy move (no kind or AA change) ---------------- */
+  const teamTransfer = route(req, 'POST', /^([0-9a-f-]+)\/team-transfer$/);
+  if (teamTransfer) {
+    const auth = await authorizeAfHomes(req, 'network.members', 'update');
+    if ('error' in auth) return deny(res, auth);
+    const parsed = transferOstTeamSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return fail(
+        res,
+        'VALIDATION_ERROR',
+        'Choose the new Sales Manager, give a reason and confirm approval.',
+        400,
+        fieldDetails(parsed),
+      );
+    const id = teamTransfer[1]!;
+    const { error } = await db.rpc('transfer_ost_team', {
+      p_actor_id: auth.userId,
+      p_ost_id: id,
+      p_request_id: parsed.data.requestId,
+      p_sponsor_id: parsed.data.sponsorStaffId,
+      p_reason: parsed.data.reason,
+    });
+    if (error) {
+      const failure = ostDirectFailure(error);
+      if (failure) return fail(res, failure.code, failure.message, failure.status);
+      throw error;
+    }
+    const row = (await memberRows(db, '', undefined)).find((member: Member) => member.id === id);
+    if (!row)
+      return fail(res, 'INTERNAL', 'The transfer outcome requires review before retrying.', 500);
+    return res.status(200).json(row);
+  }
+
+  /* ---------------- convert an accredited member between kinds ---------------- */
   const transfer = route(req, 'POST', /^([0-9a-f-]+)\/transfer$/);
   if (transfer) {
     const id = transfer[1]!;

@@ -127,3 +127,49 @@ Ignored evidence: `.tmp-bin/release-review/migration-10-preflight.json` and
 `migration-10-applied.json`. No credential values or customer records are in
 this documentation. The helper loaded existing credentials only for the
 approved migration operation; values were not printed.
+
+
+## 2026-10-17: expired OST team transfer, migration 11
+
+User explicitly approved only migration 11, followed by the scoped commit and
+push to claud/develop. Applied only
+`20261208000011_afhomes_ost_team_transfer.sql` to existing project
+`ikaevepedpqygdlipsei` at 2026-10-17 21:47 SGT (13:47 UTC).
+SHA-256: `22D873A390E25C483317F1358639AB5B2E71BFFB346FEDE00986567392792FDC`.
+The applied file is immutable; its original LOCAL DRAFT header is historical.
+
+Preflight verified TLS with the existing Supabase root CA, project and username,
+94 history entries through migration 10, the exact migration-09 genealogy guard
+body, and absence of 11 and all new objects. No mismatch was found.
+
+Command: `node --use-system-ca .tmp-bin/release-review/apply-11.mjs --apply-approved`
+from the integration checkout. The ignored helper pinned the hash, used a
+5-second lock timeout and advisory migration lock, stripped only the outer file
+BEGIN/COMMIT in memory, and committed DDL, verification and one history row in
+one repeatable-read transaction. No other pending migration was run or stamped;
+the previously documented unrelated history differences remain untouched.
+
+Verified: one empty private RLS-enabled `ost_team_transfers` ledger; one
+immutable UPDATE/DELETE trigger; two new functions (private immutable-history
+helper and public `transfer_ost_team(uuid,uuid,uuid,uuid,text)`); only the
+existing genealogy guard definition changed. Runtime roles have no ledger
+privileges. New RPC execution is service_role-only; anon/authenticated are
+denied. Private helper execution is denied to all three runtime roles.
+Function search paths are restricted to pg_catalog, pg_temp. All existing
+function/table ACLs, other function definitions, table catalogs and existing
+triggers were preserved. Existing public/private/Auth/Storage row counts were
+unchanged within the apply transaction; the new ledger had zero rows. RLS
+invariant queries returned zero rows. Post-commit history, functions, table
+catalogs and triggers were re-read successfully: history 94 -> 95, old history
+unchanged, exactly version 20261208000011 added.
+
+No business RPC was invoked, no account created, and no business-data action
+performed. No Vercel change, deployment or production promotion was performed.
+Local proof before release: 138 targeted API tests, 36 admin tests and 177 real
+disposable PostgreSQL checks passed; workspace/API typechecks, scoped admin lint
+and both application builds passed. Synthetic local Chrome checked the team
+transfer dialog. Authenticated live workflow/persistence remains unverified.
+
+Ignored sanitized evidence: `.tmp-bin/release-review/migration-11-applied.json`.
+Existing gitignored credentials were loaded only by the approved helper;
+no credentials or customer records are written here.

@@ -1,5 +1,15 @@
 # Continue: safely release the OST work adapted to develop
 
+> LATEST APPROVED RELEASE: [OST team transfer](2026-10-17-ost-team-transfer.md).
+> OST team moves preserve OST role, AA number and term dates; expiry plus
+> management approval remain required. Migration `20261208000011` was approved
+> and applied on 2026-10-17 at 21:47 SGT, history 94 -> 95, with verified TLS,
+> atomic DDL/history and unchanged existing business/Auth/Storage row counts.
+> Scoped commit and normal push are authorized ONLY to `origin/claud/develop`.
+> No production deployment/promotion or live business-transfer UAT is authorized.
+> See the migration log. The checkpoints below are historical, superseded where
+> they describe migration 10/11 or commit/push as pending. Preserve unrelated work.
+
 > NEW STATUS: [OST password creation and form layout](2026-10-17-ost-password-creation.md)
 > supersedes release-readiness claims below. Migration `20261208000010`
 > was approved and applied on 2026-10-17; history 93 -> 94, verified TLS,

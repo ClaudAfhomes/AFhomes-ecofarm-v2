@@ -97,6 +97,15 @@ export const transferMember = (id: string, input: TransferMember): Promise<Membe
     body: JSON.stringify(input),
   });
 
+export const transferOstTeam = (
+  id: string,
+  input: { requestId: string; sponsorStaffId: string; reason: string; managementApproved: true },
+): Promise<Member> =>
+  request(`/members/${id}/team-transfer`, memberSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
 export const updateMember = (id: string, input: UpdateMemberProfile): Promise<Member> =>
   request(`/members/${id}`, memberSchema, { method: 'PATCH', body: JSON.stringify(input) });
 
