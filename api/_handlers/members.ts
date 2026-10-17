@@ -63,7 +63,7 @@ import {
   type Db,
 } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
-import { inviteAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
+import { createAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
@@ -579,11 +579,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       if (failure) return fail(res, failure.code, failure.message, failure.status);
       throw signatures.error;
     }
-    const installed = await inviteAndInstallDirectOst(db, {
+    const installed = await createAndInstallDirectOst(db, {
       applicationId,
       actorId: auth.userId,
       email: input.identity.email.toLowerCase(),
       fullName: ostFullName(input.identity),
+      temporaryPassword: input.temporaryPassword!,
+      aaNumber: input.aaNumberMode === 'manual' ? input.aaNumber! : null,
       startsOn: input.startsOn!,
       expiresOn: input.expiresOn!,
     });

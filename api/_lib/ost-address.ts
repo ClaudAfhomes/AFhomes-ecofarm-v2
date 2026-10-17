@@ -20,11 +20,14 @@ export async function verifyOstAddressDetails(
   if (!codes) return { ok: true, address };
   const provider = addressProvider();
   try {
-    if (!provider.provincesInRegion) return { ok: false, status: 503 };
-    const provinces = await provider.provincesInRegion(codes.regionCode);
-    if (!provinces.some((p) => p.code === codes.provinceCode)) return { ok: false, status: 400 };
+    if (codes.regionCode) {
+      if (!provider.provincesInRegion) return { ok: false, status: 503 };
+      const provinces = await provider.provincesInRegion(codes.regionCode);
+      if (!provinces.some((p) => p.code === codes.provinceCode)) return { ok: false, status: 400 };
+    }
     const result = await verifyAddressHierarchy(provider, codes);
-    if (!result.valid) return { ok: false, status: result.reason.startsWith('PROVIDER_') ? 503 : 400 };
+    if (!result.valid)
+      return { ok: false, status: result.reason.startsWith('PROVIDER_') ? 503 : 400 };
     const { province, locality, barangay } = result.hierarchy;
     if (address.postalCode && address.postalCode !== locality.postalCode)
       return { ok: false, status: 400 };
@@ -43,9 +46,9 @@ export async function verifyOstAddressDetails(
   }
 }
 
-export async function verifyOstAddress(identity: OstIdentity): Promise<
-  { ok: true; identity: OstIdentity } | { ok: false; status: 400 | 503 }
-> {
+export async function verifyOstAddress(
+  identity: OstIdentity,
+): Promise<{ ok: true; identity: OstIdentity } | { ok: false; status: 400 | 503 }> {
   const result = await verifyOstAddressDetails(identity.address, identity.addressHierarchy);
   return result.ok ? { ok: true, identity: { ...identity, address: result.address } } : result;
 }

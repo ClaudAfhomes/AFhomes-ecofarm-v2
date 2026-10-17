@@ -5,12 +5,14 @@ import { GOVERNMENT_ID_TYPE_LABELS, governmentIdTypeSchema } from '@afhomes/cont
 export function OstOfficialFields({
   values,
   onChange,
+  className,
 }: {
   values: Record<string, string>;
   onChange: (name: string, value: string) => void;
+  className?: string;
 }) {
   return (
-    <fieldset>
+    <fieldset className={className}>
       <legend>Official accreditation details</legend>
       {[
         ['dateApplied', 'Date applied', 'date'],
@@ -70,7 +72,8 @@ const selects: { name: string; label: string; options: [string, string][] }[] = 
     options: [
       ['', 'Choose ID type'],
       ...governmentIdTypeSchema.options.map((value): [string, string] => [
-        value, GOVERNMENT_ID_TYPE_LABELS[value],
+        value,
+        GOVERNMENT_ID_TYPE_LABELS[value],
       ]),
     ],
   },

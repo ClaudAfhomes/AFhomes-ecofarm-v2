@@ -248,6 +248,8 @@ function install(
     rpcs?: { fn: string; result: unknown | ((args: Record<string, unknown>) => unknown) }[];
     /** Id handed back by inviteUserByEmail; must be a UUID to pass contracts. */
     inviteUserId?: string;
+    createUserId?: string;
+    createUser?: NonNullable<ConstructorParameters<typeof FakeSupabase>[0]>['createUser'];
   },
 ) {
   holder.db = new FakeSupabase({
@@ -1205,6 +1207,7 @@ const directForm = {
 };
 const directBody = (extra: Record<string, unknown> = {}) => ({
   mode: 'complete',
+  temporaryPassword: 'SyntheticPass123!',
   requestId: '22222222-3333-4444-8555-666666666666',
   sponsorStaffId: SM_ID,
   identity: directIdentity,
@@ -1215,16 +1218,74 @@ const directBody = (extra: Record<string, unknown> = {}) => ({
 });
 const installDirect = (extra: Record<string, unknown> = {}) =>
   install(undefined, {
+    createUserId: DIRECT_MEMBER_ID,
     inviteUserId: DIRECT_MEMBER_ID,
     rpcs: [
       { fn: 'submit_ost_accreditation', result: DIRECT_APP_ID },
       { fn: 'confirm_ost_application_signatures', result: DIRECT_APP_ID },
-      { fn: 'install_direct_ost_accreditation', result: DIRECT_TERM_ID },
+      { fn: 'install_direct_ost_password', result: DIRECT_TERM_ID },
     ],
     ...extra,
   });
 
 describe('POST /members/ost (direct OST creation)', () => {
+  it('rejects a missing password before any submission or account write', async () => {
+    const db = installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody({ temporaryPassword: undefined }),
+    });
+    expect(state.status).toBe(400);
+    expect(rpcCalls('submit_ost_accreditation')).toHaveLength(0);
+    expect(db.calls.filter((c) => c.op === 'createUser')).toHaveLength(0);
+  });
+  it('removes only its new login after a confirmed atomic SQL rejection', async () => {
+    const db = installDirect({
+      rpcErrors: {
+        install_direct_ost_password: { message: 'ACCREDITATION_NUMBER_TAKEN', code: '23505' },
+      },
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody(),
+    });
+    expect(state.status).toBe(409);
+    expect(db.deletedAuthUsers).toEqual([DIRECT_MEMBER_ID]);
+  });
+  it('does not reuse or delete a pre-existing Auth identity', async () => {
+    const db = installDirect({
+      createUser: async () => ({ data: { user: null }, error: { message: 'Already registered' } }),
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody(),
+    });
+    expect(state.status).toBe(409);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
+    expect(db.deletedAuthUsers).toEqual([]);
+  });
+  it('creates a password login without an invitation and forwards the manual AA', async () => {
+    const db = installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody({ aaNumberMode: 'manual', aaNumber: 'AAO26100001' }),
+    });
+    expect(state.status).toBe(201);
+    expect(db.calls.filter((c) => c.op === 'createUser')).toHaveLength(1);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(0);
+    expect(rpcArgs('install_direct_ost_password')[0]?.arg).toMatchObject({
+      p_aa_number: 'AAO26100001',
+    });
+    expect(JSON.stringify(state.body)).not.toContain('SyntheticPass123!');
+  });
   const ORIGINAL_ADMIN_URL = process.env.AFHOMES_ADMIN_URL;
   beforeEach(() => {
     process.env.AFHOMES_ADMIN_URL = 'https://afhomes.test/admin';
@@ -1244,7 +1305,7 @@ describe('POST /members/ost (direct OST creation)', () => {
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(201);
-    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(1);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(1);
     expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
     expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
   });
@@ -1273,13 +1334,13 @@ describe('POST /members/ost (direct OST creation)', () => {
     const signatures = rpcArgs('confirm_ost_application_signatures')[0]!.arg!;
     expect(signatures.p_applicant_date).toBe('2026-10-01');
     expect(signatures.p_referrer_date).toBe('2026-10-01');
-    // The install re-validates the sponsor in SQL and never receives a number.
-    const installed = rpcArgs('install_direct_ost_accreditation')[0]!.arg!;
+    // SQL revalidates the sponsor; null selects automatic numbering.
+    const installed = rpcArgs('install_direct_ost_password')[0]!.arg!;
     expect(installed.p_actor_id).toBe(ADMIN_ID);
     expect(installed.p_auth_id).toBe(DIRECT_MEMBER_ID);
     expect(installed.p_starts_on).toBe('2026-10-01');
     expect(installed.p_expires_on).toBe('2027-10-01');
-    expect(installed).not.toHaveProperty('p_aa_number');
+    expect(installed.p_aa_number).toBeNull();
   });
 
   it('saves the application as pending and invites nobody', async () => {
@@ -1297,7 +1358,7 @@ describe('POST /members/ost (direct OST creation)', () => {
       status: 'submitted',
     });
     expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
-    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(0);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
     expect(
       (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
         (c) => c.op === 'inviteUserByEmail',
@@ -1305,10 +1366,10 @@ describe('POST /members/ost (direct OST creation)', () => {
     ).toHaveLength(0);
   });
 
-  it('keeps the invitation when the install is refused', async () => {
+  it('preserves a newly created login on an uncertain install outcome', async () => {
     installDirect({
       rpcErrors: {
-        install_direct_ost_accreditation: { message: 'OST_SIGNATURE_EVIDENCE_REQUIRED' },
+        install_direct_ost_password: { message: 'OST_SIGNATURE_EVIDENCE_REQUIRED' },
       },
     });
     const state = await call({
@@ -1319,12 +1380,10 @@ describe('POST /members/ost (direct OST creation)', () => {
     });
     expect(state.status).toBe(400);
     expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
-    // The invitation is deliberately preserved: an invite response does not
-    // prove the account was newly created, so deleting it could destroy a
-    // pre-existing login. The operator retries from the OST queue.
+    // No confirmed SQL error code: preserve the login for administrator review.
     expect(
       (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
-        (c) => c.op === 'inviteUserByEmail',
+        (c) => c.op === 'createUser',
       ),
     ).toHaveLength(1);
   });

@@ -83,3 +83,47 @@ These repository migrations remain absent from live history and were **not appli
 The two live-only history versions `20261012075439` and `20261203000002` remain as recorded above.
 
 Any further history reconciliation, live migration, or business-data test requires its own appropriate scope. No credentials, signed URLs or customer data belong in this log.
+
+
+## 2026-10-17: direct OST password creation, migration 10
+
+User approved migration 10 subject to safety and verification checks. Applied
+only `20261208000010_afhomes_direct_ost_password.sql` to existing project
+`ikaevepedpqygdlipsei` at 2026-10-17 20:49 SGT (12:49 UTC).
+SHA-256: `5D60A0DA23BDFFFBC5983B41DD804507D52289571E12E684AF04A502222DED61`.
+The file is now applied and immutable; its earlier draft comment is historical.
+
+Preflight verified the target and TLS certificate, 93 history entries through
+09, absence of migration 10 and the new RPC, and exact agreement of the live
+legacy direct-install body with the repository's migration 09. The first
+connection stopped on an untrusted certificate chain; the successful connection
+used the existing Supabase root CA with rejectUnauthorized=true. No TLS trust
+store or platform settings were changed.
+
+Exact scoped helper: `node --use-system-ca .tmp-bin/release-review/apply-10.mjs --apply-approved`.
+It pins the above hash and only this version. It executes the migration's
+function/ACL statements and the history insert inside one enclosing transaction,
+with 5-second lock timeout, preserving atomic DDL/history recording. No broad
+migration runner or earlier missing migrations were executed.
+
+Verified before commit: one new `install_direct_ost_password(uuid,uuid,uuid,date,date,text)`
+SECURITY DEFINER RPC with `search_path=pg_catalog, pg_temp`; execution denied to
+anon/authenticated and allowed to service_role. All existing public/private
+functions and their ACLs, table catalogs, and public/private/Auth/Storage row
+counts were unchanged in that transaction. RLS invariant queries returned zero
+rows. Committed history was then re-read: 93 -> 94, old rows unchanged, only
+20261208000010 added, new RPC visible. No business RPC was called, no account
+created, and no business data changed by this apply.
+
+Local proof: 135 targeted API tests and 155 disposable PostgreSQL checks passed
+again during release review. Both application builds passed via direct pnpm
+scripts; Turbo's launcher could not locate pnpm, so that wrapper did not pass.
+Earlier form/contracts tests and workspace typechecks are recorded in the OST
+password handoff. No managed Auth sign-in, authenticated browser UAT, staging,
+commit, push or deployment was performed. Application changes remain local;
+this entry confirms the database prerequisite, not live feature acceptance.
+
+Ignored evidence: `.tmp-bin/release-review/migration-10-preflight.json` and
+`migration-10-applied.json`. No credential values or customer records are in
+this documentation. The helper loaded existing credentials only for the
+approved migration operation; values were not printed.

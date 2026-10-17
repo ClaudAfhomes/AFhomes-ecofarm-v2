@@ -3,15 +3,39 @@ import { barangaySchema, localitySchema, provinceSchema } from '@afhomes/contrac
 import type { OstAddressSelection } from '@afhomes/ui';
 import { protectedRequestList } from '../../lib/api/client';
 
-export function useOstAddress(value: OstAddressSelection) {
+export function useOstAddress(value: OstAddressSelection, showRegion = true) {
   const common = { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false, retry: false };
-  const regions = useQuery({ ...common, queryKey: ['address', 'regions'],
-    queryFn: () => protectedRequestList('/address/regions', provinceSchema) });
-  const provinces = useQuery({ ...common, queryKey: ['address', 'region-provinces', value.regionCode], enabled: Boolean(value.regionCode),
-    queryFn: () => protectedRequestList(`/address/regions/${value.regionCode}/provinces`, provinceSchema) });
-  const localities = useQuery({ ...common, queryKey: ['address', 'localities', value.provinceCode], enabled: Boolean(value.provinceCode),
-    queryFn: () => protectedRequestList(`/address/provinces/${value.provinceCode}/localities`, localitySchema) });
-  const barangays = useQuery({ ...common, queryKey: ['address', 'barangays', value.localityCode], enabled: Boolean(value.localityCode),
-    queryFn: () => protectedRequestList(`/address/localities/${value.localityCode}/barangays`, barangaySchema) });
+  const regions = useQuery({
+    ...common,
+    queryKey: ['address', 'regions'],
+    enabled: showRegion,
+    queryFn: () => protectedRequestList('/address/regions', provinceSchema),
+  });
+  const provinces = useQuery({
+    ...common,
+    queryKey: showRegion
+      ? ['address', 'region-provinces', value.regionCode]
+      : ['address', 'provinces'],
+    enabled: !showRegion || Boolean(value.regionCode),
+    queryFn: () =>
+      protectedRequestList(
+        showRegion ? `/address/regions/${value.regionCode}/provinces` : '/address/provinces',
+        provinceSchema,
+      ),
+  });
+  const localities = useQuery({
+    ...common,
+    queryKey: ['address', 'localities', value.provinceCode],
+    enabled: Boolean(value.provinceCode),
+    queryFn: () =>
+      protectedRequestList(`/address/provinces/${value.provinceCode}/localities`, localitySchema),
+  });
+  const barangays = useQuery({
+    ...common,
+    queryKey: ['address', 'barangays', value.localityCode],
+    enabled: Boolean(value.localityCode),
+    queryFn: () =>
+      protectedRequestList(`/address/localities/${value.localityCode}/barangays`, barangaySchema),
+  });
   return { regions, provinces, localities, barangays };
 }

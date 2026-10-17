@@ -288,10 +288,11 @@ try {
       'insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug=$2',
       [id, role],
     );
-    if (upline) await db.query(
-      'insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,assigned_by) values($1,$2,$3,$4)',
-      [id, upline, role, ids.super_admin],
-    );
+    if (upline)
+      await db.query(
+        'insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,assigned_by) values($1,$2,$3,$4)',
+        [id, upline, role, ids.super_admin],
+      );
     await db.query(profileSql, [id, phone]);
     if (role !== 'ost')
       await db.query(
@@ -465,15 +466,49 @@ try {
   );
   await db.query('drop trigger synthetic_transfer_failure on public.audit_events');
   check((await db.query(transferSql, rollbackArgs)).rows[0].result.aaNumber, 'AAO26100072');
-  const collision = await addIst('sales_manager','AAI26100074',ids.senior_sales_manager,'+639189990074');
-  await db.query("insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AAO26100074','SYNTHETIC COLLISION','OST','active','2026-01-01','2027-01-01',$2)",[child,ids.super_admin]);
-  await assert.rejects(db.query(transferSql,await transferArgs(collision)),/ACCREDITATION_NUMBER_TAKEN/); checks++;
-  check((await db.query('select aa_number from private.sale_team_accreditations where staff_id=$1',[collision])).rows[0].aa_number,'AAI26100074');
-  check((await db.query('select count(*)::int n from public.ost_members where id=$1',[collision])).rows[0].n,0);
+  const collision = await addIst(
+    'sales_manager',
+    'AAI26100074',
+    ids.senior_sales_manager,
+    '+639189990074',
+  );
+  await db.query(
+    "insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AAO26100074','SYNTHETIC COLLISION','OST','active','2026-01-01','2027-01-01',$2)",
+    [child, ids.super_admin],
+  );
+  await assert.rejects(
+    db.query(transferSql, await transferArgs(collision)),
+    /ACCREDITATION_NUMBER_TAKEN/,
+  );
+  checks++;
+  check(
+    (
+      await db.query('select aa_number from private.sale_team_accreditations where staff_id=$1', [
+        collision,
+      ])
+    ).rows[0].aa_number,
+    'AAI26100074',
+  );
+  check(
+    (await db.query('select count(*)::int n from public.ost_members where id=$1', [collision]))
+      .rows[0].n,
+    0,
+  );
 
-  const rootIst = await addIst('vice_director','AAI26100076',null,'+639189990076');
-  check((await db.query(transferSql,await transferArgs(rootIst))).rows[0].result.aaNumber,'AAO26100076');
-  check((await db.query('select from_upline_staff_id from private.ost_ist_conversions where staff_id=$1',[rootIst])).rows[0].from_upline_staff_id,null);
+  const rootIst = await addIst('vice_director', 'AAI26100076', null, '+639189990076');
+  check(
+    (await db.query(transferSql, await transferArgs(rootIst))).rows[0].result.aaNumber,
+    'AAO26100076',
+  );
+  check(
+    (
+      await db.query(
+        'select from_upline_staff_id from private.ost_ist_conversions where staff_id=$1',
+        [rootIst],
+      )
+    ).rows[0].from_upline_staff_id,
+    null,
+  );
   // The operation CHECK must stay a forward-only union: an already-applied
   // database keeps rows for operations this batch never wrote, so the list may
   // grow but must never shrink.
@@ -1279,6 +1314,103 @@ try {
     (
       await db.query(
         "select has_function_privilege('authenticated','public.transfer_sale_team_member(uuid,uuid,text,text,text,uuid,uuid,jsonb,jsonb,date,date)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  // Password-based management creation is additive; the legacy path above still works.
+  const passwordInstall =
+    "select public.install_direct_ost_password($1,$2,$3,'2026-10-17','2027-10-17',$4) id";
+  async function passwordApplication(index) {
+    const person = randomUUID();
+    const applicant = {
+      ...identity,
+      email: `${person}@example.invalid`,
+      phone: `+6391899901${index}`,
+    };
+    const app = (
+      await db.query("select public.submit_ost_accreditation($1,$2,$3,null,$4,$5,'manual') id", [
+        randomUUID(),
+        ids.super_admin,
+        ids.sales_manager,
+        applicant,
+        form,
+      ])
+    ).rows[0].id;
+    await db.query('insert into auth.users(id,email) values($1,$2)', [person, applicant.email]);
+    return { person, app };
+  }
+  for (const [index, number] of [
+    [11, null],
+    [12, 'AAO99129999'],
+  ]) {
+    const { person, app } = await passwordApplication(index);
+    const args = [app, ids.super_admin, person, number];
+    const term = (await db.query(passwordInstall, args)).rows[0].id;
+    const state = (
+      await db.query(
+        `select s.status,s.must_change_password,a.aa_number from public.staff_users s
+      join private.sale_team_accreditations a on a.staff_id=s.id where s.id=$1`,
+        [person],
+      )
+    ).rows[0];
+    check(state.status, 'active');
+    check(state.must_change_password, true);
+    check(number ? state.aa_number === number : /^AAO2610\d{4}$/.test(state.aa_number), true);
+    check(
+      (
+        await db.query(
+          'select count(*)::int n from public.staff_invitations where auth_user_id=$1',
+          [person],
+        )
+      ).rows[0].n,
+      0,
+    );
+    check((await db.query(passwordInstall, args)).rows[0].id, term);
+    await assert.rejects(
+      db.query(passwordInstall, [app, ids.super_admin, person, 'AAO99129998']),
+      /MUTATION_PAYLOAD_CONFLICT/,
+    );
+    checks++;
+  }
+  const denied = await passwordApplication(13);
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.senior_sales_manager, denied.person, null]),
+    /OST_AA_ISSUANCE_FORBIDDEN/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.super_admin, denied.person, 'AAI99129999']),
+    /INVALID_ACCREDITATION_NUMBER/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.super_admin, denied.person, 'AAO99129999']),
+    /ACCREDITATION_NUMBER_TAKEN/,
+  );
+  checks++;
+  check(
+    (await db.query('select count(*)::int n from public.staff_users where id=$1', [denied.person]))
+      .rows[0].n,
+    0,
+  );
+  check(
+    (await db.query('select status from public.ost_applications where id=$1', [denied.app])).rows[0]
+      .status,
+    'submitted',
+  );
+  check(
+    (
+      await db.query(
+        "select has_function_privilege('authenticated','public.install_direct_ost_password(uuid,uuid,uuid,date,date,text)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  check(
+    (
+      await db.query(
+        "select has_function_privilege('anon','public.install_direct_ost_password(uuid,uuid,uuid,date,date,text)','execute') allowed",
       )
     ).rows[0].allowed,
     false,
