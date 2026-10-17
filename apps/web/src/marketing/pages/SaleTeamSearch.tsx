@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { aaNumberSchema, saleTeamLookupSchema } from '@afhomes/contracts';
+import { aaNumberSchema, saleTeamSearchResultSchema } from '@afhomes/contracts';
 import { AccreditationId, Alert, Button, Skeleton, TextField } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
 import { Container } from '../components/ui/Container';
@@ -14,9 +14,13 @@ export default function SaleTeamSearch() {
   const result = useQuery({
     queryKey: ['sale-team-search', submitted],
     queryFn: ({ signal }) =>
-      request(`/sale-team/search?aaNumber=${encodeURIComponent(submitted)}`, saleTeamLookupSchema, {
-        signal,
-      }),
+      request(
+        `/sale-team/search?aaNumber=${encodeURIComponent(submitted)}`,
+        saleTeamSearchResultSchema,
+        {
+          signal,
+        },
+      ),
     enabled: Boolean(submitted),
     retry: false,
     staleTime: 0,
@@ -79,7 +83,11 @@ export default function SaleTeamSearch() {
           {showing && !result.isFetching && result.isSuccess ? (
             result.data ? (
               <section
-                aria-label="Accredited sales team member"
+                aria-label={
+                  result.data.status === 'superseded'
+                    ? 'Superseded AA number'
+                    : 'Accredited sales team member'
+                }
                 className="rounded-xl border border-leaf-300 p-6"
               >
                 <h2 className="text-xl font-semibold">{result.data.fullName}</h2>
@@ -96,8 +104,20 @@ export default function SaleTeamSearch() {
                   </div>
                   <div>
                     <dt>Status</dt>
-                    <dd>Currently accredited</dd>
+                    <dd>
+                      {result.data.status === 'superseded'
+                        ? 'No longer current'
+                        : 'Currently accredited'}
+                    </dd>
                   </div>
+                  {result.data.status === 'superseded' && result.data.successorAaNumber ? (
+                    <div>
+                      <dt>Current AA number</dt>
+                      <dd>
+                        <AccreditationId value={result.data.successorAaNumber} />
+                      </dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Valid from</dt>
                     <dd>{result.data.startsOn}</dd>

@@ -110,7 +110,19 @@ export function CreateMemberDialog({
       return createMember(checked.data);
     },
     onSuccess: (created) => {
-      notifySuccess({ title: 'Member created', message: `${created.fullName} was added.` });
+      // The success popup carries the two identifiers the operator needs to
+      // hand over: the staff code and the fresh AA number.
+      const detail = [
+        created.employeeNumber ? `Code: ${created.employeeNumber}` : '',
+        created.aaNumber ? `AA number: ${created.aaNumber}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      notifySuccess({
+        title: 'Member created',
+        message: `${created.fullName} was added.`,
+        ...(detail ? { detail } : {}),
+      });
       onCreated();
     },
     // A centered modal, not just an inline line: a failed save must be

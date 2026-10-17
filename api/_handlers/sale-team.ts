@@ -1,7 +1,12 @@
 import { z } from 'zod';
-import { aaNumberSchema, manageSaleTeamSchema, saleTeamLookupSchema } from '@afhomes/contracts';
+import {
+  aaNumberSchema,
+  manageSaleTeamSchema,
+  saleTeamHistoricalAccreditationSchema,
+  saleTeamLookupSchema,
+} from '@afhomes/contracts';
 import { authorizeAfHomes, resolveAfHomesPrincipal } from '../_lib/afhomes-access.js';
-import { deny, fail, jsonBody, method, subPath } from '../_lib/handler-kit.js';
+import { deny, fail, jsonBody, method, singleRpcRow, subPath } from '../_lib/handler-kit.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
@@ -13,6 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const path = subPath(req);
   try {
     let result;
+    let historical = false;
     if (path === 'search' && method(req) === 'GET') {
       // shortcut: per-instance IP limit only; use platform edge limits before broad public rollout.
       const verdict = consumeIdentifierAttempt(req, 'public-sale-team');
@@ -23,6 +29,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const number = aaNumberSchema.safeParse(req.query.aaNumber);
       if (!number.success) return fail(res, 'VALIDATION_ERROR', 'Enter a valid AA number.', 400);
       result = await db.rpc('search_sale_team_accreditation', { p_aa_number: number.data });
+      if (!result.error && singleRpcRow(result.data) === null) {
+        // The number is not current. It may have been retired by a transfer,
+        // and only the history table can tell the successor. That answer is
+        // for an authenticated staff caller who holds the members permission
+        // and for nobody else: an anonymous or unauthorized caller keeps the
+        // ordinary not-found answer, so this endpoint can never be used to
+        // probe which numbers have ever existed.
+        const principal = await resolveAfHomesPrincipal(req);
+        if (!('error' in principal)) {
+          const access = await authorizeAfHomes(req, 'network.members');
+          if (!('error' in access)) {
+            const resolved = await db.rpc('resolve_sale_team_accreditation_number', {
+              p_aa_number: number.data,
+            });
+            if (resolved.error) throw resolved.error;
+            if (singleRpcRow(resolved.data) !== null) {
+              result = resolved;
+              historical = true;
+            }
+          }
+        }
+      }
     } else if (path === 'me' && method(req) === 'GET') {
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal) return deny(res, principal);
@@ -66,9 +94,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'CONFLICT', 'Review the account and approved accreditation dates.', 409);
       throw result.error;
     }
-    const parsed = saleTeamLookupSchema.safeParse(result.data);
+    const parsed = (
+      historical ? saleTeamHistoricalAccreditationSchema : saleTeamLookupSchema
+    ).safeParse(result.data);
     if (!parsed.success) throw new Error('Invalid accreditation response');
-    if (path === 'search' && parsed.data && parsed.data.status !== 'accredited')
+    if (
+      path === 'search' &&
+      parsed.data &&
+      parsed.data.status !== 'accredited' &&
+      parsed.data.status !== 'superseded'
+    )
       throw new Error('Ineligible public accreditation response');
     res.status(200).json(parsed.data);
   } catch {

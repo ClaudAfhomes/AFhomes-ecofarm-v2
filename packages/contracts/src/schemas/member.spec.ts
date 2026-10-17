@@ -3,13 +3,17 @@ import { describe, expect, it } from 'vitest';
 import {
   MEMBER_POSITION_LABELS,
   MEMBER_UPLINE_ROLE,
+  IST_POSITIONS,
   createMemberSchema,
+  createOstMemberSchema,
   issueAccreditationSchema,
-  manualAaNumberSchema,
+  manualIstAaNumberSchema,
   memberCivilStatusSchema,
   memberDetailSchema,
   memberSchema,
   memberSexSchema,
+  positionKind,
+  transferMemberSchema,
   updateMemberProfileSchema,
 } from './member.js';
 import { GOVERNMENT_ID_TYPE_LABELS, governmentIdTypeSchema } from './sales.js';
@@ -130,39 +134,61 @@ describe('member contracts', () => {
     expect(createMemberSchema.safeParse({ ...body, provinceCode: 'bogus' }).success).toBe(false);
   });
 
-  it('accepts a typed AA number in manual mode only', () => {
+  it('accepts a typed IST AA number in manual mode only', () => {
     expect(
-      createMemberSchema.safeParse({ ...body, aaNumberMode: 'manual', aaNumber: 'aaabc123def4' })
+      createMemberSchema.safeParse({ ...body, aaNumberMode: 'manual', aaNumber: 'aai26100001' })
         .success,
     ).toBe(true);
     const lower = createMemberSchema.safeParse({
       ...body,
       aaNumberMode: 'manual',
-      aaNumber: 'aaabc123def4',
+      aaNumber: 'aai26100001',
     });
-    if (lower.success) expect(lower.data.aaNumber).toBe('AAABC123DEF4');
+    if (lower.success) expect(lower.data.aaNumber).toBe('AAI26100001');
     // Manual without a number, automatic with one, and malformed numbers fail.
     expect(createMemberSchema.safeParse({ ...body, aaNumberMode: 'manual' }).success).toBe(false);
-    expect(createMemberSchema.safeParse({ ...body, aaNumber: 'AAABC123DEF4' }).success).toBe(false);
+    expect(createMemberSchema.safeParse({ ...body, aaNumber: 'AAI26100001' }).success).toBe(false);
     expect(
       createMemberSchema.safeParse({ ...body, aaNumberMode: 'manual', aaNumber: 'NOPE' }).success,
     ).toBe(false);
+    // OST is never created here, and an OST number is never typed onto an IST.
     expect(
       createMemberSchema.safeParse({
         ...body,
         position: 'ost',
         aaNumberMode: 'manual',
-        aaNumber: 'AAABC123DEF4',
+        aaNumber: 'AAI26100001',
         referrerStaffId: '33333333-3333-4333-8333-333333333333',
       }).success,
     ).toBe(false);
-    expect(manualAaNumberSchema.safeParse('AAABC').success).toBe(false);
+    expect(
+      createMemberSchema.safeParse({ ...body, aaNumberMode: 'manual', aaNumber: 'AAO26100001' })
+        .success,
+    ).toBe(false);
+    expect(manualIstAaNumberSchema.safeParse('AAABC').success).toBe(false);
+    expect(manualIstAaNumberSchema.safeParse('AAAI26100001').success).toBe(false);
+    expect(manualIstAaNumberSchema.safeParse('AAI26130001').success).toBe(false);
+    expect(manualIstAaNumberSchema.safeParse('AAI26100000').success).toBe(false);
+  });
+
+  it('accepts an issued legacy AA number when typed manually', () => {
+    expect(manualIstAaNumberSchema.safeParse('AA-K7Q2M9T4B1R8').success).toBe(true);
+    expect(manualIstAaNumberSchema.safeParse('AA-ABCDEF123456').success).toBe(true);
+    // The legacy shape still carries six letters and six digits.
+    expect(manualIstAaNumberSchema.safeParse('AA-ABCDEFGHIJKL').success).toBe(false);
+    expect(manualIstAaNumberSchema.safeParse('AAK7Q2M9T4B1R8').success).toBe(false);
+  });
+
+  it('derives the accreditation kind from the position', () => {
+    expect(IST_POSITIONS).toEqual(['vice_director', 'senior_sales_manager', 'sales_manager']);
+    expect(IST_POSITIONS.map(positionKind)).toEqual(['IST', 'IST', 'IST']);
+    expect(positionKind('ost')).toBe('OST');
   });
 
   it('issues missing numbers with the same AUTO/MANUAL rules', () => {
     expect(issueAccreditationSchema.safeParse({}).success).toBe(true);
     expect(
-      issueAccreditationSchema.safeParse({ aaNumberMode: 'manual', aaNumber: 'AAABC123DEF4' })
+      issueAccreditationSchema.safeParse({ aaNumberMode: 'manual', aaNumber: 'AAI26100001' })
         .success,
     ).toBe(true);
     expect(issueAccreditationSchema.safeParse({ aaNumberMode: 'manual' }).success).toBe(false);
@@ -203,7 +229,8 @@ describe('member contracts', () => {
     expect(updateMemberProfileSchema.safeParse({ headChangeReason: 'no' }).success).toBe(false);
     expect(updateMemberProfileSchema.safeParse({ temporaryPassword: 'short' }).success).toBe(false);
     expect(updateMemberProfileSchema.safeParse({ position: 'employee' }).success).toBe(false);
-    expect(updateMemberProfileSchema.safeParse({ position: 'ost' }).success).toBe(true);
+    // A kind change is a transfer, never a profile edit.
+    expect(updateMemberProfileSchema.safeParse({ position: 'ost' }).success).toBe(false);
     expect(updateMemberProfileSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
   });
 
@@ -259,5 +286,145 @@ describe('member contracts', () => {
     ).toBe(true);
     // The detail shape is required to state both fields, null or not.
     expect(memberDetailSchema.safeParse(row).success).toBe(false);
+  });
+
+  /* ---- direct OST creation and transfers (Create OST / Transfer) ---- */
+  const ostIdentity = {
+    firstName: 'Maria',
+    middleName: 'Santos',
+    lastName: 'Dela Cruz',
+    email: 'maria@afhomes.test',
+    phone: '+639171234567',
+    birthDate: '1990-06-19',
+    address: {
+      line1: '123 Mango St',
+      city: 'Calauan',
+      province: 'Laguna',
+      postalCode: '4012',
+    },
+  };
+  const ostForm = {
+    dateApplied: '2026-10-01',
+    programCategory: 'non_vip',
+    vipCardType: null,
+    sex: 'female',
+    civilStatus: 'single',
+    governmentIdType: 'passport',
+    governmentIdNumber: 'P1234567',
+    applicantSignatureStatus: 'received',
+    referrerSignatureStatus: 'received',
+    applicantSignedOn: '2026-10-01',
+    referrerSignedOn: '2026-10-01',
+  };
+  const sponsorStaffId = '44444444-4444-4444-8444-444444444444';
+  const requestId = '55555555-5555-4555-8555-555555555555';
+
+  it('completes an OST only with signatures and approved validity', () => {
+    const complete = {
+      mode: 'complete',
+      requestId,
+      sponsorStaffId,
+      identity: ostIdentity,
+      form: ostForm,
+      startsOn: '2026-10-16',
+      expiresOn: '2027-10-16',
+    };
+    expect(createOstMemberSchema.safeParse(complete).success).toBe(true);
+    // Expiry before the start, a missing date, and a missing signature fail.
+    expect(
+      createOstMemberSchema.safeParse({ ...complete, expiresOn: '2026-10-15' }).success,
+    ).toBe(false);
+    expect(createOstMemberSchema.safeParse({ ...complete, startsOn: null }).success).toBe(false);
+    expect(
+      createOstMemberSchema.safeParse({
+        ...complete,
+        form: { ...ostForm, applicantSignatureStatus: 'pending', applicantSignedOn: null },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('saves a pending OST without validity or signatures', () => {
+    expect(
+      createOstMemberSchema.safeParse({
+        mode: 'pending',
+        requestId,
+        sponsorStaffId,
+        identity: ostIdentity,
+        form: { ...ostForm, applicantSignatureStatus: 'pending', applicantSignedOn: null, referrerSignatureStatus: 'pending', referrerSignedOn: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('transfers with a reason; IST -> OST carries the full footprint', () => {
+    expect(
+      transferMemberSchema.safeParse({
+        direction: 'IST_TO_OST',
+        reason: 'Moved to OST by management decision',
+        sponsorStaffId,
+        identity: ostIdentity,
+        form: ostForm,
+        startsOn: '2026-10-16',
+        expiresOn: '2027-10-16',
+      }).success,
+    ).toBe(true);
+    // A short reason, a missing signature, an inverted window and no sponsor fail.
+    const base = {
+      direction: 'IST_TO_OST' as const,
+      reason: 'Moved to OST by management decision',
+      sponsorStaffId,
+      identity: ostIdentity,
+      form: ostForm,
+      startsOn: '2026-10-16',
+      expiresOn: '2027-10-16',
+    };
+    expect(transferMemberSchema.safeParse({ ...base, reason: 'no' }).success).toBe(false);
+    expect(transferMemberSchema.safeParse({ ...base, expiresOn: '2026-10-15' }).success).toBe(
+      false,
+    );
+    expect(
+      transferMemberSchema.safeParse({
+        ...base,
+        form: { ...ostForm, referrerSignatureStatus: 'pending', referrerSignedOn: null },
+      }).success,
+    ).toBe(false);
+    const { sponsorStaffId: _s, ...sponsorless } = base;
+    expect(transferMemberSchema.safeParse(sponsorless).success).toBe(false);
+  });
+
+  it('transfers OST -> IST only to a valid IST position with its head', () => {
+    expect(
+      transferMemberSchema.safeParse({
+        direction: 'OST_TO_IST',
+        reason: 'Appointed Senior Sales Manager',
+        targetPosition: 'senior_sales_manager',
+        headStaffId: '66666666-6666-4666-8666-666666666666',
+      }).success,
+    ).toBe(true);
+    // OST is not an IST target, a headless IST level fails, and a Vice
+    // Director with a head fails.
+    expect(
+      transferMemberSchema.safeParse({
+        direction: 'OST_TO_IST',
+        reason: 'Appointed to a hierarchy level',
+        targetPosition: 'ost',
+        headStaffId: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      transferMemberSchema.safeParse({
+        direction: 'OST_TO_IST',
+        reason: 'Appointed Sales Manager',
+        targetPosition: 'sales_manager',
+        headStaffId: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      transferMemberSchema.safeParse({
+        direction: 'OST_TO_IST',
+        reason: 'Appointed Sales Vice Director',
+        targetPosition: 'vice_director',
+        headStaffId: '66666666-6666-4666-8666-666666666666',
+      }).success,
+    ).toBe(false);
   });
 });

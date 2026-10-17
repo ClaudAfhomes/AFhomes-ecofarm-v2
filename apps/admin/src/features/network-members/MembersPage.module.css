@@ -14,12 +14,182 @@
   .tableWrap.tableWrap {
     overflow-x: clip;
   }
+
+  .loadingHeader {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .loadingAction {
+    width: 100%;
+  }
 }
 
 .tableWrap {
   margin-top: var(--space-2);
   min-width: 0;
   max-width: 100%;
+}
+
+/* --- Loading skeleton: mirrors the loaded layout piece for piece. --- */
+
+.loadingStack {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.loadingHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.loadingHeaderText {
+  display: grid;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.loadingTitle {
+  height: 30px;
+  max-width: 220px;
+}
+
+.loadingSubtitle {
+  height: 16px;
+  max-width: 360px;
+}
+
+.loadingAction {
+  height: var(--control-md);
+  width: 148px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-control);
+}
+
+.loadingChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.loadingChip {
+  height: 26px;
+  width: 168px;
+  border-radius: var(--radius-full);
+}
+
+.loadingFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.loadingSearch {
+  height: var(--control-md);
+  flex: 1 1 260px;
+  max-width: 420px;
+  border-radius: var(--radius-control);
+}
+
+.loadingSelect {
+  height: var(--control-md);
+  width: 180px;
+  border-radius: var(--radius-control);
+}
+
+.loadingTable {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.loadingAvatar {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.loadingLineLong {
+  height: 14px;
+  flex: 2 1 40%;
+}
+
+.loadingLineShort {
+  height: 14px;
+  flex: 1 1 20%;
+  max-width: 160px;
+}
+
+/* --- Live states. --- */
+
+.refreshing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-surface-raised);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.inlineStatus {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.alertText {
+  margin: 0;
+}
+
+.alertActions {
+  margin-top: var(--space-2);
+}
+
+.errorList {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-body-s);
+}
+
+.deleteBody {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.deleteQuestion {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .badges {
@@ -129,19 +299,36 @@
 }
 
 .formSection {
+  position: relative;
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border-default);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
   min-width: 0;
+  transition: border-color var(--transition-fast);
+}
+
+/* Brand accent rail: the green-to-gold rule that marks every section. */
+.formSection::before {
+  content: '';
+  position: absolute;
+  inset: var(--space-3) auto var(--space-3) 0;
+  width: 3px;
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: linear-gradient(180deg, var(--color-brand-primary), var(--color-accent));
+}
+
+.formSection:focus-within {
+  border-color: color-mix(in srgb, var(--color-brand-secondary) 40%, var(--color-border-default));
 }
 
 .formSection > legend {
   padding: 0 var(--space-2);
   font-weight: 700;
-  font-size: var(--text-body-s);
-  letter-spacing: 0.04em;
+  font-size: var(--text-caption);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-brand-primary);
 }
@@ -156,6 +343,16 @@
   color: var(--color-text-secondary);
 }
 
+.footerHint {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  margin: 0 auto 0 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-accent-strong);
+}
+
 .formFields {
   display: grid;
   gap: var(--space-3);
@@ -163,9 +360,10 @@
 
 .fieldLabel {
   display: grid;
-  gap: 4px;
-  font-size: 14px;
+  gap: var(--space-1);
+  font-size: var(--text-body-s);
   font-weight: 600;
+  color: var(--color-text-primary);
   min-width: 0;
 }
 

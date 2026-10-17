@@ -5,8 +5,15 @@
  * onboarded with a full personal record. A Member IS a staff account: creation
  * provisions the Auth login (administrator-set temporary password, forced
  * change on first sign-in) and stores the extra form fields on the linked
- * `network_member_profiles` row. OST is onboarded through OST registration,
- * never here.
+ * `network_member_profiles` row.
+ *
+ * OST has its own pipeline (application, sponsor, term, AA number). This
+ * handler offers the two management paths into it: `POST /members/ost` creates
+ * one directly - either completing it (both signatures and the approved
+ * validity are stated, so management approves on the spot) or saving it
+ * pending for the sponsored workflow - and `POST /members/:id/transfer`
+ * changes a member's accreditation kind, retiring the held number into the
+ * accreditation history and issuing the successor in the same transaction.
  *
  * Sensitivity follows the customer record: TIN and the government ID number
  * are accepted on write, masked on every list-shaped read, and never appear in
@@ -21,12 +28,15 @@ import {
   MEMBER_UPLINE_ROLE,
   afHomesModuleKeySchema,
   createMemberSchema,
+  createOstMemberResultSchema,
+  createOstMemberSchema,
   hierarchyAllowsUpline,
   issueAccreditationSchema,
   maskGovernmentId,
   memberDetailSchema,
   memberListQuerySchema,
   memberSchema,
+  transferMemberSchema,
   updateMemberProfileSchema,
   type AfHomesPermission,
   type CreateMember,
@@ -51,6 +61,7 @@ import {
   type Db,
 } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { inviteAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
@@ -65,6 +76,15 @@ function accreditationWindow(now = new Date()): { startsOn: string; expiresOn: s
   const startsOn = now.toISOString().slice(0, 10);
   const expires = new Date(Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()));
   return { startsOn, expiresOn: expires.toISOString().slice(0, 10) };
+}
+
+/** Display order of an OST applicant's name from the official identity. */
+function ostFullName(identity: {
+  firstName: string;
+  middleName?: string | undefined;
+  lastName: string;
+}): string {
+  return [identity.firstName, identity.middleName, identity.lastName].filter(Boolean).join(' ');
 }
 
 async function accreditationNumber(db: Db, staffId: string): Promise<string | null> {
@@ -490,6 +510,118 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return res.status(200).json(row);
   }
 
+  /* ---------------- create OST directly (management onboarding) ---------------- */
+  if (path === 'ost' && method(req) === 'POST') {
+    const auth = await authorizeAfHomes(req, 'network.members', 'create');
+    if ('error' in auth) return deny(res, auth);
+    const parsed = createOstMemberSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
+    const input = parsed.data;
+    // The shared submission writes the application, its official form and the
+    // frozen sponsor snapshot, and re-checks the sponsor, duplicates and scope
+    // in SQL. It takes no operator identity on trust.
+    const submitted = await db.rpc('submit_ost_accreditation', {
+      p_request_id: input.requestId,
+      p_actor_id: auth.userId,
+      p_sponsor_id: input.sponsorStaffId,
+      p_code_id: null,
+      p_identity: input.identity,
+      p_form: input.form,
+      p_source: 'manual',
+    });
+    if (submitted.error) {
+      const failure = ostDirectFailure(submitted.error);
+      if (failure) return fail(res, failure.code, failure.message, failure.status);
+      throw submitted.error;
+    }
+    const applicationId = String(submitted.data);
+    if (input.mode === 'pending')
+      return res.status(201).json(
+        createOstMemberResultSchema.parse({ applicationId, memberId: null, status: 'submitted' }),
+      );
+    // Complete: the operator recorded the signatures that were actually
+    // signed (with their real dates) and management approves now. The SQL
+    // re-checks both signatures and the sponsor; no endorsement is invented.
+    const signatures = await db.rpc('confirm_ost_application_signatures', {
+      p_id: applicationId,
+      p_actor_id: auth.userId,
+      p_applicant_date: input.form.applicantSignedOn,
+      p_referrer_date: input.form.referrerSignedOn,
+    });
+    if (signatures.error) {
+      const failure = ostDirectFailure(signatures.error);
+      if (failure) return fail(res, failure.code, failure.message, failure.status);
+      throw signatures.error;
+    }
+    const installed = await inviteAndInstallDirectOst(db, {
+      applicationId,
+      actorId: auth.userId,
+      email: input.identity.email.toLowerCase(),
+      fullName: ostFullName(input.identity),
+      startsOn: input.startsOn!,
+      expiresOn: input.expiresOn!,
+    });
+    if (!installed.ok) return fail(res, installed.code, installed.message, installed.status);
+    return res.status(201).json(
+      createOstMemberResultSchema.parse({
+        applicationId,
+        memberId: installed.memberId,
+        status: 'approved',
+      }),
+    );
+  }
+
+  /* ---------------- transfer an accredited member between kinds ---------------- */
+  const transfer = route(req, 'POST', /^([0-9a-f-]+)\/transfer$/);
+  if (transfer) {
+    const id = transfer[1]!;
+    const auth = await authorizeAfHomes(req, 'network.members', 'update');
+    if ('error' in auth) return deny(res, auth);
+    const parsed = transferMemberSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
+    const input = parsed.data;
+    const rows = await memberRows(db, '', undefined);
+    if (!rows.some((r: Member) => r.id === id))
+      return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    // One call, one transaction: the held number is retired into the
+    // accreditation history and the successor is issued with the new kind's
+    // complete footprint. A transfer never takes a manually typed number.
+    const { error } = await db.rpc(
+      'transfer_sale_team_member',
+      input.direction === 'IST_TO_OST'
+        ? {
+            p_actor_id: auth.userId,
+            p_staff_id: id,
+            p_direction: input.direction,
+            p_reason: input.reason,
+            p_sponsor_id: input.sponsorStaffId,
+            p_identity: input.identity,
+            p_form: input.form,
+            p_starts_on: input.startsOn,
+            p_expires_on: input.expiresOn,
+          }
+        : {
+            p_actor_id: auth.userId,
+            p_staff_id: id,
+            p_direction: input.direction,
+            p_reason: input.reason,
+            p_target_position: input.targetPosition,
+            p_head_id: input.headStaffId ?? null,
+          },
+    );
+    if (error) {
+      const failure = ostDirectFailure(error);
+      if (failure) return fail(res, failure.code, failure.message, failure.status);
+      throw error;
+    }
+    const updated = await memberRows(db, '', undefined);
+    const row = updated.find((r: Member) => r.id === id);
+    if (!row) return fail(res, 'INTERNAL', 'Member was transferred but cannot be read', 500);
+    return res.status(200).json(row);
+  }
+
   const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
   const patch = route(req, 'PATCH', /^([0-9a-f-]+)$/);
   if (detail || patch) {
@@ -823,6 +955,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
 
+    // OST is never created here: it carries a different accreditation
+    // footprint (application, sponsor edge, term) and its own pipeline. The
+    // contract already refuses this, and the guard keeps a later contract
+    // relaxation from silently minting an OST identity on this path.
+    if (input.position === 'ost')
+      return fail(res, 'VALIDATION_ERROR', 'Use Create OST for an OST member', 400);
+
     const roles = await roleCatalog(db);
     const target = roles.find((r) => r.slug === input.position);
     if (!target?.is_active) return fail(res, 'VALIDATION_ERROR', 'Position is not active', 400);
@@ -1039,33 +1178,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         referrerStaffId: referrer?.id ?? null,
         ostReferrerStaffId: ostReferrer?.id ?? null,
       });
-      // The AA number is issued with the account for hierarchy sellers (IST
-      // accreditation, one year). AUTO omits the number, so it works on any
+      // Every member created on this path is a hierarchy seller (the guard
+      // above refuses OST), so the AA number is issued with the account: IST
+      // accreditation, one year. AUTO omits the number, so it works on any
       // database; MANUAL passes it to the 7-argument function from the
-      // manual-AA migration. OST accreditation rides on the OST approval
-      // flow, so OST members gain their number there, not here.
-      if (input.position !== 'ost') {
-        const { startsOn, expiresOn } = accreditationWindow();
-        const baseArgs = {
-          p_actor_id: auth.userId,
-          p_staff_id: created.user.id,
-          p_kind: 'IST',
-          p_action: 'approve',
-          p_starts_on: startsOn,
-          p_expires_on: expiresOn,
-        };
-        const { error: accreditationError } = await db.rpc(
-          'manage_sale_team_accreditation',
-          manualAa ? { ...baseArgs, p_aa_number: manualAa } : baseArgs,
+      // manual-AA migration. OST numbers are issued by its own pipeline.
+      const { startsOn, expiresOn } = accreditationWindow();
+      const baseArgs = {
+        p_actor_id: auth.userId,
+        p_staff_id: created.user.id,
+        p_kind: 'IST',
+        p_action: 'approve',
+        p_starts_on: startsOn,
+        p_expires_on: expiresOn,
+      };
+      const { error: accreditationError } = await db.rpc(
+        'manage_sale_team_accreditation',
+        manualAa ? { ...baseArgs, p_aa_number: manualAa } : baseArgs,
+      );
+      if (accreditationError) {
+        await compensate();
+        if (accreditationFailure(res, accreditationError as { message?: string }, manualAa)) return;
+        throw new Error(
+          `sale team accreditation failed: ${(accreditationError as { message?: string }).message ?? 'unknown'}`,
         );
-        if (accreditationError) {
-          await compensate();
-          if (accreditationFailure(res, accreditationError as { message?: string }, manualAa))
-            return;
-          throw new Error(
-            `sale team accreditation failed: ${(accreditationError as { message?: string }).message ?? 'unknown'}`,
-          );
-        }
       }
     } catch (error) {
       await compensate();
