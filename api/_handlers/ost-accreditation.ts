@@ -6,6 +6,7 @@ import {
   submitOstAccreditationSchema,
   submitOstRenewalSchema,
   ostRenewalDecisionSchema,
+  updateOstApplicantSchema,
 } from '@afhomes/contracts';
 import { authorizeAfHomes, resolveAfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { deny, fail, jsonBody, method, subPath } from '../_lib/handler-kit.js';
@@ -16,21 +17,9 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { resolveAdminUrl } from '../_lib/admin-url.js';
 import { handleOstImport } from '../_lib/ost-import-handler.js';
 import { validateOstSponsor } from '../_lib/ost-sponsor.js';
+import { verifyOstAddress, verifyOstAddressDetails } from '../_lib/ost-address.js';
 
 const uuid = z.string().uuid();
-
-/**
- * One `staff_users` row as the sponsors query reads it. The embedded
- * `staff_role_assignments` is re-checked with Zod at every use site, so this type
- * states the query's shape and never replaces that runtime validation.
- */
-type SponsorCandidate = {
-  id: string;
-  full_name: string;
-  status: string;
-  staff_role_assignments: unknown;
-};
-type StaffUsersResult = { data: SponsorCandidate[] | null; error: { message: string } | null };
 
 function rpcFailure(res: VercelResponse, error: { message: string; code?: string }) {
   const text = error.message;
@@ -41,6 +30,15 @@ function rpcFailure(res: VercelResponse, error: { message: string; code?: string
       'This referral code is expired, revoked, exhausted, or unavailable. Ask your Sales Manager for a valid code.',
       400,
     );
+  if (text === 'OST_APPLICANT_REASON_REQUIRED')
+    return fail(
+      res,
+      'VALIDATION_ERROR',
+      'A reason of at least five characters is required for identity changes.',
+      400,
+    );
+  if (text === 'OST_APPLICANT_NO_CHANGES')
+    return fail(res, 'VALIDATION_ERROR', 'There is nothing to update.', 400);
   if (error.code === '42501')
     return fail(res, 'FORBIDDEN', 'You cannot perform this accreditation action.', 403);
   if (/NOT_FOUND/.test(text)) return fail(res, 'NOT_FOUND', 'Accreditation record not found.', 404);
@@ -85,12 +83,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch {
       return fail(res, 'INTERNAL', 'Unable to verify the Sales Manager. Please retry.', 500);
     }
+    const address = await verifyOstAddress(parsed.data.identity);
+    if (!address.ok)
+      return fail(
+        res,
+        address.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+        address.status === 503
+          ? 'Address verification is unavailable. Please retry.'
+          : 'Choose a consistent address and reference postal code.',
+        address.status,
+      );
     const result = await db.rpc('submit_ost_accreditation', {
       p_request_id: parsed.data.requestId,
       p_actor_id: null,
       p_sponsor_id: code.sponsor_staff_id,
       p_code_id: code.id,
-      p_identity: parsed.data.identity,
+      p_identity: address.identity,
       p_form: parsed.data.form,
       p_source: 'public',
     });
@@ -132,37 +140,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (member.error || !member.data)
         return fail(res, 'FORBIDDEN', 'An active OST account is required.', 403);
     }
-    // The payload shape is declared here rather than taken from the Supabase
-    // client: this result is an untyped PostgREST payload whose inferred type
-    // collapses to `any` whenever the client generic does not resolve (Vercel's
-    // function-bundling typecheck does exactly that, which raised TS7006 on
-    // `row`). Asserting the response gives `row` a real type in every
-    // environment. The per-row Zod check below still validates at runtime.
-    const result = (await db
-      .from('staff_users')
-      .select(
-        'id,full_name,status,staff_role_assignments!staff_role_assignments_staff_id_fkey(roles(slug,is_active))',
-      )
-      .eq('status', 'active')) as StaffUsersResult;
+    const result = await db.rpc('list_ost_manual_sponsors', { p_actor: principal.userId });
     if (result.error) return rpcFailure(res, result.error);
-    const sponsors = (result.data ?? [])
-      .filter((row) => {
-        const parsed = z
-          .object({
-            staff_role_assignments: z.preprocess(
-              (value) => (Array.isArray(value) ? value : value == null ? [] : [value]),
-              z.array(z.object({ roles: z.object({ slug: z.string(), is_active: z.boolean() }) })),
-            ),
-          })
-          .safeParse(row);
-        return (
-          parsed.success &&
-          parsed.data.staff_role_assignments.some(
-            (a) => a.roles.slug === 'sales_manager' && a.roles.is_active,
-          )
-        );
-      })
-      .map((row) => ({ id: row.id, name: row.full_name }));
+    const parsed = z.array(z.object({ id: uuid, name: z.string() })).safeParse(result.data);
+    if (!parsed.success) return fail(res, 'INTERNAL', 'Sponsor lookup is unavailable.', 500);
+    const sponsors = parsed.data;
     return res.status(200).json({ data: sponsors, meta: { total: sponsors.length } });
   }
   if (
@@ -186,12 +168,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Complete the official accreditation form and choose an active Sales Manager.',
         400,
       );
+    try {
+      const sponsor = await validateOstSponsor(db, parsed.data.sponsorStaffId, 'manual');
+      if (!sponsor.ok) return fail(res, 'CONFLICT', sponsor.message, sponsor.status);
+    } catch {
+      return fail(res, 'INTERNAL', 'Unable to verify the Sales Manager. Please retry.', 500);
+    }
+    const address = await verifyOstAddress(parsed.data.identity);
+    if (!address.ok)
+      return fail(
+        res,
+        address.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+        address.status === 503
+          ? 'Address verification is unavailable. Please retry.'
+          : 'Choose a consistent address and reference postal code.',
+        address.status,
+      );
     const result = await db.rpc('submit_ost_accreditation', {
       p_request_id: parsed.data.requestId,
       p_actor_id: principal.userId,
       p_sponsor_id: parsed.data.sponsorStaffId,
       p_code_id: null,
-      p_identity: parsed.data.identity,
+      p_identity: address.identity,
       p_form: parsed.data.form,
       p_source: 'manual',
     });
@@ -199,7 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(201).json({ id: result.data });
   }
   const match = path.match(
-    /^(applications|members|renewals)\/([^/]+)(?:\/(endorse|signatures|approve|renew|decision|revise))?$/,
+    /^(applications|members|renewals)\/([^/]+)(?:\/(endorse|signatures|approve|renew|decision|revise|applicant))?$/,
   );
   if (!match || !uuid.safeParse(match[2]).success)
     return fail(res, 'NOT_FOUND', 'Accreditation endpoint not found.', 404);
@@ -223,6 +221,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (method(req) !== 'POST')
     return fail(res, 'NOT_FOUND', 'Accreditation endpoint not found.', 404);
+  if (kind === 'members' && action === 'applicant') {
+    // Controlled applicant corrections carry the member profile-update
+    // authority (network.members update), not the accreditation-review roles.
+    const admin = await authorizeAfHomes(req, 'network.members', 'update');
+    if ('error' in admin) return deny(res, admin);
+    const parsed = updateOstApplicantSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return fail(
+        res,
+        'VALIDATION_ERROR',
+        'Check the applicant details and the reason for identity changes.',
+        400,
+      );
+    const { requestId, reason, addressHierarchy: codes, address, ...fields } = parsed.data;
+    let verifiedAddress = address;
+    if (address && codes) {
+      const verified = await verifyOstAddressDetails(address, codes);
+      if (!verified.ok)
+        return fail(
+          res,
+          verified.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+          verified.status === 503
+            ? 'Address verification is unavailable. Please retry.'
+            : 'Choose a consistent address and reference postal code.',
+          verified.status,
+        );
+      // Keep the reference codes with the recorded address so the next edit can
+      // re-open the same cascade selection.
+      verifiedAddress = { ...verified.address, ...codes };
+    }
+    const result = await db.rpc('update_ost_applicant', {
+      p_request_id: requestId,
+      p_actor_id: principal.userId,
+      p_ost_id: id,
+      p_input: { ...fields, ...(verifiedAddress ? { address: verifiedAddress } : {}), reason },
+    });
+    if (result.error) return rpcFailure(res, result.error);
+    return res.status(200).json({ id: result.data });
+  }
   if (kind === 'applications' && action === 'signatures') {
     const parsed = z
       .object({ applicantSignedOn: z.iso.date(), referrerSignedOn: z.iso.date() })

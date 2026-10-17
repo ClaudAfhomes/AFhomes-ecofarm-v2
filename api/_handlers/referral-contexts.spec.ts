@@ -114,7 +114,7 @@ const officialApplicant = {
     programCategory: 'non_vip',
     sex: 'male',
     civilStatus: 'single',
-    governmentIdType: 'QA TEST',
+    governmentIdType: 'philippine_id',
     governmentIdNumber: 'SYNTHETIC-ID',
     applicantSignatureStatus: 'pending',
     referrerSignatureStatus: 'pending',
@@ -461,14 +461,14 @@ describe('OST sponsorship keeps the Sales Manager rule', () => {
       /referral code is expired, revoked, exhausted, or unavailable/i,
     );
   });
-  it('public resolution of a non-SM-sponsored code keeps the SM-only refusal', async () => {
+  it('resolves a public referral code owned by an active VD', async () => {
     install();
     const s = await callOst({ familyPath: `referrals/${NON_SM_CODE}`, token: null });
-    expect(s.status).toBe(409);
-    expect(messageOf(s)).toBe('Referrals must come from an active Sales Manager');
+    expect(s.status).toBe(200);
+    expect(s.body).toMatchObject({ sponsorName: 'Vic Director' });
   });
 
-  it('public submission with a non-SM-sponsored code keeps the SM-only refusal', async () => {
+  it('accepts public submission through a VD referral code', async () => {
     install();
     const s = await callOst({
       method: 'POST',
@@ -476,8 +476,7 @@ describe('OST sponsorship keeps the Sales Manager rule', () => {
       token: null,
       body: { ...officialApplicant, referralCode: NON_SM_CODE },
     });
-    expect(s.status).toBe(409);
-    expect(messageOf(s)).toBe('Referrals must come from an active Sales Manager');
+    expect(s.status).toBe(201);
   });
 
   it('public submission with an SM code still succeeds', async () => {
@@ -698,7 +697,7 @@ describe('referral-code issuance validates the issuer', () => {
     expect(messageOf(result)).toMatch(/active referral code already exists/i);
     expect(JSON.stringify(db.rows('referral_codes'))).toBe(before);
   });
-  it('a non-SM issuing for themselves gets an issuance-specific refusal and no code row', async () => {
+  it('an active VD may issue their own referral code', async () => {
     const db = install();
     const before = db.rows('referral_codes').length;
     const s = await callOst({
@@ -707,10 +706,8 @@ describe('referral-code issuance validates the issuer', () => {
       token: VD_TOKEN,
       body: { maxUses: 5, expiresInHours: 72, rotate: true },
     });
-    expect(s.status).toBe(403);
-    expect(messageOf(s)).toMatch(/only an active sales manager can sponsor/i);
-    expect(messageOf(s)).not.toBe('Referrals must come from an active Sales Manager');
-    expect(db.rows('referral_codes')).toHaveLength(before);
+    expect(s.status).toBe(201);
+    expect(db.rows('referral_codes')).toHaveLength(before + 1);
   });
 
   it('an SM issuing for themselves still succeeds', async () => {
@@ -725,18 +722,17 @@ describe('referral-code issuance validates the issuer', () => {
     expect((s.body as { code: string }).code).toMatch(/^OST-/);
   });
 
-  it('an admin issuing on behalf of a non-SM gets an issuance-specific refusal', async () => {
+  it('an admin may issue on behalf of an active VD', async () => {
     const db = install();
     const before = db.rows('referral_codes').length;
     const s = await callOst({
       method: 'POST',
       familyPath: 'referral-codes',
       token: ADMIN_TOKEN,
-      body: { maxUses: 5, expiresInHours: 72, sponsorStaffId: VD_ID },
+      body: { maxUses: 5, expiresInHours: 72, sponsorStaffId: VD_ID, rotate: true },
     });
-    expect(s.status).toBe(409);
-    expect(messageOf(s)).toMatch(/cannot back an OST referral code/i);
-    expect(db.rows('referral_codes')).toHaveLength(before);
+    expect(s.status).toBe(201);
+    expect(db.rows('referral_codes')).toHaveLength(before + 1);
   });
 
   it('an admin issuing on behalf of an SM still succeeds', async () => {

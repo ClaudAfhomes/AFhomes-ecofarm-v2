@@ -1165,6 +1165,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (r: { id: string }) => r.id === parsed.data.roleId,
       );
       if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
+      if (target.slug === 'ost')
+        return fail(
+          res,
+          'CONFLICT',
+          'Create OST accounts through official OST registration and approval.',
+          409,
+        );
       if (target.slug === 'customer')
         return fail(
           res,
@@ -1304,6 +1311,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const target = (await roleCatalog(db)).find(
           (role: { id: string }) => role.id === parsed.data.roleId,
         );
+        if (
+          parsed.data.roleId !== before.roleId &&
+          (target?.slug === 'ost' || targetRole?.slug === 'ost')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'Use the controlled OST accreditation workflow for role changes.',
+            409,
+          );
         if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
         if (target.slug === 'customer')
           return fail(

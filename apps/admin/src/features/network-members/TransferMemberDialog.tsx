@@ -1,32 +1,20 @@
+import { OstTeamTransferDialog } from './OstTeamTransferDialog';
+import { getOstSponsors } from '../ost/services';
+import { OstAddressFields, emptyOstAddress } from '@afhomes/ui';
+import { useOstAddress } from '../address/useOstAddress';
 /**
- * Transfer a member between the two accreditation kinds.
- *
- * A transfer is not a profile edit. The server retires the held AA number
- * into the accreditation history and issues a successor number for the new
- * kind in one transaction, so the client never sends a number and no residue
- * of the old kind survives:
- *
- * - IST -> OST creates the OST footprint (application, sponsor, member,
- *   term) and requires the signed official form, because the application is
- *   the same record the sponsored pipeline uses.
- * - OST -> IST retires the OST registration and issues a fresh one-year IST
- *   accreditation under the chosen position and its immediate head.
- *
- * Both directions demand a reason, which lands in the audit trail with the
- * before and after numbers.
+ * OST opens a genealogy-only team move. IST opens its distinct conversion
+ * workflow, preserving the accreditation suffix and recording the signed form.
  */
 import { useState } from 'react';
 import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import {
-  MEMBER_POSITION_LABELS,
-  MEMBER_UPLINE_ROLE,
-  IST_POSITIONS,
   officialOstFormDefaults,
+  ostAnnualExpiry,
   parseOfficialOstFields,
   transferMemberSchema,
   type Member,
   type MemberDetail,
-  type MemberPosition,
 } from '@afhomes/contracts';
 import {
   Alert,
@@ -40,17 +28,11 @@ import {
 } from '@afhomes/ui';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { filterHolderNameInput, filterMobileInput } from '../../lib/normalize';
-import { getMember, getMemberUplines, networkMemberKeys, transferMember } from './services';
+import { getMember, networkMemberKeys, transferMember } from './services';
 import styles from './MembersPage.module.css';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function oneYearOn(start: string): string {
-  const expires = new Date(`${start}T00:00:00Z`);
-  expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-  return expires.toISOString().slice(0, 10);
 }
 
 /** What the member holds right now, before anything changes. */
@@ -87,132 +69,6 @@ function ReasonField({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
-function TransferToIstForm({
-  member,
-  onClose,
-  onTransferred,
-}: {
-  member: Member;
-  onClose: () => void;
-  onTransferred: () => void;
-}) {
-  const [targetPosition, setTargetPosition] = useState<MemberPosition>('sales_manager');
-  const [headStaffId, setHeadStaffId] = useState('');
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState('');
-  const headRole = MEMBER_UPLINE_ROLE[targetPosition];
-  const heads = useQuery({
-    queryKey: ['network', 'members', 'uplines', headRole],
-    queryFn: () => getMemberUplines(headRole!),
-    placeholderData: keepPreviousData,
-    enabled: headRole !== null,
-  });
-  const transfer = useBusinessMutation({
-    mutationFn: (input: Parameters<typeof transferMember>[1]) => transferMember(member.id, input),
-  });
-  const submit = () => {
-    const parsed = transferMemberSchema.safeParse({
-      direction: 'OST_TO_IST',
-      reason,
-      targetPosition,
-      headStaffId: headRole === null ? null : headStaffId || null,
-    });
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Complete the transfer details.');
-      return;
-    }
-    setError('');
-    transfer.mutate(parsed.data, {
-      onSuccess: onTransferred,
-      onError: (failure) => setError(failure.message),
-    });
-  };
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title={`Transfer ${member.fullName} to IST`}
-      footer={
-        <>
-          {!reason.trim() ? (
-            <p className={styles.footerHint} role="status">
-              Give a reason to transfer.
-            </p>
-          ) : null}
-          <Button variant="secondary" onClick={onClose} disabled={transfer.isPending}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            loading={transfer.isPending}
-            loadingLabel="Transferring…"
-            onClick={submit}
-          >
-            Transfer to IST
-          </Button>
-        </>
-      }
-    >
-      <div className={styles.dialogBody}>
-        <CurrentState member={member} />
-        <section className={styles.formSection} aria-labelledby="transfer-target">
-          <h2 id="transfer-target" className={styles.sectionTitle}>
-            New IST accreditation
-          </h2>
-          <p className={styles.sectionHint}>
-            The OST registration and its current term end with this transfer; a fresh one-year IST
-            accreditation is issued instead.
-          </p>
-          <div className={styles.formFields}>
-            <label className={styles.fieldLabel}>
-              Position
-              <Select
-                value={targetPosition}
-                onChange={(e) => {
-                  setTargetPosition(e.target.value as MemberPosition);
-                  setHeadStaffId('');
-                }}
-                options={IST_POSITIONS.map((value) => ({
-                  value,
-                  label: MEMBER_POSITION_LABELS[value],
-                }))}
-              />
-            </label>
-            {headRole !== null ? (
-              <label className={styles.fieldLabel}>
-                Immediate head
-                <Select
-                  required
-                  value={headStaffId}
-                  onChange={(e) => setHeadStaffId(e.target.value)}
-                  options={[
-                    { value: '', label: `Choose an active ${MEMBER_POSITION_LABELS[headRole]}` },
-                    ...(heads.data?.map((holder) => ({
-                      value: holder.id,
-                      label: holder.fullName,
-                    })) ?? []),
-                  ]}
-                />
-              </label>
-            ) : null}
-            <ReasonField value={reason} onChange={setReason} />
-          </div>
-          {heads.isError ? (
-            <p className={styles.sectionHint} role="alert">
-              The head list could not be loaded. Close the dialog and retry.
-            </p>
-          ) : null}
-        </section>
-        {error ? (
-          <Alert variant="danger" title="Member was not transferred">
-            <p className={styles.alertText}>{error}</p>
-          </Alert>
-        ) : null}
-      </div>
-    </Dialog>
-  );
-}
-
 function TransferToOstForm({
   member,
   detail,
@@ -235,6 +91,8 @@ function TransferToOstForm({
     province: member.province ?? '',
     postalCode: member.zipCode ?? '',
   }));
+  const [geography, setGeography] = useState(emptyOstAddress);
+  const addressOptions = useOstAddress(geography, false);
   const [official, setOfficial] = useState<Record<string, string>>(() => ({
     ...officialOstFormDefaults(),
     sex: detail.sex?.toLowerCase() ?? '',
@@ -250,12 +108,13 @@ function TransferToOstForm({
   }));
   const [sponsorStaffId, setSponsorStaffId] = useState(member.ostReferrerStaffId ?? '');
   const [startsOn, setStartsOn] = useState(today);
-  const [expiresOn, setExpiresOn] = useState(() => oneYearOn(today()));
+  const [expiresOn, setExpiresOn] = useState(() => ostAnnualExpiry(today()));
   const [reason, setReason] = useState('');
+  const [requestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const sponsors = useQuery({
-    queryKey: ['network', 'members', 'uplines', 'sales_manager'],
-    queryFn: () => getMemberUplines('sales_manager'),
+    queryKey: ['ost', 'manual-sponsors'],
+    queryFn: getOstSponsors,
     placeholderData: keepPreviousData,
   });
   const transfer = useBusinessMutation({
@@ -279,6 +138,7 @@ function TransferToOstForm({
     }
     const parsed = transferMemberSchema.safeParse({
       direction: 'IST_TO_OST',
+      requestId,
       reason,
       sponsorStaffId,
       identity: {
@@ -292,10 +152,16 @@ function TransferToOstForm({
         birthDate: fields.birthDate ?? '',
         address: {
           line1: fields.line1 ?? '',
-          city: fields.city ?? '',
-          province: fields.province ?? '',
-          postalCode: fields.postalCode || undefined,
+          city: geography.city,
+          province: geography.province,
+          barangay: geography.barangay,
+          postalCode: geography.postalCode || undefined,
           countryCode: 'PH',
+        },
+        addressHierarchy: {
+          provinceCode: geography.provinceCode,
+          localityCode: geography.localityCode,
+          barangayCode: geography.barangayCode,
         },
       },
       form: form.data,
@@ -316,7 +182,7 @@ function TransferToOstForm({
     <Dialog
       open
       onClose={onClose}
-      title={`Transfer ${member.fullName} to OST`}
+      title={`Convert ${member.fullName} to OST`}
       footer={
         <>
           {!reason.trim() ? (
@@ -333,7 +199,7 @@ function TransferToOstForm({
             loadingLabel="Transferring…"
             onClick={submit}
           >
-            Transfer to OST
+            Convert to OST
           </Button>
         </>
       }
@@ -393,27 +259,11 @@ function TransferToOstForm({
               value={fields.line1 ?? ''}
               onChange={onChange('line1')}
             />
-            <TextField
-              id="transfer-city"
-              name="transfer-city"
-              label="City / Municipality"
-              value={fields.city ?? ''}
-              onChange={onChange('city')}
-            />
-            <TextField
-              id="transfer-province"
-              name="transfer-province"
-              label="Province"
-              value={fields.province ?? ''}
-              onChange={onChange('province')}
-            />
-            <TextField
-              id="transfer-postal-code"
-              name="transfer-postal-code"
-              label="ZIP Code"
-              optional
-              value={fields.postalCode ?? ''}
-              onChange={onChange('postalCode')}
+            <OstAddressFields
+              showRegion={false}
+              value={geography}
+              onChange={setGeography}
+              {...addressOptions}
             />
             <label className={styles.fieldLabel}>
               Sponsor (active Sales Manager)
@@ -425,7 +275,7 @@ function TransferToOstForm({
                   { value: '', label: 'Choose an active Sales Manager' },
                   ...(sponsors.data?.map((holder) => ({
                     value: holder.id,
-                    label: holder.fullName,
+                    label: holder.name,
                   })) ?? []),
                 ]}
               />
@@ -438,6 +288,8 @@ function TransferToOstForm({
           ) : null}
         </section>
         <OstOfficialFields
+          grouped
+          className={`${styles.formSection} ${styles.officialFields}`}
           values={official}
           onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
         />
@@ -453,7 +305,7 @@ function TransferToOstForm({
               value={startsOn}
               onChange={(value) => {
                 setStartsOn(value);
-                setExpiresOn(oneYearOn(value));
+                setExpiresOn(ostAnnualExpiry(value));
               }}
             />
             <DateField
@@ -461,7 +313,8 @@ function TransferToOstForm({
               name="transfer-expires-on"
               label="Approved Expiry"
               value={expiresOn}
-              onChange={setExpiresOn}
+              onChange={() => {}}
+              disabled
             />
             <ReasonField value={reason} onChange={setReason} />
           </div>
@@ -498,10 +351,12 @@ export function TransferMemberDialog({
     enabled: toOst,
   }) as UseQueryResult<MemberDetail>;
   if (!toOst)
-    return <TransferToIstForm member={member} onClose={onClose} onTransferred={onTransferred} />;
+    return (
+      <OstTeamTransferDialog member={member} onClose={onClose} onTransferred={onTransferred} />
+    );
   if (detail.isPending)
     return (
-      <Dialog open onClose={onClose} title={`Transfer ${member.fullName} to OST`}>
+      <Dialog open onClose={onClose} title={`Convert ${member.fullName} to OST`}>
         <div className={styles.dialogBody} role="status" aria-label="Loading member record">
           <Skeleton style={{ height: 32 }} />
           <Skeleton style={{ height: 160 }} />
@@ -511,7 +366,7 @@ export function TransferMemberDialog({
     );
   if (detail.isError)
     return (
-      <Dialog open onClose={onClose} title={`Transfer ${member.fullName} to OST`}>
+      <Dialog open onClose={onClose} title={`Convert ${member.fullName} to OST`}>
         <div className={styles.dialogBody}>
           <Alert variant="danger" title="The member record could not be loaded">
             <p className={styles.alertText}>

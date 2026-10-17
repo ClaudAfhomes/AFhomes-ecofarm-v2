@@ -4,7 +4,9 @@ import { Link } from 'react-router';
 import { z } from 'zod';
 import {
   ostAccreditationRecordsSchema,
+  ostAnnualExpiry,
   ostMutationResultSchema,
+  ostRenewalEarliestStart,
   submitOstRenewalSchema,
 } from '@afhomes/contracts';
 import { Button, DateField, ErrorState, PageHeader, Select, TextAreaField } from '@afhomes/ui';
@@ -76,6 +78,12 @@ export function OstRenewalPage() {
         }}
       />
     );
+  // Policy: the next term starts strictly after the prior expiry (inclusive expiry).
+  const lastExpiry = records.data.terms.reduce(
+    (latest, term) => (term.expires_on > latest ? term.expires_on : latest),
+    '',
+  );
+  const earliestStart = lastExpiry ? ostRenewalEarliestStart(lastExpiry) : '';
   return (
     <section>
       <PageHeader
@@ -107,16 +115,52 @@ export function OstRenewalPage() {
             {records.data.terms.at(-1)?.expires_on}. Your approved identity and program details
             carry forward.
           </p>
-          {(['dateOfRenewal', 'requestedStart', 'requestedEnd'] as const).map((name) => (
-            <DateField
-              key={name}
-              id={`renewal-${name}`}
-              name={name}
-              label={name.replace(/([A-Z])/g, ' $1')}
-              value={fields[name]}
-              onChange={(value) => setFields((f) => ({ ...f, [name]: value }))}
-            />
-          ))}
+          {records.data.currentApplicant ? (
+            <p>
+              Registered program state:{' '}
+              {records.data.currentApplicant.programCategory === 'vip_holder'
+                ? `VIP holder (${records.data.currentApplicant.vipCardType ?? 'card tier unknown'})`
+                : records.data.currentApplicant.programCategory === 'non_vip'
+                  ? 'Non-VIP'
+                  : 'unknown — management verifies before approval'}
+              .
+            </p>
+          ) : null}
+          <DateField
+            id="renewal-dateOfRenewal"
+            name="dateOfRenewal"
+            label="Date of renewal"
+            value={fields.dateOfRenewal}
+            onChange={(value) => setFields((f) => ({ ...f, dateOfRenewal: value }))}
+          />
+          <DateField
+            id="renewal-requestedStart"
+            name="requestedStart"
+            label="Requested start"
+            value={fields.requestedStart}
+            onChange={(value) =>
+              setFields((f) => ({
+                ...f,
+                requestedStart: value,
+                requestedEnd: ostAnnualExpiry(value),
+              }))
+            }
+            hint={
+              earliestStart
+                ? `Your new term must start on or after ${earliestStart} (after your current expiry).`
+                : 'Choose the start of the new term.'
+            }
+            {...(earliestStart ? { min: earliestStart } : {})}
+          />
+          <DateField
+            id="renewal-requestedEnd"
+            name="requestedEnd"
+            label="Requested end"
+            value={fields.requestedEnd}
+            onChange={() => {}}
+            disabled
+            hint="Calculated: one calendar year after the start (February 29 clamps to February 28)."
+          />
           <label>
             Referrer change
             <Select

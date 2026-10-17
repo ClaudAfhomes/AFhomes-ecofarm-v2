@@ -322,6 +322,7 @@ describe('member contracts', () => {
   it('completes an OST only with signatures and approved validity', () => {
     const complete = {
       mode: 'complete',
+      temporaryPassword: 'SyntheticPass123!',
       requestId,
       sponsorStaffId,
       identity: ostIdentity,
@@ -330,10 +331,27 @@ describe('member contracts', () => {
       expiresOn: '2027-10-16',
     };
     expect(createOstMemberSchema.safeParse(complete).success).toBe(true);
-    // Expiry before the start, a missing date, and a missing signature fail.
     expect(
-      createOstMemberSchema.safeParse({ ...complete, expiresOn: '2026-10-15' }).success,
+      createOstMemberSchema.safeParse({ ...complete, temporaryPassword: undefined }).success,
     ).toBe(false);
+    expect(createOstMemberSchema.safeParse({ ...complete, aaNumberMode: 'manual' }).success).toBe(
+      false,
+    );
+    expect(
+      createOstMemberSchema.safeParse({
+        ...complete,
+        aaNumberMode: 'manual',
+        aaNumber: 'AAO26100001',
+      }).success,
+    ).toBe(true);
+    for (const aaNumber of ['AAI26100001', 'AAO26130001', 'AAO26100000'])
+      expect(
+        createOstMemberSchema.safeParse({ ...complete, aaNumberMode: 'manual', aaNumber }).success,
+      ).toBe(false);
+    // Expiry before the start, a missing date, and a missing signature fail.
+    expect(createOstMemberSchema.safeParse({ ...complete, expiresOn: '2026-10-15' }).success).toBe(
+      false,
+    );
     expect(createOstMemberSchema.safeParse({ ...complete, startsOn: null }).success).toBe(false);
     expect(
       createOstMemberSchema.safeParse({
@@ -350,7 +368,13 @@ describe('member contracts', () => {
         requestId,
         sponsorStaffId,
         identity: ostIdentity,
-        form: { ...ostForm, applicantSignatureStatus: 'pending', applicantSignedOn: null, referrerSignatureStatus: 'pending', referrerSignedOn: null },
+        form: {
+          ...ostForm,
+          applicantSignatureStatus: 'pending',
+          applicantSignedOn: null,
+          referrerSignatureStatus: 'pending',
+          referrerSignedOn: null,
+        },
       }).success,
     ).toBe(true);
   });
@@ -359,6 +383,7 @@ describe('member contracts', () => {
     expect(
       transferMemberSchema.safeParse({
         direction: 'IST_TO_OST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Moved to OST by management decision',
         sponsorStaffId,
         identity: ostIdentity,
@@ -370,6 +395,7 @@ describe('member contracts', () => {
     // A short reason, a missing signature, an inverted window and no sponsor fail.
     const base = {
       direction: 'IST_TO_OST' as const,
+      requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
       reason: 'Moved to OST by management decision',
       sponsorStaffId,
       identity: ostIdentity,
@@ -395,6 +421,7 @@ describe('member contracts', () => {
     expect(
       transferMemberSchema.safeParse({
         direction: 'OST_TO_IST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Appointed Senior Sales Manager',
         targetPosition: 'senior_sales_manager',
         headStaffId: '66666666-6666-4666-8666-666666666666',
@@ -405,6 +432,7 @@ describe('member contracts', () => {
     expect(
       transferMemberSchema.safeParse({
         direction: 'OST_TO_IST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Appointed to a hierarchy level',
         targetPosition: 'ost',
         headStaffId: null,
@@ -413,6 +441,7 @@ describe('member contracts', () => {
     expect(
       transferMemberSchema.safeParse({
         direction: 'OST_TO_IST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Appointed Sales Manager',
         targetPosition: 'sales_manager',
         headStaffId: null,
@@ -421,6 +450,7 @@ describe('member contracts', () => {
     expect(
       transferMemberSchema.safeParse({
         direction: 'OST_TO_IST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Appointed Sales Vice Director',
         targetPosition: 'vice_director',
         headStaffId: '66666666-6666-4666-8666-666666666666',

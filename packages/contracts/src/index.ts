@@ -509,6 +509,7 @@ export {
   transferMemberToOstSchema,
   transferMemberToIstSchema,
   transferMemberSchema,
+  transferOstTeamSchema,
   updateMemberProfileSchema,
   memberSchema,
   memberDetailSchema,

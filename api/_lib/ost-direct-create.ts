@@ -8,13 +8,10 @@
  * so the direct install function records NO endorsement rather than
  * attributing one to a sponsor who did not act.
  *
- * The GoTrue invitation and the SQL install cannot share a transaction. The
- * SQL call is the one that can fail after the invitation exists, and the
- * invitation is deliberately preserved in that case: an invite response does
- * not prove the account was newly created, so deleting it could destroy a
- * pre-existing login. The operator retries from the OST queue instead.
+ * Password provisioning and SQL cannot share a transaction. Only an account
+ * created by this request may be removed after a confirmed SQL rejection;
+ * uncertain outcomes are preserved for review.
  */
-import { resolveAdminUrl } from './admin-url.js';
 import type { Db, FailureCode } from './handler-kit.js';
 
 export type OstDirectFailure = { code: FailureCode; message: string; status: number };
@@ -39,6 +36,29 @@ export function ostDirectFailure(
     };
   if (/ACCREDITATION_NUMBER_TAKEN/.test(message))
     return { code: 'CONFLICT', message: 'This AA number is already issued', status: 409 };
+  if (/OST_ACCREDITATION_EXPIRED_REQUIRED/.test(message))
+    return {
+      code: 'CONFLICT',
+      message: 'OST accreditation must expire before a team change can be approved.',
+      status: 409,
+    };
+  if (/OST_TRANSFER_SAME_TEAM|OST_TRANSFER_GENEALOGY_CONFLICT/.test(message))
+    return {
+      code: 'CONFLICT',
+      message:
+        'Choose a different active Sales Manager and refresh the current team before retrying.',
+      status: 409,
+    };
+  if (
+    /OST_ACCREDITATION_EXPIRED_REQUIRED|OST_CONVERSION_|OST_ANNUAL_VALIDITY_REQUIRED|OST_ROLE_WORKFLOW_REQUIRED|OST_TRANSFER_SPONSOR_REQUIRED/.test(
+      message,
+    )
+  )
+    return {
+      code: 'CONFLICT',
+      message: 'Review the accreditation expiry, conversion eligibility and one-year validity.',
+      status: 409,
+    };
   if (/AA_SEQUENCE_EXHAUSTED/.test(message))
     return {
       code: 'CONFLICT',
@@ -141,45 +161,78 @@ export function ostDirectFailure(
   return null;
 }
 
-export async function inviteAndInstallDirectOst(
+export async function createAndInstallDirectOst(
   db: Db,
   input: {
     applicationId: string;
     actorId: string;
     email: string;
     fullName: string;
+    temporaryPassword: string;
+    aaNumber: string | null;
     startsOn: string;
     expiresOn: string;
   },
 ): Promise<OstDirectInstall> {
-  const redirectTo = resolveAdminUrl();
-  if (!redirectTo)
+  const existing = await db
+    .from('ost_members')
+    .select('id')
+    .eq('application_id', input.applicationId)
+    .maybeSingle();
+  if (existing.error)
     return {
       ok: false,
       code: 'INTERNAL',
-      message: 'Account invitation is not configured.',
+      message: 'Unable to verify the approval outcome. Review before retrying.',
       status: 500,
     };
-  const invited = await db.auth.admin.inviteUserByEmail(input.email, {
-    redirectTo,
-    data: { full_name: input.fullName },
-  });
-  if (invited.error || !invited.data?.user)
-    return {
-      ok: false,
-      code: 'CONFLICT',
-      message: 'Unable to invite this account. Review existing accounts before retrying.',
-      status: 409,
-    };
-  const memberId = invited.data.user.id as string;
-  const installed = await db.rpc('install_direct_ost_accreditation', {
+  let memberId = existing.data?.id as string | undefined;
+  let createdHere = false;
+  if (!memberId) {
+    const created = await db.auth.admin.createUser({
+      email: input.email,
+      password: input.temporaryPassword,
+      email_confirm: true,
+      user_metadata: { full_name: input.fullName },
+    });
+    if (created.error || !created.data?.user) {
+      const duplicate = /already.*(registered|exists)|duplicate/i.test(
+        String(created.error?.message ?? ''),
+      );
+      return {
+        ok: false,
+        code: duplicate ? 'CONFLICT' : 'INTERNAL',
+        message:
+          'Unable to create this login. Review the password and existing accounts before retrying.',
+        status: duplicate ? 409 : 500,
+      };
+    }
+    memberId = created.data.user.id as string;
+    createdHere = true;
+  }
+  const installed = await db.rpc('install_direct_ost_password', {
     p_application_id: input.applicationId,
     p_actor_id: input.actorId,
     p_auth_id: memberId,
     p_starts_on: input.startsOn,
     p_expires_on: input.expiresOn,
+    p_aa_number: input.aaNumber,
   });
   if (installed.error) {
+    // A transport failure may hide a committed install. Never delete on uncertainty.
+    if (createdHere && /^(22|23|42|P0001)/.test(String(installed.error.code ?? ''))) {
+      const outcome = await db.from('ost_members').select('id').eq('id', memberId).maybeSingle();
+      if (!outcome.error && !outcome.data) {
+        const removed = await db.auth.admin.deleteUser(memberId);
+        if (removed.error)
+          return {
+            ok: false,
+            code: 'INTERNAL',
+            status: 500,
+            message: 'Account cleanup needs administrator review before retrying.',
+          };
+      }
+    }
     const failure = ostDirectFailure(installed.error);
     if (failure) return { ok: false, ...failure };
     throw installed.error;

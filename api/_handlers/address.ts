@@ -23,6 +23,7 @@ import { AddressProviderError } from '../_lib/address-provider.js';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { deny, fail, list, method, route } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 
 const provider = addressProvider();
 
@@ -48,8 +49,39 @@ export default async function address(req: VercelRequest, res: VercelResponse): 
     return fail(res, 'VALIDATION_ERROR', 'Method not allowed', 405);
   }
 
-  const auth = await authorizeAfHomes(req, 'sales.customers');
-  if ('error' in auth) return deny(res, auth);
+  const publicReference = route(req, 'GET', /^public(?:\/(.*))?$/);
+  if (publicReference) {
+    if (!consumeIdentifierAttempt(req, 'public-address-reference').allowed)
+      return fail(res, 'RATE_LIMITED', 'Too many address lookups. Try again shortly.', 429);
+    req = { ...req, query: { ...req.query, familyPath: publicReference[1] ?? '' } };
+  } else {
+    const auth = await authorizeAfHomes(req, 'sales.customers');
+    if ('error' in auth) {
+      const ost = await authorizeAfHomes(req, 'network.ost_registrations');
+      if ('error' in ost) return deny(res, auth);
+    }
+  }
+
+  if (route(req, 'GET', /^regions$/)) {
+    try {
+      if (!provider.regions) throw new AddressProviderError('PROVIDER_UNAVAILABLE');
+      return list(res, await provider.regions());
+    } catch (error) {
+      return failProvider(res, error);
+    }
+  }
+  const regionProvinces = route(req, 'GET', /^regions\/([^/]+)\/provinces$/);
+  if (regionProvinces) {
+    const code = addressHierarchyQuerySchema.safeParse(regionProvinces[1]);
+    if (!code.success)
+      return fail(res, 'VALIDATION_ERROR', 'Use the 10-digit PSGC region code', 400);
+    try {
+      if (!provider.provincesInRegion) throw new AddressProviderError('PROVIDER_UNAVAILABLE');
+      return list(res, await provider.provincesInRegion(code.data));
+    } catch (error) {
+      return failProvider(res, error);
+    }
+  }
 
   const provinceList = route(req, 'GET', /^$/);
   const localityList = route(req, 'GET', /^provinces\/([^/]+)\/localities$/);

@@ -46,7 +46,7 @@ export async function runOstAccreditationChecks({
     vipCardType: null,
     sex: 'male',
     civilStatus: 'single',
-    governmentIdType: 'QA TEST',
+    governmentIdType: 'philippine_id',
     governmentIdNumber: 'SYNTHETIC-PRIVATE-ID',
     applicantSignatureStatus: 'received',
     referrerSignatureStatus: 'received',
@@ -191,6 +191,16 @@ export async function runOstAccreditationChecks({
       "insert into public.staff_role_assignments(staff_id,role_id,assigned_by) select $1,id,$2 from public.roles where slug='sales_manager'",
       [alternate, actor],
     );
+    // 20261208000001's manual-sponsor rule requires a live SM -> SSM -> VD
+    // chain, so alternate mirrors the fixture sponsor's own upline before the
+    // module proposes them as the renewed referrer below.
+    await db.query(
+      `insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,is_authoritative,is_active,assigned_by)
+       select $1, r.upline_staff_id, 'sales_manager', true, true, $2
+       from public.referral_relationships r
+       where r.subject_staff_id = $3 and r.is_active and r.hierarchy_role = 'sales_manager'`,
+      [alternate, actor, sponsor],
+    );
     const request = randomUUID();
     const submit = "select public.submit_ost_accreditation($1,$2,$3,null,$4,$5,'manual') id";
     const app = await scalar(submit, [request, actor, sponsor, identity('main'), form]);
@@ -213,17 +223,24 @@ export async function runOstAccreditationChecks({
       'registration retry returns the original application',
       (await scalar(submit, [request, actor, sponsor, identity('main'), form])) === app,
     );
+    // The payload change is the identity, not the sponsor: 20261208000001
+    // resolves the manual sponsor BEFORE the request replay check, so swapping
+    // in a fresh SM without an upline would refuse for OST_SM_UPPERLINE_REQUIRED
+    // and never reach the same-key conflict this check is about.
     await refused(
       'registration same-key payload change refused',
       submit,
-      [request, actor, alternate, identity('main'), form],
+      [request, actor, sponsor, identity('invalid'), form],
       /PAYLOAD_CONFLICT/,
     );
+    // A sponsor outside the manual-sponsor set is refused by
+    // OST_ACTIVE_SPONSOR_REQUIRED; an active VD/SSM would instead reach
+    // OST_ACTIVE_SM_REQUIRED. Both mean "not a valid SM sponsor".
     await refused(
       'non-SM sponsor refused',
       submit,
       [randomUUID(), actor, actor, identity('invalid'), form],
-      /ACTIVE_SM_REQUIRED/,
+      /OST_ACTIVE_(SM|SPONSOR)_REQUIRED/,
     );
     const approve = 'select public.install_ost_accreditation_identity($1,$2,$3,$4,$5) id';
     await refused(
@@ -242,7 +259,7 @@ export async function runOstAccreditationChecks({
       await Promise.all(clients.map((c) => c.connect()));
       const approved = await Promise.all(
         clients.map((c) =>
-          c.query<{ id: string }>(approve, [app, actor, member, '2026-10-01', '2027-10-01']),
+          c.query<{ id: string }>(approve, [app, actor, member, '2025-10-01', '2026-10-01']),
         ),
       );
       const term = approved[0]!.rows[0]!.id;
@@ -254,7 +271,7 @@ export async function runOstAccreditationChecks({
     check(
       'initial term records explicitly approved dates',
       (await count(
-        "select count(*)::int n from private.ost_accreditation_terms where ost_id=$1 and starts_on='2026-10-01' and expires_on='2027-10-01'",
+        "select count(*)::int n from private.ost_accreditation_terms where ost_id=$1 and starts_on='2025-10-01' and expires_on='2026-10-01'",
         [member],
       )) === 1,
     );
@@ -266,10 +283,14 @@ export async function runOstAccreditationChecks({
       )) === 1,
     );
     await db.query("update public.staff_users set status='active' where id=$1", [member]);
+    // The installed term above is deliberately past-dated: 20261208000003
+    // refuses a proposed referrer change while the member's current term is
+    // still running, so the renewal opens the day after the expired term and
+    // must itself be exactly one year long.
     const renewalInput = {
       dateOfRenewal: '2026-10-01',
-      requestedStart: '2027-10-02',
-      requestedEnd: '2028-10-01',
+      requestedStart: '2026-10-02',
+      requestedEnd: '2027-10-02',
       proposedNewSponsorStaffId: alternate,
       reasonForReferrerChange: 'QA management reviewed change',
       applicantSignatureStatus: 'received',
@@ -312,7 +333,7 @@ export async function runOstAccreditationChecks({
     check(
       'prior validity dates remain unchanged',
       (await count(
-        "select count(*)::int n from private.ost_accreditation_terms where id=$1 and status='superseded' and starts_on='2026-10-01' and expires_on='2027-10-01'",
+        "select count(*)::int n from private.ost_accreditation_terms where id=$1 and status='superseded' and starts_on='2025-10-01' and expires_on='2026-10-01'",
         [terms[0]],
       )) === 1,
     );
@@ -342,11 +363,20 @@ export async function runOstAccreditationChecks({
         [member],
       )) === 1,
     );
+    // A second referrer change would need term2 itself expired (20261208000003
+    // guards every proposal), so the refused renewal is a plain one for the
+    // following year: refused by review, not by form.
     const rejected = await scalar('select public.submit_ost_renewal($1,$2,$3,$4) id', [
       randomUUID(),
       member,
       member,
-      { ...renewalInput, proposedNewSponsorStaffId: sponsor },
+      {
+        ...renewalInput,
+        requestedStart: '2027-10-03',
+        requestedEnd: '2028-10-03',
+        proposedNewSponsorStaffId: null,
+        reasonForReferrerChange: null,
+      },
     ]);
     renewals.push(rejected);
     await db.query("select public.decide_ost_renewal($1,$2,'reject','QA rejected renewal')", [
@@ -560,9 +590,19 @@ export async function runOstAccreditationChecks({
         'delete from private.ost_registration_details where application_id=any($1::uuid[])',
         [applications],
       );
+      // The member is an OST: the develop genealogy guard (20261208000002)
+      // refuses DELETE of their edge by design, so the synthetic rows go with
+      // that one trigger disabled in this disposable test database, then the
+      // guard is re-enabled immediately.
+      await db.query(
+        'alter table public.referral_relationships disable trigger ost_genealogy_transfer_guard',
+      );
       await db.query(
         'delete from public.referral_relationships where subject_staff_id=any($1::uuid[])',
         [[member, alternate]],
+      );
+      await db.query(
+        'alter table public.referral_relationships enable trigger ost_genealogy_transfer_guard',
       );
       await db.query('delete from public.ost_members where id=$1', [member]);
       await db.query('delete from public.ost_applications where id=any($1::uuid[])', [

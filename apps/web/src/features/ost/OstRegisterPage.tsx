@@ -10,7 +10,8 @@ import {
   officialOstFormDefaults,
   parseOfficialOstFields,
 } from '@afhomes/contracts';
-import { NormalizedInput, AuthLayout, Button, OstOfficialFields } from '@afhomes/ui';
+import { NormalizedInput, AuthLayout, Button, OstOfficialFields, OstAddressFields, emptyOstAddress } from '@afhomes/ui';
+import { useOstAddress } from './useOstAddress';
 
 import { resolveOstReferral, submitOfficialOstAccreditation } from './services';
 import authStyles from '../customer/auth.module.css';
@@ -46,6 +47,8 @@ export function OstRegisterPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [official, setOfficial] = useState(officialOstFormDefaults);
+  const [geography, setGeography] = useState(emptyOstAddress);
+  const addressOptions = useOstAddress(geography);
   const [requestId] = useState(() => crypto.randomUUID());
 
   const submission = useMutation({
@@ -57,6 +60,10 @@ export function OstRegisterPage() {
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    if (!geography.regionCode || !geography.provinceCode || !geography.localityCode || !geography.barangayCode) {
+      setError('Choose the region, province, city / municipality and barangay from the lists.');
+      return;
+    }
     const parsedOfficial = parseOfficialOstFields(official);
     if (!parsedOfficial.success) {
       setError(parsedOfficial.error.issues[0]?.message ?? 'Check the official form.');
@@ -76,11 +83,14 @@ export function OstRegisterPage() {
           birthDate: form.birthDate,
           address: {
             line1: normalizeAddressField(form.line1),
-            city: normalizeAddressField(form.city),
-            province: normalizeAddressField(form.province),
-            postalCode: form.postalCode.trim() || undefined,
+            city: geography.city,
+            province: geography.province,
+            barangay: geography.barangay,
+            postalCode: geography.postalCode || undefined,
             countryCode: 'PH',
           },
+          addressHierarchy: { regionCode: geography.regionCode, provinceCode: geography.provinceCode,
+            localityCode: geography.localityCode, barangayCode: geography.barangayCode },
         },
       })
       .catch(() => {
@@ -245,44 +255,7 @@ export function OstRegisterPage() {
             maxLength={200}
             autoComplete="street-address"
           />
-          <label className={authStyles.label} htmlFor="ost-city">
-            City
-          </label>
-          <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
-            id="ost-city"
-            className={authStyles.input}
-            value={form.city}
-            onChange={set('city')}
-            required
-            maxLength={100}
-            autoComplete="address-level2"
-          />
-          <label className={authStyles.label} htmlFor="ost-province">
-            Province
-          </label>
-          <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
-            id="ost-province"
-            className={authStyles.input}
-            value={form.province}
-            onChange={set('province')}
-            required
-            maxLength={100}
-            autoComplete="address-level1"
-          />
-          <label className={authStyles.label} htmlFor="ost-postal">
-            Postal code (optional)
-          </label>
-          <NormalizedInput
-            normalize={(value) => value.toUpperCase()}
-            id="ost-postal"
-            className={authStyles.input}
-            value={form.postalCode}
-            onChange={set('postalCode')}
-            maxLength={20}
-            autoComplete="postal-code"
-          />
+          <OstAddressFields value={geography} onChange={setGeography} {...addressOptions} />
           <OstOfficialFields
             values={official}
             onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}

@@ -44,6 +44,7 @@ const ADMIN_SPONSOR_ID = '33333333-3333-4333-8333-333333333333';
 const SUSPENDED_SM_ID = '44444444-4444-4444-8444-444444444444';
 const OST_ID = '55555555-5555-4555-8555-555555555555';
 const NEW_OST_ID = '66666666-6666-4666-8666-666666666666';
+const OLD_ACCOUNT_ID = '88888888-8888-4888-8888-888888888888';
 const EMP_ID = '77777777-7777-4777-8777-777777777777';
 
 const ADMIN_TOKEN = 'token-admin';
@@ -849,19 +850,152 @@ describe('OST approval state guards', () => {
     expect(db.calls.filter((c) => c.op === 'deleteUser')).toHaveLength(0);
   });
 
-  it('31. a database failure after the invite cleans up the orphan Auth user', async () => {
+  it('31. a database failure rolls back its SQL transaction and keeps the identity', async () => {
     const db = install(undefined, {
       inviteUserId: NEW_OST_ID,
       unique: { staff_role_assignments: [['staff_id']] },
     });
-    // A prior partial run left the assignment behind; the member insert would
-    // land next, so the approval must unwind the Auth user it just invited.
+    // A prior partial run left the assignment behind. The staff_users insert
+    // succeeds, the assignment insert fails, and the approval must remove the
+    // rows it created while PRESERVING the invited Auth identity.
     db.rows('staff_role_assignments').push({ staff_id: NEW_OST_ID, role_id: 'r-ost' });
     const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
     expect((await approve(appId)).status).toBe(409);
+    expect(db.deletedAuthUsers).toEqual([]);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(1);
+    // This run's rows are gone; the prior partial run's assignment stays.
+    expect(db.rows('staff_users').find((r) => r.id === NEW_OST_ID)).toBeUndefined();
+    expect(db.rows('staff_role_assignments').filter((r) => r.staff_id === NEW_OST_ID)).toHaveLength(
+      1,
+    );
+    expect(db.rows('staff_invitations').filter((r) => r.auth_user_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
     expect(
-      db.calls.filter((c) => c.op === 'deleteUser' && String(c.arg) === NEW_OST_ID),
-    ).toHaveLength(1);
+      db.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),
+    ).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('34. an invitation that returns an existing staff identity stops before any write', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    // The invited id already belongs to an account, so the response cannot
+    // prove GoTrue created a new identity; the approval must stop, and no row
+    // of the pre-existing identity may be touched.
+    db.rows('staff_users').push({
+      id: NEW_OST_ID,
+      email: 'returning@afhomes.test',
+      full_name: 'Returning User',
+      status: 'active',
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /already linked to an account/,
+    );
+    expect(db.deletedAuthUsers).toEqual([]);
+    expect(db.rows('staff_users').filter((r) => r.id === NEW_OST_ID)).toHaveLength(1);
+    expect(db.rows('staff_role_assignments').filter((r) => r.staff_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('fails closed when the invited identity ownership lookup fails', async () => {
+    const db = install(undefined, {
+      invite: async () => {
+        db.errors['staff_users.id'] = { message: 'PRIVATE ownership lookup failure' };
+        return { data: { user: { id: NEW_OST_ID } }, error: null };
+      },
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const beforeApproval = db.calls.length;
+    const result = await approve(appId);
+    expect(result.status).toBe(500);
+    expect(
+      db.calls
+        .slice(beforeApproval)
+        .some((c) => ['insert', 'update', 'delete', 'deleteUser'].includes(c.op)),
+    ).toBe(false);
+    expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+  });
+
+  it.each(['returned error', 'thrown error'])(
+    'preserves the invitation and avoids compensating deletes after an RPC %s',
+    async (mode) => {
+      const db = install();
+      const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+      if (mode === 'returned error')
+        db.rpcErrors.install_legacy_ost_identity = { message: 'PRIVATE SQL failure' };
+      else {
+        const originalRpc = db.rpc.bind(db);
+        vi.spyOn(db, 'rpc').mockImplementation((name, args) => {
+          if (name === 'install_legacy_ost_identity')
+            return Promise.reject(new Error('PRIVATE transport failure'));
+          return originalRpc(name, args);
+        });
+      }
+      const result = await approve(appId);
+      expect(result.status).toBe(500);
+      expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+      expect(db.calls.some((c) => c.op === 'delete' || c.op === 'deleteUser')).toBe(false);
+      expect(db.rows('audit_events')).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action:
+              mode === 'returned error'
+                ? 'OST_APPROVAL_PROVISIONING_FAILED'
+                : 'OST_APPROVAL_RECONCILIATION_REQUIRED',
+            entity_id: appId,
+          }),
+        ]),
+      );
+    },
+  );
+
+  it('recovers a committed approval after a lost RPC response without another invite or deletion', async () => {
+    const db = install();
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const originalRpc = db.rpc.bind(db);
+    vi.spyOn(db, 'rpc').mockImplementation(async (name, args) => {
+      const result = await originalRpc(name, args);
+      if (name === 'install_legacy_ost_identity')
+        throw new Error('PRIVATE response lost after commit');
+      return result;
+    });
+    expect((await approve(appId)).status).toBe(500);
+    expect((await approve(appId)).status).toBe(200);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(1);
+    expect(db.rows('audit_events').filter((r) => r.action === 'OST_MEMBER_ACTIVATED')).toHaveLength(
+      1,
+    );
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(1);
+    expect(db.calls.some((c) => c.op === 'delete' || c.op === 'deleteUser')).toBe(false);
+  });
+
+  it('35. an invitation for the applicant email of an existing account writes nothing', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    // Same email, different id: the invite would hand back an id that is new
+    // to staff_users, yet the identity behind the email already exists.
+    db.rows('staff_users').push({
+      id: OLD_ACCOUNT_ID,
+      email: applicant.email,
+      full_name: 'Previous Oscar',
+      status: 'suspended',
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /already linked to an account/,
+    );
+    expect(db.rows('staff_users').filter((r) => r.id === NEW_OST_ID)).toHaveLength(0);
+    expect(db.rows('staff_invitations').filter((r) => r.auth_user_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
     expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
     expect(
       db.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),

@@ -1,3 +1,4 @@
+import { ostAnnualExpiry } from './ost-accreditation.js';
 import { z } from 'zod';
 
 import {
@@ -349,9 +350,18 @@ export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
 export const createOstMemberModeSchema = z.enum(['complete', 'pending']);
 export type CreateOstMemberMode = z.infer<typeof createOstMemberModeSchema>;
 
+export const manualOstAaNumberSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^AAO\d{2}(?:0[1-9]|1[0-2])(?!0000)\d{4}$/, 'Use AAO + YYMM + four-digit sequence');
+
 export const createOstMemberSchema = z
   .object({
     mode: createOstMemberModeSchema,
+    temporaryPassword: z.string().min(8).max(128).optional(),
+    aaNumberMode: z.enum(['auto', 'manual']).default('auto'),
+    aaNumber: manualOstAaNumberSchema.optional(),
     requestId: z.string().uuid(),
     sponsorStaffId: z.string().uuid(),
     identity: ostIdentitySchema,
@@ -363,6 +373,20 @@ export const createOstMemberSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if (value.mode !== 'complete') return;
+    if (!value.temporaryPassword)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['temporaryPassword'],
+        message: 'Set a temporary password',
+      });
+    if (value.aaNumberMode === 'manual' && !value.aaNumber)
+      ctx.addIssue({ code: 'custom', path: ['aaNumber'], message: 'Enter the AA number' });
+    if (value.aaNumberMode === 'auto' && value.aaNumber)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['aaNumber'],
+        message: 'Choose manual mode to enter an AA number',
+      });
     if (
       value.form.applicantSignatureStatus !== 'received' ||
       value.form.referrerSignatureStatus !== 'received'
@@ -378,7 +402,7 @@ export const createOstMemberSchema = z
         path: ['expiresOn'],
         message: 'Choose the approved start and expiry dates',
       });
-    else if (value.expiresOn < value.startsOn)
+    else if (value.expiresOn !== ostAnnualExpiry(value.startsOn))
       ctx.addIssue({
         code: 'custom',
         path: ['expiresOn'],
@@ -409,9 +433,20 @@ export type CreateOstMemberResult = z.infer<typeof createOstMemberResultSchema>;
  */
 const transferReasonSchema = z.string().trim().min(5).max(300);
 
+/** A genealogy move preserves OST identity, role, AA number and term dates. */
+export const transferOstTeamSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    sponsorStaffId: z.string().uuid(),
+    reason: transferReasonSchema,
+    managementApproved: z.literal(true),
+  })
+  .strict();
+
 export const transferMemberToOstSchema = z
   .object({
     direction: z.literal('IST_TO_OST'),
+    requestId: z.string().uuid(),
     reason: transferReasonSchema,
     sponsorStaffId: z.string().uuid(),
     identity: ostIdentitySchema,
@@ -424,6 +459,7 @@ export const transferMemberToOstSchema = z
 export const transferMemberToIstSchema = z
   .object({
     direction: z.literal('OST_TO_IST'),
+    requestId: z.string().uuid(),
     reason: transferReasonSchema,
     targetPosition: istPositionSchema,
     headStaffId: z.string().uuid().nullable().default(null),

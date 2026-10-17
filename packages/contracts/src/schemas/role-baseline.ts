@@ -141,6 +141,11 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
     moduleKey: 'network.members',
     roles: ['admin', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'],
   },
+  // OST registration oversight for the Sales Manager, seeded by 20261208000004
+  // alongside the IST conversion ledger. View only: the conversion itself runs
+  // through the transfer function, and no SM edits a registration directly. The
+  // matrix above is not rewritten because the grant arrived after review.
+  { moduleKey: 'network.ost_registrations', roles: ['senior_sales_manager'] },
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

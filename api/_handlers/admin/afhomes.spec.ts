@@ -140,6 +140,58 @@ const data = (body: unknown) => (body as Json).data;
 /* Session / authentication                                           */
 /* ================================================================== */
 
+describe('staff OST lifecycle boundary', () => {
+  const ostRoleId = '10000000-0000-4000-8000-000000000001';
+  it.each(['into', 'out of'])('refuses generic staff role changes %s OST', async (direction) => {
+    const db = install();
+    db.rows('roles').push({
+      id: ostRoleId,
+      slug: 'ost',
+      name: 'OST',
+      is_active: true,
+      is_system: true,
+    });
+    if (direction === 'out of')
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id =
+        ostRoleId;
+    const before = JSON.stringify(db.tables);
+    const result = await call({
+      method: 'PATCH',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+      body: { roleId: direction === 'into' ? ostRoleId : UUID.role.employee },
+    });
+    expect(result.status).toBe(409);
+    expect(JSON.stringify(db.tables)).toBe(before);
+  });
+  it('refuses generic staff creation with the OST role before Auth provisioning', async () => {
+    const db = install();
+    db.rows('roles').push({
+      id: ostRoleId,
+      slug: 'ost',
+      name: 'OST',
+      is_active: true,
+      is_system: true,
+    });
+    const result = await call({
+      method: 'POST',
+      afPath: 'staff',
+      token: TOKEN.superAdmin,
+      body: {
+        fullName: 'Synthetic Ost',
+        email: 'synthetic@example.invalid',
+        roleId: ostRoleId,
+        departmentId: UUID.department.sales,
+        temporaryPassword: 'SyntheticPass123',
+      },
+    });
+    expect(result.status).toBe(409);
+    expect(db.calls.some((c) => ['createUser', 'inviteUserByEmail', 'insert'].includes(c.op))).toBe(
+      false,
+    );
+  });
+});
+
 describe('GET /admin/afhomes/session', () => {
   beforeEach(() => install());
 

@@ -278,7 +278,7 @@ export function MemberDetailDialog({
             </Button>
             {onTransfer ? (
               <Button variant="secondary" onClick={() => onTransfer(member)}>
-                Transfer
+                {member.position === 'ost' ? 'Transfer team' : 'Convert to OST'}
               </Button>
             ) : null}
             <Button

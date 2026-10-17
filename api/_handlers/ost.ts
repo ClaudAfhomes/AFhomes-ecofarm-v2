@@ -114,28 +114,6 @@ function newReferralCode(): string {
   return `OST-${hex.slice(0, 6)}-${hex.slice(6, 12)}`;
 }
 
-function newOstNumberFallback(): string {
-  const hex = randomBytes(3).toString('hex').toUpperCase();
-  return `OST-${hex}`;
-}
-
-async function nextOstNumber(db: Db): Promise<string> {
-  try {
-    const { data, error } = await db.rpc('next_ost_number');
-    if (!error && data) {
-      const value = Array.isArray(data) ? data[0] : data;
-      const text =
-        typeof value === 'string'
-          ? value
-          : String((value as Record<string, unknown>)?.ost_number ?? '');
-      if (text) return text;
-    }
-  } catch {
-    // Sequence missing (pre-migration database): fall back to a local value.
-  }
-  return newOstNumberFallback();
-}
-
 /**
  * Approval-time re-validation of the FROZEN sponsor.
  *
@@ -172,13 +150,16 @@ async function validateReferralCodeIssuer(
   caller: ReferralCodeIssuer,
   sponsorId: string,
 ): Promise<SponsorCheck> {
-  if (sponsorId === caller.userId && caller.roleSlug !== 'sales_manager') {
+  if (
+    sponsorId === caller.userId &&
+    !['vice_director', 'senior_sales_manager', 'sales_manager'].includes(caller.roleSlug)
+  ) {
     return {
       ok: false,
       status: 403,
       message:
-        'Only an active Sales Manager can sponsor an OST referral code. ' +
-        'Ask a Sales Manager for their code, or have an administrator issue one on their behalf.',
+        'Only an active VD, SSM or Sales Manager can sponsor an OST referral code. ' +
+        'Ask an eligible seller for their code, or have an administrator issue one on their behalf.',
     };
   }
   const checked = await validateOstSponsor(db, sponsorId);
@@ -473,117 +454,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'CONFLICT', 'Unable to invite this email address', 409);
       const ostUserId = invited.data.user.id;
 
-      try {
-        const now = new Date().toISOString();
-        const ostNumber = await nextOstNumber(db);
-
-        const { error: staffError } = await db.from('staff_users').insert({
-          id: ostUserId,
-          email: String(app.email),
-          full_name: fullName,
-          department_id: null,
-          status: 'invited',
-          invited_at: now,
-        });
-        if (staffError) throw staffError;
-
-        const { error: assignmentError } = await db.from('staff_role_assignments').insert({
-          staff_id: ostUserId,
-          role_id: ostRole.id,
-          assigned_by: auth.userId,
-        });
-        if (assignmentError) throw assignmentError;
-
-        const { error: invitationError } = await db.from('staff_invitations').insert({
-          email: String(app.email),
-          full_name: fullName,
-          role_id: ostRole.id,
-          department_id: null,
-          invited_by: auth.userId,
-          expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-          auth_user_id: ostUserId,
-        });
-        if (invitationError) throw invitationError;
-
-        const { data: memberRow, error: memberError } = await db
-          .from('ost_members')
-          .insert({
-            id: ostUserId,
-            application_id: id,
-            sponsor_staff_id: sponsor.id,
-            ost_number: ostNumber,
-            full_name: fullName,
-            email: String(app.email),
-            phone: String(app.phone),
-            status: 'active',
-            approved_by: auth.userId,
-            approved_at: now,
-          })
-          .select('*')
-          .single();
-        if (memberError) throw memberError;
-
-        // SM -> OST genealogy edge. The Phase 7 trigger re-validates exact
-        // adjacency (ost under sales_manager), one active upline, and cycles;
-        // a violation surfaces here and rolls the approval back via cleanup.
-        const { data: edge, error: edgeError } = await db
-          .from('referral_relationships')
-          .insert({
-            subject_staff_id: ostUserId,
-            upline_staff_id: sponsor.id,
-            hierarchy_role: 'ost',
-            is_authoritative: true,
-            is_active: true,
-            assigned_by: auth.userId,
-          })
-          .select('*')
-          .single();
-        if (edgeError) throw edgeError;
-
-        const { data: updated, error: updateError } = await db
-          .from('ost_applications')
-          .update({ status: 'approved', reviewed_by: auth.userId, reviewed_at: now })
-          .eq('id', id)
-          .select('*')
-          .single();
-        if (updateError) throw updateError;
-        void updated;
-
-        await audit(
-          db,
-          auth.userId,
-          'OST_APPLICATION_APPROVED',
-          'ost_application',
-          id,
-          { status: String(app.status) },
-          {
-            status: 'approved',
-            sponsorStaffId: sponsor.id,
-            ostMemberId: ostUserId,
-            genealogyRelationshipId: String((edge as { id: string }).id),
-          },
+      // An invitation response does not prove GoTrue created a NEW identity:
+      // for an existing account it can hand back that account's id. Writing
+      // (or later unwinding) rows under a pre-existing identity would corrupt
+      // it, so a known staff identity for either the invited id or this email
+      // stops the approval BEFORE any write, with nothing to clean up.
+      const [{ data: idOwner, error: idOwnerError }, { data: emailOwner, error: emailOwnerError }] =
+        await Promise.all([
+          db.from('staff_users').select('id').eq('id', ostUserId).maybeSingle(),
+          db.from('staff_users').select('id').eq('email', String(app.email)).maybeSingle(),
+        ]);
+      if (idOwnerError || emailOwnerError)
+        return fail(
+          res,
+          'INTERNAL',
+          'Account ownership could not be verified. Review the invitation before retrying.',
+          500,
         );
-        await audit(db, auth.userId, 'OST_MEMBER_ACTIVATED', 'ost_member', ostUserId, null, {
-          applicationId: id,
-          sponsorStaffId: sponsor.id,
-          ostNumber,
+      if (idOwner || emailOwner)
+        return fail(
+          res,
+          'CONFLICT',
+          'This email is already linked to an account. Review the existing identity before approving.',
+          409,
+        );
+
+      let installed;
+      try {
+        installed = await db.rpc('install_legacy_ost_identity', {
+          p_application_id: id,
+          p_actor_id: auth.userId,
+          p_auth_id: ostUserId,
         });
-        return res
-          .status(201)
-          .json(toMember(memberRow as Record<string, unknown>, sponsor.fullName));
-      } catch (error) {
-        // The invitation created an Auth user with no usable identity: remove
-        // it so a retry starts clean. A pre-existing user is never destroyed
-        // because this run created this one.
+      } catch {
+        // A lost response cannot establish whether the SQL transaction committed.
         try {
-          await db.auth.admin.deleteUser(ostUserId);
+          await audit(
+            db,
+            auth.userId,
+            'OST_APPROVAL_RECONCILIATION_REQUIRED',
+            'ost_application',
+            id,
+            null,
+            { authUserId: ostUserId, authIdentityRetained: true, databaseOutcome: 'unknown' },
+          );
         } catch {
-          // Cleanup is best-effort; the original error is what matters.
+          console.error('[ost-approval] reconciliation audit unavailable', { applicationId: id });
         }
-        if ((error as { code?: string })?.code === '23505')
-          return fail(res, 'CONFLICT', 'An OST member for this application already exists', 409);
-        return mapRpcError(res, error as { message?: string });
+        return fail(
+          res,
+          'INTERNAL',
+          'Approval could not be confirmed. Administrator reconciliation is required before retrying.',
+          500,
+        );
       }
+      if (installed.error) {
+        // The RPC is one SQL transaction; no compensating history deletion is needed.
+        try {
+          await audit(
+            db,
+            auth.userId,
+            'OST_APPROVAL_PROVISIONING_FAILED',
+            'ost_application',
+            id,
+            null,
+            { authUserId: ostUserId, authIdentityRetained: true, databaseOutcome: 'rolled_back' },
+          );
+        } catch {
+          console.error('[ost-approval] provisioning failure audit unavailable', {
+            applicationId: id,
+          });
+        }
+        if (installed.error.code === '23505')
+          return fail(
+            res,
+            'CONFLICT',
+            'An account already exists. Review the retained invitation and account before retrying.',
+            409,
+          );
+        return fail(
+          res,
+          installed.error.code === '42501' ? 'FORBIDDEN' : 'INTERNAL',
+          'OST installation failed. Review the retained invitation before retrying.',
+          installed.error.code === '42501' ? 403 : 500,
+        );
+      }
+      return res
+        .status(201)
+        .json(toMember(installed.data as Record<string, unknown>, sponsor.fullName));
     }
 
     /* ---------------- staff: reject ---------------- */
