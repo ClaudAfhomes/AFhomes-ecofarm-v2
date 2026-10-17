@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { barangaySchema, localitySchema, provinceSchema } from '@afhomes/contracts';
+import { provinceSchema } from '@afhomes/contracts';
 import type { OstAddressSelection } from '@afhomes/ui';
 import { protectedRequestList } from '../../lib/api/client';
+import { getAddressProvinces, getAddressLocalities, getAddressBarangays } from './services';
 
 export function useOstAddress(value: OstAddressSelection, showRegion = true) {
   const common = { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false, retry: false };
@@ -17,25 +18,21 @@ export function useOstAddress(value: OstAddressSelection, showRegion = true) {
       ? ['address', 'region-provinces', value.regionCode]
       : ['address', 'provinces'],
     enabled: !showRegion || Boolean(value.regionCode),
-    queryFn: () =>
-      protectedRequestList(
-        showRegion ? `/address/regions/${value.regionCode}/provinces` : '/address/provinces',
-        provinceSchema,
-      ),
+    queryFn: showRegion
+      ? () => protectedRequestList(`/address/regions/${value.regionCode}/provinces`, provinceSchema)
+      : getAddressProvinces,
   });
   const localities = useQuery({
     ...common,
     queryKey: ['address', 'localities', value.provinceCode],
     enabled: Boolean(value.provinceCode),
-    queryFn: () =>
-      protectedRequestList(`/address/provinces/${value.provinceCode}/localities`, localitySchema),
+    queryFn: () => getAddressLocalities(value.provinceCode),
   });
   const barangays = useQuery({
     ...common,
     queryKey: ['address', 'barangays', value.localityCode],
     enabled: Boolean(value.localityCode),
-    queryFn: () =>
-      protectedRequestList(`/address/localities/${value.localityCode}/barangays`, barangaySchema),
+    queryFn: () => getAddressBarangays(value.localityCode),
   });
   return { regions, provinces, localities, barangays };
 }

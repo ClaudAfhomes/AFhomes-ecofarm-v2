@@ -5,12 +5,24 @@ vi.mock('../ost/services', () => ({
       { id: '11111111-2222-4333-8444-555555555555', name: 'VERIFIED ACTIVE SM' },
     ]),
 }));
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { CreateOstDialog } from './CreateOstDialog';
 import { createOstMember } from './services';
+
+it('places ID type and an editable ID number together in a named identification section', () => {
+  renderWithProviders(<CreateOstDialog open onClose={vi.fn()} onCreated={vi.fn()} />);
+  const identification = within(screen.getByRole('group', { name: 'Identification' }));
+  const type = identification.getByLabelText(/^Government ID type/);
+  const number = identification.getByLabelText(/^Government ID number/);
+  fireEvent.change(type, { target: { value: 'passport' } });
+  fireEvent.change(number, { target: { value: 'P1234567' } });
+  expect(type).toHaveValue('passport');
+  expect(number).toHaveValue('P1234567');
+  expect(number).toBeRequired();
+});
 
 vi.mock('./services', () => ({
   getMemberUplines: vi.fn().mockResolvedValue([]),

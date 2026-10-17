@@ -17,7 +17,7 @@ import { useOstAddress } from '../address/useOstAddress';
  *
  * Completed members use a temporary-password login and automatic or manual AAO.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   createOstMemberSchema,
@@ -45,10 +45,9 @@ const IDENTITY_FIELDS = [
   { name: 'middleName', label: 'Middle Name', optional: true },
   { name: 'lastName', label: 'Last Name' },
   { name: 'phone', label: 'Mobile Number' },
-  { name: 'line1', label: 'No. / Street' },
 ] as const;
 
-type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate' | 'email';
+type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate' | 'email' | 'line1';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -79,6 +78,10 @@ export function CreateOstDialog({
   // the application already recorded instead of writing a second one.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   const sponsors = useQuery({
     queryKey: ['ost', 'manual-sponsors'],
     queryFn: getOstSponsors,
@@ -164,17 +167,36 @@ export function CreateOstDialog({
             Cancel
           </Button>
           <Button
-            type="button"
+            type="submit"
+            form="create-ost-form"
             loading={create.isPending}
             loadingLabel="Creating…"
-            onClick={submit}
           >
             {mode === 'complete' ? 'Create and accredit' : 'Save application'}
           </Button>
         </>
       }
     >
-      <div className={styles.dialogBody}>
+      <form
+        id="create-ost-form"
+        className={styles.dialogBody}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        aria-busy={create.isPending}
+      >
+        <p className={styles.sectionHint}>
+          Create the OST login, choose an active Sales Manager, and record the signed accreditation
+          form. Fields marked * are required.
+        </p>
+        {error ? (
+          <div ref={errorRef} tabIndex={-1}>
+            <Alert variant="danger" title="Review the form">
+              <p className={styles.alertText}>{error}</p>
+            </Alert>
+          </div>
+        ) : null}
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>Personal information</legend>
           <div className={styles.formFields}>
@@ -191,12 +213,6 @@ export function CreateOstDialog({
                 />
               ))}
             </div>
-            <OstAddressFields
-              showRegion={false}
-              value={geography}
-              onChange={setGeography}
-              {...addressOptions}
-            />
             <DateField
               id="create-ost-birthDate"
               name="create-ost-birthDate"
@@ -205,6 +221,27 @@ export function CreateOstDialog({
               value={fields.birthDate ?? ''}
               onChange={onChange('birthDate')}
             />
+          </div>
+        </fieldset>
+
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>Home address</legend>
+          <div className={styles.formFields}>
+            <TextField
+              id="create-ost-line1"
+              name="create-ost-line1"
+              label="No. / Street"
+              value={fields.line1 ?? ''}
+              onChange={onChange('line1')}
+            />
+            <div className={styles.inlinePair}>
+              <OstAddressFields
+                showRegion={false}
+                value={geography}
+                onChange={setGeography}
+                {...addressOptions}
+              />
+            </div>
           </div>
         </fieldset>
 
@@ -237,7 +274,10 @@ export function CreateOstDialog({
           </div>
           {sponsors.isError ? (
             <p className={styles.sectionHint} role="alert">
-              The Sales Manager list could not be loaded. Close the dialog and retry.
+              The Sales Manager list could not be loaded.
+              <Button type="button" variant="secondary" onClick={() => void sponsors.refetch()}>
+                Retry Sales Managers
+              </Button>
             </p>
           ) : null}
         </fieldset>
@@ -281,6 +321,7 @@ export function CreateOstDialog({
         </fieldset>
 
         <OstOfficialFields
+          grouped
           className={`${styles.formSection} ${styles.officialFields}`}
           values={official}
           onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
@@ -288,7 +329,7 @@ export function CreateOstDialog({
 
         <section className={styles.formSection} aria-labelledby="create-ost-finish">
           <h2 id="create-ost-finish" className={styles.sectionTitle}>
-            Finish
+            Accreditation and completion
           </h2>
           <div className={styles.formFields}>
             <label className={styles.fieldLabel}>
@@ -355,13 +396,7 @@ export function CreateOstDialog({
               : 'Records the application only. The sponsor endorses it, then management approves it in the OST queue.'}
           </p>
         </section>
-
-        {error ? (
-          <Alert variant="danger" title="OST was not created">
-            <p className={styles.alertText}>{error}</p>
-          </Alert>
-        ) : null}
-      </div>
+      </form>
     </Dialog>
   );
 }
