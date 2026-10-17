@@ -1,22 +1,28 @@
 # Continue: safely release the OST work adapted to develop
 
-> CURRENT STATE / RELEASE PREPARED, AWAITING SCOPED APPROVALS: Read
+> CURRENT STATE / MIGRATION 09 APPLIED LIVE, AWAITING SCOPED APPROVAL C: Read
 > [the release plan and commit allowlist](2026-10-17-release-plan-and-allowlist.md)
-> before acting on anything below. Live has the eight `20261208000001`-`08`
-> OST migrations applied from the older checkout; their bodies are frozen.
-> This tree carries the reconciled implementation plus the single pending
-> migration `20261208000009_afhomes_develop_transfer_integration.sql`. All
-> three reproduced blockers are resolved locally and the full battery is
-> green (suite 2635/2635, harness 13/13, lifecycle gate 136 checks, live-like
-> upgrade probe green, typecheck and unit suites green). Nothing is
-> committed, pushed, applied or deployed from this tree. See
+> before acting on anything below. Live has all nine `20261208000001`-`09`
+> OST migrations applied: the eight from the older checkout, and
+> `20261208000009` applied from this tree on 2026-10-17 (approval B, runner
+> exit 0, history 92 -> 93, post-apply verification 28/28 checks, RLS
+> invariants zero, PostgREST resolves both RPC overloads; see the new section
+> in `docs/supabase/MIGRATION-APPLICATIONS.md`). All three reproduced blockers
+> are resolved and the full battery is green (suite 2635/2635, harness 13/13,
+> lifecycle gate 136 checks, live-like upgrade probe green, typecheck and unit
+> suites green). Approval A (commit) was executed: local commit `15abff0` on
+> `fix/develop-ost-lifecycle` (61 files). Nothing is pushed or deployed.
+> The remaining gate is approval C (push + deploy/promote). See
 > [the applied-eight review](2026-10-17-release-blockers-after-live-apply.md)
 > for the finding record.
 
-Checkpoint: 2026-10-17, Asia/Singapore. The user requested this continuation
-and a pause. The release-safety/commit-scope review is now COMPLETED; its
-output is the release plan named above. The three approvals it requests
-(commit / live apply of 09 / deploy or defer) are the next gate.
+Checkpoint: 2026-10-17, Asia/Singapore. Approvals A (commit) and B (live apply
+of `20261208000009` only) are DONE. Approval C (push + deploy/promote) requires
+its own explicit approval and must come after the applied migration - the new
+application code calls the 12-argument transfer RPC, which now exists live.
+The bookkeeping commit for `docs/supabase/MIGRATION-APPLICATIONS.md` and this
+file is also awaiting authorization (both are edited in the working tree,
+uncommitted). No other live action is authorized.
 
 ## Mission and completion standard
 
@@ -39,9 +45,10 @@ authorized by the preceding implementation request. Preserve these boundaries.
 
 - Directory: `C:/Users/SSD-CLAUD/Documents/AFhomes-develop-ost-integration`
 - Branch: `fix/develop-ost-lifecycle`
-- Verified HEAD: `b64c5130807b0d2605d07a1e1b3f8382d6fedb1f`
-- Last inspected remote `develop`: that same SHA. Refresh before relying on it.
-- Implementation remains unstaged/uncommitted. The index was empty at checkpoint.
+- HEAD (local commit, approval A): `15abff076320f4fc5c0fc0f0daf134caf073c134` (`15abff0`),
+  parent `b64c513`. Local only; nothing pushed.
+- Last inspected remote `develop`: `b64c513`. Refresh before relying on it.
+- The index is clean; the working tree carries only the allowed local commit.
 - The old `AFhomes-claud-develop-vscode` checkout is dirty user work: preserve it.
   Do not overwrite this newer tree with its older files or work in it by mistake.
 - No task commit, push, PR, deployment, remote apply or live Auth action occurred.
@@ -131,7 +138,7 @@ instructions explicitly request it. What the completed review covered:
   authenticated UAT remain UNVERIFIED. Do not run a generic migration command
   that might apply unrelated history gaps.
 
-## Nine new draft migrations: review exact scope, not a wildcard apply
+## Nine new draft migrations: review exact scope, not a wildcard apply (CONTEXT AS OF THE PRE-APPLY CHECKPOINT)
 
 Under `supabase/migrations/`:
 
@@ -196,15 +203,87 @@ that justifies them. Use disposable loopback PostgreSQL for local SQL proof.
   `final-typecheck.txt`, `final-tests.txt`, `live-baseline.txt`,
   `draft-vs-applied.diff.txt`.
 
+## Checkpoint B: migration 09 applied live (2026-10-17, COMPLETED)
+
+Approval B was granted and executed for exactly
+`20261208000009_afhomes_develop_transfer_integration.sql` (file SHA-256
+`C867F8EC3E2DC477195BD1A3A04DEE9DA6FC7761CAA34DD7ED9461A8F3BD229B`, matching
+the approved value; the working tree file is unmodified from commit `15abff0`).
+
+- Preflight: target ref `ikaevepedpqygdlipsei` confirmed; history 92 rows, last
+  `20261208000008`, 09 absent; the 11 documented skips and the two live-only
+  versions unchanged (no unexpected drift); `--check` exit 0; `--check
+  --only=20261208000009` exit 0 with `applied already : false`.
+- Apply: `npx pnpm db:migrate -- --approve-production --only=20261208000009`,
+  runner exit 0, 2026-10-17T11:52:01.403Z -> 11:52:13.717Z. It warned about the
+  11 intentionally skipped unapplied versions (unchanged policy) and applied
+  exactly one file.
+- Verification (read-only): pre/post snapshots 28/28 checks - history 92 -> 93
+  with exactly `20261208000009` added; functions 224 -> 227; the 5 re-delivered
+  bodies changed and are whitespace-normalized equal to the committed file; the
+  operation CHECK is the 14-operation union; `ost_members_origin_required` is
+  `>= 1`; `from_upline_staff_id` is nullable; the sync trigger exists; both
+  `transfer_sale_team_member` overloads (11-arg wrapper + 12-arg request-aware)
+  are `service_role`-only with owner `postgres`; `rls_invariants.sql` returned
+  zero violations; all 76 tables matched the pre-apply backup manifest except
+  the history row; managed PostgREST resolves both RPC names in its schema
+  cache (anon gets `42501`, not `PGRST202`) - no transfer was issued.
+- Evidence: `.tmp-bin/release-review/apply-b-run.txt`, `apply-b-live.txt`,
+  `apply-b-check-plain.txt`, `apply-b-check-only.txt`,
+  `apply-b-check-only-post.txt`, `apply-b-pre.json`, `apply-b-post.json`,
+  `apply-b-verify-report.json`, `apply-b-postgrest-report.json`,
+  `apply-b-manifest-diff.json`, `apply-b-defs-pre/`, `apply-b-defs-post/`.
+- Bookkeeping: `docs/supabase/MIGRATION-APPLICATIONS.md` gained the dated
+  2026-10-17 section (uncommitted, with this file).
+
+## Checkpoint B(c): backup, restore rehearsal, transaction proof (2026-10-17, COMPLETED)
+
+Approval B(c) ("backup and final transaction verification only") was granted
+and executed. All checks passed; full evidence in
+`.tmp-bin/release-review/` (`backup-run.txt`, `rehearsal-run.txt`,
+`txn-run.txt`, `restore-rehearsal-report.json`, `txn-rollback-report.json`,
+`checkpoint-b-backup-report.md`); the operator documents live outside git in
+the secure backup directory (`C:\Users\SSD-CLAUD\afhomes-backups\` +
+`afhomes-backup-keys\`, ACL-limited).
+
+- Fresh logical backup from the live production project, read-only on the
+  server: session pooler `:5432`, `sslmode=verify-full` against Supabase's
+  pinned root CA (captured from the chain, sha256 `7007235814...`).
+  `pg_dump -Fc` of `public`+`private`+`supabase_migrations` (1,353,457 bytes,
+  1545 TOC entries, sha256 `27004dd0...4308`) and of `auth` (114,641 bytes,
+  sha256 `a24c8a95...b132`), AES-256-GCM encrypted, decryption key in a
+  separate directory, decrypt round-trip proven by hash equality.
+- Restore rehearsal on disposable (loopback) PostgreSQL: **12/12 checks** -
+  auth first then application dump (the order matters: FKs reference
+  `auth.users`); 76/76 tables with every row count equal to the manifest,
+  224/224 foreign keys validated, 43 RLS policy tables, migration history
+  92 rows, last `20261208000008`. Plaintext artifacts removed; only the
+  encrypted files + manifest + RESTORE.md remain.
+- Transaction proof with the real runner sequence and the real 09 file bytes,
+  fault-injected on disposable PostgreSQL: **10/10 checks**. A failure inside
+  the file body rolls back completely (no partial commit possible). A failure
+  in the narrow window between the file's own commit and the version insert
+  leaves finished DDL + no history row, and a plain rerun completes it
+  (idempotent, proven). No modification of migration 09 or the runner is
+  required.
+
 ## Continue through release, with scoped approvals
 
 The reviewed files, commit message, exact push/merge target and what Vercel
 will do are presented in
 [the release plan and commit allowlist](2026-10-17-release-plan-and-allowlist.md);
-the three approvals requested there (commit, live apply of `20261208000009`,
-deploy/promote or defer) are the current gate. Obtain explicit approval before
-staging/commit/push/merge/PR. Never force-push or include the old checkout's work.
-Preserve develop's latest changes; do not assume its branch is production.
+approval A (commit) is DONE (`15abff0`, local) and approval B (live apply of
+`20261208000009`) is DONE - history 92 -> 93, verification 28/28, evidence in
+`.tmp-bin/release-review/`. The current gate is approval C: push
+`fix/develop-ost-lifecycle` (to `develop` or as a PR - decide at approval time)
+and deploy/promote in Vercel. Deploy must come after the applied migration
+(it now has); code rollback remains safe at any point (the 11-argument wrapper
+keeps the deployed call shape working). The bookkeeping commit (this file +
+`docs/supabase/MIGRATION-APPLICATIONS.md`) also awaits authorization. Obtain
+explicit approval before staging/push/merge/PR or deployment. Never force-push
+or include the old checkout's work. Preserve develop's latest changes; do not
+assume its branch is production. Remote `develop` was `b64c513` at apply time;
+refresh and reconcile before pushing if it has advanced.
 
 Separately obtain approval for exact shared-database changes and any maintenance
 window, test data/Auth actions, deployment or production promotion. Verify the
