@@ -39,6 +39,8 @@ export class AddressProviderError extends Error {
 
 export interface AddressProvider {
   readonly name: string;
+  regions?(): Promise<Province[]>;
+  provincesInRegion?(regionCode: string): Promise<Province[]>;
   provinces(): Promise<Province[]>;
   localities(provinceCode: string): Promise<Locality[]>;
   barangays(localityCode: string): Promise<Barangay[]>;
@@ -106,6 +108,14 @@ export function createCachedAddressProvider(
 
   return {
     name: `${inner.name}+cached`,
+    regions: () => cached('regions', () => {
+      if (!inner.regions) throw new AddressProviderError('PROVIDER_UNAVAILABLE');
+      return inner.regions();
+    }),
+    provincesInRegion: (code) => cached(`region-provinces:${code}`, () => {
+      if (!inner.provincesInRegion) throw new AddressProviderError('PROVIDER_UNAVAILABLE');
+      return inner.provincesInRegion(code);
+    }),
     provinces: () => cached('provinces', () => inner.provinces()),
     localities: (code) => cached(`localities:${code}`, () => inner.localities(code)),
     barangays: (code) => cached(`barangays:${code}`, () => inner.barangays(code)),

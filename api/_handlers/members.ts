@@ -1,3 +1,5 @@
+import { validateOstSponsor } from '../_lib/ost-sponsor.js';
+import { verifyOstAddress } from '../_lib/ost-address.js';
 /**
  * AFHomes sales-network Members.
  *
@@ -518,6 +520,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (!parsed.success)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
+    if (input.mode === 'complete' && !['admin', 'super_admin'].includes(auth.roleSlug))
+      return fail(res, 'FORBIDDEN', 'Administrator approval is required.', 403);
+    const sponsor = await validateOstSponsor(db, input.sponsorStaffId, 'manual');
+    if (!sponsor.ok) return fail(res, 'VALIDATION_ERROR', sponsor.message, sponsor.status);
+    const verified = await verifyOstAddress(input.identity);
+    if (!verified.ok)
+      return fail(
+        res,
+        verified.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+        'Choose a verified address hierarchy.',
+        verified.status,
+      );
+    input.identity = verified.identity;
     // The shared submission writes the application, its official form and the
     // frozen sponsor snapshot, and re-checks the sponsor, duplicates and scope
     // in SQL. It takes no operator identity on trust.
@@ -537,18 +552,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const applicationId = String(submitted.data);
     if (input.mode === 'pending')
-      return res.status(201).json(
-        createOstMemberResultSchema.parse({ applicationId, memberId: null, status: 'submitted' }),
-      );
+      return res
+        .status(201)
+        .json(
+          createOstMemberResultSchema.parse({ applicationId, memberId: null, status: 'submitted' }),
+        );
     // Complete: the operator recorded the signatures that were actually
     // signed (with their real dates) and management approves now. The SQL
     // re-checks both signatures and the sponsor; no endorsement is invented.
-    const signatures = await db.rpc('confirm_ost_application_signatures', {
-      p_id: applicationId,
-      p_actor_id: auth.userId,
-      p_applicant_date: input.form.applicantSignedOn,
-      p_referrer_date: input.form.referrerSignedOn,
-    });
+    const existing = await db
+      .from('ost_members')
+      .select('id')
+      .eq('application_id', applicationId)
+      .maybeSingle();
+    if (existing.error) throw existing.error;
+    const signatures = existing.data
+      ? { error: null }
+      : await db.rpc('confirm_ost_application_signatures', {
+          p_id: applicationId,
+          p_actor_id: auth.userId,
+          p_applicant_date: input.form.applicantSignedOn,
+          p_referrer_date: input.form.referrerSignedOn,
+        });
     if (signatures.error) {
       const failure = ostDirectFailure(signatures.error);
       if (failure) return fail(res, failure.code, failure.message, failure.status);
@@ -582,6 +607,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (!parsed.success)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
+    if (input.direction === 'IST_TO_OST') {
+      const sponsor = await validateOstSponsor(db, input.sponsorStaffId, 'manual');
+      if (!sponsor.ok) return fail(res, 'VALIDATION_ERROR', sponsor.message, sponsor.status);
+      const verified = await verifyOstAddress(input.identity);
+      if (!verified.ok)
+        return fail(
+          res,
+          verified.status === 503 ? 'INTERNAL' : 'VALIDATION_ERROR',
+          'Choose a verified address hierarchy.',
+          verified.status,
+        );
+      input.identity = verified.identity;
+    }
     const rows = await memberRows(db, '', undefined);
     if (!rows.some((r: Member) => r.id === id))
       return fail(res, 'NOT_FOUND', 'Member not found', 404);
@@ -595,6 +633,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
             p_actor_id: auth.userId,
             p_staff_id: id,
             p_direction: input.direction,
+            p_request_id: input.requestId,
             p_reason: input.reason,
             p_sponsor_id: input.sponsorStaffId,
             p_identity: input.identity,
@@ -606,6 +645,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
             p_actor_id: auth.userId,
             p_staff_id: id,
             p_direction: input.direction,
+            p_request_id: input.requestId,
             p_reason: input.reason,
             p_target_position: input.targetPosition,
             p_head_id: input.headStaffId ?? null,
@@ -699,11 +739,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const currentOst = (profileRow.ost_referrer_staff_id as string | undefined) ?? null;
 
     const positionChanged = position !== undefined && position !== currentSlug;
+    if (positionChanged && (currentSlug === 'ost' || position === 'ost'))
+      return fail(
+        res,
+        'CONFLICT',
+        'Use the controlled OST conversion workflow for accreditation role changes.',
+        409,
+      );
+    if (currentSlug === 'ost' && referrerStaffId !== undefined && referrerStaffId !== currentHead)
+      return fail(
+        res,
+        'CONFLICT',
+        'OST team changes require the expired-accreditation renewal approval workflow.',
+        409,
+      );
     let effectivePosition = (position ?? currentSlug) as MemberPosition | undefined;
     let targetRole: RoleRow | undefined;
     if (positionChanged) {
       targetRole = roles.find((r) => r.slug === position);
-      if (!targetRole?.is_active) return fail(res, 'VALIDATION_ERROR', 'Position is not active', 400);
+      if (!targetRole?.is_active)
+        return fail(res, 'VALIDATION_ERROR', 'Position is not active', 400);
       if (!permissionsAreSubset(targetRole.permissions, auth.permissions))
         return fail(res, 'FORBIDDEN', 'Cannot assign a position you do not possess', 403);
       effectivePosition = position;
@@ -954,13 +1009,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (!parsed.success)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
-
-    // OST is never created here: it carries a different accreditation
-    // footprint (application, sponsor edge, term) and its own pipeline. The
-    // contract already refuses this, and the guard keeps a later contract
-    // relaxation from silently minting an OST identity on this path.
     if (input.position === 'ost')
-      return fail(res, 'VALIDATION_ERROR', 'Use Create OST for an OST member', 400);
+      return fail(
+        res,
+        'CONFLICT',
+        'Create OST accounts through official OST registration and approval.',
+        409,
+      );
 
     const roles = await roleCatalog(db);
     const target = roles.find((r) => r.slug === input.position);

@@ -5,7 +5,9 @@ import { useSession } from '../../lib/session';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
   manualOstAccreditationSchema,
+  ostAnnualExpiry,
   ostIdentitySchema,
+  ostRenewalEarliestStart,
   officialOstFormDefaults,
   parseOfficialOstFields,
   submitOstRenewalSchema,
@@ -23,6 +25,8 @@ import {
   ErrorState,
   FileField,
   OstOfficialFields,
+  OstAddressFields,
+  emptyOstAddress,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -53,7 +57,9 @@ import {
 } from './services';
 import { downloadExport } from '../reports/services';
 import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
+import { OstApplicantUpdate } from './OstApplicantUpdate';
 import styles from './OstAccreditationPages.module.css';
+import { useOstAddress } from '../address/useOstAddress';
 
 /** Query keys scoped to the OST accreditation workspace. */
 const accreditationKeys = {
@@ -65,6 +71,14 @@ const accreditationKeys = {
 const statusLabel = (status: string) =>
   status.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 
+/** Authoritative program state; an unlinked customer is `unknown`, never an assumed VIP. */
+const programStateLabel = (applicant: { programCategory: string; vipCardType: string | null }) =>
+  applicant.programCategory === 'vip_holder'
+    ? `VIP holder (${applicant.vipCardType ?? 'card tier unknown'})`
+    : applicant.programCategory === 'non_vip'
+      ? 'Non-VIP'
+      : 'VIP state unknown — verify before deciding';
+
 const MANUAL_FIELDS = [
   'firstName',
   'middleName',
@@ -73,9 +87,6 @@ const MANUAL_FIELDS = [
   'phone',
   'birthDate',
   'line1',
-  'city',
-  'province',
-  'postalCode',
 ] as const;
 
 const MANUAL_OPTIONAL = new Set(['middleName', 'postalCode']);
@@ -85,6 +96,8 @@ const manualLabel = (name: string) => name.replace(/([A-Z])/g, ' $1');
 export function OstManualRegistrationPage() {
   const navigate = useNavigate();
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [geography, setGeography] = useState(emptyOstAddress);
+  const addressOptions = useOstAddress(geography);
   const [official, setOfficial] = useState(officialOstFormDefaults);
   const [requestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
@@ -95,6 +108,10 @@ export function OstManualRegistrationPage() {
   });
   const save = useBusinessMutation({ mutationFn: registerOfficialOst });
   const submit = () => {
+    if (!geography.regionCode || !geography.provinceCode || !geography.localityCode || !geography.barangayCode) {
+      setError('Choose the region, province, city / municipality and barangay from the lists.');
+      return;
+    }
     const parsedForm = parseOfficialOstFields(official);
     if (!parsedForm.success) {
       setError(parsedForm.error.issues[0]?.message ?? 'Check the official form.');
@@ -112,11 +129,14 @@ export function OstManualRegistrationPage() {
         birthDate: fields.birthDate,
         address: {
           line1: fields.line1,
-          city: fields.city,
-          province: fields.province,
-          postalCode: fields.postalCode || undefined,
+          city: geography.city,
+          province: geography.province,
+          barangay: geography.barangay,
+          postalCode: geography.postalCode || undefined,
           countryCode: 'PH',
         },
+        addressHierarchy: { regionCode: geography.regionCode, provinceCode: geography.provinceCode,
+          localityCode: geography.localityCode, barangayCode: geography.barangayCode },
       },
       form: parsedForm.data,
     });
@@ -218,6 +238,7 @@ export function OstManualRegistrationPage() {
                   ]}
                 />
               </label>
+              <OstAddressFields value={geography} onChange={setGeography} {...addressOptions} />
             </div>
             {sponsors.isError ? (
               <ErrorState
@@ -267,6 +288,11 @@ export function OstAccreditationHistoryPage() {
     user?.afHomesPermissions?.some(
       (p) => p.moduleKey === 'network.ost_registrations' && p.canUpdate,
     );
+  // Applicant corrections carry the member profile-update authority, not the
+  // accreditation-review roles; the API enforces the same gate.
+  const canUpdateApplicant =
+    user?.afHomesPermissions?.some((p) => p.moduleKey === 'network.members' && p.canUpdate) ?? false;
+
   const { id = '' } = useParams();
   const client = useQueryClient();
   const records = useQuery({
@@ -334,6 +360,9 @@ export function OstAccreditationHistoryPage() {
   const member = members.data?.find((m) => m.id === id);
   const terms = records.data?.terms ?? [];
   const renewals = records.data?.renewals ?? [];
+  // Policy: the next term starts strictly after the prior expiry (inclusive expiry).
+  const lastExpiry = terms.reduce((latest, term) => (term.expires_on > latest ? term.expires_on : latest), '');
+  const earliestStart = lastExpiry ? ostRenewalEarliestStart(lastExpiry) : '';
   const pendingRenewals = renewals.filter((r) =>
     ['submitted', 'under_review', 'changes_requested'].includes(r.status),
   ).length;
@@ -435,6 +464,15 @@ export function OstAccreditationHistoryPage() {
               </Table>
             </div>
           )}
+          {records.data.currentApplicant ? (
+            <OstApplicantUpdate
+              ostId={id}
+              current={records.data.currentApplicant}
+              programState={programStateLabel(records.data.currentApplicant)}
+              canUpdate={canUpdateApplicant}
+              onUpdated={refresh}
+            />
+          ) : null}
           {terms.length > 0 ? (
             <form
               className={styles.panel}
@@ -449,17 +487,47 @@ export function OstAccreditationHistoryPage() {
                 {records.data.terms.at(-1)?.expires_on}. Identity and program details are carried
                 forward from the approved application.
               </p>
+              {records.data.currentApplicant ? (
+                <p>Registered program state: {programStateLabel(records.data.currentApplicant)}.</p>
+              ) : null}
               <div className={styles.editorGrid}>
-                {(['dateOfRenewal', 'requestedStart', 'requestedEnd'] as const).map((name) => (
-                  <DateField
-                    key={name}
-                    id={`renewal-${name}`}
-                    name={name}
-                    label={name.replace(/([A-Z])/g, ' $1')}
-                    value={dates[name]}
-                    onChange={(value) => setDates((current) => ({ ...current, [name]: value }))}
-                  />
-                ))}
+                <DateField
+                  id="renewal-dateOfRenewal"
+                  name="dateOfRenewal"
+                  label="Date of renewal"
+                  value={dates.dateOfRenewal}
+                  onChange={(value) =>
+                    setDates((current) => ({ ...current, dateOfRenewal: value }))
+                  }
+                />
+                <DateField
+                  id="renewal-requestedStart"
+                  name="requestedStart"
+                  label="Requested start"
+                  value={dates.requestedStart}
+                  onChange={(value) =>
+                    setDates((current) => ({
+                      ...current,
+                      requestedStart: value,
+                      requestedEnd: ostAnnualExpiry(value),
+                    }))
+                  }
+                  hint={
+                    earliestStart
+                      ? `Management selects the start; it must be on or after ${earliestStart} (after the prior expiry).`
+                      : 'Management selects the start of the new term.'
+                  }
+                  {...(earliestStart ? { min: earliestStart } : {})}
+                />
+                <DateField
+                  id="renewal-requestedEnd"
+                  name="requestedEnd"
+                  label="Requested end"
+                  value={dates.requestedEnd}
+                  onChange={() => {}}
+                  disabled
+                  hint="Calculated: one calendar year after the start (February 29 clamps to February 28)."
+                />
                 <label className={styles.filterLabel}>
                   Proposed new referrer (optional)
                   <Select
@@ -624,6 +692,16 @@ export function OstAccreditationHistoryPage() {
             <DetailField label="Renewed on">{detailRenewal.date_of_renewal}</DetailField>
             <DetailField label="Requested start">{detailRenewal.requested_start}</DetailField>
             <DetailField label="Requested end">{detailRenewal.requested_end}</DetailField>
+            <DetailField label="Original accreditation">
+              {detailRenewal.original_accreditation_date}
+            </DetailField>
+            <DetailField label="Prior term expiry">{detailRenewal.last_expiry_date}</DetailField>
+            <DetailField label="Registered applicant">
+              {detailRenewal.applicant_snapshot.fullName}
+            </DetailField>
+            <DetailField label="Program state">
+              {programStateLabel(detailRenewal.applicant_snapshot)}
+            </DetailField>
             <DetailField label="Referrer">
               {detailRenewal.proposed_new_sponsor_staff_id
                 ? 'Referrer change proposed'

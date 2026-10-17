@@ -889,6 +889,100 @@ export class FakeSupabase {
     const entry = (this.rpcs ?? []).find((r) => r.fn === fn);
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
+    if (!entry && fn === 'install_legacy_ost_identity') {
+      // Handler fixture only. PostgreSQL rollback/locking is proved in the local DB gate.
+      const before = structuredClone(this.tables);
+      try {
+        const app = this.rows('ost_applications').find((r) => r.id === args.p_application_id);
+        if (!app) throw { code: 'P0002', message: 'APPLICATION_NOT_FOUND' };
+        const role = this.rows('roles').find((r) => r.slug === 'ost' && r.is_active);
+        if (!role) throw { message: 'ROLE_NOT_FOUND' };
+        if (this.rows('staff_users').some((r) => r.id === args.p_auth_id || r.email === app.email))
+          throw { code: '23505', message: 'OST_IDENTITY_ALREADY_LINKED' };
+        const now = new Date().toISOString();
+        const fullName = [app.first_name, app.middle_name, app.last_name].filter(Boolean).join(' ');
+        const write = (query: ReturnType<FakeSupabase['from']>) =>
+          query.then(({ error }) => {
+            if (error) throw error;
+          });
+        const number = (await this.rpc('next_ost_number')) as { data: { ost_number: string }[] };
+        const member = {
+          id: args.p_auth_id,
+          application_id: app.id,
+          sponsor_staff_id: app.sponsor_staff_id,
+          ost_number: number.data[0].ost_number,
+          full_name: fullName,
+          email: app.email,
+          phone: app.phone,
+          status: 'active',
+          approved_by: args.p_actor_id,
+          approved_at: now,
+          created_at: now,
+        };
+        await write(
+          this.from('staff_users').insert({
+            id: args.p_auth_id,
+            email: app.email,
+            full_name: fullName,
+            status: 'invited',
+            invited_at: now,
+          }),
+        );
+        await write(
+          this.from('staff_role_assignments').insert({
+            staff_id: args.p_auth_id,
+            role_id: role.id,
+            assigned_by: args.p_actor_id,
+          }),
+        );
+        await write(
+          this.from('staff_invitations').insert({
+            email: app.email,
+            full_name: fullName,
+            role_id: role.id,
+            invited_by: args.p_actor_id,
+            auth_user_id: args.p_auth_id,
+            expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+          }),
+        );
+        await write(this.from('ost_members').insert(member));
+        await write(
+          this.from('referral_relationships').insert({
+            subject_staff_id: args.p_auth_id,
+            upline_staff_id: app.sponsor_staff_id,
+            hierarchy_role: 'ost',
+            is_authoritative: true,
+            is_active: true,
+            assigned_by: args.p_actor_id,
+          }),
+        );
+        await write(
+          this.from('ost_applications')
+            .update({ status: 'approved', reviewed_by: args.p_actor_id, reviewed_at: now })
+            .eq('id', app.id),
+        );
+        await write(
+          this.from('audit_events').insert([
+            {
+              actor_id: args.p_actor_id,
+              action: 'OST_APPLICATION_APPROVED',
+              entity_type: 'ost_application',
+              entity_id: app.id,
+            },
+            {
+              actor_id: args.p_actor_id,
+              action: 'OST_MEMBER_ACTIVATED',
+              entity_type: 'ost_member',
+              entity_id: args.p_auth_id,
+            },
+          ]),
+        );
+        return { data: member, error: null };
+      } catch (error) {
+        this.tables = before;
+        return { data: null, error };
+      }
+    }
     if (!entry && fn === 'afhomes_admin_mfa_required') return { data: false, error: null };
     // Directory behavior is a handler fixture only; real SQL is separately executed.
     if (!entry && fn === 'match_import_emails') {
@@ -948,8 +1042,15 @@ export class FakeSupabase {
       const actorRole = this.actorRoleSlug(String(args.p_actor));
       if (
         !actorRole ||
-        !['admin', 'super_admin', 'sales_manager'].includes(actorRole) ||
-        (actorRole === 'sales_manager' && args.p_actor !== args.p_sponsor)
+        ![
+          'admin',
+          'super_admin',
+          'vice_director',
+          'senior_sales_manager',
+          'sales_manager',
+        ].includes(actorRole) ||
+        (['vice_director', 'senior_sales_manager', 'sales_manager'].includes(actorRole) &&
+          args.p_actor !== args.p_sponsor)
       ) {
         return {
           data: null,
@@ -962,7 +1063,10 @@ export class FakeSupabase {
       const sponsorIsSalesManager = this.rows('staff_role_assignments').some((a) => {
         if (a.staff_id !== args.p_sponsor) return false;
         const r = this.rows('roles').find((x) => x.id === a.role_id);
-        return r?.slug === 'sales_manager' && r?.is_active !== false;
+        return (
+          ['vice_director', 'senior_sales_manager', 'sales_manager'].includes(String(r?.slug)) &&
+          r?.is_active !== false
+        );
       });
       if (!sponsor || sponsor.status !== 'active' || !sponsorIsSalesManager) {
         return {

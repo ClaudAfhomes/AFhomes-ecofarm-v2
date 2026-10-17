@@ -1,3 +1,5 @@
+import { GOVERNMENT_ID_TYPE_LABELS, governmentIdTypeSchema } from '@afhomes/contracts';
+
 /** Shared official supplemental fields for public and authorized manual entry.
  * Validation belongs to the shared contracts and server, never this renderer. */
 export function OstOfficialFields({
@@ -22,7 +24,6 @@ export function OstOfficialFields({
         ['referrerMobile', 'Referrer mobile on the form (optional)', 'tel'],
         ['referrerAddress', 'Referrer address on the form (optional)', 'text'],
         ['referrerMessenger', 'Referrer Messenger on the form (optional)', 'text'],
-        ['governmentIdType', 'Government ID type', 'text'],
         ['governmentIdNumber', 'Government ID number', 'text'],
         ['applicantSignedOn', 'Applicant signature date', 'date'],
         ['referrerSignedOn', 'Referrer signature date', 'date'],
@@ -58,12 +59,21 @@ export function OstOfficialFields({
       ))}
       <p>
         Signature status records the reviewed paper form; it does not replace a legal signature.
-        Your Sales Manager must endorse this application before management approval.
       </p>
     </fieldset>
   );
 }
 const selects: { name: string; label: string; options: [string, string][] }[] = [
+  {
+    name: 'governmentIdType',
+    label: 'Government ID type',
+    options: [
+      ['', 'Choose ID type'],
+      ...governmentIdTypeSchema.options.map((value): [string, string] => [
+        value, GOVERNMENT_ID_TYPE_LABELS[value],
+      ]),
+    ],
+  },
   {
     name: 'programCategory',
     label: 'Program category',

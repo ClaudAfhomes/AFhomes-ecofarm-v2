@@ -15,6 +15,8 @@ const upstream = vi.hoisted(() => ({
   provinces: vi.fn(),
   localities: vi.fn(),
   barangays: vi.fn(),
+  regions: vi.fn(),
+  provincesInRegion: vi.fn(),
 }));
 
 vi.mock('../_lib/psgc-cloud-provider.js', () => ({
@@ -23,6 +25,8 @@ vi.mock('../_lib/psgc-cloud-provider.js', () => ({
     provinces: upstream.provinces,
     localities: upstream.localities,
     barangays: upstream.barangays,
+    regions: upstream.regions,
+    provincesInRegion: upstream.provincesInRegion,
   },
 }));
 
@@ -41,7 +45,12 @@ vi.mock('../_lib/afhomes-access.js', () => ({
     });
     if (!token) return denied(401, 'UNAUTHORIZED');
     if (token.includes('forbidden')) return denied(403, 'FORBIDDEN');
-    return { userId: '11111111-1111-4111-8111-111111111111', roleSlug: 'super_admin', moduleKey, action };
+    return {
+      userId: '11111111-1111-4111-8111-111111111111',
+      roleSlug: 'super_admin',
+      moduleKey,
+      action,
+    };
   },
 }));
 
@@ -63,6 +72,10 @@ beforeEach(() => {
   upstream.provinces.mockReset();
   upstream.localities.mockReset();
   upstream.barangays.mockReset();
+  upstream.regions.mockReset();
+  upstream.provincesInRegion.mockReset();
+  upstream.regions.mockResolvedValue([{ code: '0400000000', name: 'CALABARZON' }]);
+  upstream.provincesInRegion.mockResolvedValue([{ code: '0403400000', name: 'Laguna' }]);
   upstream.provinces.mockResolvedValue([{ code: '0403400000', name: 'Laguna' }]);
   upstream.localities.mockResolvedValue([
     { code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000' },
@@ -77,7 +90,10 @@ describe('GET /address/provinces', () => {
     const state = await call('');
 
     expect(state.status).toBe(200);
-    expect(state.body).toEqual({ data: [{ code: '0403400000', name: 'Laguna' }], meta: { total: 1 } });
+    expect(state.body).toEqual({
+      data: [{ code: '0403400000', name: 'Laguna' }],
+      meta: { total: 1 },
+    });
   });
 
   it('never exposes a provider URL or a provider field name', async () => {
@@ -128,10 +144,7 @@ describe('GET /address/provinces/:code/localities', () => {
 
     const state = await call('provinces/0403400000/localities');
 
-    expect(state.body?.data?.map((l) => l.type)).toEqual([
-      'city',
-      'municipality',
-    ]);
+    expect(state.body?.data?.map((l) => l.type)).toEqual(['city', 'municipality']);
   });
 
   it('caches localities per province code', async () => {
@@ -219,7 +232,17 @@ describe('upstream failures', () => {
 
 describe('route hygiene', () => {
   it('404s an unrouted sub-path instead of guessing', async () => {
-    expect((await call('regions')).status).toBe(404);
+    expect((await call('not-a-route')).status).toBe(404);
+  });
+  it('serves public read-only region reference data without an account', async () => {
+    expect((await call('public/regions', null)).status).toBe(200);
+    expect((await call('public/regions/0400000000/provinces', null)).body.data).toEqual([
+      { code: '0403400000', name: 'Laguna' },
+    ]);
+  });
+  it('rejects malformed public region codes before provider lookup', async () => {
+    expect((await call('public/regions/not-a-code/provinces', null)).status).toBe(400);
+    expect(upstream.provincesInRegion).not.toHaveBeenCalled();
   });
 
   it('rejects a write method on a read-only reference family', async () => {

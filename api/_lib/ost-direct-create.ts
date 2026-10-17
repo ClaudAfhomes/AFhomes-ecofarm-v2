@@ -39,6 +39,16 @@ export function ostDirectFailure(
     };
   if (/ACCREDITATION_NUMBER_TAKEN/.test(message))
     return { code: 'CONFLICT', message: 'This AA number is already issued', status: 409 };
+  if (
+    /OST_ACCREDITATION_EXPIRED_REQUIRED|OST_CONVERSION_|OST_ANNUAL_VALIDITY_REQUIRED|OST_ROLE_WORKFLOW_REQUIRED|OST_TRANSFER_SPONSOR_REQUIRED/.test(
+      message,
+    )
+  )
+    return {
+      code: 'CONFLICT',
+      message: 'Review the accreditation expiry, conversion eligibility and one-year validity.',
+      status: 409,
+    };
   if (/AA_SEQUENCE_EXHAUSTED/.test(message))
     return {
       code: 'CONFLICT',
@@ -152,26 +162,41 @@ export async function inviteAndInstallDirectOst(
     expiresOn: string;
   },
 ): Promise<OstDirectInstall> {
-  const redirectTo = resolveAdminUrl();
-  if (!redirectTo)
+  const existing = await db
+    .from('ost_members')
+    .select('id')
+    .eq('application_id', input.applicationId)
+    .maybeSingle();
+  if (existing.error)
     return {
       ok: false,
       code: 'INTERNAL',
-      message: 'Account invitation is not configured.',
+      message: 'Unable to verify the approval outcome. Review before retrying.',
       status: 500,
     };
-  const invited = await db.auth.admin.inviteUserByEmail(input.email, {
-    redirectTo,
-    data: { full_name: input.fullName },
-  });
-  if (invited.error || !invited.data?.user)
-    return {
-      ok: false,
-      code: 'CONFLICT',
-      message: 'Unable to invite this account. Review existing accounts before retrying.',
-      status: 409,
-    };
-  const memberId = invited.data.user.id as string;
+  let memberId = existing.data?.id as string | undefined;
+  if (!memberId) {
+    const redirectTo = resolveAdminUrl();
+    if (!redirectTo)
+      return {
+        ok: false,
+        code: 'INTERNAL',
+        message: 'Account invitation is not configured.',
+        status: 500,
+      };
+    const invited = await db.auth.admin.inviteUserByEmail(input.email, {
+      redirectTo,
+      data: { full_name: input.fullName },
+    });
+    if (invited.error || !invited.data?.user)
+      return {
+        ok: false,
+        code: 'CONFLICT',
+        message: 'Unable to invite this account. Review existing accounts before retrying.',
+        status: 409,
+      };
+    memberId = invited.data.user.id as string;
+  }
   const installed = await db.rpc('install_direct_ost_accreditation', {
     p_application_id: input.applicationId,
     p_actor_id: input.actorId,

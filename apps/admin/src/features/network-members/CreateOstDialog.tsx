@@ -1,3 +1,6 @@
+import { getOstSponsors } from '../ost/services';
+import { OstAddressFields, emptyOstAddress } from '@afhomes/ui';
+import { useOstAddress } from '../address/useOstAddress';
 /**
  * Create OST directly from the Members console.
  *
@@ -20,6 +23,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   createOstMemberSchema,
   officialOstFormDefaults,
+  ostAnnualExpiry,
   parseOfficialOstFields,
 } from '@afhomes/contracts';
 import {
@@ -33,7 +37,7 @@ import {
 } from '@afhomes/ui';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { filterHolderNameInput, filterMobileInput } from '../../lib/normalize';
-import { createOstMember, getMemberUplines } from './services';
+import { createOstMember } from './services';
 import styles from './MembersPage.module.css';
 
 const IDENTITY_FIELDS = [
@@ -43,21 +47,12 @@ const IDENTITY_FIELDS = [
   { name: 'email', label: 'Email' },
   { name: 'phone', label: 'Mobile Number' },
   { name: 'line1', label: 'No. / Street' },
-  { name: 'city', label: 'City / Municipality' },
-  { name: 'province', label: 'Province' },
-  { name: 'postalCode', label: 'ZIP Code', optional: true },
 ] as const;
 
 type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function oneYearOn(start: string): string {
-  const expires = new Date(`${start}T00:00:00Z`);
-  expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-  return expires.toISOString().slice(0, 10);
 }
 
 export function CreateOstDialog({
@@ -71,17 +66,19 @@ export function CreateOstDialog({
 }) {
   const [mode, setMode] = useState<'complete' | 'pending'>('complete');
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [geography, setGeography] = useState(emptyOstAddress);
+  const addressOptions = useOstAddress(geography);
   const [official, setOfficial] = useState(officialOstFormDefaults);
   const [sponsorStaffId, setSponsorStaffId] = useState('');
   const [startsOn, setStartsOn] = useState(today);
-  const [expiresOn, setExpiresOn] = useState(() => oneYearOn(today()));
+  const [expiresOn, setExpiresOn] = useState(() => ostAnnualExpiry(today()));
   // One submission, one idempotency key: a retry after a lost response returns
   // the application already recorded instead of writing a second one.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const sponsors = useQuery({
-    queryKey: ['network', 'members', 'uplines', 'sales_manager'],
-    queryFn: () => getMemberUplines('sales_manager'),
+    queryKey: ['ost', 'manual-sponsors'],
+    queryFn: getOstSponsors,
     placeholderData: keepPreviousData,
     enabled: open,
   });
@@ -115,10 +112,17 @@ export function CreateOstDialog({
         birthDate: fields.birthDate ?? '',
         address: {
           line1: fields.line1 ?? '',
-          city: fields.city ?? '',
-          province: fields.province ?? '',
-          postalCode: fields.postalCode || undefined,
+          city: geography.city,
+          province: geography.province,
+          barangay: geography.barangay,
+          postalCode: geography.postalCode || undefined,
           countryCode: 'PH',
+        },
+        addressHierarchy: {
+          regionCode: geography.regionCode,
+          provinceCode: geography.provinceCode,
+          localityCode: geography.localityCode,
+          barangayCode: geography.barangayCode,
         },
       },
       form: form.data,
@@ -182,6 +186,7 @@ export function CreateOstDialog({
                 {...('optional' in rest && rest.optional ? { optional: true as const } : {})}
               />
             ))}
+            <OstAddressFields value={geography} onChange={setGeography} {...addressOptions} />
             <DateField
               id="create-ost-birthDate"
               name="create-ost-birthDate"
@@ -200,7 +205,7 @@ export function CreateOstDialog({
                   { value: '', label: 'Choose an active Sales Manager' },
                   ...(sponsors.data?.map((holder) => ({
                     value: holder.id,
-                    label: holder.fullName,
+                    label: holder.name,
                   })) ?? []),
                 ]}
               />
@@ -246,7 +251,7 @@ export function CreateOstDialog({
                   value={startsOn}
                   onChange={(value) => {
                     setStartsOn(value);
-                    setExpiresOn(oneYearOn(value));
+                    setExpiresOn(ostAnnualExpiry(value));
                   }}
                 />
                 <DateField
@@ -254,7 +259,8 @@ export function CreateOstDialog({
                   name="create-ost-expires-on"
                   label="Approved Expiry"
                   value={expiresOn}
-                  onChange={setExpiresOn}
+                  onChange={() => {}}
+                  disabled
                 />
               </>
             ) : null}

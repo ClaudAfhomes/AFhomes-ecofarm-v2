@@ -5,7 +5,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 92. Public table inventory: 60.
+-- Migration count: 104. Public table inventory: 60.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -122,6 +122,18 @@
 --   20261206000004_afhomes_sale_team_manual_aa.sql
 --   20261206000005_afhomes_network_member_address_codes.sql
 --   20261206000006_afhomes_reconcile_workbook_network_version.sql
+--   20261207000001_afhomes_sale_team_accreditation_history.sql
+--   20261207000002_afhomes_official_aa_numbering.sql
+--   20261207000003_afhomes_sale_team_accreditation_transfer.sql
+--   20261208000001_afhomes_ost_sponsor_contexts.sql
+--   20261208000002_afhomes_ost_expired_genealogy.sql
+--   20261208000003_afhomes_ost_annual_history.sql
+--   20261208000004_afhomes_ost_ist_conversion.sql
+--   20261208000005_afhomes_ost_install_aa_guard.sql
+--   20261208000006_afhomes_ost_applicant_changes.sql
+--   20261208000007_afhomes_ost_role_workflow_guard.sql
+--   20261208000008_afhomes_ost_legacy_atomic_install.sql
+--   20261208000009_afhomes_develop_transfer_integration.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

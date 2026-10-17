@@ -3,6 +3,7 @@ import {
   phase2World,
   phase2WorldTokens,
   TOKEN,
+  TOKEN2,
   UUID,
   STAFF2,
 } from '../_lib/testing/phase2-fixtures.js';
@@ -11,14 +12,21 @@ import { ostFileSchema } from '@afhomes/contracts';
 import { OST_IMPORT_COLUMNS } from '../_lib/ost-import.js';
 import { toCsv } from '../_lib/report-export.js';
 const holder = vi.hoisted(() => ({ db: null as FakeSupabase | null }));
+const provider = vi.hoisted(() => ({
+  provinces: vi.fn(),
+  provincesInRegion: vi.fn(),
+  localities: vi.fn(),
+  barangays: vi.fn(),
+}));
 vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
+vi.mock('../_lib/address-source.js', () => ({ addressProvider: () => provider }));
 const handler = (await import('./ost-accreditation.js')).default;
 const form = {
   dateApplied: '2026-01-01',
   programCategory: 'non_vip',
   sex: 'male',
   civilStatus: 'single',
-  governmentIdType: 'QA TEST',
+  governmentIdType: 'philippine_id',
   governmentIdNumber: 'SYNTHETIC-PRIVATE',
   applicantSignatureStatus: 'received',
   applicantSignedOn: '2026-01-01',
@@ -33,11 +41,33 @@ const identity = {
   address: { line1: 'QA STREET', city: 'QA CITY', province: 'QA PROVINCE', countryCode: 'PH' },
 };
 beforeEach(() => {
+  const tables = phase2World({});
+  tables.modules = [
+    ...(tables.modules ?? []),
+    { id: 'fafafafa-0000-4000-8000-000000000001', key: 'network.members', is_active: true },
+  ];
   holder.db = new FakeSupabase({
-    tables: { ...phase2World({}), referral_codes: [] },
+    tables: { ...tables, referral_codes: [] },
     tokens: phase2WorldTokens(),
-    rpcs: [{ fn: 'submit_ost_accreditation', result: UUID.viewerStaff }],
+    rpcs: [
+      { fn: 'submit_ost_accreditation', result: UUID.viewerStaff },
+      { fn: 'update_ost_applicant', result: UUID.viewerStaff },
+    ],
   });
+  provider.provinces.mockResolvedValue([{ code: '0403400000', name: 'Laguna' }]);
+  provider.provincesInRegion.mockResolvedValue([{ code: '0403400000', name: 'Laguna' }]);
+  provider.localities.mockResolvedValue([
+    {
+      code: '0403406000',
+      name: 'Calauan',
+      type: 'municipality',
+      provinceCode: '0403400000',
+      postalCode: '4000',
+    },
+  ]);
+  provider.barangays.mockResolvedValue([
+    { code: '0403406003', name: 'Dayap', localityCode: '0403406000' },
+  ]);
 });
 async function call(path: string, body: unknown, token?: string) {
   const { res, state } = makeRes();
@@ -69,6 +99,10 @@ describe('official OST handler boundary', () => {
           { child: 'staff_role_assignments', parent: 'staff_users', fk: 'staff_id' },
         ],
         rpcs: [
+          {
+            fn: 'list_ost_manual_sponsors',
+            result: [{ id: STAFF2.salesManager, name: 'Sales Manager' }],
+          },
           { fn: 'stage_ost_import', result: UUID.viewerStaff },
           { fn: 'ost_import_preview', result: { id: UUID.viewerStaff } },
         ],
@@ -88,7 +122,7 @@ describe('official OST handler boundary', () => {
         program_category: 'non_vip',
         sex: 'male',
         civil_status: 'single',
-        government_id_type: 'QA',
+        government_id_type: 'philippine_id',
         government_id_number: 'SYNTHETIC',
       };
       const { res, state } = makeRes();
@@ -121,6 +155,10 @@ describe('official OST handler boundary', () => {
           p_rows: [expect.objectContaining({ status: 'valid', errors: [] })],
         });
       expect(db.calls.some((call) => call.op === 'insert' || call.op === 'update')).toBe(false);
+      if (path === 'sponsors')
+        expect(db.calls.find((c) => c.table === 'list_ost_manual_sponsors')?.arg).toEqual({
+          p_actor: UUID.superAdminStaff,
+        });
     },
   );
   it.each([
@@ -151,6 +189,23 @@ describe('official OST handler boundary', () => {
   it('requires staff authentication for manual registration', async () => {
     expect((await call('manual', {})).status).toBe(401);
   });
+  it('rejects SSM as the sponsor of manual registration before mutation', async () => {
+    expect(
+      (
+        await call(
+          'manual',
+          {
+            requestId: UUID.viewerStaff,
+            sponsorStaffId: STAFF2.seniorSalesManager,
+            identity,
+            form,
+          },
+          TOKEN.superAdmin,
+        )
+      ).status,
+    ).toBe(409);
+    expect(holder.db?.calls.some((c) => c.table === 'submit_ost_accreditation')).toBe(false);
+  });
   it('rejects malformed manual sponsor before any RPC', async () => {
     expect(
       (
@@ -170,7 +225,7 @@ describe('official OST handler boundary', () => {
       (
         await call(
           'manual',
-          { requestId: UUID.viewerStaff, sponsorStaffId: UUID.viewerStaff, identity, form },
+          { requestId: UUID.viewerStaff, sponsorStaffId: STAFF2.salesManager, identity, form },
           TOKEN.superAdmin,
         )
       ).status,
@@ -208,5 +263,101 @@ describe('official OST handler boundary', () => {
       ).status,
     ).toBe(400);
     expect(holder.db?.calls.some((c) => c.op === 'rpc')).toBe(false);
+  });
+});
+
+describe('controlled applicant corrections', () => {
+  const correction = {
+    requestId: 'f0a0a0a0-1111-4111-8111-000000000001',
+    fullName: 'Maria Santos-Reyes',
+    birthDate: '1990-01-01',
+    phone: '09171234567',
+    sex: 'female',
+    civilStatus: 'married',
+    messenger: '',
+    employerName: '',
+    jobPosition: '',
+    reason: 'MARRIAGE CERTIFICATE VERIFIED',
+  };
+  const path = `members/${STAFF2.ost}/applicant`;
+  it('records a verified correction through the ledger RPC for management', async () => {
+    const state = await call(path, correction, TOKEN.superAdmin);
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual({ id: UUID.viewerStaff });
+    const rpc = holder.db?.calls.find((c) => c.table === 'update_ost_applicant');
+    const args = rpc?.arg as
+      { p_actor_id?: string; p_ost_id?: string; p_input?: { address?: unknown } } | undefined;
+    expect(args).toMatchObject({ p_actor_id: UUID.superAdminStaff, p_ost_id: STAFF2.ost });
+    expect(args?.p_input).toMatchObject({
+      phone: '+639171234567',
+      civilStatus: 'married',
+      reason: 'MARRIAGE CERTIFICATE VERIFIED',
+    });
+    expect(args?.p_input?.address).toBeUndefined();
+  });
+  it('stores the reference spelling and codes when the address is re-verified', async () => {
+    const state = await call(
+      path,
+      {
+        ...correction,
+        address: {
+          line1: 'QA STREET',
+          city: 'submitted',
+          province: 'submitted',
+          countryCode: 'PH',
+        },
+        addressHierarchy: {
+          regionCode: '0400000000',
+          provinceCode: '0403400000',
+          localityCode: '0403406000',
+          barangayCode: '0403406003',
+        },
+      },
+      TOKEN.superAdmin,
+    );
+    expect(state.status).toBe(200);
+    const rpc = holder.db?.calls.find((c) => c.table === 'update_ost_applicant');
+    const args = rpc?.arg as { p_input?: Record<string, unknown> } | undefined;
+    expect(args?.p_input).toMatchObject({
+      address: {
+        line1: 'QA STREET',
+        city: 'Calauan',
+        province: 'Laguna',
+        barangay: 'Dayap',
+        postalCode: '4000',
+        regionCode: '0400000000',
+        provinceCode: '0403400000',
+        localityCode: '0403406000',
+        barangayCode: '0403406003',
+      },
+    });
+  });
+  it('refuses the update when the reference rejects the address', async () => {
+    provider.barangays.mockResolvedValueOnce([]);
+    const state = await call(
+      path,
+      {
+        ...correction,
+        address: { line1: 'QA STREET', city: 'Calauan', province: 'Laguna', countryCode: 'PH' },
+        addressHierarchy: {
+          regionCode: '0400000000',
+          provinceCode: '0403400000',
+          localityCode: '0403406000',
+          barangayCode: '0403406003',
+        },
+      },
+      TOKEN.superAdmin,
+    );
+    expect(state.status).toBe(400);
+    expect(holder.db?.calls.some((c) => c.table === 'update_ost_applicant')).toBe(false);
+  });
+  it('never lets the OST member or a reviewing role edit the registered values', async () => {
+    expect((await call(path, correction, TOKEN2.ost)).status).toBe(403);
+    expect((await call(path, correction, TOKEN2.seniorSalesManager)).status).toBe(403);
+    expect(holder.db?.calls.some((c) => c.table === 'update_ost_applicant')).toBe(false);
+  });
+  it('rejects an incomplete correction before any RPC', async () => {
+    expect((await call(path, { ...correction, fullName: '' }, TOKEN.superAdmin)).status).toBe(400);
+    expect(holder.db?.calls.some((c) => c.table === 'update_ost_applicant')).toBe(false);
   });
 });

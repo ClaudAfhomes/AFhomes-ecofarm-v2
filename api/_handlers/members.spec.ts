@@ -72,6 +72,7 @@ const ROLE_VD = 'c0000000-0000-4000-8000-000000000002';
 const ROLE_SSM = 'c0000000-0000-4000-8000-000000000003';
 const ROLE_SM = 'c0000000-0000-4000-8000-000000000004';
 const ROLE_OST = 'c0000000-0000-4000-8000-000000000005';
+const SM2_ID = 'e0000000-0000-4000-8000-000000000006';
 const DEPT_SALES = 'd0000000-0000-4000-8000-000000000001';
 const DEPT_OPS = 'd0000000-0000-4000-8000-000000000002';
 
@@ -816,6 +817,44 @@ describe('GET /members/:id', () => {
 });
 
 describe('PATCH /members/:id', () => {
+  it.each([
+    [SSM_ID, 'ost', SM_ID],
+    [OST_ID, 'sales_manager', SSM_ID],
+    [OST_ID, 'ost', SM2_ID],
+  ])(
+    'routes OST role/head changes through the controlled workflow: %s -> %s',
+    async (id, position, head) => {
+      const tables = baseTables();
+      tables.network_member_profiles!.push({
+        ...tables.network_member_profiles![1],
+        staff_id: OST_ID,
+        referrer_staff_id: SM_ID,
+      });
+      addStaff(tables, {
+        id: SM2_ID,
+        email: 'other-sm@example.invalid',
+        fullName: 'OTHER SM',
+        roleId: ROLE_SM,
+      });
+      const db = install(tables);
+      const before = JSON.stringify(tables);
+      const state = await call({
+        method: 'PATCH',
+        familyPath: id,
+        token: ADMIN_TOKEN,
+        body: {
+          position,
+          referrerStaffId: head,
+          headChangeReason: 'Attempt to bypass controlled conversion',
+        },
+      });
+      expect(state.status).toBe(position === 'ost' ? 400 : 409);
+      expect(JSON.stringify(db.tables)).toBe(before);
+      expect(
+        db.calls.some((c) => ['insert', 'update', 'delete', 'updateUserById'].includes(c.op)),
+      ).toBe(false);
+    },
+  );
   it('updates profile fields and keeps secrets masked', async () => {
     const state = await call({
       method: 'PATCH',
@@ -865,7 +904,12 @@ describe('PATCH /members/:id', () => {
 
   it('moves the position, re-resolves the role and the head, and retires the OST referrer', async () => {
     const tables = baseTables();
-    addStaff(tables, { id: VD_ID, email: 'vd@afhomes.test', fullName: 'VICE DIRECTOR', roleId: ROLE_VD });
+    addStaff(tables, {
+      id: VD_ID,
+      email: 'vd@afhomes.test',
+      fullName: 'VICE DIRECTOR',
+      roleId: ROLE_VD,
+    });
     install(tables);
     const state = await call({
       method: 'PATCH',
@@ -1051,9 +1095,9 @@ describe('PATCH /members/:id', () => {
     const authCall = db.calls.find((c) => c.op === 'updateUserById');
     expect(authCall?.arg).toMatchObject({ id: SM_ID, hasEmail: true, emailConfirmed: true });
     // The password reached GoTrue; the audit trail holds neither secret.
-    expect(
-      (holder.db as unknown as { passwordsSeen: string[] }).passwordsSeen,
-    ).toContain('TempPass456');
+    expect((holder.db as unknown as { passwordsSeen: string[] }).passwordsSeen).toContain(
+      'TempPass456',
+    );
     const audits = JSON.stringify(db.rows('audit_events'));
     expect(audits).not.toContain('TempPass456');
     expect(audits).not.toContain('new.address@example.com');
@@ -1190,6 +1234,21 @@ describe('POST /members/ost (direct OST creation)', () => {
     else process.env.AFHOMES_ADMIN_URL = ORIGINAL_ADMIN_URL;
   });
 
+  it('replays a committed direct approval without another invitation or signature write', async () => {
+    const db = installDirect();
+    db.tables.ost_members = [{ id: DIRECT_MEMBER_ID, application_id: DIRECT_APP_ID }];
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      body: directBody(),
+      token: ADMIN_TOKEN,
+    });
+    expect(state.status).toBe(201);
+    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(1);
+    expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
+    expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
+  });
+
   it('records the application, the real signature dates and the approval in one act', async () => {
     installDirect();
     const state = await call({
@@ -1303,6 +1362,7 @@ describe('POST /members/ost (direct OST creation)', () => {
 describe('POST /members/:id/transfer', () => {
   const toOstBody = (extra: Record<string, unknown> = {}) => ({
     direction: 'IST_TO_OST',
+    requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
     reason: 'Moved to the OST desk by management',
     sponsorStaffId: SM_ID,
     identity: directIdentity,
@@ -1328,6 +1388,7 @@ describe('POST /members/:id/transfer', () => {
   it('transfers IST to OST in one call and sends no number at all', async () => {
     transferRpc({
       direction: 'IST_TO_OST',
+      requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
       kind: 'OST',
       previousAaNumber: 'AAI26090001',
       aaNumber: 'AAO26090001',
@@ -1357,6 +1418,7 @@ describe('POST /members/:id/transfer', () => {
   it('transfers OST to IST with the chosen position and head', async () => {
     transferRpc({
       direction: 'OST_TO_IST',
+      requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
       kind: 'IST',
       previousAaNumber: 'AAO26090001',
       aaNumber: 'AAI26090009',
@@ -1366,6 +1428,7 @@ describe('POST /members/:id/transfer', () => {
       familyPath: `${SM_ID}/transfer`,
       body: {
         direction: 'OST_TO_IST',
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
         reason: 'Returns to the selling hierarchy',
         targetPosition: 'sales_manager',
         headStaffId: SSM_ID,

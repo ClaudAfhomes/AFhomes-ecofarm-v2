@@ -15,6 +15,25 @@ const stubFetch = (impl: (url: string) => Promise<Response> | Response) =>
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe('explicit region cascade', () => {
+  it('loads provinces through their selected region path', async () => {
+    const seen: string[] = [];
+    stubFetch((url) => {
+      seen.push(url);
+      return json({ data: url.endsWith('/regions')
+        ? [{ code: '0400000000', name: 'CALABARZON' }]
+        : [{ code: '0403400000', name: 'Laguna' }] });
+    });
+    expect(await psgcCloudAddressProvider.regions!()).toEqual([{ code: '0400000000', name: 'CALABARZON' }]);
+    expect(await psgcCloudAddressProvider.provincesInRegion!('0400000000')).toEqual([{ code: '0403400000', name: 'Laguna' }]);
+    expect(seen[1]).toMatch(/\/regions\/0400000000\/provinces$/);
+  });
+  it('offers Metro Manila as the province scope for province-less NCR', async () => {
+    stubFetch(() => json({ data: [] }));
+    expect(await psgcCloudAddressProvider.provincesInRegion!('1300000000')).toEqual([{ code: '1300000000', name: 'Metro Manila' }]);
+  });
+});
+
 describe('psgcCloudAddressProvider.provinces', () => {
   it('offers province-less NCR and confirms other unmatched regions before offering them', async () => {
     stubFetch((url) => {

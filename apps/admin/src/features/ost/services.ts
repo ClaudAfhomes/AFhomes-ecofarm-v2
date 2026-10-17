@@ -21,6 +21,7 @@ import {
   type OstMember,
   type OstReferralCodeIssued,
   type OstReferralCodeRecord,
+  type UpdateOstApplicant,
 } from '@afhomes/contracts';
 import { z } from 'zod';
 import {
@@ -65,6 +66,9 @@ export const approveAccreditation = (id: string, startsOn: string, expiresOn: st
   });
 export const submitRenewal = (id: string, body: SubmitOstRenewal) =>
   post(`/ost-accreditation/members/${id}/renew`, ostMutationResultSchema, body);
+/** Controlled applicant correction: records prior/resulting values with a reason. */
+export const updateOstApplicant = (id: string, body: UpdateOstApplicant) =>
+  post(`/ost-accreditation/members/${id}/applicant`, ostMutationResultSchema, body);
 export const reviseRenewal = (id: string, body: SubmitOstRenewal) =>
   post(`/ost-accreditation/renewals/${id}/revise`, ostMutationResultSchema, body);
 export const decideRenewal = (

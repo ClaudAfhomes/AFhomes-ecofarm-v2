@@ -214,6 +214,19 @@ export const psgcCloudAddressProvider: AddressProvider = {
 
   provinces: provinceScopes,
 
+  async regions(): Promise<Province[]> {
+    return rows(await getJson('/regions')).map((row) =>
+      parseRow(provinceSchema, { code: row.code, name: officialName(row.name) }),
+    );
+  },
+
+  async provincesInRegion(regionCode: string): Promise<Province[]> {
+    const raw = rows(await getJson(`/regions/${segment(regionCode)}/provinces`));
+    if (raw.length === 0 && regionCode === METRO_MANILA_REGION_CODE)
+      return [{ code: METRO_MANILA_REGION_CODE, name: METRO_MANILA_LABEL }];
+    return raw.map((row) => parseRow(provinceSchema, { code: row.code, name: officialName(row.name) }));
+  },
+
   async localities(scopeCode: string): Promise<Locality[]> {
     const raw = await localityRows(scopeCode);
     return raw.flatMap((row) => {

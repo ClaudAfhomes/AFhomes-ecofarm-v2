@@ -1,8 +1,11 @@
+import { getOstSponsors } from '../ost/services';
+import { OstAddressFields, emptyOstAddress } from '@afhomes/ui';
+import { useOstAddress } from '../address/useOstAddress';
 /**
  * Transfer a member between the two accreditation kinds.
  *
  * A transfer is not a profile edit. The server retires the held AA number
- * into the accreditation history and issues a successor number for the new
+ * into the accreditation history and preserves the suffix for IST to OST and issues a new IST number for the reverse
  * kind in one transaction, so the client never sends a number and no residue
  * of the old kind survives:
  *
@@ -22,6 +25,7 @@ import {
   MEMBER_UPLINE_ROLE,
   IST_POSITIONS,
   officialOstFormDefaults,
+  ostAnnualExpiry,
   parseOfficialOstFields,
   transferMemberSchema,
   type Member,
@@ -45,12 +49,6 @@ import styles from './MembersPage.module.css';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function oneYearOn(start: string): string {
-  const expires = new Date(`${start}T00:00:00Z`);
-  expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-  return expires.toISOString().slice(0, 10);
 }
 
 /** What the member holds right now, before anything changes. */
@@ -99,6 +97,7 @@ function TransferToIstForm({
   const [targetPosition, setTargetPosition] = useState<MemberPosition>('sales_manager');
   const [headStaffId, setHeadStaffId] = useState('');
   const [reason, setReason] = useState('');
+  const [requestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const headRole = MEMBER_UPLINE_ROLE[targetPosition];
   const heads = useQuery({
@@ -113,6 +112,7 @@ function TransferToIstForm({
   const submit = () => {
     const parsed = transferMemberSchema.safeParse({
       direction: 'OST_TO_IST',
+      requestId,
       reason,
       targetPosition,
       headStaffId: headRole === null ? null : headStaffId || null,
@@ -235,6 +235,8 @@ function TransferToOstForm({
     province: member.province ?? '',
     postalCode: member.zipCode ?? '',
   }));
+  const [geography, setGeography] = useState(emptyOstAddress);
+  const addressOptions = useOstAddress(geography);
   const [official, setOfficial] = useState<Record<string, string>>(() => ({
     ...officialOstFormDefaults(),
     sex: detail.sex?.toLowerCase() ?? '',
@@ -250,12 +252,13 @@ function TransferToOstForm({
   }));
   const [sponsorStaffId, setSponsorStaffId] = useState(member.ostReferrerStaffId ?? '');
   const [startsOn, setStartsOn] = useState(today);
-  const [expiresOn, setExpiresOn] = useState(() => oneYearOn(today()));
+  const [expiresOn, setExpiresOn] = useState(() => ostAnnualExpiry(today()));
   const [reason, setReason] = useState('');
+  const [requestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const sponsors = useQuery({
-    queryKey: ['network', 'members', 'uplines', 'sales_manager'],
-    queryFn: () => getMemberUplines('sales_manager'),
+    queryKey: ['ost', 'manual-sponsors'],
+    queryFn: getOstSponsors,
     placeholderData: keepPreviousData,
   });
   const transfer = useBusinessMutation({
@@ -279,6 +282,7 @@ function TransferToOstForm({
     }
     const parsed = transferMemberSchema.safeParse({
       direction: 'IST_TO_OST',
+      requestId,
       reason,
       sponsorStaffId,
       identity: {
@@ -292,10 +296,17 @@ function TransferToOstForm({
         birthDate: fields.birthDate ?? '',
         address: {
           line1: fields.line1 ?? '',
-          city: fields.city ?? '',
-          province: fields.province ?? '',
-          postalCode: fields.postalCode || undefined,
+          city: geography.city,
+          province: geography.province,
+          barangay: geography.barangay,
+          postalCode: geography.postalCode || undefined,
           countryCode: 'PH',
+        },
+        addressHierarchy: {
+          regionCode: geography.regionCode,
+          provinceCode: geography.provinceCode,
+          localityCode: geography.localityCode,
+          barangayCode: geography.barangayCode,
         },
       },
       form: form.data,
@@ -393,28 +404,7 @@ function TransferToOstForm({
               value={fields.line1 ?? ''}
               onChange={onChange('line1')}
             />
-            <TextField
-              id="transfer-city"
-              name="transfer-city"
-              label="City / Municipality"
-              value={fields.city ?? ''}
-              onChange={onChange('city')}
-            />
-            <TextField
-              id="transfer-province"
-              name="transfer-province"
-              label="Province"
-              value={fields.province ?? ''}
-              onChange={onChange('province')}
-            />
-            <TextField
-              id="transfer-postal-code"
-              name="transfer-postal-code"
-              label="ZIP Code"
-              optional
-              value={fields.postalCode ?? ''}
-              onChange={onChange('postalCode')}
-            />
+            <OstAddressFields value={geography} onChange={setGeography} {...addressOptions} />
             <label className={styles.fieldLabel}>
               Sponsor (active Sales Manager)
               <Select
@@ -425,7 +415,7 @@ function TransferToOstForm({
                   { value: '', label: 'Choose an active Sales Manager' },
                   ...(sponsors.data?.map((holder) => ({
                     value: holder.id,
-                    label: holder.fullName,
+                    label: holder.name,
                   })) ?? []),
                 ]}
               />
@@ -453,7 +443,7 @@ function TransferToOstForm({
               value={startsOn}
               onChange={(value) => {
                 setStartsOn(value);
-                setExpiresOn(oneYearOn(value));
+                setExpiresOn(ostAnnualExpiry(value));
               }}
             />
             <DateField
@@ -461,7 +451,8 @@ function TransferToOstForm({
               name="transfer-expires-on"
               label="Approved Expiry"
               value={expiresOn}
-              onChange={setExpiresOn}
+              onChange={() => {}}
+              disabled
             />
             <ReasonField value={reason} onChange={setReason} />
           </div>

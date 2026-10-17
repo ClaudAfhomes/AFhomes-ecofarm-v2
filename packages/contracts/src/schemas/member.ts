@@ -1,3 +1,4 @@
+import { ostAnnualExpiry } from './ost-accreditation.js';
 import { z } from 'zod';
 
 import {
@@ -378,7 +379,7 @@ export const createOstMemberSchema = z
         path: ['expiresOn'],
         message: 'Choose the approved start and expiry dates',
       });
-    else if (value.expiresOn < value.startsOn)
+    else if (value.expiresOn !== ostAnnualExpiry(value.startsOn))
       ctx.addIssue({
         code: 'custom',
         path: ['expiresOn'],
@@ -412,6 +413,7 @@ const transferReasonSchema = z.string().trim().min(5).max(300);
 export const transferMemberToOstSchema = z
   .object({
     direction: z.literal('IST_TO_OST'),
+    requestId: z.string().uuid(),
     reason: transferReasonSchema,
     sponsorStaffId: z.string().uuid(),
     identity: ostIdentitySchema,
@@ -424,6 +426,7 @@ export const transferMemberToOstSchema = z
 export const transferMemberToIstSchema = z
   .object({
     direction: z.literal('OST_TO_IST'),
+    requestId: z.string().uuid(),
     reason: transferReasonSchema,
     targetPosition: istPositionSchema,
     headStaffId: z.string().uuid().nullable().default(null),

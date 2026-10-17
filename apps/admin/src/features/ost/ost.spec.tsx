@@ -22,6 +22,7 @@ import {
   requestOstApplicationChanges,
   getAccreditation,
   submitRenewal,
+  updateOstApplicant,
 } from './services';
 
 vi.mock('./services', () => ({
@@ -33,7 +34,9 @@ vi.mock('./services', () => ({
   confirmOstImport: vi.fn(),
   downloadOstFile: vi.fn(),
   getOstSponsors: vi.fn().mockResolvedValue([]),
-  getAccreditation: vi.fn().mockResolvedValue({ registration: null, terms: [], renewals: [] }),
+  getAccreditation: vi
+    .fn()
+    .mockResolvedValue({ registration: null, currentApplicant: null, terms: [], renewals: [] }),
   getOstApplications: vi.fn(),
   getOstApplication: vi.fn(),
   approveOstApplication: vi.fn(),
@@ -42,6 +45,7 @@ vi.mock('./services', () => ({
   getOstMembers: vi.fn(),
   getMyReferralCodes: vi.fn(),
   createReferralCode: vi.fn(),
+  updateOstApplicant: vi.fn(),
 }));
 
 vi.mock('../documents/services', () => ({
@@ -60,6 +64,7 @@ const mockedRequestChanges = vi.mocked(requestOstApplicationChanges);
 const mockedGetOstMembers = vi.mocked(getOstMembers);
 const mockedGetCodes = vi.mocked(getMyReferralCodes);
 const mockedCreateCode = vi.mocked(createReferralCode);
+const mockedUpdateApplicant = vi.mocked(updateOstApplicant);
 
 const STAFF: SessionUser = {
   id: 'staff-id',
@@ -95,9 +100,10 @@ const STAFF: SessionUser = {
 
 const APP_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
 
-it('shows a readable renewal date error without sending a mutation', async () => {
+it('derives the annual renewal end from the management-selected start', async () => {
   vi.mocked(getAccreditation).mockResolvedValueOnce({
     registration: null,
+    currentApplicant: null,
     renewals: [],
     terms: [
       {
@@ -117,14 +123,17 @@ it('shows a readable renewal date error without sending a mutation', async () =>
     { user: STAFF, route: `/members/${MEMBER.id}` },
   );
   await screen.findByRole('button', { name: 'Submit renewal' });
-  fireEvent.change(screen.getByLabelText('date Of Renewal'), { target: { value: '2026-01-01' } });
-  fireEvent.change(screen.getByLabelText('requested Start'), { target: { value: '2026-02-01' } });
-  fireEvent.change(screen.getByLabelText('requested End'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('Date of renewal'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('Requested start'), { target: { value: '2026-02-01' } });
+  const end = screen.getByLabelText('Requested end') as HTMLInputElement;
+  expect(end.value).toBe('2027-02-01');
+  expect(end.disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Submit renewal' }));
-  expect((await screen.findByRole('alert')).textContent).toBe(
-    'Expiry must be on or after the start',
-  );
-  expect(submitRenewal).not.toHaveBeenCalled();
+  await waitFor(() => expect(vi.mocked(submitRenewal)).toHaveBeenCalled());
+  expect(vi.mocked(submitRenewal).mock.calls[0]?.[1]).toMatchObject({
+    requestedStart: '2026-02-01',
+    requestedEnd: '2027-02-01',
+  });
 });
 
 const APP: OstApplication = {
@@ -462,5 +471,121 @@ describe('live OST search', () => {
     expect(mockedGetOstMembers).toHaveBeenLastCalledWith('missing');
     fireEvent.change(input, { target: { value: '' } });
     await screen.findByText(MEMBER.fullName);
+  });
+});
+
+const CURRENT_APPLICANT = {
+  fullName: 'Oscar Trainee',
+  birthDate: '1995-06-15',
+  email: 'oscar@example.invalid',
+  phone: '+639171234567',
+  sex: 'male',
+  civilStatus: 'single',
+  address: {
+    line1: 'SYNTHETIC',
+    barangay: 'QA VILLAGE',
+    city: 'QA CITY',
+    province: 'QA',
+    postalCode: '1000',
+    countryCode: 'PH',
+  },
+  messenger: null,
+  employerName: null,
+  jobPosition: null,
+  tinMasked: null,
+  programCategory: 'non_vip' as const,
+  vipCardType: null,
+};
+
+const ADMIN: SessionUser = {
+  ...STAFF,
+  roleSlug: 'super_admin',
+  afHomesPermissions: [
+    ...(STAFF.afHomesPermissions ?? []),
+    {
+      moduleKey: 'network.members',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+  ],
+};
+
+describe('OST applicant information', () => {
+  function renderPage(user: SessionUser) {
+    vi.mocked(getAccreditation).mockResolvedValue({
+      registration: null,
+      currentApplicant: CURRENT_APPLICANT,
+      terms: [],
+      renewals: [],
+    });
+    mockedGetOstMembers.mockResolvedValue([MEMBER]);
+    return renderWithProviders(
+      <Routes>
+        <Route path="/members/:id" element={<OstAccreditationHistoryPage />} />
+      </Routes>,
+      { user, route: `/members/${MEMBER.id}` },
+    );
+  }
+
+  it('shows the registered applicant read-only without update permission', async () => {
+    renderPage(STAFF);
+    expect(await screen.findByText('Registered applicant')).toBeInTheDocument();
+    expect(screen.getByText('+639171234567')).toBeInTheDocument();
+    expect(screen.getByText('Non-VIP')).toBeInTheDocument();
+    expect(screen.getByText('oscar@example.invalid', { exact: false })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update Information' })).toBeNull();
+    expect(
+      screen.getByText(/Updates require the member-profile update permission/),
+    ).toBeInTheDocument();
+  });
+
+  it('records a controlled mobile-number change and refreshes the panel', async () => {
+    renderPage(ADMIN);
+    fireEvent.click(await screen.findByRole('button', { name: 'Update Information' }));
+    await screen.findByRole('dialog');
+    fireEvent.change(screen.getByLabelText('Mobile number'), { target: { value: '09987654321' } });
+    expect(
+      await screen.findByText('Mobile number: +639171234567 → +639987654321'),
+    ).toBeInTheDocument();
+    mockedUpdateApplicant.mockResolvedValue({ id: MEMBER.id });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockedUpdateApplicant).toHaveBeenCalledTimes(1));
+    expect(mockedUpdateApplicant.mock.calls[0]?.[0]).toBe(MEMBER.id);
+    expect(mockedUpdateApplicant.mock.calls[0]?.[1]).toMatchObject({
+      fullName: 'Oscar Trainee',
+      phone: '+639987654321',
+      sex: 'male',
+      civilStatus: 'single',
+      reason: '',
+      requestId: expect.any(String),
+    });
+    expect(await screen.findByText(/recorded in the audit trail/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('requires a reason before an identity change is submitted', async () => {
+    renderPage(ADMIN);
+    fireEvent.click(await screen.findByRole('button', { name: 'Update Information' }));
+    await screen.findByRole('dialog');
+    fireEvent.change(screen.getByLabelText('Full name'), {
+      target: { value: 'Oscar Trainee-Reyes' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(
+      await screen.findByText(/A reason of at least 5 characters is required/),
+    ).toBeInTheDocument();
+    expect(mockedUpdateApplicant).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Reason for the change/), {
+      target: { value: 'Marriage certificate on file.' },
+    });
+    mockedUpdateApplicant.mockResolvedValue({ id: MEMBER.id });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockedUpdateApplicant).toHaveBeenCalledTimes(1));
+    expect(mockedUpdateApplicant.mock.calls[0]?.[1]).toMatchObject({
+      fullName: 'Oscar Trainee-Reyes',
+      reason: 'Marriage certificate on file.',
+    });
   });
 });
