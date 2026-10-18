@@ -13,6 +13,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 import { AddressProviderError } from '../_lib/address-provider.js';
+import { MEMBER_ENTRY_TABS, memberWorkbook } from '../_lib/member-workbook.js';
+import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
+import { zipStored } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as FakeSupabase }));
 
@@ -24,6 +27,7 @@ vi.mock('../_lib/rest.js', () => ({
 const upstream = vi.hoisted(() => ({
   provinces: vi.fn(),
   localities: vi.fn(),
+  barangays: vi.fn(),
 }));
 
 vi.mock('../_lib/psgc-cloud-provider.js', () => ({
@@ -31,7 +35,7 @@ vi.mock('../_lib/psgc-cloud-provider.js', () => ({
     name: 'psgc-cloud-stub',
     provinces: upstream.provinces,
     localities: upstream.localities,
-    barangays: vi.fn(),
+    barangays: upstream.barangays,
   },
 }));
 
@@ -341,6 +345,9 @@ beforeEach(() => {
   install();
   resetAddressProviderCache();
   upstream.provinces.mockResolvedValue([LAGUNA]);
+  upstream.barangays.mockResolvedValue([
+    { code: '0403406001', name: 'Dayap', localityCode: CALAUAN.code },
+  ]);
   upstream.localities.mockImplementation(async (code: string) =>
     code === LAGUNA.code ? [CALAUAN] : [LEMERY],
   );
@@ -1611,5 +1618,171 @@ describe('POST /members/:id/transfer', () => {
       body: toOstBody(),
     });
     expect(anonymous.status).toBe(401);
+  });
+});
+
+describe('member workbook read-only endpoints', () => {
+  function uploadFields(fields: Record<string, string>) {
+    const parts = readWorkbookParts(memberWorkbook('IST', []));
+    Object.values(MEMBER_ENTRY_TABS).forEach((headers, index) => {
+      const path = `xl/worksheets/sheet${index + 2}.xml`;
+      let text = new TextDecoder().decode(parts.get(path));
+      headers.forEach((h, c) => {
+        if (fields[h] === undefined) return;
+        const ref = String.fromCharCode(65 + c) + '2';
+        text = text.replace(
+          new RegExp(`<c r="${ref}"[^>]*?(?:/>|>[\\s\\S]*?</c>)`),
+          () => `<c r="${ref}" t="inlineStr"><is><t>${fields[h]}</t></is></c>`,
+        );
+      });
+      parts.set(path, new TextEncoder().encode(text));
+    });
+    return Buffer.from(
+      zipStored(
+        [...parts].map(([name, data]) => ({ name, data })),
+        true,
+      ),
+    ).toString('base64');
+  }
+  it('previews a real workbook read-only, including normalized-phone duplicate detection', async () => {
+    const f = {
+      first_name: 'Synthetic',
+      last_name: 'Seller',
+      email: 'synthetic@example.invalid',
+      mobile: '09171111111',
+      birth_date: '1990-01-01',
+      sex: 'Male',
+      civil_status: 'Single',
+      province: 'Laguna',
+      city: 'Calauan',
+      barangay: 'Dayap',
+      address_line_1: 'One Street',
+      position: 'vice_director',
+      aa_mode: 'auto',
+      employer_name: 'Example',
+      employer_address: 'Calauan',
+      job_position: 'Seller',
+      government_id_type: 'passport',
+      government_id_number: 'P1234567',
+    };
+    const response = await call({
+      method: 'POST',
+      familyPath: 'workbook/preview',
+      body: { kind: 'IST', contentBase64: uploadFields(f) },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    const result = response.body as {
+      rows: { fields: Record<string, string>; errors: string[] }[];
+    };
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.fields.postal_code).toBe('4012');
+    expect(result.rows[0]!.errors).toContain(
+      'mobile: an existing member already uses this mobile.',
+    );
+    expect(
+      holder.db.calls.filter((c) =>
+        ['createUser', 'inviteUserByEmail', 'insert', 'update', 'upsert', 'delete'].includes(c.op),
+      ),
+    ).toEqual([]);
+    const clean = await call({
+      method: 'POST',
+      familyPath: 'workbook/preview',
+      body: { kind: 'IST', contentBase64: uploadFields({ ...f, mobile: '09999999999' }) },
+      token: ADMIN_TOKEN,
+    });
+    expect((clean.body as typeof result).rows[0]!.errors).toEqual([]);
+  });
+  it('requires authentication and rejects unsupported kind and invalid uploads', async () => {
+    expect((await call({ familyPath: 'workbook/template', query: { kind: 'IST' } })).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await call({
+          familyPath: 'workbook/template',
+          query: { kind: 'admin' },
+          token: ADMIN_TOKEN,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call({
+          method: 'POST',
+          familyPath: 'workbook/preview',
+          body: { kind: 'IST', contentBase64: 'bad!' },
+          token: ADMIN_TOKEN,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
+  });
+  it('downloads a guided template without running any business mutation', async () => {
+    const response = await call({
+      familyPath: 'workbook/template',
+      query: { kind: 'OST' },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ filename: 'afhomes-ost-template.xlsx' });
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
+  });
+  it('exports only the selected kind and excludes credentials and private identifiers', async () => {
+    const response = await call({
+      familyPath: 'workbook/export',
+      query: { kind: 'IST' },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ filename: 'afhomes-ist-roster.xlsx' });
+    const sheets = readWorkbook(
+      Buffer.from((response.body as { content: string }).content, 'base64'),
+      ['IST'],
+    );
+    const cells = sheets.get('IST')!;
+    expect(cells[0]).not.toContain('TIN');
+    expect(cells.slice(1).every((r) => r[5] !== 'ost')).toBe(true);
+    expect(cells.flat()).not.toContain('D7654321');
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
   });
 });
