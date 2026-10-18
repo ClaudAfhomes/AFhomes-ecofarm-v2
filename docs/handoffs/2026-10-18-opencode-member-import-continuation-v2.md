@@ -427,3 +427,28 @@ and normal push to `origin/claud/develop`. Reverify pause/backup/preflight durin
 that window, retain older incompatible deployments' affected-route isolation,
 verify the new Preview, then resume only its approved compatible hosts. No
 production `main` deployment or automatic business import is implied.
+
+## Approved cutover executed - 2026-10-18
+
+The owner answered YES to applying only migrations 12-15, committing the 46
+reviewed files and pushing only `origin/claud/develop`. The release checkout
+`AFhomes-claud-develop-ost-release` was fast-forwarded to the verified remote
+baseline `9f44ecc`; only the hash-verified 46-file snapshot was copied/staged.
+Cached whitespace/scope checks passed. Feature commit: `b63e906`.
+
+With both project WAF rules and 15 database guards active, a fresh encrypted
+backup was captured at `2026-10-18T12-29-18-483Z-pre-member-import` outside Git.
+All 104 included table counts/digests/history restored exactly; the guarded
+restore rehearsed only the four migrations. Fresh preflight still had history
+95 and all 12 expected function bodies. The live four-file transaction COMMITTED
+and independently verified history 99, eight service-only RPCs, private-table
+denials, 17 deny guards, unchanged counts across 111 inspected tables and
+unchanged complete accreditation identity/history digests.
+The exact four hashes and backup limitations are recorded in
+`docs/supabase/MIGRATION-APPLICATIONS.md`.
+
+No unrelated migration, production import, production Auth-user change or `main`
+deployment was performed. The database is migrated; affected writes remain
+paused while the compatible Preview is built and verified. Subsequent release
+status must explicitly record push/build, old-host isolation and guard removal;
+do not infer that any of those already happened from this migration result.

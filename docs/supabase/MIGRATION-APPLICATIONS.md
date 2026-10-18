@@ -261,3 +261,42 @@ the original AA-search rate limit remains intact. One intermediate cleanup
 failure was recovered and verified separately. Final retry cleanup passed.
 Live history remains 95 through `20261208000011`; versions 12-15 are still NOT
 live-applied. See the latest v2 handoff for evidence files and approval boundary.
+
+### APPROVED LIVE APPLY - 2026-10-18: IST/OST company workbook release
+
+The owner explicitly approved only the four migrations below, the reviewed
+46-file feature commit and a normal push to `origin/claud/develop`. Target:
+the existing shared project `ikaevepedpqygdlipsei`. Feature commit: `b63e906`.
+This entry supersedes the earlier unapplied status for these four versions.
+
+| Version / file | SHA-256 |
+| --- | --- |
+| `20261208000012_afhomes_ist_employee_identity_schema.sql` | `873f01c332449de436a4c115bf735fe41bee9f7e7857255aa59d503fada4b9cf` |
+| `20261208000013_afhomes_member_workbook_jobs_schema.sql` | `66bc08a751bb6ca7869457ef99802eb65538a49c533942ed05ae9a662a2eb04e` |
+| `20261208000014_afhomes_ist_employee_identity_functions.sql` | `f35edee08583002832f7a8c0f2264ce08474e8886acc846f1aa1104dcc37d639` |
+| `20261208000015_afhomes_member_workbook_jobs_functions.sql` | `6d550f2540343b50d0a67254295bcb95dd9c6231a9611fe7c20b332643fe0e9c` |
+
+- Both project WAF pauses and 15 database deny guards were active before apply.
+  Current project-wide rule equivalence, fresh authenticated per-project probes
+  and the earlier identical-rule 231-host proof established HTTP coverage;
+  direct database denial was reverified. No other active writers were reported.
+- A new encrypted read-only snapshot was taken AFTER pausing writes:
+  `C:\Users\SSD-CLAUD\afhomes-backups\2026-10-18T12-29-18-483Z-pre-member-import`.
+  Disposable restore verified all 104 included table counts/data digests and
+  migration history 95. Rehearsal on that restore rolled back, then committed
+  ONLY these four migrations. Storage binaries/platform settings are excluded.
+- Fresh live preflight: history 95 through version 11; all 12 prerequisite
+  function bodies matched. The pinned phase-aware executor applied these four
+  file bodies and version records in ONE transaction, checking schema then
+  functions. No unrelated history-missing migration was replayed.
+- Live COMMIT succeeded. Independent post-commit read-only verification:
+  history 99, exact selected four-version delta, restricted private import
+  tables, eight service-only RPCs and 17 active maintenance guards. Existing
+  row counts in all 111 inspected public/private/Auth/Storage tables were
+  unchanged; complete accreditation identity/history digests also matched.
+- Evidence: local ignored `live-four-migrations-applied.json` and the cutover
+  journal under `.tmp-bin/member-acceptance/`. They contain no credential values.
+  The schema context index was regenerated from repository migrations.
+- At this entry's time the new Preview is not yet verified and maintenance is
+  still active. Resume only after the compatible Preview and older-host
+  isolation are verified. No production `main` promotion is authorized.
