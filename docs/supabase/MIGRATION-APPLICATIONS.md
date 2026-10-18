@@ -300,3 +300,22 @@ This entry supersedes the earlier unapplied status for these four versions.
 - At this entry's time the new Preview is not yet verified and maintenance is
   still active. Resume only after the compatible Preview and older-host
   isolation are verified. No production `main` promotion is authorized.
+
+### Post-apply release and resume verification - 2026-10-18
+
+Feature `b63e906` and cutover evidence `35c49fc` were normally pushed only to
+`origin/claud/develop`. The compatible Preview reached READY for `35c49fc`;
+its branch alias is `afhomes-ecofarm-v2-git-claud-develop-afhomes.vercel.app`.
+Older hosts on both projects retain affected-route isolation, preserving
+unrelated firewall rules. Only the verified deployment and branch alias are
+allowed through those rules.
+
+At `2026-10-18T12:43:26.778Z`, the guarded resume removed exactly 17 temporary
+triggers and their guard function. Independent read-only verification confirmed
+history 99, all four version records, zero maintenance guards, eight restricted
+service-only RPCs and empty import-job tables. Direct probes confirmed new-host
+health 200, invalid application authentication 401 without WAF denial, and an
+old-host member request 403 with WAF denial. Signed-in directory reload and
+IST/OST import-dialog checks passed; no production import/account was created.
+Hosted saved downloads/roster exports and native Excel/Sheets remain unverified.
+Full details and local evidence locations are in the continuation handoff.

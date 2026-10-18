@@ -452,3 +452,34 @@ deployment was performed. The database is migrated; affected writes remain
 paused while the compatible Preview is built and verified. Subsequent release
 status must explicitly record push/build, old-host isolation and guard removal;
 do not infer that any of those already happened from this migration result.
+
+### Compatible Preview verified and maintenance resumed - 2026-10-18
+
+- Normal push to `origin/claud/develop` completed: feature `b63e906`, release
+  evidence `35c49fc`. Preview `dpl_AAB3zkyA2iUcSdk8SQTFzAG4mAAP` reached READY
+  for exact commit `35c49fc293c58aee28e0cc64140f2f0d90d7339f`.
+- Compatible branch URL:
+  `https://afhomes-ecofarm-v2-git-claud-develop-afhomes.vercel.app`.
+  Its immutable deployment is `afhomes-ecofarm-v2-qwh2dmk67-afhomes.vercel.app`.
+- Both projects retain affected-route isolation: all methods on affected member
+  route families are denied on older hosts; only the compatible deployment and
+  branch alias are allowed. Existing unrelated firewall rules were preserved.
+- Database maintenance ended at `2026-10-18T12:43:26.778Z`. Read-only post-check:
+  history 99, versions 12-15 present, zero maintenance triggers, guard function
+  absent, eight service-only RPC checks passed, and no import jobs/rows created.
+- Direct probes: compatible health 200; compatible members route with invalid
+  application authentication 401 without WAF denial; older deployment members
+  route 403 with `x-vercel-mitigated: deny`.
+- Signed-in browser: existing directory and identifiers loaded before/after
+  resume; IST/OST dialog and controls rendered; import history completed without
+  application error. Template controls completed without a displayed error, but
+  automation did not capture downloaded files: saved-file and hosted roster
+  export verification remain UNVERIFIED. Native Excel/Google Sheets remain
+  UNVERIFIED. No hosted import or production Auth-user creation was performed.
+- Local end-to-end import, shared temporary-password login/change, persistence,
+  export/re-import and duplicate prevention evidence remains the disposable
+  acceptance proof above. This is not a claim of a live business-write test.
+- Local ignored evidence: `post-resume-proof.json`, `preview-deployment.json`
+  and `live-rpc-readonly-proof.json`. Unrelated user changes remain untouched.
+  No production `main` promotion occurred. Older hosts intentionally retain
+  restricted member operations until separately released with compatible code.
