@@ -222,9 +222,6 @@ export function MemberFormDialog({
   // server stores what was typed.
   const provinces = useProvincesQuery(open);
   const localities = useLocalitiesQuery(provinceCode || undefined);
-  const selectedLocality =
-    (localities.data ?? []).find((locality) => locality.code === localityCode) ?? null;
-  const zipPublished = selectedLocality?.postalCode != null;
 
   const pickProvince = (option: ComboboxOption | null) => {
     setProvince(option?.name ?? '');
@@ -313,7 +310,7 @@ export function MemberFormDialog({
     if (employerName.trim() === '' || employerAddress.trim() === '' || jobPosition.trim() === '')
       return 'Complete the work details.';
     if (!editing && (governmentIdType === '' || governmentIdNumber.trim() === ''))
-      return 'Pick an ID type and number.';
+      return 'Pick ID type and number.';
     if (editing && governmentIdNumber.trim() !== '' && governmentIdType === '')
       return 'Pick an ID type.';
     if (email.trim() === '') return 'Enter the email address.';
@@ -449,7 +446,7 @@ export function MemberFormDialog({
               <Alert variant="danger" title="Sales team unavailable">
                 {departments.error instanceof ApiError && departments.error.status === 403
                   ? 'You need department access.'
-                  : 'Reload the page and try again.'}
+                  : 'Reload the page.'}
               </Alert>
             ) : null}
           </div>
@@ -539,7 +536,7 @@ export function MemberFormDialog({
                 required
                 loading={provinces.isFetching}
                 loadingLabel="Loading provinces"
-                error={provinces.isError ? 'Unable to load provinces. Try again.' : null}
+                error={provinces.isError ? 'Provinces failed to load.' : null}
                 onRetry={() => void provinces.refetch()}
                 value={province ? { code: provinceCode, name: province } : null}
                 options={provinces.data ?? []}
@@ -550,12 +547,10 @@ export function MemberFormDialog({
                 label="City / Municipality"
                 required
                 disabled={!provinceCode}
-                disabledHint={province ? 'Pick the province from the list first.' : undefined}
+                disabledHint={province ? 'Pick a province first.' : undefined}
                 loading={localities.isFetching}
                 loadingLabel="Loading cities and municipalities"
-                error={
-                  provinceCode && localities.isError ? 'Unable to load cities. Try again.' : null
-                }
+                error={provinceCode && localities.isError ? 'Cities failed to load.' : null}
                 onRetry={() => void localities.refetch()}
                 value={cityMunicipality ? { code: localityCode, name: cityMunicipality } : null}
                 options={localities.data ?? []}
@@ -570,11 +565,6 @@ export function MemberFormDialog({
               onChange={(value) => setZipCode(value)}
               autoComplete="postal-code"
             />
-            {localityCode ? (
-              <p className={styles.sectionHint}>
-                {zipPublished ? 'Suggested ZIP. Edit if wrong.' : 'No published ZIP. Type one.'}
-              </p>
-            ) : null}
           </div>
         </fieldset>
 
@@ -642,7 +632,6 @@ export function MemberFormDialog({
 
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>Government IDs</legend>
-          {editing ? <p className={styles.sectionHint}>Blank ID fields stay unchanged.</p> : null}
           <div className={styles.formFields}>
             <div className={styles.inlinePair}>
               <label className={styles.fieldLabel}>
@@ -681,11 +670,6 @@ export function MemberFormDialog({
 
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>Account</legend>
-          <p className={styles.sectionHint}>
-            {editing
-              ? 'The login email. Changing it changes how the member signs in.'
-              : 'Member signs in with email.'}
-          </p>
           <div className={styles.formFields}>
             <TextField
               id="member-email"
@@ -696,11 +680,6 @@ export function MemberFormDialog({
               onChange={(value) => setEmail(value.toLowerCase().replace(/\s+/g, ''))}
               autoComplete="email"
             />
-            {editing ? (
-              <p className={styles.sectionHint}>
-                Leave the passwords blank to keep the current one.
-              </p>
-            ) : null}
             <div className={styles.inlinePair}>
               <PasswordField
                 id="member-temp-password"
@@ -723,9 +702,6 @@ export function MemberFormDialog({
         {uplineRole !== null ? (
           <fieldset className={styles.formSection}>
             <legend className={styles.sectionTitle}>Head</legend>
-            <p className={styles.sectionHint}>
-              The {MEMBER_POSITION_LABELS[uplineRole]} this member serves under.
-            </p>
             <div className={styles.formFields}>
               <label className={styles.fieldLabel}>
                 {MEMBER_POSITION_LABELS[uplineRole]}
@@ -758,7 +734,7 @@ export function MemberFormDialog({
                 </Alert>
               ) : (heads.data ?? []).length === 0 ? (
                 <Alert variant="info" title="No heads found">
-                  Add a {MEMBER_POSITION_LABELS[uplineRole]} first.
+                  Add a {MEMBER_POSITION_LABELS[uplineRole]}.
                 </Alert>
               ) : null}
               {editing && headMoves ? (
@@ -774,14 +750,13 @@ export function MemberFormDialog({
           </fieldset>
         ) : (
           <Alert variant="info" title="No head">
-            A Vice Director has no head.
+            Vice Directors have no head.
           </Alert>
         )}
 
         {position === 'sales_manager' ? (
           <fieldset className={styles.formSection}>
             <legend className={styles.sectionTitle}>Referrer Details</legend>
-            <p className={styles.sectionHint}>The OST referrer, when there is one.</p>
             <div className={styles.formFields}>
               <label className={styles.fieldLabel}>
                 OST Referrer (Optional)
@@ -818,7 +793,7 @@ export function MemberFormDialog({
                 </Alert>
               ) : (ostReferrers.data ?? []).length === 0 ? (
                 <Alert variant="info" title="No OST referrers found">
-                  Save without one, or add an OST first.
+                  Save without a referrer.
                 </Alert>
               ) : null}
             </div>
@@ -827,13 +802,6 @@ export function MemberFormDialog({
 
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>AA Number</legend>
-          <p className={styles.sectionHint}>
-            {editing && aaNumber
-              ? 'Issued once. It can never be re-numbered.'
-              : editing && position === 'ost'
-                ? 'OST numbers ride the approval flow.'
-                : 'System issues it, or type one.'}
-          </p>
           <div className={styles.formFields}>
             {editing && aaNumber ? (
               <TextField
@@ -867,7 +835,6 @@ export function MemberFormDialog({
                     id="member-aa-number"
                     name="member-aa-number"
                     label="AA Number"
-                    hint="AAI plus the two-digit year, month and sequence, or an existing AA- number."
                     value={aaNumberInput}
                     onChange={(value) => setAaNumberInput(normalizeAaEntry(value))}
                     placeholder="AAI26090001"
