@@ -7,6 +7,9 @@
  * single-record read returns the identification fields for the record view.
  */
 import {
+  memberWorkbookFileSchema,
+  memberWorkbookPreviewSchema,
+  type MemberWorkbookKind,
   afHomesDepartmentSchema,
   createOstMemberResultSchema,
   memberDetailSchema,
@@ -117,3 +120,11 @@ export const issueMemberAccreditation = (id: string, input: IssueAccreditation):
 
 export const getMemberDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
+
+export const downloadMemberWorkbook = (kind: MemberWorkbookKind, action: 'template' | 'export') =>
+  request(`/members/workbook/${action}?kind=${kind}`, memberWorkbookFileSchema);
+
+export const previewMemberWorkbook = (kind: MemberWorkbookKind, contentBase64: string) =>
+  request('/members/workbook/preview', memberWorkbookPreviewSchema, {
+    method: 'POST', body: JSON.stringify({ kind, contentBase64 }),
+  });

@@ -24,6 +24,7 @@ import { formatCountOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { CreateMemberDialog } from './CreateMemberDialog';
+import { MemberWorkbookDialog } from './MemberWorkbookDialog';
 import { CreateOstDialog } from './CreateOstDialog';
 import { MemberDetailDialog } from './MemberDetailDialog';
 import { TransferMemberDialog } from './TransferMemberDialog';
@@ -50,6 +51,7 @@ export function MembersPage() {
   const [position, setPosition] = useState<'all' | MemberPosition>('all');
   const [page, setPage] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const [workbookOpen, setWorkbookOpen] = useState(false);
   const [createOstOpen, setCreateOstOpen] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [transferId, setTransferId] = useState<string | null>(null);
@@ -119,6 +121,7 @@ export function MembersPage() {
         description="Hierarchy sellers (IST) and OSTs with their heads."
         actions={
           <>
+            <Button variant="secondary" onClick={() => setWorkbookOpen(true)}>Import / export</Button>
             <Button variant="secondary" onClick={() => setCreateOstOpen(true)}>
               Create OST
             </Button>
@@ -296,6 +299,10 @@ export function MembersPage() {
           void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
         }}
       />
+      {workbookOpen ? <MemberWorkbookDialog
+        onClose={() => setWorkbookOpen(false)}
+        onCreated={() => { void client.invalidateQueries({ queryKey: networkMemberKeys.scope }); }}
+      /> : null}
       {viewing ? (
         <MemberDetailDialog
           member={viewing}

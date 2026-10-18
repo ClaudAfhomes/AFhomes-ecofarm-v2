@@ -221,14 +221,18 @@ function fieldDetails(parsed: {
   return details;
 }
 
-async function roleCatalog(db: Db): Promise<RoleRow[]> {
-  const [{ data: roles }, { data: grants }, { data: modules }] = await Promise.all([
-    db.from('roles').select('id,slug,name,is_active'),
+async function roleCatalog(db: Db, complete = false): Promise<RoleRow[]> {
+  const options = complete ? { count: 'exact' as const } : undefined;
+  const results = await Promise.all([
+    db.from('roles').select('id,slug,name,is_active', options),
     db
       .from('role_permissions')
-      .select('role_id,module_id,can_view,can_create,can_update,can_delete'),
-    db.from('modules').select('id,key'),
+      .select('role_id,module_id,can_view,can_create,can_update,can_delete', options),
+    db.from('modules').select('id,key', options),
   ]);
+  if (complete && results.some((r) => r.error || r.count !== (r.data?.length ?? 0)))
+    throw new Error('Workbook role reference is unavailable or truncated');
+  const [{ data: roles }, { data: grants }, { data: modules }] = results;
   const keyById = new Map<string, string>(
     ((modules ?? []) as { id: string; key: string }[]).map((m) => [m.id, m.key]),
   );
@@ -340,40 +344,56 @@ async function roleHolders(
     }));
 }
 
-async function memberRows(db: Db, search: string, position?: MemberPosition) {
+async function memberRows(db: Db, search: string, position?: MemberPosition, workbook = false) {
+  const options = workbook ? { count: 'exact' as const } : undefined;
   const [
-    { data: staff },
-    { data: assignments },
-    { data: profiles },
-    { data: departments },
-    { data: ostEdges, error: ostEdgesError },
+    { data: staff, error: staffError, count: staffCount },
+    { data: assignments, error: assignmentsError, count: assignmentsCount },
+    { data: profiles, error: profilesError, count: profilesCount },
+    { data: departments, error: departmentsError, count: departmentsCount },
+    { data: ostEdges, error: ostEdgesError, count: edgesCount },
   ] = await Promise.all([
     db
       .from('staff_users')
-      .select('id,email,full_name,status,department_id,employee_number,created_at')
+      .select('id,email,full_name,status,department_id,employee_number,created_at', options)
       .order('created_at', { ascending: false }),
-    db.from('staff_role_assignments').select('staff_id,role_id'),
+    db.from('staff_role_assignments').select('staff_id,role_id', options),
     db
       .from('network_member_profiles')
       .select(
         'staff_id,date_of_birth,sex,civil_status,street_no,city_municipality,province,province_code,city_municipality_code,zip_code,tel_no,mobile_no,fb_messenger,tin,employer_name,employer_address,job_position,government_id_type,government_id_number,referrer_staff_id,ost_referrer_staff_id',
+        options,
       ),
-    db.from('departments').select('id,name'),
+    db.from('departments').select('id,name', options),
     db
       .from('referral_relationships')
-      .select('subject_staff_id,upline_staff_id')
+      .select('subject_staff_id,upline_staff_id', options)
       .eq('hierarchy_role', 'ost')
       .eq('is_active', true)
       .eq('is_authoritative', true),
   ]);
   if (ostEdgesError) throw ostEdgesError;
+  if (workbook && (staffError || assignmentsError || profilesError || departmentsError))
+    throw new Error('Workbook member reference read failed');
+  // shortcut: roster references use one response; paginate before their server cap blocks workbooks.
+  if (
+    workbook &&
+    [
+      [staff, staffCount],
+      [assignments, assignmentsCount],
+      [profiles, profilesCount],
+      [departments, departmentsCount],
+      [ostEdges, edgesCount],
+    ].some(([rows, count]) => count !== (Array.isArray(rows) ? rows.length : 0))
+  )
+    throw new Error('Workbook reference is truncated; pagination is required before import/export');
   const ostHeadByStaff = new Map(
     (ostEdges ?? []).map((edge: Record<string, unknown>) => [
       String(edge.subject_staff_id),
       String(edge.upline_staff_id),
     ]),
   );
-  const roles = await roleCatalog(db);
+  const roles = await roleCatalog(db, workbook);
   const roleById = new Map(roles.map((r: RoleRow) => [r.id, r]));
   const assignmentByStaff = new Map(
     ((assignments ?? []) as Record<string, unknown>[]).map((a) => [
@@ -447,6 +467,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   const path = subPath(req);
+
+  if (path.startsWith('workbook/'))
+    return handleMemberWorkbook(
+      req,
+      res,
+      db,
+      () => memberRows(db, '', undefined, true),
+      async (actor) =>
+        new Set(
+          (await roleCatalog(db, true))
+            .filter(
+              (role) => role.is_active && permissionsAreSubset(role.permissions, actor.permissions),
+            )
+            .map((role) => role.slug),
+        ),
+    );
 
   /* ---------------- eligible uplines for a position ---------------- */
   if (path === 'uplines' && method(req) === 'GET') {
@@ -1334,3 +1370,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   return fail(res, 'NOT_FOUND', `No handler for ${path || 'members'}`, 404);
 }
+import { handleMemberWorkbook } from '../_lib/member-workbook-handler.js';
