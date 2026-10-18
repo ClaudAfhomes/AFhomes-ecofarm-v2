@@ -33,6 +33,13 @@ function install() {
       roles: [],
       role_permissions: [],
       staff_users: [
+        {
+          id: OST_ID,
+          email: 'ost@afhomes.test',
+          full_name: 'Ollie Seller',
+          status: 'active',
+          must_change_password: false,
+        },
         { id: SM_ID, email: 'sm@afhomes.test', full_name: 'Sam Manager', status: 'active' },
         { id: OTHER_ID, email: 'other@afhomes.test', full_name: 'Other Person', status: 'active' },
       ],
@@ -60,8 +67,16 @@ function install() {
       audit_events: [],
     } as never,
     tokens: {
-      'tok-ost': { id: OST_ID, email: 'ost@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
-      'tok-other': { id: OTHER_ID, email: 'other@afhomes.test', email_confirmed_at: '2026-09-01T00:00:00.000Z' },
+      'tok-ost': {
+        id: OST_ID,
+        email: 'ost@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
+      'tok-other': {
+        id: OTHER_ID,
+        email: 'other@afhomes.test',
+        email_confirmed_at: '2026-09-01T00:00:00.000Z',
+      },
     },
   });
 }
@@ -80,6 +95,26 @@ async function call(token?: string) {
 }
 
 describe('GET /ost/me', () => {
+  it('blocks the temporary password until the server flag is cleared', async () => {
+    install();
+    const db = holder.db as FakeSupabase;
+    const staff = db.rows('staff_users').find((row) => row.id === OST_ID)!;
+    staff.must_change_password = true;
+    const denied = await call('tok-ost');
+    expect(denied.status).toBe(403);
+    expect(JSON.stringify(denied.body)).not.toContain('OST-000007');
+    staff.must_change_password = false;
+    expect((await call('tok-ost')).status).toBe(200);
+  });
+
+  it('fails closed when the password requirement cannot be read', async () => {
+    install();
+    (holder.db as FakeSupabase).errors['staff_users'] = { message: 'PRIVATE lookup error' };
+    const denied = await call('tok-ost');
+    expect(denied.status).toBe(503);
+    expect(JSON.stringify(denied.body)).not.toContain('PRIVATE');
+  });
+
   it('returns the caller own safe record with the sponsor name', async () => {
     install();
     const s = await call('tok-ost');

@@ -107,7 +107,9 @@ export default function SaleTeamSearch() {
                     <dd>
                       {result.data.status === 'superseded'
                         ? 'No longer current'
-                        : 'Currently accredited'}
+                        : result.data.kind === 'IST'
+                          ? 'Employee identity'
+                          : 'Currently accredited'}
                     </dd>
                   </div>
                   {result.data.status === 'superseded' && result.data.successorAaNumber ? (
@@ -120,11 +122,19 @@ export default function SaleTeamSearch() {
                   ) : null}
                   <div>
                     <dt>Valid from</dt>
-                    <dd>{result.data.startsOn}</dd>
+                    <dd>
+                      {result.data.kind === 'IST'
+                        ? 'Not applicable — employee'
+                        : result.data.startsOn}
+                    </dd>
                   </div>
                   <div>
                     <dt>Valid until</dt>
-                    <dd>{result.data.expiresOn}</dd>
+                    <dd>
+                      {result.data.kind === 'IST'
+                        ? 'No accreditation expiry'
+                        : result.data.expiresOn}
+                    </dd>
                   </div>
                 </dl>
               </section>

@@ -1291,6 +1291,9 @@ describe('POST /members/ost (direct OST creation)', () => {
     expect(rpcArgs('install_direct_ost_password')[0]?.arg).toMatchObject({
       p_aa_number: 'AAO26100001',
     });
+    expect(rpcArgs('install_direct_ost_password')[0]?.arg).not.toHaveProperty(
+      'p_temporary_password',
+    );
     expect(JSON.stringify(state.body)).not.toContain('SyntheticPass123!');
   });
   const ORIGINAL_ADMIN_URL = process.env.AFHOMES_ADMIN_URL;
@@ -1622,6 +1625,42 @@ describe('POST /members/:id/transfer', () => {
 });
 
 describe('member workbook read-only endpoints', () => {
+  it.each(['12345678', 'SyntheticPass123!'])(
+    'accepts canonical temporary password length %s before claiming a row',
+    async (temporaryPassword) => {
+      await call({
+        method: 'POST',
+        familyPath: `workbook/jobs/${SSM_ID}/rows/${SM_ID}/confirm`,
+        token: ADMIN_TOKEN,
+        body: { evidenceVerified: true, temporaryPassword },
+      });
+      expect(rpcCalls('claim_member_workbook_row')).toHaveLength(1);
+    },
+  );
+  it.each(['1234567', 'x'.repeat(129)])(
+    'rejects invalid temporary password length before claiming a row',
+    async (temporaryPassword) => {
+      const result = await call({
+        method: 'POST',
+        familyPath: `workbook/jobs/${SSM_ID}/rows/${SM_ID}/confirm`,
+        token: ADMIN_TOKEN,
+        body: { evidenceVerified: true, temporaryPassword },
+      });
+      expect(result.status).toBe(400);
+      expect(rpcCalls('claim_member_workbook_row')).toHaveLength(0);
+    },
+  );
+  it('protects job history and rejects browser-supplied confirmation payloads', async () => {
+    expect((await call({ familyPath: 'workbook/jobs' })).status).toBe(401);
+    const result = await call({
+      method: 'POST',
+      familyPath: `workbook/jobs/${SSM_ID}/rows/${SM_ID}/confirm`,
+      token: ADMIN_TOKEN,
+      body: { evidenceVerified: true, fields: { email: 'forged@example.invalid' } },
+    });
+    expect(result.status).toBe(400);
+    expect(holder.db.calls.filter((c) => c.op === 'createUser')).toEqual([]);
+  });
   function uploadFields(fields: Record<string, string>) {
     const parts = readWorkbookParts(memberWorkbook('IST', []));
     Object.values(MEMBER_ENTRY_TABS).forEach((headers, index) => {
@@ -1755,6 +1794,18 @@ describe('member workbook read-only endpoints', () => {
     ).toEqual([]);
   });
   it('exports only the selected kind and excludes credentials and private identifiers', async () => {
+    install(undefined, {
+      rpcs: [
+        { fn: 'get_sale_team_accreditation', result: null },
+        {
+          fn: 'export_member_workbook_profiles',
+          result: [
+            { id: SSM_ID, fields: {}, history: [] },
+            { id: SM_ID, fields: {}, history: [] },
+          ],
+        },
+      ],
+    });
     const response = await call({
       familyPath: 'workbook/export',
       query: { kind: 'IST' },
@@ -1764,12 +1815,21 @@ describe('member workbook read-only endpoints', () => {
     expect(response.body).toMatchObject({ filename: 'afhomes-ist-roster.xlsx' });
     const sheets = readWorkbook(
       Buffer.from((response.body as { content: string }).content, 'base64'),
-      ['IST'],
+      ['Identity', 'Team', 'Details'],
+      false,
+      { Identity: [8, 15], Team: [1, 4], Details: [1] },
     );
-    const cells = sheets.get('IST')!;
-    expect(cells[0]).not.toContain('TIN');
-    expect(cells.slice(1).every((r) => r[5] !== 'ost')).toBe(true);
-    expect(cells.flat()).not.toContain('D7654321');
+    const cells = sheets.get('Identity')!;
+    expect(cells[0]![0]).toBe('AAI Number');
+    expect(
+      cells
+        .slice(1)
+        .filter((r) => r[4])
+        .map((r) => r[4]),
+    ).toEqual(['sm@afhomes.test', 'ssm@afhomes.test']);
+    const details = sheets.get('Details')!;
+    expect(details.slice(1).every((r) => !r[2] && !r[3])).toBe(true);
+    expect([...sheets.values()].flat(2)).not.toContain('D7654321');
     expect(
       holder.db.calls.filter((c) =>
         [

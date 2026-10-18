@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/utils';
 import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
@@ -53,17 +53,15 @@ it('displays the official IST number on the own account', async () => {
   expect(screen.queryByText(/Legacy ID/i)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
 });
-it('requires dates and explicit confirmation before admin issuance', async () => {
+it('issues IST employee identity after explicit confirmation without accreditation dates', async () => {
   api.request.mockImplementation((_path: string, _schema: unknown, init?: RequestInit) =>
     Promise.resolve(init ? record : null),
   );
   renderWithProviders(<SaleTeamAccreditationCard staffId="seller" kind="IST" />, { user: admin });
-  const button = await screen.findByRole('button', { name: 'Approve and issue AA number' });
-  expect(button).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('Approved start'), { target: { value: record.startsOn } });
-  fireEvent.change(screen.getByLabelText('Approved expiry'), {
-    target: { value: record.expiresOn },
-  });
+  const button = await screen.findByRole('button', { name: 'Issue employee AAI number' });
+  expect(button).toBeEnabled();
+  expect(screen.queryByLabelText('Approved start')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Approved expiry')).not.toBeInTheDocument();
   await userEvent.click(button);
   expect(api.request).toHaveBeenCalledTimes(1);
   await userEvent.click(screen.getByRole('button', { name: 'Approve' }));
@@ -76,8 +74,6 @@ it('requires dates and explicit confirmation before admin issuance', async () =>
         body: JSON.stringify({
           action: 'approve',
           kind: 'IST',
-          startsOn: record.startsOn,
-          expiresOn: record.expiresOn,
         }),
       }),
     ),

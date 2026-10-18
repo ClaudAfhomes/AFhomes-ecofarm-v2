@@ -126,6 +126,13 @@ export function readWorkbook(
   selected?: readonly string[],
   requireSingleSheet = selected === undefined,
   ignoredFormulaColumns: Readonly<Record<string, readonly number[]>> = {},
+  formulaCell?: (
+    sheet: string,
+    column: number,
+    row: number,
+    formula: string,
+    cached: string,
+  ) => string,
 ): Map<string, string[][]> {
   const parts = bytes instanceof Map ? bytes : readWorkbookParts(bytes);
   const part = (name: string) => {
@@ -152,7 +159,9 @@ export function readWorkbook(
     const name = selectedSheet.attrs.name ?? '';
     if (selected && !selected.includes(name)) continue;
     if (result.has(name)) throw new Error('Duplicate worksheet name');
-    const id = selectedSheet.attrs['r:id'];
+    const id =
+      selectedSheet.attrs['r:id'] ??
+      Object.entries(selectedSheet.attrs).find(([key]) => key.endsWith(':id'))?.[1];
     const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
     if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
       throw new Error('Unsupported worksheet relationship');
@@ -202,7 +211,15 @@ export function readWorkbook(
         if (children(c, 'f').length) {
           // Derived workbook columns are recomputed by their importer, never evaluated here.
           if (ignoredFormulaColumns[name]?.includes(col)) {
-            cells[col - 1] = '';
+            cells[col - 1] = formulaCell
+              ? formulaCell(
+                  name,
+                  col,
+                  rowIndex + 1,
+                  children(c, 'f')[0]!.text,
+                  children(c, 'v')[0]?.text ?? '',
+                )
+              : '';
             continue;
           }
           // Age is discarded; postal caches are unverified candidate text. Nothing is evaluated.

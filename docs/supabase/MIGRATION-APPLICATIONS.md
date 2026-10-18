@@ -173,3 +173,91 @@ transfer dialog. Authenticated live workflow/persistence remains unverified.
 Ignored sanitized evidence: `.tmp-bin/release-review/migration-11-applied.json`.
 Existing gitignored credentials were loaded only by the approved helper;
 no credentials or customer records are written here.
+
+## Prepared locally only — 2026-10-18 — IST identity and member workbook jobs
+
+**NOT APPLIED. PENDING AUTHORIZATION.** Initial implementation prohibited live
+SQL. The owner subsequently approved read-only preflight only on 2026-10-18:
+TLS-verified target `ikaevepedpqygdlipsei`, transaction read-only ON, 95 history
+entries through migration 11, migrations 12/13 and new import tables absent.
+The 12 inspected prerequisite function overloads match their repository baseline
+bodies after whitespace/comment normalization. No live mutation was authorized.
+
+- `20261208000012_afhomes_ist_employee_identity.sql`: date-free IST employee AAI
+  issuance in the existing identifier registry; retain all legacy records and
+  old dates; OST still requires term dates. Existing management and conversion
+  signatures remain, with IST employment separated from annual accreditation.
+- `20261208000013_afhomes_member_workbook_jobs.sql`: private durable provenance,
+  identity matching, reserved account claims, transactional canonical persistence,
+  safe job history/export, and sealed-import-only legacy OST identifier support.
+- `CURRENT-SCHEMA.sql` regenerated: 108 migration files / 60 public tables.
+  It remains context-only and must never be applied as SQL.
+- Local disposable PostgreSQL: member workbook gate 78/78, including forward
+  upgrade preservation, the OST profile persistence regression and six existing
+  RLS invariant queries returning zero rows; existing OST lifecycle gate 177/177.
+- Review packet, exact hashes, field mappings and remaining acceptance work:
+  `docs/handoffs/2026-10-18-member-company-import.md`.
+
+Real local GoTrue/PostgREST and Chrome acceptance subsequently exercised IST
+hierarchy creation, OST registration/profile persistence, issued identifiers and
+export/re-import matching. A local SMTP capture subsequently proved IST/OST
+one-use recovery, password login and correct portal access with unchanged IDs.
+External email delivery and hosted deployment remain unverified. Exact evidence and the updated
+migration-13 checksum are in the review packet above.
+
+No live apply, live Auth mutation, production import, deployment or remote Git write
+occurred. A separately approved coordinated migration/application window must
+prevent old clients from creating/reading new date-free IST records mid-release.
+Do not replay unrelated older history-missing migrations.
+
+### Local split preparation and OST password fix - 2026-10-18
+
+The former combined draft migrations 12/13 were split locally into active schema
+files 12/13 and function files 14/15; this does NOT record a live application.
+The exact four checksums and local OST password-enforcement fix are recorded in
+`docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md`.
+Current local gate: 81/81, with schema-only legacy preservation/getter checks,
+then function migrations and canonical import tests. No migration body changed
+during the password fix. CURRENT-SCHEMA.sql remains the existing synchronized
+110-file context index. The old two-migration live wrapper now refuses the
+four-file plan; do not use it or infer authorization from its CLI flags.
+Live pause, a fresh pre-change restore-verified backup, a rehearsed phase-aware
+executor and explicit scoped approval remain required before any live apply.
+
+### Release safeguard rehearsal - 2026-10-18 (NOT a migration application)
+
+Fresh encrypted application/Auth backup was taken through a repeatable-read,
+read-only snapshot of project `ikaevepedpqygdlipsei`. Disposable restore verified
+104 table counts and data digests, all 95 history rows (through version 11),
+and zero unvalidated constraints. The same restored snapshot then rehearsed
+ONLY versions `20261208000012` through `20261208000015`: rollback then commit,
+history 95 -> 99, existing table data preserved. This history delta is LOCAL.
+
+The new four-file runner pins exact bytes and checks schema then function phases
+inside one transaction. Local fault injection after each DDL body/history insert
+passed 35 checks. The database maintenance model passed 132 local checks.
+
+A newly executed privilege regression failed against draft migration 15's
+seven-argument direct OST installer (public execution was allowed). The unapplied
+draft now retains the existing six-argument signature and explicitly restricts
+execution to `service_role`. PostgreSQL workbook gate: 86/86; restored-backup and
+fault-injection rehearsals passed again. Migration 15's new SHA-256 is
+`6d550f2540343b50d0a67254295bcb95dd9c6231a9611fe7c20b332643fe0e9c`.
+`CURRENT-SCHEMA.sql` was regenerated. No applied migration was edited.
+
+The owner authorized a temporary live pause test. The first test installed and
+removed 15 deny triggers and project-level WAF rules, with no migration/history
+change or business-row mutation. Database denial passed. HTTP coverage was NOT
+accepted because Vercel Authentication intercepted most unauthenticated probes.
+Both project firewall rule sets/enabled states and the database guard objects
+were restored. Authenticated HTTP retest results are recorded separately in the
+latest handoff; do not treat temporary-test evidence as an active release pause.
+
+Authenticated follow-up PASS: all 231 deployment/alias URLs and the 88 affected
+route/method combinations proved WAF denial, after explicitly retrying eight
+transport failures. Unrelated route probes remained outside the deny rule.
+Temporary WAF rules/enabled-state changes and database guards were removed;
+the original AA-search rate limit remains intact. One intermediate cleanup
+failure was recovered and verified separately. Final retry cleanup passed.
+Live history remains 95 through `20261208000011`; versions 12-15 are still NOT
+live-applied. See the latest v2 handoff for evidence files and approval boundary.

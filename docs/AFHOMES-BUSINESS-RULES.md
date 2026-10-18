@@ -382,3 +382,31 @@ Enforce Supabase RLS **and** server-resolved authorization; use a service-role k
 ---
 
 **Document disposition:** Customer external ID format approved as `AF-CUS-YYYY-NNNNNN` on 2026-10-14. Ready for technical planning; **not approved for production issuance** until the remaining §13 decisions, including OD-12 operational details, are resolved.
+
+## 16. IST employee identity correction — owner instruction, 2026-10-18
+
+This explicit project-owner clarification supersedes earlier passages that describe
+IST employees as requiring annual accreditation. IST is the Internal Sales Team:
+company employees in the VD → SSM → SM hierarchy. Their AAI is a permanent employee
+identifier. New IST creation and historical import require no accreditation start,
+expiry or annual renewal. Role assignment and account access still require the
+existing authorization. Preserve issued identifiers, UUIDs, genealogy and legacy
+history; do not delete or rewrite old term-shaped records automatically.
+
+OST remains an external sales representative requiring its existing accreditation,
+signature verification, management approval and annual validity. Manual OST CREATE
+still requires an active SM with its valid upperline. Matching an existing public
+referral record does not change its lawful existing direct parent.
+
+Keep the existing company-wide monthly AAI/AAO allocator. For a newly allocated AAI,
+use the actual issuance month, not a fabricated accreditation date. Historical
+AAI/AAO values remain unchanged, including valid supported legacy identifiers.
+
+Import names are validated with shared contracts, then stored uppercase as directed;
+Philippine mobile storage remains canonical +63. Excel/preview presentation uses
+Proper Case conservatively and 09 text. Display casing never reconstructs legal
+capitalization or rewrites an existing account. The current shared name helper
+preserves casing, so this import-specific storage decision is explicit.
+
+Local forward migrations 20261208000012 and 20261208000013 implement this distinction.
+They are proposals for operational review, **not evidence of live application**.

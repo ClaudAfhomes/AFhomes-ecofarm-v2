@@ -104,8 +104,8 @@ export function TransferToIstDialog({
       <form id="ist-transfer" className={styles.dialogBody} onSubmit={submit}>
         <p className={styles.sectionHint}>
           Leaves OST for the selling hierarchy. The held number {member.aaNumber ?? ''} is retired —
-          never renumbered — and gets an AAI successor with a fresh one-year validity. Past sales,
-          commissions and team history are preserved.
+          never renumbered — and gets an AAI employee identity without accreditation expiry. Past
+          sales, commissions and team history are preserved.
         </p>
         <p className={styles.sectionHint}>
           Current Sales Manager: {member.referrerName ?? 'Not recorded'}.

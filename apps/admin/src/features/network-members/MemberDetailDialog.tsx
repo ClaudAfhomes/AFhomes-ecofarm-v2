@@ -262,7 +262,7 @@ export function MemberDetailDialog({
     onSuccess: async () => {
       await invalidate();
       onChanged();
-      notifySuccess({ title: 'AA number issued', message: 'Accreditation is active.' });
+      notifySuccess({ title: 'AAI number issued', message: 'Employee identity recorded.' });
     },
   });
   const issueFields = errorFieldEntries(issue.error);
@@ -410,7 +410,7 @@ export function MemberDetailDialog({
           </DetailCard>
           {!member.aaNumber && member.position !== 'ost' ? (
             <DetailCard>
-              <DetailCardTitle>Accreditation</DetailCardTitle>
+              <DetailCardTitle>Employee identity</DetailCardTitle>
               <p className={styles.sectionHint}>No number yet. Issue one.</p>
               <div className={styles.formFields}>
                 <label className={styles.fieldLabel}>

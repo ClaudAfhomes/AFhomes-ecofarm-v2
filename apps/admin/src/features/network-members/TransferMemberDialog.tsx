@@ -40,7 +40,7 @@ function CurrentState({ member }: { member: Member }) {
   return (
     <section className={styles.formSection} aria-labelledby="transfer-current">
       <h2 id="transfer-current" className={styles.sectionTitle}>
-        Current accreditation
+        {member.position === 'ost' ? 'Current accreditation' : 'Current employee identity'}
       </h2>
       <div className={styles.formFields}>
         <p className={styles.sectionHint}>

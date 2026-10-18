@@ -6,7 +6,6 @@ import {
   AccreditationId,
   Button,
   ConfirmDialog,
-  DateField,
   DetailCard,
   DetailCardTitle,
   DetailField,
@@ -40,8 +39,6 @@ export function SaleTeamAccreditationCard({
   kind: 'IST' | 'OST';
 }) {
   const { user } = useSession();
-  const [startsOn, setStartsOn] = useState('');
-  const [expiresOn, setExpiresOn] = useState('');
   const [action, setAction] = useState<'approve' | 'revoke' | null>(null);
   const management = Boolean(
     staffId &&
@@ -66,7 +63,6 @@ export function SaleTeamAccreditationCard({
         body: JSON.stringify({
           action: approvedAction,
           kind,
-          ...(kind === 'IST' && approvedAction === 'approve' ? { startsOn, expiresOn } : {}),
         }),
       }),
     onSuccess: async () => {
@@ -75,14 +71,19 @@ export function SaleTeamAccreditationCard({
     },
   });
   const value: SaleTeamAccreditation | null | undefined = record.data;
-  const statusLabel = value
-    ? value.status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
-    : 'Not issued';
+  const statusLabel =
+    value?.kind === 'IST' && value.status === 'accredited'
+      ? 'Active employee'
+      : value
+        ? value.status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
+        : 'Not issued';
   const statusTone = value ? ACCREDITATION_STATUS_TONES[value.status] : 'warning';
   return (
     <DetailCard>
       <div className={styles.header}>
-        <DetailCardTitle>Sales accreditation</DetailCardTitle>
+        <DetailCardTitle>
+          {kind === 'IST' ? 'Employee identity' : 'Sales accreditation'}
+        </DetailCardTitle>
         {record.isPending || record.isError ? null : (
           <StatusChip label={statusLabel} tone={statusTone} />
         )}
@@ -96,8 +97,12 @@ export function SaleTeamAccreditationCard({
           <DetailField label="AA number">
             <AccreditationId value={value?.aaNumber ?? null} />
           </DetailField>
-          {value ? <DetailField label="Accredited name">{value.fullName}</DetailField> : null}
           {value ? (
+            <DetailField label={kind === 'IST' ? 'Employee name' : 'Accredited name'}>
+              {value.fullName}
+            </DetailField>
+          ) : null}
+          {value && kind === 'OST' ? (
             <>
               <DetailField label="Valid from">{value.startsOn}</DetailField>
               <DetailField label="Valid until">{value.expiresOn}</DetailField>
@@ -107,34 +112,22 @@ export function SaleTeamAccreditationCard({
       )}
       {management && !record.isError && !record.isPending ? (
         <div className={styles.actionArea}>
-          {kind === 'IST' ? (
-            <DetailFieldGrid>
-              <DateField
-                id={`aa-start-${staffId}`}
-                name="startsOn"
-                label="Approved start"
-                value={startsOn}
-                onChange={setStartsOn}
-              />
-              <DateField
-                id={`aa-end-${staffId}`}
-                name="expiresOn"
-                label="Approved expiry"
-                value={expiresOn}
-                onChange={setExpiresOn}
-              />
-            </DetailFieldGrid>
-          ) : (
+          {kind === 'OST' ? (
             <p className={styles.note}>Uses approved OST validity dates.</p>
+          ) : (
+            <p className={styles.note}>
+              IST employees have no accreditation dates or annual renewal.
+            </p>
           )}
           <div className={styles.actionButtons}>
-            <Button
-              onClick={() => setAction('approve')}
-              disabled={kind === 'IST' && (!startsOn || !expiresOn || expiresOn < startsOn)}
-            >
-              {value ? 'Approve accreditation' : 'Approve and issue AA number'}
+            <Button onClick={() => setAction('approve')} disabled={kind === 'IST' && !!value}>
+              {kind === 'IST'
+                ? 'Issue employee AAI number'
+                : value
+                  ? 'Approve accreditation'
+                  : 'Approve and issue AA number'}
             </Button>
-            {value && value.status !== 'revoked' ? (
+            {kind === 'OST' && value && value.status !== 'revoked' ? (
               <Button variant="danger" onClick={() => setAction('revoke')}>
                 Revoke accreditation
               </Button>
@@ -143,11 +136,19 @@ export function SaleTeamAccreditationCard({
           {save.isError ? <Alert variant="danger">{save.error.message}</Alert> : null}
           <ConfirmDialog
             open={action !== null}
-            title={action === 'revoke' ? 'Revoke accreditation?' : 'Approve accreditation?'}
+            title={
+              kind === 'IST'
+                ? 'Issue employee identity?'
+                : action === 'revoke'
+                  ? 'Revoke accreditation?'
+                  : 'Approve accreditation?'
+            }
             message={
-              action === 'revoke'
-                ? 'Public verification will stop immediately.'
-                : 'Confirms eligibility for AA verification.'
+              kind === 'IST'
+                ? 'Issues the permanent AAI identifier without an accreditation term.'
+                : action === 'revoke'
+                  ? 'Public verification will stop immediately.'
+                  : 'Confirms eligibility for AA verification.'
             }
             confirmLoading={save.isPending}
             danger={action === 'revoke'}

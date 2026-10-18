@@ -74,13 +74,6 @@ const MEMBER_ROLES: readonly MemberPosition[] = [
   'ost',
 ];
 
-/** Accreditation validity granted at onboarding: one year from approval. */
-function accreditationWindow(now = new Date()): { startsOn: string; expiresOn: string } {
-  const startsOn = now.toISOString().slice(0, 10);
-  const expires = new Date(Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()));
-  return { startsOn, expiresOn: expires.toISOString().slice(0, 10) };
-}
-
 /** Display order of an OST applicant's name from the official identity. */
 function ostFullName(identity: {
   firstName: string;
@@ -546,14 +539,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (singleRpcRow(existing)) return fail(res, 'CONFLICT', 'AA number already issued', 409);
     if (manual && (await aaNumberTaken(db, manual)))
       return fail(res, 'CONFLICT', 'This AA number is already issued', 409);
-    const { startsOn, expiresOn } = accreditationWindow();
     const baseArgs = {
       p_actor_id: auth.userId,
       p_staff_id: id,
       p_kind: 'IST',
       p_action: 'approve',
-      p_starts_on: startsOn,
-      p_expires_on: expiresOn,
+      p_starts_on: null,
+      p_expires_on: null,
     };
     const { error: accreditationError } = await db.rpc(
       'manage_sale_team_accreditation',
@@ -1328,19 +1320,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         referrerStaffId: referrer?.id ?? null,
         ostReferrerStaffId: ostReferrer?.id ?? null,
       });
-      // Every member created on this path is a hierarchy seller (the guard
-      // above refuses OST), so the AA number is issued with the account: IST
-      // accreditation, one year. AUTO omits the number, so it works on any
-      // database; MANUAL passes it to the 7-argument function from the
-      // manual-AA migration. OST numbers are issued by its own pipeline.
-      const { startsOn, expiresOn } = accreditationWindow();
+      // IST receives an employee identity only; the compatible RPC must not create a term.
       const baseArgs = {
         p_actor_id: auth.userId,
         p_staff_id: created.user.id,
         p_kind: 'IST',
         p_action: 'approve',
-        p_starts_on: startsOn,
-        p_expires_on: expiresOn,
+        p_starts_on: null,
+        p_expires_on: null,
       };
       const { error: accreditationError } = await db.rpc(
         'manage_sale_team_accreditation',
