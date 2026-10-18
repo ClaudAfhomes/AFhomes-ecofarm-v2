@@ -22,6 +22,53 @@
   gap: var(--space-2);
 }
 
+/* Header identity line: OST number chip, applicant name, current sponsor. */
+.headerMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.headerId {
+  padding: 2px var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  background-color: var(--color-bg-surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary);
+}
+
+.headerName {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.headerDivider {
+  width: 1px;
+  height: 1em;
+  background-color: var(--color-border-default);
+}
+
+.headerSponsor {
+  color: var(--color-text-secondary);
+}
+
+.headerSponsor strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+@media (max-width: 639px) {
+  .headerDivider {
+    display: none;
+  }
+}
+
 .panel {
   margin: 0;
   min-width: 0;
@@ -53,6 +100,15 @@
 
 .editorGrid > * {
   min-width: 0;
+}
+
+/* Read-only detail fields: denser columns on wider viewports.
+   Doubled class so the page rule wins over the shared field grid. */
+@media (min-width: 720px) {
+  .fieldColumns.fieldColumns {
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: var(--space-3) var(--space-5);
+  }
 }
 
 .filterLabel {
@@ -103,6 +159,97 @@
   display: grid;
   gap: var(--space-3);
   align-content: start;
+}
+
+.panelNote {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Renewal context strip: term facts side by side above the form groups. */
+.termFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-sunken);
+}
+
+.fact {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.factLabel {
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.factValue {
+  margin: 0;
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Proposed-changes summary in the applicant dialog: rows on a sunken strip. */
+.changeBlock {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-sunken);
+}
+
+.changeList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-body-s);
+  color: var(--color-text-primary);
+}
+
+.changeList li {
+  overflow-wrap: anywhere;
+}
+
+.formGroup {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.renewalHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.renewalMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
 }
 
 .tableWrap {

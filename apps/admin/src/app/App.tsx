@@ -190,9 +190,6 @@ const OstApplicationDetailPage = lazy(() =>
 const OstApplicationsPage = lazy(() =>
   import('../features/ost/OstApplicationsPage').then((m) => ({ default: m.OstApplicationsPage })),
 );
-const OstMembersPage = lazy(() =>
-  import('../features/ost/OstMembersPage').then((m) => ({ default: m.OstMembersPage })),
-);
 const OstManualRegistrationPage = lazy(() =>
   import('../features/ost/OstAccreditationPages').then((m) => ({
     default: m.OstManualRegistrationPage,
@@ -407,7 +404,6 @@ export default function App() {
                 path="/admin/ost/applications/:id"
                 element={protectedPage(<OstApplicationDetailPage />)}
               />
-              <Route path="/admin/ost/members" element={protectedPage(<OstMembersPage />)} />
               <Route
                 path="/admin/ost/referral-code"
                 element={protectedPage(<OstReferralCodesPage />)}

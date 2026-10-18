@@ -27,7 +27,7 @@ import styles from './OstAccreditationPages.module.css';
 
 type Applicant = z.infer<typeof ostApplicantSnapshotSchema>;
 
-const DASH = '—';
+const NOT_RECORDED = 'Not recorded';
 /** Identity fields whose change requires a recorded reason (server re-enforces). */
 const SENSITIVE_FIELDS = ['fullName', 'birthDate', 'sex', 'civilStatus'] as const;
 const SEX_OPTIONS = [
@@ -48,7 +48,7 @@ const sexValue = (value: string | null) =>
 const civilStatusValue = (value: string | null) =>
   CIVIL_STATUS_OPTIONS.some((option) => option.value === value && value !== '') ? value! : '';
 
-const text = (value: unknown) => (value == null || value === '' ? DASH : String(value));
+const text = (value: unknown) => (value == null || value === '' ? NOT_RECORDED : String(value));
 const recordOf = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -236,7 +236,7 @@ export function OstApplicantUpdate({
 
   const submit = () => {
     if (editAddress && (!geography.regionCode || !geography.provinceCode || !geography.localityCode || !geography.barangayCode)) {
-      setError('Choose the region, province, city / municipality and barangay from the lists.');
+      setError('Pick region, province, city, barangay.');
       return;
     }
     if (!fields.birthDate) {
@@ -244,7 +244,7 @@ export function OstApplicantUpdate({
       return;
     }
     if (!fields.sex || !fields.civilStatus) {
-      setError('Choose the sex and civil status.');
+      setError('Choose sex and civil status.');
       return;
     }
     if (!parsed.success) {
@@ -252,9 +252,7 @@ export function OstApplicantUpdate({
       return;
     }
     if (isSensitiveChange(current, parsed.data) && parsed.data.reason.trim().length < 5) {
-      setError(
-        'A reason of at least 5 characters is required when the name, birth date, sex or civil status changes.',
-      );
+      setError('Reason needs five characters.');
       return;
     }
     setError('');
@@ -266,19 +264,16 @@ export function OstApplicantUpdate({
       <h2 id="ost-applicant-heading" className={styles.panelTitle}>
         Registered applicant
       </h2>
-      <p>
-        Values carried by the account and copied into every future renewal submission. Earlier
-        renewal snapshots are frozen history and are never rewritten.
+      <p className={styles.panelNote}>
+        Copied into future renewals. Snapshots are never rewritten.
       </p>
-      <DetailFieldGrid>
+      <DetailFieldGrid className={styles.fieldColumns}>
         <DetailField label="Full name">{current.fullName}</DetailField>
         <DetailField label="Date of birth">{text(current.birthDate)}</DetailField>
         <DetailField label="Sex">{text(current.sex)}</DetailField>
         <DetailField label="Civil status">{text(current.civilStatus)}</DetailField>
         <DetailField label="Mobile number">{text(current.phone)}</DetailField>
-        <DetailField label="Email">
-          {current.email ?? DASH} — sign-in identity, not editable here
-        </DetailField>
+        <DetailField label="Email">{current.email ?? NOT_RECORDED} (sign-in identity)</DetailField>
         <DetailField label="Facebook name">{text(current.messenger)}</DetailField>
         <DetailField label="Employer">{text(current.employerName)}</DetailField>
         <DetailField label="Job position">{text(current.jobPosition)}</DetailField>
@@ -289,16 +284,15 @@ export function OstApplicantUpdate({
       {canUpdate ? (
         <div className={styles.actions}>
           <Button variant="secondary" onClick={openDialog}>
-            Update Information
+            Update information
           </Button>
         </div>
       ) : (
-        <p>Updates require the member-profile update permission in Administration.</p>
+        <p className={styles.panelNote}>Member-profile update permission required.</p>
       )}
       {saved ? (
         <Alert variant="success" title="Applicant information updated">
-          Previous and proposed values were recorded in the audit trail. Submitted renewal forms
-          keep their own frozen snapshot.
+          Recorded in the audit trail. Renewal snapshots stay frozen.
         </Alert>
       ) : null}
 
@@ -317,9 +311,7 @@ export function OstApplicantUpdate({
           </>
         }
       >
-        <p>
-          Email, program and VIP state, accreditation numbers and history are not editable here.
-        </p>
+        <p className={styles.panelNote}>Email, program, history locked.</p>
         <div className={styles.editorGrid}>
           <TextField
             id="applicant-fullName"
@@ -374,7 +366,7 @@ export function OstApplicantUpdate({
           <TextField
             id="applicant-employerName"
             name="employerName"
-            label="Business / employer name"
+            label="Employer name"
             optional
             value={fields.employerName}
             onChange={(value) => setField('employerName', value)}
@@ -391,10 +383,9 @@ export function OstApplicantUpdate({
         <TextAreaField
           id="applicant-reason"
           name="reason"
-          label="Reason for the change"
+          label="Change reason"
           optional
           maxLength={500}
-          hint="Required (at least 5 characters) when the name, birth date, sex or civil status changes."
           value={fields.reason}
           onChange={(value) => setField('reason', value)}
         />
@@ -416,19 +407,19 @@ export function OstApplicantUpdate({
             onLine1={setLine1}
           />
         ) : (
-          <p>Current address: {addressText(current.address)}</p>
+          <p className={styles.panelNote}>Current address: {addressText(current.address)}</p>
         )}
         {parsed.success && changes.length > 0 ? (
-          <section aria-label="Proposed changes">
-            <h3>Proposed changes</h3>
-            <ul>
+          <section className={styles.changeBlock} aria-label="Proposed changes">
+            <h3 className={styles.groupTitle}>Proposed changes</h3>
+            <ul className={styles.changeList}>
               {changes.map((change) => (
                 <li key={change.label}>{`${change.label}: ${change.from} → ${change.to}`}</li>
               ))}
             </ul>
           </section>
         ) : (
-          <p>No changes to record yet.</p>
+          <p className={styles.panelNote}>No changes to record yet.</p>
         )}
         {error ? (
           <Alert variant="danger" title="Check the new values">
@@ -436,7 +427,7 @@ export function OstApplicantUpdate({
           </Alert>
         ) : null}
         {save.isError ? (
-          <Alert variant="danger" title="Applicant information could not be updated">
+          <Alert variant="danger" title="Applicant update failed">
             {save.error.message}
           </Alert>
         ) : null}

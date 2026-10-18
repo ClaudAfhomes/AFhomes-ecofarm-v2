@@ -28,6 +28,7 @@ import { MemberWorkbookDialog } from './MemberWorkbookDialog';
 import { CreateOstDialog } from './CreateOstDialog';
 import { MemberDetailDialog } from './MemberDetailDialog';
 import { TransferMemberDialog } from './TransferMemberDialog';
+import { TransferToIstDialog } from './TransferToIstDialog';
 import { getMembers, networkMemberKeys } from './services';
 import styles from './MembersPage.module.css';
 
@@ -55,6 +56,7 @@ export function MembersPage() {
   const [createOstOpen, setCreateOstOpen] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [transferId, setTransferId] = useState<string | null>(null);
+  const [convertToIstId, setConvertToIstId] = useState<string | null>(null);
   const settled = useDebouncedValue(search.trim(), 300, () => setPage(0));
   const query = useQuery({
     queryKey: networkMemberKeys.list(settled, position),
@@ -69,6 +71,9 @@ export function MembersPage() {
   const viewing = viewingId ? (rows.find((member) => member.id === viewingId) ?? null) : null;
   const transferring = transferId
     ? (rows.find((member) => member.id === transferId) ?? null)
+    : null;
+  const convertingToIst = convertToIstId
+    ? (rows.find((member) => member.id === convertToIstId) ?? null)
     : null;
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
@@ -315,6 +320,11 @@ export function MembersPage() {
             setViewingId(null);
             setTransferId(member.id);
           }}
+          onConvertToIst={(member) => {
+            // The IST conversion is its own workflow, not a team move.
+            setViewingId(null);
+            setConvertToIstId(member.id);
+          }}
         />
       ) : null}
       {transferring ? (
@@ -323,6 +333,16 @@ export function MembersPage() {
           onClose={() => setTransferId(null)}
           onTransferred={() => {
             setTransferId(null);
+            void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
+          }}
+        />
+      ) : null}
+      {convertingToIst ? (
+        <TransferToIstDialog
+          member={convertingToIst}
+          onClose={() => setConvertToIstId(null)}
+          onTransferred={() => {
+            setConvertToIstId(null);
             void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
           }}
         />

@@ -165,11 +165,13 @@ export function MemberDetailDialog({
   onClose,
   onChanged,
   onTransfer,
+  onConvertToIst,
 }: {
   member: Member;
   onClose: () => void;
   onChanged: () => void;
   onTransfer?: (member: Member) => void;
+  onConvertToIst?: (member: Member) => void;
 }) {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -266,6 +268,14 @@ export function MemberDetailDialog({
   const issueFields = errorFieldEntries(issue.error);
 
   const canDelete = user?.roleSlug === 'super_admin' && user.id !== member.id;
+  // A kind transfer is an administrator act (the transfer RPC refuses anyone
+  // else); mirror the role and update-right gates so nobody sees a dead end.
+  const canConvertToIst =
+    member.position === 'ost' &&
+    (user?.roleSlug === 'admin' || user?.roleSlug === 'super_admin') &&
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'network.members' && permission.canUpdate,
+    ) === true;
   const canViewRenewal =
     member.position === 'ost' &&
     canViewModule(user?.afHomesPermissions, 'network.ost_registrations') &&
@@ -280,9 +290,6 @@ export function MemberDetailDialog({
         title={member.fullName}
         footer={
           <>
-            <Button variant="secondary" onClick={onClose}>
-              Close
-            </Button>
             {canViewRenewal ? (
               <Button
                 variant="secondary"
@@ -291,12 +298,17 @@ export function MemberDetailDialog({
                   navigate(`/admin/ost/members/${member.id}`);
                 }}
               >
-                Validity / renewal
+                Renewal
               </Button>
             ) : null}
             {onTransfer ? (
               <Button variant="secondary" onClick={() => onTransfer(member)}>
-                {member.position === 'ost' ? 'Transfer team' : 'Convert to OST'}
+                {member.position === 'ost' ? 'Transfer team' : 'Transfer to OST'}
+              </Button>
+            ) : null}
+            {onConvertToIst && canConvertToIst ? (
+              <Button variant="secondary" onClick={() => onConvertToIst(member)}>
+                Transfer to IST
               </Button>
             ) : null}
             <Button

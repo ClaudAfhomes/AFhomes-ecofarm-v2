@@ -18,6 +18,19 @@ import {
 import { protectedRequest } from '../../lib/api/client';
 import { useSession } from '../../lib/session';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import styles from './SaleTeamAccreditationCard.module.css';
+
+/** Chip tone per accreditation status; anything unrecognized reads neutral. */
+const ACCREDITATION_STATUS_TONES: Record<
+  SaleTeamAccreditation['status'],
+  'success' | 'neutral' | 'danger'
+> = {
+  accredited: 'success',
+  expired: 'neutral',
+  revoked: 'danger',
+  inactive: 'neutral',
+  not_started: 'neutral',
+};
 
 export function SaleTeamAccreditationCard({
   staffId,
@@ -62,9 +75,18 @@ export function SaleTeamAccreditationCard({
     },
   });
   const value: SaleTeamAccreditation | null | undefined = record.data;
+  const statusLabel = value
+    ? value.status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
+    : 'Not issued';
+  const statusTone = value ? ACCREDITATION_STATUS_TONES[value.status] : 'warning';
   return (
     <DetailCard>
-      <DetailCardTitle>Sales accreditation</DetailCardTitle>
+      <div className={styles.header}>
+        <DetailCardTitle>Sales accreditation</DetailCardTitle>
+        {record.isPending || record.isError ? null : (
+          <StatusChip label={statusLabel} tone={statusTone} />
+        )}
+      </div>
       {record.isPending ? (
         <Skeleton style={{ height: 80 }} />
       ) : record.isError ? (
@@ -75,12 +97,6 @@ export function SaleTeamAccreditationCard({
             <AccreditationId value={value?.aaNumber ?? null} />
           </DetailField>
           {value ? <DetailField label="Accredited name">{value.fullName}</DetailField> : null}
-          <DetailField label="Accreditation">
-            <StatusChip
-              label={value?.status.replaceAll('_', ' ') ?? 'Not issued'}
-              tone={value?.status === 'accredited' ? 'success' : 'warning'}
-            />
-          </DetailField>
           {value ? (
             <>
               <DetailField label="Valid from">{value.startsOn}</DetailField>
@@ -90,7 +106,7 @@ export function SaleTeamAccreditationCard({
         </DetailFieldGrid>
       )}
       {management && !record.isError && !record.isPending ? (
-        <>
+        <div className={styles.actionArea}>
           {kind === 'IST' ? (
             <DetailFieldGrid>
               <DateField
@@ -109,19 +125,21 @@ export function SaleTeamAccreditationCard({
               />
             </DetailFieldGrid>
           ) : (
-            <p>Uses the approved OST validity dates.</p>
+            <p className={styles.note}>Uses approved OST validity dates.</p>
           )}
-          <Button
-            onClick={() => setAction('approve')}
-            disabled={kind === 'IST' && (!startsOn || !expiresOn || expiresOn < startsOn)}
-          >
-            {value ? 'Approve accreditation' : 'Approve and issue AA number'}
-          </Button>
-          {value && value.status !== 'revoked' ? (
-            <Button variant="danger" onClick={() => setAction('revoke')}>
-              Revoke accreditation
+          <div className={styles.actionButtons}>
+            <Button
+              onClick={() => setAction('approve')}
+              disabled={kind === 'IST' && (!startsOn || !expiresOn || expiresOn < startsOn)}
+            >
+              {value ? 'Approve accreditation' : 'Approve and issue AA number'}
             </Button>
-          ) : null}
+            {value && value.status !== 'revoked' ? (
+              <Button variant="danger" onClick={() => setAction('revoke')}>
+                Revoke accreditation
+              </Button>
+            ) : null}
+          </div>
           {save.isError ? <Alert variant="danger">{save.error.message}</Alert> : null}
           <ConfirmDialog
             open={action !== null}
@@ -129,7 +147,7 @@ export function SaleTeamAccreditationCard({
             message={
               action === 'revoke'
                 ? 'Public verification will stop immediately.'
-                : 'Confirms eligibility for public AA verification.'
+                : 'Confirms eligibility for AA verification.'
             }
             confirmLoading={save.isPending}
             danger={action === 'revoke'}
@@ -139,7 +157,7 @@ export function SaleTeamAccreditationCard({
               if (action) save.mutate(action);
             }}
           />
-        </>
+        </div>
       ) : null}
     </DetailCard>
   );

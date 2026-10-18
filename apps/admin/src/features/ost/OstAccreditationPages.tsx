@@ -71,13 +71,33 @@ const accreditationKeys = {
 const statusLabel = (status: string) =>
   status.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 
+/** Renewal statuses still open for revision or a decision. */
+const OPEN_RENEWAL_STATUSES = ['submitted', 'under_review', 'changes_requested'];
+/** Renewal statuses that can no longer be acted on. */
+const CLOSED_RENEWAL_STATUSES = ['approved', 'rejected', 'withdrawn'];
+/** Chip tone per renewal status; an unknown state reads neutral, never an assumed success. */
+const RENEWAL_TONES: Record<string, 'neutral' | 'success' | 'warning' | 'danger'> = {
+  submitted: 'warning',
+  under_review: 'warning',
+  changes_requested: 'warning',
+  approved: 'success',
+  rejected: 'danger',
+  withdrawn: 'neutral',
+};
+const DECISION_LABELS = {
+  endorse: 'Endorse',
+  approve: 'Approve',
+  'request-changes': 'Request changes',
+  reject: 'Reject',
+} as const;
+
 /** Authoritative program state; an unlinked customer is `unknown`, never an assumed VIP. */
 const programStateLabel = (applicant: { programCategory: string; vipCardType: string | null }) =>
   applicant.programCategory === 'vip_holder'
     ? `VIP holder (${applicant.vipCardType ?? 'card tier unknown'})`
     : applicant.programCategory === 'non_vip'
       ? 'Non-VIP'
-      : 'VIP state unknown — verify before deciding';
+      : 'VIP state unknown, verify';
 
 const MANUAL_FIELDS = [
   'firstName',
@@ -341,9 +361,7 @@ export function OstAccreditationHistoryPage() {
     onSuccess: () => {
       setEditing(null);
       setRequestId(crypto.randomUUID());
-      setMessage(
-        'Renewal submitted. The current sponsor and term remain authoritative until approval.',
-      );
+      setMessage('Renewal submitted. Current sponsor stays until approval.');
       refresh();
     },
   });
@@ -363,9 +381,12 @@ export function OstAccreditationHistoryPage() {
   // Policy: the next term starts strictly after the prior expiry (inclusive expiry).
   const lastExpiry = terms.reduce((latest, term) => (term.expires_on > latest ? term.expires_on : latest), '');
   const earliestStart = lastExpiry ? ostRenewalEarliestStart(lastExpiry) : '';
-  const pendingRenewals = renewals.filter((r) =>
-    ['submitted', 'under_review', 'changes_requested'].includes(r.status),
-  ).length;
+  const pendingRenewals = renewals.filter((r) => OPEN_RENEWAL_STATUSES.includes(r.status)).length;
+  const isSponsor = user?.roleSlug === 'sales_manager' && user?.id === member?.sponsorStaffId;
+  // The decision controls, therefore the notes field, only exist for someone who can act.
+  const actionableRenewals = renewals.filter(
+    (r) => !CLOSED_RENEWAL_STATUSES.includes(r.status) && (management || isSponsor),
+  );
   const detailRenewal = renewals.find((r) => r.id === detailRenewalId) ?? null;
 
   if (records.isPending) {
@@ -380,6 +401,7 @@ export function OstAccreditationHistoryPage() {
           <Skeleton style={{ height: 16, maxWidth: 460 }} />
           <Skeleton style={{ height: 96 }} />
           <Skeleton style={{ height: 96 }} />
+          <Skeleton style={{ height: 96 }} />
           <span className="sr-only">Loading accreditation…</span>
         </div>
       </section>
@@ -391,19 +413,27 @@ export function OstAccreditationHistoryPage() {
       <PageHeader
         title="OST validity and renewal"
         description={
-          member
-            ? `${member.ostNumber} · ${member.fullName} · Current sponsor: ${member.sponsorName}`
-            : 'Accreditation history'
+          member ? (
+            <span className={styles.headerMeta}>
+              <span className={styles.headerId}>{member.ostNumber}</span>
+              <span className={styles.headerName}>{member.fullName}</span>
+              <span className={styles.headerDivider} aria-hidden="true" />
+              <span className={styles.headerSponsor}>
+                Current sponsor: <strong>{member.sponsorName}</strong>
+              </span>
+            </span>
+          ) : (
+            'Accreditation history'
+          )
         }
         actions={
-          <Button variant="secondary" onClick={() => navigate('/admin/ost/members')}>
+          <Button variant="secondary" onClick={() => navigate('/admin/network/members')}>
             Back to members
           </Button>
         }
       />
 
-      {['admin', 'super_admin'].includes(user?.roleSlug ?? '') ? <SaleTeamAccreditationCard staffId={id} kind="OST" /> : null}
-      <div className={styles.badges} aria-label="Accreditation summary">
+      <div className={styles.badges} role="group" aria-label="Accreditation summary">
         <StatusChip
           label={`Recorded terms: ${formatCountOrDash(terms.length)}`}
           tone="neutral"
@@ -420,6 +450,7 @@ export function OstAccreditationHistoryPage() {
           icon="check"
         />
       </div>
+      {['admin', 'super_admin'].includes(user?.roleSlug ?? '') ? <SaleTeamAccreditationCard staffId={id} kind="OST" /> : null}
 
       {records.isError ? (
         <ErrorState
@@ -429,41 +460,45 @@ export function OstAccreditationHistoryPage() {
         />
       ) : (
         <>
-          <h2>Approved validity history</h2>
-          {terms.length === 0 ? (
-            <EmptyState
-              title="No accreditation terms"
-              description="No recorded accreditation term. Management must review legacy accreditation; no dates are inferred."
-            />
-          ) : (
-            <div
-              role="region"
-              aria-label="Accreditation terms"
-              tabIndex={0}
-              className={`table-scroll ${styles.tableWrap}`}
-            >
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableHeaderCell>Starts</TableHeaderCell>
-                    <TableHeaderCell>Expires</TableHeaderCell>
-                    <TableHeaderCell>Status</TableHeaderCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {terms.map((term) => (
-                    <TableRow key={term.id}>
-                      <TableCell label="Starts">{term.starts_on}</TableCell>
-                      <TableCell label="Expires">{term.expires_on}</TableCell>
-                      <TableCell label="Status">
-                        <StatusChip label={statusLabel(term.displayStatus)} />
-                      </TableCell>
+          <section className={styles.panel} aria-labelledby="ost-validity-heading">
+            <h2 id="ost-validity-heading" className={styles.panelTitle}>
+              Validity history
+            </h2>
+            {terms.length === 0 ? (
+              <EmptyState
+                title="No accreditation terms"
+                description="Management must review legacy accreditation. No dates are inferred."
+              />
+            ) : (
+              <div
+                role="region"
+                aria-label="Accreditation terms"
+                tabIndex={0}
+                className={`table-scroll ${styles.tableWrap}`}
+              >
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeaderCell>Starts</TableHeaderCell>
+                      <TableHeaderCell>Expires</TableHeaderCell>
+                      <TableHeaderCell>Status</TableHeaderCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                  </TableHead>
+                  <TableBody>
+                    {terms.map((term) => (
+                      <TableRow key={term.id}>
+                        <TableCell label="Starts">{term.starts_on}</TableCell>
+                        <TableCell label="Expires">{term.expires_on}</TableCell>
+                        <TableCell label="Status">
+                          <StatusChip label={statusLabel(term.displayStatus)} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </section>
           {records.data.currentApplicant ? (
             <OstApplicantUpdate
               ostId={id}
@@ -481,195 +516,234 @@ export function OstAccreditationHistoryPage() {
                 renewal.mutate();
               }}
             >
-              <h2>Request renewal</h2>
-              <p>
-                Original accreditation: {records.data.terms[0]?.starts_on}. Last expiry:{' '}
-                {records.data.terms.at(-1)?.expires_on}. Identity and program details are carried
-                forward from the approved application.
-              </p>
-              {records.data.currentApplicant ? (
-                <p>Registered program state: {programStateLabel(records.data.currentApplicant)}.</p>
-              ) : null}
-              <div className={styles.editorGrid}>
-                <DateField
-                  id="renewal-dateOfRenewal"
-                  name="dateOfRenewal"
-                  label="Date of renewal"
-                  value={dates.dateOfRenewal}
-                  onChange={(value) =>
-                    setDates((current) => ({ ...current, dateOfRenewal: value }))
-                  }
-                />
-                <DateField
-                  id="renewal-requestedStart"
-                  name="requestedStart"
-                  label="Requested start"
-                  value={dates.requestedStart}
-                  onChange={(value) =>
-                    setDates((current) => ({
-                      ...current,
-                      requestedStart: value,
-                      requestedEnd: ostAnnualExpiry(value),
-                    }))
-                  }
-                  hint={
-                    earliestStart
-                      ? `Management selects the start; it must be on or after ${earliestStart} (after the prior expiry).`
-                      : 'Management selects the start of the new term.'
-                  }
-                  {...(earliestStart ? { min: earliestStart } : {})}
-                />
-                <DateField
-                  id="renewal-requestedEnd"
-                  name="requestedEnd"
-                  label="Requested end"
-                  value={dates.requestedEnd}
-                  onChange={() => {}}
-                  disabled
-                  hint="Calculated: one calendar year after the start (February 29 clamps to February 28)."
-                />
-                <label className={styles.filterLabel}>
-                  Proposed new referrer (optional)
-                  <Select
-                    value={dates.proposedNewSponsorStaffId}
-                    onChange={(e) =>
+              <h2 className={styles.panelTitle}>
+                {editing ? 'Revise renewal' : 'Request renewal'}
+              </h2>
+              <dl className={styles.termFacts}>
+                <div className={styles.fact}>
+                  <dt className={styles.factLabel}>Original accreditation</dt>
+                  <dd className={styles.factValue}>{records.data.terms[0]?.starts_on}</dd>
+                </div>
+                <div className={styles.fact}>
+                  <dt className={styles.factLabel}>Last expiry</dt>
+                  <dd className={styles.factValue}>{records.data.terms.at(-1)?.expires_on}</dd>
+                </div>
+                {records.data.currentApplicant ? (
+                  <div className={styles.fact}>
+                    <dt className={styles.factLabel}>Program state</dt>
+                    <dd className={styles.factValue}>
+                      {programStateLabel(records.data.currentApplicant)}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+              <p className={styles.panelNote}>Identity details carry forward.</p>
+              <div className={styles.formGroup}>
+                <h3 className={styles.groupTitle}>Term dates</h3>
+                <div className={styles.editorGrid}>
+                  <DateField
+                    id="renewal-dateOfRenewal"
+                    name="dateOfRenewal"
+                    label="Date of renewal"
+                    value={dates.dateOfRenewal}
+                    onChange={(value) =>
+                      setDates((current) => ({ ...current, dateOfRenewal: value }))
+                    }
+                  />
+                  <DateField
+                    id="renewal-requestedStart"
+                    name="requestedStart"
+                    label="Requested start"
+                    value={dates.requestedStart}
+                    onChange={(value) =>
                       setDates((current) => ({
                         ...current,
-                        proposedNewSponsorStaffId: e.target.value,
+                        requestedStart: value,
+                        requestedEnd: ostAnnualExpiry(value),
                       }))
                     }
-                    options={[
-                      { value: '', label: 'Keep current Sales Manager' },
-                      ...(sponsors.data
-                        ?.filter((s) => s.id !== member?.sponsorStaffId)
-                        .map((s) => ({ value: s.id, label: s.name })) ?? []),
-                    ]}
+                    {...(earliestStart ? { min: earliestStart } : {})}
                   />
-                </label>
-                <TextAreaField
-                  id="renewal-referrer-reason"
-                  name="reasonForReferrerChange"
-                  label="Reason for referrer change"
-                  optional
-                  value={dates.reasonForReferrerChange}
-                  onChange={(value) =>
-                    setDates((current) => ({ ...current, reasonForReferrerChange: value }))
-                  }
-                />
-                {(['applicantSignatureStatus', 'referrerSignatureStatus'] as const).map((name) => (
-                  <label key={name} className={styles.filterLabel}>
-                    {name.replace(/([A-Z])/g, ' $1')}
+                  <DateField
+                    id="renewal-requestedEnd"
+                    name="requestedEnd"
+                    label="Requested end"
+                    value={dates.requestedEnd}
+                    onChange={() => {}}
+                    disabled
+                  />
+                </div>
+              </div>
+              <div className={styles.formGroup}>
+                <h3 className={styles.groupTitle}>Referrer and signatures</h3>
+                <div className={styles.editorGrid}>
+                  <label className={styles.filterLabel}>
+                    New referrer (optional)
                     <Select
-                      value={dates[name]}
+                      value={dates.proposedNewSponsorStaffId}
                       onChange={(e) =>
-                        setDates((current) => ({ ...current, [name]: e.target.value }))
+                        setDates((current) => ({
+                          ...current,
+                          proposedNewSponsorStaffId: e.target.value,
+                        }))
                       }
                       options={[
-                        { value: 'pending', label: 'Pending' },
-                        { value: 'received', label: 'Received' },
+                        { value: '', label: 'Keep current Sales Manager' },
+                        ...(sponsors.data
+                          ?.filter((s) => s.id !== member?.sponsorStaffId)
+                          .map((s) => ({ value: s.id, label: s.name })) ?? []),
                       ]}
                     />
                   </label>
-                ))}
+                  <TextAreaField
+                    id="renewal-referrer-reason"
+                    name="reasonForReferrerChange"
+                    label="Reason"
+                    optional
+                    rows={1}
+                    value={dates.reasonForReferrerChange}
+                    onChange={(value) =>
+                      setDates((current) => ({ ...current, reasonForReferrerChange: value }))
+                    }
+                  />
+                  {(
+                    [
+                      { name: 'applicantSignatureStatus', label: 'Applicant signature' },
+                      { name: 'referrerSignatureStatus', label: 'Referrer signature' },
+                    ] as const
+                  ).map(({ name, label }) => (
+                    <label key={name} className={styles.filterLabel}>
+                      {label}
+                      <Select
+                        value={dates[name]}
+                        onChange={(e) =>
+                          setDates((current) => ({ ...current, [name]: e.target.value }))
+                        }
+                        options={[
+                          { value: 'pending', label: 'Pending' },
+                          { value: 'received', label: 'Received' },
+                        ]}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
-              <Button disabled={renewal.isPending} type="submit">
-                {editing ? 'Submit revised renewal' : 'Submit renewal'}
-              </Button>
+              <div className={styles.actions}>
+                <Button disabled={renewal.isPending} type="submit">
+                  {editing ? 'Submit revised renewal' : 'Submit renewal'}
+                </Button>
+                {editing ? (
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      setRequestId(crypto.randomUUID());
+                    }}
+                  >
+                    Cancel revision
+                  </Button>
+                ) : null}
+              </div>
               {renewal.isError ? (
-                <p role="alert" className={styles.formAlert}>
+                <Alert variant="danger" title="Renewal not submitted">
                   {renewal.error.message}
-                </p>
+                </Alert>
+              ) : null}
+              {message ? (
+                <Alert variant="success" title="Renewal recorded">
+                  {message}
+                </Alert>
               ) : null}
             </form>
           ) : null}
-          <h2>Renewal review history</h2>
-          <TextAreaField
-            id="renewal-review-notes"
-            name="reviewNotes"
-            label="Review notes"
-            optional
-            value={notes}
-            onChange={setNotes}
-          />
-          {renewals.length === 0 ? (
-            <EmptyState
-              title="No renewals"
-              description="No renewal requests have been filed for this member."
-            />
-          ) : (
-            <div className={styles.renewalList}>
-              {renewals.map((r) => (
-                <DetailCard key={r.id}>
-                  <DetailCardTitle>{r.renewal_number}</DetailCardTitle>
-                  <p>
-                    {r.requested_start} to {r.requested_end} · {statusLabel(r.status)}
-                  </p>
-                  <p>
-                    {r.proposed_new_sponsor_staff_id
-                      ? 'Referrer change proposed'
-                      : 'Current referrer retained'}
-                    {r.reason_for_referrer_change ? `: ${r.reason_for_referrer_change}` : ''}
-                  </p>
-                  <div className={styles.actions}>
-                    {['submitted', 'under_review', 'changes_requested'].includes(r.status) && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          setEditing(r.id);
-                          setDates({
-                            dateOfRenewal: r.date_of_renewal,
-                            requestedStart: r.requested_start,
-                            requestedEnd: r.requested_end,
-                            proposedNewSponsorStaffId: r.proposed_new_sponsor_staff_id ?? '',
-                            reasonForReferrerChange: r.reason_for_referrer_change ?? '',
-                            applicantSignatureStatus: r.applicant_signature_status,
-                            referrerSignatureStatus: r.referrer_signature_status,
-                          });
-                        }}
-                      >
-                        Revise pending renewal
-                      </Button>
-                    )}
-                    {!['approved', 'rejected', 'withdrawn'].includes(r.status) &&
-                      (['endorse', 'approve', 'request-changes', 'reject'] as const)
-                        .filter((action) =>
-                          action === 'endorse'
-                            ? user?.roleSlug === 'sales_manager' &&
-                              user?.id === member?.sponsorStaffId
-                            : management,
-                        )
-                        .map((action) => (
-                          <Button
-                            key={action}
-                            variant="secondary"
-                            disabled={decision.isPending}
-                            onClick={() => decision.mutate({ renewalId: r.id, action })}
-                          >
-                            {action.replace(/-/g, ' ')}
-                          </Button>
-                        ))}
-                    <OverflowMenu
-                      label={`More actions for ${r.renewal_number}`}
-                      items={[
-                        {
-                          label: 'View renewal details',
-                          icon: 'info',
-                          onClick: () => setDetailRenewalId(r.id),
-                        },
-                      ]}
-                    />
-                  </div>
-                </DetailCard>
-              ))}
-            </div>
-          )}
+          <section className={styles.panel} aria-labelledby="ost-renewal-review-heading">
+            <h2 id="ost-renewal-review-heading" className={styles.panelTitle}>
+              Renewal review history
+            </h2>
+            {actionableRenewals.length > 0 ? (
+              <TextAreaField
+                id="renewal-review-notes"
+                name="reviewNotes"
+                label="Review notes"
+                optional
+                value={notes}
+                onChange={setNotes}
+              />
+            ) : null}
+            {renewals.length === 0 ? (
+              <EmptyState title="No renewals" description="No renewal requests yet." />
+            ) : (
+              <div className={styles.renewalList}>
+                {renewals.map((r) => (
+                  <DetailCard key={r.id}>
+                    <div className={styles.renewalHeader}>
+                      <DetailCardTitle>{r.renewal_number}</DetailCardTitle>
+                      <StatusChip
+                        label={statusLabel(r.status)}
+                        tone={RENEWAL_TONES[r.status] ?? 'neutral'}
+                      />
+                    </div>
+                    <p className={styles.renewalMeta}>
+                      {r.requested_start} → {r.requested_end}
+                    </p>
+                    <p className={styles.renewalMeta}>
+                      {r.proposed_new_sponsor_staff_id
+                        ? 'Referrer change proposed'
+                        : 'Current referrer retained'}
+                      {r.reason_for_referrer_change ? `: ${r.reason_for_referrer_change}` : ''}
+                    </p>
+                    <div className={styles.actions}>
+                      {OPEN_RENEWAL_STATUSES.includes(r.status) && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            setEditing(r.id);
+                            setDates({
+                              dateOfRenewal: r.date_of_renewal,
+                              requestedStart: r.requested_start,
+                              requestedEnd: r.requested_end,
+                              proposedNewSponsorStaffId: r.proposed_new_sponsor_staff_id ?? '',
+                              reasonForReferrerChange: r.reason_for_referrer_change ?? '',
+                              applicantSignatureStatus: r.applicant_signature_status,
+                              referrerSignatureStatus: r.referrer_signature_status,
+                            });
+                          }}
+                        >
+                          Revise pending renewal
+                        </Button>
+                      )}
+                      {!CLOSED_RENEWAL_STATUSES.includes(r.status) &&
+                        (['endorse', 'approve', 'request-changes', 'reject'] as const)
+                          .filter((action) => (action === 'endorse' ? isSponsor : management))
+                          .map((action) => (
+                            <Button
+                              key={action}
+                              variant="secondary"
+                              disabled={decision.isPending}
+                              onClick={() => decision.mutate({ renewalId: r.id, action })}
+                            >
+                              {DECISION_LABELS[action]}
+                            </Button>
+                          ))}
+                      <OverflowMenu
+                        label={`More actions for ${r.renewal_number}`}
+                        items={[
+                          {
+                            label: 'View renewal details',
+                            icon: 'info',
+                            onClick: () => setDetailRenewalId(r.id),
+                          },
+                        ]}
+                      />
+                    </div>
+                  </DetailCard>
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
-      {message ? (
-        <Alert variant="success" title="Renewal recorded">
-          {message}
-        </Alert>
-      ) : null}
       {decision.isError ? (
         <Alert variant="danger" title="Renewal decision failed">
           {decision.error.message}
@@ -687,7 +761,7 @@ export function OstAccreditationHistoryPage() {
         }
       >
         {detailRenewal ? (
-          <DetailFieldGrid>
+          <DetailFieldGrid className={styles.fieldColumns}>
             <DetailField label="Status">{statusLabel(detailRenewal.status)}</DetailField>
             <DetailField label="Renewed on">{detailRenewal.date_of_renewal}</DetailField>
             <DetailField label="Requested start">{detailRenewal.requested_start}</DetailField>

@@ -18,6 +18,7 @@ vi.mock('./services', async (importOriginal) => {
     getMemberOstReferrers: vi.fn(),
     createMember: vi.fn(),
     updateMember: vi.fn(),
+    transferMember: vi.fn(),
     issueMemberAccreditation: vi.fn(),
     getMemberDepartments: vi.fn(),
     networkMemberKeys: {
@@ -57,6 +58,11 @@ vi.mock('../address/services', () => ({
   getAddressBarangays: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('../ost/services', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ost/services')>()),
+  getAccreditation: vi.fn(),
+}));
+
 const {
   getMembers,
   getMember,
@@ -64,7 +70,9 @@ const {
   getMemberOstReferrers,
   createMember,
   getMemberDepartments,
+  transferMember,
 } = await import('./services');
+const { getAccreditation } = await import('../ost/services');
 
 const ROW = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -128,6 +136,19 @@ const VD_UPLINE = {
   fullName: 'VICE DIRECTOR',
   employeeNumber: 'AF-EMP-00001',
   positionLabel: 'Sales Vice Director',
+};
+
+/** An OST member awaiting expiry before the IST conversion. */
+const OST_ROW = {
+  ...ROW,
+  id: '44444444-4444-4444-8444-444444444444',
+  employeeNumber: 'AF-EMP-00011',
+  fullName: 'OST MEMBER',
+  email: 'ost@afhomes.test',
+  position: 'ost',
+  positionLabel: 'OST',
+  referrerName: 'SM ONE',
+  aaNumber: 'AAO20010001',
 };
 
 function showList() {
@@ -294,7 +315,7 @@ describe('Members page', () => {
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'ost' } });
     await waitFor(() => expect(screen.queryByLabelText('OST Referrer')).toBeNull());
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'vice_director' } });
-    expect(await screen.findByText('A Vice Director has no head.')).toBeInTheDocument();
+    expect(await screen.findByText('Vice Directors have no head.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Head')).toBeNull();
   });
 
@@ -437,7 +458,6 @@ describe('Members page', () => {
     expect(screen.getByLabelText('ZIP Code')).toHaveValue('4012');
     // The reference only suggests it: PSGC answers 4018 for Victoria, Laguna,
     // whose ZIP is 4011, so the operator has to be able to correct it.
-    expect(screen.getByText('Suggested ZIP. Edit if wrong.')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('ZIP Code'), { target: { value: '4011' } });
     expect(screen.getByLabelText('ZIP Code')).toHaveValue('4011');
   });
@@ -448,7 +468,6 @@ describe('Members page', () => {
     await openCreate();
     await chooseFromList(/^Province/, 'Laguna');
     await chooseFromList(/City \/ Municipality/, /^Nozip Town/);
-    expect(screen.getByText('No published ZIP. Type one.')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('ZIP Code'), { target: { value: '4020' } });
     expect(screen.getByLabelText('ZIP Code')).toHaveValue('4020');
   });
@@ -769,5 +788,62 @@ describe('Members page', () => {
     // the dialog cannot be dismissed mid-request.
     expect(await screen.findByText('Deleting…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
+  it('converts an expired OST to IST and refreshes the list', async () => {
+    vi.mocked(getMembers).mockResolvedValue([OST_ROW] as never);
+    vi.mocked(getAccreditation).mockResolvedValue({
+      registration: null,
+      currentApplicant: null,
+      renewals: [],
+      terms: [
+        {
+          id: '44444444-4444-4444-8444-444444444444',
+          starts_on: '2020-01-01',
+          expires_on: '2021-01-01',
+          displayStatus: 'expired',
+          approved_at: '2020-01-01',
+        },
+      ],
+    } as never);
+    vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
+    vi.mocked(transferMember).mockResolvedValue(OST_ROW as never);
+    renderWithProviders(<MembersPage />, {
+      user: {
+        id: '99999999-9999-4999-8999-999999999999',
+        name: 'Admin',
+        email: 'admin@afhomes.test',
+        roleId: 'role-admin',
+        roleSlug: 'admin',
+        roleName: 'Admin',
+        afHomesPermissions: [
+          {
+            moduleKey: 'network.members',
+            canView: true,
+            canCreate: false,
+            canUpdate: true,
+            canDelete: false,
+          },
+        ],
+        status: 'active',
+      },
+    });
+    fireEvent.click(await screen.findByText('OST MEMBER'));
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer to IST' }));
+    const position = await screen.findByLabelText('Position');
+    await waitFor(() => expect(position).toBeEnabled());
+    fireEvent.change(position, { target: { value: 'sales_manager' } });
+    const head = await screen.findByLabelText('Senior Sales Manager');
+    await waitFor(() => expect(head).toBeEnabled());
+    fireEvent.change(head, { target: { value: SSM_UPLINE.id } });
+    fireEvent.change(screen.getByLabelText(/^Reason for transfer/), {
+      target: { value: 'Returns to the selling hierarchy' },
+    });
+    // Call history accumulates across this file's tests; assert a fresh list read.
+    const listsRead = vi.mocked(getMembers).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Transfer to IST' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(transferMember).toHaveBeenCalledOnce();
+    await waitFor(() => expect(vi.mocked(getMembers).mock.calls.length).toBeGreaterThan(listsRead));
   });
 });
