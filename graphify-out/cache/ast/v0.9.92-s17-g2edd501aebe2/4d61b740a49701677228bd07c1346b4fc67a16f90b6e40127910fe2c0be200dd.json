@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20260930000001_afhomes_role_permission_baseline_sql", "label": "20260930000001_afhomes_role_permission_baseline.sql", "file_type": "code", "source_file": "supabase/migrations/20260930000001_afhomes_role_permission_baseline.sql", "source_location": null}], "edges": []}

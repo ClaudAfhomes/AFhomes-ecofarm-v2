@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20261123000001_afhomes_preserve_legacy_points_sql", "label": "20261123000001_afhomes_preserve_legacy_points.sql", "file_type": "code", "source_file": "supabase/migrations/20261123000001_afhomes_preserve_legacy_points.sql", "source_location": null}], "edges": []}

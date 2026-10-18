@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20261016000001_afhomes_onboarding_token_pgcrypto_path_sql", "label": "20261016000001_afhomes_onboarding_token_pgcrypto_path.sql", "file_type": "code", "source_file": "supabase/migrations/20261016000001_afhomes_onboarding_token_pgcrypto_path.sql", "source_location": null}], "edges": []}
