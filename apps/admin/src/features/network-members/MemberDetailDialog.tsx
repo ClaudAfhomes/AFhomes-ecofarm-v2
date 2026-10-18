@@ -10,6 +10,7 @@
  * AA number reads as issued, a missing one offers the issue controls.
  */
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -37,6 +38,7 @@ import {
 } from '@afhomes/contracts';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useSession } from '../../lib/session';
+import { canViewModule } from '../../app/navigation';
 import { ApiError, errorBlockers, errorFieldEntries } from '../../lib/api/errors';
 import { deleteAfHomesStaff } from '../afhomes/services';
 import { MemberFormDialog, type MemberFormSeed, type MemberFormValues } from './MemberFormDialog';
@@ -170,6 +172,7 @@ export function MemberDetailDialog({
   onTransfer?: (member: Member) => void;
 }) {
   const client = useQueryClient();
+  const navigate = useNavigate();
   const { user } = useSession();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -263,6 +266,10 @@ export function MemberDetailDialog({
   const issueFields = errorFieldEntries(issue.error);
 
   const canDelete = user?.roleSlug === 'super_admin' && user.id !== member.id;
+  const canViewRenewal =
+    member.position === 'ost' &&
+    canViewModule(user?.afHomesPermissions, 'network.ost_registrations') &&
+    canViewModule(user?.afHomesPermissions, 'network.ost_members');
   const deleteBlockers = errorBlockers(remove.error);
 
   return (
@@ -276,6 +283,17 @@ export function MemberDetailDialog({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
+            {canViewRenewal ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  onClose();
+                  navigate(`/admin/ost/members/${member.id}`);
+                }}
+              >
+                Validity / renewal
+              </Button>
+            ) : null}
             {onTransfer ? (
               <Button variant="secondary" onClick={() => onTransfer(member)}>
                 {member.position === 'ost' ? 'Transfer team' : 'Convert to OST'}
