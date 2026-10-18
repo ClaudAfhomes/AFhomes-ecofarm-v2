@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20261131000003_afhomes_customer_lookup_module_sql", "label": "20261131000003_afhomes_customer_lookup_module.sql", "file_type": "code", "source_file": "supabase/migrations/20261131000003_afhomes_customer_lookup_module.sql", "source_location": null}], "edges": []}
