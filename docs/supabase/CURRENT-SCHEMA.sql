@@ -5,7 +5,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 106. Public table inventory: 60.
+-- Migration count: 110. Public table inventory: 60.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -136,6 +136,10 @@
 --   20261208000009_afhomes_develop_transfer_integration.sql
 --   20261208000010_afhomes_direct_ost_password.sql
 --   20261208000011_afhomes_ost_team_transfer.sql
+--   20261208000012_afhomes_ist_employee_identity_schema.sql
+--   20261208000013_afhomes_member_workbook_jobs_schema.sql
+--   20261208000014_afhomes_ist_employee_identity_functions.sql
+--   20261208000015_afhomes_member_workbook_jobs_functions.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

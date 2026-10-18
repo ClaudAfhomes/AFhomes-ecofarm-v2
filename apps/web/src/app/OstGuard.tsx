@@ -31,6 +31,8 @@ export function OstGuard({ children }: { children: ReactNode }) {
     return <Navigate to="/ost/login" replace state={{ from: location.pathname }} />;
   }
   if (portals.isLoading) return <Spinner label="Checking your OST record" />;
+  if (portals.data?.staff?.mustChangePassword)
+    return <PortalRedirect to={portalDashboard(portals.data)!} />;
   if (portals.data?.ost?.status === 'active') return <>{children}</>;
   const destination = portals.data ? portalDashboard(portals.data) : null;
   if (destination && destination !== '/ost/login') return <PortalRedirect to={destination} />;

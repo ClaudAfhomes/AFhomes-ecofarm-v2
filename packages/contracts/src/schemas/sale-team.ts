@@ -18,11 +18,15 @@ export const saleTeamAccreditationSchema = z
     kind: saleTeamKindSchema,
     fullName: z.string(),
     status: z.enum(['accredited', 'expired', 'revoked', 'inactive', 'not_started']),
-    startsOn: z.iso.date(),
-    expiresOn: z.iso.date(),
+    startsOn: z.iso.date().nullable(),
+    expiresOn: z.iso.date().nullable(),
   })
   .strict()
-  .superRefine(prefixMatchesKind);
+  .superRefine(prefixMatchesKind)
+  .superRefine((value, ctx) => {
+    if (value.kind === 'OST' && (!value.startsOn || !value.expiresOn))
+      ctx.addIssue({ code: 'custom', message: 'OST accreditation requires approved dates.' });
+  });
 
 /**
  * A number that is no longer current because its holder was transferred to the
@@ -36,8 +40,8 @@ export const saleTeamHistoricalAccreditationSchema = z
     kind: saleTeamKindSchema,
     fullName: z.string(),
     status: z.literal('superseded'),
-    startsOn: z.iso.date(),
-    expiresOn: z.iso.date(),
+    startsOn: z.iso.date().nullable(),
+    expiresOn: z.iso.date().nullable(),
     successorAaNumber: aaNumberSchema.nullable(),
   })
   .strict()
@@ -70,12 +74,9 @@ export const manageSaleTeamSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (
-      value.action === 'approve' &&
-      value.kind === 'IST' &&
-      (!value.startsOn || !value.expiresOn || value.expiresOn < value.startsOn)
-    ) {
-      ctx.addIssue({ code: 'custom', message: 'Choose approved start and expiry dates.' });
-    }
+    if (value.kind === 'IST' && value.action === 'revoke')
+      ctx.addIssue({ code: 'custom', message: 'Use the employee access/deactivation workflow.' });
+    if (value.startsOn && value.expiresOn && value.expiresOn < value.startsOn)
+      ctx.addIssue({ code: 'custom', message: 'Expiry cannot precede start.' });
   });
 export type SaleTeamAccreditation = z.infer<typeof saleTeamAccreditationSchema>;

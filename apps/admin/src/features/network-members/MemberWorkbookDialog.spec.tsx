@@ -2,7 +2,13 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { MemberWorkbookDialog } from './MemberWorkbookDialog';
-import { createMember, createOstMember, previewMemberWorkbook } from './services';
+import {
+  createMember,
+  createOstMember,
+  previewMemberWorkbook,
+  getMemberWorkbookJobs,
+  confirmMemberWorkbookRow,
+} from './services';
 
 vi.mock('./services', async (original) => ({
   ...(await original<typeof import('./services')>()),
@@ -10,8 +16,16 @@ vi.mock('./services', async (original) => ({
   createOstMember: vi.fn(),
   previewMemberWorkbook: vi.fn(),
   downloadMemberWorkbook: vi.fn(),
+  getMemberWorkbookJobs: vi.fn(),
+  confirmMemberWorkbookRow: vi.fn(),
 }));
 const id = '11111111-1111-4111-8111-111111111111';
+const batchPassword = 'SyntheticBatch123!';
+function enterBatchPassword() {
+  fireEvent.change(screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'), {
+    target: { value: batchPassword },
+  });
+}
 const fields = {
   first_name: 'Test',
   last_name: 'Seller',
@@ -51,9 +65,9 @@ async function upload() {
     },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Validate and preview' }));
-  await screen.findByText(/rows ·/);
+  await screen.findByText(/rows ·|Job .*complete/);
 }
-it('requires an explicit review checkbox and uses the existing IST API with an individual temporary password', async () => {
+it('requires an explicit review checkbox and uses the existing IST API with a temporary password', async () => {
   vi.mocked(previewMemberWorkbook).mockResolvedValue({
     kind: 'IST',
     departmentId: id,
@@ -65,13 +79,18 @@ it('requires an explicit review checkbox and uses the existing IST API with an i
   const button = screen.getByRole('button', { name: 'Create 1 IST accounts' });
   expect(button).toBeDisabled();
   expect(createMember).not.toHaveBeenCalled();
+  // Batch password field exists and is required
+  expect(
+    screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'),
+  ).toBeInTheDocument();
+  enterBatchPassword();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(button);
   await screen.findByText('Created; password change required.');
   expect(createMember).toHaveBeenCalledWith(
     expect.objectContaining({
       position: 'vice_director',
-      temporaryPassword: expect.stringMatching(/^Aa1!/),
+      temporaryPassword: batchPassword,
       referrerStaffId: null,
     }),
   );
@@ -79,6 +98,88 @@ it('requires an explicit review checkbox and uses the existing IST API with an i
   expect(onCreated).toHaveBeenCalledOnce();
   expect(button).toBeDisabled();
 });
+it.each(['IST', 'OST'] as const)(
+  'confirms every %s company row with one chosen password in hierarchy order',
+  async (kind) => {
+    const ids = ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'];
+    const job = {
+      id,
+      kind,
+      sourceHash: 'synthetic',
+      createdAt: '2026-10-18',
+      rows: [
+        {
+          id: ids[1]!,
+          rowNumber: 2,
+          decision: 'CREATE' as const,
+          state: 'preview' as 'preview' | 'completed',
+          errors: [],
+          memberId: null,
+          name: 'Synthetic SM',
+          email: 'sm@example.invalid',
+          mobile: '09123456789',
+          aaNumber: null,
+          head: 'Synthetic VD',
+          position: 'sales_manager',
+          details: {},
+          lastError: null,
+          attempts: 0,
+        },
+        {
+          id: ids[0]!,
+          rowNumber: 3,
+          decision: 'CREATE' as const,
+          state: 'preview' as 'preview' | 'completed',
+          errors: [],
+          memberId: null,
+          name: 'Synthetic VD',
+          email: 'vd@example.invalid',
+          mobile: '09123456788',
+          aaNumber: null,
+          head: null,
+          position: 'vice_director',
+          details: {},
+          lastError: null,
+          attempts: 0,
+        },
+      ],
+    };
+    vi.mocked(previewMemberWorkbook).mockResolvedValue({
+      kind,
+      departmentId: id,
+      jobId: id,
+      rows: [{ rowNumber: 2, fields: { ...fields, source_layout: 'company-v2' }, errors: [] }],
+    });
+    vi.mocked(getMemberWorkbookJobs).mockImplementation(async () => [structuredClone(job)]);
+    vi.mocked(confirmMemberWorkbookRow).mockImplementation(async (_job, _row, _approved, _pw) => {
+      job.rows.find((r) => r.id === _row)!.state = 'completed';
+      return [structuredClone(job)];
+    });
+    const changed = vi.fn();
+    renderWithProviders(<MemberWorkbookDialog onClose={vi.fn()} onCreated={changed} />);
+    fireEvent.change(screen.getByLabelText('Workbook type'), { target: { value: kind } });
+    await upload();
+    const button = screen.getByRole('button', { name: 'Confirm / resume reviewed import' });
+    expect(button).toBeDisabled();
+    // Batch password field exists
+    expect(
+      screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'),
+    ).toBeInTheDocument();
+    // Without batch password, confirm shows error
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(button);
+    await screen.findByText(/Enter a temporary password/);
+    expect(changed).not.toHaveBeenCalled();
+    enterBatchPassword();
+    fireEvent.click(button);
+    await waitFor(() => expect(confirmMemberWorkbookRow).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(confirmMemberWorkbookRow).mock.calls).toEqual([
+      [id, ids[0], true, batchPassword],
+      [id, ids[1], true, batchPassword],
+    ]);
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  },
+);
 it('blocks creation when any row has a validation error', async () => {
   vi.mocked(previewMemberWorkbook).mockResolvedValue({
     kind: 'IST',
@@ -102,6 +203,11 @@ it('refreshes members after an ambiguous first-row failure without retrying it',
   const changed = vi.fn();
   renderWithProviders(<MemberWorkbookDialog onClose={vi.fn()} onCreated={changed} />);
   await upload();
+  // Batch password field exists
+  expect(
+    screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'),
+  ).toBeInTheDocument();
+  enterBatchPassword();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Create 1 IST accounts' }));
   await screen.findByRole('alert');
@@ -125,10 +231,19 @@ it('retains successful credentials and stops after a failed row without attempti
   const changed = vi.fn();
   renderWithProviders(<MemberWorkbookDialog onClose={vi.fn()} onCreated={changed} />);
   await upload();
+  // Batch password field exists
+  expect(
+    screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'),
+  ).toBeInTheDocument();
+  enterBatchPassword();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Create 3 IST accounts' }));
   await screen.findByRole('alert');
   expect(createMember).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(createMember).mock.calls.map(([input]) => input.temporaryPassword)).toEqual([
+    batchPassword,
+    batchPassword,
+  ]);
   expect(screen.getByText('Created; password change required.')).toBeVisible();
   expect(screen.getByText(/Stopped\. Verify/)).toBeVisible();
   await waitFor(() => expect(changed).toHaveBeenCalledOnce());
@@ -167,6 +282,11 @@ it('sends OST completion to its own creation API and preserves the preview reque
   renderWithProviders(<MemberWorkbookDialog onClose={vi.fn()} onCreated={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('Workbook type'), { target: { value: 'OST' } });
   await upload();
+  // Batch password field exists
+  expect(
+    screen.getByLabelText('Batch temporary password (shared for all CREATE rows)'),
+  ).toBeInTheDocument();
+  enterBatchPassword();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Create 1 OST accounts' }));
   await screen.findByText('Created; password change required.');
@@ -176,6 +296,7 @@ it('sends OST completion to its own creation API and preserves the preview reque
       mode: 'complete',
       sponsorStaffId: id,
       expiresOn: '2027-10-17',
+      temporaryPassword: batchPassword,
     }),
   );
   expect(createMember).not.toHaveBeenCalled();

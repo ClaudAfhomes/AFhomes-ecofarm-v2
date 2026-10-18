@@ -15,6 +15,11 @@ import { CustomerLoginForm } from '../customer/CustomerLoginForm';
 import { Navigate, Route, Routes } from 'react-router';
 import { OstGuard } from '../../app/OstGuard';
 
+vi.mock('../../lib/PortalRedirect', () => ({
+  PortalRedirect: ({ to }: { to: string }) =>
+    to.startsWith('/admin') ? <p>Opening password setup: {to}</p> : <Navigate to={to} replace />,
+}));
+
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: (...args: unknown[]) =>
@@ -134,6 +139,30 @@ const render = (route: string, sessionUser: { authUserId: string; email: string 
   renderWithProviders(<App />, { route, sessionUser });
 
 describe('OST login', () => {
+  it('routes temporary-password OST login to the existing password setup', async () => {
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    const user = userEvent.setup();
+    render('/ost/login');
+    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(screen.getByLabelText('Password'), 'Temporary123!');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+    expect(await screen.findByText('Opening password setup: /admin/profile')).toBeInTheDocument();
+    expect(screen.queryByText('Ollie Seller')).not.toBeInTheDocument();
+  });
+
+  it('blocks a direct dashboard visit until password setup completes', async () => {
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    render('/ost/dashboard', { authUserId: 'u', email: 'ost@afhomes.test' });
+    expect(await screen.findByText('Opening password setup: /admin/profile')).toBeInTheDocument();
+    expect(screen.queryByText('Ollie Seller')).not.toBeInTheDocument();
+  });
+
   it('renders the OST entry with a register link and no admin link', async () => {
     render('/ost/login');
     expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();

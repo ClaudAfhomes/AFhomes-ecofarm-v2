@@ -9,6 +9,7 @@
 import {
   memberWorkbookFileSchema,
   memberWorkbookPreviewSchema,
+  memberWorkbookJobsSchema,
   type MemberWorkbookKind,
   afHomesDepartmentSchema,
   createOstMemberResultSchema,
@@ -126,5 +127,14 @@ export const downloadMemberWorkbook = (kind: MemberWorkbookKind, action: 'templa
 
 export const previewMemberWorkbook = (kind: MemberWorkbookKind, contentBase64: string) =>
   request('/members/workbook/preview', memberWorkbookPreviewSchema, {
-    method: 'POST', body: JSON.stringify({ kind, contentBase64 }),
+    method: 'POST',
+    body: JSON.stringify({ kind, contentBase64 }),
+  });
+
+export const getMemberWorkbookJobs = (jobId?: string) =>
+  request(`/members/workbook/jobs${jobId ? '/' + jobId : ''}`, memberWorkbookJobsSchema);
+export const confirmMemberWorkbookRow = (jobId: string, rowId: string, evidenceVerified: boolean, temporaryPassword: string) =>
+  request(`/members/workbook/jobs/${jobId}/rows/${rowId}/confirm`, memberWorkbookJobsSchema, {
+    method: 'POST',
+    body: JSON.stringify({ evidenceVerified, temporaryPassword }),
   });

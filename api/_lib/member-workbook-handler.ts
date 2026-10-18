@@ -2,14 +2,18 @@ import {
   memberWorkbookKindSchema,
   memberWorkbookUploadSchema,
   normalizePhilippinePhone,
+  memberWorkbookInput,
   type Member,
 } from '@afhomes/contracts';
-import { memberWorkbook, readMemberWorkbook } from './member-workbook.js';
+import { readMemberWorkbook } from './member-workbook.js';
 import { previewMemberWorkbook } from './member-workbook-preview.js';
+import { companyMemberWorkbook } from './member-company-workbook.js';
+import { handleMemberWorkbookJobs } from './member-workbook-jobs.js';
+import { createHash } from 'node:crypto';
 import { addressProvider } from './address-source.js';
 import { authorizeAfHomes, type AfHomesPrincipal } from './afhomes-access.js';
 import { deny, fail, jsonBody, method, subPath } from './handler-kit.js';
-import { toXlsxMulti } from './report-export.js';
+import { exportMemberWorkbook } from './member-workbook-export.js';
 import type { serviceClient } from './rest.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
@@ -21,6 +25,7 @@ export async function handleMemberWorkbook(
   allowedPositions: (actor: AfHomesPrincipal) => Promise<Set<string>>,
 ) {
   const path = subPath(req);
+  if (path.startsWith('workbook/jobs')) return handleMemberWorkbookJobs(req, res, db);
   const preview = path === 'workbook/preview' && method(req) === 'POST';
   if (
     !preview &&
@@ -73,69 +78,35 @@ export async function handleMemberWorkbook(
       mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       content: Buffer.from(bytes).toString('base64'),
     });
-  if (path === 'workbook/template')
-    return send(
-      `afhomes-${kind.data.toLowerCase()}-template.xlsx`,
-      memberWorkbook(kind.data, members),
-    );
-  if (path === 'workbook/export') {
-    const rows = members.filter((m) =>
-      kind.data === 'OST' ? m.position === 'ost' : m.position !== 'ost',
-    );
-    const ostPhones = new Map<string, string>();
-    if (kind.data === 'OST' && rows.length) {
-      const result = await db
-        .from('ost_members')
-        .select('id,phone', { count: 'exact' })
-        .in(
-          'id',
-          rows.map((r) => r.id),
-        );
-      if (result.error || result.count !== (result.data?.length ?? 0))
-        return fail(res, 'CONFLICT', 'Unable to verify OST contact data.', 409);
-      for (const r of result.data ?? []) ostPhones.set(String(r.id), String(r.phone ?? ''));
+  if (path === 'workbook/template') {
+    try {
+      return send(
+        `afhomes-${kind.data.toLowerCase()}-template.xlsx`,
+        companyMemberWorkbook(kind.data, members),
+      );
+    } catch {
+      return fail(
+        res,
+        'CONFLICT',
+        'Unable to prepare the official template. Verify its local asset and a maximum of 500 head choices per role.',
+        409,
+      );
     }
-    return send(
-      `afhomes-${kind.data.toLowerCase()}-roster.xlsx`,
-      toXlsxMulti(`${kind.data} roster`, [
-        {
-          name: 'README',
-          columns: [{ label: 'Read-only roster', type: 'text' }],
-          rows: [
-            ['Not an import template. No passwords, TIN or government ID numbers.'],
-            ['Team is current genealogy, not historical sale attribution.'],
-          ],
-          filter: false,
-        },
-        {
-          name: kind.data,
-          columns: [
-            'Member ID',
-            'Employee number',
-            'Name',
-            'Email',
-            'Mobile',
-            'Position',
-            'Status',
-            'AA number',
-            'Immediate head',
-            'Head email',
-          ].map((label) => ({ label, type: 'text' })),
-          rows: rows.map((m) => [
-            m.id,
-            m.employeeNumber,
-            m.fullName,
-            m.email,
-            kind.data === 'OST' ? (ostPhones.get(m.id) ?? '') : m.mobileNo,
-            m.position,
-            m.status,
-            m.aaNumber,
-            m.referrerName,
-            members.find((h) => h.id === m.referrerStaffId)?.email ?? '',
-          ]),
-        },
-      ]),
-    );
+  }
+  if (path === 'workbook/export') {
+    try {
+      return send(
+        `afhomes-${kind.data.toLowerCase()}-roster.xlsx`,
+        await exportMemberWorkbook(db, auth.userId, kind.data, members),
+      );
+    } catch {
+      return fail(
+        res,
+        'CONFLICT',
+        'Unable to verify a complete safe sectioned export. Check the 500-member limit and reviewed import migration. No partial file was returned.',
+        409,
+      );
+    }
   }
   if (!body?.success) return;
   if (
@@ -157,7 +128,60 @@ export async function handleMemberWorkbook(
     return fail(res, 'CONFLICT', 'An active Sales department is required.', 409);
   try {
     const allowed = await allowedPositions(auth);
-    const uploaded = readMemberWorkbook(bytes);
+    const uploaded = readMemberWorkbook(bytes, kind.data);
+    if (uploaded[0]?.fields.source_layout === 'company-v2') {
+      if (!['admin', 'super_admin'].includes(auth.roleSlug))
+        return fail(
+          res,
+          'FORBIDDEN',
+          'Administrator review is required for company migration jobs.',
+          403,
+        );
+      const result = await previewMemberWorkbook(
+        bytes,
+        kind.data,
+        members,
+        String(department.data.id),
+        addressProvider(),
+        async (f) =>
+          kind.data === 'IST' && !allowed.has(f.position ?? '')
+            ? ['position: you cannot assign this role.']
+            : [],
+      );
+      const sealed = result.rows.map((row) => {
+        const f = row.fields;
+        const legacyOst = kind.data === 'OST' && f.aa_number?.startsWith('AA-');
+        const canonical = {
+          ...f,
+          first_name: f.first_name?.toUpperCase() ?? '',
+          middle_name: f.middle_name?.toUpperCase() ?? '',
+          last_name: f.last_name?.toUpperCase() ?? '',
+        };
+        const parsed = memberWorkbookInput(
+          kind.data,
+          legacyOst ? { ...canonical, aa_number: '', aa_mode: 'auto' } : canonical,
+          result.departmentId,
+          'Preview-only-not-a-password-1!',
+        );
+        const input: Record<string, unknown> = parsed.success ? { ...parsed.data } : {};
+        delete input.temporaryPassword;
+        return { ...row, input };
+      });
+      const staged = await db.rpc('stage_member_workbook', {
+        p_actor: auth.userId,
+        p_kind: kind.data,
+        p_source_hash: createHash('sha256').update(bytes).digest('hex'),
+        p_rows: sealed,
+      });
+      if (staged.error)
+        return fail(
+          res,
+          'CONFLICT',
+          'Durable import storage is unavailable. Apply the reviewed migration before importing. No accounts were created.',
+          409,
+        );
+      return res.status(200).json({ ...result, jobId: staged.data });
+    }
     const existingEmails = new Set<string>(),
       existingMobiles = new Set<string>();
     const pendingEmails = new Set<string>(),

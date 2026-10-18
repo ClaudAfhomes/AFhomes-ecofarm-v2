@@ -219,6 +219,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const userId = authData?.user?.id;
       if (authError || !userId)
         return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
       const { data: member, error } = await db
         .from('ost_members')
         .select('id, ost_number, full_name, email, status, sponsor_staff_id, approved_at')
@@ -684,6 +694,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal) return deny(res, principal);
+      if (principal.mustChangePassword || principal.mfaRequired)
+        return fail(res, 'FORBIDDEN', 'Complete account security setup before continuing.', 403);
       const single = memberSingle;
       const grants = principal.permissions.find((p) => p.moduleKey === 'network.ost_members');
       const canViewAll = grants?.canView === true;

@@ -47,6 +47,9 @@ supabase/backfill-staff-domain.retire.json
 # Supabase CLI local cache (project ref + pooler URL - connection metadata)
 supabase/.temp/
 
+# Migration archive (original combined migrations preserved for reference, not executable)
+supabase/migrations/archive/
+
 # NOTE: a bare `.env*` used to sit here. Because the LAST matching pattern wins,
 # it silently overrode the `!.env.example` negation above, so on a fresh clone
 # the documented environment template was git-ignored and could never be added

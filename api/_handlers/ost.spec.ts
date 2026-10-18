@@ -727,6 +727,18 @@ describe('OST visibility scopes', () => {
       OST_ID,
     ]);
   });
+
+  it.each(['members', `members/${OST_ID}`])(
+    'blocks password-gated direct OST reads: %s',
+    async (familyPath) => {
+      const db = install(tablesWithTwoApps());
+      db.rows('staff_users').find((row) => row.id === OST_ID)!.must_change_password = true;
+      const { res, state } = makeRes();
+      await ost(makeReq({ method: 'GET', familyPath, token: OST_TOKEN }) as never, res as never);
+      expect(state.status).toBe(403);
+      expect(JSON.stringify(state.body)).not.toContain('Ollie Seller');
+    },
+  );
 });
 
 describe('OST approval state guards', () => {

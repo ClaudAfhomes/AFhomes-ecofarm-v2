@@ -1,5 +1,24 @@
 import { expect, it } from 'vitest';
 import { aaNumberSchema, saleTeamAccreditationSchema } from './sale-team.js';
+import { manageSaleTeamSchema } from './sale-team.js';
+
+it('allows date-free IST employee identity but still requires OST validity', () => {
+  const employee = {
+    aaNumber: 'AAI26100001',
+    kind: 'IST',
+    fullName: 'SYNTHETIC',
+    status: 'accredited',
+    startsOn: null,
+    expiresOn: null,
+  };
+  expect(saleTeamAccreditationSchema.safeParse(employee).success).toBe(true);
+  expect(
+    saleTeamAccreditationSchema.safeParse({ ...employee, kind: 'OST', aaNumber: 'AAO26100001' })
+      .success,
+  ).toBe(false);
+  expect(manageSaleTeamSchema.safeParse({ kind: 'IST', action: 'approve' }).success).toBe(true);
+  expect(manageSaleTeamSchema.safeParse({ kind: 'IST', action: 'revoke' }).success).toBe(false);
+});
 
 it.each(['AAI26100001', 'AAO26100002', 'AAI26019999', 'AAO26120001'])(
   'accepts official accreditation number %s',
