@@ -1,10 +1,19 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { ApplicationHolder } from '@afhomes/contracts';
+import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
-import { HolderFields, emptyHolder } from './official-forms-fields';
+import { HolderFields, RecommenderFields, emptyHolder } from './official-forms-fields';
+import { getGenealogy } from '../genealogy/services';
+
+vi.mock('../genealogy/services', () => ({
+  getGenealogy: vi.fn(),
+  getGenealogyNode: vi.fn(),
+  getGenealogyUpline: vi.fn(async () => []),
+  getGenealogyDownline: vi.fn(async () => []),
+  getGenealogySummary: vi.fn(),
+}));
 
 /**
  * The holder block of the customer-application editor.
@@ -187,5 +196,168 @@ describe('postal code hint', () => {
   it('no longer claims the postal code fills from the city', () => {
     render();
     expect(screen.queryByText('Fills from the city selected.')).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Recommender details                                                 */
+/* ------------------------------------------------------------------ */
+
+const node = (
+  staffId: string,
+  fullName: string,
+  role: GenealogyNode['role'],
+  over: Partial<GenealogyNode> = {},
+): GenealogyNode => ({
+  staffId,
+  fullName,
+  role,
+  status: 'active',
+  ostStatus: 'active',
+  uplineStaffId: null,
+  directDownlineCount: 0,
+  totalDescendantCount: 0,
+  ...over,
+});
+
+const OST_A = '00000000-0000-4000-8000-0000000000a1';
+const OST_B = '00000000-0000-4000-8000-0000000000b2';
+const SM_A = '00000000-0000-4000-8000-0000000000c3';
+
+function Recommender({ initial }: { initial?: Partial<Parameters<typeof RecommenderFields>[0]['meta']> }) {
+  const [meta, setMeta] = useState({
+    svdStaffId: '',
+    ssmStaffId: '',
+    smStaffId: '',
+    referrerStaffId: '',
+    vipRecommenderName: '',
+    recommenderContact: '',
+    recommenderEmail: '',
+    acknowledgedAt: '2026-10-19',
+    ...initial,
+  });
+  return (
+    <RecommenderFields
+      meta={meta}
+      chainNames={{}}
+      onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
+      onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
+    />
+  );
+}
+
+const renderRecommender = (initial?: Parameters<typeof Recommender>[0]['initial']) =>
+  renderWithProviders(<Recommender initial={initial} />);
+
+const optionsOf = (label: string): string[] =>
+  within(screen.getByLabelText(label))
+    .getAllByRole('option')
+    .map((option) => option.textContent ?? '');
+
+describe('recommender loading states', () => {
+  it('spins inside every chain dropdown while the genealogy loads', () => {
+    vi.mocked(getGenealogy).mockReturnValue(new Promise(() => {}));
+    renderRecommender();
+    // A disabled dropdown with no spinner leaves the operator staring at four
+    // empty boxes with no explanation.
+    for (const label of ['SVD', 'SSM', 'SM', 'Referrer', 'VIP Recommender']) {
+      const select = screen.getByLabelText(label);
+      expect(select).toHaveAttribute('aria-busy', 'true');
+      expect(select.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    }
+  });
+
+  it('spins inside the VIP Recommender dropdown while the genealogy loads', () => {
+    vi.mocked(getGenealogy).mockReturnValue(new Promise(() => {}));
+    renderRecommender();
+    expect(screen.getByLabelText('VIP Recommender')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('offers a real retry button when the genealogy fails, and spins on it', async () => {
+    vi.mocked(getGenealogy).mockRejectedValue(new Error('offline'));
+    renderRecommender();
+    const retry = await screen.findByRole('button', { name: 'Retry chain list' });
+    expect(retry).toBeInTheDocument();
+    // The old affordance was the words "Chain list unavailable. Retry." with
+    // nothing clickable behind them.
+    expect(screen.queryByText('Chain list unavailable. Retry.')).not.toBeInTheDocument();
+
+    vi.mocked(getGenealogy).mockResolvedValue([node(OST_A, 'ANA SANTOS', 'ost')]);
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry chain list' })).not.toBeInTheDocument(),
+    );
+    expect(optionsOf('VIP Recommender')).toContain('ANA SANTOS');
+  });
+});
+
+describe('VIP recommender', () => {
+  it('is a dropdown of active OST members, not a typed name', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node(OST_A, 'ANA SANTOS', 'ost'),
+      node(OST_B, 'BEN REYES', 'ost'),
+      node(SM_A, 'CARLO CRUZ', 'sales_manager'),
+      node(OST_A, 'INACTIVE ONE', 'ost', { status: 'inactive' }),
+    ]);
+    renderRecommender();
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('BEN REYES'));
+    const options = optionsOf('VIP Recommender');
+    expect(options).toEqual(['Not specified', 'ANA SANTOS', 'BEN REYES']);
+    // Not a text box any more, and not a non-OST seller.
+    expect(screen.queryByRole('textbox', { name: 'VIP Recommender' })).not.toBeInTheDocument();
+  });
+
+  it('lists the whole OST roster, not only the selected upline downline', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node(OST_A, 'ANA SANTOS', 'ost'),
+      node(OST_B, 'BEN REYES', 'ost'),
+    ]);
+    renderRecommender({ smStaffId: SM_A });
+    // A recommender is not in the applicant's reporting chain, so the upline
+    // must not narrow the list the way it narrows Referrer.
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('BEN REYES'));
+    expect(optionsOf('VIP Recommender')).toHaveLength(3);
+  });
+
+  it('stores the chosen recommender name', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node(OST_A, 'ANA SANTOS', 'ost')]);
+    renderRecommender();
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('ANA SANTOS'));
+    fireEvent.change(screen.getByLabelText('VIP Recommender'), {
+      target: { value: 'ANA SANTOS' },
+    });
+    expect(screen.getByLabelText('VIP Recommender')).toHaveValue('ANA SANTOS');
+  });
+
+  it('keeps a stored recommender that is no longer an OST member visible', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node(OST_A, 'ANA SANTOS', 'ost')]);
+    renderRecommender({ vipRecommenderName: 'FORMER MEMBER' });
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('ANA SANTOS'));
+    // Otherwise the dropdown would display "Not specified" while still holding
+    // the old name, and the operator would never know what is stored.
+    expect(optionsOf('VIP Recommender')).toContain('FORMER MEMBER (retired)');
+    expect(screen.getByLabelText('VIP Recommender')).toHaveValue('FORMER MEMBER');
+  });
+});
+
+describe('recommender typed fields', () => {
+  it('refuses a contact number carrying letters, rather than storing part of it', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([]);
+    renderRecommender();
+    const contact = screen.getByLabelText('Recommender Contact');
+    // The keystroke is refused whole, so the field can never hold the digits
+    // left over from a number that was never valid.
+    fireEvent.change(contact, { target: { value: '0917abc1234' } });
+    expect(contact).toHaveValue('');
+    fireEvent.change(contact, { target: { value: '09171234567' } });
+    expect(contact).toHaveValue('09171234567');
+  });
+
+  it('keeps the email lowercase while typing', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([]);
+    renderRecommender();
+    const email = screen.getByLabelText('Recommender Email');
+    fireEvent.change(email, { target: { value: 'Ana@Example.COM' } });
+    expect(email).toHaveValue('ana@example.com');
   });
 });

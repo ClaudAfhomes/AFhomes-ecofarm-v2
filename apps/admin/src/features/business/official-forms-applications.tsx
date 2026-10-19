@@ -1632,7 +1632,7 @@ export function CustomerApplicationEditorPage() {
           {(!isNew || activeStep === 3) && (
             <fieldset id="step-recommender" className={styles.panel}>
               <legend className={styles.panelTitle}>4. Recommender details</legend>
-              <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
+              <p className={styles.hint}>Referrer and VIP recommender are active OST staff.</p>
               <div className={styles.editorGrid}>
                 <RecommenderFields
                   meta={meta}
