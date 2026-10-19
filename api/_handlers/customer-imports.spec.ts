@@ -191,6 +191,129 @@ describe('company XLSX/XLSM preview', () => {
       expect(db.tables.payments).toHaveLength(0);
     },
   );
+  it('previews two existing OSTs with different direct uplines in one tree, without provisioning accounts', async () => {
+    const registered = [
+      {
+        staff_id: 'vd',
+        full_name: 'Registered VD',
+        role_slug: 'vice_director',
+        ancestor_ids: [],
+        match_count: 1,
+      },
+      {
+        staff_id: 'ssm',
+        full_name: 'Registered SSM',
+        role_slug: 'senior_sales_manager',
+        ancestor_ids: ['vd'],
+        match_count: 1,
+      },
+      {
+        staff_id: 'sm',
+        full_name: 'Registered SM',
+        role_slug: 'sales_manager',
+        ancestor_ids: ['ssm', 'vd'],
+        match_count: 1,
+      },
+      {
+        staff_id: 'ref',
+        full_name: 'Registered Referrer',
+        role_slug: 'ost',
+        ancestor_ids: ['sm', 'ssm', 'vd'],
+        match_count: 1,
+      },
+      {
+        staff_id: 'vip',
+        full_name: 'Registered VIP',
+        role_slug: 'ost',
+        ancestor_ids: ['vd'],
+        match_count: 1,
+      },
+    ];
+    const staff = registered.map((m) => ({
+      id: m.staff_id,
+      full_name: m.full_name,
+      status: 'active',
+    }));
+    const db = install(
+      { staff_users: structuredClone(staff) },
+      {
+        rpcs: [
+          { fn: 'match_company_import_staff', result: registered },
+          { fn: 'get_sale_team_accreditation', result: null },
+        ],
+      },
+    );
+    const input = {
+      ...pendingRow({ mobile: '09123456789' }),
+      vd_name: 'Registered VD',
+      ssm_name: 'Registered SSM',
+      sm_name: 'Registered SM',
+      referrer_name: 'Registered Referrer',
+      recommender_name: 'Registered VIP',
+      citizenship: 'Filipino',
+      tin: '123-456-789',
+    };
+    const result = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'excel', contentBase64: b64(companyWorkbook([input])) },
+    });
+    expect(result.status).toBe(201);
+    expect(result.body).toMatchObject({
+      job: { totalRows: 1, validRows: 1, invalidRows: 0 },
+      rows: [
+        {
+          fields: {
+            referrer_staff_id: 'ref',
+            recommender_staff_id: 'vip',
+            referrer_sm_staff_id: 'sm',
+            recommender_vd_staff_id: 'vd',
+          },
+          errors: [],
+        },
+      ],
+    });
+    expect(db.tables.staff_users).toEqual(staff);
+    expect(db.tables.customers).toEqual([]);
+    expect(db.tables.memberships).toEqual([]);
+    expect(db.tables.payments).toEqual([]);
+    expect(db.calls.some((c) => ['createUser', 'inviteUserByEmail'].includes(c.op))).toBe(false);
+    // A saved preview cannot authorize a changed VIP genealogy at confirmation.
+    registered.push({
+      staff_id: 'vd2',
+      full_name: 'Other VD',
+      role_slug: 'vice_director',
+      ancestor_ids: [],
+      match_count: 1,
+    });
+    registered.find((m) => m.staff_id === 'vip')!.ancestor_ids = ['vd2'];
+    const jobId = (result.body as { job: { id: string } }).job.id;
+    const confirmed = await call({ path: `jobs/${jobId}/confirm`, method: 'POST', body: {} });
+    expect(confirmed.body).toMatchObject({ committed: 0, failed: 1 });
+    expect(db.calls.some((c) => c.table === 'commit_customer_import_row')).toBe(false);
+    expect(db.tables.customers).toEqual([]);
+  });
+  it('locates the independent incomplete TIN error at the workbook field while accepting Filipino', async () => {
+    install();
+    const result = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'excel',
+        contentBase64: b64(
+          companyWorkbook([
+            { ...pendingRow({ mobile: '09123456789' }), citizenship: 'Filipino', tin: '123456' },
+          ]),
+        ),
+      },
+    });
+    expect(result.status).toBe(201);
+    const row = (result.body as { rows: { errors: { field: string; message: string }[] }[] })
+      .rows[0]!;
+    expect(row.errors).toEqual([
+      { field: 'tin', message: expect.stringMatching(/6 digits.*complete 9-digit/) },
+    ]);
+  });
   it('marks both rows conflicting when one file repeats a strong customer identity', async () => {
     install();
     const row = { ...pendingRow({ mobile: '09123456789' }), stated_status: 'Pending' };

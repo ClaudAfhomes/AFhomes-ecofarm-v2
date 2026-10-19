@@ -8,6 +8,8 @@ import {
   normalizeWorkbookName,
   companyApplicationPrefillSchema,
   emailSchema,
+  CITIZENSHIP_OPTIONS,
+  tinNumberSchema,
 } from '@afhomes/contracts';
 import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
 import type { ImportFieldRow, ValidatedImportRow } from './customer-import.js';
@@ -15,6 +17,9 @@ import type { AddressProvider } from './address-provider.js';
 import { resolvePostalCode } from './postal-reference.js';
 
 export { WORKBOOK_FIELDS };
+const workbookCitizenship = (value: string) =>
+  CITIZENSHIP_OPTIONS.find((choice) => choice.toLowerCase() === value.trim().toLowerCase()) ??
+  value.trim();
 export function workbookDate(raw: string, date1904 = false): string {
   if (!raw) return '';
   let date = raw;
@@ -193,6 +198,8 @@ export function parseCustomerWorkbook(
           fields[key] = workbookDate(fields[key] ?? '', date1904);
         for (const key of ['email', 'secondary_email', 'recommender_email'])
           fields[key] = (fields[key] ?? '').trim().toLowerCase();
+        for (const key of ['citizenship', 'secondary_citizenship'])
+          fields[key] = workbookCitizenship(fields[key] ?? '');
         for (const key of ['suffix', 'secondary_suffix'])
           if (fields[key] === 'N/A') fields[key] = '';
         for (const key of [
@@ -235,6 +242,16 @@ export function validateWorkbookFields(
 ): void {
   if (fields.suffix === 'N/A') row.errors = row.errors.filter((e) => e.field !== 'suffix');
   const err = (field: string, message: string) => row.errors.push({ field, message });
+  for (const prefix of ['', 'secondary_']) {
+    const key = prefix + 'citizenship';
+    if (fields[key]) fields[key] = workbookCitizenship(fields[key]!);
+    const tin = fields[prefix + 'tin'];
+    if (tin && !tinNumberSchema.safeParse(tin).success)
+      err(
+        prefix + 'tin',
+        `TIN has ${tin.replace(/\D/g, '').length} digits. Enter the complete 9-digit TIN (123-456-789), optionally followed by a 3-5 digit branch suffix. TIN is optional; leave it blank if unavailable. Never pad an incomplete TIN.`,
+      );
+  }
   if (fields.recommender_email && !emailSchema.safeParse(fields.recommender_email).success)
     err('recommender_email', 'Invalid email');
   for (const [field, choices] of Object.entries(CUSTOMER_WORKBOOK_CHOICES)) {
@@ -283,53 +300,173 @@ export type WorkbookStaffMatch = {
   role_slug: string;
   ancestor_ids: string[];
   match_count: number;
+  aa_number?: string | null;
 };
 export function resolveWorkbookStaff(
   fields: Record<string, string>,
   matches: WorkbookStaffMatch[],
-  row: ValidatedImportRow,
+  row: Pick<ValidatedImportRow, 'errors' | 'warnings'>,
 ): void {
-  const expected: Record<string, string | null> = {
+  const expected: Record<string, string> = {
     vd_name: 'vice_director',
     ssm_name: 'senior_sales_manager',
     sm_name: 'sales_manager',
-    referrer_name: null,
+    referrer_name: 'ost',
+    recommender_name: 'ost',
   };
-  const resolved: WorkbookStaffMatch[] = [];
+  const resolved = new Map<string, WorkbookStaffMatch>();
+  const describe = (match: WorkbookStaffMatch) =>
+    `${match.full_name} [${match.aa_number || match.staff_id}]`;
+  const fail = (field: string, message: string) => row.errors.push({ field, message });
   for (const [field, role] of Object.entries(expected)) {
     if (!fields[field]) continue;
-    const options = matches.filter((match) => nameKey(match.full_name) === nameKey(fields[field]!));
+    const input = fields[field]!.trim();
+    const id = fields[field.replace('_name', '_staff_id')];
+    const aa = fields[field.replace('_name', '_aa_number')];
+    const options = matches.filter(
+      (match) =>
+        (!id || match.staff_id.toLowerCase() === id.toLowerCase()) &&
+        (!aa || match.aa_number?.toUpperCase() === aa.toUpperCase()) &&
+        (nameKey(match.full_name) === nameKey(input) ||
+          match.staff_id.toLowerCase() === input.toLowerCase() ||
+          match.aa_number?.toUpperCase() === input.toUpperCase()),
+    );
     const match = options[0];
-    if (
-      options.length !== 1 ||
-      !match ||
-      Number(match.match_count) !== 1 ||
-      (role && match.role_slug !== role) ||
-      !['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(match.role_slug)
-    ) {
-      row.errors.push({
+    if (options.length !== 1 || !match || match.role_slug !== role) {
+      fail(
         field,
-        message:
-          'Unknown, ambiguous or wrong-role registered staff identity; manual review required',
-      });
+        `Expected one existing registered ${role === 'ost' ? 'OST' : role.replaceAll('_', ' ')}. ${options.length > 1 ? 'Name is ambiguous; use the canonical staff ID or AAO/AAI number.' : 'No matching identity with the required role; verify the staff ID or AAO/AAI number. No new account is needed.'}`,
+      );
+      continue;
+    }
+    const canonical =
+      id ||
+      aa ||
+      match.staff_id.toLowerCase() === input.toLowerCase() ||
+      match.aa_number?.toUpperCase() === input.toUpperCase();
+    if (!canonical && Number(match.match_count) !== 1) {
+      fail(
+        field,
+        'Name is ambiguous; use the canonical staff ID or AAO/AAI number. No identity was assumed.',
+      );
       continue;
     }
     if (
       new Set(match.ancestor_ids).size !== match.ancestor_ids.length ||
-      resolved.some(
-        (parent) =>
-          parent.staff_id !== match.staff_id && !match.ancestor_ids.includes(parent.staff_id),
-      )
+      match.ancestor_ids.includes(match.staff_id)
     ) {
-      row.errors.push({
+      fail(
         field,
-        message:
-          'Registered seller hierarchy contradicts the supplied managers; manual review required',
-      });
+        'Registered genealogy contains a cycle or conflicting placements; manual review required.',
+      );
       continue;
     }
     fields[field.replace('_name', '_staff_id')] = match.staff_id;
-    resolved.push(match);
+    if (match.aa_number) fields[field.replace('_name', '_aa_number')] = match.aa_number;
+    resolved.set(field, match);
+    // The unchanged confirmation RPC still validates unique registered names.
+    if (Number(match.match_count) !== 1) {
+      fail(
+        field,
+        `Identity resolved to ${describe(match)}, but database confirmation still requires a unique registered name. Held for review; no duplicate account will be created.`,
+      );
+    } else if (nameKey(input) !== nameKey(match.full_name)) {
+      fields[field.replace('_name', '_reference')] = input;
+      fields[field] = match.full_name;
+      row.warnings.push({
+        field,
+        message: `${input} resolved to ${describe(match)}; the registered name is used for confirmation. The original reference is preserved.`,
+      });
+    }
+  }
+  const lineage = (field: string) => {
+    const member = resolved.get(field);
+    if (!member) return null;
+    const ancestors = member.ancestor_ids.map((id) => matches.find((m) => m.staff_id === id));
+    const ranks: Record<string, number> = {
+      vice_director: 0,
+      senior_sales_manager: 1,
+      sales_manager: 2,
+      ost: 3,
+    };
+    let rank = ranks[member.role_slug]!;
+    for (const ancestor of ancestors) {
+      if (
+        !ancestor ||
+        ranks[ancestor.role_slug] === undefined ||
+        ranks[ancestor.role_slug]! >= rank
+      ) {
+        fail(
+          field,
+          'Registered genealogy is incomplete or has invalid role order; no upperlines were inferred.',
+        );
+        return null;
+      }
+      rank = ranks[ancestor.role_slug]!;
+    }
+    const root = ancestors.at(-1) ?? member;
+    if (root.role_slug !== 'vice_director') {
+      fail(field, 'Registered genealogy has no verified VD root; manual review required.');
+      return null;
+    }
+    if (member.role_slug === 'ost') {
+      const stem = field.replace('_name', '');
+      for (const [key, role] of Object.entries({
+        vd: 'vice_director',
+        ssm: 'senior_sales_manager',
+        sm: 'sales_manager',
+      })) {
+        const upper = ancestors.find((a) => a?.role_slug === role);
+        if (upper) fields[`${stem}_${key}_staff_id`] = upper.staff_id;
+        else delete fields[`${stem}_${key}_staff_id`];
+      }
+      row.warnings.push({
+        field,
+        message: `${field === 'referrer_name' ? 'Referrer' : 'VIP Recommender'}: ${describe(member)}. Actual lineage (direct upline first): ${ancestors.map((a) => `${a!.role_slug.replaceAll('_', ' ')} ${describe(a!)}`).join(' → ')}. Missing SM/SSM levels are not inferred.`,
+      });
+    }
+    return { member, ancestors, root };
+  };
+  const referrer = lineage('referrer_name');
+  const recommender = lineage('recommender_name');
+  const managers = ['vd_name', 'ssm_name', 'sm_name'].flatMap((field) => {
+    const match = resolved.get(field);
+    return match ? [{ field, match }] : [];
+  });
+  for (let i = 0; i < managers.length; i++) {
+    const { field, match } = managers[i]!;
+    for (const parent of managers.slice(0, i))
+      if (!match.ancestor_ids.includes(parent.match.staff_id))
+        fail(
+          field,
+          `${describe(match)} is not under workbook ${describe(parent.match)} in the registered genealogy.`,
+        );
+    if (referrer && !referrer.member.ancestor_ids.includes(match.staff_id)) {
+      const actual = referrer.ancestors.find((a) => a?.role_slug === match.role_slug);
+      fail(
+        field,
+        `Workbook ${describe(match)} conflicts with Referrer ${describe(referrer.member)}: registered ${match.role_slug.replaceAll('_', ' ')} is ${actual ? describe(actual) : 'not present (direct placement skips this level)'}. No genealogy was replaced.`,
+      );
+    }
+  }
+  if (referrer && recommender) {
+    if (referrer.root.staff_id !== recommender.root.staff_id)
+      fail(
+        'recommender_name',
+        `Referrer and VIP Recommender are in different registered genealogy trees: Referrer VD ${describe(referrer.root)}; VIP Recommender VD ${describe(recommender.root)}. Review the intended tree; no genealogy was changed.`,
+      );
+    else
+      row.warnings.push({
+        field: 'recommender_name',
+        message:
+          'Referrer and VIP Recommender share the same registered VD tree. Different immediate uplines are allowed; each OST lineage was checked separately.',
+      });
+  } else if (!fields.recommender_name) {
+    row.warnings.push({
+      field: 'recommender_name',
+      message:
+        'VIP Recommender not supplied; no OST identity or genealogy relationship was assumed.',
+    });
   }
 }
 /** Resolve only unique exact official names, scoped to the selected parent. */

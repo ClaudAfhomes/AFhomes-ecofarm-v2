@@ -123,7 +123,20 @@ const renderRowErrors = (
           {workbookFieldLabel(error.field, rowNumber)}: {error.message}
         </li>
       ))}
-      {hidden > 0 ? <li className={styles.errorMore}>+{hidden} more</li> : null}
+      {hidden > 0 ? (
+        <li className={styles.errorMore}>
+          <details>
+            <summary>Show {hidden} more</summary>
+            <ul>
+              {errors.slice(2).map((error, index) => (
+                <li key={index}>
+                  {workbookFieldLabel(error.field, rowNumber)}: {error.message}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </li>
+      ) : null}
     </ul>
   );
 };

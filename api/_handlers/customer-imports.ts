@@ -58,9 +58,9 @@ import {
   resolveWorkbookGeography,
   sameWorkbookIdentity,
   resolveWorkbookStaff,
-  type WorkbookStaffMatch,
   workbookApplicationPrefill,
 } from '../_lib/customer-workbook.js';
+import { loadWorkbookStaffMatches } from '../_lib/customer-workbook-staff.js';
 import { addressProvider } from '../_lib/address-source.js';
 import { companyTemplate, companyWorkbook } from '../_lib/customer-workbook-export.js';
 import { serviceClient } from '../_lib/rest.js';
@@ -482,26 +482,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const ctx = await buildContext(db, records);
       const raOwners = new Map<string, Set<string>>();
-      const staffMatches: WorkbookStaffMatch[] = [];
+      const staffMatches = workbookRecords ? await loadWorkbookStaffMatches(db, records) : [];
       if (workbookRecords) {
-        const names = [
-          ...new Set(
-            records
-              .flatMap((r) =>
-                ['vd_name', 'ssm_name', 'sm_name', 'referrer_name'].map(
-                  (key) => r.fields[key] ?? '',
-                ),
-              )
-              .filter(Boolean),
-          ),
-        ];
-        for (let offset = 0; offset < names.length; offset += 200) {
-          const lookup = await db.rpc('match_company_import_staff', {
-            p_names: names.slice(offset, offset + 200),
-          });
-          if (lookup.error) throw lookup.error;
-          staffMatches.push(...((lookup.data ?? []) as WorkbookStaffMatch[]));
-        }
         const ras = [...new Set(records.map((r) => r.fields.ra_number ?? '').filter(Boolean))];
         for (let offset = 0; offset < ras.length; offset += 100) {
           const batch = ras.slice(offset, offset + 100);
@@ -585,12 +567,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             workbookApplicationPrefill(r.fields);
           } catch (error) {
             if (!(error instanceof z.ZodError)) throw error;
-            v.errors.push(
-              ...error.issues.map((issue) => ({
-                field: issue.path.join('.'),
-                message: issue.message,
-              })),
-            );
+            for (const issue of error.issues) {
+              const [holder, property] = issue.path;
+              const workbookKey =
+                property === 'citizenship'
+                  ? 'citizenship'
+                  : property === 'tinNumber'
+                    ? 'tin'
+                    : null;
+              const field =
+                workbookKey && ['primary', 'secondary'].includes(String(holder))
+                  ? (holder === 'secondary' ? 'secondary_' : '') + workbookKey
+                  : issue.path.join('.');
+              if (!v.errors.some((error) => error.field === field))
+                v.errors.push({ field, message: issue.message });
+            }
           }
           const owners = raOwners.get(r.fields.ra_number ?? '');
           if (owners && [...owners].some((email) => email !== r.fields.email?.toLowerCase()))
@@ -881,6 +872,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Import row count is incomplete; retry after reviewing the job.',
           409,
         );
+      const confirmationStaff = await loadWorkbookStaffMatches(
+        db,
+        rows
+          .filter(
+            (row) =>
+              !row.committed_at &&
+              row.validation_status !== 'error' &&
+              ['CREATE', 'UPDATE'].includes(String(row.action)) &&
+              (row.raw_data as Record<string, string> | undefined)?.workbook_format ===
+                'company_v1',
+          )
+          .slice(0, 100)
+          .map((row) => ({ fields: row.raw_data as Record<string, string> })),
+      );
       const results: {
         rowId: string;
         ok: boolean;
@@ -934,6 +939,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         attempted++;
         try {
+          if ((raw.raw_data as Record<string, string>)?.workbook_format === 'company_v1') {
+            const checked: Pick<ValidatedImportRow, 'errors' | 'warnings'> = {
+              errors: [],
+              warnings: [],
+            };
+            resolveWorkbookStaff(
+              { ...(raw.raw_data as Record<string, string>) },
+              confirmationStaff,
+              checked,
+            );
+            if (checked.errors.length) throw new Error('IMPORT_STAFF_REVIEW_REQUIRED');
+          }
           if (action === 'CREATE') {
             const out = await commitCreateRow(db, auth.userId, raw);
 
@@ -1179,24 +1196,24 @@ async function buildExportRows(db: Db, filters: ExportFilters): Promise<Customer
   return directory.map(({ record: r }) => ({
     // PRIMARY block, SSOT order. TIN stays masked on this read surface too.
     'RA NO': text(r.ra_number),
-    'STATUS': text(r.company_status),
+    STATUS: text(r.company_status),
     'FIRST NAME': text(r.first_name),
     'LAST NAME': text(r.last_name),
     'MIDDLE NAME': text(r.middle_name),
-    'SUFFIX': text(r.suffix),
-    'BIRTHDAY': date(r.birth_date),
-    'GENDER': text(r.gender),
-    'AGE': ageOn(r.birth_date),
-    'CITIZENSHIP': text(r.citizenship),
+    SUFFIX: text(r.suffix),
+    BIRTHDAY: date(r.birth_date),
+    GENDER: text(r.gender),
+    AGE: ageOn(r.birth_date),
+    CITIZENSHIP: text(r.citizenship),
     'CIVIL STATUS': text(r.civil_status),
     'PERMANENT ADDRESS LINE 1': addressPart(r, 'line1'),
     'PERMANENT ADDRESS LINE 2': addressPart(r, 'line2'),
-    'PROVINCE': addressPart(r, 'province'),
-    'CITY': addressPart(r, 'city'),
-    'BARANGGAY': addressPart(r, 'barangay'),
+    PROVINCE: addressPart(r, 'province'),
+    CITY: addressPart(r, 'city'),
+    BARANGGAY: addressPart(r, 'barangay'),
     'POSTAL CODE': addressPart(r, 'postalCode'),
-    'LANDLINE': text(r.landline),
-    'EMAIL': text(r.email),
+    LANDLINE: text(r.landline),
+    EMAIL: text(r.email),
     'TIN NO.': masked(r.tin_number),
     'MOBILE NO.': text(r.phone),
     'OCCUPATION / BUSINESS NAME': text(r.occupation_business_name),
@@ -1230,12 +1247,12 @@ async function buildExportRows(db: Db, filters: ExportFilters): Promise<Customer
     'VIP PACKAGE': text(r.stated_vip_package),
     'PAYMENT TERMS': text(r.stated_payment_terms),
     'REGULAR PRICE': text(r.stated_regular_price),
-    'DISCOUNT': text(r.stated_discount),
+    DISCOUNT: text(r.stated_discount),
     'TOTAL AMOUNT': text(r.stated_total_amount),
-    'RF': text(r.stated_rf),
+    RF: text(r.stated_rf),
     'PAYMENT TYPE': text(r.stated_payment_type),
     'REF NO': text(r.stated_ref_no),
-    'DATE': date(r.stated_payment_date),
+    DATE: date(r.stated_payment_date),
     // System columns: identifiers and derived state, never company-stated.
     'CUSTOMER ID': text(r.customer_number),
     'CUSTOMER CODE': text(r.customer_code),
@@ -1243,9 +1260,9 @@ async function buildExportRows(db: Db, filters: ExportFilters): Promise<Customer
     'CUSTOMER STATUS': text(r.status),
     'MEMBERSHIP STATUS': text(r.member_status),
     'PAYMENT STATUS': text(r.payment_status ?? 'no_payment'),
-    'CATEGORY': CUSTOMER_CATEGORY_LABELS[customerCategorySchema.parse(r.derivedCategory)],
+    CATEGORY: CUSTOMER_CATEGORY_LABELS[customerCategorySchema.parse(r.derivedCategory)],
     'POINTS BALANCE': text(r.available_points),
-    'SELLER': text(r.seller_name),
+    SELLER: text(r.seller_name),
     'ACTIVATED AT': isoOrNull(r.activated_at) ?? '',
     'EXPIRES AT': isoOrNull(r.expires_at) ?? '',
     'CREATED AT': isoOrNull(r.created_at) ?? '',
