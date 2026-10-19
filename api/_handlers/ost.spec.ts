@@ -742,6 +742,21 @@ describe('OST visibility scopes', () => {
 });
 
 describe('OST approval state guards', () => {
+  it('creates an OST with a temporary password without sending an invitation', async () => {
+    const db = install();
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const result = await approve(appId, ADMIN_TOKEN, { temporaryPassword: 'TempPass123' });
+    expect(result.status).toBe(201);
+    const created = db.createdAuthUsers[0]!;
+    expect(db.passwordsSeen).toEqual(['TempPass123']);
+    expect(db.rows('staff_users').find((r) => r.id === created.id)).toMatchObject({
+      status: 'active',
+      must_change_password: true,
+    });
+    expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
+    expect(JSON.stringify(result.body)).not.toContain('TempPass123');
+    expect(JSON.stringify(db.rows('audit_events'))).not.toContain('TempPass123');
+  });
   async function approve(appId: string, token = ADMIN_TOKEN, body: unknown = {}) {
     const { res, state } = makeRes();
     await ost(

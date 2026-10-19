@@ -14,7 +14,6 @@ import { hashIdentifier } from '../_lib/identifier.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
-import { resolveAdminUrl } from '../_lib/admin-url.js';
 import { handleOstImport } from '../_lib/ost-import-handler.js';
 import { validateOstSponsor } from '../_lib/ost-sponsor.js';
 import { verifyOstAddress, verifyOstAddressDetails } from '../_lib/ost-address.js';
@@ -351,24 +350,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (readError) return rpcFailure(res, readError);
       if (!application || !['submitted', 'under_review'].includes(application.status))
         return fail(res, 'CONFLICT', 'The application is not ready for approval.', 409);
-      const redirectTo = resolveAdminUrl();
-      if (!redirectTo) return fail(res, 'INTERNAL', 'Account invitation is not configured.', 500);
-      const invited = await db.auth.admin.inviteUserByEmail(application.email, {
-        redirectTo,
-        data: {
+      if (!parsed.data.temporaryPassword)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Provide a temporary password for the OST account.',
+          400,
+        );
+      const created = await db.auth.admin.createUser({
+        email: application.email,
+        password: parsed.data.temporaryPassword,
+        email_confirm: true,
+        user_metadata: {
           full_name: [application.first_name, application.middle_name, application.last_name]
             .filter(Boolean)
             .join(' '),
         },
       });
-      if (invited.error || !invited.data.user)
+      if (created.error || !created.data.user)
         return fail(
           res,
           'CONFLICT',
-          'Unable to invite this account. Review existing accounts before retrying.',
+          'Unable to create this account. Review existing accounts before retrying.',
           409,
         );
-      const authId = invited.data.user.id;
+      const authId = created.data.user.id;
       const installed = await db.rpc('install_ost_accreditation_identity', {
         p_application_id: id,
         p_actor_id: principal.userId,
@@ -377,11 +383,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_expires_on: parsed.data.expiresOn,
       });
       if (installed.error) {
-        // GoTrue invitation and SQL cannot share a transaction. Preserve the Auth
-        // identity for reconciliation; an invitation response does not prove it
-        // was newly created, so deleting it could destroy a pre-existing account.
+        // Preserve the identity for reconciliation if the SQL outcome is uncertain.
         return rpcFailure(res, installed.error);
       }
+      // The installer leaves staff invited; activate and enforce the password gate together.
+      const activated = await db
+        .from('staff_users')
+        .update({
+          status: 'active',
+          must_change_password: true,
+          activated_at: new Date().toISOString(),
+        })
+        .eq('id', authId)
+        .eq('status', 'invited')
+        .select('id')
+        .maybeSingle();
+      if (activated.error || !activated.data)
+        return fail(res, 'INTERNAL', 'Account setup requires administrator reconciliation.', 500);
       return res.status(201).json({ id: installed.data });
     }
     const result = await db.rpc('approve_ost_accreditation', {

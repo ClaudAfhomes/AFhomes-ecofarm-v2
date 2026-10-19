@@ -95,6 +95,12 @@ async function call(token?: string) {
 }
 
 describe('GET /ost/me', () => {
+  it('refuses an OST whose staff activation is incomplete', async () => {
+    install();
+    const staff = (holder.db as FakeSupabase).rows('staff_users').find((row) => row.id === OST_ID)!;
+    staff.status = 'invited';
+    expect((await call('tok-ost')).status).toBe(403);
+  });
   it('blocks the temporary password until the server flag is cleared', async () => {
     install();
     const db = holder.db as FakeSupabase;

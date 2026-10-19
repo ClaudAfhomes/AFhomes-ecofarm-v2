@@ -19,6 +19,7 @@ import { randomBytes } from 'node:crypto';
 
 import {
   OST_REVIEWABLE_STATUSES,
+  createAfHomesStaffSchema,
   createOstReferralCodeSchema,
   normalizeOstReferralCode,
   ostMeSchema,
@@ -221,13 +222,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
       const { data: staff, error: staffError } = await db
         .from('staff_users')
-        .select('must_change_password')
+        .select('status,must_change_password')
         .eq('id', userId)
         .maybeSingle();
       if (staffError)
         return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
       if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
-      if (staff.must_change_password === true)
+      if (staff.status !== 'active' || staff.must_change_password === true)
         return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
       const { data: member, error } = await db
         .from('ost_members')
@@ -454,14 +455,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ostRole?.is_active) return fail(res, 'CONFLICT', 'The OST role is not available', 409);
 
       const fullName = applicantName(app);
-      const redirectTo = resolveAdminUrl();
-      if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
-      const invited = (await db.auth.admin.inviteUserByEmail(String(app.email), {
-        redirectTo,
-        data: { full_name: fullName },
-      })) as { data?: { user?: { id: string } | null }; error?: { message?: string } | null };
+      const credentials = createAfHomesStaffSchema
+        .pick({ temporaryPassword: true })
+        .partial()
+        .safeParse(jsonBody(req));
+      if (!credentials.success)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Use a temporary password of 8 to 128 characters.',
+          400,
+        );
+      const temporaryPassword = credentials.data.temporaryPassword;
+      let invited;
+      if (temporaryPassword) {
+        invited = await db.auth.admin.createUser({
+          email: String(app.email),
+          password: temporaryPassword,
+          email_confirm: true,
+          user_metadata: { full_name: fullName },
+        });
+      } else {
+        // Preserve invitation compatibility for historical approval clients.
+        const redirectTo = resolveAdminUrl();
+        if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
+        invited = await db.auth.admin.inviteUserByEmail(String(app.email), {
+          redirectTo,
+          data: { full_name: fullName },
+        });
+      }
       if (invited.error || !invited.data?.user?.id)
-        return fail(res, 'CONFLICT', 'Unable to invite this email address', 409);
+        return fail(res, 'CONFLICT', 'Unable to create this OST account', 409);
       const ostUserId = invited.data.user.id;
 
       // An invitation response does not prove GoTrue created a NEW identity:
@@ -548,6 +572,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'OST installation failed. Review the retained invitation before retrying.',
           installed.error.code === '42501' ? 403 : 500,
         );
+      }
+      if (temporaryPassword) {
+        const activated = await db
+          .from('staff_users')
+          .update({
+            status: 'active',
+            must_change_password: true,
+            activated_at: new Date().toISOString(),
+          })
+          .eq('id', ostUserId)
+          .eq('status', 'invited')
+          .select('id')
+          .maybeSingle();
+        if (activated.error || !activated.data)
+          return fail(res, 'INTERNAL', 'Account setup requires administrator reconciliation.', 500);
       }
       return res
         .status(201)

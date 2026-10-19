@@ -17,6 +17,7 @@ import {
   ErrorState,
   FileField,
   PageHeader,
+  PasswordField,
   Skeleton,
   StatusChip,
   TextAreaField,
@@ -92,6 +93,8 @@ export function OstApplicationDetailPage() {
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [startsOn, setStartsOn] = useState('');
   const [expiresOn, setExpiresOn] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const records = useQuery({
     queryKey: ostDetailKeys.accreditation(id),
     queryFn: () => getAccreditation('applications', id),
@@ -108,13 +111,17 @@ export function OstApplicationDetailPage() {
 
   const approve = useBusinessMutation({
     mutationFn: () =>
-      official ? approveAccreditation(id, startsOn, expiresOn) : approveOstApplication(id),
+      official
+        ? approveAccreditation(id, startsOn, expiresOn, temporaryPassword)
+        : approveOstApplication(id, temporaryPassword),
     onSuccess: (member) => {
+      setTemporaryPassword('');
+      setConfirmPassword('');
       const legacy = ostMemberSchema.safeParse(member);
       setOutcome(
         legacy.success
           ? `Approved. OST member ${legacy.data.ostNumber} created under ${legacy.data.sponsorName}.`
-          : 'Accreditation approved and invitation issued.',
+          : 'Accreditation approved. Provide the temporary password to the OST for first sign-in.',
       );
       void client.invalidateQueries({ queryKey: ['ost'] });
     },
@@ -310,6 +317,29 @@ export function OstApplicationDetailPage() {
               ) : null}
             </>
           )}
+          <PasswordField
+            id="ost-temporary-password"
+            label="Temporary password"
+            value={temporaryPassword}
+            onChange={setTemporaryPassword}
+            autoComplete="new-password"
+          />
+          <PasswordField
+            id="ost-confirm-temporary-password"
+            label="Confirm temporary password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            error={
+              confirmPassword && confirmPassword !== temporaryPassword
+                ? 'Passwords do not match.'
+                : undefined
+            }
+          />
+          <p>
+            Use at least 8 characters. Share this password securely with the OST; they must change
+            it at first sign-in.
+          </p>
           <Button
             onClick={() => {
               setOutcome(null);
@@ -317,10 +347,17 @@ export function OstApplicationDetailPage() {
             }}
             disabled={
               (official && !management) ||
+              temporaryPassword.length < 8 ||
+              temporaryPassword !== confirmPassword ||
               approve.isPending ||
               reject.isPending ||
               requestChanges.isPending ||
-              (official && (!startsOn || !expiresOn || !records.data?.registration?.endorsed_at))
+              (official &&
+                (!startsOn ||
+                  !expiresOn ||
+                  !records.data?.registration?.endorsed_at ||
+                  temporaryPassword.length < 8 ||
+                  temporaryPassword !== confirmPassword))
             }
           >
             {approve.isPending ? 'Approving…' : 'Approve as OST'}

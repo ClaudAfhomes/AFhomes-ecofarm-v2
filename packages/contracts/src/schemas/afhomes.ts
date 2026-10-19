@@ -411,8 +411,13 @@ export type UpdateAfHomesStaffProfile = z.infer<typeof updateAfHomesStaffProfile
  * re-verified with a fresh `signInWithPassword` (Supabase does not require
  * it by default); the new password follows the AFHomes >= 8 rule.
  */
-export const changeAfHomesStaffPasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(128),
-});
+export const changeAfHomesStaffPasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(8).max(128),
+  })
+  .refine((value) => value.currentPassword !== value.newPassword, {
+    path: ['newPassword'],
+    message: 'Choose a password different from your current password.',
+  });
 export type ChangeAfHomesStaffPassword = z.infer<typeof changeAfHomesStaffPasswordSchema>;
