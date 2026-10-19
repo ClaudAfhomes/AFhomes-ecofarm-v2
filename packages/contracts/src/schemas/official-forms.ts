@@ -204,6 +204,12 @@ const optionalCompanyMoney = z.preprocess(
   z.string().trim().regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/).optional(),
 );
 
+/** Write-only government ID number; blank is "not supplied", never a clear. */
+const optionalGovernmentIdNumber = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().min(4).max(40).optional(),
+);
+
 const customerApplicationInputSchema = z.object({
   /** Required by POST creation; existing-record PATCH does not require a token. */
   requestId: z.string().uuid().optional(),
@@ -237,6 +243,12 @@ const customerApplicationInputSchema = z.object({
   statedPaymentType: optionalCompanyText,
   statedRefNo: optionalCompanyText,
   statedPaymentDate: dateSchema.optional(),
+  /**
+   * The government ID number captured during the application. Write-only:
+   * `save_customer_application` mirrors it onto `customers` and no read path
+   * returns it. The type is mirrored from the uploaded document instead.
+   */
+  governmentIdNumber: optionalGovernmentIdNumber,
   primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
   /** The Sales Manager of record (SM column on the paper form). */

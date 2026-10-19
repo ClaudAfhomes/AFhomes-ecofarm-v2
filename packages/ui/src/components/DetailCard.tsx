@@ -38,9 +38,17 @@ export function DetailFieldGrid({ children, className, ...rest }: HTMLAttributes
   );
 }
 
-export function DetailField({ label, children }: { label: ReactNode; children: ReactNode }) {
+export function DetailField({
+  label,
+  children,
+  className,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className={styles.field}>
+    <div className={`${styles.field} ${className ?? ''}`.trim()}>
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>

@@ -54,6 +54,7 @@ import {
   Skeleton,
   StatusChip,
   TextAreaField,
+  TextField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
 import { tierArtwork } from '@afhomes/ui';
@@ -582,6 +583,9 @@ export function CustomerApplicationEditorPage() {
     };
   }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
+  // Write-only (never returned): starts blank on every open, blank never clears
+  // the stored value.
+  const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   // Steps unlock only by moving forward. Going back is always free; jumping
@@ -769,6 +773,7 @@ export function CustomerApplicationEditorPage() {
     paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
+    governmentIdNumber: idNumber.trim() || undefined,
     ...meta,
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
@@ -1567,6 +1572,16 @@ export function CustomerApplicationEditorPage() {
                     ]}
                   />
                 </label>
+                <TextField
+                  id="application-government-id-number"
+                  name="governmentIdNumber"
+                  label="Government ID number"
+                  optional
+                  value={idNumber}
+                  onChange={setIdNumber}
+                  maxLength={40}
+                  disabled={saveAndSubmit.isPending}
+                />
                 <IdCapturePicker
                   onFile={setIdFile}
                   disabled={saveAndSubmit.isPending}

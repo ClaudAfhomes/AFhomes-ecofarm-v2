@@ -19,6 +19,13 @@ describe('UAT optional inputs', () => {
     expect(createCustomerApplicationSchema.shape.recommenderEmail.parse(' QA@Example.COM ')).toBe(
       'qa@example.com',
     ));
+  it('treats a blank government ID number as not supplied and trims a real one', () => {
+    const number = createCustomerApplicationSchema.shape.governmentIdNumber;
+    expect(number.parse('')).toBeUndefined();
+    expect(number.parse(undefined)).toBeUndefined();
+    expect(number.parse(' P1234567 ')).toBe('P1234567');
+    expect(number.safeParse('12').success).toBe(false);
+  });
 });
 
 describe('referral chain staff linkage', () => {

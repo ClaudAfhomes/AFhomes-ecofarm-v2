@@ -18,7 +18,11 @@ import {
   StatusChip,
   type IconName,
 } from '@afhomes/ui';
-import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts';
+import {
+  CUSTOMER_CATEGORY_LABELS,
+  GOVERNMENT_ID_TYPE_LABELS,
+  paymentSchemeLabel,
+} from '@afhomes/contracts';
 
 import { formatDate, formatDateTime } from '../../lib/format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
@@ -28,6 +32,7 @@ import { businessKeys } from './queryKeys';
 import { formatMoneyOrDash } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
 import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
+import { CustomerIdImage } from './CustomerIdImage';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
@@ -115,6 +120,13 @@ export function CustomerDetailPage() {
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
+  // The ID scan is a SEPARATE module from the customer record: holding
+  // `sales.customers` does not carry `sales.id_documents`. Reading the scan
+  // needs the second grant, so the image is never requested without it.
+  const canViewIdDocuments =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'sales.id_documents' && permission.canView,
+    ) === true;
   const customer = useQuery({
     queryKey: businessKeys.customer(id),
     queryFn: () => getCustomerById(id ?? ''),
@@ -135,31 +147,54 @@ export function CustomerDetailPage() {
 
   if (customer.isPending)
     return (
-      <section className={styles.page}>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading customer"
-        >
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <Skeleton style={{ height: 32, maxWidth: 240 }} />
-            <Skeleton style={{ height: 16, maxWidth: 360 }} />
-          </div>
-          <DetailGrid className={styles.topGrid}>
-            {['Customer', 'Contact', 'Verification', 'Membership'].map((title) => (
-              <DetailCard key={title}>
-                <DetailCardTitle>{title}</DetailCardTitle>
-                <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-                  <Skeleton style={{ height: 16 }} />
-                  <Skeleton style={{ height: 16 }} />
-                  <Skeleton style={{ height: 16 }} />
-                </div>
-              </DetailCard>
-            ))}
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-          </DetailGrid>
+      <section className={styles.page} role="status" aria-label="Loading customer">
+        <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+          <Skeleton style={{ height: 32, maxWidth: 240 }} />
+          <Skeleton style={{ height: 16, maxWidth: 360 }} />
         </div>
+        <div className={styles.masthead} aria-hidden="true">
+          <DetailFieldGrid className={styles.mastheadState}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ display: 'grid', gap: 2 }}>
+                <Skeleton style={{ height: 12, maxWidth: 80 }} />
+                <Skeleton style={{ height: 18, maxWidth: 120 }} />
+              </div>
+            ))}
+          </DetailFieldGrid>
+          <DetailFieldGrid className={styles.mastheadIds}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} style={{ display: 'grid', gap: 2 }}>
+                <Skeleton style={{ height: 12, maxWidth: 80 }} />
+                <Skeleton style={{ height: 18, maxWidth: 140 }} />
+              </div>
+            ))}
+          </DetailFieldGrid>
+        </div>
+        <DetailGrid className={styles.topGrid}>
+          <DetailCard>
+            <Skeleton style={{ height: 18, maxWidth: 160 }} />
+            <DetailFieldGrid className={styles.fields}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} style={{ height: 16 }} />
+              ))}
+            </DetailFieldGrid>
+          </DetailCard>
+          <DetailCard>
+            <Skeleton style={{ height: 18, maxWidth: 120 }} />
+            <DetailFieldGrid className={styles.fields}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} style={{ height: 16 }} />
+              ))}
+            </DetailFieldGrid>
+          </DetailCard>
+          <DetailCard>
+            <Skeleton style={{ height: 18, maxWidth: 80 }} />
+            <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+              <Skeleton style={{ height: 36 }} />
+              <Skeleton style={{ height: 36 }} />
+            </div>
+          </DetailCard>
+        </DetailGrid>
       </section>
     );
   if (customer.isError)
@@ -222,18 +257,38 @@ export function CustomerDetailPage() {
     tone?: CompanyTone;
     blurb?: string;
     fields: Array<[string, ReactNode]>;
+    /** Rendered under the field grid, full width. The ID image lives here. */
+    footer?: ReactNode;
     company?: boolean;
   }> = [
     {
-      title: 'Contact and identity',
+      title: 'Contact and Identity',
       fields: [
         ['Email', record.email],
         ['Phone', record.phone],
         ['Date of birth', record.dateOfBirth ?? 'Not Recorded'],
-        ['Gender', record.gender ?? 'Not Recorded'],
-        ['ID type', record.governmentIdType ?? 'Not Recorded'],
-        // Only ever the masked form; the API never returns the number.
-        ['Government ID', record.governmentIdMasked ?? 'Not Recorded'],
+        [
+          'Gender',
+          record.gender
+            ? record.gender.charAt(0).toUpperCase() + record.gender.slice(1)
+            : 'Not Recorded',
+        ],
+        [
+          'ID type',
+          record.governmentIdType
+            ? (GOVERNMENT_ID_TYPE_LABELS[
+                record.governmentIdType as keyof typeof GOVERNMENT_ID_TYPE_LABELS
+              ] ?? record.governmentIdType)
+            : 'Not Recorded',
+        ],
+        // Only ever the masked form; the API never returns the number. When no
+        // number is recorded, the scan itself stands in for the value.
+        [
+          'Government ID',
+          record.governmentIdMasked ?? (
+            <CustomerIdImage customerId={record.id} canView={canViewIdDocuments} />
+          ),
+        ],
       ],
     },
     {
@@ -249,28 +304,28 @@ export function CustomerDetailPage() {
       fields: [
         ['RA NO', statedMono(record.raNumber)],
         ['STATUS', stated(record.companyStatus)],
-        ['FIRST NAME', stated(record.firstName )],
-        ['LAST NAME', stated(record.lastName )],
-        ['MIDDLE NAME', stated(record.middleName )],
-        ['SUFFIX', stated(record.suffix )],
-        ['BIRTHDAY', stated(record.dateOfBirth )],
-        ['GENDER', stated(record.gender )],
+        ['FIRST NAME', stated(record.firstName)],
+        ['LAST NAME', stated(record.lastName)],
+        ['MIDDLE NAME', stated(record.middleName)],
+        ['SUFFIX', stated(record.suffix)],
+        ['BIRTHDAY', stated(record.dateOfBirth)],
+        ['GENDER', stated(record.gender)],
         ['AGE', ageOn(record.dateOfBirth)],
-        ['CITIZENSHIP', stated(record.citizenship )],
-        ['CIVIL STATUS', stated(record.civilStatus )],
-        ['PERMANENT ADDRESS LINE 1', stated(addressPartOf(record.address, 'line1') )],
-        ['PERMANENT ADDRESS LINE 2', stated(addressPartOf(record.address, 'line2') )],
-        ['PROVINCE', stated(addressPartOf(record.address, 'province') )],
-        ['CITY', stated(addressPartOf(record.address, 'city') )],
-        ['BARANGGAY', stated(addressPartOf(record.address, 'barangay') )],
-        ['POSTAL CODE', statedMono(addressPartOf(record.address, 'postalCode') )],
-        ['LANDLINE', stated(record.landline )],
+        ['CITIZENSHIP', stated(record.citizenship)],
+        ['CIVIL STATUS', stated(record.civilStatus)],
+        ['PERMANENT ADDRESS LINE 1', stated(addressPartOf(record.address, 'line1'))],
+        ['PERMANENT ADDRESS LINE 2', stated(addressPartOf(record.address, 'line2'))],
+        ['PROVINCE', stated(addressPartOf(record.address, 'province'))],
+        ['CITY', stated(addressPartOf(record.address, 'city'))],
+        ['BARANGGAY', stated(addressPartOf(record.address, 'barangay'))],
+        ['POSTAL CODE', statedMono(addressPartOf(record.address, 'postalCode'))],
+        ['LANDLINE', stated(record.landline)],
         ['EMAIL', stated(record.email)],
-        ['TIN NO.', statedMono(record.tinNumberMasked )],
+        ['TIN NO.', statedMono(record.tinNumberMasked)],
         ['MOBILE NO.', statedMono(record.phone)],
-        ['OCCUPATION / BUSINESS NAME', stated(record.occupationBusinessName )],
-        ['OFFICE / BUSINESS ADDRESS', stated(record.officeBusinessAddress )],
-        ['EMPLOYED POSITION', stated(record.employedPosition )],
+        ['OCCUPATION / BUSINESS NAME', stated(record.occupationBusinessName)],
+        ['OFFICE / BUSINESS ADDRESS', stated(record.officeBusinessAddress)],
+        ['EMPLOYED POSITION', stated(record.employedPosition)],
       ],
     },
     {
@@ -283,20 +338,20 @@ export function CustomerDetailPage() {
       blurb: 'Second holder, Gold only',
       company: true,
       fields: [
-        ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName )],
-        ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress )],
-        ['BIRTHDAY', stated(record.supplementaryBirthday )],
-        ['GENDER', stated(record.supplementaryGender )],
+        ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName)],
+        ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress)],
+        ['BIRTHDAY', stated(record.supplementaryBirthday)],
+        ['GENDER', stated(record.supplementaryGender)],
         ['AGE', ageOn(record.supplementaryBirthday)],
-        ['CITIZENSHIP', stated(record.supplementaryCitizenship )],
-        ['CIVIL STATUS', stated(record.supplementaryCivilStatus )],
-        ['TIN NO.', statedMono(record.supplementaryTinNumberMasked )],
-        ['LANDLINE', stated(record.supplementaryLandline )],
-        ['MOBILE NO.', statedMono(record.supplementaryMobile )],
-        ['EMAIL', stated(record.supplementaryEmail )],
-        ['OCCUPATION / BUSINESS NAME', stated(record.supplementaryOccupationBusinessName )],
-        ['OFFICE / BUSINESS ADDRESS', stated(record.supplementaryOfficeAddress )],
-        ['EMPLOYED POSITION', stated(record.supplementaryPosition )],
+        ['CITIZENSHIP', stated(record.supplementaryCitizenship)],
+        ['CIVIL STATUS', stated(record.supplementaryCivilStatus)],
+        ['TIN NO.', statedMono(record.supplementaryTinNumberMasked)],
+        ['LANDLINE', stated(record.supplementaryLandline)],
+        ['MOBILE NO.', statedMono(record.supplementaryMobile)],
+        ['EMAIL', stated(record.supplementaryEmail)],
+        ['OCCUPATION / BUSINESS NAME', stated(record.supplementaryOccupationBusinessName)],
+        ['OFFICE / BUSINESS ADDRESS', stated(record.supplementaryOfficeAddress)],
+        ['EMPLOYED POSITION', stated(record.supplementaryPosition)],
       ],
     },
     {
@@ -308,14 +363,14 @@ export function CustomerDetailPage() {
       blurb: 'Stated names, not the genealogy',
       company: true,
       fields: [
-        ['OST/IST NAME', stated(record.ostIstName )],
-        ['SVD (NAME)', stated(record.svdName )],
-        ['SSM (NAME)', stated(record.ssmName )],
-        ['SM (NAME)', stated(record.smName )],
-        ['REFERRER (NAME)', stated(record.referrerName )],
-        ['VIP RECOMMENDER (NAME)', stated(record.vipRecommenderName )],
-        ['CONTACT NO.', stated(record.relatedContactNo )],
-        ['EMAIL ADDRESS', stated(record.relatedEmail )],
+        ['OST/IST NAME', stated(record.ostIstName)],
+        ['SVD (NAME)', stated(record.svdName)],
+        ['SSM (NAME)', stated(record.ssmName)],
+        ['SM (NAME)', stated(record.smName)],
+        ['REFERRER (NAME)', stated(record.referrerName)],
+        ['VIP RECOMMENDER (NAME)', stated(record.vipRecommenderName)],
+        ['CONTACT NO.', stated(record.relatedContactNo)],
+        ['EMAIL ADDRESS', stated(record.relatedEmail)],
       ],
     },
     {
@@ -327,15 +382,15 @@ export function CustomerDetailPage() {
       blurb: 'Company figures, not sale totals',
       company: true,
       fields: [
-        ['VIP PACKAGE', stated(record.statedVipPackage )],
-        ['PAYMENT TERMS', stated(record.statedPaymentTerms )],
-        ['REGULAR PRICE', statedMono(record.statedRegularPrice )],
-        ['DISCOUNT', statedMono(record.statedDiscount )],
-        ['TOTAL AMOUNT', statedMono(record.statedTotalAmount )],
-        ['RF', statedMono(record.statedRf )],
-        ['PAYMENT TYPE', stated(record.statedPaymentType )],
-        ['REF NO', statedMono(record.statedRefNo )],
-        ['DATE', stated(record.statedPaymentDate )],
+        ['VIP PACKAGE', stated(record.statedVipPackage)],
+        ['PAYMENT TERMS', stated(record.statedPaymentTerms)],
+        ['REGULAR PRICE', statedMono(record.statedRegularPrice)],
+        ['DISCOUNT', statedMono(record.statedDiscount)],
+        ['TOTAL AMOUNT', statedMono(record.statedTotalAmount)],
+        ['RF', statedMono(record.statedRf)],
+        ['PAYMENT TYPE', stated(record.statedPaymentType)],
+        ['REF NO', statedMono(record.statedRefNo)],
+        ['DATE', stated(record.statedPaymentDate)],
       ],
     },
     {
@@ -434,11 +489,16 @@ export function CustomerDetailPage() {
                 <DetailCardTitle>{group.title}</DetailCardTitle>
                 <DetailFieldGrid className={styles.fields}>
                   {group.fields.map(([label, value]) => (
-                    <DetailField key={label} label={label}>
+                    <DetailField
+                      key={label}
+                      label={label}
+                      className={label === 'Government ID' ? styles.govIdField : undefined}
+                    >
                       {value}
                     </DetailField>
                   ))}
                 </DetailFieldGrid>
+                {group.footer ? <div className={styles.groupFooter}>{group.footer}</div> : null}
               </DetailCard>
             ))}
             <CustomerRecordActions
@@ -487,7 +547,9 @@ export function CustomerDetailPage() {
         <div className={styles.dossier}>
           {companyGroups.map((group) => (
             <article key={group.title} className={styles.dossierCard}>
-              <header className={`${styles.dossierHead} ${group.tone ? styles[`tone${group.tone}`] : ''}`}>
+              <header
+                className={`${styles.dossierHead} ${group.tone ? styles[`tone${group.tone}`] : ''}`}
+              >
                 {group.icon ? (
                   <span className={styles.dossierMark} aria-hidden="true">
                     <Icon name={group.icon} size={16} />
@@ -525,7 +587,17 @@ const RECORD_TABS = [
  */
 function SettlementStrip({ sales }: { sales: Sale[] }) {
   if (sales.length === 0)
-    return <p className={styles.muted}>No card sales yet, so there is nothing outstanding.</p>;
+    return (
+      <section className={styles.settlementEmpty} aria-label="Outstanding balance">
+        <span className={styles.settlementEmptyMark} aria-hidden="true">
+          <Icon name="wallet" size={22} />
+        </span>
+        <div className={styles.settlementEmptyBody}>
+          <h3 className={styles.settlementEmptyTitle}>No card sales yet</h3>
+          <p className={styles.settlementEmptyText}>Nothing outstanding for this customer yet.</p>
+        </div>
+      </section>
+    );
   return (
     <section className={styles.settlement} aria-label="Outstanding balance">
       {sales.map((sale) => (
@@ -542,11 +614,7 @@ function SettlementStrip({ sales }: { sales: Sale[] }) {
             <DetailField label="Total">{formatMoneyOrDash(sale.cashPrice)}</DetailField>
             <DetailField label="Paid">{formatMoneyOrDash(sale.paidAmount)}</DetailField>
           </dl>
-          <SettlementBadge
-            total={sale.cashPrice}
-            paid={sale.paidAmount}
-            balance={sale.balance}
-          />
+          <SettlementBadge total={sale.cashPrice} paid={sale.paidAmount} balance={sale.balance} />
         </div>
       ))}
     </section>

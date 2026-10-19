@@ -397,6 +397,58 @@
   overflow: hidden;
 }
 
+/* Empty settlement: a calm, centred panel rather than a stray sentence, so the
+   Overview still reads as a complete answer when there is nothing to settle. */
+.settlementEmpty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+@media (max-width: 559px) {
+  .settlementEmpty {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+}
+
+.settlementEmptyMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-muted);
+}
+
+.settlementEmptyBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.settlementEmptyTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.settlementEmptyText {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  max-width: 48ch;
+}
+
 .settlementRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -517,6 +569,30 @@
   gap: var(--space-3) var(--space-5);
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   margin: 0;
+}
+
+/* The Government ID field carries the scan when no number is recorded, so it
+   takes the full row instead of being crammed beside the ID type. */
+.govIdField {
+  grid-column: 1 / -1;
+}
+
+.govIdField dd {
+  display: flex;
+  align-items: center;
+}
+
+.govIdField img {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+}
+
+/* The identity card's image block. A rule above it, so the scan reads as one
+   more fact about this record and not as a card inside a card. */
+.groupFooter {
+  min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 /*

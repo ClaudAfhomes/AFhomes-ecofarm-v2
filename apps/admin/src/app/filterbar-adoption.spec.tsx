@@ -19,7 +19,7 @@ import { BusinessCommissionsPage } from '../features/business/BusinessCommission
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
-import { DocumentsPage } from '../features/documents/DocumentsPage';
+
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { MembershipsPage } from '../features/memberships/MembershipsPage';
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
@@ -288,11 +288,6 @@ describe('FilterBar adoption', () => {
   it('audit renders action, entity, dates, and export in one toolbar', async () => {
     await showsFilterBar(<AuditPage />);
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
-  });
-
-  it('documents renders its scope selector in one toolbar', async () => {
-    await showsFilterBar(<DocumentsPage />);
-    expect(screen.getByRole('button', { name: 'Show' })).toBeInTheDocument();
   });
 
   it('the internal guide carries no filterable surface', async () => {

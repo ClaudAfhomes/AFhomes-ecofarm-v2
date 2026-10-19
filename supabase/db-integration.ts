@@ -17737,7 +17737,7 @@ async function main(): Promise<void> {
           ...payload,
         });
         const m78CustomerColumns =
-          'citizenship, civil_status, occupation_business_name, office_business_address, employed_position, ra_number, company_status, stated_vip_package, stated_payment_terms, stated_regular_price, stated_total_amount, tin_number';
+          'citizenship, civil_status, occupation_business_name, office_business_address, employed_position, ra_number, company_status, stated_vip_package, stated_payment_terms, stated_regular_price, stated_total_amount, tin_number, government_id_number';
         const readMirror = async (id: string) =>
           one<Record<string, string | null>>(
             `select ${m78CustomerColumns} from public.customers where id = $1`,
@@ -17765,7 +17765,9 @@ async function main(): Promise<void> {
               uuidFor('import:m78:create'),
               m78Actor,
               // The customer rides in on the header; the RPC has no id argument.
-              JSON.stringify(m78Header({ customerId: m78Existing })),
+              JSON.stringify(
+                m78Header({ customerId: m78Existing, governmentIdNumber: 'M78-ID-0001' }),
+              ),
               m78Holder({}),
             ],
           )
@@ -17780,6 +17782,11 @@ async function main(): Promise<void> {
           'Architect',
         );
         eq('create-for-existing mirrors RA NO', afterCreate.ra_number, 'RA-2026-9078');
+        eq(
+          'create-for-existing mirrors the government ID number',
+          afterCreate.government_id_number,
+          'M78-ID-0001',
+        );
         eq(
           'create-for-existing mirrors stated package',
           afterCreate.stated_vip_package,
@@ -17801,7 +17808,7 @@ async function main(): Promise<void> {
           [
             m78CreateApp,
             m78Actor,
-            m78Header({ raNumber: 'RA-2026-9079' }),
+            m78Header({ raNumber: 'RA-2026-9079', governmentIdNumber: 'M78-ID-0002' }),
             m78Holder({ occupationBusinessName: 'Landscape Architect' }),
           ],
         );
@@ -17812,6 +17819,45 @@ async function main(): Promise<void> {
           'a draft edit re-mirrors the occupation',
           afterEdit.occupation_business_name,
           'Landscape Architect',
+        );
+        // The already-recorded number wins: the mirror never rewrites an
+        // identity value the row already carries (same rule as document review).
+        eq(
+          'a draft edit cannot overwrite the recorded government ID number',
+          afterEdit.government_id_number,
+          'M78-ID-0001',
+        );
+
+        // A number another customer already holds is skipped, never written:
+        // the unique index would abort the save otherwise.
+        const m78Dup = (
+          await one<{ id: string }>(
+            `insert into public.customers(customer_number, first_name, last_name, email, phone, government_id_number, created_by)
+             values ($1, 'Dup', 'Holder', $2, '+639170000079', 'M78-ID-0003', $3) returning id`,
+            [
+              `AF-CUS-M78D${Date.now().toString().slice(-4)}`,
+              `${RUN}-m78-dup@example.invalid`,
+              m78Actor,
+            ],
+          )
+        ).id;
+        createdCustomerIds.push(m78Dup);
+        await db.query('update public.customers set government_id_number = null where id = $1', [
+          m78Existing,
+        ]);
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [
+            m78CreateApp,
+            m78Actor,
+            m78Header({ raNumber: 'RA-2026-9079', governmentIdNumber: 'M78-ID-0003' }),
+            m78Holder({ occupationBusinessName: 'Landscape Architect' }),
+          ],
+        );
+        eq(
+          'a duplicate government ID number is skipped, never written',
+          (await readMirror(m78Existing)).government_id_number,
+          null,
         );
 
         // The "blank never clears" rule still holds across both paths.

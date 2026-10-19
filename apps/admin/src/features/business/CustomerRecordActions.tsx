@@ -31,11 +31,11 @@ import { useSaleRowActions } from './useSaleRowActions';
 
 /**
  * All actions for one customer in a single card, mirroring the directory row
- * menu so the detail page carries the same workflows: a new application, the
- * one-time activation link, deactivation, and (super admin only) anonymize
- * and permanent delete - plus the per-sale actions (record/verify payment,
- * edit, delete) aimed at a selected sale. Same guards, same dialogs, same
- * auditing - the server re-checks everything.
+ * menu so the detail page carries the same workflows: the one-time activation
+ * link, deactivation, and (super admin only) anonymize and permanent delete -
+ * plus the per-sale payment actions (record/verify) aimed at a selected sale.
+ * Edit/cancel of a sale stay on the sales directory. Same guards, same dialogs,
+ * same auditing - the server re-checks everything.
  */
 export function CustomerRecordActions({
   customer,
@@ -125,8 +125,9 @@ export function CustomerRecordActions({
     },
   });
 
-  const showSaleActions =
-    sales.length > 0 && (saleActions.canRecord || saleActions.canEdit || saleActions.canCancel);
+  // Only the payment actions are offered here; edit/cancel of a sale stay on the
+  // sales directory, so a user with only those grants sees no dead sale card.
+  const showSaleActions = sales.length > 0 && saleActions.canRecord;
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
   const deactivationBlocked = customer.status === 'suspended' || customer.status === 'cancelled';
@@ -186,17 +187,18 @@ export function CustomerRecordActions({
               </Button>
             </>
           ) : null}
-          <Button
-            variant="secondary"
-            className={styles.toneInfo}
-            disabled={deactivationBlocked}
-            onClick={() => {
-              setAccountAction('deactivate');
-              setConfirmation('');
-            }}
-          >
-            Deactivate account
-          </Button>
+          {!deactivationBlocked ? (
+            <Button
+              variant="secondary"
+              className={styles.toneInfo}
+              onClick={() => {
+                setAccountAction('deactivate');
+                setConfirmation('');
+              }}
+            >
+              Deactivate account
+            </Button>
+          ) : null}
           {showSaleActions && selectedSale ? (
             <>
               {saleActions.canRecord ? (
@@ -237,7 +239,7 @@ export function CustomerRecordActions({
                   if (next && next !== customer.status) statusMutation.mutate(next);
                 }}
                 options={[
-                  { value: '', label: 'Select Status' },
+                  { value: '', label: 'Select Status', disabled: true },
                   { value: 'prospect', label: 'Prospect' },
                   { value: 'active', label: 'Active' },
                   { value: 'suspended', label: 'Suspended' },

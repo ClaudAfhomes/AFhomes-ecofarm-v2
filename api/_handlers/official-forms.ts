@@ -1301,6 +1301,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_seller_candidate: parsed.data.sellerCandidateId ?? null,
       });
       if (error) return mapRpcError(res, error);
+      if (
+        typeof before.customerId === 'string' &&
+        governmentIdTypeSchema.safeParse(reviewed?.fields?.idType).success
+      ) {
+        await db
+          .from('customers')
+          .update({ government_id_type: reviewed?.fields?.idType })
+          .eq('id', before.customerId)
+          .is('government_id_type', null);
+      }
       return res.status(200).json(await getApplication(db, appSubmit[1]!));
     }
     const appDecision = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/decision$/);

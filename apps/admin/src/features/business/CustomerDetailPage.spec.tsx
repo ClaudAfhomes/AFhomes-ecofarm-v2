@@ -2,13 +2,14 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission, Customer, Sale } from '@afhomes/contracts';
+import type { AfHomesPermission, Customer, IdentityDocument, Sale } from '@afhomes/contracts';
 
 import { CustomerDetailPage } from './CustomerDetailPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { ApiError } from '../../lib/api/errors';
 import { getCustomerById, getSalePayments, getSales } from './services';
+import { getCurrentDocument, getDocumentAccessUrl } from '../documents/services';
 
 vi.mock('./services', () => ({
   getCustomerById: vi.fn(),
@@ -17,6 +18,12 @@ vi.mock('./services', () => ({
   getSaleSummary: vi.fn(),
   getCustomerApplications: vi.fn(),
   cancelSale: vi.fn(),
+}));
+
+// The ID image comes from the documents API, not the customers one.
+vi.mock('../documents/services', () => ({
+  getCurrentDocument: vi.fn(),
+  getDocumentAccessUrl: vi.fn(),
 }));
 
 const grant = (
@@ -115,8 +122,42 @@ function renderDetail(user: SessionUser = STAFF, tab = 'overview') {
   );
 }
 
+const ID_SCAN_STAFF: SessionUser = {
+  ...STAFF,
+  afHomesPermissions: [grant('sales.customers'), grant('sales.id_documents')],
+};
+
+const ID_DOCUMENT = {
+  id: 'd-1',
+  subjectType: 'customer',
+  subjectId: 'c-1',
+  originalFilename: 'philippine-id.jpg',
+  mime: 'image/jpeg',
+  sizeBytes: 2048,
+  hasFile: true,
+  ocrStatus: 'not_requested',
+  ocrProvider: null,
+  verificationStatus: 'pending_review',
+  isCurrent: true,
+  extractedFields: {},
+  warnings: [],
+  reviewedFields: null,
+  possibleDuplicate: null,
+  uploadedAt: '2026-10-01T09:00:00.000Z',
+  reviewedAt: null,
+} as unknown as IdentityDocument;
+
 beforeEach(() => {
   vi.mocked(getSales).mockResolvedValue([]);
+  // No global `clearMocks` here, so the documents mocks start each test with
+  // an empty call history: the "never asked" assertion must see this test only.
+  vi.mocked(getCurrentDocument).mockReset();
+  vi.mocked(getDocumentAccessUrl).mockReset();
+  vi.mocked(getCurrentDocument).mockResolvedValue(null);
+  vi.mocked(getDocumentAccessUrl).mockResolvedValue({
+    url: 'https://signed.test/id.jpg',
+    expiresAt: '2026-10-20T00:00:00.000Z',
+  });
 });
 
 describe('CustomerDetailPage', () => {
@@ -458,5 +499,51 @@ describe('CustomerDetailPage merged actions', () => {
     // The figures live on the Overview and are not repeated in the sale cards.
     expect(screen.queryByText('₱45,000.00')).not.toBeInTheDocument();
     expect(screen.queryByText('₱60,000.00')).not.toBeInTheDocument();
+  });
+
+  it('shows the current ID image to staff who may view ID scans', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCurrentDocument).mockResolvedValue(ID_DOCUMENT);
+    renderDetail(ID_SCAN_STAFF);
+    const image = await screen.findByAltText('Scan of philippine-id.jpg');
+    expect(image).toHaveAttribute('src', 'https://signed.test/id.jpg');
+    // The server decides which document is current; the page only asks for it.
+    expect(vi.mocked(getCurrentDocument)).toHaveBeenCalledWith({
+      subjectType: 'customer',
+      subjectId: 'c-1',
+    });
+    // The scan is never shown without a grant, so the request is never sent.
+    expect(vi.mocked(getDocumentAccessUrl)).toHaveBeenCalledWith('d-1');
+  });
+
+  it('never asks for the ID image without the ID-scan grant', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    renderDetail();
+    await screen.findByRole('heading', { name: 'MARIA SANTOS' });
+    expect(vi.mocked(getCurrentDocument)).not.toHaveBeenCalled();
+    expect(screen.queryByAltText(/Scan of/)).not.toBeInTheDocument();
+  });
+
+  it('links a PDF scan out instead of inlining it', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCurrentDocument).mockResolvedValue({
+      ...ID_DOCUMENT,
+      mime: 'application/pdf',
+      originalFilename: 'philippine-id.pdf',
+    });
+    vi.mocked(getDocumentAccessUrl).mockResolvedValue({
+      url: 'https://signed.test/id.pdf',
+      expiresAt: '2026-10-20T00:00:00.000Z',
+    });
+    renderDetail(ID_SCAN_STAFF);
+    const link = await screen.findByRole('link', { name: /Open the PDF/ });
+    expect(link).toHaveAttribute('href', 'https://signed.test/id.pdf');
+    expect(screen.queryByAltText(/Scan of/)).not.toBeInTheDocument();
+  });
+
+  it('says so when the customer has no ID image on file', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    renderDetail(ID_SCAN_STAFF);
+    expect(await screen.findByText('Not Recorded')).toBeInTheDocument();
   });
 });

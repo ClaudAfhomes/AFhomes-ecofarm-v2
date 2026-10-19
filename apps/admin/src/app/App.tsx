@@ -156,14 +156,10 @@ const GenealogyDetailsPage = lazy(() =>
 const MembersPage = lazy(() =>
   import('../features/network-members/MembersPage').then((m) => ({ default: m.MembersPage })),
 );
-const DocumentsPage = lazy(() =>
-  import('../features/documents/DocumentsPage').then((m) => ({ default: m.DocumentsPage })),
-);
-const DocumentReviewPage = lazy(() =>
-  import('../features/documents/DocumentReviewPage').then((m) => ({
-    default: m.DocumentReviewPage,
-  })),
-);
+// ID documents are no longer reviewed on their own screen: the uploaded scan
+// follows the status of the customer application that created it. The image is
+// still loaded on the customer record via the (kept) current/access-url
+// endpoints, but there is no list or review route any more.
 const MembershipCardPrintPage = lazy(() =>
   import('../features/memberships/MembershipCardPrintPage').then((m) => ({
     default: m.MembershipCardPrintPage,
@@ -426,10 +422,9 @@ export default function App() {
                 path="/admin/memberships/:id"
                 element={protectedPage(<MembershipDetailPage />)}
               />
-              {/* ID documents. Gated on the sales.id_documents nav key; the server
-              re-checks scope and never returns paths, hashes or raw ID numbers. */}
-              <Route path="/admin/documents" element={protectedPage(<DocumentsPage />)} />
-              <Route path="/admin/documents/:id" element={protectedPage(<DocumentReviewPage />)} />
+              {/* ID documents are no longer reviewed on their own screen; the scan
+              travels with the customer application that created it. The upload and
+              current/access-url endpoints remain for intake and display. */}
               <Route
                 path="/admin/memberships/:id/card"
                 element={protectedPage(<MembershipCardPrintPage />)}

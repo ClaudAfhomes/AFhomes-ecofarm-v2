@@ -239,7 +239,9 @@ export const EXTRA_GATED_ROUTES: readonly {
 }[] = [
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
-  { pathPrefix: '/admin/documents', module: 'sales.id_documents' },
+  // `/admin/documents` list/review route removed; the scan travels with the
+  // application. The `sales.id_documents` module still gates the image on the
+  // customer record.
   {
     pathPrefix: '/admin/customers/applications/import-export',
     module: 'governance.customer_import',

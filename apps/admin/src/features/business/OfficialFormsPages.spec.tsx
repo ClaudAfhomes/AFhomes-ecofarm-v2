@@ -704,6 +704,9 @@ describe('application private ID intake', () => {
 
     await setup(null, { pickCustomer: false });
     chooseIdTypeAndFile();
+    fireEvent.change(screen.getByLabelText(/Government ID number/), {
+      target: { value: ' P1234567 ' },
+    });
     await screen.findByText('Ready to upload on save.');
 
     // Identity is satisfied by the picked file; forward to Holders and fill
@@ -734,6 +737,8 @@ describe('application private ID intake', () => {
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
     const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
     expect(registration).toMatchObject({ registerNewCustomer: true });
+    // The typed number travels trimmed; it is the only capture path for it.
+    expect(registration).toMatchObject({ governmentIdNumber: 'P1234567' });
     // The register contract omits customerId by type: no linked id may travel.
     expect('customerId' in registration).toBe(false);
     // The create path belongs to a picked customer only.
