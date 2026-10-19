@@ -1,0 +1,1520 @@
+{
+ "url": ".taste-skill/dossier/index.html",
+ "at": "2026-10-19T09:43:43.314Z",
+ "allow": [
+  "palette-cream",
+  "icon-chips"
+ ],
+ "viewports": [
+  {
+   "width": 1440,
+   "height": 900,
+   "load": "load",
+   "screens": 2,
+   "filled": [
+    0.52,
+    0.65
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "page": {
+     "height": 1434,
+     "screens": 1.6,
+     "words": 249,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 4,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 28,
+     "vw": 1.9,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.02,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "lines": 1,
+     "size": 27.8,
+     "font": "-apple-system"
+    },
+    "headings": [
+     {
+      "text": "MARIA SANTOS",
+      "words": 2,
+      "chars": 12,
+      "lines": 1,
+      "size": 27.8,
+      "vw": 1.9,
+      "font": "-apple-system",
+      "weight": 700,
+      "tracking": -0.015,
+      "leading": 1.25,
+      "upper": true,
+      "italic": false,
+      "mono": false,
+      "align": "left",
+      "position": "left",
+      "widthRatio": 0.14,
+      "top": 32,
+      "tag": "h1",
+      "kind": "heading"
+     }
+    ],
+    "headingSummary": {
+     "count": 1,
+     "maxLines": 1,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.93,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.07,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      14,
+      16,
+      28
+     ],
+     "sizeCount": 4,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 27.8,
+      "vw": 1.9,
+      "font": "-apple-system",
+      "text": "MARIA SANTOS"
+     },
+     "monoShare": 0.07,
+     "monoProseShare": 0.07,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [
+      "RA-2026-0001",
+      "4027",
+      "********9012",
+      "+63 917 123 4567",
+      "********7001",
+      "+63 918 555 0101"
+     ],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.46,
+     "centerShare": 0.01,
+     "smallText": 28
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#fbfaf7",
+     "bodyBgHsl": {
+      "h": 45,
+      "s": 0.33,
+      "l": 0.98
+     },
+     "dark": false,
+     "sectionBgs": [
+      {
+       "color": "#ffffff",
+       "top": 213,
+       "hsl": {
+        "h": 0,
+        "s": 0,
+        "l": 1
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#1c2b3a",
+       "share": 0.45
+      },
+      {
+       "color": "#64737f",
+       "share": 0.45
+      },
+      {
+       "color": "#40505f",
+       "share": 0.11
+      }
+     ],
+     "button": {
+      "bg": "#ffffff",
+      "hsl": {
+       "h": 0,
+       "s": 0,
+       "l": 1
+      },
+      "fg": "#1c2b3a"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 8,
+     "height": 40,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Edit company record"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 6,
+     "hairlineSamples": [
+      "header.header 1100px",
+      "nav.tabs 1100px",
+      "header.dossierHead.tonebrand 1098px",
+      "header.dossierHead.toneinfo 1098px",
+      "header.dossierHead.toneneutral 538px"
+     ],
+     "outlinedBoxes": 4,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 4,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [],
+    "nav": {
+     "links": 0,
+     "fixed": false,
+     "height": 81,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "pageH": 1434,
+    "margins": {
+     "left": 170,
+     "right": 252
+    },
+    "sections": [
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 213,
+      "height": 470,
+      "words": 89,
+      "media": 0,
+      "middle": 96,
+      "heading": {
+       "text": "Primary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 191,
+      "right": 269,
+      "textLeft": 191,
+      "textRight": 269,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 703,
+      "height": 350,
+      "words": 62,
+      "media": 0,
+      "middle": 111,
+      "heading": {
+       "text": "Supplementary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 191,
+      "right": 254,
+      "textLeft": 191,
+      "textRight": 254,
+      "fullBleed": false,
+      "footer": true,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     }
+    ],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "MARIA SANTOS",
+      "size": 28,
+      "top": 32,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 235,
+      "n": 3
+     },
+     {
+      "x": 170,
+      "n": 1
+     },
+     {
+      "x": 795,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 5,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0.14,
+    "voidBox": {
+     "x": 1200,
+     "y": 120,
+     "w": 240,
+     "h": 780
+    }
+   },
+   "app": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "dark": false,
+    "ground": "#fbfaf7",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 170,
+     "right": 252
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 28,
+     "vw": 1.9,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.02,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 4,
+     "firstScreen": 2,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 8,
+     "radii": [
+      [
+       12,
+       4
+      ],
+      [
+       0,
+       4
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 4,
+     "hues": 3,
+     "samples": [
+      {
+       "hue": 158,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 199,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 209,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 38,
+       "size": 32,
+       "radius": "6px"
+      }
+     ]
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 10,
+     "tabularShare": 0,
+     "kpiMax": 14
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      14,
+      16,
+      28
+     ]
+    },
+    "title": {
+     "text": "MARIA SANTOS",
+     "size": 28,
+     "top": 32
+    },
+    "colourShare": 0.001
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 768,
+   "height": 1024,
+   "load": "load",
+   "screens": 2,
+   "filled": [
+    0.79,
+    0.86
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "page": {
+     "height": 1877,
+     "screens": 1.8,
+     "words": 249,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 4,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 24,
+     "vw": 3.1,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.01,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "lines": 1,
+     "size": 23.8,
+     "font": "-apple-system"
+    },
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.93,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.07,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      14,
+      16,
+      24
+     ],
+     "sizeCount": 4,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 23.8,
+      "vw": 3.1,
+      "font": "-apple-system",
+      "text": "MARIA SANTOS"
+     },
+     "monoShare": 0.07,
+     "monoProseShare": 0.07,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [
+      "RA-2026-0001",
+      "4027",
+      "********9012",
+      "+63 917 123 4567",
+      "********7001",
+      "+63 918 555 0101"
+     ],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.46,
+     "centerShare": 0.01,
+     "smallText": 28
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#fbfaf7",
+     "bodyBgHsl": {
+      "h": 45,
+      "s": 0.33,
+      "l": 0.98
+     },
+     "dark": false,
+     "sectionBgs": [
+      {
+       "color": "#ffffff",
+       "top": 208,
+       "hsl": {
+        "h": 0,
+        "s": 0,
+        "l": 1
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#1c2b3a",
+       "share": 0.45
+      },
+      {
+       "color": "#64737f",
+       "share": 0.45
+      },
+      {
+       "color": "#40505f",
+       "share": 0.11
+      }
+     ],
+     "button": {
+      "bg": "#ffffff",
+      "hsl": {
+       "h": 0,
+       "s": 0,
+       "l": 1
+      },
+      "fg": "#1c2b3a"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 8,
+     "height": 40,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Edit company record"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 6,
+     "hairlineSamples": [
+      "header.header 704px",
+      "nav.tabs 704px",
+      "header.dossierHead.tonebrand 702px",
+      "header.dossierHead.toneinfo 702px",
+      "header.dossierHead.toneneutral 702px"
+     ],
+     "outlinedBoxes": 4,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 4,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [],
+    "nav": {
+     "links": 0,
+     "fixed": false,
+     "height": 76,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "pageH": 1877,
+    "margins": {
+     "left": 32,
+     "right": 73
+    },
+    "sections": [
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 208,
+      "height": 589,
+      "words": 89,
+      "media": 0,
+      "middle": 59,
+      "heading": {
+       "text": "Primary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 89,
+      "textLeft": 53,
+      "textRight": 89,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 817,
+      "height": 409,
+      "words": 62,
+      "media": 0,
+      "middle": 61,
+      "heading": {
+       "text": "Supplementary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 73,
+      "textLeft": 53,
+      "textRight": 73,
+      "fullBleed": false,
+      "footer": false,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 1246,
+      "height": 288,
+      "words": 43,
+      "media": 0,
+      "middle": 73,
+      "heading": {
+       "text": "Related Persons and Referral",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 95,
+      "textLeft": 53,
+      "textRight": 95,
+      "fullBleed": false,
+      "footer": false,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 1554,
+      "height": 291,
+      "words": 39,
+      "media": 0,
+      "middle": 121,
+      "heading": {
+       "text": "Package and Payment (company stated)",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 169,
+      "textLeft": 53,
+      "textRight": 169,
+      "fullBleed": false,
+      "footer": true,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     }
+    ],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "MARIA SANTOS",
+      "size": 24,
+      "top": 32,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 97,
+      "n": 4
+     },
+     {
+      "x": 32,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 5,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "dark": false,
+    "ground": "#fbfaf7",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 32,
+     "right": 73
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 24,
+     "vw": 3.1,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.01,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 4,
+     "firstScreen": 2,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 8,
+     "radii": [
+      [
+       12,
+       4
+      ],
+      [
+       0,
+       4
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 4,
+     "hues": 3,
+     "samples": [
+      {
+       "hue": 158,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 199,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 209,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 38,
+       "size": 32,
+       "radius": "6px"
+      }
+     ]
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 10,
+     "tabularShare": 0,
+     "kpiMax": 14
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      14,
+      16,
+      24
+     ]
+    },
+    "title": {
+     "text": "MARIA SANTOS",
+     "size": 24,
+     "top": 32
+    },
+    "colourShare": 0.003
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 390,
+   "height": 844,
+   "load": "load",
+   "screens": 5,
+   "filled": [
+    0.56,
+    0.83,
+    0.78,
+    0.78,
+    0.78
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "page": {
+     "height": 4167,
+     "screens": 4.9,
+     "words": 249,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 4,
+     "sections": 1,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 22,
+     "vw": 5.6,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.02,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "lines": 1,
+     "size": 22,
+     "font": "-apple-system"
+    },
+    "headings": [
+     {
+      "text": "MARIA SANTOS",
+      "words": 2,
+      "chars": 12,
+      "lines": 1,
+      "size": 22,
+      "vw": 5.6,
+      "font": "-apple-system",
+      "weight": 700,
+      "tracking": -0.015,
+      "leading": 1.25,
+      "upper": true,
+      "italic": false,
+      "mono": false,
+      "align": "left",
+      "position": "left",
+      "widthRatio": 0.51,
+      "top": 32,
+      "tag": "h1",
+      "kind": "heading"
+     }
+    ],
+    "headingSummary": {
+     "count": 1,
+     "maxLines": 1,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.93,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.07,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      14,
+      16,
+      22
+     ],
+     "sizeCount": 4,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 22,
+      "vw": 5.6,
+      "font": "-apple-system",
+      "text": "MARIA SANTOS"
+     },
+     "monoShare": 0.07,
+     "monoProseShare": 0.07,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [
+      "RA-2026-0001",
+      "4027",
+      "********9012",
+      "+63 917 123 4567",
+      "********7001",
+      "+63 918 555 0101"
+     ],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.46,
+     "centerShare": 0.01,
+     "smallText": 28
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#fbfaf7",
+     "bodyBgHsl": {
+      "h": 45,
+      "s": 0.33,
+      "l": 0.98
+     },
+     "dark": false,
+     "sectionBgs": [
+      {
+       "color": "#ffffff",
+       "top": 325,
+       "hsl": {
+        "h": 0,
+        "s": 0,
+        "l": 1
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#1c2b3a",
+       "share": 0.45
+      },
+      {
+       "color": "#64737f",
+       "share": 0.45
+      },
+      {
+       "color": "#40505f",
+       "share": 0.11
+      }
+     ],
+     "button": {
+      "bg": "#ffffff",
+      "hsl": {
+       "h": 0,
+       "s": 0,
+       "l": 1
+      },
+      "fg": "#1c2b3a"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 1,
+     "inHero": 1,
+     "radius": 8,
+     "height": 40,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Edit company record"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 6,
+     "hairlineSamples": [
+      "header.header 326px",
+      "nav.tabs 326px",
+      "header.dossierHead.tonebrand 324px",
+      "header.dossierHead.toneinfo 324px",
+      "header.dossierHead.toneneutral 324px"
+     ],
+     "outlinedBoxes": 4,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 4,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": [
+      {
+       "count": 4,
+       "iconTopped": true,
+       "rounded": true,
+       "top": 325
+      }
+     ]
+    },
+    "heroMedia": [],
+    "nav": {
+     "links": 0,
+     "fixed": false,
+     "height": 126,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "pageH": 4167,
+    "margins": {
+     "left": 32,
+     "right": 86
+    },
+    "sections": [
+     {
+      "sel": "header.header",
+      "tag": "header",
+      "top": 32,
+      "height": 126,
+      "words": 10,
+      "media": 0,
+      "middle": 0,
+      "heading": {
+       "text": "MARIA SANTOS",
+       "size": 22,
+       "tag": "h1"
+      },
+      "left": 32,
+      "right": 32,
+      "textLeft": 32,
+      "textRight": 129,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 325,
+      "height": 1543,
+      "words": 89,
+      "media": 0,
+      "middle": 0,
+      "heading": {
+       "text": "Primary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 148,
+      "textLeft": 53,
+      "textRight": 148,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": true,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 1888,
+      "height": 945,
+      "words": 62,
+      "media": 0,
+      "middle": 0,
+      "heading": {
+       "text": "Supplementary Member",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 116,
+      "textLeft": 53,
+      "textRight": 116,
+      "fullBleed": false,
+      "footer": false,
+      "hero": false,
+      "continues": true,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 2853,
+      "height": 586,
+      "words": 43,
+      "media": 0,
+      "middle": 0,
+      "heading": {
+       "text": "Related Persons and Referral",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 86,
+      "textLeft": 53,
+      "textRight": 86,
+      "fullBleed": false,
+      "footer": false,
+      "hero": false,
+      "continues": true,
+      "pinned": false
+     },
+     {
+      "sel": "article.dossierCard",
+      "tag": "article",
+      "top": 3459,
+      "height": 676,
+      "words": 39,
+      "media": 0,
+      "middle": 0,
+      "heading": {
+       "text": "Package and Payment (company stated)",
+       "size": 16,
+       "tag": "h2"
+      },
+      "left": 53,
+      "right": 58,
+      "textLeft": 53,
+      "textRight": 58,
+      "fullBleed": false,
+      "footer": true,
+      "hero": false,
+      "continues": true,
+      "pinned": false
+     }
+    ],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "MARIA SANTOS",
+      "size": 22,
+      "top": 32,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 97,
+      "n": 4
+     },
+     {
+      "x": 32,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 5,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "dark": false,
+    "ground": "#fbfaf7",
+    "sidebar": null,
+    "topbar": null,
+    "canvas": {
+     "left": 32,
+     "right": 86
+    },
+    "hero": {
+     "text": "MARIA SANTOS",
+     "words": 2,
+     "chars": 12,
+     "lines": 1,
+     "size": 22,
+     "vw": 5.6,
+     "font": "-apple-system",
+     "weight": 700,
+     "tracking": -0.02,
+     "leading": 1.25,
+     "top": 32,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 4,
+     "firstScreen": 1,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 8,
+     "radii": [
+      [
+       12,
+       4
+      ],
+      [
+       0,
+       4
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 4,
+     "hues": 3,
+     "samples": [
+      {
+       "hue": 158,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 199,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 209,
+       "size": 32,
+       "radius": "6px"
+      },
+      {
+       "hue": 38,
+       "size": 32,
+       "radius": "6px"
+      }
+     ]
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 10,
+     "tabularShare": 0,
+     "kpiMax": 14
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      14,
+      16,
+      22
+     ]
+    },
+    "title": {
+     "text": "MARIA SANTOS",
+     "size": 22,
+     "top": 32
+    },
+    "colourShare": 0.003
+   },
+   "consoleErrors": []
+  }
+ ],
+ "findings": [
+  {
+   "level": "WARN",
+   "id": "unused-canvas",
+   "width": 1440,
+   "message": "The content stops 252px short of the right edge while it starts 170px from the sidebar.",
+   "fix": "Let the grid fill the canvas (columns in fr units), or centre a capped canvas with equal margins. A dead strip on one side reads as unfinished."
+  },
+  {
+   "level": "WARN",
+   "id": "tabular",
+   "width": 1440,
+   "message": "Only 0% of the figures use tabular numerals.",
+   "fix": "Set font-variant-numeric: tabular-nums on tables, KPIs and anything that updates, so digits keep their width.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "WARN",
+   "id": "tiny-text",
+   "width": 1440,
+   "message": "52% of the text is under 13px.",
+   "fix": "Data and labels read at 13–14px; keep 11–12px for sublines and axis ticks.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  }
+ ],
+ "images": [
+  {
+   "viewport": "desktop",
+   "width": 1440,
+   "fold": "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\desktop-fold.jpg",
+   "pages": [
+    "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\desktop-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "tablet",
+   "width": 768,
+   "fold": "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\tablet-fold.jpg",
+   "pages": [
+    "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\tablet-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "mobile",
+   "width": 390,
+   "fold": "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\mobile-fold.jpg",
+   "pages": [
+    "C:\\Users\\SSD-ORLANDO\\Documents\\Project\\AFhomes-ecofarm-v2\\.taste-skill\\inspect-dossier\\mobile-page-01.jpg"
+   ],
+   "film": []
+  }
+ ]
+}

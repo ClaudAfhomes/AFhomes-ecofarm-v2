@@ -24,19 +24,425 @@
   align-items: start;
 }
 
-/* The sales section spans the grid; sales stack vertically beneath it. */
-.salesSection {
-  grid-column: 1 / -1;
+/*
+ * Identity strip. One container split by 1px dividers into equal columns,
+ * which is the measured default for a set of record facts (11 of 20 studied
+ * screens divide one container rather than tile each fact). Seven facts that
+ * each float on their own have no edges to share, so nothing says "these seven
+ * describe one record".
+ *
+ * Two groups, because they are two different kinds of fact and the previous
+ * round put them there on purpose: state is what the person IS, identifiers are
+ * which row it is. The boundary between the groups is the stronger rule.
+ *
+ * Grid arithmetic at 1440: the canvas is 1100, split evenly, so the four state
+ * facts get 137px each and the three identifiers 183px. Even is not a default:
+ * the state values are 16px text and need about 88px, while the identifiers
+ * carry a mono key and a full timestamp and need about 147px. The previous
+ * 1.35fr state side starved the date and wrapped "12:00 AM" onto a second line.
+ */
+.masthead {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  /* Clips the cell padding and the dividers to the rounded corners. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+.page .mastheadState,
+.page .mastheadIds {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.page .mastheadState {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.page .mastheadIds {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-left: 1px solid var(--color-border-default);
+}
+
+/*
+ * Cells. `DetailField` renders each pair as a bare div child of the dl, so the
+ * divider is the adjacent-sibling border: every cell after the first carries a
+ * rule, and the first needs none. Nothing is nested and nothing is boxed.
+ */
+.page .mastheadState > div,
+.page .mastheadIds > div {
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.page .mastheadState > div + div,
+.page .mastheadIds > div + div {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.page .mastheadState dt,
+.page .mastheadIds dt {
+  font-size: var(--text-caption);
+}
+
+/*
+ * Three steps, so the eye lands in one place: the state value, then the
+ * identifiers, then the labels under both.
+ *
+ * Status and tier arrive already coloured - a status chip and a tier badge -
+ * and those own the colour on this strip. They are 12px marks and cannot be
+ * resized from here without restyling the shared components, so the text values
+ * come DOWN to meet them at 16px. Set larger, "Active VIP" out-shouted the
+ * status of the record, which is backwards: the derived category and the portal
+ * flag are secondary facts about a person whose status is the answer.
+ */
+.page .mastheadState dd {
+  font-size: var(--text-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.page .mastheadIds dd {
+  font-size: var(--text-body-s);
+}
+
+@media (max-width: 899px) {
+  .masthead {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-default);
+  }
+}
+
+@media (max-width: 559px) {
+  .page .mastheadState {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* A wrapped cell is the first of its row, so its rule would divide nothing. */
+  .page .mastheadState > div:nth-child(3) {
+    border-left: 0;
+  }
+
+  .page .mastheadState > div:nth-child(n + 3) {
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  /* The identifiers carry the longest strings on the strip - a mono key and a
+     full timestamp - so they take the whole row each instead of being squeezed
+     into half of one and wrapping mid-time. */
+  .page .mastheadIds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+}
+
+/* Panels: card sales, and the company form when its tab is open. */
+.panel {
+  display: grid;
+  gap: var(--space-4);
   align-content: start;
 }
 
-.sectionTitle {
+/*
+ * Company record: the company master form, as a dossier.
+ *
+ * Four blocks of the same printed form, so they get four cards rather than one
+ * ruled sheet: each carries its own tinted header saying what the block is, so
+ * an operator who opens this tab knows which part of the form they are reading
+ * without scrolling back to a heading.
+ *
+ * Spans are chosen by field count, not by a uniform grid. Primary is the subject
+ * of the record and takes the full width; Related (8) and Package (9) balance
+ * each other exactly on one line. Nothing is stretched to a neighbour's height.
+ *
+ * Grid arithmetic at 1440 on a 1100 canvas, 20px gutter:
+ *   full  = 1100              -> Primary 4-up  (275/cell, 6 rows)
+ *                                Supplementary 3-up (367/cell, 5 rows)
+ *   half  = (1100 - 20) / 2 = 540 -> Related 2-up (270/cell, 4 rows)
+ *                                Package  2-up (270/cell, 5 rows)
+ */
+.dossier {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.dossierCard {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* The subject of the record, and the one block with enough fields to need the
+   full measure. */
+.dossierCard:nth-child(1),
+.dossierCard:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+/*
+ * Header: one tint doing the area work, the hue only on the mark. The icon
+ * square is the solid colour - a small mark - while the band behind it is the
+ * pale tint, which is the whole move.
+ */
+.dossierHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.dossierMark {
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+}
+
+/* The title is the card's voice: one step above any label inside it. */
+.dossierTitle {
   margin: 0;
+  align-self: end;
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--color-text-primary);
+}
+
+/* What the block is, and what it is not. */
+.dossierBlurb {
+  margin: 0;
+  align-self: start;
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.tonebrand {
+  background-color: var(--color-brand-soft);
+}
+
+.tonebrand .dossierMark {
+  background-color: var(--color-brand-secondary);
+}
+
+.toneinfo {
+  background-color: #e8eef6;
+}
+
+.toneinfo .dossierMark {
+  background-color: var(--color-info);
+}
+
+.tonegold {
+  background-color: var(--color-accent-soft);
+}
+
+.tonegold .dossierMark {
+  background-color: var(--color-accent-strong);
+}
+
+.toneneutral {
+  background-color: var(--color-bg-surface);
+}
+
+.toneneutral .dossierMark {
+  background-color: var(--color-text-secondary);
+}
+
+/* Field grid: as many comfortable columns as the card is wide. Three widths,
+   because the cards are three widths - a fixed count would either strand the
+   narrow cards or over-fill the wide one. */
+.page .dossierFields {
+  display: grid;
+  gap: var(--space-4) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin: 0;
+  padding: var(--space-5);
+  align-content: start;
+}
+
+/* The paired cards take three columns rather than two. Eight fields and nine
+   fields in two columns end one row apart and the row stops level; in three
+   they are exactly three rows each, so the pair shares a bottom edge.
+   Desktop only: below the two-column breakpoint the cards go full width, and
+   three columns of a phone is three unreadable 100px strips. */
+@media (min-width: 900px) {
+  .page .dossierCard:nth-child(3) .dossierFields,
+  .page .dossierCard:nth-child(4) .dossierFields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * The labels are the form's own all-caps headers, so the shout is in the
+ * strings and cannot be removed. It is answered in weight instead: the header
+ * sits small and muted, the value below it at body size in primary ink.
+ */
+.page .dossierFields dt {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.page .dossierFields dd {
+  margin: 0;
+  font-size: var(--text-body-s);
+  line-height: var(--line-height-body);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A blank cell recedes so the recorded ones carry the eye. */
+.absent {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+@media (max-width: 899px) {
+  .dossier {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dossierCard:nth-child(1),
+  .dossierCard:nth-child(2) {
+    grid-column: auto;
+  }
+}
+
+/*
+ * Section tabs. A 2px brand mark sitting on the sheet's own rule - the full
+ * hue on a small mark, which is this style's move, and never a tinted pill or
+ * a left bar. 44px tall so it is comfortable to hit, while the indicator stays
+ * the width of its label instead of the width of the row.
+ */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  /* Pulls the indicator onto the rule above it rather than below it. */
+  margin-bottom: -1px;
+  padding: 0;
+  border-bottom: 2px solid transparent;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.tabCurrent {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-brand-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}
+
+/*
+ * Settlement strip: the screen's answer. One divided container, not a tile per
+ * figure. The balance leads; card, scheme, total and paid are its arithmetic.
+ */
+.settlement {
+  display: grid;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.settlementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.settlementRow + .settlementRow {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.settlementLead {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settlementLabel {
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.settlementValue {
+  font-size: var(--text-h2);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settlementFacts {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: var(--space-5);
+  margin: 0;
+}
+
+@media (max-width: 899px) {
+  .settlementRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settlementFacts {
+    grid-template-columns: repeat(2, auto);
+  }
 }
 
 /* Vertical stack of per-sale cards. */
@@ -103,27 +509,14 @@
   flex: 0 0 auto;
 }
 
-/* Two-column field grids on wide screens. Column flow fills column one
-   first, so JSX order stays the single source of field order (Customer:
-   identity then identifiers; Sale Details: record then money). */
-.twoCol {
-  grid-auto-flow: column;
-}
-
-.twoColRows4 {
-  grid-template-rows: repeat(4, auto);
-}
-
-.twoColRows5 {
-  grid-template-rows: repeat(5, auto);
-}
-
-@media (max-width: 639px) {
-  .twoCol {
-    grid-auto-flow: row;
-    grid-template-rows: none;
-    grid-template-columns: 1fr;
-  }
+/* Field grid: as many comfortable columns as fit, filled in reading order.
+   The previous fixed-row column flow packed the 24-field company block into six
+   implicit columns, so every label wrapped to two or three lines. */
+.topGrid .fields {
+  display: grid;
+  gap: var(--space-3) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  margin: 0;
 }
 
 /*

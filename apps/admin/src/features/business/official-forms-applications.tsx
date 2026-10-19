@@ -37,9 +37,7 @@ import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,
-  DateField,
-  Dialog,
+  Button,  Dialog,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
@@ -111,8 +109,6 @@ export function CustomerApplicationsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only applications that still need APPLICATION work. Turning this
   // off reveals the progressed history, which is never deleted or archived.
@@ -126,15 +122,7 @@ export function CustomerApplicationsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: applicationKeys.list(
-      status,
-      tier,
-      debouncedSearch,
-      from,
-      to,
-      applicationWorkOnly,
-      page,
-    ),
+    queryKey: applicationKeys.list(status, tier, debouncedSearch, applicationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -143,8 +131,6 @@ export function CustomerApplicationsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
         ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
@@ -210,7 +196,7 @@ export function CustomerApplicationsPage() {
                 Import/Export Data
               </Button>
             ) : null}
-            <Button onClick={() => navigate('/admin/customers/applications/new')}>
+            <Button onClick={() => navigate('/admin/customers/new')}>
               New application
             </Button>
           </>
@@ -277,28 +263,6 @@ export function CustomerApplicationsPage() {
                 ]}
               />
             </label>
-            <DateField
-              id="applications-from"
-              name="from"
-              label="From date"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setPage(0);
-              }}
-            />
-            <DateField
-              id="applications-to"
-              name="to"
-              label="To date"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                setPage(0);
-              }}
-            />
           </>
         }
       />
@@ -1247,15 +1211,15 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>Submitted</dt>
-                <dd>{existing.data.submittedAt ?? '—'}</dd>
+                <dd>{existing.data.submittedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Approved</dt>
-                <dd>{existing.data.approvedAt ?? '—'}</dd>
+                <dd>{existing.data.approvedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Rejected</dt>
-                <dd>{existing.data.rejectedAt ?? '—'}</dd>
+                <dd>{existing.data.rejectedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Customer</dt>
@@ -1271,7 +1235,7 @@ export function CustomerApplicationEditorPage() {
               </div>
               <div className={styles.snapshotField}>
                 <dt>Sale</dt>
-                <dd>{existing.data.saleId ?? '—'}</dd>
+                <dd>{existing.data.saleId ?? '-'}</dd>
               </div>
             </dl>
           </section>
@@ -1279,7 +1243,7 @@ export function CustomerApplicationEditorPage() {
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
         {relatedCustomer ? (
           <section aria-label="Linked company record" className={styles.panel}>
-            <h2 className={styles.panelTitle}>Linked company record — read-only</h2>
+            <h2 className={styles.panelTitle}>Linked company record (read-only)</h2>
             <p className={styles.hint}>
               Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
               on the customer page. Stated figures never change the offer.
@@ -1287,19 +1251,19 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>RA NO</dt>
-                <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+                <dd>{relatedCustomer.raNumber ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATUS (company)</dt>
-                <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+                <dd>{relatedCustomer.companyStatus ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>CITIZENSHIP</dt>
-                <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+                <dd>{relatedCustomer.citizenship ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>SUPPLEMENTARY</dt>
-                <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+                <dd>{relatedCustomer.supplementaryFullName ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>RELATED</dt>
@@ -1311,12 +1275,12 @@ export function CustomerApplicationEditorPage() {
                     relatedCustomer.smName,
                   ]
                     .filter(Boolean)
-                    .join(' · ') || '—'}
+                    .join(' · ') || '-'}
                 </dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATED PACKAGE</dt>
-                <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+                <dd>{relatedCustomer.statedVipPackage ?? '-'}</dd>
               </div>
             </dl>
             <div className={styles.actions}>

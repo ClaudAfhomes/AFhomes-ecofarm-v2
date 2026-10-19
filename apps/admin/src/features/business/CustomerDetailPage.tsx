@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import type { Sale } from '@afhomes/contracts';
 import {
   Button,
@@ -12,9 +12,11 @@ import {
   DetailMono,
   EmptyState,
   ErrorState,
+  Icon,
   PageHeader,
   Skeleton,
   StatusChip,
+  type IconName,
 } from '@afhomes/ui';
 import { CUSTOMER_CATEGORY_LABELS, paymentSchemeLabel } from '@afhomes/contracts';
 
@@ -61,6 +63,34 @@ function describeSalesLoadError(error: unknown): string | undefined {
 }
 
 /**
+ * The company form is mostly empty cells, so "Not Recorded" has to recede.
+ * Forty identical grey strings at body weight drown the twenty that carry real
+ * data; at caption weight in muted ink they read as what they are - blanks on
+ * a form. The wording is unchanged, so nothing downstream has to know.
+ */
+/**
+ * The dossier's colour ladder. Three tints, all of them already in the design
+ * system and all of them meaning something here: brand green is the person,
+ * info blue is the second holder, gold is money - the same gold the tier badge
+ * and the plan card already use. No fourth hue, and none invented.
+ */
+type CompanyTone = 'brand' | 'info' | 'gold' | 'neutral';
+
+function stated(value: string | null | undefined): ReactNode {
+  return value ? value : <span className={styles.absent}>Not Recorded</span>;
+}
+
+/**
+ * A figure or a reference, set in mono. Identifiers are digits and punctuation
+ * - they line up down the rail and read as machine output, not as prose. Exact
+ * decimal text is stored and rendered verbatim; no currency mark is ever
+ * concatenated onto it (AGENTS.md money rule).
+ */
+function statedMono(value: string | null | undefined): ReactNode {
+  return value ? <DetailMono>{value}</DetailMono> : stated(null);
+}
+
+/**
  * Single customer record, reached by clicking a directory row.
  *
  * Record fields come from `GET /customers/:id` (same RPC as the directory,
@@ -74,6 +104,10 @@ function describeSalesLoadError(error: unknown): string | undefined {
  */
 export function CustomerDetailPage() {
   const { id } = useParams();
+  // One object, one panel at a time. The tab is URL state, so a panel is
+  // shareable and the back button walks the operator out of it.
+  const [searchParams] = useSearchParams();
+  const tab = searchParams.get('tab') ?? 'overview';
   const { user } = useSession();
   const [editing, setEditing] = useState(false);
   const canEditCompany =
@@ -151,9 +185,9 @@ export function CustomerDetailPage() {
   // Company-stated age is never stored (it goes stale); both AGE fields derive
   // from the stored birthdays so the display can never disagree with them.
   const ageOn = (iso: string | null | undefined): string => {
-    if (!iso) return '—';
+    if (!iso) return 'Not Recorded';
     const born = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(born.valueOf())) return '—';
+    if (Number.isNaN(born.valueOf())) return 'Not Recorded';
     const now = new Date();
     let age = now.getFullYear() - born.getFullYear();
     if (
@@ -161,50 +195,45 @@ export function CustomerDetailPage() {
       (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())
     )
       age -= 1;
-    return age < 0 ? '—' : String(age);
+    return age < 0 ? 'Not Recorded' : String(age);
   };
   const addressPartOf = (address: unknown, key: string): string => {
     if (!address || typeof address !== 'object') return '';
     const part = (address as Record<string, unknown>)[key];
     return typeof part === 'string' ? part.trim() : '';
   };
-  const groups: Array<{ title: string; fields: Array<[string, ReactNode]>; columns?: 2 }> = [
+  // `company` groups are the company's own form columns: fifty-odd fields that
+  // read as a spreadsheet, not as a record. They get their own tab as a dossier:
+  // one card per block of the form, each with a tinted header that says what the
+  // block is and what it is not.
+  //
+  // Two inks, one rule: mono is the machine's value (an identifier or a figure),
+  // body type is what a person said. An operator looking for the total finds it
+  // because it is the only mono row in its block.
+  //
+  // The header blurb is not decoration. Two of these blocks carry a warning the
+  // operator needs before acting on them: the referral names do NOT establish a
+  // reporting line, and the stated figures are NOT the sale total.
+  const groups: Array<{
+    title: string;
+    /** Dossier presentation. Only the company blocks set these; the Overview
+     *  cards are plain `DetailCard`s and carry none. */
+    icon?: IconName;
+    tone?: CompanyTone;
+    blurb?: string;
+    fields: Array<[string, ReactNode]>;
+    company?: boolean;
+  }> = [
     {
-      title: 'Customer',
-      // Two columns: identity (name, status, category, portal) then
-      // identifiers (ID, code, registered). Column flow preserves JSX order.
-      columns: 2,
-      fields: [
-        ['Full name', record.fullName],
-        ['Status', <StatusChip label={record.status} />],
-        [
-          'Category',
-          record.derivedCategory ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory] : '—',
-        ],
-        ['Portal account', record.portalAccountActivated ? 'Activated' : 'Not activated'],
-        ['Customer ID', <DetailMono>{record.customerNumber}</DetailMono>],
-        [
-          'Customer code',
-          record.customerCode ? <DetailMono>{record.customerCode}</DetailMono> : '—',
-        ],
-        ['Registered', record.createdAt ? formatDateTime(record.createdAt) : '—'],
-      ],
-    },
-    {
-      title: 'Contact',
+      title: 'Contact and identity',
       fields: [
         ['Email', record.email],
         ['Phone', record.phone],
-        ['Date of birth', record.dateOfBirth ?? '—'],
-        ['Gender', record.gender ?? '—'],
-      ],
-    },
-    {
-      title: 'Verification',
-      fields: [
-        ['ID type', record.governmentIdType ?? '—'],
+        ['Date of birth', record.dateOfBirth ?? 'Not Recorded'],
+        ['Gender', record.gender ?? 'Not Recorded'],
+        ['ID type', record.governmentIdType ?? 'Not Recorded'],
         // Only ever the masked form; the API never returns the number.
-        ['Government ID', record.governmentIdMasked ?? '—'],
+        ['Government ID', record.governmentIdMasked ?? 'Not Recorded'],
       ],
     },
     {
@@ -213,32 +242,35 @@ export function CustomerDetailPage() {
       // lifecycle state stays under Customer above. TIN is masked like the
       // government ID; AGE derives from the birthday, never stored.
       title: 'Primary Member',
-      columns: 2,
+      icon: 'user',
+      tone: 'brand',
+      blurb: 'Who holds the card',
+      company: true,
       fields: [
-        ['RA NO', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
-        ['STATUS', record.companyStatus ?? '—'],
-        ['FIRST NAME', record.firstName ?? '—'],
-        ['LAST NAME', record.lastName ?? '—'],
-        ['MIDDLE NAME', record.middleName ?? '—'],
-        ['SUFFIX', record.suffix ?? '—'],
-        ['BIRTHDAY', record.dateOfBirth ?? '—'],
-        ['GENDER', record.gender ?? '—'],
+        ['RA NO', statedMono(record.raNumber)],
+        ['STATUS', stated(record.companyStatus)],
+        ['FIRST NAME', stated(record.firstName )],
+        ['LAST NAME', stated(record.lastName )],
+        ['MIDDLE NAME', stated(record.middleName )],
+        ['SUFFIX', stated(record.suffix )],
+        ['BIRTHDAY', stated(record.dateOfBirth )],
+        ['GENDER', stated(record.gender )],
         ['AGE', ageOn(record.dateOfBirth)],
-        ['CITIZENSHIP', record.citizenship ?? '—'],
-        ['CIVIL STATUS', record.civilStatus ?? '—'],
-        ['PERMANENT ADDRESS LINE 1', addressPartOf(record.address, 'line1') || '—'],
-        ['PERMANENT ADDRESS LINE 2', addressPartOf(record.address, 'line2') || '—'],
-        ['PROVINCE', addressPartOf(record.address, 'province') || '—'],
-        ['CITY', addressPartOf(record.address, 'city') || '—'],
-        ['BARANGGAY', addressPartOf(record.address, 'barangay') || '—'],
-        ['POSTAL CODE', addressPartOf(record.address, 'postalCode') || '—'],
-        ['LANDLINE', record.landline ?? '—'],
-        ['EMAIL', record.email],
-        ['TIN NO.', record.tinNumberMasked ?? '—'],
-        ['MOBILE NO.', record.phone],
-        ['OCCUPATION / BUSINESS NAME', record.occupationBusinessName ?? '—'],
-        ['OFFICE / BUSINESS ADDRESS', record.officeBusinessAddress ?? '—'],
-        ['EMPLOYED POSITION', record.employedPosition ?? '—'],
+        ['CITIZENSHIP', stated(record.citizenship )],
+        ['CIVIL STATUS', stated(record.civilStatus )],
+        ['PERMANENT ADDRESS LINE 1', stated(addressPartOf(record.address, 'line1') )],
+        ['PERMANENT ADDRESS LINE 2', stated(addressPartOf(record.address, 'line2') )],
+        ['PROVINCE', stated(addressPartOf(record.address, 'province') )],
+        ['CITY', stated(addressPartOf(record.address, 'city') )],
+        ['BARANGGAY', stated(addressPartOf(record.address, 'barangay') )],
+        ['POSTAL CODE', statedMono(addressPartOf(record.address, 'postalCode') )],
+        ['LANDLINE', stated(record.landline )],
+        ['EMAIL', stated(record.email)],
+        ['TIN NO.', statedMono(record.tinNumberMasked )],
+        ['MOBILE NO.', statedMono(record.phone)],
+        ['OCCUPATION / BUSINESS NAME', stated(record.occupationBusinessName )],
+        ['OFFICE / BUSINESS ADDRESS', stated(record.officeBusinessAddress )],
+        ['EMPLOYED POSITION', stated(record.employedPosition )],
       ],
     },
     {
@@ -246,55 +278,64 @@ export function CustomerDetailPage() {
       // (single text columns) and display as the two stored fields; AGE
       // derives from the supplementary birthday.
       title: 'Supplementary Member',
-      columns: 2,
+      icon: 'users',
+      tone: 'info',
+      blurb: 'Second holder, Gold only',
+      company: true,
       fields: [
-        ['SUPPLEMENTARY FULL NAME', record.supplementaryFullName ?? '—'],
-        ['SUPPLEMENTARY ADDRESS', record.supplementaryAddress ?? '—'],
-        ['BIRTHDAY', record.supplementaryBirthday ?? '—'],
-        ['GENDER', record.supplementaryGender ?? '—'],
+        ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName )],
+        ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress )],
+        ['BIRTHDAY', stated(record.supplementaryBirthday )],
+        ['GENDER', stated(record.supplementaryGender )],
         ['AGE', ageOn(record.supplementaryBirthday)],
-        ['CITIZENSHIP', record.supplementaryCitizenship ?? '—'],
-        ['CIVIL STATUS', record.supplementaryCivilStatus ?? '—'],
-        ['TIN NO.', record.supplementaryTinNumberMasked ?? '—'],
-        ['LANDLINE', record.supplementaryLandline ?? '—'],
-        ['MOBILE NO.', record.supplementaryMobile ?? '—'],
-        ['EMAIL', record.supplementaryEmail ?? '—'],
-        ['OCCUPATION / BUSINESS NAME', record.supplementaryOccupationBusinessName ?? '—'],
-        ['OFFICE / BUSINESS ADDRESS', record.supplementaryOfficeAddress ?? '—'],
-        ['EMPLOYED POSITION', record.supplementaryPosition ?? '—'],
+        ['CITIZENSHIP', stated(record.supplementaryCitizenship )],
+        ['CIVIL STATUS', stated(record.supplementaryCivilStatus )],
+        ['TIN NO.', statedMono(record.supplementaryTinNumberMasked )],
+        ['LANDLINE', stated(record.supplementaryLandline )],
+        ['MOBILE NO.', statedMono(record.supplementaryMobile )],
+        ['EMAIL', stated(record.supplementaryEmail )],
+        ['OCCUPATION / BUSINESS NAME', stated(record.supplementaryOccupationBusinessName )],
+        ['OFFICE / BUSINESS ADDRESS', stated(record.supplementaryOfficeAddress )],
+        ['EMPLOYED POSITION', stated(record.supplementaryPosition )],
       ],
     },
     {
       // Stored verbatim as stated. These names do not assert reporting lines;
       // referral_relationships remains the only genealogy authority.
       title: 'Related Persons and Referral',
-      columns: 2,
+      icon: 'user-plus',
+      tone: 'neutral',
+      blurb: 'Stated names, not the genealogy',
+      company: true,
       fields: [
-        ['OST/IST NAME', record.ostIstName ?? '—'],
-        ['SVD (NAME)', record.svdName ?? '—'],
-        ['SSM (NAME)', record.ssmName ?? '—'],
-        ['SM (NAME)', record.smName ?? '—'],
-        ['REFERRER (NAME)', record.referrerName ?? '—'],
-        ['VIP RECOMMENDER (NAME)', record.vipRecommenderName ?? '—'],
-        ['CONTACT NO.', record.relatedContactNo ?? '—'],
-        ['EMAIL ADDRESS', record.relatedEmail ?? '—'],
+        ['OST/IST NAME', stated(record.ostIstName )],
+        ['SVD (NAME)', stated(record.svdName )],
+        ['SSM (NAME)', stated(record.ssmName )],
+        ['SM (NAME)', stated(record.smName )],
+        ['REFERRER (NAME)', stated(record.referrerName )],
+        ['VIP RECOMMENDER (NAME)', stated(record.vipRecommenderName )],
+        ['CONTACT NO.', stated(record.relatedContactNo )],
+        ['EMAIL ADDRESS', stated(record.relatedEmail )],
       ],
     },
     {
       // Company-stated figures, verbatim. Server-computed money (verified
       // payments, snapshots, commissions) never reads these columns.
-      title: 'Package and Payment — company stated',
-      columns: 2,
+      title: 'Package and Payment (company stated)',
+      icon: 'wallet',
+      tone: 'gold',
+      blurb: 'Company figures, not sale totals',
+      company: true,
       fields: [
-        ['VIP PACKAGE', record.statedVipPackage ?? '—'],
-        ['PAYMENT TERMS', record.statedPaymentTerms ?? '—'],
-        ['REGULAR PRICE', record.statedRegularPrice ?? '—'],
-        ['DISCOUNT', record.statedDiscount ?? '—'],
-        ['TOTAL AMOUNT', record.statedTotalAmount ?? '—'],
-        ['RF', record.statedRf ?? '—'],
-        ['PAYMENT TYPE', record.statedPaymentType ?? '—'],
-        ['REF NO', record.statedRefNo ?? '—'],
-        ['DATE', record.statedPaymentDate ?? '—'],
+        ['VIP PACKAGE', stated(record.statedVipPackage )],
+        ['PAYMENT TERMS', stated(record.statedPaymentTerms )],
+        ['REGULAR PRICE', statedMono(record.statedRegularPrice )],
+        ['DISCOUNT', statedMono(record.statedDiscount )],
+        ['TOTAL AMOUNT', statedMono(record.statedTotalAmount )],
+        ['RF', statedMono(record.statedRf )],
+        ['PAYMENT TYPE', stated(record.statedPaymentType )],
+        ['REF NO', statedMono(record.statedRefNo )],
+        ['DATE', stated(record.statedPaymentDate )],
       ],
     },
     {
@@ -315,6 +356,8 @@ export function CustomerDetailPage() {
       ],
     },
   ];
+  const workingGroups = groups.filter((group) => !group.company);
+  const companyGroups = groups.filter((group) => group.company);
 
   return (
     <section className={styles.page}>
@@ -337,23 +380,78 @@ export function CustomerDetailPage() {
           onSaved={() => void customer.refetch()}
         />
       ) : null}
-      <DetailGrid className={styles.topGrid}>
-        {groups.map((group) => (
-          <DetailCard key={group.title}>
-            <DetailCardTitle>{group.title}</DetailCardTitle>
-            <DetailFieldGrid
-              className={group.columns === 2 ? `${styles.twoCol} ${styles.twoColRows4}` : undefined}
-            >
-              {group.fields.map(([label, value]) => (
-                <DetailField key={label} label={label}>
-                  {value}
-                </DetailField>
-              ))}
-            </DetailFieldGrid>
-          </DetailCard>
+      {/* Identity. No panel, no tint, no rule, no row of pills: the facts sit on
+          the page ground at one step larger than the cards below, so the name
+          is answered by scale instead of by a box drawn around it. Two rows,
+          because 4 and 3 fit their columns exactly and 7 would orphan one. */}
+      <div className={styles.masthead}>
+        <DetailFieldGrid className={styles.mastheadState}>
+          <DetailField label="Status">
+            <StatusChip label={record.status} />
+          </DetailField>
+          <DetailField label="Tier">
+            <TierBadge tier={record.tier} />
+          </DetailField>
+          <DetailField label="Category">
+            {record.derivedCategory
+              ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory]
+              : 'Not Recorded'}
+          </DetailField>
+          <DetailField label="Portal account">
+            {record.portalAccountActivated ? 'Activated' : 'Not activated'}
+          </DetailField>
+        </DetailFieldGrid>
+        <DetailFieldGrid className={styles.mastheadIds}>
+          <DetailField label="Customer ID">
+            <DetailMono>{record.customerNumber}</DetailMono>
+          </DetailField>
+          <DetailField label="Customer code">
+            {record.customerCode ? <DetailMono>{record.customerCode}</DetailMono> : 'Not Recorded'}
+          </DetailField>
+          <DetailField label="Registered">
+            {record.createdAt ? formatDateTime(record.createdAt) : 'Not Recorded'}
+          </DetailField>
+        </DetailFieldGrid>
+      </div>
+      <nav className={styles.tabs} aria-label="Customer record sections">
+        {RECORD_TABS.filter((entry) => entry.id !== 'sales' || !salesHidden).map((entry) => (
+          <Link
+            key={entry.id}
+            to={`?tab=${entry.id}`}
+            className={entry.id === tab ? `${styles.tab} ${styles.tabCurrent}` : styles.tab}
+            aria-current={entry.id === tab ? 'page' : undefined}
+          >
+            {entry.label}
+          </Link>
         ))}
-        {salesHidden ? null : (
-          <section aria-label="Card Sales" className={styles.salesSection}>
+      </nav>
+      {tab === 'overview' ? (
+        <>
+          {salesHidden ? null : <SettlementStrip sales={sales.data ?? []} />}
+          <DetailGrid className={styles.topGrid}>
+            {workingGroups.map((group) => (
+              <DetailCard key={group.title}>
+                <DetailCardTitle>{group.title}</DetailCardTitle>
+                <DetailFieldGrid className={styles.fields}>
+                  {group.fields.map(([label, value]) => (
+                    <DetailField key={label} label={label}>
+                      {value}
+                    </DetailField>
+                  ))}
+                </DetailFieldGrid>
+              </DetailCard>
+            ))}
+            <CustomerRecordActions
+              customer={record}
+              sales={salesHidden ? [] : (sales.data ?? [])}
+              onChanged={() => void customer.refetch()}
+            />
+          </DetailGrid>
+        </>
+      ) : null}
+      {tab === 'sales' ? (
+        salesHidden ? null : (
+          <section aria-label="Sales and payments" className={styles.panel}>
             {sales.isPending ? (
               <div
                 style={{ display: 'grid', gap: 'var(--space-3)' }}
@@ -364,43 +462,101 @@ export function CustomerDetailPage() {
                 <Skeleton style={{ height: 96 }} />
                 <Skeleton style={{ height: 96 }} />
               </div>
+            ) : sales.isError ? (
+              <ErrorState
+                error={sales.error}
+                message={describeSalesLoadError(sales.error)}
+                onRetry={sales.refetch}
+              />
+            ) : sales.data.length === 0 ? (
+              <EmptyState
+                title="No card sales yet."
+                description="A sale appears here once the purchase is finalised in Finance."
+              />
             ) : (
-              <>
-                <h2 className={styles.sectionTitle}>Card Sales</h2>
-                {sales.isError ? (
-                  <ErrorState
-                    error={sales.error}
-                    message={describeSalesLoadError(sales.error)}
-                    onRetry={sales.refetch}
-                  />
-                ) : sales.data.length === 0 ? (
-                  <p className={styles.muted}>No card sales yet.</p>
-                ) : (
-                  <div className={styles.saleStack}>
-                    {sales.data.map((sale) => (
-                      <CustomerSaleCard key={sale.id} sale={sale} />
-                    ))}
-                  </div>
-                )}
-              </>
+              <div className={styles.saleStack}>
+                {sales.data.map((sale) => (
+                  <CustomerSaleCard key={sale.id} sale={sale} />
+                ))}
+              </div>
             )}
           </section>
-        )}
-        <div className={styles.salesSection}>
-          <CustomerRecordActions
-            customer={record}
-            sales={salesHidden ? [] : (sales.data ?? [])}
-            onChanged={() => void customer.refetch()}
+        )
+      ) : null}
+      {tab === 'company' ? (
+        <div className={styles.dossier}>
+          {companyGroups.map((group) => (
+            <article key={group.title} className={styles.dossierCard}>
+              <header className={`${styles.dossierHead} ${group.tone ? styles[`tone${group.tone}`] : ''}`}>
+                {group.icon ? (
+                  <span className={styles.dossierMark} aria-hidden="true">
+                    <Icon name={group.icon} size={16} />
+                  </span>
+                ) : null}
+                <h2 className={styles.dossierTitle}>{group.title}</h2>
+                {group.blurb ? <p className={styles.dossierBlurb}>{group.blurb}</p> : null}
+              </header>
+              <DetailFieldGrid className={styles.dossierFields}>
+                {group.fields.map(([label, value]) => (
+                  <DetailField key={label} label={label}>
+                    {value}
+                  </DetailField>
+                ))}
+              </DetailFieldGrid>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const RECORD_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'sales', label: 'Sales and payments' },
+  { id: 'company', label: 'Company record' },
+] as const;
+
+/**
+ * The screen's answer, above everything else: what this customer still owes.
+ * The balance leads and the rest are its arithmetic, so one glance settles
+ * the question. Money lives here and only here; the Sales panel carries the
+ * payment ledger behind it, never a second copy of these totals.
+ */
+function SettlementStrip({ sales }: { sales: Sale[] }) {
+  if (sales.length === 0)
+    return <p className={styles.muted}>No card sales yet, so there is nothing outstanding.</p>;
+  return (
+    <section className={styles.settlement} aria-label="Outstanding balance">
+      {sales.map((sale) => (
+        <div key={sale.id} className={styles.settlementRow}>
+          <div className={styles.settlementLead}>
+            <span className={styles.settlementLabel}>
+              Balance on <DetailMono>{sale.saleNumber}</DetailMono>
+            </span>
+            <span className={styles.settlementValue}>{formatMoneyOrDash(sale.balance)}</span>
+          </div>
+          <dl className={styles.settlementFacts}>
+            <DetailField label="Card">{sale.productName}</DetailField>
+            <DetailField label="Scheme">{paymentSchemeLabel(sale.paymentScheme)}</DetailField>
+            <DetailField label="Total">{formatMoneyOrDash(sale.cashPrice)}</DetailField>
+            <DetailField label="Paid">{formatMoneyOrDash(sale.paidAmount)}</DetailField>
+          </dl>
+          <SettlementBadge
+            total={sale.cashPrice}
+            paid={sale.paidAmount}
+            balance={sale.balance}
           />
         </div>
-      </DetailGrid>
+      ))}
     </section>
   );
 }
 
 /**
- * One sale as a single card: facts plus collapsible payment history. Sale
- * actions live in the Actions card below, aimed at a selected sale.
+ * One sale and its payment ledger. The money figures are NOT repeated here:
+ * they live once, in the settlement strip on Overview, so a figure can never
+ * show up twice and disagree with itself.
  */
 function CustomerSaleCard({ sale }: { sale: Sale }) {
   const payments = useQuery({
@@ -410,25 +566,16 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
   });
   return (
     <DetailCard>
-      <DetailCardTitle>Sale Details</DetailCardTitle>
-      <DetailFieldGrid className={`${styles.twoCol} ${styles.twoColRows5}`}>
-        <DetailField label="Sale number">
-          <DetailMono>{sale.saleNumber}</DetailMono>
-        </DetailField>
+      <DetailCardTitle>Sale {sale.saleNumber}</DetailCardTitle>
+      <DetailFieldGrid className={styles.fields}>
         <DetailField label="Card">{sale.productName}</DetailField>
         <DetailField label="Scheme">{paymentSchemeLabel(sale.paymentScheme)}</DetailField>
-        <DetailField label="Seller">{sale.sellerName ?? '—'}</DetailField>
+        <DetailField label="Seller">{sale.sellerName ?? 'Not Recorded'}</DetailField>
         <DetailField label="Activation status">
           {sale.activatedAt ? 'Active' : 'Not activated'}
         </DetailField>
-        <DetailField label="Total">{formatMoneyOrDash(sale.cashPrice)}</DetailField>
-        <DetailField label="Paid">{formatMoneyOrDash(sale.paidAmount)}</DetailField>
-        <DetailField label="Balance">{formatMoneyOrDash(sale.balance)}</DetailField>
-        <DetailField label="Payment Status">
-          <SettlementBadge total={sale.cashPrice} paid={sale.paidAmount} balance={sale.balance} />
-        </DetailField>
         <DetailField label="Created">
-          {sale.createdAt ? formatDateTime(sale.createdAt) : '—'}
+          {sale.createdAt ? formatDateTime(sale.createdAt) : 'Not Recorded'}
         </DetailField>
       </DetailFieldGrid>
       <details className={styles.history} name="sale-payment-history">

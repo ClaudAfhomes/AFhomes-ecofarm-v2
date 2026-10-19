@@ -32,9 +32,7 @@ import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,
-  DateField,
-  EmptyState,
+  Button,  EmptyState,
   ErrorState,
   FilterBar,
   PageHeader,
@@ -93,8 +91,6 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
@@ -109,7 +105,7 @@ export function ReservationAgreementsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: reservationKeys.list(status, tier, debouncedSearch, from, to, reservationWorkOnly, page),
+    queryKey: reservationKeys.list(status, tier, debouncedSearch, reservationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -118,8 +114,6 @@ export function ReservationAgreementsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
@@ -256,28 +250,6 @@ export function ReservationAgreementsPage() {
                 ]}
               />
             </label>
-            <DateField
-              id="reservations-from"
-              name="from"
-              label="From date"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setPage(0);
-              }}
-            />
-            <DateField
-              id="reservations-to"
-              name="to"
-              label="To date"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                setPage(0);
-              }}
-            />
           </>
         }
       />

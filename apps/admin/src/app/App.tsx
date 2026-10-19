@@ -105,11 +105,6 @@ const CustomerApplicationEditorPage = lazy(() =>
     default: m.CustomerApplicationEditorPage,
   })),
 );
-const CustomerApplicationsPage = lazy(() =>
-  import('../features/business/OfficialFormsPages').then((m) => ({
-    default: m.CustomerApplicationsPage,
-  })),
-);
 const ReservationAgreementEditorPage = lazy(() =>
   import('../features/business/OfficialFormsPages').then((m) => ({
     default: m.ReservationAgreementEditorPage,
@@ -282,10 +277,25 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+              {/*
+                The customer area is exactly THREE screens: main (list), create,
+                and detail. The create screen IS the application builder - the
+                builder is what creates the customer, so a separate
+                "/admin/customers/create" page would be a second form for one
+                action. The main screen carries two views, People and
+                Applications, on two real addresses so the sidebar can highlight
+                whichever is on screen. The retired
+                `/admin/customers/applications/*` addresses below redirect rather
+                than 404, because operators have them bookmarked.
+              */}
+              <Route
+                path="/admin/customers/new"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
               <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
               <Route
                 path="/admin/customers/applications"
-                element={protectedPage(<CustomerApplicationsPage />)}
+                element={protectedPage(<BusinessCustomersPage />)}
               />
               <Route
                 path="/admin/customers/applications/import-export"
@@ -293,7 +303,7 @@ export default function App() {
               />
               <Route
                 path="/admin/customers/applications/new"
-                element={protectedPage(<CustomerApplicationEditorPage />)}
+                element={<Navigate to="/admin/customers/new" replace />}
               />
               <Route
                 path="/admin/customers/applications/:id"

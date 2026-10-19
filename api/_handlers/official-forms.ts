@@ -564,6 +564,11 @@ async function listRows(
   let query = db.from(table).select('*', { count: 'exact' });
   if (q.status) query = query.eq('status', q.status);
   if (q.saleId) query = query.eq('sale_id', q.saleId);
+  // "This customer's applications". Reservations hang off an APPLICATION, not
+  // a customer, so the filter is applications-only rather than silently
+  // returning every agreement in the system.
+  if (q.customerId && table === 'customer_applications')
+    query = query.eq('customer_id', q.customerId);
   if (q.tier) query = query.eq('tier_snapshot', q.tier);
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);

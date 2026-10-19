@@ -175,7 +175,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
       <div className={styles.editGrid}>
         <p>
           Verbatim company record. Stated figures never affect verified totals. TIN is write-only
-          (current: {customer.tinNumberMasked ?? '—'}); leave blank to keep.
+          (current: {customer.tinNumberMasked ?? 'Not Recorded'}); leave blank to keep.
         </p>
         {save.error ? <Alert variant="danger">{save.error.message}</Alert> : null}
         <h3>Primary Member</h3>
@@ -442,7 +442,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           value={form.relatedEmail}
           onChange={set('relatedEmail')}
         />
-        <h3>Package and Payment — company stated</h3>
+        <h3>Package and Payment (company stated)</h3>
         <TextField
           id="ce-pkg"
           name="statedVipPackage"
