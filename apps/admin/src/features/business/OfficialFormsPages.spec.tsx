@@ -533,6 +533,27 @@ describe('application private ID intake', () => {
     expect(await screen.findByAltText('Full ID preview')).toBeInTheDocument();
   });
 
+  it('brings the newly revealed step to the top of the view', async () => {
+    // jsdom has no scrolling, so record which element the wizard asks to
+    // reveal. `setup()` already advanced once, landing on Identity.
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    } as Element['scrollIntoView'];
+    try {
+      await setup(document('completed'));
+      await waitFor(() => expect(scrolled).toContain('step-identity'));
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      // Holders is where the operator must land, not wherever the previous
+      // step happened to leave the scroll position.
+      await waitFor(() => expect(scrolled).toContain('step-holders'));
+      expect(scrolled.at(-1)).toBe('step-holders');
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('defers upload until Save, keeping pickers enabled meanwhile', async () => {
     await setup();
     chooseIdTypeAndFile();

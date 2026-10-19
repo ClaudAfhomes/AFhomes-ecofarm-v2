@@ -1131,15 +1131,31 @@ export function CustomerApplicationEditorPage() {
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
+  // Every step change puts the panel it reveals at the top of the view.
+  // Without it, Next leaves the operator standing where they were - scrolled to
+  // the bottom of the step they just finished, with the new panel above the
+  // viewport reading as a blank page.
+  const revealStep = (index: number) => {
+    // The panel is not in the DOM until React re-renders, so the lookup waits a
+    // tick. Optional call keeps it inert in runtimes without scrolling.
+    window.setTimeout(() => {
+      document.getElementById(steps[index]!.id)?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 0);
+  };
   const goStep = (index: number) => {
     if (index < 0 || index > steps.length - 1 || index > maxReached) return;
     setActiveStep(index);
+    revealStep(index);
   };
   const goNext = () => {
     if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
     const next = activeStep + 1;
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
+    revealStep(next);
   };
   // Edit entry point for the record-actions panel: the form below is the only
   // editor (there is no separate edit route), so editing means revealing it.
