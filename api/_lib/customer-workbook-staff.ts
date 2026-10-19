@@ -17,7 +17,13 @@ export async function loadWorkbookStaffMatches(
     ),
   ];
   if (!references.length) return [];
-  const names = new Set<string>();
+  const names = new Set<string>(
+    rows
+      .flatMap((row) =>
+        fields.map((field) => row.fields[field.replace('_name', '_expected_name')] ?? ''),
+      )
+      .filter(Boolean),
+  );
   const ids: string[] = [];
   for (const reference of references) {
     if (z.uuid().safeParse(reference).success) ids.push(reference);

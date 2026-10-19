@@ -110,7 +110,7 @@ export const CUSTOMER_WORKBOOK_CHOICES = {
   ],
   suffix: ['Jr.', 'Sr.', 'II', 'III', 'IV', 'N/A'],
   gender: ['Male', 'Female'],
-  civil_status: ['Single', 'Married', 'Widowed', 'Seperated'],
+  civil_status: ['Single', 'Married', 'Widowed', 'Separated'],
   vip_tier: ['GOLD', 'SILVER', 'BRONZE'],
   stated_payment_scheme: [
     'Spot cash',

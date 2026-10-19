@@ -745,6 +745,8 @@ export * from './schemas/point-approvals.js';
 
 export * from './schemas/service-refunds.js';
 export * from './schemas/customer-workbook.js';
+export * from './schemas/customer-workflow.js';
+export * from './schemas/customer-import-continuation.js';
 
 export { servicePolicyManagementResultSchema } from './schemas/points.js';
 export * from './schemas/member-workbook.js';

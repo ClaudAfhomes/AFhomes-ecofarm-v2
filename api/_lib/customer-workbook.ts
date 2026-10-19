@@ -200,6 +200,8 @@ export function parseCustomerWorkbook(
           fields[key] = (fields[key] ?? '').trim().toLowerCase();
         for (const key of ['citizenship', 'secondary_citizenship'])
           fields[key] = workbookCitizenship(fields[key] ?? '');
+        for (const key of ['civil_status', 'secondary_civil_status'])
+          if (fields[key] === 'Seperated') fields[key] = 'Separated';
         for (const key of ['suffix', 'secondary_suffix'])
           if (fields[key] === 'N/A') fields[key] = '';
         for (const key of [
@@ -243,6 +245,8 @@ export function validateWorkbookFields(
   if (fields.suffix === 'N/A') row.errors = row.errors.filter((e) => e.field !== 'suffix');
   const err = (field: string, message: string) => row.errors.push({ field, message });
   for (const prefix of ['', 'secondary_']) {
+    if (fields[prefix + 'civil_status'] === 'Seperated')
+      fields[prefix + 'civil_status'] = 'Separated';
     const key = prefix + 'citizenship';
     if (fields[key]) fields[key] = workbookCitizenship(fields[key]!);
     const tin = fields[prefix + 'tin'];
@@ -339,6 +343,14 @@ export function resolveWorkbookStaff(
       );
       continue;
     }
+    const expectedName = fields[field.replace('_name', '_expected_name')];
+    if (expectedName && nameKey(expectedName) !== nameKey(match.full_name)) {
+      fail(
+        field,
+        'The selected staff name no longer matches its registered AA identity; download a current template.',
+      );
+      continue;
+    }
     const canonical =
       id ||
       aa ||
@@ -364,8 +376,8 @@ export function resolveWorkbookStaff(
     fields[field.replace('_name', '_staff_id')] = match.staff_id;
     if (match.aa_number) fields[field.replace('_name', '_aa_number')] = match.aa_number;
     resolved.set(field, match);
-    // The unchanged confirmation RPC still validates unique registered names.
-    if (Number(match.match_count) !== 1) {
+    // Old workbook confirmations keep their historical unique-name guard.
+    if (Number(match.match_count) !== 1 && fields.workbook_format !== 'company_v2') {
       fail(
         field,
         `Identity resolved to ${describe(match)}, but database confirmation still requires a unique registered name. Held for review; no duplicate account will be created.`,

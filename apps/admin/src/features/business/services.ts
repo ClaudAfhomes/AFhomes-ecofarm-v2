@@ -342,7 +342,17 @@ export const registerCustomerApplication = (
     method: 'POST',
     body: JSON.stringify(input),
   });
-export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
+export const createCustomerApplication = (
+  input: CreateCustomerApplicationRequest & {
+    importContext?: {
+      rowId: string;
+      requestId: string;
+      expectedSourceHash: string;
+      expectedTargetVersion: string;
+      purchaseReference?: string;
+    };
+  },
+) =>
   post(
     '/official-forms/customer-applications',
     customerApplicationSchema,

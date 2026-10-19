@@ -29,6 +29,7 @@ import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
+import { ImportContinuationPanel } from './ImportContinuationPanel';
 import styles from './CustomerDetailPage.module.css';
 
 /**
@@ -182,7 +183,7 @@ export function CustomerDetailPage() {
           record.derivedCategory ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory] : '—',
         ],
         ['Portal account', record.portalAccountActivated ? 'Activated' : 'Not activated'],
-        ['Customer ID', <DetailMono>{record.customerNumber}</DetailMono>],
+        ['Customer ID (RA No.)', <DetailMono>{record.customerNumber}</DetailMono>],
         [
           'Customer code',
           record.customerCode ? <DetailMono>{record.customerCode}</DetailMono> : '—',
@@ -215,7 +216,7 @@ export function CustomerDetailPage() {
       title: 'Primary Member',
       columns: 2,
       fields: [
-        ['RA NO', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
+        ['Historical RA alias', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
         ['STATUS', record.companyStatus ?? '—'],
         ['FIRST NAME', record.firstName ?? '—'],
         ['LAST NAME', record.lastName ?? '—'],
@@ -337,6 +338,7 @@ export function CustomerDetailPage() {
           onSaved={() => void customer.refetch()}
         />
       ) : null}
+      <ImportContinuationPanel customerId={record.id} />
       <DetailGrid className={styles.topGrid}>
         {groups.map((group) => (
           <DetailCard key={group.title}>

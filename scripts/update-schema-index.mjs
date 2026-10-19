@@ -4,16 +4,18 @@ const files = readdirSync(new URL('supabase/migrations/', root))
   .filter((name) => name.endsWith('.sql'))
   .sort();
 const tables = new Set();
+const privateTables = new Set();
+// Regex handles possible line breaks after schema name
+const createPublicRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?public\.([a-z_][a-z_0-9]*)/gi;
+const dropPublicRe = /drop\s+table\s+(?:if\s+exists\s+)?public\.([a-z_][a-z_0-9]*)/gi;
+const createPrivateRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?private\.\s*([a-z_][a-z_0-9]*)/gi;
+const dropPrivateRe = /drop\s+table\s+(?:if\s+exists\s+)?private\.\s*([a-z_][a-z_0-9]*)/gi;
 for (const file of files) {
   const sql = readFileSync(new URL('supabase/migrations/' + file, root), 'utf8');
-  for (const match of sql.matchAll(
-    /create\s+table\s+(?:if\s+not\s+exists\s+)?public\.([a-z_][a-z_0-9]*)/gi,
-  ))
-    tables.add(match[1]);
-  for (const match of sql.matchAll(
-    /drop\s+table\s+(?:if\s+exists\s+)?public\.([a-z_][a-z_0-9]*)/gi,
-  ))
-    tables.delete(match[1]);
+  for (const match of sql.matchAll(createPublicRe)) tables.add(match[1]);
+  for (const match of sql.matchAll(dropPublicRe)) tables.delete(match[1]);
+  for (const match of sql.matchAll(createPrivateRe)) privateTables.add(match[1]);
+  for (const match of sql.matchAll(dropPrivateRe)) privateTables.delete(match[1]);
 }
 mkdirSync(new URL('docs/supabase/', root), { recursive: true });
 writeFileSync(
@@ -26,7 +28,11 @@ writeFileSync(
     '-- and whenever repository migrations change: node scripts/update-schema-index.mjs.',
     '-- Verify the sorted manifest and table inventory against the actual migration files.',
     '-- Local verification and live application are separate; record live applies only after confirmation.',
-    `-- Migration count: ${files.length}. Public table inventory: ${tables.size}.`,
+    `-- Migration count: ${files.length}. Public table inventory: ${tables.size}. Private table inventory: ${privateTables.size}.`,
+    '-- Customer continuation 20261208000016 is local-only until separately approved for live apply.',
+    '-- It adds three private RLS-protected source/claim tables, service-only reviewed continuation RPCs,',
+    '-- canonical purchase identity and stale-target guards. Claims are not ledger payments;',
+    '-- explicit Finance reconciliation records unverified payments, with verification remaining separate.',
     '-- Company workbook change: one forward migration; no tables or columns added.',
     '-- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row',
     '-- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.',
@@ -54,7 +60,9 @@ writeFileSync(
     ...files.map((file) => '--   ' + file),
     '-- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):',
     ...[...tables].sort().map((name) => '--   public.' + name),
+    '-- Private table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):',
+    ...[...privateTables].sort().map((name) => '--   private.' + name),
     '',
   ].join('\n'),
 );
-console.log(`${files.length} migrations, ${tables.size} public tables indexed.`);
+console.log(`${files.length} migrations, ${tables.size} public tables, ${privateTables.size} private tables indexed.`);

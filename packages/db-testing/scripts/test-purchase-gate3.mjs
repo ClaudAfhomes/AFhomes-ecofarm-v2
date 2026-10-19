@@ -1018,9 +1018,23 @@ try {
         ],
       )
     )[0];
+    const serviceWrappers = new Set([
+      'decide_purchase_application_once',
+      'finalize_reservation_purchase_once',
+      'purchase_document',
+      'purchase_financial_summary',
+      'purchase_terms_proposal',
+      'record_reservation_payment_once',
+      'reserve_application_purchase_once',
+      'review_application_purchase_terms_once',
+      'submit_purchase_application_once',
+      'transition_purchase_reservation_once',
+      'verify_purchase_payment_once',
+    ]);
+    const serviceExpected = f.schema === 'public' && serviceWrappers.has(f.proname);
     check(
-      `new helper grants closed: ${f.proname}`,
-      !grants.anon && !grants.authenticated && !grants.service,
+      `new function grants match contract: ${f.schema}.${f.proname}`,
+      !grants.anon && !grants.authenticated && grants.service === serviceExpected,
     );
   }
   check(
@@ -1031,17 +1045,75 @@ try {
         .find((f) => f.proname === 'append_purchase_document')
         .arguments.includes('jsonb'),
   );
-  for (const name of [
-    'activate_card_sale',
-    'verify_card_payment',
-    'complete_mutation',
-    'mutation_result',
-  ])
+  for (const name of ['complete_mutation', 'mutation_result'])
     check(
       `legacy function unchanged: ${name}`,
       JSON.stringify(evidence.baseline.catalog.functions.filter((f) => f.proname === name)) ===
         JSON.stringify(evidence.post.catalog.functions.filter((f) => f.proname === name)),
     );
+  // These two existing wrappers intentionally gained origin-aware gates in this migration.
+  for (const name of ['activate_card_sale', 'verify_card_payment']) {
+    check(
+      `legacy wrapper signature preserved: ${name}`,
+      JSON.stringify(
+        evidence.baseline.catalog.functions
+          .filter((f) => f.proname === name)
+          .map((f) => ({ schema: f.schema, arguments: f.arguments })),
+      ) ===
+        JSON.stringify(
+          evidence.post.catalog.functions
+            .filter((f) => f.proname === name)
+            .map((f) => ({ schema: f.schema, arguments: f.arguments })),
+        ),
+    );
+    const signature =
+      name === 'activate_card_sale'
+        ? 'public.activate_card_sale(uuid,uuid,integer)'
+        : 'public.verify_card_payment(uuid,text,text,uuid)';
+    const acl = (
+      await q(
+        "select has_function_privilege('anon',$1,'EXECUTE') anon,has_function_privilege('authenticated',$1,'EXECUTE') authenticated,has_function_privilege('service_role',$1,'EXECUTE') service",
+        [signature],
+      )
+    )[0];
+    check(
+      `legacy wrapper has explicit service-only access: ${name}`,
+      !acl.anon && !acl.authenticated && acl.service,
+    );
+  }
+  await db.query('begin');
+  try {
+    const legacyPayment = await insert('public.payments', {
+      ...paymentValue,
+      id: uuid(),
+      origin: 'sale',
+      reservation_id: null,
+      sale_id: sales[3].id,
+      customer_id: customers[3].id,
+      amount: '54000.00',
+      payment_type: 'full',
+      reference: 'SYNTHETIC LEGACY COMPATIBILITY',
+    });
+    const verified = (
+      await q("select * from public.verify_card_payment($1,'verified',null,$2)", [
+        legacyPayment.id,
+        actor,
+      ])
+    )[0];
+    check(
+      'legacy sale-only payment verification remains functional',
+      verified.fully_paid && verified.verified_total === '54000.00',
+    );
+    const activated = (
+      await q('select * from public.activate_card_sale($1,$2,12)', [sales[3].id, actor])
+    )[0];
+    check(
+      'legacy fully verified sale activation remains functional',
+      Boolean(activated.membership_id),
+    );
+  } finally {
+    await db.query('rollback');
+  }
   const oldOps = ['payment.create', 'application.create', 'reservation.create'];
   const newOps = [
     'purchase_terms.review',

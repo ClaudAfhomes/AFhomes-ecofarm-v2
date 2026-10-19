@@ -5,7 +5,11 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 110. Public table inventory: 60.
+-- Migration count: 111. Public table inventory: 60. Private table inventory: 21.
+-- Customer continuation 20261208000016 is local-only until separately approved for live apply.
+-- It adds three private RLS-protected source/claim tables, service-only reviewed continuation RPCs,
+-- canonical purchase identity and stale-target guards. Claims are not ledger payments;
+-- explicit Finance reconciliation records unverified payments, with verification remaining separate.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -140,6 +144,7 @@
 --   20261208000013_afhomes_member_workbook_jobs_schema.sql
 --   20261208000014_afhomes_ist_employee_identity_functions.sql
 --   20261208000015_afhomes_member_workbook_jobs_functions.sql
+--   20261208000016_afhomes_customer_import_continuation.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories
@@ -201,3 +206,25 @@
 --   public.staff_role_assignments
 --   public.staff_users
 --   public.tier_points_config
+-- Private table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
+--   private.business_id_aliases
+--   private.commission_rule_archive
+--   private.customer_import_payment_claims
+--   private.customer_import_purchase_sources
+--   private.customer_import_source_rows
+--   private.member_workbook_jobs
+--   private.member_workbook_rows
+--   private.mutation_requests
+--   private.ost_accreditation_renewals
+--   private.ost_accreditation_terms
+--   private.ost_applicant_changes
+--   private.ost_import_jobs
+--   private.ost_import_rows
+--   private.ost_ist_conversions
+--   private.ost_registration_details
+--   private.ost_team_transfers
+--   private.purchase_document_evidence
+--   private.sale_team_aa_counters
+--   private.sale_team_accreditation_history
+--   private.sale_team_accreditations
+--   private.staff_security_policy

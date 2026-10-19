@@ -144,7 +144,7 @@ describe('CustomerDetailPage', () => {
       'Status',
       'Category',
       'Portal account',
-      'Customer ID',
+      'Customer ID (RA No.)',
       'Customer code',
       'Registered',
     ]);
@@ -232,7 +232,7 @@ describe('CustomerDetailPage', () => {
     // address parts, one landline, one email, one mobile number.
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
     expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'RA NO',
+      'Historical RA alias',
       'STATUS',
       'FIRST NAME',
       'LAST NAME',

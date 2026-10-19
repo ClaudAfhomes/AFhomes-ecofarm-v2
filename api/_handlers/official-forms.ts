@@ -6,6 +6,7 @@ import { governmentIdTypeSchema } from '@afhomes/contracts';
 import {
   canTransitionReservationAgreement,
   createCustomerApplicationSchema,
+  importContinuationRequestSchema,
   registerCustomerApplicationSchema,
   createReservationAgreementSchema,
   customerApplicationDecisionSchema,
@@ -26,6 +27,7 @@ import {
 } from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { addressProvider } from '../_lib/address-source.js';
+import { loadImportRecoveryContext } from '../_lib/customer-import-continuation.js';
 import { verifyAddressHierarchy } from '../_lib/address-provider.js';
 import { resolvePostalCode } from '../_lib/postal-reference.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
@@ -1104,6 +1106,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'customer-applications' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
+      const incoming = jsonBody(req) as Record<string, unknown>;
+      if (incoming?.registerNewCustomer && incoming?.importContext)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'An imported purchase must use its existing linked customer',
+          400,
+        );
       const newRegistration = registerCustomerApplicationSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -1134,14 +1144,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(201).json(await getApplication(db, rpcId(data)));
       }
       const parsed = createCustomerApplicationSchema
-        .safeExtend({ requestId: z.string().uuid() })
+        .safeExtend({
+          requestId: z.string().uuid(),
+          importContext: importContinuationRequestSchema
+            .extend({
+              rowId: z.uuid(),
+              purchaseReference: z.string().trim().min(1).max(200).optional(),
+            })
+            .optional(),
+        })
         .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
-      const { primary, secondary, requestId, ...header } = parsed.data;
+      const { primary, secondary, requestId, importContext, ...header } = parsed.data;
       const locations = await resolveHolderLocations(primary, secondary);
       if ('status' in locations)
         return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
+      if (importContext) {
+        const importAuth = await authorizeAfHomes(req, 'governance.customer_import', 'update');
+        if ('error' in importAuth) return deny(res, importAuth);
+        const { fields, recoveryArguments } = await loadImportRecoveryContext(
+          db,
+          importContext.rowId,
+        );
+        const result = await db.rpc('complete_import_application_once', {
+          p_row_id: importContext.rowId,
+          p_actor_id: auth.userId,
+          p_request_id: requestId,
+          p_expected_source_hash: importContext.expectedSourceHash,
+          p_expected_target_version: importContext.expectedTargetVersion,
+          p_header: {
+            ...normalizeApplicationHeader(header),
+            ...(importContext.purchaseReference
+              ? { importPurchaseReference: importContext.purchaseReference }
+              : {}),
+          },
+          p_primary: normalizeHolderOptionals({
+            ...primary,
+            tinNumber: primary.tinNumber || fields.tin || undefined,
+            ...locations.primary,
+          }),
+          p_secondary: secondary
+            ? normalizeHolderOptionals({
+                ...secondary,
+                tinNumber: secondary.tinNumber || fields.secondary_tin || undefined,
+                ...(locations.secondary as Record<string, unknown>),
+              })
+            : null,
+          p_proposed_facts: recoveryArguments.p_proposed_facts ?? null,
+        });
+        if (result.error) return mapRpcError(res, result.error);
+        const applicationId = z.uuid().parse(result.data.applicationId);
+        return res.status(201).json(await getApplication(db, applicationId));
+      }
       const { data, error } = await db.rpc('create_customer_application_once', {
         p_request_id: requestId,
         p_actor_id: auth.userId,

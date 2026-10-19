@@ -7,6 +7,9 @@ import {
   customerImportCommitResponseSchema,
   customerImportJobSchema,
   customerImportParseResponseSchema,
+  customerImportContinuationSchema,
+  importContinuationRequestSchema,
+  type WorkbookCustomerV2,
   maskGovernmentId,
   type CustomerExportRow,
 } from '@afhomes/contracts';
@@ -61,8 +64,16 @@ import {
   workbookApplicationPrefill,
 } from '../_lib/customer-workbook.js';
 import { loadWorkbookStaffMatches } from '../_lib/customer-workbook-staff.js';
+import { parseCustomerWorkbookV2 } from '../_lib/customer-workbook-v2.js';
+import {
+  buildImportedCustomerFacts,
+  loadImportRecoveryContext,
+  legacyPaymentClaims,
+} from '../_lib/customer-import-continuation.js';
+import { handleImportWorkflow } from './_customer-import-workflow.js';
 import { addressProvider } from '../_lib/address-source.js';
 import { companyTemplate, companyWorkbook } from '../_lib/customer-workbook-export.js';
+import { customerWorkflowTemplate } from '../_lib/customer-workflow-export.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -118,11 +129,35 @@ const shapeJob = (row: Record<string, unknown>) => ({
   failedRows: Number(row.failed_rows ?? 0),
 });
 
+function maskImportPrivateValues(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskImportPrivateValues);
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        [
+          'tin',
+          'tin_number',
+          'secondary_tin',
+          'supplementary_tin_number',
+          'tinNumber',
+          'supplementaryTinNumber',
+          'governmentIdNumber',
+          'government_id_number',
+        ].includes(key)
+          ? typeof item === 'string' && item
+            ? maskGovernmentId(item)
+            : item
+          : maskImportPrivateValues(item),
+      ]),
+    );
+  return value;
+}
 const shapeRow = (row: Record<string, unknown>) => ({
   id: row.id,
   rowNumber: row.row_number,
-  fields: (row.raw_data ?? {}) as Record<string, string>,
-  normalized: (row.normalized_data ?? {}) as Record<string, unknown>,
+  fields: maskImportPrivateValues(row.raw_data ?? {}) as Record<string, string>,
+  normalized: maskImportPrivateValues(row.normalized_data ?? {}) as Record<string, unknown>,
   validation: row.validation_status,
   errors: (row.validation_errors ?? []) as { field: string; message: string }[],
   warnings: (row.validation_warnings ?? []) as { field: string; message: string }[],
@@ -268,18 +303,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   try {
     const path = subPath(req);
+    if (await handleImportWorkflow(req, res, db)) return;
+
+    const continuation = route(
+      req,
+      method(req) === 'GET' ? 'GET' : 'POST',
+      /^rows\/([0-9a-f-]+)\/continuation$/,
+    );
+    if (continuation) {
+      const action = method(req) === 'GET' ? 'view' : 'update';
+      const auth = await authorizeAfHomes(req, MODULE, action);
+      if ('error' in auth) return deny(res, auth);
+      const customerAccess = await authorizeAfHomes(req, 'sales.customers', 'view');
+      if ('error' in customerAccess) return deny(res, customerAccess);
+      const id = z.uuid().safeParse(continuation[1]);
+      if (!id.success) return fail(res, 'VALIDATION_ERROR', 'Invalid import row', 400);
+      let result;
+      let input: ReturnType<typeof importContinuationRequestSchema.parse> | undefined;
+      if (method(req) === 'POST') {
+        const checked = importContinuationRequestSchema.safeParse(jsonBody(req));
+        if (!checked.success)
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Invalid continuation request; use the current review snapshot.',
+            400,
+          );
+        input = checked.data;
+      }
+      const { recoveryArguments: recoveryFacts } = await loadImportRecoveryContext(db, id.data);
+      if (method(req) === 'GET')
+        result = await db.rpc('preview_customer_import_continuation', {
+          p_row_id: id.data,
+          p_actor_id: auth.userId,
+          ...recoveryFacts,
+        });
+      else if (method(req) === 'POST') {
+        result = await db.rpc('continue_customer_import_once', {
+          p_row_id: id.data,
+          p_actor_id: auth.userId,
+          p_request_id: input!.requestId,
+          p_expected_source_hash: input!.expectedSourceHash,
+          p_expected_target_version: input!.expectedTargetVersion,
+          ...recoveryFacts,
+        });
+      } else return fail(res, 'NOT_FOUND', 'Route not found', 404);
+      if (result.error) return mapRpcError(res, result.error);
+      return res.status(200).json(customerImportContinuationSchema.parse(result.data));
+    }
 
     if (method(req) === 'GET' && path === 'template/xlsx') {
       const auth = await authorizeAfHomes(req, MODULE);
       if ('error' in auth) return deny(res, auth);
+      const customerAuth = await authorizeAfHomes(req, 'sales.customers', 'view');
+      if ('error' in customerAuth) return deny(res, customerAuth);
+      const roster = await db
+        .from('staff_users')
+        .select('id,full_name')
+        .eq('status', 'active')
+        .order('full_name');
+      if (roster.error) throw roster.error;
+      const staff = await loadWorkbookStaffMatches(
+        db,
+        (roster.data ?? []).map((s: { full_name: string }) => ({
+          fields: { referrer_name: s.full_name },
+        })),
+      );
       return sendFile(
         res,
-        'membership-template.xlsx',
+        'customer-workflow-template.xlsx',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        // The sanitized company workbook (ten source tabs, no sample rows,
-        // no VBA) is the current guided download; its four entry sheets keep
-        // the company's exact vocabulary.
-        companyTemplate(),
+        // Current registered choices are read-only; source claims remain subject to review.
+        customerWorkflowTemplate(staff),
       );
     }
     if (method(req) === 'GET' && path === 'template/csv') {
@@ -301,6 +396,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { source, sourceName } = parsed.data;
       let matrix: string[][];
       let workbookRecords: ReturnType<typeof parseCustomerWorkbook> = null;
+      let workflowRecords: WorkbookCustomerV2[] | null = null;
       let sheetId: string | null = null;
       // Sectioned-template extras surface as per-row warnings below, next to
       // the established unknown-column and dropped-header warnings.
@@ -333,7 +429,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // merges as the guided template, anything else tries the legacy
             // sectioned merge. A multi-sheet file that matches neither stays
             // rejected rather than silently reading the wrong tab.
-            workbookRecords = parseCustomerWorkbook(bytes);
+            const workflow = parseCustomerWorkbookV2(bytes);
+            workflowRecords = workflow?.rows ?? null;
+            workbookRecords = workflow
+              ? {
+                  rows: workflow.rows.map((row, index) => ({
+                    rowNumber: index + 2,
+                    fields: row.fields,
+                  })),
+                  unknownHeaders: workflow.unknownHeaders,
+                }
+              : parseCustomerWorkbook(bytes);
             if (workbookRecords) {
               matrix = [];
             } else {
@@ -590,7 +696,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               message:
                 'Reservation agreement reference belongs to an existing record; manual identity review required',
             });
-          for (const field of ['email', 'ra_number', 'customer_number']) {
+          for (const field of r.fields.workbook_format === 'company_v2'
+            ? ['customer_key', 'purchase_reference']
+            : ['email', 'ra_number', 'customer_number']) {
             const value = r.fields[field]?.trim().toLowerCase();
             if (!value) continue;
             const key = field + ':' + value;
@@ -608,7 +716,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else seen.set(key, r.rowNumber);
           }
           // A matched identity is reviewed separately; bulk imports never overwrite it.
-          if (v.customerId) {
+          if (v.customerId && r.fields.workbook_format !== 'company_v2') {
             const previous = ctx.companySnapshots?.get(v.customerId);
             const unchanged =
               previous &&
@@ -625,6 +733,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               });
           }
           v.fields = { ...v.fields, ...r.fields };
+          if (v.normalized && !v.errors.length) {
+            v.normalized.customerFacts = buildImportedCustomerFacts(r.fields);
+            v.normalized.paymentClaims =
+              workflowRecords?.find((w) => w.customerKey === r.fields.customer_key)?.payments ??
+              legacyPaymentClaims(r.fields);
+          }
           if (v.errors.length) {
             v.validation = 'error';
             v.action = 'CONFLICT';
@@ -648,9 +762,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (v.errors.length === 0 && v.warnings.length > 0) v.validation = 'warning';
         validated.push(v);
       }
-      const validRows = validated.filter((v) => v.errors.length === 0).length;
-      const invalidRows = validated.length - validRows;
-      const status = invalidRows === 0 ? 'ready' : 'validated';
+      let validRows = validated.filter((v) => v.errors.length === 0).length;
+      let invalidRows = validated.length - validRows;
+      let status = invalidRows === 0 ? 'ready' : 'validated';
       const now = new Date().toISOString();
       const { data: job, error: jobError } = await db
         .from('customer_import_jobs')
@@ -703,7 +817,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (!entry) throw new Error('Import row persistence was incomplete');
             persistedIds.push(entry.id);
           }
+          const candidateIds = batch
+            .filter(
+              (v) =>
+                !v.errors.length &&
+                ['CREATE', 'UPDATE'].includes(v.action) &&
+                v.normalized?.customerFacts,
+            )
+            .map(
+              (v) =>
+                ((saved ?? []) as { id: string; row_number: number }[]).find(
+                  (s) => s.row_number === v.rowNumber,
+                )!.id,
+            );
+          if (candidateIds.length) {
+            const prepared = await db.rpc('prepare_customer_import_batch', {
+              p_row_ids: candidateIds,
+              p_actor_id: auth.userId,
+            });
+            if (prepared.error) throw prepared.error;
+            if (!Array.isArray(prepared.data) || prepared.data.length !== candidateIds.length)
+              throw new Error('Import review snapshot is incomplete');
+            for (const result of prepared.data as Record<string, unknown>[]) {
+              const item = ((saved ?? []) as { id: string; row_number: number }[]).find(
+                (s) => s.id === result.rowId,
+              );
+              const row = batch.find((v) => v.rowNumber === item?.row_number);
+              if (!row) throw new Error('Import review snapshot row is missing');
+              if (result.error) {
+                row.errors.push({ field: 'customer_id', message: String(result.error) });
+                row.validation = 'error';
+                row.action = 'CONFLICT';
+              } else if (row.normalized)
+                row.normalized.continuationPreview = customerImportContinuationSchema.parse(result);
+            }
+          }
         }
+        validRows = validated.filter((v) => !v.errors.length).length;
+        invalidRows = validated.length - validRows;
+        status = invalidRows ? 'validated' : 'ready';
+        const refreshed = await db
+          .from('customer_import_jobs')
+          .update({ valid_rows: validRows, invalid_rows: invalidRows, status })
+          .eq('id', jobId);
+        if (refreshed.error) throw refreshed.error;
+        Object.assign(job as Record<string, unknown>, {
+          valid_rows: validRows,
+          invalid_rows: invalidRows,
+          status,
+        });
       } catch (error) {
         const failure = await db
           .from('customer_import_jobs')
@@ -880,8 +1042,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               !row.committed_at &&
               row.validation_status !== 'error' &&
               ['CREATE', 'UPDATE'].includes(String(row.action)) &&
-              (row.raw_data as Record<string, string> | undefined)?.workbook_format ===
-                'company_v1',
+              ['company_v1', 'company_v2'].includes(
+                (row.raw_data as Record<string, string> | undefined)?.workbook_format ?? '',
+              ),
           )
           .slice(0, 100)
           .map((row) => ({ fields: row.raw_data as Record<string, string> })),
@@ -892,6 +1055,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         customerId: string | null;
         membershipId: string | null;
         error: string | null;
+        importContinuation?: Record<string, unknown>;
       }[] = [];
       let inserted = 0;
       let updated = 0;
@@ -961,6 +1125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               customerId: out.customerId,
               membershipId: out.membershipId,
               error: null,
+              importContinuation: out.importContinuation,
             });
           } else {
             const out = await commitUpdateRow(db, auth.userId, raw);
@@ -971,6 +1136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               customerId: out.customerId,
               membershipId: out.membershipId,
               error: null,
+              importContinuation: out.importContinuation,
             });
           }
         } catch (error) {
@@ -1085,6 +1251,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (exportMatch) {
       const auth = await authorizeAfHomes(req, MODULE);
       if ('error' in auth) return deny(res, auth);
+      const customerAccess = await authorizeAfHomes(req, 'sales.customers', 'view');
+      if ('error' in customerAccess) return deny(res, customerAccess);
       const parsed = exportQuerySchema.safeParse(req.query);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid export query', 400);
       if (exportMatch[1] === 'csv') {
@@ -1142,6 +1310,7 @@ async function commitCreateRow(db: Db, actorId: string, raw: Record<string, unkn
     membershipId: string | null;
     saleId: string | null;
     action?: string;
+    importContinuation?: Record<string, unknown>;
   };
 }
 const commitUpdateRow = commitCreateRow;

@@ -4,6 +4,35 @@ import { validateImportRow } from './customer-import.js';
 import { loadWorkbookStaffMatches } from './customer-workbook-staff.js';
 import { FakeSupabase } from './testing/supabase-fake.js';
 
+it.each(['8735d00e-e7c9-4a0f-9470-55be2f3dcd79', 'AAO26100001'])(
+  'accepts registered staff reference %s through initial customer validation',
+  (reference) => {
+    const fields = {
+      first_name: 'Synthetic',
+      last_name: 'Customer',
+      email: 'synthetic@example.invalid',
+      mobile: '09123456789',
+      source_status: 'Pending',
+      workbook_format: 'company_v1',
+      referrer_name: reference,
+    };
+    const row = validateImportRow(
+      2,
+      fields,
+      {
+        plansByTier: new Map(),
+        customerByNumber: new Map(),
+        customerByEmail: new Map(),
+        membershipByNumber: new Map(),
+        referralStaffByCode: new Map(),
+        seenMembershipNumbers: new Map(),
+      },
+      '2026-10-19',
+    );
+    expect(row.errors.filter((e) => e.field === 'referrer_name')).toEqual([]);
+  },
+);
+
 const registered: WorkbookStaffMatch[] = [
   {
     staff_id: 'vd',
@@ -50,6 +79,18 @@ const registered: WorkbookStaffMatch[] = [
     aa_number: 'AAO26100002',
   },
 ];
+it('accepts a v2 canonical AA identity despite another registered person sharing its name', () => {
+  const matches = [
+    ...registered.map((m) => (m.staff_id === 'vip' ? { ...m, match_count: 2 } : m)),
+    { ...registered[5]!, staff_id: 'duplicate-vip', aa_number: 'AAO26100003', match_count: 2 },
+  ];
+  const result = preview(
+    { workbook_format: 'company_v2', recommender_name: 'AAO26100002' },
+    matches,
+  );
+  expect(result.row.errors).toEqual([]);
+  expect(result.fields.recommender_staff_id).toBe('vip');
+});
 function preview(over: Record<string, string> = {}, matches = registered) {
   const fields: Record<string, string> = {
     first_name: 'Synthetic',

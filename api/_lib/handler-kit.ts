@@ -105,6 +105,29 @@ export function mapRpcError(
   const [code] = message.split(':');
 
   const byCode: Record<string, [FailureCode, number]> = {
+    IMPORT_TARGET_CHANGED: ['CONFLICT', 409],
+    IMPORT_SOURCE_CHANGED: ['CONFLICT', 409],
+    IMPORT_SOURCE_IDENTITY_CONFLICT: ['CONFLICT', 409],
+    IMPORT_IDENTITY_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_CUSTOMER_FIELD_CONFLICT: ['CONFLICT', 409],
+    IMPORT_REFERRAL_CONFLICT: ['CONFLICT', 409],
+    IMPORT_GENEALOGY_CONFLICT: ['CONFLICT', 409],
+    IMPORT_UNKNOWN_CUSTOMER_ID: ['CONFLICT', 409],
+    IMPORT_SOURCE_FORBIDDEN: ['FORBIDDEN', 403],
+    IMPORT_ROW_NOT_FOUND: ['NOT_FOUND', 404],
+    IMPORT_CLAIM_NOT_FOUND: ['NOT_FOUND', 404],
+    IMPORT_CLAIM_ALREADY_RECORDED: ['CONFLICT', 409],
+    IMPORT_CLAIM_INVALID: ['VALIDATION_ERROR', 400],
+    IMPORT_PURCHASE_REFERENCE_REQUIRED: ['VALIDATION_ERROR', 400],
+    IMPORT_HISTORICAL_TERMS_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_RESERVATION_REFERENCE_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_STAFF_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_APPLICATION_ALREADY_LINKED: ['CONFLICT', 409],
+    IMPORT_PROOF_REQUIRED: ['CONFLICT', 409],
+    IMPORT_PROOF_CHANGED: ['CONFLICT', 409],
+    IMPORT_PAYMENT_MATCH_CONFLICT: ['CONFLICT', 409],
+    IMPORT_PAYMENT_RECONCILIATION_REQUIRED: ['CONFLICT', 409],
+    IMPORT_CLAIM_REJECTED: ['CONFLICT', 409],
     SALE_NOT_FOUND: ['NOT_FOUND', 404],
     PAYMENT_NOT_FOUND: ['NOT_FOUND', 404],
     ACTOR_REQUIRED: ['UNAUTHORIZED', 401],
@@ -211,6 +234,34 @@ export function mapRpcError(
     );
   if (code === 'DOCUMENT_NOT_FOUND') return fail(res, 'NOT_FOUND', 'Document not found', 404);
   const mapped = byCode[code ?? ''];
+  const importMessages: Record<string, string> = {
+    IMPORT_RESERVATION_REFERENCE_REVIEW_REQUIRED:
+      'The existing reservation reference was not found for this customer, or has no compatible application. Review the exact reservation reference; no replacement application was created.',
+    IMPORT_TARGET_CHANGED:
+      'The customer, genealogy or payment record changed after review. Reload and review the current details before retrying.',
+    IMPORT_SOURCE_CHANGED:
+      'The import source changed after review. Reload its preview before retrying.',
+    IMPORT_SOURCE_IDENTITY_CONFLICT:
+      'This purchase reference is already linked to different source details. Review the existing purchase; no duplicate was created.',
+    IMPORT_CUSTOMER_FIELD_CONFLICT:
+      'Imported customer details conflict with the current record. Review the highlighted fields; current values were preserved.',
+    IMPORT_PURCHASE_REFERENCE_REQUIRED:
+      'Enter the actual purchase reference. Reuse the same reference for the same purchase.',
+    IMPORT_HISTORICAL_TERMS_REVIEW_REQUIRED:
+      'The workbook price, reservation fee, plan or payment terms disagree with the current approved offer. Historical terms need authorized review; no terms were replaced.',
+    IMPORT_STAFF_REVIEW_REQUIRED:
+      'The registered sales identity or genealogy changed or conflicts with the workbook. Review the actual staff placement.',
+    IMPORT_APPLICATION_ALREADY_LINKED:
+      'This purchase already has an application. Reload and continue the existing application.',
+    IMPORT_GENEALOGY_CONFLICT:
+      'Referrer and VIP Recommender belong to different VD genealogy trees. Correct the attribution before importing.',
+    IMPORT_PAYMENT_RECONCILIATION_REQUIRED:
+      'A payment with matching receipt details already exists. Link that payment, or explain why this is a distinct payment.',
+    IMPORT_PAYMENT_MATCH_CONFLICT:
+      'The selected payment belongs to different purchase details or has a conflicting amount or method. No payment was linked.',
+    IMPORT_PROOF_REQUIRED: 'Upload and review a valid private receipt before accepting this claim.',
+    IMPORT_PROOF_CHANGED: 'The receipt upload changed. Reload and review the current receipt.',
+  };
   // eslint-disable-next-line no-console
   console.error('[api] rpc error:', message);
   if (mapped)
@@ -219,7 +270,7 @@ export function mapRpcError(
       mapped[0],
       code === 'SALE_COMPLETE_HIERARCHY_REQUIRED'
         ? 'Complete the seller hierarchy before creating this sale.'
-        : code!.replace(/_/g, ' ').toLowerCase(),
+        : (importMessages[code ?? ''] ?? code!.replace(/_/g, ' ').toLowerCase()),
       mapped[1],
     );
 

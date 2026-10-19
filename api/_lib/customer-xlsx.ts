@@ -57,6 +57,21 @@ function xml(bytes: Uint8Array): Node {
   return root;
 }
 const children = (node: Node, name: string) => node.children.filter((n) => n.name === name);
+
+export function readWorkbookCustomProperties(parts: Map<string, Uint8Array>): Map<string, string> {
+  const bytes = parts.get('docProps/custom.xml');
+  const properties = new Map<string, string>();
+  if (!bytes) return properties;
+  const root = xml(bytes);
+  if (root.name !== 'Properties') throw new Error('Invalid workbook custom properties');
+  for (const property of children(root, 'property')) {
+    const name = property.attrs.name;
+    if (!name) throw new Error('Workbook property name is required');
+    if (properties.has(name)) throw new Error('Duplicate workbook property: ' + name);
+    properties.set(name, property.children.length === 1 ? property.children[0]!.text.trim() : '');
+  }
+  return properties;
+}
 const descendants = (node: Node, name: string): Node[] =>
   node.children.flatMap((n) => [...(n.name === name ? [n] : []), ...descendants(n, name)]);
 export function readWorkbookParts(bytes: Uint8Array): Map<string, Uint8Array> {
