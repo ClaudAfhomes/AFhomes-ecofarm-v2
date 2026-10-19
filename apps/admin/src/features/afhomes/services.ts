@@ -21,6 +21,7 @@ import {
   type StaffTestPurgeResponse,
 } from '@afhomes/contracts';
 import { z } from 'zod';
+import { staffSaleInvolvementSchema } from '@afhomes/contracts';
 import {
   protectedRequest as request,
   protectedRequestList as requestList,
@@ -29,6 +30,12 @@ import { normalizeProfileName, normalizeStaffIdentity } from '../../lib/normaliz
 
 export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);
+
+export const getStaffSalesInvolvement = (staffId: string, offset = 0) =>
+  requestList(
+    `/admin/afhomes/staff/${staffId}/sales-involvement?limit=25&offset=${offset}`,
+    staffSaleInvolvementSchema,
+  );
 export const createAfHomesRole = (input: {
   name: string;
   isActive: boolean;

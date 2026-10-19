@@ -28,6 +28,23 @@ try {
     "insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='super_admin'",
     [actor],
   );
+  const issueYear = Number(
+    (
+      await db.query(
+        "select extract(year from current_timestamp at time zone 'Asia/Manila')::int as y",
+      )
+    ).rows[0].y,
+  );
+  const beforeImport = (
+    await db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-BEFORE-IMPORT','Before','Import','before-company-import@example.invalid','09123456789','prospect') returning ra_number",
+    )
+  ).rows[0];
+  assert.equal(beforeImport.ra_number, `AF-CUS-${issueYear}-000001`);
+  await db.query(
+    "insert into public.customers(customer_number,ra_number,first_name,last_name,email,phone,status) values('SYNTHETIC-COMPANY-SEED',$1,'Company','Seed','company-counter-seed@example.invalid','09123456789','prospect')",
+    [`AF-CUS-${issueYear}-000100`],
+  );
   const raw = {
     workbook_format: 'company_v2',
     purchase_reference: 'SYNTHETIC PURCHASE ONE',
@@ -718,6 +735,280 @@ try {
     applicationCount,
   );
   console.log('PASS conflicting existing reservation terms are held before any history is created');
+  const companyId = `AF-CUS-${issueYear}-900001`;
+  const companyRaw = {
+    ...raw,
+    purchase_reference: 'SYNTHETIC PRE-SYSTEM PURCHASE',
+    ra_number: companyId,
+    email: 'pre-system@example.invalid',
+  };
+  const companyFacts = {
+    ...normalized,
+    person: { ...normalized.person, email: companyRaw.email },
+    company: { ...normalized.company, raNumber: companyId },
+    paymentClaims: [],
+  };
+  const companyRow = await newRow(companyRaw, companyFacts);
+  const companyImported = await confirm(companyRow, await preview(companyRow));
+  const identity = (
+    await db.query('select customer_number,ra_number from public.customers where id=$1', [
+      companyImported.customerId,
+    ])
+  ).rows[0];
+  assert.equal(identity.ra_number, companyId);
+  assert.notEqual(identity.customer_number, companyId);
+  assert.match(identity.customer_number, /^AF-CUS-[A-HJ-NP-Z2-9]{5}$/);
+  const companyRetry = await newRow(companyRaw, companyFacts);
+  assert.equal(
+    (await confirm(companyRetry, await preview(companyRetry))).customerId,
+    companyImported.customerId,
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select count(*)::int n from public.customer_directory($1) where record->>'id'=$2",
+        [{ search: companyId }, companyImported.customerId],
+      )
+    ).rows[0].n,
+    1,
+  );
+  const companyConflict = await newRow(
+    {
+      ...companyRaw,
+      email: 'different-owner@example.invalid',
+      purchase_reference: 'SYNTHETIC WRONG ID OWNER',
+    },
+    {
+      ...companyFacts,
+      person: { ...companyFacts.person, email: 'different-owner@example.invalid' },
+    },
+  );
+  await assert.rejects(preview(companyConflict), /IMPORT_IDENTITY_REVIEW_REQUIRED/);
+  await assert.rejects(
+    db.query('update public.customers set ra_number=$1 where id=$2', [
+      companyId.toLowerCase(),
+      first.customerId,
+    ]),
+    (error) => error.code === '23505',
+  );
+  assert.equal(
+    (
+      await db.query('select count(*)::int n from public.payments where customer_id=$1', [
+        companyImported.customerId,
+      ])
+    ).rows[0].n,
+    0,
+  );
+  console.log(
+    'PASS pre-system company Customer ID preserved, internal reference separate, retries/search work and conflicting ID reuse is rejected',
+  );
+  const raceId = `AF-CUS-${issueYear}-900002`;
+  const raceRows = [];
+  for (let i = 0; i < 2; i++) {
+    const email = `company-id-race-${i}@example.invalid`;
+    const r = await newRow(
+      { ...companyRaw, email, ra_number: raceId, purchase_reference: `COMPANY ID RACE ${i}` },
+      {
+        ...companyFacts,
+        person: { ...companyFacts.person, email },
+        company: { ...companyFacts.company, raNumber: raceId },
+      },
+    );
+    raceRows.push({ row: r, preview: await preview(r) });
+  }
+  const raceClients = [
+    new pg.Client({ connectionString: postgres.url }),
+    new pg.Client({ connectionString: postgres.url }),
+  ];
+  await Promise.all(raceClients.map((c) => c.connect()));
+  try {
+    const results = await Promise.allSettled(
+      raceClients.map((c, i) =>
+        c.query('select public.continue_customer_import_once($1,$2,$3,$4,$5)', [
+          raceRows[i].row,
+          actor,
+          randomUUID(),
+          raceRows[i].preview.expectedSourceHash,
+          raceRows[i].preview.expectedTargetVersion,
+        ]),
+      ),
+    );
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
+    assert.equal(
+      (await db.query('select count(*)::int n from public.customers where ra_number=$1', [raceId]))
+        .rows[0].n,
+      1,
+    );
+  } finally {
+    await Promise.all(raceClients.map((c) => c.end()));
+  }
+  console.log(
+    'PASS concurrent distinct-email imports cannot create duplicate company Customer IDs',
+  );
+  const generated = (
+    await db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-GENERAL-ONE','General','Example','general-one@example.invalid','09123456789','prospect') returning id,ra_number",
+    )
+  ).rows[0];
+  assert.equal(
+    generated.ra_number,
+    `AF-CUS-${issueYear}-900003`,
+    'general creation continues after the highest imported number',
+  );
+  await db.query('delete from public.customers where id=$1', [generated.id]);
+  const retained = (
+    await db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-GENERAL-TWO','General','Example','general-two@example.invalid','09123456789','prospect') returning ra_number",
+    )
+  ).rows[0];
+  assert.equal(
+    retained.ra_number,
+    `AF-CUS-${issueYear}-900004`,
+    'deleting a test record must not reissue its ID',
+  );
+  await assert.rejects(
+    db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-GENERAL-FAILED','General','Example','general-two@example.invalid','09123456789','prospect')",
+    ),
+    (error) => error.code === '23505',
+  );
+  const afterFailure = (
+    await db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-GENERAL-THREE','General','Example','general-three@example.invalid','09123456789','prospect') returning ra_number",
+    )
+  ).rows[0];
+  assert.equal(
+    afterFailure.ra_number,
+    `AF-CUS-${issueYear}-900005`,
+    'a failed insert rolls its company-number allocation back',
+  );
+  const generalClients = [
+    new pg.Client({ connectionString: postgres.url }),
+    new pg.Client({ connectionString: postgres.url }),
+  ];
+  await Promise.all(generalClients.map((c) => c.connect()));
+  try {
+    const rows = await Promise.all(
+      generalClients.map((c, i) =>
+        c.query(
+          "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values($1,'Concurrent','Example',$2,'09123456789','prospect') returning ra_number",
+          [`SYNTHETIC-GENERAL-RACE-${i}`, `general-race-${i}@example.invalid`],
+        ),
+      ),
+    );
+    assert.deepEqual(rows.map((r) => r.rows[0].ra_number).sort(), [
+      `AF-CUS-${issueYear}-900006`,
+      `AF-CUS-${issueYear}-900007`,
+    ]);
+  } finally {
+    await Promise.all(generalClients.map((c) => c.end()));
+  }
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    assert.equal(
+      (
+        await db.query(
+          "select has_table_privilege($1,'private.company_customer_id_counters','select') as allowed",
+          [role],
+        )
+      ).rows[0].allowed,
+      false,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select has_function_privilege($1,'private.assign_company_customer_id()','execute') as allowed",
+          [role],
+        )
+      ).rows[0].allowed,
+      false,
+    );
+  }
+  await db.query(
+    "insert into public.customers(customer_number,ra_number,first_name,last_name,email,phone,status) values('SYNTHETIC-LOWER-ID',$1,'Lower','Example','lower-id@example.invalid','09123456789','prospect')",
+    [`af-cus-${issueYear}-900008`],
+  );
+  const afterLower = (
+    await db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-AFTER-LOWER','Next','Example','after-lower-id@example.invalid','09123456789','prospect') returning ra_number",
+    )
+  ).rows[0];
+  assert.equal(afterLower.ra_number, `AF-CUS-${issueYear}-900009`);
+  await db.query('begin');
+  await db.query(
+    'update private.company_customer_id_counters set last_issued=999999 where issue_year=$1',
+    [issueYear],
+  );
+  await assert.rejects(
+    db.query(
+      "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-RANGE-EXHAUSTED','Range','Example','range-exhausted@example.invalid','09123456789','prospect')",
+    ),
+    /COMPANY_CUSTOMER_ID_RANGE_EXHAUSTED/,
+  );
+  await db.query('rollback');
+  console.log(
+    'PASS general annual generator works before imports, advances after imports, survives deletion, rolls back failures, serializes concurrent creates and protects private counters',
+  );
+  await db.query('begin');
+  const involved = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  for (const id of involved) {
+    await db.query('insert into auth.users(id,email) values($1,$2)', [id, `${id}@example.invalid`]);
+    await db.query(
+      "insert into public.staff_users(id,email,full_name,status) values($1,$2,'Synthetic participant','active')",
+      [id, `${id}@example.invalid`],
+    );
+  }
+  await db.query(
+    'update public.customer_import_rows set raw_data=raw_data||$2::jsonb where id=$1',
+    [
+      row,
+      JSON.stringify({
+        referrer_staff_id: involved[0],
+        recommender_staff_id: involved[1],
+        referrer_sm_staff_id: involved[2],
+        recommender_sm_staff_id: involved[3],
+      }),
+    ],
+  );
+  const historyFor = async (id) =>
+    (await db.query('select public.staff_sales_involvement($1,$2,25,0) as history', [actor, id]))
+      .rows[0].history;
+  for (const [i, label] of [
+    'Referrer',
+    'VIP Recommender',
+    'Referrer SM',
+    'Recommender SM',
+  ].entries()) {
+    const history = await historyFor(involved[i]);
+    assert.equal(history.length, 1, 'one purchase despite application/import overlap');
+    assert.equal(history[0].customerId, first.customerId);
+    assert.equal(history[0].tier, 'GOLD');
+    assert(history[0].roles.includes(label));
+    assert(!('email' in history[0]) && !('phone' in history[0]), 'general details only');
+  }
+  assert.equal(
+    (
+      await historyFor(randomUUID()).catch((error) => {
+        assert.match(error.message, /STAFF_NOT_FOUND/);
+        return [];
+      })
+    ).length,
+    0,
+  );
+  await db.query('rollback');
+  for (const role of ['anon', 'authenticated'])
+    assert.equal(
+      (
+        await db.query(
+          "select has_function_privilege($1,'public.staff_sales_involvement(uuid,uuid,integer,integer)','execute') as allowed",
+          [role],
+        )
+      ).rows[0].allowed,
+      false,
+    );
+  console.log(
+    'PASS recorded referrer, recommender and separate upperlines see one general purchase summary; browser RPC access denied',
+  );
 } catch (error) {
   console.error('FAIL customer import continuation:', error.message);
   failure = error;

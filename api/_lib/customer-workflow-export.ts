@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { readWorkbookParts } from './customer-xlsx.js';
 import { zipStored } from './report-export.js';
 import type { WorkbookStaffMatch } from './customer-workbook.js';
+import { WORKFLOW_COLUMNS, WORKFLOW_MAPPING_VERSION } from '@afhomes/contracts';
+import { workflowAddressLists } from './customer-workflow-addresses.js';
 const escape = (s: string) =>
   s
     .replaceAll('&', '&amp;')
@@ -14,15 +16,21 @@ const column = (n: number): string =>
     : String.fromCharCode(64 + n);
 
 /** Versioned metadata is independent of the Excel application used to fill the file. */
-export function customerWorkflowTemplate(staff: WorkbookStaffMatch[] = []): Uint8Array {
+export function customerWorkflowTemplate(
+  staff: WorkbookStaffMatch[] = [],
+  source?: Uint8Array,
+): Uint8Array {
   const parts = readWorkbookParts(
-    readFileSync(
-      new URL('../../packages/contracts/assets/customer-workflow-template.xlsx', import.meta.url),
-    ),
+    source ??
+      readFileSync(
+        new URL('../../packages/contracts/assets/customer-workflow-template.xlsx', import.meta.url),
+      ),
   );
   const encode = (s: string) => new TextEncoder().encode(s);
   const decoder = new TextDecoder();
-  for (const name of ['xl/workbook.xml', 'xl/worksheets/sheet4.xml', 'xl/worksheets/sheet6.xml']) {
+  for (const name of [...parts.keys()].filter(
+    (name) => name === 'xl/workbook.xml' || /^xl\/worksheets\/sheet\d+\.xml$/.test(name),
+  )) {
     parts.set(
       name,
       encode(
@@ -63,6 +71,8 @@ export function customerWorkflowTemplate(staff: WorkbookStaffMatch[] = []): Uint
       'VD tree',
       'SSM',
       'SM',
+      'Contact number',
+      'Email',
     ],
     ...Array.from({ length: Math.max(1, all.length) }, (_, i) => {
       const m = all[i];
@@ -75,6 +85,8 @@ export function customerWorkflowTemplate(staff: WorkbookStaffMatch[] = []): Uint
         m ? lineage(m, 'vice_director') : '',
         m ? lineage(m, 'senior_sales_manager') : '',
         m ? lineage(m, 'sales_manager') : '',
+        m?.phone ?? '',
+        m?.email ?? '',
       ];
     }),
   ];
@@ -88,15 +100,21 @@ export function customerWorkflowTemplate(staff: WorkbookStaffMatch[] = []): Uint
   refs = refs
     .replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${rows}</sheetData>`)
     .replace(/<autoFilter\b[^>]*\/>/g, '')
-    .replace('</sheetData>', `</sheetData><autoFilter ref="F1:K${table.length}"/>`);
+    .replace('</sheetData>', `</sheetData><autoFilter ref="F1:M${table.length}"/>`);
   parts.set('xl/worksheets/sheet6.xml', encode(refs));
   let book = decoder.decode(parts.get('xl/workbook.xml')!);
-  const defined = roles
-    .map(
-      (_, i) =>
-        `<definedName name="AFHomesStaff${i}">'Reference Lists'!$${column(i + 1)}$2:$${column(i + 1)}$${Math.max(2, lists[i]!.length + 1)}</definedName>`,
-    )
-    .join('');
+  const addresses = workflowAddressLists();
+  const defined =
+    roles
+      .map(
+        (_, i) =>
+          `<definedName name="AFHomesStaff${i}">'Reference Lists'!$${column(i + 1)}$2:$${column(i + 1)}$${Math.max(2, lists[i]!.length + 1)}</definedName>`,
+      )
+      .join('') +
+    addresses.definedNames
+      .map((d) => `<definedName name="${d.name}">${escape(d.formula)}</definedName>`)
+      .join('') +
+    `<definedName name="AFHomesPurchases">'Customers'!$B$2:$B$101</definedName>`;
   book = book.includes('</definedNames>')
     ? book.replace('</definedNames>', defined + '</definedNames>')
     : book.replace('</workbook>', `<definedNames>${defined}</definedNames></workbook>`);
@@ -119,20 +137,67 @@ export function customerWorkflowTemplate(staff: WorkbookStaffMatch[] = []): Uint
     (row: string, index: string) => {
       const r = Number(index);
       if (r < 2) return row;
-      const formulas = Array.from({ length: 6 }, (_, i) => {
-        const lookup = i < 3 ? 'E' : 'F';
-        return `<c r="${column(i + 9)}${r}"><f>${escape(`IFERROR(VLOOKUP(${lookup}${r},'Reference Lists'!$F$2:$K$${Math.max(2, table.length)},${(i % 3) + 4},FALSE),"")`)}</f></c>`;
-      }).join('');
+      const contactFormulas = [7, 8]
+        .map(
+          (field, i) =>
+            `<c r="${column(i + 7)}${r}"><f>${escape(`IFERROR(VLOOKUP(F${r},'Reference Lists'!$F$2:$M$${Math.max(2, table.length)},${field},FALSE),"")`)}</f></c>`,
+        )
+        .join('');
       return row
-        .replace(/<c\b[^>]*r="[I-N]\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g, '')
-        .replace('</row>', formulas + '</row>');
+        .replace(/<c\b[^>]*r="[G-N]\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g, '')
+        .replace('</row>', contactFormulas + '</row>');
     },
   );
   parts.set('xl/worksheets/sheet4.xml', encode(team));
+  for (const [index, [name, columns]] of Object.entries(WORKFLOW_COLUMNS).entries()) {
+    const path = `xl/worksheets/sheet${index + 2}.xml`;
+    let sheet = decoder.decode(parts.get(path)!);
+    const validations: string[] = [];
+    const at = (key: string) => column(columns.findIndex((c) => c.key === key) + 1);
+    const add = (key: string, formula: string) =>
+      validations.push(
+        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${at(key)}2:${at(key)}101"><formula1>${escape(formula)}</formula1></dataValidation>`,
+      );
+    if (name !== 'Customers') add('customer_key', 'AFHomesPurchases');
+    if (columns.some((c) => c.key === 'province')) {
+      add('province', 'AFHomesProvinces');
+      for (let r = 2; r <= 101; r++) {
+        const province = `$${at('province')}${r}`,
+          city = `$${at('city')}${r}`;
+        const list = (key: string, formula: string) =>
+          validations.push(
+            `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${at(key)}${r}"><formula1>${escape(formula)}</formula1></dataValidation>`,
+          );
+        list(
+          'city',
+          `INDIRECT(IFERROR(VLOOKUP(${province},'Address Lists'!$A$2:$B$${addresses.provinceEnd},2,FALSE),"AFHomesEmpty"))`,
+        );
+        list(
+          'barangay',
+          `INDIRECT(IFERROR(VLOOKUP(${province}&"|"&${city},'Address Lists'!$A$${addresses.localityStart}:$B$${addresses.rows.length},2,FALSE),"AFHomesEmpty"))`,
+        );
+      }
+    }
+    if (validations.length) {
+      if (sheet.includes('</dataValidations>')) {
+        sheet = sheet
+          .replace(
+            /<dataValidations count="(\d+)"/,
+            (_, count) => `<dataValidations count="${Number(count) + validations.length}"`,
+          )
+          .replace('</dataValidations>', validations.join('') + '</dataValidations>');
+      } else
+        sheet = sheet.replace(
+          '</sheetData>',
+          `</sheetData><dataValidations count="${validations.length}">${validations.join('')}</dataValidations>`,
+        );
+    }
+    parts.set(path, encode(sheet));
+  }
   parts.set(
     'docProps/custom.xml',
     encode(
-      '<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="AFHomesTemplate"><vt:lpwstr>company_v2</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="AFHomesMappingVersion"><vt:lpwstr>1</vt:lpwstr></property></Properties>',
+      `<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="AFHomesTemplate"><vt:lpwstr>company_v2</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="AFHomesMappingVersion"><vt:lpwstr>${WORKFLOW_MAPPING_VERSION}</vt:lpwstr></property></Properties>`,
     ),
   );
   const types = decoder.decode(parts.get('[Content_Types].xml')!);

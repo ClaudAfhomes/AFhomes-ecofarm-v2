@@ -41,6 +41,7 @@ import { useSession } from '../../lib/session';
 import { canViewModule } from '../../app/navigation';
 import { ApiError, errorBlockers, errorFieldEntries } from '../../lib/api/errors';
 import { deleteAfHomesStaff } from '../afhomes/services';
+import { StaffSalesInvolvement } from '../afhomes/StaffSalesInvolvement';
 import { MemberFormDialog, type MemberFormSeed, type MemberFormValues } from './MemberFormDialog';
 import {
   getMember,
@@ -478,6 +479,11 @@ export function MemberDetailDialog({
             </DetailCard>
           ) : null}
         </div>
+        {(user?.roleSlug === 'super_admin' ||
+          (canViewModule(user?.afHomesPermissions, 'organization.staff') &&
+            canViewModule(user?.afHomesPermissions, 'sales.customers'))) && (
+          <StaffSalesInvolvement key={member.id} staffId={member.id} />
+        )}
       </Dialog>
 
       {editing ? (

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { WORKFLOW_COLUMNS, type WorkflowSheet } from '@afhomes/contracts';
+import {
+  LEGACY_WORKFLOW_COLUMNS as WORKFLOW_COLUMNS,
+  type WorkflowSheet,
+} from '@afhomes/contracts';
+import { WORKFLOW_COLUMNS as SIMPLE_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
+import { validateImportRow } from './customer-import.js';
 import { zipStored } from './report-export.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
 
@@ -12,6 +17,7 @@ const col = (n: number): string =>
 function book(
   rows: Partial<Record<WorkflowSheet, Record<string, string>[]>> = {},
   extra: Record<string, string> = {},
+  mapping = '1',
 ) {
   const sheets = Object.keys(WORKFLOW_COLUMNS) as WorkflowSheet[];
   const parts: Record<string, string> = {
@@ -21,7 +27,12 @@ function book(
       '<Properties><property name="AFHomesTemplate"><v>company_v2</v></property><property name="AFHomesMappingVersion"><v>1</v></property></Properties>',
   };
   sheets.forEach((s, i) => {
-    const columns = WORKFLOW_COLUMNS[s];
+    const columns =
+      mapping === '1'
+        ? WORKFLOW_COLUMNS[s]
+        : mapping === '2'
+          ? PREVIOUS_WORKFLOW_COLUMNS[s]
+          : SIMPLE_COLUMNS[s];
     const table = [Object.fromEntries(columns.map((c) => [c.key, c.header])), ...(rows[s] ?? [])];
     parts[`xl/worksheets/s${i}.xml`] = `<worksheet><sheetData>${table
       .map(
@@ -36,7 +47,11 @@ function book(
       .join('')}</sheetData></worksheet>`;
   });
   return zipStored(
-    Object.entries({ ...parts, ...extra }).map(([name, data]) => ({
+    Object.entries({
+      ...parts,
+      'docProps/custom.xml': parts['docProps/custom.xml']!.replace('<v>1</v>', `<v>${mapping}</v>`),
+      ...extra,
+    }).map(([name, data]) => ({
       name,
       data: new TextEncoder().encode(data),
     })),
@@ -66,6 +81,149 @@ const payment = (key = 'Person 1', claim = 'Receipt 1') => ({
 });
 
 describe('workflow workbook v2', () => {
+  it('preserves supplied Customer ID for existing-identity matching instead of dropping it', () => {
+    const id = 'AF-CUS-2026-000001';
+    const record = parseCustomerWorkbookV2(
+      book({ Customers: [{ ...customer(), customer_id: id }] }, {}, '3'),
+    )!.rows[0]!;
+    expect(record.customerId).toBe(id);
+    expect(record.fields).toMatchObject({ ra_number: id, customer_number: id });
+    const matched = validateImportRow(
+      2,
+      record.fields,
+      {
+        plansByTier: new Map(),
+        customerByNumber: new Map([
+          [id, { id: 'existing-customer', email: 'synthetic@example.invalid' }],
+        ]),
+        customerByEmail: new Map(),
+        membershipByNumber: new Map(),
+        referralStaffByCode: new Map(),
+        seenMembershipNumbers: new Map(),
+      },
+      '2026-10-19',
+    );
+    expect(matched.customerId).toBe('existing-customer');
+    expect(matched.action).toBe('UPDATE');
+  });
+  it.each(['Silver', 'Bronze'])('rejects a supplementary holder for %s', (tier) => {
+    expect(() =>
+      parseCustomerWorkbookV2(
+        book(
+          {
+            Customers: [{ ...customer(), vip_tier: tier }],
+            'Supplementary Holders': [
+              { customer_key: 'Purchase 1', first_name: 'Second', last_name: 'Example' },
+            ],
+          },
+          {},
+          '3',
+        ),
+      ),
+    ).toThrow('Supplementary holder is Gold-only');
+  });
+  it('accepts optional Gold supplementary holders in the reduced layout and preserves older layouts', () => {
+    const row = parseCustomerWorkbookV2(
+      book(
+        {
+          Customers: [customer()],
+          'Supplementary Holders': [
+            { customer_key: 'Purchase 1', first_name: 'Second', last_name: 'Example' },
+          ],
+        },
+        {},
+        '3',
+      ),
+    )!.rows[0]!;
+    expect(row.fields.secondary_first_name).toBe('Second');
+    expect(SIMPLE_COLUMNS['Sales Team']).toHaveLength(8);
+    expect(PREVIOUS_WORKFLOW_COLUMNS['Sales Team']).toHaveLength(14);
+    expect(parseCustomerWorkbookV2(book({ Customers: [customer()] }, {}, '2'))!.rows).toHaveLength(
+      1,
+    );
+  });
+  it('accepts native OOXML midnight dates without silently truncating times', () => {
+    const row = parseCustomerWorkbookV2(
+      book({
+        Customers: [
+          {
+            ...customer(),
+            birth_date: '1990-06-15T00:00:00.000Z',
+            contract_date: '2026-10-01T00:00:00Z',
+          },
+        ],
+        Payments: [{ ...payment(), date: '2026-10-02T00:00:00.000Z' }],
+      }),
+    )!.rows[0]!;
+    expect(row.fields.birth_date).toBe('1990-06-15');
+    expect(row.fields.contract_date).toBe('2026-10-01');
+    expect(row.payments[0]!.date).toBe('2026-10-02');
+    expect(() =>
+      parseCustomerWorkbookV2(
+        book({ Customers: [{ ...customer(), birth_date: '1990-06-15T12:30:00Z' }] }),
+      ),
+    ).toThrow(/real date/);
+  });
+  it('reads simplified dates and purchase selections without a manual customer key', () => {
+    const result = parseCustomerWorkbookV2(
+      book(
+        {
+          Customers: [
+            {
+              ...customer(),
+              birth_date: '1990-10-20',
+              citizenship: 'American',
+              province: 'Cavite',
+              city: 'Alfonso',
+              barangay: 'Amuyong',
+            },
+          ],
+          'Sales Team': [
+            {
+              customer_key: 'Purchase 1',
+              referrer_name: 'Existing referrer',
+              recommender_name: 'Existing recommender',
+            },
+          ],
+          Payments: [{ ...payment('Purchase 1', ''), date: '2026-10-19' }],
+        },
+        {},
+        '2',
+      ),
+    )!.rows[0]!;
+    expect(result.customerKey).toBe('Purchase 1');
+    expect(result.fields).toMatchObject({
+      birth_date: '1990-10-20',
+      postal_code: '4123',
+      citizenship: 'American',
+      referrer_name: 'Existing referrer',
+      recommender_name: 'Existing recommender',
+    });
+    expect(result.payments[0]!.paymentKey).toMatch(/^AUTO-[a-f0-9]{64}$/);
+  });
+  it('keeps blank-reference payment identities stable across sorting and equivalent input', () => {
+    const first = payment('Person 1', '');
+    const second = { ...first, date: '2026-10-17', reference: 'Receipt 2' };
+    const parse = (payments: Record<string, string>[]) =>
+      parseCustomerWorkbookV2(book({ Customers: [customer()], Payments: payments }))!.rows[0]!
+        .payments;
+    expect(
+      parse([first, second])
+        .map((p) => p.paymentKey)
+        .sort(),
+    ).toEqual(
+      parse([second, { ...first, amount: '10000.00', notes: 'Updated note' }])
+        .map((p) => p.paymentKey)
+        .sort(),
+    );
+    expect(() => parse([first, first])).toThrow(/genuinely separate identical payments/);
+    expect(
+      parse([
+        { ...first, payment_key: 'ONE' },
+        { ...first, payment_key: 'TWO' },
+      ]),
+    ).toHaveLength(2);
+  });
   it('accepts namespaced Excel custom properties and rejects duplicate version metadata', () => {
     expect(
       parseCustomerWorkbookV2(
@@ -260,30 +418,32 @@ describe('workflow workbook v2', () => {
     )!.rows[0]!;
     expect(row.fields.birth_date).toBe('2000-02-29');
   });
-  it('rejects hidden input formulas on reference sheets', () => {
-    expect(() =>
-      parseCustomerWorkbookV2(
-        book(
-          {},
-          {
-            'xl/workbook.xml':
-              '<workbook xmlns:r="urn:r"><sheets><sheet name="Customers" r:id="r0"/><sheet name="Supplementary Holders" r:id="r1"/><sheet name="Sales Team" r:id="r2"/><sheet name="Payments" r:id="r3"/><sheet name="Reference Lists" r:id="r4"/></sheets></workbook>',
-            'xl/_rels/workbook.xml.rels':
-              '<Relationships>' +
-              ['r0', 'r1', 'r2', 'r3', 'r4']
-                .map(
-                  (id, i) =>
-                    `<Relationship Id="${id}" Type="urn:/worksheet" Target="worksheets/s${i}.xml"/>`,
-                )
-                .join('') +
-              '</Relationships>',
-            'xl/worksheets/s4.xml':
-              '<worksheet><sheetData><row r="1"><c r="A1"><f>WEBSERVICE("https://example.invalid")</f></c></row></sheetData></worksheet>',
-          },
+  it.each(['Reference Lists', 'Address Lists', 'Postal Codes'])(
+    'rejects hidden input formulas on %s',
+    (referenceSheet) => {
+      expect(() =>
+        parseCustomerWorkbookV2(
+          book(
+            {},
+            {
+              'xl/workbook.xml': `<workbook xmlns:r="urn:r"><sheets><sheet name="Customers" r:id="r0"/><sheet name="Supplementary Holders" r:id="r1"/><sheet name="Sales Team" r:id="r2"/><sheet name="Payments" r:id="r3"/><sheet name="${referenceSheet}" r:id="r4"/></sheets></workbook>`,
+              'xl/_rels/workbook.xml.rels':
+                '<Relationships>' +
+                ['r0', 'r1', 'r2', 'r3', 'r4']
+                  .map(
+                    (id, i) =>
+                      `<Relationship Id="${id}" Type="urn:/worksheet" Target="worksheets/s${i}.xml"/>`,
+                  )
+                  .join('') +
+                '</Relationships>',
+              'xl/worksheets/s4.xml':
+                '<worksheet><sheetData><row r="1"><c r="A1"><f>WEBSERVICE("https://example.invalid")</f></c></row></sheetData></worksheet>',
+            },
+          ),
         ),
-      ),
-    ).toThrow(/Formula/);
-  });
+      ).toThrow(/Formula/);
+    },
+  );
   it('rejects populated unmapped headers', () => {
     const bytes = book({ Customers: [customer()] });
     // The required header shape is validated independently of protected metadata.

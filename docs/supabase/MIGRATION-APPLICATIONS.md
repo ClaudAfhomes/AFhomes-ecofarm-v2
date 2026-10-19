@@ -319,3 +319,28 @@ old-host member request 403 with WAF denial. Signed-in directory reload and
 IST/OST import-dialog checks passed; no production import/account was created.
 Hosted saved downloads/roster exports and native Excel/Sheets remain unverified.
 Full details and local evidence locations are in the continuation handoff.
+
+### APPROVED LIVE APPLY - 2026-10-19: Customer import continuation
+
+The user separately approved ONLY `20261208000016_afhomes_customer_import_continuation.sql` after feature commit `8082c81` was pushed to `claud/develop`. Target: existing shared project `ikaevepedpqygdlipsei`. No production website promotion, data recovery, account import or payment mutation was included.
+
+- SQL SHA-256: `33773120bceacfd747baac56d861cbbc0893195d592ba5ecc2b3ecffb5714758`.
+- Fresh preflight: 109 history entries, maximum `20261208000015`; target tables and predecessor adapter absent; required functions present and pinned by definition hashes. No historical missing migration was replayed.
+- The first attempt rolled back before commit because the temporary verifier incorrectly expected 15 public signatures instead of the 14 defined in the approved file. Read-only recheck confirmed unchanged history and absent new objects. Only that verifier count was corrected; migration SQL was unchanged.
+- The exact approved SQL and its history row committed atomically at `2026-10-19T11:57:19.923Z`. History is now 110 entries with only version `20261208000016` added. PostgREST schema reload was requested.
+- Before commit: all 113 existing public/private/Auth/Storage table counts were unchanged within the transaction; existing function definitions were unchanged except the intended public import dispatcher replacement. Its exact predecessor was preserved in the private adapter.
+- Post-commit catalog checks: three private tables have RLS and no direct PUBLIC/anon/authenticated/service-role grants; 14 public RPC signatures are service-only; zero private helper execute leaks. An independent connection confirmed the history body matches the local file and successfully ran the read-only continuation list as an existing authorized actor. No business rows were created or repaired by these checks.
+- Local ignored evidence: `.tmp-bin/customer-continuation-applied.json`; preflight and apply scripts are also ignored and contain no credential values.
+- Preview deployment `dpl_54dZLxsqh4JUAP2wTec4CRMAW47B` for feature SHA `8082c819a697f1d5b3b7276db6c2dc21c4fb54e6` reached READY. Unauthenticated endpoint probes redirected to Vercel Authentication; no successful authenticated HTTP workflow is claimed. Native Excel Desktop/Online and signed-in private-receipt/reload acceptance remain unverified.
+
+### APPROVED LIVE APPLY - 2026-10-19: Company Customer IDs and staff sales involvement
+
+The user explicitly approved finishing the changes for commit/push with live migration. Scope: only versions 17 and 18 on the existing shared project `ikaevepedpqygdlipsei`, followed by `claud/develop` Preview. No production website promotion, seed, account import, historical repair or payment mutation was authorized or performed.
+
+- `20261208000017_afhomes_import_company_customer_ids.sql`: SHA-256 `984458aa1c6ecdb2879500e1a505e674810ce87d7c7f39d0309c79720ec1154c`.
+- `20261208000018_afhomes_staff_sales_involvement.sql`: SHA-256 `4bcf19e7478e61c4f2bdf5c9173f6062b3a323009d10efccc2ebe7b0dec27f1b`.
+- Fresh preflight: 110 history entries ending at version 16; both candidates and their objects absent, zero normalized duplicate company IDs. Version 16's recorded body exactly matched its immutable repository file. The dynamic function patch prerequisites matched. Historical missing migrations were not replayed.
+- Both exact files and history rows committed atomically at `2026-10-19T13:59:12.524Z`. History is now 112 entries ending at version 18. PostgREST schema reload was requested.
+- All 116 preexisting public/private/Auth/Storage table counts were unchanged within the repeatable-read transaction. Customer, staff, genealogy, payment, membership and frozen sale hierarchy row digests were unchanged. Existing function definitions were preserved except the three intentionally changed by version 17.
+- The annual counter has RLS and no direct PUBLIC/anon/authenticated/service-role access. All existing official IDs are covered by its high-water marks. The new general-summary RPC is service-only, checks staff/customer permissions, and exposes no private helper execute grants. An independent read-only connection confirmed both recorded file bodies, ACLs and the summary RPC using an existing authorized actor. No live test application or customer was created.
+- Sanitized local evidence: `.tmp-bin/customer-release-applied.json`. The schema index was regenerated. Preview deployment verification is recorded separately in the release handoff.

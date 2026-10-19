@@ -10,6 +10,7 @@ import {
   emailSchema,
   CITIZENSHIP_OPTIONS,
   tinNumberSchema,
+  applicationHolderSchema,
 } from '@afhomes/contracts';
 import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
 import type { ImportFieldRow, ValidatedImportRow } from './customer-import.js';
@@ -22,7 +23,8 @@ const workbookCitizenship = (value: string) =>
   value.trim();
 export function workbookDate(raw: string, date1904 = false): string {
   if (!raw) return '';
-  let date = raw;
+  // Native OOXML date cells use an ISO midnight value rather than an Excel serial.
+  let date = raw.replace(/^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.0+)?Z?$/, '$1');
   if (/^\d+(?:\.\d+)?$/.test(raw)) {
     const serial = Math.floor(Number(raw));
     if (
@@ -249,6 +251,12 @@ export function validateWorkbookFields(
       fields[prefix + 'civil_status'] = 'Separated';
     const key = prefix + 'citizenship';
     if (fields[key]) fields[key] = workbookCitizenship(fields[key]!);
+    if (
+      fields.workbook_format === 'company_v2' &&
+      fields[key] &&
+      !applicationHolderSchema.shape.citizenship.safeParse(fields[key]).success
+    )
+      err(key, 'Enter a valid citizenship, using the same format as the customer application');
     const tin = fields[prefix + 'tin'];
     if (tin && !tinNumberSchema.safeParse(tin).success)
       err(
@@ -259,6 +267,7 @@ export function validateWorkbookFields(
   if (fields.recommender_email && !emailSchema.safeParse(fields.recommender_email).success)
     err('recommender_email', 'Invalid email');
   for (const [field, choices] of Object.entries(CUSTOMER_WORKBOOK_CHOICES)) {
+    if (field === 'citizenship' && fields.workbook_format === 'company_v2') continue;
     const keys =
       field === 'status'
         ? ['stated_status']
@@ -305,6 +314,8 @@ export type WorkbookStaffMatch = {
   ancestor_ids: string[];
   match_count: number;
   aa_number?: string | null;
+  phone?: string | null;
+  email?: string | null;
 };
 export function resolveWorkbookStaff(
   fields: Record<string, string>,
@@ -376,6 +387,11 @@ export function resolveWorkbookStaff(
     fields[field.replace('_name', '_staff_id')] = match.staff_id;
     if (match.aa_number) fields[field.replace('_name', '_aa_number')] = match.aa_number;
     resolved.set(field, match);
+    if (field === 'recommender_name' && fields.workbook_format === 'company_v2') {
+      if (!fields.recommender_contact && match.phone && /^0\d{10}$/.test(match.phone))
+        fields.recommender_contact = match.phone;
+      if (!fields.recommender_email && match.email) fields.recommender_email = match.email;
+    }
     // Old workbook confirmations keep their historical unique-name guard.
     if (Number(match.match_count) !== 1 && fields.workbook_format !== 'company_v2') {
       fail(

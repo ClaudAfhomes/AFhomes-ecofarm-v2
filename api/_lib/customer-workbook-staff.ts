@@ -71,8 +71,22 @@ export async function loadWorkbookStaffMatches(
     db,
     [...matches.values()].map((match) => match.staff_id),
   );
+  const ostIds = [...matches.values()]
+    .filter((match) => match.role_slug === 'ost')
+    .map((match) => match.staff_id);
+  const contacts = new Map<string, { phone: string; email: string }>();
+  for (let offset = 0; offset < ostIds.length; offset += 200) {
+    const result = await db
+      .from('ost_members')
+      .select('id,phone,email')
+      .in('id', ostIds.slice(offset, offset + 200));
+    if (result.error) throw result.error;
+    for (const record of result.data ?? [])
+      contacts.set(record.id, { phone: record.phone, email: record.email });
+  }
   return [...matches.values()].map((match) => ({
     ...match,
+    ...contacts.get(match.staff_id),
     aa_number: numbers.get(match.staff_id) ?? null,
   }));
 }

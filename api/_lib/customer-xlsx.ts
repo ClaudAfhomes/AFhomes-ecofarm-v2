@@ -148,6 +148,7 @@ export function readWorkbook(
     formula: string,
     cached: string,
   ) => string,
+  referenceOnlySheets: readonly string[] = [],
 ): Map<string, string[][]> {
   const parts = bytes instanceof Map ? bytes : readWorkbookParts(bytes);
   const part = (name: string) => {
@@ -199,6 +200,12 @@ export function readWorkbook(
     const sheet = part(target.startsWith('/xl/') ? target.slice(1) : 'xl/' + target);
     if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
       throw new Error('Unsupported worksheet structure');
+    // Geographic lists can be wide; they are never imported or evaluated.
+    if (referenceOnlySheets.includes(name)) {
+      if (descendants(sheet, 'f').length) throw new Error('Formula on a reference worksheet');
+      result.set(name, []);
+      continue;
+    }
     const rows = children(children(sheet, 'sheetData')[0]!, 'row');
     if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
     let cellCount = 0;
@@ -253,7 +260,7 @@ export function readWorkbook(
         const value = children(c, 'v')[0]?.text ?? '';
         if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
           throw new Error('Invalid shared-string index');
-        let text =
+        const text =
           c.attrs.t === 's'
             ? strings[Number(value)]
             : c.attrs.t === 'inlineStr'

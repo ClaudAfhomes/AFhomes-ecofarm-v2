@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { exactDecimalStringSchema } from './money.js';
 
 export const WORKFLOW_TEMPLATE_VERSION = 'company_v2';
-export const WORKFLOW_MAPPING_VERSION = '1';
+export const WORKFLOW_MAPPING_VERSION = '3';
 export type WorkflowColumn = {
   key: string;
   header: string;
@@ -113,7 +113,7 @@ const holderColumns = (secondary: boolean): WorkflowColumn[] => {
 const customerKey = () => input('customer_key', 'Customer key', 'source.customerKey');
 
 /** One manifest owns parser headers, export headers and complete mapping coverage. */
-export const WORKFLOW_COLUMNS = {
+export const LEGACY_WORKFLOW_COLUMNS = {
   Customers: [
     customerKey(),
     input('customer_id', 'Customer ID (RA No.)', 'identity.customerReference'),
@@ -190,6 +190,55 @@ export const WORKFLOW_COLUMNS = {
     helper('payment_year', 'Payment year'),
   ],
 } satisfies Record<string, WorkflowColumn[]>;
+/** Mapping 1 remains readable; new downloads ask for each fact only once. */
+export const PREVIOUS_WORKFLOW_COLUMNS = Object.fromEntries(
+  Object.entries(LEGACY_WORKFLOW_COLUMNS).map(([sheet, columns]) => [
+    sheet,
+    columns
+      .filter(
+        (c) =>
+          c.disposition !== 'helper' &&
+          c.key !== 'age' &&
+          !(sheet === 'Customers' && c.key === 'customer_key'),
+      )
+      .flatMap((c) => (c.key === 'birth_date' ? [c, calculated('age', 'Age (calculated)')] : [c]))
+      .map((c) => ({
+        ...c,
+        disposition: ['recommender_contact', 'recommender_email'].includes(c.key)
+          ? ('calculated' as const)
+          : c.disposition,
+        header:
+          c.key === 'customer_key'
+            ? 'Purchase reference (select customer)'
+            : c.key === 'payment_key'
+              ? 'Payment claim reference (optional)'
+              : c.key === 'landline'
+                ? 'Landline (optional)'
+                : c.key === 'stated_status'
+                  ? 'Existing document status (optional)'
+                  : c.header,
+      })),
+  ]),
+) as typeof LEGACY_WORKFLOW_COLUMNS;
+export const WORKFLOW_COLUMNS = {
+  ...PREVIOUS_WORKFLOW_COLUMNS,
+  'Supplementary Holders': PREVIOUS_WORKFLOW_COLUMNS['Supplementary Holders'].map((column) =>
+    column.key === 'customer_key'
+      ? { ...column, header: 'Gold purchase reference (select)' }
+      : column,
+  ),
+  'Sales Team': PREVIOUS_WORKFLOW_COLUMNS['Sales Team'].filter(
+    (column) =>
+      ![
+        'referrer_vd',
+        'referrer_ssm',
+        'referrer_sm',
+        'recommender_vd',
+        'recommender_ssm',
+        'recommender_sm',
+      ].includes(column.key),
+  ),
+};
 export type WorkflowSheet = keyof typeof WORKFLOW_COLUMNS;
 
 const text = z.string().trim().max(200);

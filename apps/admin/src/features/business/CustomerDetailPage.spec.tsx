@@ -145,6 +145,7 @@ describe('CustomerDetailPage', () => {
       'Category',
       'Portal account',
       'Customer ID (RA No.)',
+      'Internal system reference',
       'Customer code',
       'Registered',
     ]);
@@ -231,8 +232,9 @@ describe('CustomerDetailPage', () => {
     // Primary Member follows the SSOT order exactly: split names, split
     // address parts, one landline, one email, one mobile number.
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
-    expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'Historical RA alias',
+    expect(
+      Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
+    ).toEqual([
       'STATUS',
       'FIRST NAME',
       'LAST NAME',
@@ -278,7 +280,13 @@ describe('CustomerDetailPage', () => {
       'EMPLOYED POSITION',
     ]);
     // Related block carries the verbatim (NAME) headers.
-    for (const label of ['SVD (NAME)', 'SSM (NAME)', 'SM (NAME)', 'REFERRER (NAME)', 'VIP RECOMMENDER (NAME)']) {
+    for (const label of [
+      'SVD (NAME)',
+      'SSM (NAME)',
+      'SM (NAME)',
+      'REFERRER (NAME)',
+      'VIP RECOMMENDER (NAME)',
+    ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

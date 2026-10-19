@@ -183,7 +183,8 @@ export function CustomerDetailPage() {
           record.derivedCategory ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory] : '—',
         ],
         ['Portal account', record.portalAccountActivated ? 'Activated' : 'Not activated'],
-        ['Customer ID (RA No.)', <DetailMono>{record.customerNumber}</DetailMono>],
+        ['Customer ID (RA No.)', <DetailMono>{record.raNumber || '—'}</DetailMono>],
+        ['Internal system reference', <DetailMono>{record.customerNumber}</DetailMono>],
         [
           'Customer code',
           record.customerCode ? <DetailMono>{record.customerCode}</DetailMono> : '—',
@@ -216,7 +217,6 @@ export function CustomerDetailPage() {
       title: 'Primary Member',
       columns: 2,
       fields: [
-        ['Historical RA alias', record.raNumber ? <DetailMono>{record.raNumber}</DetailMono> : '—'],
         ['STATUS', record.companyStatus ?? '—'],
         ['FIRST NAME', record.firstName ?? '—'],
         ['LAST NAME', record.lastName ?? '—'],

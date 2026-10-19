@@ -1,5 +1,7 @@
 import {
   WORKFLOW_COLUMNS,
+  LEGACY_WORKFLOW_COLUMNS,
+  PREVIOUS_WORKFLOW_COLUMNS,
   WORKFLOW_TEMPLATE_VERSION,
   WORKFLOW_MAPPING_VERSION,
   workbookCustomerV2Schema,
@@ -12,6 +14,8 @@ import {
 import { addMoney, subtractMoney, compareMoney } from '@afhomes/shared';
 import { readWorkbook, readWorkbookParts, readWorkbookCustomProperties } from './customer-xlsx.js';
 import { workbookDate } from './customer-workbook.js';
+import { createHash } from 'node:crypto';
+import { resolvePostalCode } from './postal-reference.js';
 
 const key = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -67,6 +71,12 @@ export function parseCustomerWorkbookV2(
   const property = (name: string) => metadata.get(name) ?? '';
   const templateVersion = property('AFHomesTemplate');
   const mappingVersion = property('AFHomesMappingVersion');
+  const columnsBySheet =
+    mappingVersion === '1'
+      ? LEGACY_WORKFLOW_COLUMNS
+      : mappingVersion === '2'
+        ? PREVIOUS_WORKFLOW_COLUMNS
+        : WORKFLOW_COLUMNS;
   // Read workbook to get sheet names first
   const workbook = decoder.decode(parts.get('xl/workbook.xml')!);
   const names = [...workbook.matchAll(/<(?:\w+:)?sheet\b[^>]*\bname=["']([^"']+)["']/g)].map(
@@ -85,7 +95,7 @@ export function parseCustomerWorkbookV2(
           : `Unsupported workbook template version: ${templateVersion}; download the current template`,
       );
     }
-    if (mappingVersion !== WORKFLOW_MAPPING_VERSION)
+    if (!['1', '2', WORKFLOW_MAPPING_VERSION].includes(mappingVersion))
       throw new Error('Unsupported workbook mapping version; download the current template');
   } else if (templateVersion === '') {
     // Not a v2 workbook - return null so legacy parser can handle it
@@ -94,7 +104,7 @@ export function parseCustomerWorkbookV2(
     throw new Error(
       `Unsupported workbook template version: ${templateVersion}; download the current template`,
     );
-  } else if (mappingVersion !== WORKFLOW_MAPPING_VERSION) {
+  } else if (!['1', '2', WORKFLOW_MAPPING_VERSION].includes(mappingVersion)) {
     throw new Error('Unsupported workbook mapping version; download the current template');
   }
   for (const [path, content] of parts) {
@@ -111,56 +121,71 @@ export function parseCustomerWorkbookV2(
     names.some(
       (name) =>
         !sheets.includes(name as WorkflowSheet) &&
-        !['Start Here', 'Reference Lists'].includes(name),
+        ![
+          'Start Here',
+          'Reference Lists',
+          'Address Lists',
+          'Postal Codes',
+          'Examples Guide',
+        ].includes(name),
     )
   )
     throw new Error('Unknown worksheet; remove unmapped data before confirmation');
   const ignored = Object.fromEntries(
     sheets.map((s) => [
       s,
-      WORKFLOW_COLUMNS[s].flatMap((c, i) =>
-        c.disposition === 'calculated' || ['birth_date', 'date'].includes(c.key) ? [i + 1] : [],
+      columnsBySheet[s].flatMap((c, i) =>
+        c.disposition === 'calculated' || ['birth_date', 'date', 'postal_code'].includes(c.key)
+          ? [i + 1]
+          : [],
       ),
     ]),
   );
-  const matrices = readWorkbook(parts, names, false, ignored, (_sheet, _column, _row, formula) => {
-    const text = formula.replace(/"(?:[^"]|"")*"/g, '""');
-    const functions = [...text.matchAll(/([\w.]+)\s*\(/g)].map((m) => m[1]!.toUpperCase());
-    const internal = text.replace(
-      /'(Customers|Supplementary Holders|Sales Team|Payments|Reference Lists)'!/g,
-      '',
-    );
-    if (
-      /[\[\]|!]/.test(internal) ||
-      /(?:https?:|file:|\\\\)/i.test(formula) ||
-      functions.some(
-        (f) =>
-          ![
-            'IF',
-            'IFERROR',
-            'AND',
-            'OR',
-            'SUMIF',
-            'SUMIFS',
-            'COUNTIF',
-            'COUNTIFS',
-            'DATE',
-            'DATEDIF',
-            'TODAY',
-            'ROUND',
-            'MIN',
-            'MAX',
-            'VLOOKUP',
-          ].includes(f),
+  const matrices = readWorkbook(
+    parts,
+    names,
+    false,
+    ignored,
+    (_sheet, _column, _row, formula) => {
+      const text = formula.replace(/"(?:[^"]|"")*"/g, '""');
+      const functions = [...text.matchAll(/([\w.]+)\s*\(/g)].map((m) => m[1]!.toUpperCase());
+      const internal = text.replace(
+        /'(Customers|Supplementary Holders|Sales Team|Payments|Reference Lists|Address Lists|Postal Codes)'!/g,
+        '',
+      );
+      if (
+        /[[\]|!]/.test(internal) ||
+        /(?:https?:|file:|\\\\)/i.test(formula) ||
+        functions.some(
+          (f) =>
+            ![
+              'IF',
+              'IFERROR',
+              'AND',
+              'OR',
+              'SUMIF',
+              'SUMIFS',
+              'COUNTIF',
+              'COUNTIFS',
+              'DATE',
+              'DATEDIF',
+              'TODAY',
+              'ROUND',
+              'MIN',
+              'MAX',
+              'VLOOKUP',
+            ].includes(f),
+        )
       )
-    )
-      throw new Error('Unsafe or external calculated formula');
-    return '';
-  });
+        throw new Error('Unsafe or external calculated formula');
+      return '';
+    },
+    ['Address Lists', 'Postal Codes'],
+  );
   const rowsBySheet = new Map<WorkflowSheet, Record<string, string>[]>();
   for (const sheet of sheets) {
     const matrix = matrices.get(sheet)!;
-    const columns = WORKFLOW_COLUMNS[sheet];
+    const columns = columnsBySheet[sheet];
     if (matrix[0]?.length !== columns.length || columns.some((c, i) => matrix[0]![i] !== c.header))
       throw new Error(`${sheet}: incorrect or unmapped required headers`);
     const rows: Record<string, string>[] = [];
@@ -169,8 +194,12 @@ export function parseCustomerWorkbookV2(
         throw new Error(`${sheet} row ${index + 2}: unmapped column contains data`);
       const fields = Object.fromEntries(columns.map((c, i) => [c.key, (values[i] ?? '').trim()]));
       if (!columns.some((c) => c.disposition !== 'calculated' && fields[c.key])) continue;
+      if (mappingVersion !== '1' && sheet === 'Customers')
+        fields.customer_key = fields.purchase_reference ?? '';
       if (!fields.customer_key)
-        throw new Error(`${sheet} row ${index + 2}: Customer key is required`);
+        throw new Error(
+          `${sheet} row ${index + 2}: ${mappingVersion === '1' ? 'Customer key' : 'Purchase reference'} is required`,
+        );
       rows.push(fields);
     }
     rowsBySheet.set(sheet, rows);
@@ -179,6 +208,8 @@ export function parseCustomerWorkbookV2(
   const purchases = new Set<string>();
   for (const fields of rowsBySheet.get('Customers')!) {
     const customerKey = fields.customer_key!;
+    fields.ra_number = fields.customer_id ?? '';
+    if (fields.ra_number.startsWith('AF-CUS-')) fields.customer_number = fields.ra_number;
     if (result.has(key(customerKey))) throw new Error(`Duplicate customer key: ${customerKey}`);
     if (!fields.purchase_reference)
       throw new Error(`Customers ${customerKey}: Purchase reference is required`);
@@ -233,16 +264,33 @@ export function parseCustomerWorkbookV2(
       const customer = result.get(id);
       if (!customer) throw new Error(`${sheet}: Unknown customer key ${fields.customer_key}`);
       if (sheet === 'Payments') {
-        const paymentKey = key(fields.payment_key ?? '');
-        if (!paymentKey) throw new Error('Payment claim reference is required');
-        const source = id + ':' + paymentKey;
-        if (seen.has(source)) throw new Error(`Duplicate payment claim: ${fields.payment_key}`);
-        seen.add(source);
         dateInput(fields, 'date', 'payment', date1904);
         const amount = money(fields.amount ?? '', 'Payment amount');
         if (compareMoney(amount, '0.00') <= 0) throw new Error('Payment amount must be positive');
+        // Exclude row position and notes so sorting and repeat downloads retain the same identity.
+        const automaticKey =
+          'AUTO-' +
+          createHash('sha256')
+            .update(
+              JSON.stringify([
+                key(customer.purchaseReference),
+                purposes[key(fields.purpose ?? '')],
+                amount,
+                fields.date,
+                methods[key(fields.method ?? '')],
+                key(fields.reference ?? ''),
+              ]),
+            )
+            .digest('hex');
+        const paymentKey = fields.payment_key?.trim() || automaticKey;
+        const source = id + ':' + key(paymentKey);
+        if (seen.has(source))
+          throw new Error(
+            'Duplicate payment claim. If these are genuinely separate identical payments, give each a distinct Payment claim reference.',
+          );
+        seen.add(source);
         const claim: WorkbookPaymentClaim = workbookPaymentClaimSchema.parse({
-          paymentKey: fields.payment_key,
+          paymentKey,
           customerKey: customer.customerKey,
           purpose: purposes[key(fields.purpose ?? '')],
           amount,
@@ -268,6 +316,21 @@ export function parseCustomerWorkbookV2(
     }
   }
   for (const customer of result.values()) {
+    if (mappingVersion !== '1') {
+      for (const prefix of ['', 'secondary_']) {
+        const postal = resolvePostalCode(
+          customer.fields[prefix + 'province'] ?? '',
+          customer.fields[prefix + 'city'] ?? '',
+          customer.fields[prefix + 'barangay'] ?? '',
+        );
+        const supplied = customer.fields[prefix + 'postal_code'];
+        if (postal.status === 'matched') {
+          if (supplied && supplied !== postal.postalCode)
+            throw new Error('Postal code conflicts with the selected address');
+          customer.fields[prefix + 'postal_code'] = postal.postalCode;
+        }
+      }
+    }
     for (const field of ['vd_name', 'ssm_name', 'sm_name', 'referrer_name', 'recommender_name']) {
       const choice = /^(.+) \[(AA[IO]\d{8})\]$/i.exec(customer.fields[field] ?? '');
       if (choice) {

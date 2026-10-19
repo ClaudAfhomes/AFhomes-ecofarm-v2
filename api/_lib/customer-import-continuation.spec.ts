@@ -51,6 +51,17 @@ const fields = {
   secondary_email: 'second@example.invalid',
 };
 describe('import canonical facts and safe recovery', () => {
+  it('preserves typed citizenship and accepts blank optional landlines', () => {
+    const result = buildImportedCustomerFacts({
+      ...fields,
+      citizenship: 'American',
+      landline: '',
+      secondary_landline: '',
+    });
+    expect(result.primary.citizenship).toBe('American');
+    expect(result.company.citizenship).toBe('American');
+    expect(result.person.landline).toBeNull();
+  });
   it('extracts a legacy reservation claim only with an explicit paid status and complete receipt facts', () => {
     const source = {
       ...fields,

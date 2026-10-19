@@ -5,8 +5,16 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 111. Public table inventory: 60. Private table inventory: 21.
--- Customer continuation 20261208000016 is local-only until separately approved for live apply.
+-- Migration count: 113. Public table inventory: 60. Private table inventory: 22.
+-- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
+-- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
+-- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.
+-- It preserves pre-system company IDs in ra_number, prevents duplicate company IDs, and issues
+-- AF-CUS-YYYY-NNNNNN through a private annual high-water counter for general new customers.
+-- Internal customer_number references stay separate. No existing identifiers are rewritten.
+-- Staff sales involvement 20261208000018 was approved and live-applied on 2026-10-19: a service-only read RPC
+-- projects recorded application/import identities and frozen sale hierarchy into general summaries.
+-- It does not infer name-only attribution or change genealogy, payments, membership or commissions.
 -- It adds three private RLS-protected source/claim tables, service-only reviewed continuation RPCs,
 -- canonical purchase identity and stale-target guards. Claims are not ledger payments;
 -- explicit Finance reconciliation records unverified payments, with verification remaining separate.
@@ -145,6 +153,8 @@
 --   20261208000014_afhomes_ist_employee_identity_functions.sql
 --   20261208000015_afhomes_member_workbook_jobs_functions.sql
 --   20261208000016_afhomes_customer_import_continuation.sql
+--   20261208000017_afhomes_import_company_customer_ids.sql
+--   20261208000018_afhomes_staff_sales_involvement.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories
@@ -209,6 +219,7 @@
 -- Private table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   private.business_id_aliases
 --   private.commission_rule_archive
+--   private.company_customer_id_counters
 --   private.customer_import_payment_claims
 --   private.customer_import_purchase_sources
 --   private.customer_import_source_rows

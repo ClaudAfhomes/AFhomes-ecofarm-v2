@@ -79,6 +79,26 @@ const registered: WorkbookStaffMatch[] = [
     aa_number: 'AAO26100002',
   },
 ];
+it('fills blank recommender contacts from the selected registered OST', () => {
+  const fields = {
+    workbook_format: 'company_v2',
+    referrer_name: 'Synthetic Referrer',
+    recommender_name: 'Synthetic VIP',
+    recommender_contact: '',
+    recommender_email: '',
+  };
+  const row = { errors: [], warnings: [] };
+  resolveWorkbookStaff(
+    fields,
+    registered.map((m) =>
+      m.staff_id === 'vip' ? { ...m, phone: '09123456789', email: 'vip@example.invalid' } : m,
+    ),
+    row,
+  );
+  expect(row.errors).toEqual([]);
+  expect(fields.recommender_contact).toBe('09123456789');
+  expect(fields.recommender_email).toBe('vip@example.invalid');
+});
 it('accepts a v2 canonical AA identity despite another registered person sharing its name', () => {
   const matches = [
     ...registered.map((m) => (m.staff_id === 'vip' ? { ...m, match_count: 2 } : m)),

@@ -2,6 +2,8 @@
 
 Scope: implemented and verified locally in the isolated `AFhomes-customer-import-check` worktree. The user subsequently explicitly approved committing and pushing to `claud/develop` Preview. Shared migration application and live customer recovery remain outside that approval.
 
+Update 2026-10-19: feature commit `8082c81` was pushed to `claud/develop` and its Preview reached READY. The user then separately approved the single migration `20261208000016`; it committed at `2026-10-19T11:57:19.923Z`. See `docs/supabase/MIGRATION-APPLICATIONS.md` for verification. No live customer recovery or test import was performed. Authenticated browser and native Excel acceptance remain pending; unauthenticated Preview endpoint probes redirected to Vercel Authentication and do not prove API behavior.
+
 ## Verified cause
 
 The old company-workbook path intentionally created a prospect identity and retained application/package/payment statements in the protected import row. Import success did not mean that a normal customer application, reservation or payment existed. This explains the missing canonical company details and the absence of continuation actions. A stated reservation fee or company status is not a verified ledger payment.
@@ -37,4 +39,4 @@ The historical purchase test was corrected to distinguish private helpers from i
 
 Release acceptance is still pending: actual Excel Desktop and Excel Online save/reopen/import tests, and an authenticated browser flow with real private receipt storage and reload persistence. Artifact rendering and component tests do not prove these environments. Native searchable dropdowns and date pickers vary by Excel version; the workbook also supplies Reference Lists filtering/Find and day/month/year entry.
 
-No live customer has been repaired, and no deployed behavior is claimed. The approved push triggers the configured Preview build; it does not apply SQL. The new import continuation paths depend on migration `20261208000016` and must not be used on the shared database before its separately approved application. Live migration and any scoped customer recovery require separate approval. The remaining Excel and authenticated browser acceptance checks are still pending.
+No live customer has been repaired, and no deployed behavior is claimed. The approved push triggers the configured Preview build; it does not apply SQL. The required migration `20261208000016` is now live-applied under the subsequent explicit approval recorded above. Any scoped customer recovery still requires separate approval. The remaining Excel and authenticated browser acceptance checks are still pending.
