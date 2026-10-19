@@ -1096,31 +1096,35 @@ export function CustomerApplicationEditorPage() {
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
-  // Every step change puts the panel it reveals at the top of the view.
-  // Without it, Next leaves the operator standing where they were - scrolled to
-  // the bottom of the step they just finished, with the new panel above the
-  // viewport reading as a blank page.
-  const revealStep = (index: number) => {
-    // The panel is not in the DOM until React re-renders, so the lookup waits a
-    // tick. Optional call keeps it inert in runtimes without scrolling.
-    window.setTimeout(() => {
-      document.getElementById(steps[index]!.id)?.scrollIntoView?.({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    }, 0);
+  // Every step change puts the operator back at the top of the page.
+  //
+  // This used to scroll the step's own element into view, which is the wrong
+  // target for a wizard whose steps unmount each other: advancing UNMOUNTS the
+  // panel just left behind, so the document can get much shorter underneath
+  // the scroll. A smooth scroll then animates toward a height the layout no
+  // longer has and stops short, leaving the operator looking at empty ground
+  // instead of the step they pressed Next for.
+  //
+  // Scrolling the window to 0 has no target element to miss and cannot be
+  // clamped short. The stepper sits at the top of the page and marks the open
+  // step, so the operator lands on the new step's heading with their place in
+  // the flow still visible.
+  const revealStep = () => {
+    // After the swap has committed, so the shortened document is already in
+    // place and the browser has nothing left to clamp against.
+    window.setTimeout(() => window.scrollTo({ top: 0, left: 0 }), 0);
   };
   const goStep = (index: number) => {
     if (index < 0 || index > steps.length - 1 || index > maxReached) return;
     setActiveStep(index);
-    revealStep(index);
+    revealStep();
   };
   const goNext = () => {
     if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
     const next = activeStep + 1;
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
-    revealStep(next);
+    revealStep();
   };
   // Edit entry point for the record-actions panel: the form below is the only
   // editor (there is no separate edit route), so editing means revealing it.
@@ -1371,7 +1375,6 @@ export function CustomerApplicationEditorPage() {
           >
             <div className={styles.planBenefitsHead}>
               <div>
-                <p className={styles.planEyebrow}>Official plan benefits</p>
                 <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
               </div>
               <TierBadge tier={selectedPlan.code} />
@@ -1405,7 +1408,7 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="application-panel-heading"
             >
               <h2 id="application-panel-heading" className={styles.panelTitle}>
-                1. Application
+                Application
               </h2>
               <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
               <div className={styles.editorGrid}>
@@ -1498,7 +1501,7 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="identity-panel-heading"
             >
               <h2 id="identity-panel-heading" className={styles.panelTitle}>
-                2. Identity
+                Identity
               </h2>
               <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
               <fieldset className={styles.subGroup}>
@@ -1591,7 +1594,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 2) && (
             <div id="step-holders">
-              <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+              <HolderFields title="Primary holder" value={primary} onChange={setPrimary} />
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
@@ -1612,7 +1615,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 3) && (
             <fieldset id="step-recommender" className={styles.panel}>
-              <legend className={styles.panelTitle}>4. Recommender details</legend>
+              <legend className={styles.panelTitle}>Recommender details</legend>
               <p className={styles.hint}>Referrer and VIP recommender are active OST staff.</p>
               <div className={styles.editorGrid}>
                 <RecommenderFields
@@ -1626,7 +1629,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 4) && (
             <fieldset id="step-channel" className={styles.panel}>
-              <legend className={styles.panelTitle}>5. Acquisition channel</legend>
+              <legend className={styles.panelTitle}>Acquisition channel</legend>
               {[
                 'CMP',
                 'DRP',
@@ -1655,7 +1658,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 5) && (
             <fieldset id="step-cert" className={styles.panel}>
-              <legend className={styles.panelTitle}>6. Certification</legend>
+              <legend className={styles.panelTitle}>Certification</legend>
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"

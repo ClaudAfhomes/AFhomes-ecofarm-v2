@@ -533,24 +533,33 @@ describe('application private ID intake', () => {
     expect(await screen.findByAltText('Full ID preview')).toBeInTheDocument();
   });
 
-  it('brings the newly revealed step to the top of the view', async () => {
-    // jsdom has no scrolling, so record which element the wizard asks to
-    // reveal. `setup()` already advanced once, landing on Identity.
-    const scrolled: string[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this.id);
-    } as Element['scrollIntoView'];
+  it('puts the operator at the top of the page on every step change', async () => {
+    // jsdom cannot scroll, so record what the wizard asks the window to do.
+    //
+    // This asserts the OUTCOME - the page is back at the top - and not the old
+    // mechanism. The previous version of this test passed while the wizard was
+    // broken in a real browser: it only checked that `scrollIntoView` had been
+    // called on the next step's element, which says nothing about where the
+    // operator ends up once advancing unmounts the panel just left behind.
+    const calls: Array<ScrollToOptions | undefined> = [];
+    const original = window.scrollTo;
+    window.scrollTo = function scrolledTo(options?: ScrollToOptions) {
+      calls.push(options);
+    } as typeof window.scrollTo;
     try {
       await setup(document('completed'));
-      await waitFor(() => expect(scrolled).toContain('step-identity'));
+      // setup() already pressed Next once, landing on Identity.
+      await waitFor(() => expect(calls.length).toBeGreaterThan(0));
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-      // Holders is where the operator must land, not wherever the previous
-      // step happened to leave the scroll position.
-      await waitFor(() => expect(scrolled).toContain('step-holders'));
-      expect(scrolled.at(-1)).toBe('step-holders');
+      await waitFor(() => expect(calls.length).toBeGreaterThan(1));
+      // Every change asks for the top, and every one of them carries an
+      // explicit target: a bare `scrollTo()` would be an unassertable no-op.
+      expect(calls).toHaveLength(2);
+      for (const call of calls) expect(call).toEqual({ top: 0, left: 0 });
+      // Holders is where the operator must land, not wherever Identity left off.
+      expect(screen.getByText('Primary holder')).toBeInTheDocument();
     } finally {
-      Element.prototype.scrollIntoView = original;
+      window.scrollTo = original;
     }
   });
 
@@ -764,6 +773,51 @@ describe('IST commercial summary rendering', () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     },
   );
+
+  it('counts the queue and the signature backlog as figures, not a sentence', async () => {
+    // The count used to read as one grey line, so the only number anyone acts
+    // on was the one you had to hunt for. Both figures are now their own cells,
+    // and only a NON-ZERO backlog takes the warning tone.
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [
+        agreement,
+        {
+          ...agreement,
+          id: 'res-2',
+          reservationNumber: 'RES-000002',
+          primarySignatureStatus: 'pending',
+        },
+      ],
+      total: 7,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+
+    const summary = screen.getByLabelText('Reservation queue summary');
+    const figure = (label: string) => screen.getByText(label).closest('div');
+    expect(summary).toBeInTheDocument();
+    expect(figure('Agreements')).toHaveTextContent('7');
+    expect(figure('Awaiting signature')).toHaveTextContent('1');
+    // One pending row out of two, so the exception is the coloured one.
+    expect(figure('Awaiting signature')).toHaveAttribute('data-alert', 'true');
+    // The settled state recedes to plain text so the pending chip stands out.
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.getByText('Pending signature')).toBeInTheDocument();
+  });
+
+  it('shows a clean backlog figure, and no warning tone, when nothing is pending', async () => {
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    const figure = (label: string) => screen.getByText(label).closest('div');
+    expect(figure('Agreement')).toHaveTextContent('1');
+    expect(figure('Awaiting signature')).toHaveTextContent('0');
+    // A warning-coloured zero is a false alarm.
+    expect(figure('Awaiting signature')).not.toHaveAttribute('data-alert');
+  });
 });
 
 it('renders application-origin reservations before a sale exists', async () => {
