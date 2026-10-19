@@ -417,7 +417,7 @@ export function CustomerImportExportPage() {
             <div className={styles.templateGrid}>
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
-                <p className={styles.templateDesc}>Four tabs guide entry. Dropdowns included.</p>
+                <p className={styles.templateDesc}>Guided entry, dropdowns and automatic calculations.</p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
                 </div>

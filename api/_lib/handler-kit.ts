@@ -263,7 +263,6 @@ export function mapRpcError(
     IMPORT_PROOF_REQUIRED: 'Upload and review a valid private receipt before accepting this claim.',
     IMPORT_PROOF_CHANGED: 'The receipt upload changed. Reload and review the current receipt.',
   };
-  // eslint-disable-next-line no-console
   console.error('[api] rpc error:', message);
   if (mapped)
     return fail(

@@ -10,7 +10,6 @@ import { z } from 'zod';
 import {
   createCustomerSchema,
   maskGovernmentId,
-  normalizeAddressField,
   normalizePersonName,
   normalizePhilippinePhone,
   normalizePostalCode,
@@ -30,7 +29,6 @@ import {
   isoOrNull,
   jsonBody,
   type Db,
-  list,
   mapRpcError,
   method,
   route,
@@ -886,7 +884,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error('[api] customers:', error instanceof Error ? error.message : error);
     mapRpcError(res, error as { message?: string });
   }
