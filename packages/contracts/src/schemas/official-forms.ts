@@ -37,20 +37,23 @@ export const acquisitionChannelSchema = z.enum([
  * Fixed pick-lists for the application holder. The values ARE the stored
  * text, so a dropdown option and a saved record can never disagree.
  * `undefined` (or a blank) is the honest "not provided" state.
+ *
+ * Sex and civil status are the two closed sets the operator chooses from, not
+ * a census: a cardholder is recorded under one of the values below, so anything
+ * outside them is a mis-key rather than a real answer.
  */
 export const SUFFIX_OPTIONS = ['Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
-export const SEX_OPTIONS = ['Male', 'Female', 'Other'] as const;
+export const SEX_OPTIONS = ['Male', 'Female'] as const;
+export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated'] as const;
+/**
+ * The customer-workbook IMPORT vocabulary only. The application holder types a
+ * citizenship instead (see `applicationHolderSchema.citizenship`), so a
+ * spreadsheet can still carry the closed set the authority's template defines
+ * while the form accepts any nationality the holder actually holds.
+ */
 export const CITIZENSHIP_OPTIONS = ['Filipino', 'Dual Citizen', 'Foreign National'] as const;
-export const CIVIL_STATUS_OPTIONS = [
-  'Single',
-  'Married',
-  'Widowed',
-  'Separated',
-  'Annulled',
-] as const;
 export const suffixOptionSchema = z.enum(SUFFIX_OPTIONS);
 export const sexOptionSchema = z.enum(SEX_OPTIONS);
-export const citizenshipOptionSchema = z.enum(CITIZENSHIP_OPTIONS);
 export const civilStatusOptionSchema = z.enum(CIVIL_STATUS_OPTIONS);
 
 /** Blank pick-list values are "not provided", never an invalid choice. */
@@ -86,6 +89,28 @@ const optionalHolderName = z
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 /**
+ * Oldest age an application holder may be recorded at. A cardholder holds a
+ * membership they pay for and use, so a birth date that puts them far past
+ * working age is a keying error, not a real customer.
+ *
+ * Scoped to the application holder on purpose: members, OST applicants and the
+ * workbook import keep the shared `isPlausibleBirthDate` lifetime, and no
+ * historical record is rewritten.
+ */
+export const OLDEST_HOLDER_AGE = 75;
+
+const oldestHolderBirthDate = (): string => {
+  const today = new Date().toISOString().slice(0, 10);
+  return `${Number(today.slice(0, 4)) - OLDEST_HOLDER_AGE}${today.slice(4)}`;
+};
+
+/** `birthDateSchema` plus the working-age ceiling for a cardholder. */
+export const holderBirthDateSchema = birthDateSchema.refine(
+  (value) => value >= oldestHolderBirthDate(),
+  { message: `Holder must be ${OLDEST_HOLDER_AGE} or younger` },
+);
+
+/**
  * Blank selector values (`""`) must never reach a UUID validator: an unchosen
  * customer/plan/sale is "missing", not "an invalid UUID". Coercing to
  * `undefined` turns the failure into `Required`, which the UI maps to a
@@ -105,9 +130,27 @@ export const applicationHolderSchema = z.object({
     (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
     z.preprocess(blankToUndefinedOption, suffixOptionSchema.optional()),
   ),
-  birthDate: birthDateSchema,
+  birthDate: holderBirthDateSchema,
   sex: z.preprocess(blankToUndefinedOption, sexOptionSchema.optional()),
-  citizenship: z.preprocess(blankToUndefinedOption, citizenshipOptionSchema.optional()),
+  /**
+   * Typed, not chosen. Citizenship is a nationality, and the closed set the
+   * workbook template uses does not cover the people who actually apply: a
+   * holder may be any dual national or foreign national, so restricting the
+   * field would refuse a legitimate applicant. Letters, spaces and the
+   * punctuation a country name actually uses; blank stays "not provided".
+   */
+  citizenship: z.preprocess(
+    blankToUndefinedOption,
+    z
+      .string()
+      .trim()
+      .max(80, 'Citizenship is too long')
+      .regex(
+        /^[\p{L}][\p{L}\p{M}'’. \-]*$/u,
+        'Use letters, spaces, apostrophes, hyphens and periods only',
+      )
+      .optional(),
+  ),
   civilStatus: z.preprocess(blankToUndefinedOption, civilStatusOptionSchema.optional()),
   permanentAddressLine1: z.string().trim().min(1).max(200).transform(toTitleCase),
   permanentAddressLine2: z.string().trim().max(200).transform(toTitleCase).optional(),
