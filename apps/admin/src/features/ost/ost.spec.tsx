@@ -372,10 +372,17 @@ describe('OST application review', () => {
     mockedApprove.mockResolvedValue(MEMBER);
     renderDetail();
     await screen.findByText('Oscar Trainee');
+    expect(screen.getByRole('button', { name: 'Approve as OST' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Temporary password'), {
+      target: { value: 'TempPass123' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm temporary password'), {
+      target: { value: 'TempPass123' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Approve as OST' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByText(/Approved\. OST member OST-000001/)).toBeInTheDocument();
-    expect(mockedApprove).toHaveBeenCalledWith(APP_ID);
+    expect(mockedApprove).toHaveBeenCalledWith(APP_ID, 'TempPass123');
   });
 
   it('requires a reason before rejecting', async () => {

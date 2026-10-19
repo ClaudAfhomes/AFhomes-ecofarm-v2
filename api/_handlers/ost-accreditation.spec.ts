@@ -75,6 +75,64 @@ async function call(path: string, body: unknown, token?: string) {
   return state;
 }
 describe('official OST handler boundary', () => {
+  it.each([false, true])(
+    'keeps OST password setup safe when activation fails=%s',
+    async (activationFails) => {
+      const db = holder.db!;
+      db.rows('ost_applications').push({
+        id: UUID.viewerStaff,
+        email: identity.email,
+        first_name: 'QA',
+        last_name: 'OST',
+        status: 'submitted',
+      });
+      db.rpcs.push(
+        {
+          fn: 'ost_accreditation_records',
+          result: {
+            registration: {
+              endorsed_at: '2026-01-01',
+              applicant_signature_status: 'received',
+              referrer_signature_status: 'received',
+            },
+          },
+        },
+        {
+          fn: 'install_ost_accreditation_identity',
+          result: (args: Record<string, unknown>) => {
+            db.rows('staff_users').push({ id: args.p_auth_id, status: 'invited' });
+            if (activationFails)
+              db.writeErrors.staff_users = { message: 'Synthetic activation failure' };
+            return args.p_auth_id;
+          },
+        },
+      );
+      const path = `applications/${UUID.viewerStaff}/approve`;
+      expect(
+        (await call(path, { startsOn: '2026-01-01', expiresOn: '2027-01-01' }, TOKEN.superAdmin))
+          .status,
+      ).toBe(400);
+      expect(db.createdAuthUsers).toHaveLength(0);
+      const result = await call(
+        path,
+        { startsOn: '2026-01-01', expiresOn: '2027-01-01', temporaryPassword: 'TempPass123' },
+        TOKEN.superAdmin,
+      );
+      expect(result.status).toBe(activationFails ? 500 : 201);
+      const created = db.createdAuthUsers[0]!;
+      expect(db.rows('staff_users').find((r) => r.id === created.id)).toMatchObject({
+        status: activationFails ? 'invited' : 'active',
+      });
+      if (!activationFails)
+        expect(db.rows('staff_users').find((r) => r.id === created.id)?.must_change_password).toBe(
+          true,
+        );
+      else expect(JSON.stringify(result.body)).toContain('reconciliation');
+      expect(db.passwordsSeen).toEqual(['TempPass123']);
+      expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
+      expect(JSON.stringify(db.rows('audit_events'))).not.toContain('TempPass123');
+    },
+  );
   it.each(['sponsors', 'imports/parse'])(
     'uses the member role relationship and accepts its one-to-one shape: %s',
     async (path) => {

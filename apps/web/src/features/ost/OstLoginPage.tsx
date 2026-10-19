@@ -92,9 +92,9 @@ export function OstLoginPage() {
     <AuthLayout
       eyebrow="AFHomes Ecofarm"
       title="OST Login"
-      lead="Sellers approved under a Sales Manager sign in here."
+      lead="Sign in with your OST email and password."
       brandTitle="Sell the farm you believe in."
-      brandLead="Your pipeline, your referral code, and your network - once your application is approved."
+      brandLead="Your pipeline, your referral code, and your network."
     >
       <form onSubmit={onSubmit} noValidate className={styles.form}>
         {serverError && (
@@ -158,10 +158,8 @@ export function OstLoginPage() {
         </div>
 
         <p className={styles.prompt}>
-          Don&apos;t have an OST account?{' '}
-          <Link className={styles.promptLink} to="/ost/register">
-            Register as OST
-          </Link>
+          First time signing in? Use the temporary password provided by your administrator. You will
+          create your own password before accessing your account. No registration is needed.
         </p>
       </form>
     </AuthLayout>

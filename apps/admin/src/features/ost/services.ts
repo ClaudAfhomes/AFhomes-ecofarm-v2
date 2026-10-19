@@ -59,10 +59,16 @@ export const reviewAccreditation = (
     action,
     notes,
   });
-export const approveAccreditation = (id: string, startsOn: string, expiresOn: string) =>
+export const approveAccreditation = (
+  id: string,
+  startsOn: string,
+  expiresOn: string,
+  temporaryPassword: string,
+) =>
   post(`/ost-accreditation/applications/${id}/approve`, ostMutationResultSchema, {
     startsOn,
     expiresOn,
+    temporaryPassword,
   });
 export const submitRenewal = (id: string, body: SubmitOstRenewal) =>
   post(`/ost-accreditation/members/${id}/renew`, ostMutationResultSchema, body);
@@ -96,8 +102,8 @@ export const getOstApplications = (status = '', search = ''): Promise<OstApplica
 export const getOstApplication = (id: string): Promise<OstApplication> =>
   request(`/ost/applications/${id}`, ostApplicationSchema);
 
-export const approveOstApplication = (id: string): Promise<OstMember> =>
-  post(`/ost/applications/${id}/approve`, ostMemberSchema, {});
+export const approveOstApplication = (id: string, temporaryPassword: string): Promise<OstMember> =>
+  post(`/ost/applications/${id}/approve`, ostMemberSchema, { temporaryPassword });
 
 export const rejectOstApplication = (id: string, reason: string): Promise<OstApplication> =>
   post(`/ost/applications/${id}/reject`, ostApplicationSchema, { reason });

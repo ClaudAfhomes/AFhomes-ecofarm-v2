@@ -102,7 +102,11 @@ export const manualOstAccreditationSchema = submitOstAccreditationSchema
   .extend({ sponsorStaffId: z.string().uuid() })
   .strict();
 export const approveOstAccreditationSchema = z
-  .object({ startsOn: date, expiresOn: date })
+  .object({
+    startsOn: date,
+    expiresOn: date,
+    temporaryPassword: z.string().min(8).max(128).optional(),
+  })
   .strict()
   .refine((v) => v.expiresOn >= v.startsOn, {
     path: ['expiresOn'],

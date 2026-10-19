@@ -288,6 +288,21 @@ describe('PATCH /admin/afhomes/session', () => {
 /* ================================================================== */
 
 describe('POST /admin/afhomes/session/password', () => {
+  it('cannot clear the temporary-password gate by reusing the same password', async () => {
+    const db = installWithNewHire();
+    await hireNewcomer();
+    const state = await call({
+      method: 'POST',
+      afPath: 'session/password',
+      token: 'token-new-hire',
+      body: { currentPassword: TEMP_PASSWORD, newPassword: TEMP_PASSWORD },
+    });
+    expect(state.status).toBe(400);
+    expect(db.rows('staff_users').find((r) => r.id === NEW_STAFF_ID)?.must_change_password).toBe(
+      true,
+    );
+    expect(db.calls.some((c) => c.op === 'updateUserById')).toBe(false);
+  });
   it('rejects a wrong current password without touching Auth or the flag', async () => {
     const db = install({
       signIn: async () => ({
