@@ -13,7 +13,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type {
+import type {
   ActivationResult,
   ApplicationHolder,
   PurchaseDocumentKind,
@@ -28,11 +28,12 @@ import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
-import {
+import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,  EmptyState,
+  Button,
+  EmptyState,
   ErrorState,
   FilterBar,
   PageHeader,
@@ -46,7 +47,7 @@ import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
 import { ReservationStatusBadge } from './ReservationStatusBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
+import {
   createReservationAgreement,
   decideReservationAgreement,
   exportReservationAgreement,
@@ -74,7 +75,7 @@ import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 import { humanizeApplicationIssues } from './official-forms-applications';
 
-import {
+import {
   today,
   asBase64,
   formatFileSize,
@@ -1128,7 +1129,7 @@ export function ReservationAgreementEditorPage() {
  * Nothing here recalculates money. Every figure is the server's, and the Finalize
  * button follows the server's own eligibility rather than a browser total.
  */
-function ApplicationOriginAgreementPanel({
+function ApplicationOriginAgreementPanel({
   id,
   agreement,
 }: {
@@ -1387,7 +1388,7 @@ function ApplicationOriginAgreementPanel({
  * call and are never re-displayable, so this panel could not show them even if it
  * wanted to.
  */
-function MembershipConfirmation({
+function MembershipConfirmation({
   saleId,
   persisted,
 }: {

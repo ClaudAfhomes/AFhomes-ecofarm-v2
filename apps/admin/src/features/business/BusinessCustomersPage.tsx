@@ -1,13 +1,14 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import {
+import {
   Button,
   ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
-  FilterBar,  OverflowMenu,
+  FilterBar,
+  OverflowMenu,
   PageHeader,
   Pagination,
   SearchField,
@@ -27,7 +28,7 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
 import { SettlementBadge } from './SettlementBadge';
 import { TierBadge } from './TierBadge';
-import {
+import {
   anonymizeCustomer,
   deactivateCustomer,
   deleteCustomer,

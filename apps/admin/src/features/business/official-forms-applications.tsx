@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
-import {
+import {
   createCustomerApplicationSchema,
   canTransitionCustomerApplication,
   registerCustomerApplicationSchema,
@@ -33,11 +33,12 @@ import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
 import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
-import {
+import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,  Dialog,
+  Button,
+  Dialog,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
@@ -58,7 +59,7 @@ import { TierBadge } from './TierBadge';
 import { tierArtwork } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
+import {
   ACCEPTED_MIME,
   MAX_BYTES,
   getCurrentDocument,
@@ -66,7 +67,7 @@ import {
   putUploadBytes,
   requestUploadGrant,
 } from '../documents/services';
-import {
+import {
   createCustomerApplication,
   registerCustomerApplication,
   decideCustomerApplication,
@@ -85,7 +86,7 @@ import {
   updateCustomerApplication,
 } from './services';
 
-import {
+import {
   today,
   emptyHolder,
   HolderFields,
@@ -763,8 +764,8 @@ export function CustomerApplicationEditorPage() {
   const payload = () => ({
     // Unchosen selectors stay absent: never send "" as a UUID.
     customerId: customerId || undefined,
-    planId: planId || undefined,
-    tier,
+    planId: planId || undefined,
+  tier,
     paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
@@ -1065,8 +1066,8 @@ export function CustomerApplicationEditorPage() {
       : !primaryComplete
         ? 'Complete primary holder fields.'
         : null,
-    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
-    null,
+    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
+  null,
     null,
   ];
   const steps = [
