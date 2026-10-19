@@ -456,6 +456,71 @@ describe('application private ID intake', () => {
     expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
   });
 
+  it('spins inside the Customer control while the list loads, never a skeleton beside it', async () => {
+    // A skeleton standing in for the control shifted the form on every load and
+    // left an empty box where the dropdown belonged. The control itself stays
+    // put and reports the wait.
+    vi.mocked(getCustomersPage).mockReturnValue(new Promise(() => {}));
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    const customer = screen.getByLabelText('Customer');
+    expect(customer).toHaveAttribute('aria-busy', 'true');
+    expect(customer.closest('div')).toHaveAttribute('data-loading', 'true');
+    // The spinner's own ring, inside the control rather than after it.
+    expect(customer.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(screen.queryByRole('status', { name: 'Searching customers' })).not.toBeInTheDocument();
+  });
+
+  it('clears the Customer spinner once the list arrives', async () => {
+    // Stays on step 1: the Application panel is the only place the picker is
+    // rendered, and the wizard unmounts it once Next is clicked.
+    vi.mocked(getCustomersPage).mockResolvedValue({
+      data: [
+        customerSchema.parse({
+          id: customerId,
+          customerNumber: 'CUS-QA-1',
+          fullName: 'QA Customer',
+          email: 'qa@example.com',
+          phone: '+639171234567',
+          dateOfBirth: '1990-01-01',
+          gender: null,
+          address: null,
+          governmentIdType: null,
+          governmentIdMasked: null,
+          status: 'prospect',
+          createdBy: null,
+          createdAt: '2026-10-01',
+          updatedAt: '2026-10-01',
+        }),
+      ],
+      total: 1,
+    });
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    // The control renders before its options do, so the wait has to end on the
+    // resolved list rather than on the control existing.
+    await screen.findByRole('option', { name: 'QA Customer' });
+    const customer = screen.getByLabelText('Customer');
+    await waitFor(() => expect(customer).not.toHaveAttribute('aria-busy'));
+    expect(customer.closest('div')).not.toHaveAttribute('data-loading');
+    expect(customer.parentElement?.querySelector('[class*="ring"]')).toBeNull();
+  });
+
+  it('labels the ID types with the shared vocabulary, not slug-derived text', async () => {
+    await setup(null);
+    const labels = [...(screen.getByLabelText('ID Type') as HTMLSelectElement).options].map(
+      (option) => option.textContent,
+    );
+    // Same map the member and OST ID-type dropdowns use. Deriving a label from
+    // the slug produced "Philippine Id", "Drivers License" and "Tax Id".
+    expect(labels).toContain('Philippine ID');
+    expect(labels).toContain("Driver's License");
+    expect(labels).toContain('Tax ID');
+    expect(labels).not.toContain('Philippine Id');
+    expect(labels).not.toContain('Drivers License');
+    expect(labels).not.toContain('Tax Id');
+  });
+
   it('shows a clickable thumbnail that opens a full preview modal', async () => {
     URL.createObjectURL = vi.fn(() => 'blob:mock-id');
     URL.revokeObjectURL = vi.fn();
@@ -518,9 +583,17 @@ describe('application private ID intake', () => {
     expect(within(item).getByText('4')).toBeInTheDocument();
   });
 
-  it('shows the recorded ID type of the current document and prompts when missing', async () => {
-    await setup(document('completed'));
-    expect(await screen.findByText(/ID type: passport/)).toBeInTheDocument();
+  it('shows the recorded ID type by its shared label, never the raw slug', async () => {
+    // The value is the stored slug (`drivers_license`); the shared label map is
+    // the single display vocabulary, the same one the member and OST ID-type
+    // dropdowns render. Deriving a label from the slug is what produced
+    // "Drivers License" and "Tax Id" before.
+    await setup({ ...document('completed'), reviewedFields: { idType: 'drivers_license' } } as never);
+    expect(await screen.findByText(/ID type: Driver's License/)).toBeInTheDocument();
+    expect(screen.queryByText(/Drivers License/)).not.toBeInTheDocument();
+    cleanup();
+    await setup({ ...document('completed'), reviewedFields: { idType: 'passport' } } as never);
+    expect(await screen.findByText(/ID type: Passport/)).toBeInTheDocument();
     cleanup();
     await setup({ ...document('completed'), reviewedFields: null } as never);
     expect(

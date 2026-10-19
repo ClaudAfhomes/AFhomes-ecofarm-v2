@@ -376,14 +376,18 @@
   overflow-wrap: anywhere;
 }
 
-/* ID preview thumbnail: opens the fullscreen modal. */
+/* ID preview thumbnail: opens the fullscreen modal. Shrink-wraps its content
+   so the control measures the image, not a fixed box. */
 .thumbnailButton {
+  display: inline-block;
+  max-width: 100%;
   padding: 0;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-control);
   background: none;
   cursor: zoom-in;
   line-height: 0;
+  vertical-align: top;
 }
 
 .thumbnailButton:focus-visible {
@@ -399,17 +403,23 @@
   border-radius: var(--radius-control);
 }
 
-/* Large ID thumbnail: filename, size and zoom hint under the image. */
+/* Large ID thumbnail: shown at the image's OWN size.
+   The button wraps it, so its width and height are whatever the uploaded file
+   measures - no fixed box, no max-height crop, no `cover` trimming. `100%` is a
+   layout guard for an oversized photo only; it never upscales or distorts. */
 .thumbnailLarge {
-  width: min(100%, 20rem);
+  width: auto;
   height: auto;
-  max-height: 14rem;
-  object-fit: cover;
+  max-width: 100%;
   border-radius: var(--radius-control);
 }
 
+/* Filename, size and zoom hint under the image. `min-width: 0` lets a long
+   filename WRAP instead of stretching the button past the image beside it. */
 .thumbnailZoom {
   display: block;
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-caption);
   color: var(--color-text-secondary);

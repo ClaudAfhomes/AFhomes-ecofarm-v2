@@ -34,16 +34,46 @@ const upperAddressOpt = (value: string | undefined): string | undefined =>
  * Live title-casing for the application holder fields. `toTitleCase` trims and
  * collapses for storage; this keeps the typed whitespace intact so a trailing
  * space survives while the operator is still on the word.
+ *
+ * The first LETTER of each word is capitalised, not merely its first character:
+ * a word may legitimately open with punctuation or a house number ("(Unit 4-B",
+ * "#12 Mabini"), and upper-casing "(" or "4" would leave the real first letter
+ * lowercase.
  */
 export const titleCaseLive = (value: string): string =>
-  value.replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  value.replace(/\S+/g, (word) => {
+    const first = word.search(/\p{L}/u);
+    if (first < 0) return word;
+    return word.slice(0, first) + word[first]!.toUpperCase() + word.slice(first + 1).toLowerCase();
+  });
 
 /** Live filter for name fields: drop anything a person name can never contain. */
 export const filterHolderNameInput = (value: string): string =>
   titleCaseLive(value.replace(/[^\p{L}\p{M}'’.\- ]/gu, ''));
 
-/** Live title-casing for street lines (digits and punctuation stay). */
-export const filterHolderAddressInput = (value: string): string => titleCaseLive(value);
+/**
+ * Live filter for the holder's street lines.
+ *
+ * An address is NOT a name: house numbers, unit designators and the punctuation
+ * that carries them are the address. So digits and the punctuation a real
+ * Philippine address uses survive; what goes is everything else — control
+ * characters, emoji, angle brackets and quotes, none of which any address
+ * contains and all of which break the stored text downstream.
+ */
+export const filterHolderAddressInput = (value: string): string =>
+  titleCaseLive(value.replace(/[^\p{L}\p{M}\p{N} .,'’\-&#/()!+%:@]/gu, ''));
+
+/**
+ * Live filter for the free-text business fields (occupation, office address,
+ * industry, employed position).
+ *
+ * Same reasoning as the street line, plus the ampersand and plus sign real
+ * employers carry: "3M Philippines", "Sales & Marketing", "C++ Developer",
+ * "Level 3 Manager" are all legitimate answers. The rule is "letters, digits
+ * and the punctuation a business name uses" — not a person-name allowlist.
+ */
+export const filterBusinessTextInput = (value: string): string =>
+  value.replace(/[^\p{L}\p{M}\p{N} .,'’\-&#/()!+%:@]/gu, '');
 
 /** Live filter for TIN input: digits and dashes only. */
 export const filterTinInput = (value: string): string => value.replace(/[^\d-]/g, '').slice(0, 15);

@@ -7,7 +7,13 @@ import {
   localitySchema,
   provinceSchema,
 } from './address.js';
-import { applicationHolderSchema, createCustomerApplicationSchema } from './official-forms.js';
+import {
+  applicationHolderSchema,
+  createCustomerApplicationSchema,
+  CIVIL_STATUS_OPTIONS,
+  OLDEST_HOLDER_AGE,
+  SEX_OPTIONS,
+} from './official-forms.js';
 
 describe('geographicCodeSchema', () => {
   it('accepts a 10-digit PSGC code', () => {
@@ -280,6 +286,57 @@ describe('applicationHolderSchema geographic fields', () => {
     expect(
       applicationHolderSchema.safeParse({ ...holderBase, civilStatus: 'Single-ish' }).success,
     ).toBe(false);
+  });
+
+  it('refuses a sex and a civil status outside the recordable pick-lists', () => {
+    // The holder is recorded under one of the offered values, so a retired or
+    // invented choice is a mis-key. The stored columns are free text, so this
+    // rule lives here and nowhere else.
+    expect(SEX_OPTIONS).toEqual(['Male', 'Female']);
+    expect(CIVIL_STATUS_OPTIONS).toEqual(['Single', 'Married', 'Widowed', 'Separated']);
+    expect(applicationHolderSchema.safeParse({ ...holderBase, sex: 'Other' }).success).toBe(false);
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, civilStatus: 'Annulled' }).success,
+    ).toBe(false);
+    expect(applicationHolderSchema.safeParse({ ...holderBase, sex: 'Male' }).success).toBe(true);
+  });
+
+  it('takes citizenship as typed text rather than the workbook pick-list', () => {
+    // The workbook vocabulary covers three cases; a real applicant can hold any
+    // nationality, so the form must accept one the template never named.
+    expect(applicationHolderSchema.parse({ ...holderBase, citizenship: 'Filipino' }).citizenship).toBe(
+      'Filipino',
+    );
+    expect(
+      applicationHolderSchema.parse({ ...holderBase, citizenship: 'American' }).citizenship,
+    ).toBe('American');
+    expect(
+      applicationHolderSchema.parse({ ...holderBase, citizenship: "Cote d'Ivoire" }).citizenship,
+    ).toBe("Cote d'Ivoire");
+    // Blank stays "not provided" rather than becoming an empty citizenship.
+    expect(applicationHolderSchema.parse({ ...holderBase, citizenship: '' }).citizenship).toBeUndefined();
+    // Still a nationality, not free text: no digits, markup or angle brackets.
+    expect(applicationHolderSchema.safeParse({ ...holderBase, citizenship: 'A1' }).success).toBe(false);
+    expect(applicationHolderSchema.safeParse({ ...holderBase, citizenship: '<b>x</b>' }).success).toBe(
+      false,
+    );
+  });
+
+  it('refuses a holder born past working age', () => {
+    const year = new Date().getUTCFullYear();
+    // Scoped to the holder on purpose: members, OST applicants and the import
+    // keep the shared lifetime rule, and no stored record is rewritten.
+    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 30}-01-01` }).success).toBe(
+      true,
+    );
+    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 76}-01-01` }).success).toBe(
+      false,
+    );
+    // A birth date the lifetime rule already refuses stays refused.
+    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 130}-01-01` }).success).toBe(
+      false,
+    );
+    expect(OLDEST_HOLDER_AGE).toBe(75);
   });
 
   it('accepts only a real TIN shape', () => {
