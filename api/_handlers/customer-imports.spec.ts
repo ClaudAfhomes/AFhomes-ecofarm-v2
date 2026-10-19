@@ -26,7 +26,6 @@ vi.mock('../_lib/afhomes-access.js', () => ({
   authorizeAfHomes: async (
     req: { headers?: Record<string, string> },
     moduleKey?: string,
-    _action?: string,
   ) => {
     const token = req.headers?.authorization ?? '';
     const denied = (status: number, code: string) => ({
@@ -251,6 +250,7 @@ function install(
               },
               expectedSourceHash: 'a'.repeat(64),
               expectedTargetVersion: 'b'.repeat(64),
+              expectedTeamVersion: 'c'.repeat(64),
               claimCount: 0,
             };
             const row = (holder.db as FakeSupabase)
@@ -388,6 +388,7 @@ describe('company XLSX/XLSM preview', () => {
               requireMember: false,
               customerStatus: 'prospect',
               person: { phone: '09123456789', suffix: null },
+              continuationPreview: { expectedTeamVersion: 'c'.repeat(64) },
             },
           },
         ],

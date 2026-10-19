@@ -31,6 +31,7 @@ export const importClaimReconcileSchema = z.strictObject({
 });
 export const importContinuationRequestSchema = importReviewTokensSchema.extend({ requestId: uuid });
 export const customerImportContinuationSchema = importReviewTokensSchema.extend({
+  expectedTeamVersion: revision,
   rowId: uuid,
   sourceId: uuid.nullable(),
   customerId: uuid.nullable(),

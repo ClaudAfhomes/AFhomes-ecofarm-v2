@@ -135,6 +135,7 @@ it('reopens the canonical imported application after a reload instead of creatin
       claimCount: 1,
       expectedSourceHash: 'a'.repeat(64),
       expectedTargetVersion: 'b'.repeat(64),
+      expectedTeamVersion: 'c'.repeat(64),
       nextAction: null,
     },
     prefill: {
