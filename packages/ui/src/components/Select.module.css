@@ -63,6 +63,25 @@
   transition: color var(--transition-fast);
 }
 
+/* Loading replaces the chevron in place: the control keeps one indicator slot,
+   so showing a spinner never resizes or reflows the form around it. */
+.spinner {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--color-text-muted);
+}
+
+.wrap[data-loading='true'] .chevron {
+  display: none;
+}
+
+.wrap[data-loading='true'] .select {
+  padding-right: 36px;
+}
+
 .wrap:has(.select:hover:not(:disabled)) .chevron {
   color: var(--color-text-secondary);
 }

@@ -22,6 +22,8 @@ import {
   optionalContactNumberSchema,
   paymentSchemeLabel,
   governmentIdTypeSchema,
+  GOVERNMENT_ID_TYPE_LABELS,
+  type GovernmentIdType,
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
@@ -1433,6 +1435,7 @@ export function CustomerApplicationEditorPage() {
                       aria-label="Customer"
                       value={customerId}
                       disabled={saveAndSubmit.isPending}
+                      loading={customerOptions.isPending}
                       onChange={(e) => pickCustomer(e.target.value)}
                       options={[
                         { value: '', label: 'New Register' },
@@ -1443,11 +1446,6 @@ export function CustomerApplicationEditorPage() {
                       ]}
                     />
                   </label>
-                  {customerOptions.isPending ? (
-                    <div role="status" aria-label="Searching customers">
-                      <Skeleton style={{ height: 40 }} />
-                    </div>
-                  ) : null}
                   {customerId && linkedCustomer.isPending ? (
                     <p role="status" className={styles.pickedLine}>
                       Loading customer…
@@ -1535,8 +1533,11 @@ export function CustomerApplicationEditorPage() {
                     <p>Current ID: {serverCurrentDocument.originalFilename}</p>
                     <p>
                       ID type:{' '}
-                      {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                        'Missing: choose the type and upload again'}
+                      {serverCurrentDocument.reviewedFields?.idType
+                        ? (GOVERNMENT_ID_TYPE_LABELS[
+                            serverCurrentDocument.reviewedFields.idType as GovernmentIdType
+                          ] ?? serverCurrentDocument.reviewedFields.idType)
+                        : 'Missing: choose the type and upload again'}
                     </p>
                   </>
                 ) : null}
@@ -1577,9 +1578,7 @@ export function CustomerApplicationEditorPage() {
                       { value: '', label: 'Select ID type' },
                       ...governmentIdTypeSchema.options.map((value) => ({
                         value,
-                        label: value
-                          .replace(/_/g, ' ')
-                          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                        label: GOVERNMENT_ID_TYPE_LABELS[value],
                       })),
                     ]}
                   />

@@ -14,8 +14,9 @@ import { useQuery } from '@tanstack/react-query';
 import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
 import {
   birthDateSchema,
+  holderBirthDateSchema,
+  OLDEST_HOLDER_AGE,
   CIVIL_STATUS_OPTIONS,
-  CITIZENSHIP_OPTIONS,
   SEX_OPTIONS,
   SUFFIX_OPTIONS,
   tinNumberSchema,
@@ -24,6 +25,7 @@ import type { ZodType } from 'zod';
 import { Select } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import {
+  filterBusinessTextInput,
   filterHolderAddressInput,
   filterHolderNameInput,
   filterTinInput,
@@ -101,6 +103,9 @@ export const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' 
 
 /** Live filter for contact numbers: strip letters outright. */
 export const filterContactInput = (value: string): string => value.replace(/\p{L}/gu, '');
+
+/** One message for every way a holder birth date can be wrong. */
+const BIRTH_DATE_MESSAGE = `Enter a real past birth date, and an age of ${OLDEST_HOLDER_AGE} or less.`;
 
 /**
  * Reservation-holder live filter, mirroring the reservation server rules.
@@ -228,11 +233,34 @@ function SelectField({
   );
 }
 
-/** `Not specified` plus the fixed options as both value and label. */
-const choiceOptions = (values: readonly string[]) => [
-  { value: '', label: 'Not specified' },
+/**
+ * The pick-list options plus the honest empty choice.
+ *
+ * `emptyLabel` is per-field because the wording is a domain word, not a
+ * generic: a holder with no suffix has NONE, which is not the same statement
+ * as a record where the field was never filled in.
+ */
+const choiceOptions = (values: readonly string[], emptyLabel = 'Not specified') => [
+  { value: '', label: emptyLabel },
   ...values.map((value) => ({ value, label: value })),
 ];
+
+/**
+ * A stored value that is no longer offered, kept visible.
+ *
+ * A `<select>` whose `value` matches no `<option>` silently DISPLAYS the first
+ * option while still holding the old value, so the form would look like
+ * "None" and submit something else. Re-surfacing the retired value keeps the
+ * record honest: the operator sees what is actually stored and changes it
+ * deliberately. The contract still refuses it on write, so it cannot persist.
+ */
+const withStoredValue = (
+  options: { value: string; label: string }[],
+  stored: string | undefined,
+) =>
+  stored && !options.some((option) => option.value === stored)
+    ? [...options, { value: stored, label: `${stored} (retired)` }]
+    : options;
 
 export function DateField({
   label,
@@ -249,16 +277,15 @@ export function DateField({
   const [touched, setTouched] = useState(false);
   const todayValue = new Date().toISOString().slice(0, 10);
   const empty = touched && required && value === '';
-  const error =
-    empty || (touched && (required || value !== '') && !birthDateSchema.safeParse(value).success);
+  const invalid = touched && (required || value !== '') && !holderBirthDateSchema.safeParse(value).success;
   return (
     <label className={styles.filterLabel} htmlFor={id}>
       <span>{label}</span>
       <input
         id={id}
         type="date"
-        aria-invalid={error || undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? `${id}-error` : undefined}
         value={value}
         max={todayValue}
         required={required}
@@ -268,16 +295,26 @@ export function DateField({
           onChange(event.target.value);
         }}
       />
-      {error ? (
+      {invalid ? (
         <small id={`${id}-error`} role="alert">
-          {empty
-            ? 'This field cannot be left empty.'
-            : 'Enter a valid past birth date in YYYY-MM-DD format.'}
+          {empty ? 'This field cannot be left empty.' : BIRTH_DATE_MESSAGE}
         </small>
       ) : null}
     </label>
   );
 }
+
+/**
+ * Live filter for a free-text business field.
+ *
+ * Keeps whatever casing convention the field already used (`normalizeLiveHumanField`
+ * is the shared rule) and only removes characters no business name contains, so
+ * this changes what may be typed - never how an existing field renders.
+ */
+const businessText =
+  (key: string) =>
+  (value: string): string =>
+    filterBusinessTextInput(normalizeLiveHumanField(key, value));
 
 export function HolderFields({
   title,
@@ -320,7 +357,7 @@ export function HolderFields({
           label="Suffix"
           value={value.suffix ?? ''}
           onChange={(v) => set('suffix', v)}
-          options={choiceOptions(SUFFIX_OPTIONS)}
+          options={choiceOptions(SUFFIX_OPTIONS, 'None')}
         />
         <DateField
           label="Birth date"
@@ -332,19 +369,25 @@ export function HolderFields({
           label="Sex"
           value={value.sex ?? ''}
           onChange={(v) => set('sex', v)}
-          options={choiceOptions(SEX_OPTIONS)}
+          options={withStoredValue(choiceOptions(SEX_OPTIONS), value.sex)}
         />
-        <SelectField
+        {/*
+          Typed, not chosen: the closed citizenship set covers the workbook
+          template, not the people who apply. Validated with the same
+          nationality-name rule the contract enforces.
+        */}
+        <Field
           label="Citizenship"
           value={value.citizenship ?? ''}
+          suggestName
+          normalize={filterHolderNameInput}
           onChange={(v) => set('citizenship', v)}
-          options={choiceOptions(CITIZENSHIP_OPTIONS)}
         />
         <SelectField
           label="Civil status"
           value={value.civilStatus ?? ''}
           onChange={(v) => set('civilStatus', v)}
-          options={choiceOptions(CIVIL_STATUS_OPTIONS)}
+          options={withStoredValue(choiceOptions(CIVIL_STATUS_OPTIONS), value.civilStatus)}
         />
         <Field
           label="Permanent address line 1"
@@ -393,9 +436,7 @@ export function HolderFields({
           />
           {value.cityMunicipalityCode && !value.postalCode ? (
             <small>No published code. Leave blank.</small>
-          ) : (
-            <small>Fills from the city selected.</small>
-          )}
+          ) : null}
         </label>
         <Field
           label="Landline"
@@ -430,25 +471,25 @@ export function HolderFields({
         <Field
           label="Occupation / business"
           value={value.occupationBusinessName ?? ''}
-          normalize={(v) => normalizeLiveHumanField('occupationBusinessName', v)}
+          normalize={businessText('occupationBusinessName')}
           onChange={(v) => set('occupationBusinessName', v)}
         />
         <Field
           label="Office / business address"
           value={value.officeBusinessAddress ?? ''}
-          normalize={(v) => normalizeLiveHumanField('officeBusinessAddress', v)}
+          normalize={businessText('officeBusinessAddress')}
           onChange={(v) => set('officeBusinessAddress', v)}
         />
         <Field
           label="Business / industry"
           value={value.businessIndustry ?? ''}
-          normalize={(v) => normalizeLiveHumanField('businessIndustry', v)}
+          normalize={businessText('businessIndustry')}
           onChange={(v) => set('businessIndustry', v)}
         />
         <Field
           label="Employed position"
           value={value.employedPosition ?? ''}
-          normalize={(v) => normalizeLiveHumanField('employedPosition', v)}
+          normalize={businessText('employedPosition')}
           onChange={(v) => set('employedPosition', v)}
         />
         <Field
