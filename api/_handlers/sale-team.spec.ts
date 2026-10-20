@@ -19,6 +19,7 @@ const record = {
   status: 'accredited',
   startsOn: '2026-01-01',
   expiresOn: '2027-12-31',
+  photoUrl: null,
 };
 /** What the resolver answers for a number a transfer retired. */
 const historicalRecord = {
@@ -29,6 +30,7 @@ const historicalRecord = {
   startsOn: '2026-01-01',
   expiresOn: '2027-12-31',
   successorAaNumber: 'AAO26110001',
+  photoUrl: null,
 };
 /**
  * The ordinary Phase 2 dataset plus the `network.members` module row. A super

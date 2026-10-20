@@ -466,7 +466,7 @@ export function CustomerDetailPage() {
             'None'
           ),
         ],
-        ['VIP tier', <TierBadge tier={record.tier} />],
+        ['VIP tier', <TierBadge tier={record.tier ?? record.statedVipPackage} />],
         [
           'Valid until',
           record.membershipExpiresAt ? formatDate(record.membershipExpiresAt) : 'Not applicable',
@@ -503,7 +503,7 @@ export function CustomerDetailPage() {
                 <StatusChip label={humanizeCode(record.status)} />
               </DetailField>
               <DetailField label="Tier:">
-                <TierBadge tier={record.tier} />
+                <TierBadge tier={record.tier ?? record.statedVipPackage} />
               </DetailField>
               <DetailField label="Category:">
                 {record.derivedCategory
@@ -594,8 +594,8 @@ export function CustomerDetailPage() {
       ) : null}
       {tab === 'sales' ? (
         salesHidden ? null : (
-          <section aria-label="Sales and payments" className={styles.panel}>
-            {sales.isPending ? (
+          <section aria-label="Sales and payments" className={styles.panel} aria-busy={sales.isFetching}>
+            {sales.isFetching ? (
               <div
                 style={{ display: 'grid', gap: 'var(--space-3)' }}
                 role="status"
@@ -611,14 +611,14 @@ export function CustomerDetailPage() {
                 message={describeSalesLoadError(sales.error)}
                 onRetry={sales.refetch}
               />
-            ) : sales.data.length === 0 ? (
+            ) : (sales.data ?? []).length === 0 ? (
               <EmptyState
                 title="No card sales yet."
                 description="A sale appears here once the purchase is finalised in Finance."
               />
             ) : (
               <div className={styles.saleStack}>
-                {sales.data.map((sale) => (
+                {(sales.data ?? []).map((sale) => (
                   <CustomerSaleCard key={sale.id} sale={sale} />
                 ))}
               </div>
@@ -731,9 +731,14 @@ function SettlementStrip({ sales, customer }: { sales: Sale[]; customer: Custome
  * show up twice and disagree with itself.
  */
 function CustomerSaleCard({ sale }: { sale: Sale }) {
+  // Payment history is hidden behind a collapsed <details> by default, so the
+  // ledger is only fetched when the user actually expands it. Scanning a
+  // customer with several sales no longer fires one payments request per sale.
+  const [open, setOpen] = useState(false);
   const payments = useQuery({
     queryKey: businessKeys.salePayments(sale.id),
     queryFn: () => getSalePayments(sale.id),
+    enabled: open,
     placeholderData: keepPreviousData,
   });
   return (
@@ -750,12 +755,16 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
           {sale.createdAt ? formatDateTime(sale.createdAt) : 'Not Recorded'}
         </DetailField>
       </DetailFieldGrid>
-      <details className={styles.history} name="sale-payment-history">
+      <details
+        className={styles.history}
+        name="sale-payment-history"
+        onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
         <summary>
           <span aria-hidden="true" className={styles.chevron} />
           View Payment History
         </summary>
-        {payments.isPending ? (
+        {!open ? null : payments.isFetching ? (
           <div
             style={{ display: 'grid', gap: 'var(--space-3)' }}
             role="status"
@@ -768,7 +777,7 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
         ) : payments.isError ? (
           <ErrorState error={payments.error} onRetry={payments.refetch} />
         ) : (
-          <SalePaymentList payments={payments.data} />
+          <SalePaymentList payments={payments.data ?? []} />
         )}
       </details>
     </DetailCard>

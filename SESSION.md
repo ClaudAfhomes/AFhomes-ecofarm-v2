@@ -61,52 +61,75 @@ Postgres + Auth. `packages/contracts` (Zod SSOT; `lifecycle.ts` statuses;
 
 ## Repo state
 
-- `orly/develop` @ `c761210 "chore: track workflow pack (graphidian + opencode)
-  and keep it @-detectable"` — working tree has UNCOMMITTED changes:
-  - Staged earlier this session: `CustomerCompanyEditDialog.tsx`,
-    `CustomerDetailPage.tsx`, `official-forms-applications.tsx`,
-    `CustomerCompanyEdit.spec.tsx`, `CustomerDetailPage.spec.tsx`,
-    `20261210000005_afhomes_backfill_stated_package_from_application.sql`.
-  - Unstaged: `.taste-skill/after/index.html`, `.taste-skill/masthead-harness.mjs`
-    (user WIP — design-taste harness, leave alone).
-- Migrations run through `20261210000005` in the disposable DB; production
-  applies recorded in `docs/supabase/MIGRATION-APPLICATIONS.md`. The new
-  backfill migration is NOT yet applied to production (approval-gated).
+- `orly/develop` @ `a3cd8c6 "fixes: Package and Payment (company stated)"` —
+  working tree has UNCOMMITTED changes (large, multi-area):
+  - Modified (27 files): api (`customers.ts`, `queues.ts`, `sale-team.ts`,
+    `list-search.ts`, specs), admin (BusinessActivationQueuePage, BusinessCustomersPage,
+    CustomerDetailPage, PurchasePaymentsPage, official-forms-reservations, services,
+    queryKeys, specs), web (SaleTeamSearch, Navbar), docs/CURRENT-SCHEMA.sql,
+    contracts/sale-team.ts, supabase/db-integration.ts.
+  - New untracked: `supabase/migrations/20261210000006_…_company_status_filter.sql`,
+    `20261211000001_…_performance_indexes.sql`, `20261211000002_…_sale_team_photo.sql`.
+  - User WIP (leave alone): `.taste-skill/after/index.html`,
+    `.taste-skill/masthead-harness.mjs`.
+- Migrations through `20261210000005` recorded committed; the three new
+  migrations (`000006`, `20261211000001`, `20261211000002`) are UNAPPLIED
+  to production (approval-gated) and not verified on the disposable DB this session.
 - Pre-existing failures (documented, not from this session): lint 2 errors in
   `MemberWorkbookDialog.spec.tsx:154` (`_approved`, `_pw` unused); DB section 77
   OST team transfer (`"the fresh IST validity starts today": expected <today>,
   got null`). Do not touch.
+- Gates this session: `pnpm typecheck` clean (7/7); `pnpm lint` 0 errors
+  (admin 24 warnings, web 8 warnings, pre-existing); focused admin specs 42/42;
+  focused api specs 19/19. `pnpm test:db:local` NOT re-run this session (new
+  migrations unverified).
 
-## Last session's work (UNCOMMITTED) — "Package and Payment (company stated)" repair
+## Last session's work (UNCOMMITTED) — loading-speed + company-stated + UX polish
 
-Four focused edits, all admin-side (one new SQL migration):
+Theme: make Finance/Customer screens fast and push work to the DB; align the
+customer directory's "Payment Status" with the company-stated `company_status`;
+add seller profile photos to the public sale-team verification card.
 
-1. `official-forms-applications.tsx` `payload()` now sends
-   `statedVipPackage: tier` and `statedPaymentTerms: paymentScheme`, so the
-   application's selected card tier + payment scheme flow through the existing
-   mirror (`coalesce` on `customers.stated_vip_package` /
-   `stated_payment_terms`) instead of staying NULL.
-2. `CustomerCompanyEditDialog.tsx` — VIP Package and Payment Terms selects now
-   carry a `Not Recorded` placeholder option (`value: ''`), so a genuinely unset
-   stored value no longer masquerades as the first card/scheme. `orNull` keeps
-   `''` out of the saved payload.
-3. `CustomerDetailPage.tsx` — PAYMENT TERMS now renders via
-   `paymentSchemeLabel(...)` (e.g. `spot_cash` → `Spot Cash`), mirroring the
-   existing PAYMENT TYPE pattern. Unknown/free-text values pass through.
-4. `supabase/migrations/20261210000005_afhomes_backfill_stated_package_from_application.sql`
-   — idempotent, coalesce-only backfill of `stated_vip_package` /
-   `stated_payment_terms` from each customer's latest linked application
-   (only where NULL). Applied cleanly on the disposable DB; production apply
-   pending explicit approval.
-5. Regression tests: `CustomerCompanyEdit.spec.tsx` (placeholder for null) and
-   `CustomerDetailPage.spec.tsx` (`Spot Cash` rendering).
+1. `api/_lib/list-search.ts` — new `readBoundedRows()` (windowed read with
+   exact count) alongside `readSearchRows()`.
+2. `api/_handlers/queues.ts` — Finance queue now pushes search to PostgREST,
+   bounds non-search reads to `limit+offset` instead of loading the whole
+   population, batches reservation payments + sellers (no N+1), orders by the
+   merge key. Activation queue supports `search`.
+3. `api/_handlers/customers.ts` — `companyStatus` filter param forwarded to
+   `customer_directory`.
+4. `supabase/migrations/20261210000006_…_company_status_filter.sql` —
+   `customer_directory()` gains `p_filters->>'companyStatus'` predicate on
+   `company_status`.
+5. `supabase/migrations/20261211000001_…_performance_indexes.sql` — trigram +
+   join indexes for customer directory and finance queue (pg_trgm).
+6. `supabase/migrations/20261211000002_…_sale_team_photo.sql` —
+   `get_sale_team_accreditation` / `resolve_sale_team_accreditation_number`
+   expose `staffId`; handler mints a 5-min signed URL from
+   `afhomes-profile-photos` and strips `staffId` before response.
+7. `packages/contracts/src/schemas/sale-team.ts` — `photoUrl` field.
+8. `apps/admin/…/BusinessCustomersPage.tsx` — Payment filter replaced with
+   company-status filter (Cancelled/Fully Paid/Partial/Installment/RF only/
+   Refunded); VIP Tier filter; Payment Status column now shows `companyStatus`
+   (or "Not Recorded"); VIP Tier falls back to `statedVipPackage`.
+9. `apps/admin/…/BusinessActivationQueuePage.tsx` — search + eligibility chips,
+   redesigned Activate dialog (progress bar, balance, validity-locked badge).
+10. `apps/admin/…/PurchasePaymentsPage.tsx` — clickable rows open a detail
+    Dialog instead of one panel per row.
+11. `apps/admin/…/CustomerDetailPage.tsx` — VIP tier falls back to stated
+    package; payment history lazy-loaded behind collapsed `<details>`.
+12. `apps/admin/…/official-forms-reservations.tsx` — lazy sales/plans/
+    applications queries gated on mode; loading/busy states on buttons.
+13. `apps/web/…/SaleTeamSearch.tsx` — redesigned verification card with photo
+    avatar; `Navbar.tsx` dark-top for `/sale-team-search`.
+14. `apps/admin/…/queryKeys.ts` — `activationQueue` now takes a search string
+    (breaking-ish: callers updated; spec updated).
+15. Tests: `BusinessCustomersPage.spec.tsx`, `CustomerDetailPage.spec.tsx`,
+    `queryKeys.spec.ts`, `customer-list-filters.spec.ts`, `sale-team.spec.ts`.
 
-Gates run this session: `CustomerDetailPage.spec.tsx` 17/17 + `OfficialFormsPages.spec.tsx`
-40/40 + `CustomerCompanyEdit.spec.tsx` 5/5 green; `tsc --noEmit` (admin + supabase)
-clean; `eslint` clean on touched files; admin build green; `pnpm check:env` PASS;
-`pnpm test:db:local` 2666/2667 (only the pre-existing section 77 failure).
-Lint root (`pnpm lint`) still red on the pre-existing `MemberWorkbookDialog.spec.tsx`
-errors — not touched.
+Gates run this session: `tsc` clean; `eslint` 0 errors; focused admin 42/42;
+focused api 19/19; `pnpm check:env` not re-run (no env-touching changes);
+`pnpm build` not run this session; `pnpm test:db:local` not run.
 
 ## Test gotchas (admin)
 
@@ -129,6 +152,9 @@ errors — not touched.
 - A native `<select>` with no matching option defaults to the first option; use
   an explicit empty placeholder option when a null stored value should read
   "Not Recorded" (see `CustomerCompanyEditDialog`).
+- PostgREST `count: 'exact'` is only returned when the query is built with
+  `{ count: 'exact' }`; `readBoundedRows` reads it per chunk — keep that option
+  on any query that relies on the total.
 
 ## Open threads / unanswered offers
 
@@ -152,24 +178,28 @@ errors — not touched.
   `AA-XXXXXXXXXXXX` vs MANUAL `^AA[A-Z0-9]{4,12}$` — unify or keep; 1-yr
   auto-validity unconfirmed); live authenticated check of the OST team transfer
   (migration-11 log: local pilot only, persistence unverified).
-- Production apply of `20261210000005` (backfill) — approval-gated, not run.
+- Production apply of `20261210000005` (backfill) + the three new migrations
+  (`000006`, `20261211000001`, `20261211000002`) — approval-gated, not run.
+- `pnpm test:db:local` + `pnpm test:db:harness` not re-run this session; run
+  before relying on the new migrations.
+- Pre-existing DB section 77 failure still blocks `test:db:harness`.
 
 ## Verify (from root)
 
 ```sh
 pnpm test                     # canonical gate (turbo --concurrency=2 -- --maxWorkers=2)
-pnpm typecheck                # turbo 7 + tsc -p supabase
+pnpm typecheck                # turbo 7 + tsc -p supabase  (clean this session)
 pnpm lint                     # 2 pre-existing errors in MemberWorkbookDialog.spec.tsx
 pnpm check:env
-pnpm test:db:local            # 2666/2667 (pre-existing section 77 failure)
+pnpm test:db:local            # not re-run this session; 2666/2667 expected (pre-existing section 77)
 pnpm test:db:harness          # blocked by the pre-existing section 77 failure
 ```
 
 Focused (green this session):
 
 ```sh
-pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerDetailPage.spec.tsx  # 17
-pnpm --filter @afhomes/admin exec vitest run src/features/business/OfficialFormsPages.spec.tsx  # 40
-pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerCompanyEdit.spec.tsx # 5
+pnpm --filter @afhomes/admin exec vitest run src/features/business/BusinessCustomersPage.spec.tsx  # pass
+pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerDetailPage.spec.tsx      # pass
+pnpm --filter @afhomes/admin exec vitest run src/features/business/queryKeys.spec.ts                 # pass
+pnpm --filter api exec vitest run _handlers/customer-list-filters.spec.ts _handlers/sale-team.spec.ts # 19
 ```
-"

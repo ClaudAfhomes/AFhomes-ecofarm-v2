@@ -25,7 +25,7 @@ const reservationPaymentsKey = (reservationId: string) =>
 export const businessKeys = {
   all: key('business'),
   queue: key('business', 'queue'),
-  activationQueue: key('business', 'queue', 'activation'),
+  activationQueue: (search: string = '') => key('business', 'queue', 'activation', search),
   financeQueue: (settled: string) => key('business', 'queue', 'finance', settled),
   saleSummary: saleSummaryKey,
   saleSummaryScope: key('business', 'sale-summary'),

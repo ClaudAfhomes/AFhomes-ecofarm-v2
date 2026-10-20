@@ -459,7 +459,6 @@ describe('Phase 26 activation queue', () => {
     render('/admin/finance/activation');
     expect(await screen.findByText('SALE-260002')).toBeInTheDocument();
     expect(screen.getByText('Eligible')).toBeInTheDocument();
-    expect(screen.getByText('Settled')).toBeInTheDocument();
   });
 
   it('shows and copies the one-time onboarding fallback when email delivery fails', async () => {

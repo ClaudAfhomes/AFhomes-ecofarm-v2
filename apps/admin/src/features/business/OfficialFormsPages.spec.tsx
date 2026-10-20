@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+import type { SessionUser } from '../../lib/session';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import {
   customerSchema,
@@ -33,7 +34,7 @@ import {
   putUploadBytes,
   requestUploadGrant,
 } from '../documents/services';
-import { getImportRowIntake } from './import-workflow-services';
+import { getImportContinuations, getImportRowIntake } from './import-workflow-services';
 vi.mock('./import-workflow-services', () => ({
   getImportRowIntake: vi.fn(),
   getImportContinuations: vi.fn(async () => []),
@@ -211,6 +212,16 @@ const agreement = {
 
 describe('CustomerApplicationsPage list states', () => {
   const pageOf = (rows: unknown[], total: number) => ({ data: rows, total }) as never;
+  const superAdmin: SessionUser = {
+    id: 'u-imports',
+    name: 'Import Admin',
+    email: 'imports@example.test',
+    roleId: 'r-imports',
+    roleSlug: 'super_admin',
+    roleName: 'Super Admin',
+    status: 'active',
+    afHomesPermissions: [],
+  };
 
   it('shows loading - never a phantom empty state - on first load', () => {
     vi.mocked(getCustomerApplicationsPage).mockReturnValue(new Promise(() => {}));
@@ -285,6 +296,46 @@ describe('CustomerApplicationsPage list states', () => {
         offset: 10,
       }),
     );
+  });
+
+  it('switches to imported purchases without reloading the applications queue', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    vi.mocked(getImportContinuations).mockResolvedValue([]);
+    renderWithProviders(<CustomerApplicationsPage />, {
+      user: superAdmin,
+      route: '/admin/customers/applications',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Applications' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    const importsTab = screen.getByRole('link', { name: 'Imported purchases' });
+    expect(importsTab).toHaveAttribute('href', '/admin/customers/applications?tab=imports');
+    vi.mocked(getCustomerApplicationsPage).mockClear();
+    await user.click(importsTab);
+    expect(
+      await screen.findByRole('heading', { name: 'Imported purchases' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('No imported purchases')).toBeInTheDocument();
+    expect(getImportContinuations).toHaveBeenCalledWith(undefined, 0);
+    expect(getCustomerApplicationsPage).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Imported purchases' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('falls back to applications when imports are not authorized', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    renderWithProviders(<CustomerApplicationsPage />, {
+      route: '/admin/customers/applications?tab=imports',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(getImportContinuations).not.toHaveBeenCalled();
   });
 });
 

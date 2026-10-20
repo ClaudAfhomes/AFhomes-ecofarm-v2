@@ -17,6 +17,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
 import { getImportRowIntake } from './import-workflow-services';
 import { ImportContinuationPanel } from './ImportContinuationPanel';
+import { canViewImportContinuations } from './import-continuation-access';
 import {
   createCustomerApplicationSchema,
   canTransitionCustomerApplication,
@@ -119,6 +120,11 @@ export function CustomerApplicationsPage() {
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
     ) === true;
+  const canSeeImportedPurchases = canViewImportContinuations(user);
+  // The tab is URL state so the queue is shareable and the browser back
+  // button works. An unauthorized imports link falls back to applications.
+  const activeTab: 'applications' | 'imports' =
+    urlParams.get('tab') === 'imports' && canSeeImportedPurchases ? 'imports' : 'applications';
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
@@ -148,6 +154,9 @@ export function CustomerApplicationsPage() {
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
       }),
+    // The applications queue is not the active tab's concern. Switching back
+    // re-enables it and fetches the current page.
+    enabled: activeTab === 'applications',
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
@@ -163,42 +172,16 @@ export function CustomerApplicationsPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  // First load skeletonizes the whole page - header, filters, and table - so
-  // no static content flashes before the data it describes. Refetches keep the
-  // previous list visible and never reach this branch.
-  if (query.isPending)
-    return (
-      <section>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading applications"
-        >
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <Skeleton style={{ height: 32, maxWidth: 280 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
-            <Skeleton style={{ height: 40, width: 180 }} />
-            <Skeleton style={{ height: 40, width: 140 }} />
-            <Skeleton style={{ height: 40, width: 140 }} />
-          </div>
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-          </div>
-        </div>
-      </section>
-    );
+  const tabHref = (tab: 'applications' | 'imports') => {
+    const next = new URLSearchParams(urlParams);
+    next.set('tab', tab);
+    return `?${next.toString()}`;
+  };
   return (
     <section className={styles.listSection}>
       <PageHeader
         title="Customer Applications"
-        description="Applications still needing application work."
+        description="Applications and imported purchases."
         actions={
           <>
             {canSeeImportExport ? (
@@ -215,145 +198,190 @@ export function CustomerApplicationsPage() {
           </>
         }
       />
-      <ImportContinuationPanel />
-      <FilterBar
-        filtersToggleLabel="Expand Filters"
-        search={
-          <SearchField
-            label="Search applications"
-            placeholder="Application number"
-            value={search}
-            onChange={setSearch}
-            busy={query.isPending}
-          />
-        }
-        filters={
-          <>
-            <label className={styles.filterLabel}>
-              Queue
-              <Select
-                aria-label="Queue"
-                value={applicationWorkOnly ? 'application_work' : 'all'}
-                onChange={(e) => {
-                  setApplicationWorkOnly(e.target.value === 'application_work');
-                  setPage(0);
-                }}
-                options={[
-                  { value: 'application_work', label: 'Needs application work' },
-                  { value: 'all', label: 'Include progressed' },
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Status
-              <Select
-                aria-label="Status"
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(0);
-                }}
-                options={[
-                  { value: '', label: 'All' },
-                  ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
-                    value: s,
-                    label: s[0]!.toUpperCase() + s.slice(1),
-                  })),
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Tier
-              <Select
-                aria-label="Tier"
-                value={tier}
-                onChange={(e) => {
-                  setTier(e.target.value);
-                  setPage(0);
-                }}
-                options={[
-                  { value: '', label: 'All' },
-                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
-                ]}
-              />
-            </label>
-          </>
-        }
-      />
-      {query.isError ? (
-        <ErrorState
-          error={query.error}
-          title="Applications could not be loaded"
-          onRetry={() => void query.refetch()}
-        />
-      ) : rows.length ? (
+      {canSeeImportedPurchases ? (
+        <nav className={styles.tabs} aria-label="Customer application views">
+          <Link
+            to={tabHref('applications')}
+            className={
+              activeTab === 'applications' ? `${styles.tab} ${styles.tabCurrent}` : styles.tab
+            }
+            aria-current={activeTab === 'applications' ? 'page' : undefined}
+          >
+            Applications
+          </Link>
+          <Link
+            to={tabHref('imports')}
+            className={activeTab === 'imports' ? `${styles.tab} ${styles.tabCurrent}` : styles.tab}
+            aria-current={activeTab === 'imports' ? 'page' : undefined}
+          >
+            Imported purchases
+          </Link>
+        </nav>
+      ) : null}
+      {activeTab === 'imports' ? (
+        <ImportContinuationPanel variant="page" />
+      ) : query.isPending ? (
         <div
-          role="region"
-          aria-label="Customer application records"
-          tabIndex={0}
-          className={`table-scroll ${styles.tableWrap}`}
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading applications"
         >
-          <table>
-            <thead>
-              <tr>
-                <th>Application</th>
-                <th>Applicant</th>
-                <th>Tier</th>
-                <th>Seller</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((app) => (
-                <tr
-                  key={app.id}
-                  tabIndex={0}
-                  role="link"
-                  aria-label={`Review application ${app.applicationNumber}`}
-                  onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ')
-                      navigate(`/admin/customers/applications/${app.id}`);
-                  }}
-                  className={styles.clickable}
-                >
-                  <td data-label="Application">
-                    <span className={styles.appRef}>
-                      <span className={styles.appRefDot} aria-hidden="true" />
-                      {app.applicationNumber}
-                    </span>
-                  </td>
-                  <td data-label="Applicant">{app.applicantName ?? '—'}</td>
-                  <td data-label="Tier">{app.tier}</td>
-                  <td data-label="Seller">{app.sellerName ?? '—'}</td>
-                  <td data-label="Status">
-                    <StatusChip
-                      label={app.status}
-                      tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 180 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
         </div>
       ) : (
-        <EmptyState
-          title="No customer applications"
-          description="Create the first official application draft."
-        />
-      )}
-
-      {total > 0 ? (
-        <div className={styles.pagination}>
-          <Pagination
-            page={safePage + 1}
-            pageCount={pageCount}
-            onChange={(next) => setPage(next - 1)}
-            label="Customer applications pagination"
+        <>
+          <FilterBar
+            filtersToggleLabel="Expand Filters"
+            search={
+              <SearchField
+                label="Search applications"
+                placeholder="Application number"
+                value={search}
+                onChange={setSearch}
+                busy={query.isPending}
+              />
+            }
+            filters={
+              <>
+                <label className={styles.filterLabel}>
+                  Queue
+                  <Select
+                    aria-label="Queue"
+                    value={applicationWorkOnly ? 'application_work' : 'all'}
+                    onChange={(e) => {
+                      setApplicationWorkOnly(e.target.value === 'application_work');
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: 'application_work', label: 'Needs application work' },
+                      { value: 'all', label: 'Include progressed' },
+                    ]}
+                  />
+                </label>
+                <label className={styles.filterLabel}>
+                  Status
+                  <Select
+                    aria-label="Status"
+                    value={status}
+                    onChange={(e) => {
+                      setStatus(e.target.value);
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: '', label: 'All' },
+                      ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
+                        value: s,
+                        label: s[0]!.toUpperCase() + s.slice(1),
+                      })),
+                    ]}
+                  />
+                </label>
+                <label className={styles.filterLabel}>
+                  Tier
+                  <Select
+                    aria-label="Tier"
+                    value={tier}
+                    onChange={(e) => {
+                      setTier(e.target.value);
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: '', label: 'All' },
+                      ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                    ]}
+                  />
+                </label>
+              </>
+            }
           />
-        </div>
-      ) : null}
+          {query.isError ? (
+            <ErrorState
+              error={query.error}
+              title="Applications could not be loaded"
+              onRetry={() => void query.refetch()}
+            />
+          ) : rows.length ? (
+            <div
+              role="region"
+              aria-label="Customer application records"
+              tabIndex={0}
+              className={`table-scroll ${styles.tableWrap}`}
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>Application</th>
+                    <th>Applicant</th>
+                    <th>Tier</th>
+                    <th>Seller</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((app) => (
+                    <tr
+                      key={app.id}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Review application ${app.applicationNumber}`}
+                      onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ')
+                          navigate(`/admin/customers/applications/${app.id}`);
+                      }}
+                      className={styles.clickable}
+                    >
+                      <td data-label="Application">
+                        <span className={styles.appRef}>
+                          <span className={styles.appRefDot} aria-hidden="true" />
+                          {app.applicationNumber}
+                        </span>
+                      </td>
+                      <td data-label="Applicant">{app.applicantName ?? '—'}</td>
+                      <td data-label="Tier">{app.tier}</td>
+                      <td data-label="Seller">{app.sellerName ?? '—'}</td>
+                      <td data-label="Status">
+                        <StatusChip
+                          label={app.status}
+                          tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              title="No customer applications"
+              description="Create the first official application draft."
+            />
+          )}
+
+          {!query.isError && total > 0 ? (
+            <div className={styles.pagination}>
+              <Pagination
+                page={safePage + 1}
+                pageCount={pageCount}
+                onChange={(next) => setPage(next - 1)}
+                label="Customer applications pagination"
+              />
+            </div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
