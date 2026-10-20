@@ -1,6 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Route, Routes, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList } from '../../lib/api/client';
