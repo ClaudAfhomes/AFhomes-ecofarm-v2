@@ -9,7 +9,7 @@
  */
 
 import { downloadFile as saveFile } from '../../lib/download';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -54,7 +54,6 @@ import {
   getCardProducts,
   getCustomerApplication,
   getCustomerApplications,
-  getOfficialFormTemplate,
   getPurchaseTermsProposal,
   getReservationPayments,
   getReservationFinance,
@@ -65,7 +64,6 @@ import {
   getReservationAgreementsPage,
   getSaleSummary,
   getSales,
-  previewOfficialFormImport,
   reopenReservationAgreement,
   submitReservationAgreement,
   updateReservationAgreement,
@@ -77,12 +75,9 @@ import { humanizeApplicationIssues } from './official-forms-applications';
 
 import {
   today,
-  asBase64,
-  formatFileSize,
   fieldLabel,
   filterReservationFieldInput,
   VIP_TIER_FIELD_OPTIONS,
-  isVipTier,
   Field,
   QUEUE_PAGE_SIZE,
 } from './official-forms-fields';
@@ -467,10 +462,6 @@ export function ReservationAgreementEditorPage() {
     tinNumber: string;
   };
   const [secondary, setSecondary] = useState<SecondaryState | null>(null);
-  /** Chosen workbook for the IST bulk import, and whether it is still being read. */
-  const [istFile, setIstFile] = useState<{ name: string; size: number } | null>(null);
-  const [istReading, setIstReading] = useState(false);
-  const istImportLabelId = useId();
   const [schedule, setSchedule] = useState({
     particular: 'Monthly amortization',
     amount: '0.00',
@@ -707,51 +698,6 @@ export function ReservationAgreementEditorPage() {
     }));
     setMessage('Prefilled from sale. Verify before saving.');
   };
-  const importIstFile = async (file: File) => {
-    const preview = await previewOfficialFormImport('reservation_agreement', await asBase64(file));
-    if (preview.errors.length) {
-      setMessage(preview.errors.map((e) => `${e.field}: ${e.message}`).join('; '));
-      return;
-    }
-    const f = preview.fields;
-    if (f.sale_id) setSaleId(f.sale_id);
-    if (f.customer_application_id) setCustomerApplicationId(f.customer_application_id);
-    // A workbook cell can hold anything. Only a real tier may reach the closed
-    // dropdown: setting an unknown value would leave the state out of step with
-    // the displayed option, and the server would reject it anyway.
-    const importedTier = (f.vip_tier ?? '').toUpperCase();
-    if (isVipTier(importedTier)) setVipTier(importedTier);
-    if (f.reservation_date)
-      setDates((d) => ({ ...d, reservationDate: f.reservation_date ?? d.reservationDate }));
-    if (f.agreement_date)
-      setDates((d) => ({ ...d, agreementDate: f.agreement_date ?? d.agreementDate }));
-    if (f.revision_number !== undefined)
-      setDates((d) => ({ ...d, revisionNumber: f.revision_number ?? d.revisionNumber }));
-    setPrimary((prev) => ({
-      ...prev,
-      name: f.primary_name ?? prev.name,
-      address: f.primary_address ?? prev.address,
-      contactNumber: f.primary_contact_number ?? prev.contactNumber,
-      email: f.primary_email ?? prev.email,
-      tinNumber: f.primary_tin ?? prev.tinNumber,
-    }));
-    if (f.secondary_enabled === 'true')
-      setSecondary((prev) => ({
-        holderType: 'SECONDARY' as const,
-        name: f.secondary_name ?? prev?.name ?? '',
-        address: f.secondary_address ?? prev?.address ?? '',
-        contactNumber: f.secondary_contact_number ?? prev?.contactNumber ?? '',
-        email: f.secondary_email ?? prev?.email ?? '',
-        tinNumber: f.secondary_tin ?? prev?.tinNumber ?? '',
-      }));
-    setSchedule((prev) => ({
-      particular: f.schedule_particular || prev.particular,
-      amount: f.schedule_amount || prev.amount,
-      paymentDate: f.schedule_payment_date || prev.paymentDate,
-      remarks: f.schedule_remarks || prev.remarks,
-    }));
-    setMessage('Imported candidates ready. Verify every field.');
-  };
   const editable = !existing.data || existing.data.status === 'draft';
   const salePlan = plans.data?.find((p) => p.id === summary.data?.saleId);
   return (
@@ -972,7 +918,7 @@ export function ReservationAgreementEditorPage() {
             {Object.entries(dates).map(([key, value]) => (
               <Field
                 key={key}
-                label={fieldLabel(key)}
+                label={key === 'revisionNumber' ? 'Reservation Number' : fieldLabel(key)}
                 value={value}
                 type={
                   key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
@@ -1066,53 +1012,6 @@ export function ReservationAgreementEditorPage() {
                 onChange={(v) => setSchedule({ ...schedule, [key]: v })}
               />
             ))}
-          </div>
-        </section>
-        <section className={styles.panel} aria-labelledby="reservation-import-heading">
-          <h2 id="reservation-import-heading" className={styles.panelTitle}>
-            Bulk import
-          </h2>
-          <p className={styles.panelNote}>Import workbook candidates. Verify every field.</p>
-          <div className={styles.importCard} data-selected={istFile ? 'true' : 'false'}>
-            <div className={styles.importHead}>
-              <span className={styles.importTitle} id={istImportLabelId}>
-                Import IST XLSX
-              </span>
-              <span className={styles.importHint}>
-                Choose official workbook. Verify imported values.
-              </span>
-            </div>
-            <div className={styles.importControls}>
-              <label className={styles.filePicker}>
-                <input
-                  className={styles.fileInput}
-                  type="file"
-                  accept=".xlsx"
-                  aria-labelledby={istImportLabelId}
-                  disabled={istReading}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    setIstFile({ name: file.name, size: file.size });
-                    setIstReading(true);
-                    void importIstFile(file).finally(() => setIstReading(false));
-                  }}
-                />
-              </label>
-              <Button
-                variant="secondary"
-                onClick={() => void getOfficialFormTemplate('ist').then(saveFile)}
-              >
-                Download import template
-              </Button>
-            </div>
-            <p className={styles.fileName} role="status">
-              {istFile
-                ? `${istFile.name} · ${formatFileSize(istFile.size)}${
-                    istReading ? ' · reading…' : ''
-                  }`
-                : 'No workbook chosen yet.'}
-            </p>
           </div>
         </section>
       </fieldset>
