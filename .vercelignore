@@ -17,6 +17,7 @@ api/_lib/testing/
 .vercel/
 
 # Not needed on the server
+workflow/
 supabase/
 supabase/.temp/
 docs/

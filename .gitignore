@@ -60,3 +60,7 @@ supabase/migrations/archive/
 # taste-skill measurement harness (screenshots, direction sheets, inspector reports)
 # Generated locally by the frontend-design skill; never commit.
 .taste-skill/
+
+# NOTE: `workflow/` is intentionally tracked (graphidian + opencode packs).
+# Do NOT add a `workflow/` ignore rule here — opencode's `@` file picker
+# surfaces tracked/non-ignored files, and ignoring it would hide the pack.
