@@ -376,20 +376,37 @@ export function ReservationAgreementEditorPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
+  const [saleId, setSaleId] = useState('');
+  const [customerApplicationId, setCustomerApplicationId] = useState(
+    () => searchParams.get('application') ?? '',
+  );
   const existing = useQuery({
     queryKey: reservationKeys.detail(id),
     queryFn: () => getReservationAgreement(id!),
     enabled: Boolean(id),
   });
-  const sales = useQuery({ queryKey: sharedScopes.sales, queryFn: () => getSales() });
-  const plans = useQuery({ queryKey: sharedScopes.cardProducts, queryFn: () => getCardProducts() });
-  const [saleId, setSaleId] = useState('');
-  const [customerApplicationId, setCustomerApplicationId] = useState(
-    () => searchParams.get('application') ?? '',
-  );
+  // Sales and card products are only needed in sale-origin mode (the agreement
+  // attaches to an existing card sale). In application-origin mode the
+  // reservation IS the first commercial document, so fetching them on mount is
+  // wasted work. Gate them accordingly; the shared cache keeps them warm for
+  // the sale-origin path.
+  const sales = useQuery({
+    queryKey: sharedScopes.sales,
+    queryFn: () => getSales(),
+    enabled: !customerApplicationId || Boolean(id),
+  });
+  const plans = useQuery({
+    queryKey: sharedScopes.cardProducts,
+    queryFn: () => getCardProducts(),
+    enabled: !customerApplicationId || Boolean(id),
+  });
+  // The application list is only needed to pick one when none has been fixed
+  // by the URL. In application-origin mode the application is already known, so
+  // the full list is never read.
   const applications = useQuery({
     queryKey: applicationKeys.reservationSource,
     queryFn: () => getCustomerApplications(),
+    enabled: !customerApplicationId,
   });
   const sourceApplication = useQuery({
     queryKey: applicationKeys.reservationSourceDetail(customerApplicationId),
@@ -894,6 +911,7 @@ export function ReservationAgreementEditorPage() {
                   <Select
                     aria-label="Card sale"
                     value={saleId}
+                    loading={sales.isPending}
                     onChange={(e) => setSaleId(e.target.value)}
                     options={[
                       { value: '', label: 'Select sale' },
@@ -916,6 +934,7 @@ export function ReservationAgreementEditorPage() {
               <Select
                 aria-label="Source Customer Application"
                 value={customerApplicationId}
+                loading={applications.isPending}
                 onChange={(e) => setCustomerApplicationId(e.target.value)}
                 options={[
                   { value: '', label: 'Choose a submitted or approved application' },
@@ -1233,9 +1252,9 @@ function ApplicationOriginAgreementPanel({
     await client.invalidateQueries({ queryKey: sharedScopes.reports });
   };
   const print = async (kind: PurchaseDocumentKind, label: string, sourceId = id) => {
-    setBusy(true);
     setError(null);
     try {
+      setBusy(true);
       downloadFile(await exportPurchaseDocument(sourceId, kind));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `${label} failed.`);
@@ -1244,9 +1263,9 @@ function ApplicationOriginAgreementPanel({
     }
   };
   const finalize = async () => {
-    setBusy(true);
     setError(null);
     try {
+      setBusy(true);
       await finalizeReservationPurchase(id, crypto.randomUUID());
       await afterMutation();
     } catch (caught) {
@@ -1304,6 +1323,7 @@ function ApplicationOriginAgreementPanel({
           variant="secondary"
           onClick={() => void print('reservation', 'Reservation')}
           disabled={busy}
+          loading={busy}
         >
           Print Reservation Agreement
         </Button>
@@ -1311,6 +1331,7 @@ function ApplicationOriginAgreementPanel({
           <Button
             onClick={() => void finalize()}
             disabled={!canHandlePayments || busy}
+            loading={busy}
             title={
               canHandlePayments
                 ? 'Creates exactly one card sale from the verified payments.'
@@ -1325,6 +1346,7 @@ function ApplicationOriginAgreementPanel({
             variant="secondary"
             onClick={() => setRecording(true)}
             disabled={busy || !canHandlePayments}
+            loading={busy}
           >
             Record Payment
           </Button>
@@ -1396,6 +1418,7 @@ function ApplicationOriginAgreementPanel({
                       size="sm"
                       variant="ghost"
                       disabled={busy}
+                      loading={busy}
                       onClick={() => void print('payment_recorded', 'Recorded receipt', payment.id)}
                     >
                       Print Recorded Receipt
@@ -1408,6 +1431,7 @@ function ApplicationOriginAgreementPanel({
                         size="sm"
                         variant="ghost"
                         disabled={busy}
+                        loading={busy}
                         onClick={() =>
                           void print('payment_verified', 'Verified receipt', payment.id)
                         }
@@ -1431,6 +1455,7 @@ function ApplicationOriginAgreementPanel({
             size="sm"
             variant="ghost"
             disabled={busy}
+            loading={busy}
             onClick={() => void print('purchase_finalized', 'Final purchase', agreement.saleId!)}
           >
             Print Final Purchase Record
@@ -1467,9 +1492,9 @@ function MembershipConfirmation({
   const [busy, setBusy] = useState(false);
   const activate = async () => {
     if (!saleId) return;
-    setBusy(true);
     setError(null);
     try {
+      setBusy(true);
       setResult(await activateSale(saleId));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Activation failed.');
@@ -1507,7 +1532,7 @@ function MembershipConfirmation({
         </>
       ) : (
         <div className={styles.actions}>
-          <Button onClick={() => void activate()} disabled={!canActivate || busy}>
+          <Button onClick={() => void activate()} disabled={!canActivate || busy} loading={busy}>
             Activate membership
           </Button>
         </div>

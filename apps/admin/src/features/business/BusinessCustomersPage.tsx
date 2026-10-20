@@ -18,15 +18,12 @@ import {
   TextField,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
-import { customerSellerOptionSchema } from '@afhomes/contracts';
 
-import { requestList } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
-import { SettlementBadge } from './SettlementBadge';
 import { TierBadge } from './TierBadge';
 import {
   anonymizeCustomer,
@@ -35,7 +32,7 @@ import {
   getCustomersPage,
   issueCustomerAccountActivation,
 } from './services';
-import { applicationKeys, businessKeys } from './queryKeys';
+import { businessKeys } from './queryKeys';
 import { CustomerApplicationsPage } from './official-forms-applications';
 
 /**
@@ -92,8 +89,8 @@ export function BusinessCustomersPage() {
   // every row, and the table shows no date to filter against.
   const [filters, setFilters] = useState({
     status: '',
-    payment: '',
-    seller: '',
+    companyStatus: '',
+    tier: '',
   });
   // Every filter change restarts at the first page.
   const patchFilters = (patch: Partial<typeof filters>) => {
@@ -125,10 +122,6 @@ export function BusinessCustomersPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  const sellers = useQuery({
-    queryKey: applicationKeys.sellerOptions,
-    queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
-  });
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
@@ -270,28 +263,34 @@ export function BusinessCustomersPage() {
               Payment
               <Select
                 aria-label="Payment status"
-                value={filters.payment}
-                onChange={(e) => patchFilters({ payment: e.target.value })}
+                value={filters.companyStatus}
+                onChange={(e) => patchFilters({ companyStatus: e.target.value })}
                 options={[
                   { value: '', label: 'All payments' },
-                  { value: 'no_payment', label: 'No payment' },
-                  { value: 'partially_paid', label: 'Partial payment' },
-                  { value: 'fully_paid', label: 'Fully paid' },
+                  { value: 'CANCELLED', label: 'Cancelled' },
+                  { value: 'FULLY PAID', label: 'Fully paid' },
+                  { value: 'PARTIAL', label: 'Partial' },
+                  { value: 'INSTALLMENT', label: 'Installment' },
+                  { value: 'RF ONLY', label: 'RF only' },
+                  { value: 'REFUNDED', label: 'Refunded' },
                 ]}
               />
             </label>
             <label className={styles.filterLabel}>
-              Seller
+              VIP Tier
               <Select
-                aria-label="Seller"
-                value={filters.seller}
-                onChange={(e) => patchFilters({ seller: e.target.value })}
+                aria-label="VIP Tier"
+                value={filters.tier}
+                onChange={(e) => patchFilters({ tier: e.target.value })}
                 options={[
-                  { value: '', label: 'All sellers' },
-                  ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
+                  { value: '', label: 'All tiers' },
+                  { value: 'GOLD', label: 'Gold' },
+                  { value: 'SILVER', label: 'Silver' },
+                  { value: 'BRONZE', label: 'Bronze' },
                 ]}
               />
             </label>
+
           </>
         }
       />
@@ -307,6 +306,7 @@ export function BusinessCustomersPage() {
         <div
           role="region"
           aria-label="Scrollable records"
+          aria-busy={customers.isFetching}
           tabIndex={0}
           className={`table-scroll ${styles.tableWrap}`}
         >
@@ -321,7 +321,17 @@ export function BusinessCustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((customer) => (
+              {customers.isFetching && !customers.isPending
+                ? Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`sk-${i}`} aria-hidden="true">
+                      <td><Skeleton style={{ height: 16, width: '60%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '70%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '50%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '60%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: 80 }} /></td>
+                    </tr>
+                  ))
+                : rows.map((customer) => (
                 <tr
                   key={customer.id}
                   tabIndex={0}
@@ -343,10 +353,14 @@ export function BusinessCustomersPage() {
                     </span>
                   </td>
                   <td data-label="Payment Status">
-                    <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
+                    {customer.companyStatus ? (
+                      <StatusChip label={customer.companyStatus} />
+                    ) : (
+                      'Not Recorded'
+                    )}
                   </td>
                   <td data-label="VIP Tier">
-                    <TierBadge tier={customer.tier} />
+                    <TierBadge tier={customer.tier ?? customer.statedVipPackage} />
                   </td>
                   <td data-label="Status">
                     <StatusChip label={customer.status} />

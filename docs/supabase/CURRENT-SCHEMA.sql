@@ -5,7 +5,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 110. Public table inventory: 60.
+-- Migration count: 120. Public table inventory: 60.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -140,6 +140,16 @@
 --   20261208000013_afhomes_member_workbook_jobs_schema.sql
 --   20261208000014_afhomes_ist_employee_identity_functions.sql
 --   20261208000015_afhomes_member_workbook_jobs_functions.sql
+--   20261209000001_afhomes_mirror_application_onto_customer.sql
+--   20261209000002_afhomes_mirror_every_application_path.sql
+--   20261210000001_afhomes_mirror_referral_names_on_customer.sql
+--   20261210000002_afhomes_mirror_government_id_on_review.sql
+--   20261210000003_afhomes_mirror_government_id_from_application.sql
+--   20261210000004_afhomes_drop_ost_ist_name.sql
+--   20261210000005_afhomes_backfill_stated_package_from_application.sql
+--   20261210000006_afhomes_customer_directory_company_status_filter.sql
+--   20261211000001_afhomes_performance_indexes.sql
+--   20261211000002_afhomes_sale_team_photo.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

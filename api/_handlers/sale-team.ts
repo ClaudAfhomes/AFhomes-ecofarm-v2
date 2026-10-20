@@ -94,9 +94,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'CONFLICT', 'Review the account and approved accreditation dates.', 409);
       throw result.error;
     }
+    // Resolve a short-lived signed URL for the seller's profile photo, if any.
+    // The RPC exposes `staffId` only so the service role can mint it; it is
+    // never returned to the caller. Failure (missing object, storage error) is
+    // non-fatal and degrades to a null photoUrl -> the UI shows the initial.
+    let photoUrl: string | null = null;
+    const rawRow = singleRpcRow(result.data);
+    const staffId = rawRow && typeof rawRow.staffId === 'string' ? rawRow.staffId : null;
+    if (staffId && typeof db.storage?.from === 'function') {
+      try {
+        const { data: signed } = await db.storage
+          .from('afhomes-profile-photos')
+          .createSignedUrl(`${staffId}/profile.jpg`, 300);
+        photoUrl = signed?.signedUrl ?? null;
+      } catch {
+        photoUrl = null;
+      }
+    }
+    const { staffId: _omit, ...cleanRow } = (rawRow ?? {}) as Record<string, unknown>;
+    const candidate = result.data === null ? null : { ...cleanRow, photoUrl };
     const parsed = (
       historical ? saleTeamHistoricalAccreditationSchema : saleTeamLookupSchema
-    ).safeParse(result.data);
+    ).safeParse(candidate);
     if (!parsed.success) throw new Error('Invalid accreditation response');
     if (
       path === 'search' &&

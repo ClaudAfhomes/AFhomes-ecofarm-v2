@@ -1470,6 +1470,7 @@ export function CustomerApplicationEditorPage() {
                   <Select
                     aria-label="VIP plan"
                     value={planId}
+                    loading={plans.isPending}
                     onChange={(e) => {
                       const plan = plans.data?.find((p) => p.id === e.target.value);
                       setPlanId(e.target.value);

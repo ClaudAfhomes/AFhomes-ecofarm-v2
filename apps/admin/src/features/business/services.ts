@@ -613,8 +613,12 @@ export const getFinanceQueue = (
   }));
 };
 
-export const getActivationQueue = (): Promise<FinanceQueueItem[]> =>
-  requestList('/queues/activation', financeQueueItemSchema);
+export const getActivationQueue = (search = ''): Promise<FinanceQueueItem[]> => {
+  const query = new URLSearchParams();
+  if (search) query.set('search', search);
+  const suffix = query.toString();
+  return requestList(`/queues/activation${suffix ? `?${suffix}` : ''}`, financeQueueItemSchema);
+};
 
 /* ------------------------------------------------------------------ */
 /* Application-origin collection and finalization                      */

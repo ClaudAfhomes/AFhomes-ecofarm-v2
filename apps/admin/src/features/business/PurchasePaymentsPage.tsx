@@ -75,6 +75,7 @@ import {
   listFinancePurchases,
   listReceipts,
   recordReceipt,
+  type PurchaseRow,
 } from './points-services';
 import { earningKeys } from './queryKeys';
 
@@ -105,6 +106,7 @@ export function PurchasePaymentsPage() {
   );
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
+  const [detailPurchase, setDetailPurchase] = useState<PurchaseRow | null>(null);
 
   const all = useMemo(() => purchases.data ?? [], [purchases.data]);
   // Headline counts from the loaded purchases.
@@ -266,11 +268,26 @@ export function PurchasePaymentsPage() {
                       <TableHeaderCell align="right">Verified</TableHeaderCell>
                       <TableHeaderCell>Status</TableHeaderCell>
                       <TableHeaderCell>Claim</TableHeaderCell>
+                      <TableHeaderCell>
+                        <span className="sr-only">Actions</span>
+                      </TableHeaderCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {rows.map((purchase) => (
-                      <TableRow key={purchase.id}>
+                      <TableRow
+                        key={purchase.id}
+                        onClick={() => setDetailPurchase(purchase)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDetailPurchase(purchase);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        className={styles.clickableRow}
+                      >
                         <TableCell label="Transaction">
                           <span className={styles.recordRef}>
                             <span className={styles.recordRefDot} aria-hidden="true" />
@@ -313,6 +330,18 @@ export function PurchasePaymentsPage() {
                         <TableCell label="Claim">
                           {purchase.claimStatus ? humanizeCode(purchase.claimStatus) : 'Not issued'}
                         </TableCell>
+                        <TableCell label="Actions">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDetailPurchase(purchase);
+                            }}
+                          >
+                            View details
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -327,20 +356,23 @@ export function PurchasePaymentsPage() {
               {rows.map((purchase) => (
                 <ServiceRefundPanel key={purchase.id} purchase={purchase} />
               ))}
-              {/* One receipt panel per sale, so a reviewer can accept or reject a
-                  specific receipt. */}
-              {rows.map((purchase) => (
-                <PurchasePaymentRow
-                  key={purchase.id}
-                  purchaseId={purchase.id}
-                  purchaseNumber={purchase.purchaseNumber}
-                  netAmount={purchase.netAmount}
-                />
-              ))}
             </section>
           )}
         </>
       )}
+      {detailPurchase ? (
+        <Dialog
+          open
+          onClose={() => setDetailPurchase(null)}
+          title={`Purchase details — ${detailPurchase.purchaseNumber}`}
+        >
+          <PurchasePaymentRow
+            purchaseId={detailPurchase.id}
+            purchaseNumber={detailPurchase.purchaseNumber}
+            netAmount={detailPurchase.netAmount}
+          />
+        </Dialog>
+      ) : null}
     </section>
   );
 }
