@@ -19,6 +19,260 @@
   }
 }
 
+/* In-page view tabs. Same segmented-pill grammar as the customer record tabs so
+   the two customer surfaces read as one product. Links keep router semantics;
+   only the presentation is button-like. */
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  background: transparent;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-subtle);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.tabCurrent {
+  color: var(--color-text-on-brand);
+  font-weight: 600;
+  background: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabCurrent:hover {
+  color: var(--color-text-on-brand);
+  background: var(--color-brand-primary-hover);
+  border-color: var(--color-brand-primary-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}
+
+/* Imported purchases tab: a page-level card grid. The card is deliberately a
+   record summary, not a second table: identity and stage lead, workbook figures
+   stay visibly separate from verified money, and the next action closes it. */
+.importsView {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.importsHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.importsTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.01em;
+}
+
+.importsDescription {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+.importsPageCount {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.purchaseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.purchaseCard {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.purchaseHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.purchaseIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.purchaseName {
+  margin: 0;
+  font-size: var(--text-body-l);
+  line-height: 1.3;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.purchaseReference {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.purchaseFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.purchaseFacts > div {
+  min-width: 0;
+}
+
+.purchaseFacts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+.purchaseFacts dd {
+  margin: 2px 0 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.purchasePayment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 18%, white);
+  border-radius: var(--radius-control);
+  background: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-body-s);
+}
+
+.purchasePaymentReview {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, white);
+  background: var(--color-accent-soft);
+  color: var(--color-warning-strong);
+}
+
+.purchasePaymentLead {
+  flex-basis: 100%;
+  font-weight: 700;
+}
+
+.purchaseNotice {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 7%, white);
+}
+
+.purchaseConflict {
+  border-left-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 7%, white);
+}
+
+.purchaseNoticeTitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.purchaseList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+.purchaseFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.purchasePaging {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 639px) {
+  .purchaseFacts {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .purchaseFooter {
+    justify-content: flex-start;
+  }
+}
+
 /*
  * Queue summary: two figures in ONE container split by 1px dividers, the same
  * treatment the customer-import Job history uses. Deliberately duplicated
