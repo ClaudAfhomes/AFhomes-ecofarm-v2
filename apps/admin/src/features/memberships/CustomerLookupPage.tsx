@@ -257,21 +257,18 @@ export function CustomerLookupPage() {
 
   // The picked record number. The card resolves live from the latest
   // fetched page, so a 30s refetch refreshes the shown card too.
-  const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
-  const selectedLookup =
-    (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
   const detail = useQuery({
-    queryKey: businessKeys.customer(selectedLookup?.customerId),
-    queryFn: () => getCustomerById(selectedLookup!.customerId),
-    enabled: Boolean(selectedLookup?.customerId),
-    placeholderData: (previousData) => previousData,
+    queryKey: businessKeys.customer(selectedCustomerId ?? undefined),
+    queryFn: () => getCustomerById(selectedCustomerId!),
+    enabled: Boolean(selectedCustomerId),
     staleTime: 15_000,
   });
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
-    setSelectedNumber(row.customerNumber);
+    setSelectedCustomerId(row.customerId);
     setActiveIndex(-1);
     setSuggestOpen(false);
   };
@@ -340,7 +337,7 @@ export function CustomerLookupPage() {
             onChange={(value) => {
               setSearch(value);
               // Typing on unpicks: the card below belongs to the last pick.
-              setSelectedNumber(null);
+              setSelectedCustomerId(null);
               setActiveIndex(-1);
               setSuggestOpen(true);
             }}
@@ -406,7 +403,7 @@ export function CustomerLookupPage() {
       </div>
       {term.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a customer or member" />
-      ) : selectedLookup ? (
+      ) : selectedCustomerId ? (
         detail.isPending ? (
           <LookupSkeleton />
         ) : detail.isError ? (
@@ -418,7 +415,7 @@ export function CustomerLookupPage() {
           />
         ) : detail.data ? (
           <div className={styles.results}>
-            <CustomerCard key={selectedLookup.customerNumber} customer={detail.data} />
+            <CustomerCard key={selectedCustomerId} customer={detail.data} />
           </div>
         ) : null
       ) : !hasSearched ? null : customers.isError ? (
