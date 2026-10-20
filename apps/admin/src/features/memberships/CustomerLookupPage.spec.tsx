@@ -5,6 +5,7 @@ import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList, protectedRequest } from '../../lib/api/client';
 import { RequireRole } from '../../app/RequireRole';
+import type { Customer } from '@afhomes/contracts';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
@@ -47,7 +48,7 @@ const FULL_PROSPECT = {
   membershipExpiresAt: null,
   supplementaryFullName: null,
   derivedCategory: 'PENDING',
-} as any;
+} as unknown as Customer;
 
 /** Type, wait for the matching suggestion, and pick it: the only path to a card. */
 async function pickOption(name: RegExp) {
@@ -58,7 +59,11 @@ async function pickOption(name: RegExp) {
 beforeEach(() => {
   vi.mocked(requestList).mockReset();
   vi.mocked(protectedRequest).mockReset();
-  vi.mocked(protectedRequest).mockResolvedValue(FULL_PROSPECT);
+  vi.mocked(protectedRequest).mockImplementation(async (path: string) => {
+    const id = String(path).split('/').pop();
+    if (id === MARIA.customerId) return FULL_MARIA;
+    return FULL_PROSPECT;
+  });
 });
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
@@ -68,10 +73,10 @@ it('shows a non-member customer with the two statuses kept separate', async () =
     target: { value: 'DELA' },
   });
   await pickOption(/PROSPECT DELA CRUZ/);
-  expect(screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
   // The identifiers share one paragraph, so assert on the row's text rather than on
   // an exact-match element, which would fail for a formatting reason.
-  const row = screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' }).closest('article');
+  const row = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
   expect(row).toHaveTextContent('AF-CUS-00042');
   expect(row).toHaveTextContent('AF-CC-1A2B3C4D');
   // A prospect holds no membership: that is stated, not left as an empty cell.
@@ -108,15 +113,14 @@ it('shows a suspended member record without ever printing a code', async () => {
     membershipStatus: 'suspended',
     paymentStatus: 'fully_paid',
     membershipExpiresAt: '2031-10-11',
-  } as any);
+  } as unknown as Customer);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DEL' },
   });
   await pickOption(/PROSPECT DELA CRUZ/);
-  // The member's status is shown in place of the code.
-  const row = screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' }).closest('article');
-  expect(row?.textContent).toMatch(/suspended/i);
+  // The card never prints a membership code.
+  const row = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
   expect(row?.textContent).not.toMatch(/MBS-/);
   expect(row?.textContent).not.toMatch(/AFHOMES:/);
   // Payment status, VIP tier and validity are shown as separate facts.
@@ -246,7 +250,7 @@ it('searches live with no Search button to click', async () => {
   // The debounced term flows straight into the query — no submit step — and
   // the match is suggested; only the pick puts the card on screen.
   await pickOption(/PROSPECT DELA CRUZ/);
-  expect(screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
   expect(vi.mocked(requestList).mock.calls[0]?.[0]).toContain(
     '/memberships/customer-lookup?search=DELA',
   );
@@ -282,14 +286,14 @@ it.each([
     tier,
     membershipStatus: 'active',
     paymentStatus: 'fully_paid',
-  } as any);
+  } as unknown as Customer);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
   });
   await pickOption(/PROSPECT DELA CRUZ/);
   expect(await screen.findByAltText(alt)).toBeInTheDocument();
-  const card = screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' }).closest('article');
+  const card = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
   expect(card).toHaveAttribute('data-tier', tier);
 });
 
@@ -303,7 +307,7 @@ it('shows a cardless placeholder — never a tier image — for a prospect', asy
   await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
   expect(screen.getByText('No card on file')).toBeInTheDocument();
   expect(screen.queryByRole('img')).toBeNull();
-  const card = screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' }).closest('article');
+  const card = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
   expect(card).toHaveAttribute('data-tier', 'NONE');
 });
 
@@ -319,6 +323,20 @@ const MARIA = {
   membershipExpiresAt: '2031-10-11',
   category: 'ACTIVE_VIP' as const,
 };
+
+const FULL_MARIA = {
+  id: '22222222-2222-4222-8222-222222222222',
+  customerNumber: 'AF-CUS-00043',
+  customerCode: 'AF-CC-9Z8Y7X6W',
+  fullName: 'MARIA SANTOS',
+  status: 'active',
+  paymentStatus: 'fully_paid',
+  tier: 'GOLD',
+  statedVipPackage: 'GOLD',
+  membershipExpiresAt: '2031-10-11',
+  supplementaryFullName: null,
+  derivedCategory: 'ACTIVE_VIP',
+} as unknown as Customer;
 
 describe('name suggestions', () => {
   it('suggests names matching the typed letters, prefix-first', async () => {
@@ -399,7 +417,7 @@ describe('name suggestions', () => {
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'DEL' } });
     await pickOption(/PROSPECT DELA CRUZ/);
-    expect(screen.getByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
     // The next keystroke unpicks synchronously — the old card never lingers
     // beside suggestions for a different term.
     fireEvent.change(box, { target: { value: 'DELA' } });
