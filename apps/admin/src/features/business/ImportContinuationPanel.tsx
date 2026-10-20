@@ -61,8 +61,10 @@ export function ImportContinuationPanel({ customerId }: { customerId?: string })
             </p>
           ) : null}
           <p>
-            Next stage: {source.stage}. Imported payment claims: {source.claimCount}. Claims require
-            Finance review and separate payment verification.
+            Next stage: {source.stage}.{' '}
+            {source.externallyVerified && source.externalSummary
+              ? `External history accepted. Verified payments: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}.`
+              : `Imported payment claims: ${source.claimCount}. Claims require Finance review and separate payment verification.`}
           </p>
           {source.missingRequirements.length ? (
             <ul>

@@ -23,10 +23,7 @@ vi.mock('../_lib/rest.js', () => ({
 }));
 
 vi.mock('../_lib/afhomes-access.js', () => ({
-  authorizeAfHomes: async (
-    req: { headers?: Record<string, string> },
-    moduleKey?: string,
-  ) => {
+  authorizeAfHomes: async (req: { headers?: Record<string, string> }, moduleKey?: string) => {
     const token = req.headers?.authorization ?? '';
     const denied = (status: number, code: string) => ({
       error: { error: { code, message: 'Denied' }, status },
@@ -45,6 +42,77 @@ vi.mock('../_lib/afhomes-access.js', () => ({
 }));
 
 const imports = (await import('./customer-imports.js')).default;
+
+it('requires Finance and sales permissions before accepting externally verified history', async () => {
+  install();
+  const response = await call({
+    path: 'parse',
+    method: 'POST',
+    body: {
+      source: 'excel',
+      externalVerificationReason: 'Verified against company records.',
+      contentBase64: 'AA==',
+    },
+  });
+  expect(response.status).toBe(403);
+  expect((holder.db as FakeSupabase).tables.customer_import_jobs).toHaveLength(0);
+});
+
+it('commits externally reviewed rows through the atomic historical reconciliation RPC', async () => {
+  const job = 'aaaaaaaa-0000-4000-8000-000000000097';
+  const row = 'bbbbbbbb-0000-4000-8000-000000000097';
+  const db = install(
+    {
+      customer_import_jobs: [
+        {
+          id: job,
+          source_type: 'excel',
+          source_name: 'verified.xlsx',
+          status: 'ready',
+          total_rows: 1,
+          valid_rows: 1,
+          created_at: '2026-10-01',
+          validated_at: '2026-10-01',
+        },
+      ],
+      customer_import_rows: [
+        {
+          id: row,
+          import_job_id: job,
+          row_number: 2,
+          action: 'CREATE',
+          validation_status: 'valid',
+          raw_data: {},
+          normalized_data: {
+            externalVerified: true,
+            externalReason: 'Verified against company records.',
+          },
+        },
+      ],
+    },
+    {
+      rpcs: [
+        {
+          fn: 'commit_external_customer_import_row',
+          result: {
+            customerId: 'cccccccc-0000-4000-8000-000000000097',
+            membershipId: null,
+            saleId: null,
+          },
+        },
+      ],
+    },
+  );
+  expect((await call({ path: `jobs/${job}/confirm`, method: 'POST' })).status).toBe(200);
+  expect(
+    db.calls.find((c) => c.table === 'commit_external_customer_import_row')?.arg,
+  ).toMatchObject({
+    p_row_id: row,
+    p_actor_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    p_reason: 'Verified against company records.',
+  });
+  expect(db.calls.some((c) => c.table === 'commit_customer_import_row')).toBe(false);
+});
 
 it('does not authorize populated PII export with import permission alone', async () => {
   install({}, { rpcs: [{ fn: 'customer_directory', result: [] }] });

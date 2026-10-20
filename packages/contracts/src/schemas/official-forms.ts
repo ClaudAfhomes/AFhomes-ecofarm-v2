@@ -234,7 +234,8 @@ const customerApplicationInputSchema = z.object({
  * substitute for.
  */
 const validateHolderLocationCodes = (
-  holder: { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
+  holder:
+    { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
   path: string,
   ctx: z.RefinementCtx,
 ) => {
@@ -309,6 +310,7 @@ export const storedApplicationHolderSchema = applicationHolderSchema.extend({
 
 export const customerApplicationSchema = customerApplicationInputSchema
   .extend({
+    acknowledgedAt: dateSchema.nullable(),
     id: z.string().uuid(),
     applicationNumber: z.string(),
     primary: storedApplicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),

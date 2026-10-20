@@ -5,13 +5,16 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 113. Public table inventory: 60. Private table inventory: 22.
+-- Migration count: 114. Public table inventory: 60. Private table inventory: 23.
 -- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
 -- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
 -- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.
 -- It preserves pre-system company IDs in ra_number, prevents duplicate company IDs, and issues
 -- AF-CUS-YYYY-NNNNNN through a private annual high-water counter for general new customers.
 -- Internal customer_number references stay separate. No existing identifiers are rewritten.
+-- External verified import 20261208000019 was approved and applied to the shared project on 2026-10-20.
+-- Opt-in acceptance creates canonical applications/reservations and verified historical payments;
+-- private immutable receipts retain the importer, acceptance time, source hash and exact totals.
 -- Staff sales involvement 20261208000018 was approved and live-applied on 2026-10-19: a service-only read RPC
 -- projects recorded application/import identities and frozen sale hierarchy into general summaries.
 -- It does not infer name-only attribution or change genealogy, payments, membership or commissions.
@@ -155,6 +158,7 @@
 --   20261208000016_afhomes_customer_import_continuation.sql
 --   20261208000017_afhomes_import_company_customer_ids.sql
 --   20261208000018_afhomes_staff_sales_involvement.sql
+--   20261208000019_afhomes_customer_external_verified_import.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories
@@ -220,6 +224,7 @@
 --   private.business_id_aliases
 --   private.commission_rule_archive
 --   private.company_customer_id_counters
+--   private.customer_external_import_receipts
 --   private.customer_import_payment_claims
 --   private.customer_import_purchase_sources
 --   private.customer_import_source_rows

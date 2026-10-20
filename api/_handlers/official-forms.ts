@@ -405,7 +405,7 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
     vip_referrer: String(app.vipReferrer ?? ''),
     acquisition_channels: (app.acquisitionChannels as string[]).join('|'),
     consent_acknowledged: String(app.consentAcknowledged),
-    acknowledgement_date: String(app.acknowledgedAt),
+    acknowledgement_date: app.acknowledgedAt == null ? '' : String(app.acknowledgedAt),
     primary_signature_status: String(app.primarySignatureStatus),
     secondary_signature_status: String(app.secondarySignatureStatus ?? ''),
     valid_id_received: String(app.validIdReceived),

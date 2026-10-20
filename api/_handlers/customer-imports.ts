@@ -1,5 +1,7 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
 import { z } from 'zod';
+import { compareMoney } from '@afhomes/shared';
+import { externalImportSummary } from '../_lib/external-customer-import.js';
 import {
   CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_CATEGORY_LABELS,
@@ -80,6 +82,7 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 const MODULE = 'governance.customer_import';
 
 const parseSchema = z.object({
+  externalVerificationReason: z.string().trim().min(10).max(500).optional(),
   source: z.enum(['excel', 'csv', 'google_sheets']),
   contentBase64: z
     .string()
@@ -394,6 +397,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = parseSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid import request', 400);
       const { source, sourceName } = parsed.data;
+      if (parsed.data.externalVerificationReason) {
+        for (const [module, action] of [
+          ['sales.customers', 'create'],
+          ['sales.card_sales', 'create'],
+          ['finance.payment_verification', 'update'],
+        ] as const) {
+          const permission = await authorizeAfHomes(req, module, action);
+          if ('error' in permission) return deny(res, permission);
+        }
+      }
       let matrix: string[][];
       let workbookRecords: ReturnType<typeof parseCustomerWorkbook> = null;
       let workflowRecords: WorkbookCustomerV2[] | null = null;
@@ -656,6 +669,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(
         new Date(),
       );
+      if (parsed.data.externalVerificationReason && !workflowRecords)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Externally verified imports require the guided customer workbook with contract dates and individual payment history.',
+          400,
+        );
       const seen = new Map<string, number>();
       const validated: ValidatedImportRow[] = [];
       for (const r of records) {
@@ -738,6 +758,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             v.normalized.paymentClaims =
               workflowRecords?.find((w) => w.customerKey === r.fields.customer_key)?.payments ??
               legacyPaymentClaims(r.fields);
+            if (parsed.data.externalVerificationReason) {
+              try {
+                if (!r.fields.referrer_staff_id)
+                  throw new Error(
+                    'Select a registered Referrer before importing verified history.',
+                  );
+                if (r.fields.contract_date! > today)
+                  throw new Error('Contract date cannot be in the future.');
+                if (compareMoney(r.fields.stated_rf || '0.00', '10000.00') !== 0)
+                  throw new Error('The included reservation fee must be 10000.00.');
+                v.normalized.externalSummary = externalImportSummary(
+                  r.fields,
+                  v.normalized.paymentClaims,
+                );
+                v.normalized.externalVerified = true;
+                v.normalized.externalReason = parsed.data.externalVerificationReason;
+              } catch (error) {
+                v.errors.push({
+                  field: 'external_history',
+                  message:
+                    error instanceof Error ? error.message : 'Invalid externally verified history.',
+                });
+              }
+            }
           }
           if (v.errors.length) {
             v.validation = 'error';
@@ -848,8 +892,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 row.errors.push({ field: 'customer_id', message: String(result.error) });
                 row.validation = 'error';
                 row.action = 'CONFLICT';
-              } else if (row.normalized)
+              } else if (row.normalized) {
                 row.normalized.continuationPreview = customerImportContinuationSchema.parse(result);
+                if (
+                  row.normalized.externalVerified &&
+                  row.normalized.continuationPreview.conflicts.length
+                ) {
+                  row.errors.push(...row.normalized.continuationPreview.conflicts);
+                  row.validation = 'error';
+                  row.action = 'CONFLICT';
+                  const blocked = await db
+                    .from('customer_import_rows')
+                    .update({
+                      validation_status: 'error',
+                      action: 'CONFLICT',
+                      validation_errors: row.errors,
+                    })
+                    .eq('id', result.rowId);
+                  if (blocked.error) throw blocked.error;
+                }
+              }
             }
           }
         }
@@ -1141,6 +1203,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         } catch (error) {
           const safeMessages: Record<string, string> = {
+            EXTERNAL_IMPORT_EXISTING_APPLICATION_REVIEW_REQUIRED:
+              'This purchase already has an application. Review the existing history before reconciling externally verified payments.',
+            EXTERNAL_IMPORT_EXISTING_PAYMENT_REVIEW_REQUIRED:
+              'This purchase already has reviewed payment history. Reconcile it without replacing existing payments.',
+            EXTERNAL_IMPORT_POSSIBLE_DUPLICATE_PAYMENT:
+              'A possible existing payment matches this receipt. Review it to prevent duplicate payment history.',
+            EXTERNAL_IMPORT_TERMS_INVALID:
+              'An actual past contract date, positive total and valid included reservation fee are required.',
+            EXTERNAL_IMPORT_INEXACT_SCHEDULE:
+              'The historical balance does not divide into the selected installment schedule. Review the contract terms.',
+            EXTERNAL_IMPORT_STATUS_CONFLICT:
+              'The stated status conflicts with the imported payment history.',
+            EXTERNAL_IMPORT_TOTAL_CONFLICT:
+              'The imported payment totals changed. Review and preview the workbook again.',
             IMPORT_NOT_FULLY_PAID: 'Verified historical payments must cover the plan price.',
             IMPORT_DUPLICATE_EMAIL: 'This email already belongs to a customer.',
             IMPORT_DUPLICATE_MEMBERSHIP: 'This membership number is already in use.',
@@ -1300,10 +1376,16 @@ async function importRows(db: Db, jobId: string): Promise<Record<string, unknown
   return rows;
 }
 async function commitCreateRow(db: Db, actorId: string, raw: Record<string, unknown>) {
-  const { data, error } = await db.rpc('commit_customer_import_row', {
-    p_row_id: raw.id,
-    p_actor_id: actorId,
-  });
+  const normalized = raw.normalized_data as Record<string, unknown> | undefined;
+  const external = normalized?.externalVerified === true;
+  const { data, error } = await db.rpc(
+    external ? 'commit_external_customer_import_row' : 'commit_customer_import_row',
+    {
+      p_row_id: raw.id,
+      p_actor_id: actorId,
+      ...(external ? { p_reason: normalized.externalReason } : {}),
+    },
+  );
   if (error) throw error;
   return (Array.isArray(data) ? data[0] : data) as {
     customerId: string;

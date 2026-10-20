@@ -64,6 +64,25 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
+it('requires an explicit external-history selection and carries it into the reviewed upload', async () => {
+  const user = userEvent.setup();
+  vi.mocked(parseCustomerImport).mockResolvedValue(previewFixture());
+  renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+  await user.click(screen.getByRole('checkbox', { name: /already verified outside/ }));
+  await user.upload(
+    screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+    new File(['synthetic'], 'verified.xlsx'),
+  );
+  await waitFor(() =>
+    expect(parseCustomerImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalVerificationReason: expect.stringContaining('verified outside the system'),
+      }),
+    ),
+  );
+  expect(screen.getByRole('checkbox', { name: /already verified outside/ })).toBeDisabled();
+});
+
 const previewFixture = (total = 1) =>
   customerImportParseResponseSchema.parse({
     job: {

@@ -31,6 +31,15 @@ export const importClaimReconcileSchema = z.strictObject({
 });
 export const importContinuationRequestSchema = importReviewTokensSchema.extend({ requestId: uuid });
 export const customerImportContinuationSchema = importReviewTokensSchema.extend({
+  externallyVerified: z.boolean().optional(),
+  externalSummary: z
+    .object({
+      stage: z.enum(['application', 'reservation', 'finance', 'activation']),
+      paid: exactDecimalStringSchema,
+      balance: exactDecimalStringSchema,
+      total: exactDecimalStringSchema,
+    })
+    .optional(),
   expectedTeamVersion: revision,
   rowId: uuid,
   sourceId: uuid.nullable(),

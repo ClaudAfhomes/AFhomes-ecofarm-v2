@@ -270,6 +270,11 @@ export type NormalizedImportRow = {
   customerFacts?: import('./customer-import-continuation.js').ImportedCustomerFacts;
   paymentClaims?: import('@afhomes/contracts').WorkbookPaymentClaim[];
   continuationPreview?: import('@afhomes/contracts').CustomerImportContinuation;
+  externalVerified?: boolean;
+  externalReason?: string;
+  externalSummary?: ReturnType<
+    typeof import('./external-customer-import.js').externalImportSummary
+  >;
   category: CustomerCategory;
   tier: string | null;
   customerStatus: string;

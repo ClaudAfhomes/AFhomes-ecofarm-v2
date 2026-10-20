@@ -16,6 +16,43 @@ const user: SessionUser = {
   afHomesPermissions: [],
 };
 describe('imported purchase continuation', () => {
+  it('shows accepted external payment history and its real destination without requesting re-verification', async () => {
+    vi.mocked(getImportContinuations).mockResolvedValue([
+      {
+        rowId: 'row',
+        sourceId: 'source',
+        customerId: 'customer',
+        applicationId: 'application',
+        reservationId: 'reservation',
+        saleId: null,
+        stage: 'finance',
+        missingRequirements: [],
+        conflicts: [],
+        proposedFields: [],
+        claimCount: 1,
+        expectedSourceHash: 'a'.repeat(64),
+        expectedTargetVersion: 'b'.repeat(64),
+        expectedTeamVersion: 'c'.repeat(64),
+        externallyVerified: true,
+        externalSummary: {
+          stage: 'finance',
+          paid: '100000.00',
+          balance: '212000.00',
+          total: '312000.00',
+        },
+        nextAction: { label: 'Continue collection', path: '/admin/finance/payments' },
+      },
+    ]);
+    renderWithProviders(<ImportContinuationPanel customerId="customer" />, { user });
+    expect(
+      await screen.findByText(/Verified payments: 100000.00. Remaining balance: 212000.00/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/separate payment verification/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Continue collection' })).toHaveAttribute(
+      'href',
+      '/admin/finance/payments',
+    );
+  });
   it('shows the authoritative next destination and claim warning without recording money', async () => {
     vi.mocked(getImportContinuations).mockResolvedValue([
       {

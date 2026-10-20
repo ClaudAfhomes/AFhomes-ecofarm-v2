@@ -870,7 +870,7 @@ export function CustomerApplicationEditorPage() {
         vipRecommenderName: app.vipRecommenderName ?? '',
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
-        acknowledgedAt: app.acknowledgedAt,
+        acknowledgedAt: app.acknowledgedAt ?? '',
       });
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);

@@ -755,6 +755,7 @@ export const getCustomerImportTemplate = (format: 'xlsx' | 'csv'): Promise<Gener
   request(`/customer-imports/template/${format}`, generatedImportFileSchema);
 
 export const parseCustomerImport = (input: {
+  externalVerificationReason?: string;
   source: 'excel' | 'csv' | 'google_sheets';
   contentBase64?: string;
   sheetUrl?: string;

@@ -40,7 +40,7 @@ import {
   getCustomerImportTemplate,
   parseCustomerImport,
 } from './services';
-import { applicationKeys, businessKeys, sharedScopes } from './queryKeys';
+import { applicationKeys, businessKeys, reservationKeys, sharedScopes } from './queryKeys';
 
 function ImportPreviewExplanation({ value }: { value: unknown }) {
   const result = customerImportContinuationSchema.safeParse(value);
@@ -49,8 +49,10 @@ function ImportPreviewExplanation({ value }: { value: unknown }) {
   return (
     <div>
       <p>
-        Destination after import: {source.stage}. {source.claimCount} payment claims awaiting
-        Finance review; no verified payment is created by import.
+        Destination after import: {source.stage}.{' '}
+        {source.externalSummary
+          ? `Externally verified payments: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}. Business records will be reconciled on confirmation.`
+          : `${source.claimCount} payment claims awaiting Finance review; no verified payment is created by import.`}
       </p>
       {source.missingRequirements.map((item) => (
         <p key={item}>{item}</p>
@@ -192,6 +194,7 @@ export function CustomerImportExportPage() {
   const [tone, setTone] = useState<FeedbackTone>('info');
   const [sheetUrl, setSheetUrl] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [externalHistory, setExternalHistory] = useState(false);
   const [exporting, setExporting] = useState<'xlsx' | 'csv' | null>(null);
   const [chosenFile, setChosenFile] = useState<{ kind: 'excel' | 'csv'; name: string } | null>(
     null,
@@ -239,6 +242,7 @@ export function CustomerImportExportPage() {
       contentBase64?: string;
       sheetUrl?: string;
       sourceName?: string;
+      externalVerificationReason?: string;
     }) => parseCustomerImport(input),
     onSuccess: (result) => {
       setPreview(result);
@@ -284,6 +288,10 @@ export function CustomerImportExportPage() {
       setPreviewPage(0);
       void client.invalidateQueries({ queryKey: businessKeys.customerImportJobs });
       void client.invalidateQueries({ queryKey: businessKeys.customersScope });
+      void client.invalidateQueries({ queryKey: businessKeys.queue });
+      void client.invalidateQueries({ queryKey: businessKeys.sales });
+      void client.invalidateQueries({ queryKey: applicationKeys.reservationsScope });
+      void client.invalidateQueries({ queryKey: reservationKeys.scope });
       void client.invalidateQueries({ queryKey: sharedScopes.memberships });
       void client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
       void client.invalidateQueries({ queryKey: sharedScopes.analytics });
@@ -300,7 +308,17 @@ export function CustomerImportExportPage() {
     setChosenFile({ kind, name: file.name });
     try {
       const contentBase64 = await toBase64(file);
-      parse.mutate({ source: kind, contentBase64, sourceName: file.name });
+      parse.mutate({
+        source: kind,
+        contentBase64,
+        sourceName: file.name,
+        ...(externalHistory
+          ? {
+              externalVerificationReason:
+                'Importer confirms this workbook contains company records and payment history already verified outside the system.',
+            }
+          : {}),
+      });
     } catch (error) {
       say(error instanceof Error ? error.message : 'Could not read the file.', 'danger');
     }
@@ -400,6 +418,21 @@ export function CustomerImportExportPage() {
       <Alert variant="warning" title="Historical data rules">
         History needs real payment facts.
       </Alert>
+      <label>
+        <input
+          type="checkbox"
+          checked={externalHistory}
+          disabled={Boolean(preview) || parse.isPending}
+          onChange={(event) => setExternalHistory(event.target.checked)}
+        />
+        Import company records and payments already verified outside the system
+      </label>
+      {externalHistory ? (
+        <p>
+          Review each destination, payment total and balance before confirming. Confirmation records
+          your acceptance and creates the actual application, reservation and payment history.
+        </p>
+      ) : null}
       {message ? <Alert variant={tone}>{message}</Alert> : null}
 
       {tabSwitcher}
@@ -417,7 +450,9 @@ export function CustomerImportExportPage() {
             <div className={styles.templateGrid}>
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
-                <p className={styles.templateDesc}>Guided entry, dropdowns and automatic calculations.</p>
+                <p className={styles.templateDesc}>
+                  Guided entry, dropdowns and automatic calculations.
+                </p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
                 </div>
@@ -515,7 +550,16 @@ export function CustomerImportExportPage() {
                   disabled={parse.isPending || !sheetUrl.trim()}
                   onClick={() => {
                     setChosenFile(null);
-                    parse.mutate({ source: 'google_sheets', sheetUrl: sheetUrl.trim() });
+                    parse.mutate({
+                      source: 'google_sheets',
+                      sheetUrl: sheetUrl.trim(),
+                      ...(externalHistory
+                        ? {
+                            externalVerificationReason:
+                              'Importer confirms this workbook contains company records and payment history already verified outside the system.',
+                          }
+                        : {}),
+                    });
                   }}
                 >
                   Read sheet
@@ -729,7 +773,7 @@ export function CustomerImportExportPage() {
                   onCancel={() => setConfirming(false)}
                   onConfirm={() => confirm.mutate(preview!.job.id)}
                   title="Confirm bulk import"
-                  message={`Write ${preview.job.validRows} valid rows to the database, one transaction per row? Invalid rows are skipped, never written.`}
+                  message={`Write ${preview.job.validRows} valid rows to the database, one transaction per row? ${externalHistory ? 'You confirm the external records and payments have been verified. Actual business records and verified payment history will be created.' : 'Invalid rows are skipped, never written.'}`}
                 />
               </section>
             </>
