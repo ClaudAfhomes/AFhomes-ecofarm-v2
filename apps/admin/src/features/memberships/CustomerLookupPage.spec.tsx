@@ -1,6 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useLocation } from 'react-router';
+
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList } from '../../lib/api/client';
@@ -55,16 +55,6 @@ const FULL_PROSPECT = {
 async function pickOption(name: RegExp) {
   const option = await screen.findByRole('option', { name });
   fireEvent.mouseDown(option);
-}
-
-function LocationProbe() {
-  const location = useLocation();
-  return (
-    <p aria-label="route">
-      {location.pathname}
-      {location.search}
-    </p>
-  );
 }
 
 beforeEach(() => {
