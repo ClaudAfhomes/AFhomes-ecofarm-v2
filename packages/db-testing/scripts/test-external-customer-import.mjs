@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { startDisposablePostgres } from './lib/local-postgres.mjs';
+import { readFileSync } from 'node:fs';
+import { listMigrations, startDisposablePostgres } from './lib/local-postgres.mjs';
 import { externalImportSummary } from '../../../api/_lib/external-customer-import.ts';
 import { buildImportedCustomerFacts } from '../../../api/_lib/customer-import-continuation.ts';
 import { makePurchaseFixtures } from '../../../supabase/reservation-purchase-integration.ts';
 
 // Owns only a fresh loopback database. Never loads repository environment files.
-const postgres = await startDisposablePostgres();
+const releasedSchema = process.argv.includes('--released-schema');
+const summaryMigration = '20261208000020_afhomes_customer_purchase_summary.sql';
+const excludedMigrations = releasedSchema
+  ? listMigrations().filter((name) => name > '20261208000020_afhomes_customer_purchase_summary.sql')
+  : [];
+const postgres = await startDisposablePostgres({
+  excludedMigrations,
+  beforeMigration: releasedSchema ? summaryMigration : undefined,
+});
+let summaryInstalled = !releasedSchema;
 const db = postgres.client;
 try {
   const staff = {};
@@ -110,12 +120,16 @@ try {
       if (tier === 'GOLD' && status === 'Fully Paid')
         Object.assign(fields, {
           secondary_first_name: 'Supplementary',
+          secondary_middle_name: 'Ann',
           secondary_last_name: 'Synthetic',
+          secondary_suffix: 'Jr.',
           secondary_birth_date: '1992-01-01',
           secondary_sex: 'Female',
           secondary_citizenship: 'Filipino',
           secondary_civil_status: 'Single',
           secondary_address_line_1: 'Synthetic secondary address',
+          secondary_address_line_2: 'Unit 7',
+          secondary_postal_code: '4027',
           secondary_province: 'Laguna',
           secondary_city: 'Calamba',
           secondary_mobile: '09175550002',
@@ -274,6 +288,104 @@ try {
       }
       const first = await commit();
       assert.equal(first.importContinuation.stage, stage);
+      if (!summaryInstalled) {
+        const snapshot = async () => {
+          const result = [];
+          for (const table of [
+            'public.customers',
+            'public.staff_users',
+            'public.referral_relationships',
+            'public.customer_applications',
+            'public.customer_application_holders',
+            'public.reservation_agreements',
+            'public.payments',
+            'public.card_sales',
+            'public.memberships',
+            'private.customer_import_purchase_sources',
+            'private.customer_external_import_receipts',
+          ]) {
+            result.push({
+              table,
+              ...(
+                await db.query(
+                  `select count(*)::int n,md5(coalesce(string_agg(hash,',' order by hash),'')) hash from (select md5(to_jsonb(t)::text) hash from ${table} t) rows`,
+                )
+              ).rows[0],
+            });
+          }
+          return result;
+        };
+        await db.query('begin');
+        // Exercise the installed live variant that lacks the company-ID lookup branch.
+        const installedDirectory = (
+          await db.query(
+            "select pg_get_functiondef('public.customer_directory(jsonb)'::regprocedure) definition",
+          )
+        ).rows[0].definition;
+        await db.query(
+          installedDirectory.replace(
+            "lower(d.ra_number) like '%'||lower(p_filters->>'search')||'%' or ",
+            '',
+          ),
+        );
+        const before = await snapshot();
+        await db.query(
+          readFileSync(
+            new URL('../../../supabase/migrations/' + summaryMigration, import.meta.url),
+            'utf8',
+          ),
+        );
+        assert.deepEqual(
+          await snapshot(),
+          before,
+          'Summary migration must not change existing business data',
+        );
+        await db.query('commit');
+        summaryInstalled = true;
+      }
+      const summaryRow = (
+        await db.query('select record from public.customer_directory($1)', [
+          { id: first.customerId },
+        ])
+      ).rows[0].record;
+      assert.equal(
+        summaryRow.tier,
+        tier,
+        'Application/reservation plan must be visible before finalization',
+      );
+      assert.equal(Number(summaryRow.verified_paid), Number(amount));
+      assert.equal(Number(summaryRow.frozen_total), stage === 'application' ? 0 : Number(total));
+      assert.equal(
+        Number(summaryRow.open_reservation_total),
+        ['reservation', 'finance'].includes(stage) ? Number(total) : 0,
+      );
+      assert.equal(
+        Number(summaryRow.open_reservation_paid),
+        ['reservation', 'finance'].includes(stage) ? Number(amount) : 0,
+      );
+      assert.equal(
+        summaryRow.payment_status,
+        stage === 'application'
+          ? 'no_payment'
+          : stage === 'activation'
+            ? 'fully_paid'
+            : 'partially_paid',
+      );
+      const filteredSummary = await db.query('select record from public.customer_directory($1)', [
+        { id: first.customerId, tier, payment: summaryRow.payment_status, limit: 1 },
+      ]);
+      assert.equal(
+        filteredSummary.rows.length,
+        1,
+        'Filters must use reservation facts before pagination',
+      );
+      const companyIdLookup = await db.query('select record from public.customer_directory($1)', [
+        { search: summaryRow.ra_number },
+      ]);
+      assert(
+        companyIdLookup.rows.some((r) => r.record.id === first.customerId),
+        'Official company Customer IDs must remain searchable',
+      );
       await db.query('set constraints all immediate');
       const second = await commit();
       assert.equal(second.customerId, first.customerId);
@@ -292,6 +404,14 @@ try {
         secondRow,
         staff.actor,
       ]);
+      const repeatedProposal = (
+        await db.query('select private.import_customer_proposal($1,null) as result', [secondRow])
+      ).rows[0].result;
+      assert.deepEqual(
+        repeatedProposal.conflicts,
+        [],
+        'Application mirroring must preserve imported facts for a repeated workbook',
+      );
       const reimport = (
         await db.query('select public.commit_external_customer_import_row($1,$2,$3) result', [
           secondRow,
@@ -405,6 +525,16 @@ try {
             staff.actor,
           ])
         ).rows[0].id;
+        const beforeVerification = (
+          await db.query('select record from public.customer_directory($1)', [
+            { id: first.customerId },
+          ])
+        ).rows[0].record;
+        assert.equal(
+          Number(beforeVerification.verified_paid),
+          30000,
+          'Recorded payments must not reduce a verified balance',
+        );
         await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)", [
           randomUUID(),
           payment,
@@ -431,6 +561,18 @@ try {
         assert.equal(continued.stage, 'activation');
         assert.equal(continued.externalSummary.balance, '0.00');
         assert.equal(continued.externalSummary.paid, total);
+        const afterFinalization = (
+          await db.query('select record from public.customer_directory($1)', [
+            { id: first.customerId },
+          ])
+        ).rows[0].record;
+        assert.equal(Number(afterFinalization.verified_paid), Number(total));
+        assert.equal(
+          Number(afterFinalization.frozen_total),
+          Number(total),
+          'Finalized reservations must not be counted again beside their sale',
+        );
+        assert.equal(Number(afterFinalization.open_reservation_total), 0);
       }
       console.log(
         JSON.stringify({
@@ -444,6 +586,14 @@ try {
       );
     }
   }
+  assert.equal(
+    (
+      await db.query(
+        "select has_function_privilege('anon','public.customer_directory(jsonb)','execute') or has_function_privilege('authenticated','public.customer_directory(jsonb)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
   assert.equal(
     (
       await db.query(

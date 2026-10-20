@@ -92,6 +92,42 @@ beforeEach(() => {
 });
 
 describe('BusinessCustomersPage views', () => {
+  it('distinguishes reservation partial payments from customers with no payments', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf(
+        [
+          row({
+            id: 'partial',
+            fullName: 'Partial Gold Customer',
+            tier: 'GOLD',
+            paymentStatus: 'partially_paid',
+            frozenTotal: '312000.00',
+            verifiedPaid: '90000.00',
+          }),
+          row({
+            id: 'unpaid',
+            fullName: 'Unpaid Silver Customer',
+            tier: 'SILVER',
+            paymentStatus: 'no_payment',
+            frozenTotal: '0.00',
+            verifiedPaid: '0.00',
+          }),
+        ],
+        2,
+      ),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('Partial Gold Customer');
+    expect(
+      within(screen.getByRole('region', { name: 'Scrollable records' })).getByText(
+        'Partial payment',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Scrollable records' })).getByText('No payment'),
+    ).toBeInTheDocument();
+  });
+
   it('shows the people list by default', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
