@@ -56,3 +56,11 @@ supabase/migrations/archive/
 # or updated - it only survived because it was already tracked. The explicit
 # block at the top of this file is the single source of truth; do not re-add a
 # blanket `.env*` here.
+
+# taste-skill measurement harness (screenshots, direction sheets, inspector reports)
+# Generated locally by the frontend-design skill; never commit.
+.taste-skill/
+
+# NOTE: `workflow/` is intentionally tracked (graphidian + opencode packs).
+# Do NOT add a `workflow/` ignore rule here — opencode's `@` file picker
+# surfaces tracked/non-ignored files, and ignoring it would hide the pack.

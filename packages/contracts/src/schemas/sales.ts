@@ -367,7 +367,6 @@ export const createCustomerSchema = z.object({
   supplementaryOccupationBusinessName: z.string().trim().max(200).optional(),
   supplementaryOfficeAddress: z.string().trim().max(200).optional(),
   supplementaryPosition: z.string().trim().max(100).optional(),
-  ostIstName: z.string().trim().max(120).optional(),
   svdName: z.string().trim().max(120).optional(),
   ssmName: z.string().trim().max(120).optional(),
   smName: z.string().trim().max(120).optional(),
@@ -401,6 +400,7 @@ export const updateCustomerSchema = z
     lastName: personNameSchema.optional(),
     suffix: z.string().trim().max(20).nullable().optional(),
     gender: genderSchema.nullable().optional(),
+    dateOfBirth: dateOfBirthSchema.nullable().optional(),
     email: emailSchema.optional(),
     phone: optionalPhoneSchema,
     landline: optionalLandlineSchema.nullable().optional(),
@@ -430,7 +430,6 @@ export const updateCustomerSchema = z
     supplementaryOccupationBusinessName: z.string().trim().max(200).nullable().optional(),
     supplementaryOfficeAddress: z.string().trim().max(200).nullable().optional(),
     supplementaryPosition: z.string().trim().max(100).nullable().optional(),
-    ostIstName: z.string().trim().max(120).nullable().optional(),
     svdName: z.string().trim().max(120).nullable().optional(),
     ssmName: z.string().trim().max(120).nullable().optional(),
     smName: z.string().trim().max(120).nullable().optional(),
@@ -479,8 +478,14 @@ export const customerSchema = z.object({
   address: z.unknown().nullable(),
   governmentIdType: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
-  /** Company-stated TIN, masked like the government ID. Never the raw value. */
+  /** Company-stated TIN, masked like the government ID on list reads. */
   tinNumberMasked: z.string().nullable().optional(),
+  /**
+   * Raw company-stated TIN. Returned only by the single-record detail read so
+   * authorized staff can show the current value. List, create and update
+   * reads expose `tinNumberMasked` only, and audits never carry either.
+   */
+  tinNumber: z.string().nullable().optional(),
   raNumber: z.string().nullable().optional(),
   companyStatus: z.string().nullable().optional(),
   citizenship: z.string().nullable().optional(),
@@ -495,13 +500,14 @@ export const customerSchema = z.object({
   supplementaryCitizenship: z.string().nullable().optional(),
   supplementaryCivilStatus: z.string().nullable().optional(),
   supplementaryTinNumberMasked: z.string().nullable().optional(),
+  /** Raw supplementary TIN; single-record detail read only. */
+  supplementaryTinNumber: z.string().nullable().optional(),
   supplementaryMobile: z.string().nullable().optional(),
   supplementaryEmail: z.string().nullable().optional(),
   supplementaryLandline: z.string().nullable().optional(),
   supplementaryOccupationBusinessName: z.string().nullable().optional(),
   supplementaryOfficeAddress: z.string().nullable().optional(),
   supplementaryPosition: z.string().nullable().optional(),
-  ostIstName: z.string().nullable().optional(),
   svdName: z.string().nullable().optional(),
   ssmName: z.string().nullable().optional(),
   smName: z.string().nullable().optional(),

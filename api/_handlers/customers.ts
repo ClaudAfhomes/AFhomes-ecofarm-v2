@@ -60,7 +60,10 @@ export function customerHasActiveMembership(row: Record<string, unknown>): boole
   return list.some((membership) => membership.status === 'active');
 }
 
-const toCustomer = (row: Record<string, unknown>) => ({
+const toCustomer = (
+  row: Record<string, unknown>,
+  options: { includeTin?: boolean } = {},
+) => ({
   id: row.id,
   customerNumber: row.customer_number,
   // The customer's own Customer Code, distinct from the Customer ID above.
@@ -80,9 +83,16 @@ const toCustomer = (row: Record<string, unknown>) => ({
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked:
     isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
-  // Company-stated membership fields. TIN values are masked exactly like the
-  // government ID: the raw numbers never leave the database through this API.
+  // Company-stated membership fields. TIN values are masked on list, create
+  // and update reads. The single-record detail read opts in to the raw value
+  // so the edit dialog can show the current TIN; audits never carry it.
   tinNumberMasked: maskGovernmentId(isoOrNull(row.tin_number)),
+  ...(options.includeTin
+    ? {
+        tinNumber: isoOrNull(row.tin_number),
+        supplementaryTinNumber: isoOrNull(row.supplementary_tin_number),
+      }
+    : {}),
   raNumber: isoOrNull(row.ra_number),
   companyStatus: isoOrNull(row.company_status),
   citizenship: isoOrNull(row.citizenship),
@@ -103,7 +113,6 @@ const toCustomer = (row: Record<string, unknown>) => ({
   supplementaryOccupationBusinessName: isoOrNull(row.supplementary_occupation_business_name),
   supplementaryOfficeAddress: isoOrNull(row.supplementary_office_address),
   supplementaryPosition: isoOrNull(row.supplementary_position),
-  ostIstName: isoOrNull(row.ost_ist_name),
   svdName: isoOrNull(row.svd_name),
   ssmName: isoOrNull(row.ssm_name),
   smName: isoOrNull(row.sm_name),
@@ -380,7 +389,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         supplementary_occupation_business_name: input.supplementaryOccupationBusinessName ?? null,
         supplementary_office_address: input.supplementaryOfficeAddress ?? null,
         supplementary_position: input.supplementaryPosition ?? null,
-        ost_ist_name: input.ostIstName ?? null,
         svd_name: input.svdName ?? null,
         ssm_name: input.ssmName ?? null,
         sm_name: input.smName ?? null,
@@ -457,10 +465,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Same RPC as the list, narrowed to one row, so the detail view can
       // never disagree with the directory about derived category, membership
       // state, or the masked government ID (the only form ever returned).
+      // TIN is the one opt-in exception: the edit dialog needs the current
+      // value to show it locked, so the single-record read includes it raw.
       const directory = await customerDirectory(db, { id: detail[1] });
       const row = directory[0];
       if (!row) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      return res.status(200).json(toCustomer(row.record));
+      return res.status(200).json(toCustomer(row.record, { includeTin: true }));
     }
 
     const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);
@@ -488,6 +498,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.suffix !== undefined)
         patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
+      if (p.dateOfBirth !== undefined) patch.date_of_birth = p.dateOfBirth;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
       if (p.landline !== undefined) patch.landline = p.landline;
@@ -538,7 +549,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch.supplementary_office_address = p.supplementaryOfficeAddress;
       if (p.supplementaryPosition !== undefined)
         patch.supplementary_position = p.supplementaryPosition;
-      if (p.ostIstName !== undefined) patch.ost_ist_name = p.ostIstName;
       if (p.svdName !== undefined) patch.svd_name = p.svdName;
       if (p.ssmName !== undefined) patch.ssm_name = p.ssmName;
       if (p.smName !== undefined) patch.sm_name = p.smName;
@@ -797,7 +807,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           supplementary_occupation_business_name: null,
           supplementary_office_address: null,
           supplementary_position: null,
-          ost_ist_name: null,
           svd_name: null,
           ssm_name: null,
           sm_name: null,

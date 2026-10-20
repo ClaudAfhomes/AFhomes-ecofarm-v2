@@ -566,6 +566,11 @@ async function listRows(
   let query = db.from(table).select('*', { count: 'exact' });
   if (q.status) query = query.eq('status', q.status);
   if (q.saleId) query = query.eq('sale_id', q.saleId);
+  // "This customer's applications". Reservations hang off an APPLICATION, not
+  // a customer, so the filter is applications-only rather than silently
+  // returning every agreement in the system.
+  if (q.customerId && table === 'customer_applications')
+    query = query.eq('customer_id', q.customerId);
   if (q.tier) query = query.eq('tier_snapshot', q.tier);
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);
@@ -1351,6 +1356,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_seller_candidate: parsed.data.sellerCandidateId ?? null,
       });
       if (error) return mapRpcError(res, error);
+      if (
+        typeof before.customerId === 'string' &&
+        governmentIdTypeSchema.safeParse(reviewed?.fields?.idType).success
+      ) {
+        await db
+          .from('customers')
+          .update({ government_id_type: reviewed?.fields?.idType })
+          .eq('id', before.customerId)
+          .is('government_id_type', null);
+      }
       return res.status(200).json(await getApplication(db, appSubmit[1]!));
     }
     const appDecision = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/decision$/);

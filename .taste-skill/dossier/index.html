@@ -1,0 +1,1397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customer company record</title>
+<style>
+/*
+ * AFHomes Ecofarm design tokens - single source consumed by both apps
+ * (@afhomes/ui/tokens.css).
+ *
+ * Palette: a deep forest green carries the brand (matching the `#174f3b`
+ * theme-color in both app shells), paired with a restrained harvest gold for
+ * rules, eyebrows, and emphasis. All values are centralized here so a brand
+ * refresh is a single edit.
+ *
+ * Contrast: brand (#174f3b) is 8.99:1 and accent-strong (#8a6420) is 5.08:1
+ * against the canvas, so body text and the 3px focus ring both clear WCAG AA.
+ */
+
+:root {
+  /* Colors - brand palette. */
+  --color-brand-primary: #174f3b;
+  --color-brand-primary-hover: #123d2d;
+  --color-brand-secondary: #1f6b4f;
+  --color-brand-soft: #e8f1ec;
+  /* Deep brand green - dark header/footer surfaces. */
+  --color-brand-deep: #0e2b20;
+  --color-brand-deep-hover: #163a2c;
+
+  --color-accent: #b08328;
+  --color-accent-strong: #8a6420;
+  --color-accent-soft: #f7f0df;
+  --color-accent-subtle: #f7f0df;
+  --color-accent-light: #dcc06a;
+
+  /* Text on dark brand surfaces (heroes, dark chrome). */
+  --color-on-dark: #ffffff;
+  --color-on-dark-muted: rgba(255, 255, 255, 0.84);
+  --color-on-dark-faint: rgba(255, 255, 255, 0.64);
+  --color-on-dark-hover: rgba(255, 255, 255, 0.1);
+
+  --color-bg-canvas: #fbfaf7;
+  --color-bg-surface: #f4f2ec;
+  --color-bg-surface-raised: #ffffff;
+  --color-bg-subtle: #f8f6f0;
+  --color-bg-sunken: #ede9e0;
+
+  --color-text-primary: #1c2b3a;
+  --color-text-secondary: #40505f;
+  --color-text-muted: #64737f;
+  --color-text-on-brand: #ffffff;
+
+  --color-border-default: #e5e0d4;
+  --color-border-strong: #d3ccb8;
+  --color-border-subtle: #eae6da;
+
+  --color-success: #3f7d4e;
+  --color-success-strong: #2e6b3a;
+  --color-warning: #9a6b1f;
+  --color-warning-strong: #805719;
+  --color-danger: #a63a32;
+  --color-info: #1f6b8f;
+
+  --color-state-focus: var(--color-accent-strong);
+  --color-state-disabled-bg: #ece9e0;
+  --color-state-disabled-text: #5d625d;
+  --color-state-hover: rgba(28, 43, 58, 0.06);
+
+  /* Typography - editorial serif for display headings, system sans for body. */
+  --font-family-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-display: Georgia, 'Iowan Old Style', 'Times New Roman', 'Noto Serif', serif;
+
+  --text-caption: 12px;
+  --text-control-sm: 13px;
+  --text-page-title: clamp(1.375rem, 1.2rem + 0.6vw, 1.75rem);
+  --text-metric: clamp(1.75rem, 1.5rem + 0.75vw, 2.25rem);
+  --control-sm: 32px;
+  --control-md: 40px;
+  --control-lg: 48px;
+  --radius-control: 8px;
+  --icon-action: 18px;
+  --auth-form-max: 440px;
+  --text-body-s: 14px;
+  --text-body: 16px;
+  --text-body-m: 14px;
+  --text-body-l: 18px;
+  --text-h3: 20px;
+  --text-h2: clamp(1.625rem, 1.375rem + 1.4vw, 2.5rem);
+  --text-heading-2: clamp(1.625rem, 1.375rem + 1.4vw, 2.5rem);
+  --text-h1: clamp(2.125rem, 1.85rem + 1.6vw, 3.5rem);
+  --text-display: clamp(2.5rem, 2.1rem + 2.2vw, 4.25rem);
+  --text-display-s: clamp(2rem, 1.7rem + 1.4vw, 3rem);
+
+  --line-height-tight: 1.15;
+  --line-height-body: 1.6;
+
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Spacing - 4px base scale (DESIGN-SYSTEM §3.1) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  /* Layout (DESIGN-SYSTEM §4.1, §5) */
+  --container-max: 1200px;
+  --container-pad: var(--space-4);
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+  --radius-pill: 999px;
+
+  /* Height of the header in its closed (transparent) state - the heroes are
+     tucked up under it so the transparent navbar shows the hero behind it,
+     not the page background. Mobile: max(logo 40, toggle 44) + 24px padding. */
+  --header-height: 68px;
+
+  --shadow-sm: 0 1px 2px rgba(28, 43, 58, 0.06), 0 1px 3px rgba(28, 43, 58, 0.08);
+  --shadow-md: 0 18px 40px -24px rgba(28, 43, 58, 0.32);
+  --shadow-lg: 0 28px 64px -28px rgba(28, 43, 58, 0.42);
+
+  --transition-fast: 160ms ease;
+
+  /* Overlays & skeleton */
+  --color-overlay: rgba(20, 27, 34, 0.45);
+  --color-skeleton: var(--color-border-default);
+
+  /* Breakpoints (DESIGN-SYSTEM §5) */
+  --bp-sm: 640px;
+  --bp-md: 1024px;
+  --bp-lg: 1280px;
+
+  /* Sidebar */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+
+  /* Z-index scale */
+  --z-topbar: 20;
+  --z-sidebar: 10;
+  --z-fab: 45;
+  --z-bottom-nav: 50;
+  --z-drawer: 60;
+  --z-skip-link: 100;
+}
+
+@media (min-width: 640px) {
+  :root {
+    /* Desktop header: max(logo 46, CTA 44) + 24px padding. */
+    --header-height: 70px;
+  }
+}
+
+/*
+ * Shared base + accessibility contract (@afhomes/ui/base.css).
+ * Consumed by every app before its own global styles: box-sizing, body
+ * defaults, visible focus, screen-reader helpers, skip link, reduced motion.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Containment reset: fieldset/grid/flex children must be allowed to shrink (prevents cms 200px grids + fieldsets from pushing page scroll) */
+fieldset {
+  min-width: 0;
+  min-inline-size: 0;
+  max-width: 100%;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body);
+  line-height: var(--line-height-body);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+::selection {
+  background-color: var(--color-accent-soft);
+  color: var(--color-text-primary);
+}
+
+/* Skip link (UI-UX §12.3, DESIGN-SYSTEM §7.2) */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--space-4);
+  z-index: var(--z-skip-link);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+/* Screen-reader-only helper */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Table scroll container - shared by Admin and Member panels (DESIGN-SYSTEM §6.4) */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+/* SweetAlert2 theme bridge - notify.ts passes these classes to every popup
+ * so success/error/warning modals match the design tokens (DESIGN-SYSTEM).
+ * The container is force-centered so every notification appears in the
+ * middle of the viewport. Every notification is a proper modal (backdrop +
+ * no outside-click): the overlay below is intentionally visible and dark
+ * enough to block the page while a notification is displayed. */
+.afhomes-swal-container {
+  align-items: center;
+  justify-content: center;
+}
+
+.afhomes-swal-container.swal2-backdrop-show {
+  background-color: rgba(20, 27, 34, 0.55);
+}
+
+.afhomes-swal-popup {
+  margin: auto;
+  font-family: var(--font-family-sans);
+  border-radius: var(--radius-md);
+}
+
+.afhomes-swal-title {
+  color: var(--color-text-primary);
+  font-size: var(--text-h3);
+}
+
+.afhomes-swal-text {
+  color: var(--color-text-secondary);
+}
+
+.afhomes-swal-confirm {
+  background-color: var(--color-brand-primary);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.afhomes-swal-confirm:focus {
+  box-shadow: 0 0 0 3px var(--color-state-focus);
+}
+
+/* Reduced motion (UI-UX §12.9, DESIGN-SYSTEM §7.8) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Shared detail layout - used by Admin detail pages (Registration, Sale, Member).
+   Keeps cards, grids and field rows consistent without per-page duplication. */
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+.card {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  /* Border OR shadow, never both: a card at rest is separated by its edge. */
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.fieldGrid {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.field {
+  display: grid;
+  gap: 2px;
+}
+
+.field dt {
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.field dd {
+  margin: 0;
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  letter-spacing: 0.02em;
+}
+
+.mockNote {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background-color: #e8eef6;
+  background-color: color-mix(in srgb, var(--color-info) 8%, white);
+  border: 1px solid #b0c6dd;
+  border-color: color-mix(in srgb, var(--color-info) 25%, white);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-body);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.text {
+  min-width: 0;
+  max-width: 68ch;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--text-page-title);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+}
+
+.description {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 639px) {
+  .header {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .actions {
+    width: 100%;
+  }
+
+  .actions > * {
+    flex: 1 1 auto;
+  }
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--color-border-default);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.6;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-surface);
+}
+
+.chip svg {
+  flex-shrink: 0;
+}
+
+.neutral {
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-surface);
+  border-color: var(--color-border-default);
+}
+
+.success {
+  color: var(--color-success-strong);
+  background-color: #eef5ef;
+  background-color: color-mix(in srgb, var(--color-success) 10%, white);
+  border-color: #b9d3be;
+  border-color: color-mix(in srgb, var(--color-success) 35%, white);
+}
+
+.warning {
+  color: var(--color-warning-strong);
+  background-color: #fdf6e3;
+  background-color: color-mix(in srgb, var(--color-warning) 10%, white);
+  border-color: #ecd9a8;
+  border-color: color-mix(in srgb, var(--color-warning) 35%, white);
+}
+
+.danger {
+  color: var(--color-danger);
+  background-color: #fbe9e8;
+  background-color: color-mix(in srgb, var(--color-danger) 10%, white);
+  border-color: #e8b4b0;
+  border-color: color-mix(in srgb, var(--color-danger) 35%, white);
+}
+
+.info {
+  color: var(--color-info);
+  background-color: #e8eef6;
+  background-color: color-mix(in srgb, var(--color-info) 10%, white);
+  border-color: #b0c6dd;
+  border-color: color-mix(in srgb, var(--color-info) 35%, white);
+}
+
+/* VIP tier badge: pill with a metal dot plus the tier name. The name always
+   carries the meaning; color is emphasis only. Gold and silver reuse brand
+   tokens; bronze has no token, so its tint is fixed here beside its text. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+  flex: 0 0 auto;
+}
+
+.gold {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.silver {
+  background-color: var(--color-bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.bronze {
+  background-color: #f7ece0;
+  border-color: #a06a32;
+  color: #7c4f21;
+}
+
+.none {
+  color: var(--color-text-muted);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+/* Page shell: shrinkable grid so detail cards never prop the page open sideways. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+}
+
+/* Short cards hug the top instead of stretching to the tallest neighbor. */
+.topGrid {
+  align-items: start;
+}
+
+/*
+ * Identity strip. One container split by 1px dividers into equal columns,
+ * which is the measured default for a set of record facts (11 of 20 studied
+ * screens divide one container rather than tile each fact). Seven facts that
+ * each float on their own have no edges to share, so nothing says "these seven
+ * describe one record".
+ *
+ * Two groups, because they are two different kinds of fact and the previous
+ * round put them there on purpose: state is what the person IS, identifiers are
+ * which row it is. The boundary between the groups is the stronger rule.
+ *
+ * Grid arithmetic at 1440: the canvas is 1100, split evenly, so the four state
+ * facts get 137px each and the three identifiers 183px. Even is not a default:
+ * the state values are 16px text and need about 88px, while the identifiers
+ * carry a mono key and a full timestamp and need about 147px. The previous
+ * 1.35fr state side starved the date and wrapped "12:00 AM" onto a second line.
+ */
+.masthead {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  /* Clips the cell padding and the dividers to the rounded corners. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+.page .mastheadState,
+.page .mastheadIds {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.page .mastheadState {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.page .mastheadIds {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-left: 1px solid var(--color-border-default);
+}
+
+/*
+ * Cells. `DetailField` renders each pair as a bare div child of the dl, so the
+ * divider is the adjacent-sibling border: every cell after the first carries a
+ * rule, and the first needs none. Nothing is nested and nothing is boxed.
+ */
+.page .mastheadState > div,
+.page .mastheadIds > div {
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.page .mastheadState > div + div,
+.page .mastheadIds > div + div {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.page .mastheadState dt,
+.page .mastheadIds dt {
+  font-size: var(--text-caption);
+}
+
+/*
+ * Three steps, so the eye lands in one place: the state value, then the
+ * identifiers, then the labels under both.
+ *
+ * Status and tier arrive already coloured - a status chip and a tier badge -
+ * and those own the colour on this strip. They are 12px marks and cannot be
+ * resized from here without restyling the shared components, so the text values
+ * come DOWN to meet them at 16px. Set larger, "Active VIP" out-shouted the
+ * status of the record, which is backwards: the derived category and the portal
+ * flag are secondary facts about a person whose status is the answer.
+ */
+.page .mastheadState dd {
+  font-size: var(--text-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.page .mastheadIds dd {
+  font-size: var(--text-body-s);
+}
+
+@media (max-width: 899px) {
+  .masthead {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-default);
+  }
+}
+
+@media (max-width: 559px) {
+  .page .mastheadState {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* A wrapped cell is the first of its row, so its rule would divide nothing. */
+  .page .mastheadState > div:nth-child(3) {
+    border-left: 0;
+  }
+
+  .page .mastheadState > div:nth-child(n + 3) {
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  /* The identifiers carry the longest strings on the strip - a mono key and a
+     full timestamp - so they take the whole row each instead of being squeezed
+     into half of one and wrapping mid-time. */
+  .page .mastheadIds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+}
+
+/* Panels: card sales, and the company form when its tab is open. */
+.panel {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/*
+ * Company record: the company master form, as a dossier.
+ *
+ * Four blocks of the same printed form, so they get four cards rather than one
+ * ruled sheet: each carries its own tinted header saying what the block is, so
+ * an operator who opens this tab knows which part of the form they are reading
+ * without scrolling back to a heading.
+ *
+ * Spans are chosen by field count, not by a uniform grid. Primary is the subject
+ * of the record and takes the full width; Related (8) and Package (9) balance
+ * each other exactly on one line. Nothing is stretched to a neighbour's height.
+ *
+ * Grid arithmetic at 1440 on a 1100 canvas, 20px gutter:
+ *   full  = 1100              -> Primary 4-up  (275/cell, 6 rows)
+ *                                Supplementary 3-up (367/cell, 5 rows)
+ *   half  = (1100 - 20) / 2 = 540 -> Related 2-up (270/cell, 4 rows)
+ *                                Package  2-up (270/cell, 5 rows)
+ */
+.dossier {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.dossierCard {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* The subject of the record, and the one block with enough fields to need the
+   full measure. */
+.dossierCard:nth-child(1),
+.dossierCard:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+/*
+ * Header: one tint doing the area work, the hue only on the mark. The icon
+ * square is the solid colour - a small mark - while the band behind it is the
+ * pale tint, which is the whole move.
+ */
+.dossierHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.dossierMark {
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+}
+
+/* The title is the card's voice: one step above any label inside it. */
+.dossierTitle {
+  margin: 0;
+  align-self: end;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* What the block is, and what it is not. */
+.dossierBlurb {
+  margin: 0;
+  align-self: start;
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.tonebrand {
+  background-color: var(--color-brand-soft);
+}
+
+.tonebrand .dossierMark {
+  background-color: var(--color-brand-secondary);
+}
+
+.toneinfo {
+  background-color: #e8eef6;
+}
+
+.toneinfo .dossierMark {
+  background-color: var(--color-info);
+}
+
+.tonegold {
+  background-color: var(--color-accent-soft);
+}
+
+.tonegold .dossierMark {
+  background-color: var(--color-accent-strong);
+}
+
+.toneneutral {
+  background-color: var(--color-bg-surface);
+}
+
+.toneneutral .dossierMark {
+  background-color: var(--color-text-secondary);
+}
+
+/* Field grid: as many comfortable columns as the card is wide. Three widths,
+   because the cards are three widths - a fixed count would either strand the
+   narrow cards or over-fill the wide one. */
+.page .dossierFields {
+  display: grid;
+  gap: var(--space-4) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin: 0;
+  padding: var(--space-5);
+  align-content: start;
+}
+
+/* The paired cards take three columns rather than two. Eight fields and nine
+   fields in two columns end one row apart and the row stops level; in three
+   they are exactly three rows each, so the pair shares a bottom edge.
+   Desktop only: below the two-column breakpoint the cards go full width, and
+   three columns of a phone is three unreadable 100px strips. */
+@media (min-width: 900px) {
+  .page .dossierCard:nth-child(3) .dossierFields,
+  .page .dossierCard:nth-child(4) .dossierFields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * The labels are the form's own all-caps headers, so the shout is in the
+ * strings and cannot be removed. It is answered in weight instead: the header
+ * sits small and muted, the value below it at body size in primary ink.
+ */
+.page .dossierFields dt {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.page .dossierFields dd {
+  margin: 0;
+  font-size: var(--text-body-s);
+  line-height: var(--line-height-body);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A blank cell recedes so the recorded ones carry the eye. */
+.absent {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+@media (max-width: 899px) {
+  .dossier {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dossierCard:nth-child(1),
+  .dossierCard:nth-child(2) {
+    grid-column: auto;
+  }
+}
+
+/*
+ * Section tabs. A 2px brand mark sitting on the sheet's own rule - the full
+ * hue on a small mark, which is this style's move, and never a tinted pill or
+ * a left bar. 44px tall so it is comfortable to hit, while the indicator stays
+ * the width of its label instead of the width of the row.
+ */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  /* Pulls the indicator onto the rule above it rather than below it. */
+  margin-bottom: -1px;
+  padding: 0;
+  border-bottom: 2px solid transparent;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.tabCurrent {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-brand-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}
+
+/*
+ * Settlement strip: the screen's answer. One divided container, not a tile per
+ * figure. The balance leads; card, scheme, total and paid are its arithmetic.
+ */
+.settlement {
+  display: grid;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.settlementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.settlementRow + .settlementRow {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.settlementLead {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settlementLabel {
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.settlementValue {
+  font-size: var(--text-h2);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settlementFacts {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: var(--space-5);
+  margin: 0;
+}
+
+@media (max-width: 899px) {
+  .settlementRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settlementFacts {
+    grid-template-columns: repeat(2, auto);
+  }
+}
+
+/* Vertical stack of per-sale cards. */
+.saleStack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Grid label + control, matching the directory filter pattern. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+/* Company edit dialog: stacked sections, full-width fields. */
+.editGrid {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.editGrid h3 {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-body);
+}
+
+/* Status select pending state: the spinner docks inside the control's right
+   edge (over the chevron spot) instead of sitting beside it, so the busy
+   indicator reads as part of the control that triggered the update. */
+.statusWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.statusSpinner {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px 2px 10px;
+  background-color: var(--color-state-disabled-bg);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+/* The action buttons stay on one row and scroll horizontally on narrow
+   cards instead of wrapping onto a second row. */
+.actionButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.actionButtons > * {
+  flex: 0 0 auto;
+}
+
+/* Field grid: as many comfortable columns as fit, filled in reading order.
+   The previous fixed-row column flow packed the 24-field company block into six
+   implicit columns, so every label wrapped to two or three lines. */
+.topGrid .fields {
+  display: grid;
+  gap: var(--space-3) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  margin: 0;
+}
+
+/*
+ * One solid, unmistakable treatment per action so function reads off color
+ * as well as text. Higher specificity than the design-system variants so the
+ * tone wins regardless of bundle order; every fill pairs a dark tone with
+ * white text at AA contrast. The uniform disabled rule below outranks them
+ * all so a busy control always greys.
+ */
+.actionButtons .toneAccent {
+  background-color: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  color: #ffffff;
+}
+
+.actionButtons .toneAccent:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.actionButtons .toneSlate {
+  background-color: var(--color-text-secondary);
+  border-color: var(--color-text-secondary);
+  color: #ffffff;
+}
+
+.actionButtons .toneSlate:hover:not(:disabled) {
+  filter: brightness(1.3);
+}
+
+.actionButtons .toneInfo {
+  background-color: var(--color-info);
+  border-color: var(--color-info);
+  color: #ffffff;
+}
+
+.actionButtons .toneInfo:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.actionButtons button:disabled {
+  background-color: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+  border-color: var(--color-border-default);
+}
+
+.actionsTitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Accordion disclosure for payment history: full-width bar with a rotating
+   chevron. Native <details> behavior only (the `name` attribute groups them
+   where supported); no JS state, keyboard-free. */
+.history {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface);
+}
+
+.history summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  font-size: var(--text-body-s);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-control);
+}
+
+.history summary::-webkit-details-marker {
+  display: none;
+}
+
+.history summary:hover {
+  background-color: var(--color-state-hover);
+}
+
+.history summary:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--transition-fast);
+}
+
+.history[open] .chevron {
+  transform: rotate(45deg);
+}
+
+.history[open] summary {
+  border-bottom: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+/* aria-disabled keeps the button focusable so its reason stays perceivable;
+   the native disabled look is mirrored without removing it from the tab order. */
+.actionButtons [aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Payment history table: desktop keeps the wide ledger; phones collapse rows
+   to labelled cards using each cell's data-label. */
+.history table {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .history table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  .history {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+
+  .history summary {
+    border: 1px solid var(--color-border-default);
+  }
+
+  div.history.history table {
+    min-width: 0;
+  }
+
+  .history table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .history thead {
+    display: none;
+  }
+
+  .history tbody {
+    display: block;
+  }
+
+  .history tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .history tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .history tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+  }
+
+  .history tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .history tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .history tbody > tr > td:not([data-label])::before,
+  .history tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .history tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+}
+
+body { padding: var(--space-8); }
+.page { max-width: 1100px; margin: 0 auto; display: grid; gap: var(--space-4); align-content: start; }
+.btn {
+  min-height: var(--control-md); padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-strong); border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised); font: inherit; font-size: var(--text-body-s);
+  font-weight: 500; color: var(--color-text-primary); cursor: pointer;
+}
+.tabs { display: flex; gap: var(--space-6); border-bottom: 1px solid var(--color-border-default); }
+.tab {
+  display: inline-flex; align-items: center; min-height: 44px; margin-bottom: -1px;
+  padding: 0; border-bottom: 2px solid transparent; font-size: var(--text-body-s);
+  color: var(--color-text-secondary); text-decoration: none;
+}
+.tabCurrent { color: var(--color-text-primary); font-weight: 600; border-bottom-color: var(--color-brand-secondary); }
+</style>
+</head>
+<body>
+    <section class="page">
+      <header class="header">
+        <div class="text">
+          <h1 class="title">MARIA SANTOS</h1>
+          <p class="description">Customer record and card sales.</p>
+        </div>
+        <div class="actions"><button class="btn" type="button">Edit company record</button></div>
+      </header>
+      <nav class="tabs" aria-label="Customer record sections">
+        <span class="tab">Overview</span>
+        <span class="tab">Sales and payments</span>
+        <span class="tab tabCurrent">Company record</span>
+      </nav>
+      <div class="dossier">
+
+          <article class="dossierCard">
+            <header class="dossierHead tonebrand">
+              <span class="dossierMark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg></span>
+              <h2 class="dossierTitle">Primary Member</h2>
+              <p class="dossierBlurb">Who holds the card</p>
+            </header>
+            <dl class="fieldGrid dossierFields">
+            <div class="field"><dt>RA NO</dt><dd><span class="mono">RA-2026-0001</span></dd></div>
+            <div class="field"><dt>STATUS</dt><dd>Active Member</dd></div>
+            <div class="field"><dt>FIRST NAME</dt><dd>MARIA</dd></div>
+            <div class="field"><dt>LAST NAME</dt><dd>SANTOS</dd></div>
+            <div class="field"><dt>MIDDLE NAME</dt><dd>DELA</dd></div>
+            <div class="field"><dt>SUFFIX</dt><dd><span class="absent">Not Recorded</span></dd></div>
+            <div class="field"><dt>BIRTHDAY</dt><dd>May 5, 1990</dd></div>
+            <div class="field"><dt>GENDER</dt><dd>female</dd></div>
+            <div class="field"><dt>AGE</dt><dd>36</dd></div>
+            <div class="field"><dt>CITIZENSHIP</dt><dd>Filipino</dd></div>
+            <div class="field"><dt>CIVIL STATUS</dt><dd>Married</dd></div>
+            <div class="field"><dt>PERMANENT ADDRESS LINE 1</dt><dd>1 SSOT Street</dd></div>
+            <div class="field"><dt>PERMANENT ADDRESS LINE 2</dt><dd>Unit 7</dd></div>
+            <div class="field"><dt>PROVINCE</dt><dd>Laguna</dd></div>
+            <div class="field"><dt>CITY</dt><dd>Calamba</dd></div>
+            <div class="field"><dt>BARANGGAY</dt><dd><span class="absent">Not Recorded</span></dd></div>
+            <div class="field"><dt>POSTAL CODE</dt><dd><span class="mono">4027</span></dd></div>
+            <div class="field"><dt>LANDLINE</dt><dd>(049) 555-1234</dd></div>
+            <div class="field"><dt>EMAIL</dt><dd>maria.santos@afhomesmail.ph</dd></div>
+            <div class="field"><dt>TIN NO.</dt><dd><span class="mono">********9012</span></dd></div>
+            <div class="field"><dt>MOBILE NO.</dt><dd><span class="mono">+63 917 123 4567</span></dd></div>
+            <div class="field"><dt>OCCUPATION / BUSINESS NAME</dt><dd>Engineer</dd></div>
+            <div class="field"><dt>OFFICE / BUSINESS ADDRESS</dt><dd>Makati HQ</dd></div>
+            <div class="field"><dt>EMPLOYED POSITION</dt><dd>Engineer II</dd></div>
+            </dl>
+          </article>
+
+          <article class="dossierCard">
+            <header class="dossierHead toneinfo">
+              <span class="dossierMark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg></span>
+              <h2 class="dossierTitle">Supplementary Member</h2>
+              <p class="dossierBlurb">Second holder, Gold only</p>
+            </header>
+            <dl class="fieldGrid dossierFields">
+            <div class="field"><dt>SUPPLEMENTARY FULL NAME</dt><dd>JUAN DELA CRUZ</dd></div>
+            <div class="field"><dt>SUPPLEMENTARY ADDRESS</dt><dd>1 Side St, Biñan, Laguna</dd></div>
+            <div class="field"><dt>BIRTHDAY</dt><dd>Aug 10, 1992</dd></div>
+            <div class="field"><dt>GENDER</dt><dd>male</dd></div>
+            <div class="field"><dt>AGE</dt><dd>34</dd></div>
+            <div class="field"><dt>CITIZENSHIP</dt><dd>Filipino</dd></div>
+            <div class="field"><dt>CIVIL STATUS</dt><dd>Married</dd></div>
+            <div class="field"><dt>TIN NO.</dt><dd><span class="mono">********7001</span></dd></div>
+            <div class="field"><dt>LANDLINE</dt><dd>(02) 8999-0000</dd></div>
+            <div class="field"><dt>MOBILE NO.</dt><dd><span class="mono">+63 918 555 0101</span></dd></div>
+            <div class="field"><dt>EMAIL</dt><dd>juan.cruz@afhomesmail.ph</dd></div>
+            <div class="field"><dt>OCCUPATION / BUSINESS NAME</dt><dd>Teacher</dd></div>
+            <div class="field"><dt>OFFICE / BUSINESS ADDRESS</dt><dd>Laguna State University</dd></div>
+            <div class="field"><dt>EMPLOYED POSITION</dt><dd>Instructor II</dd></div>
+            </dl>
+          </article>
+
+          <article class="dossierCard">
+            <header class="dossierHead toneneutral">
+              <span class="dossierMark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="17" y1="11" x2="23" y2="11" /></svg></span>
+              <h2 class="dossierTitle">Related Persons and Referral</h2>
+              <p class="dossierBlurb">Stated names, not the genealogy</p>
+            </header>
+            <dl class="fieldGrid dossierFields">
+            <div class="field"><dt>OST/IST NAME</dt><dd>OST Silk</dd></div>
+            <div class="field"><dt>SVD (NAME)</dt><dd>SVD Santos</dd></div>
+            <div class="field"><dt>SSM (NAME)</dt><dd><span class="absent">Not Recorded</span></dd></div>
+            <div class="field"><dt>SM (NAME)</dt><dd>SM Reyes</dd></div>
+            <div class="field"><dt>REFERRER (NAME)</dt><dd>Ref Reyes</dd></div>
+            <div class="field"><dt>VIP RECOMMENDER (NAME)</dt><dd><span class="absent">Not Recorded</span></dd></div>
+            <div class="field"><dt>CONTACT NO.</dt><dd>+63 918 555 0101</dd></div>
+            <div class="field"><dt>EMAIL ADDRESS</dt><dd>related@afhomesmail.ph</dd></div>
+            </dl>
+          </article>
+
+          <article class="dossierCard">
+            <header class="dossierHead tonegold">
+              <span class="dossierMark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="16" cy="14" r="1" /></svg></span>
+              <h2 class="dossierTitle">Package and Payment (company stated)</h2>
+              <p class="dossierBlurb">Company figures, not sale totals</p>
+            </header>
+            <dl class="fieldGrid dossierFields">
+            <div class="field"><dt>VIP PACKAGE</dt><dd>GOLD VIP</dd></div>
+            <div class="field"><dt>PAYMENT TERMS</dt><dd>24 months</dd></div>
+            <div class="field"><dt>REGULAR PRICE</dt><dd><span class="mono">60000.00</span></dd></div>
+            <div class="field"><dt>DISCOUNT</dt><dd><span class="mono">6000.00</span></dd></div>
+            <div class="field"><dt>TOTAL AMOUNT</dt><dd><span class="mono">54000.00</span></dd></div>
+            <div class="field"><dt>RF</dt><dd><span class="mono">0012</span></dd></div>
+            <div class="field"><dt>PAYMENT TYPE</dt><dd>Bank transfer</dd></div>
+            <div class="field"><dt>REF NO</dt><dd><span class="mono">TRF-88214</span></dd></div>
+            <div class="field"><dt>DATE</dt><dd>Jan 4, 2026</dd></div>
+            </dl>
+          </article>
+      </div>
+    </section>
+</body>
+</html>

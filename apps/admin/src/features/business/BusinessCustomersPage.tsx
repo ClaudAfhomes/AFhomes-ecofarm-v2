@@ -1,14 +1,13 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import {
+import {
   Button,
   ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
-  FilterBar,
-  DateField,
+  FilterBar,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -24,12 +23,12 @@ import { customerSellerOptionSchema } from '@afhomes/contracts';
 import { requestList } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
 import { SettlementBadge } from './SettlementBadge';
 import { TierBadge } from './TierBadge';
-import {
+import {
   anonymizeCustomer,
   deactivateCustomer,
   deleteCustomer,
@@ -37,6 +36,7 @@ import {
   issueCustomerAccountActivation,
 } from './services';
 import { applicationKeys, businessKeys } from './queryKeys';
+import { CustomerApplicationsPage } from './official-forms-applications';
 
 /**
  * Customer registration and card application.
@@ -53,6 +53,22 @@ export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
   const navigate = useNavigate();
+  // The import/export workspace keeps its OWN module, the same as it does in the
+  // applications view. Hiding the button is UX only - the server re-checks every
+  // call - so this must mirror that page's check exactly, not approximate it.
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) =>
+        permission.moduleKey === 'governance.customer_import' && permission.canView,
+    ) === true;
+  const [searchParams] = useSearchParams();
+  const { pathname } = useLocation();
+  // The Applications view has its own address so the sidebar can highlight it.
+  // `?view=` still wins, so an operator on a bookmarked `/admin/customers` link
+  // keeps landing on the view they asked for.
+  const applications = searchParams.has('view')
+    ? searchParams.get('view') === 'applications'
+    : pathname.startsWith('/admin/customers/applications');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const [page, setPage] = useState(0);
@@ -68,13 +84,16 @@ export function BusinessCustomersPage() {
     setApplied(next);
     setPage(0);
   });
+  // THREE filters, and they are the three answers to "who needs chasing":
+  // what state the account is in, whether money is still owed, and whose book
+  // of business it is. Seller is the only one of the three with no column in
+  // the table below, so without it there is no way to see your own customers.
+  // VIP tier and the registration date range were dropped: tier is printed on
+  // every row, and the table shows no date to filter against.
   const [filters, setFilters] = useState({
     status: '',
     payment: '',
-    tier: '',
     seller: '',
-    from: '',
-    to: '',
   });
   // Every filter change restarts at the first page.
   const patchFilters = (patch: Partial<typeof filters>) => {
@@ -191,11 +210,33 @@ export function BusinessCustomersPage() {
       </section>
     );
 
+  if (applications)
+    return (
+      <section className={styles.page}>
+        <CustomerApplicationsPage />
+      </section>
+    );
+
   return (
     <section className={styles.page}>
       <PageHeader
         title="Customers"
         description="Customer directory and membership records."
+        actions={
+          <>
+            {canSeeImportExport ? (
+              <Button
+                variant="secondary"
+                onClick={() => navigate('/admin/customers/applications/import-export')}
+              >
+                Import / Export
+              </Button>
+            ) : null}
+            {/* Creating a customer and building their application are ONE action,
+                so this opens the builder rather than a separate create page. */}
+            <Button onClick={() => navigate('/admin/customers/new')}>New customer</Button>
+          </>
+        }
       />
 
       <FilterBar
@@ -240,18 +281,6 @@ export function BusinessCustomersPage() {
               />
             </label>
             <label className={styles.filterLabel}>
-              VIP Tier
-              <Select
-                aria-label="VIP Tier"
-                value={filters.tier}
-                onChange={(e) => patchFilters({ tier: e.target.value })}
-                options={[
-                  { value: '', label: 'All tiers' },
-                  ...['GOLD', 'SILVER', 'BRONZE'].map((t) => ({ value: t, label: t })),
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
               Seller
               <Select
                 aria-label="Seller"
@@ -263,22 +292,6 @@ export function BusinessCustomersPage() {
                 ]}
               />
             </label>
-            <DateField
-              id="customers-from"
-              name="from"
-              label="From date"
-              optional
-              value={filters.from}
-              onChange={(value) => patchFilters({ from: value })}
-            />
-            <DateField
-              id="customers-to"
-              name="to"
-              label="To date"
-              optional
-              value={filters.to}
-              onChange={(value) => patchFilters({ to: value })}
-            />
           </>
         }
       />

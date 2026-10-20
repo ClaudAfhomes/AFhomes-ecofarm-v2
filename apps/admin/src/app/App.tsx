@@ -105,11 +105,6 @@ const CustomerApplicationEditorPage = lazy(() =>
     default: m.CustomerApplicationEditorPage,
   })),
 );
-const CustomerApplicationsPage = lazy(() =>
-  import('../features/business/OfficialFormsPages').then((m) => ({
-    default: m.CustomerApplicationsPage,
-  })),
-);
 const ReservationAgreementEditorPage = lazy(() =>
   import('../features/business/OfficialFormsPages').then((m) => ({
     default: m.ReservationAgreementEditorPage,
@@ -161,14 +156,10 @@ const GenealogyDetailsPage = lazy(() =>
 const MembersPage = lazy(() =>
   import('../features/network-members/MembersPage').then((m) => ({ default: m.MembersPage })),
 );
-const DocumentsPage = lazy(() =>
-  import('../features/documents/DocumentsPage').then((m) => ({ default: m.DocumentsPage })),
-);
-const DocumentReviewPage = lazy(() =>
-  import('../features/documents/DocumentReviewPage').then((m) => ({
-    default: m.DocumentReviewPage,
-  })),
-);
+// ID documents are no longer reviewed on their own screen: the uploaded scan
+// follows the status of the customer application that created it. The image is
+// still loaded on the customer record via the (kept) current/access-url
+// endpoints, but there is no list or review route any more.
 const MembershipCardPrintPage = lazy(() =>
   import('../features/memberships/MembershipCardPrintPage').then((m) => ({
     default: m.MembershipCardPrintPage,
@@ -282,10 +273,25 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+              {/*
+                The customer area is exactly THREE screens: main (list), create,
+                and detail. The create screen IS the application builder - the
+                builder is what creates the customer, so a separate
+                "/admin/customers/create" page would be a second form for one
+                action. The main screen carries two views, People and
+                Applications, on two real addresses so the sidebar can highlight
+                whichever is on screen. The retired
+                `/admin/customers/applications/*` addresses below redirect rather
+                than 404, because operators have them bookmarked.
+              */}
+              <Route
+                path="/admin/customers/new"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
               <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
               <Route
                 path="/admin/customers/applications"
-                element={protectedPage(<CustomerApplicationsPage />)}
+                element={protectedPage(<BusinessCustomersPage />)}
               />
               <Route
                 path="/admin/customers/applications/import-export"
@@ -293,7 +299,7 @@ export default function App() {
               />
               <Route
                 path="/admin/customers/applications/new"
-                element={protectedPage(<CustomerApplicationEditorPage />)}
+                element={<Navigate to="/admin/customers/new" replace />}
               />
               <Route
                 path="/admin/customers/applications/:id"
@@ -416,10 +422,9 @@ export default function App() {
                 path="/admin/memberships/:id"
                 element={protectedPage(<MembershipDetailPage />)}
               />
-              {/* ID documents. Gated on the sales.id_documents nav key; the server
-              re-checks scope and never returns paths, hashes or raw ID numbers. */}
-              <Route path="/admin/documents" element={protectedPage(<DocumentsPage />)} />
-              <Route path="/admin/documents/:id" element={protectedPage(<DocumentReviewPage />)} />
+              {/* ID documents are no longer reviewed on their own screen; the scan
+              travels with the customer application that created it. The upload and
+              current/access-url endpoints remain for intake and display. */}
               <Route
                 path="/admin/memberships/:id/card"
                 element={protectedPage(<MembershipCardPrintPage />)}

@@ -22,7 +22,7 @@ import {
   tinNumberSchema,
 } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
-import { Select } from '@afhomes/ui';
+import { Button, Select } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import {
   filterBusinessTextInput,
@@ -132,6 +132,8 @@ export function Field({
   type = 'text',
   required = false,
   placeholder,
+  readOnly = false,
+  disabled = false,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
@@ -145,6 +147,9 @@ export function Field({
   type?: string;
   required?: boolean;
   placeholder?: string;
+  /** Show the stored value but refuse edits (e.g. a locked TIN). */
+  readOnly?: boolean;
+  disabled?: boolean;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -178,6 +183,8 @@ export function Field({
         value={value}
         placeholder={placeholder}
         required={required}
+        readOnly={readOnly}
+        disabled={disabled}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
@@ -206,7 +213,7 @@ export function Field({
  * Civil status). A dropdown rather than a text box: the value is a closed set,
  * so free typing could only ever produce a value the server refuses.
  */
-function SelectField({
+export function SelectField({
   label,
   value,
   onChange,
@@ -254,7 +261,7 @@ const choiceOptions = (values: readonly string[], emptyLabel = 'Not specified') 
  * record honest: the operator sees what is actually stored and changes it
  * deliberately. The contract still refuses it on write, so it cannot persist.
  */
-const withStoredValue = (
+export const withStoredValue = (
   options: { value: string; label: string }[],
   stored: string | undefined,
 ) =>
@@ -357,7 +364,7 @@ export function HolderFields({
           label="Suffix"
           value={value.suffix ?? ''}
           onChange={(v) => set('suffix', v)}
-          options={choiceOptions(SUFFIX_OPTIONS, 'None')}
+          options={withStoredValue(choiceOptions(SUFFIX_OPTIONS, 'None'), value.suffix ?? undefined)}
         />
         <DateField
           label="Birth date"
@@ -430,7 +437,7 @@ export function HolderFields({
             readOnly
             aria-readonly="true"
             aria-label="Postal code"
-            placeholder="Filled from the city / municipality"
+            placeholder="Filled from city"
             value={value.postalCode ?? ''}
             onFocus={(event) => event.currentTarget.select()}
           />
@@ -649,11 +656,24 @@ export function RecommenderFields({
     onChain({ ...pickChain(meta), [key]: next, ...cleared });
   };
   const fields = [
-    { key: 'vipRecommenderName', label: 'VIP Recommender Name', optionalPhone: false, name: true },
-    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true, name: false },
-    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false, name: false },
-    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false, name: false },
+    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
+    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
+    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
   ] as const;
+  // The VIP recommender is an OST member, chosen from the same genealogy list
+  // the Referrer level reads - NOT narrowed to the selected upline's downline,
+  // because a recommender is not in the applicant's reporting chain. The stored
+  // column is the recommender's NAME, so the choice writes the name.
+  const vipRecommenderOptions = withStoredValue(
+    [
+      { value: '', label: 'Not specified' },
+      ...chainOptions(nodes, 'ost', null).map((node) => ({
+        value: node.fullName,
+        label: node.fullName,
+      })),
+    ],
+    meta.vipRecommenderName,
+  );
   return (
     <>
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
@@ -667,17 +687,40 @@ export function RecommenderFields({
             aria-label={level.label}
             value={meta[level.key]}
             disabled={chain.isPending}
+            loading={chain.isPending}
             onChange={(event) => setChain(level.key, event.target.value)}
             options={optionsFor(index)}
           />
         </label>
       ))}
-      {chain.isError ? <p role="status">Chain list unavailable. Retry.</p> : null}
+      {chain.isError ? (
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Button
+            variant="secondary"
+            loading={chain.isFetching}
+            loadingLabel="Retrying…"
+            onClick={() => void chain.refetch()}
+          >
+            Retry chain list
+          </Button>
+        </div>
+      ) : null}
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
-        <p className={styles.subGroupTitle}>VIP recommender (free text)</p>
-        <p className={styles.hint}>Name, contact and email are typed.</p>
+        <p className={styles.subGroupTitle}>VIP recommender</p>
+        <p className={styles.hint}>Recommender is active OST staff. Contact and email are typed.</p>
       </div>
-      {fields.map(({ key, label, optionalPhone, name }) => (
+      <label className={styles.filterLabel}>
+        <span>VIP Recommender</span>
+        <Select
+          aria-label="VIP Recommender"
+          value={meta.vipRecommenderName}
+          disabled={chain.isPending}
+          loading={chain.isPending}
+          onChange={(event) => onChange('vipRecommenderName', event.target.value)}
+          options={vipRecommenderOptions}
+        />
+      </label>
+      {fields.map(({ key, label, optionalPhone }) => (
         <Field
           key={key}
           label={label}
@@ -686,9 +729,7 @@ export function RecommenderFields({
           normalize={
             key === 'recommenderEmail'
               ? (v) => v.toLowerCase()
-              : name
-                ? filterHolderNameInput
-                : (v) => normalizeLiveHumanField(key, v)
+              : (v) => normalizeLiveHumanField(key, v)
           }
           optionalPhone={optionalPhone}
           onChange={(v) => onChange(key, v)}

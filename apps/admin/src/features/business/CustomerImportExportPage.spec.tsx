@@ -287,3 +287,81 @@ describe('CustomerImportExportPage workspace tabs', () => {
     expect(screen.queryByRole('button', { name: /Confirm Import/ })).not.toBeInTheDocument();
   });
 });
+
+describe('CustomerImportExportPage job history', () => {
+  const job = (over: Partial<Record<string, unknown>> = {}) => ({
+    id: 'aaaaaaaa-0000-4000-8000-000000000009',
+    jobNumber: 'AF-IMP-000009',
+    sourceType: 'excel',
+    sourceName: 'members-2026-09.xlsx',
+    googleSheetId: null,
+    status: 'completed',
+    totalRows: 500,
+    validRows: 480,
+    invalidRows: 20,
+    insertedRows: 460,
+    updatedRows: 12,
+    skippedRows: 8,
+    createdAt: '2026-10-16T09:30:00.000Z',
+    validatedAt: '2026-10-16T09:31:00.000Z',
+    committedAt: '2026-10-16T09:32:00.000Z',
+    failedAt: null,
+    cancelledAt: null,
+    failedRows: 20,
+    ...over,
+  });
+
+  it('sums the headline figures from the jobs on screen and flags the broken rows', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerImportJobs).mockResolvedValue([
+      job(),
+      job({
+        id: 'aaaaaaaa-0000-4000-8000-000000000010',
+        jobNumber: 'AF-IMP-000010',
+        sourceName: 'members-2026-10.xlsx',
+        insertedRows: 90,
+        updatedRows: 0,
+        skippedRows: 2,
+        failedRows: 0,
+      }),
+    ] as never);
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    await user.click(screen.getByRole('tab', { name: 'Job history' }));
+    await screen.findByText('Import jobs');
+
+    // Every headline figure is summed from the rows, never typed in: 2 jobs,
+    // 472 + 90 rows written, and 20 + 0 rows needing attention.
+    expect(screen.getByLabelText('Import job summary')).toBeInTheDocument();
+    const figure = (label: string) => screen.getByText(label).closest('div');
+    expect(figure('Jobs')).toHaveTextContent('2');
+    expect(figure('Rows written')).toHaveTextContent('562');
+    expect(figure('Needs attention')).toHaveTextContent('20');
+
+    // Only a non-zero failure count is allowed to take colour. The first job has
+    // 20 broken rows and the second has none, so the rule is per job.
+    expect(figure('Needs attention')).toHaveAttribute('data-alert', 'true');
+    const failedCells = screen.getAllByText('Failed').map((dt) => dt.closest('div'));
+    expect(failedCells).toHaveLength(2);
+    expect(failedCells[0]).toHaveAttribute('data-alert', 'true');
+    expect(failedCells[1]).not.toHaveAttribute('data-alert');
+
+    // Both jobs are identifiable by file and reference, with no middot joining them.
+    expect(screen.getByText('members-2026-09.xlsx')).toBeInTheDocument();
+    expect(screen.getByText('members-2026-10.xlsx')).toBeInTheDocument();
+    expect(screen.getByText('AF-IMP-000010')).toBeInTheDocument();
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
+  });
+
+  it('shows a clean summary when no row failed, and no colour on a zero', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerImportJobs).mockResolvedValue([
+      job({ insertedRows: 500, updatedRows: 0, skippedRows: 0, failedRows: 0 }),
+    ] as never);
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    await user.click(screen.getByRole('tab', { name: 'Job history' }));
+    await screen.findByText('Import jobs');
+    // A red zero is a false alarm, so the alert is only ever set above zero.
+    expect(screen.getByText('Needs attention').closest('div')).not.toHaveAttribute('data-alert');
+    expect(screen.getByText('Failed').closest('div')).not.toHaveAttribute('data-alert');
+  });
+});

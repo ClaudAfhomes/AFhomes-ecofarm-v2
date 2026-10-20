@@ -37,12 +37,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     module: 'sales.card_sales',
     dropdown: [
       { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
-      {
-        to: '/admin/customers/applications',
-        label: 'Customer Applications',
-        module: 'sales.customers',
-      },
-      { to: '/admin/sales/reservations', label: 'IST Reservations', module: 'sales.card_sales' },
+      // Applications is the second view of the customers screen, but it keeps
+      // its OWN address: `findNavSubItem` and `breadcrumbItems` are given
+      // `pathname` only, so a search-parameter target could never be marked
+      // active and the breadcrumb would name the wrong page.
+      { to: '/admin/customers/applications', label: 'Applications', module: 'sales.customers' },
+      { to: '/admin/sales/reservations', label: 'Reservation', module: 'sales.card_sales' },
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
       {
         to: '/admin/sales/payment-scheme-guide',
@@ -59,12 +59,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     dropdown: [
       {
         to: '/admin/finance/payments',
-        label: 'Payment Queue',
+        label: 'Payment List',
         module: 'finance.payment_verification',
       },
       {
         to: '/admin/finance/activation',
-        label: 'Activation Queue',
+        label: 'Activation List',
         module: 'finance.card_activation',
       },
       {
@@ -239,7 +239,9 @@ export const EXTRA_GATED_ROUTES: readonly {
 }[] = [
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
-  { pathPrefix: '/admin/documents', module: 'sales.id_documents' },
+  // `/admin/documents` list/review route removed; the scan travels with the
+  // application. The `sales.id_documents` module still gates the image on the
+  // customer record.
   {
     pathPrefix: '/admin/customers/applications/import-export',
     module: 'governance.customer_import',

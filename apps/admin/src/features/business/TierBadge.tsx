@@ -9,7 +9,7 @@ import styles from './TierBadge.module.css';
  * Meaning always rides on the text, never on color alone.
  */
 export function TierBadge({ tier }: { tier: string | null | undefined }) {
-  if (!tier) return <span className={`${styles.badge} ${styles.none}`}>No tier</span>;
+  if (!tier) return <span className={`${styles.badge} ${styles.none}`}>No Tier</span>;
   const tone =
     tier === 'GOLD'
       ? styles.gold

@@ -184,6 +184,32 @@ export const applicationHolderSchema = z.object({
   printedName: z.string().trim().min(1).max(180).transform(toTitleCase),
 });
 
+/**
+ * A company-stated field that is genuinely optional. Blank and whitespace-only
+ * both mean "not stated" and collapse to `undefined`, so an empty form cell
+ * never stores "" and never clears a value already on the record.
+ */
+const optionalCompanyText = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().max(160).optional(),
+);
+
+/**
+ * Company-stated money is EXACT-DECIMAL TEXT, never a float and never a number.
+ * Same shape `private.money()` and the `amount` helpers accept, so a value that
+ * renders on the paper form is a value the system can re-read.
+ */
+const optionalCompanyMoney = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/).optional(),
+);
+
+/** Write-only government ID number; blank is "not supplied", never a clear. */
+const optionalGovernmentIdNumber = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().min(4).max(40).optional(),
+);
+
 const customerApplicationInputSchema = z.object({
   /** Required by POST creation; existing-record PATCH does not require a token. */
   requestId: z.string().uuid().optional(),
@@ -192,6 +218,37 @@ const customerApplicationInputSchema = z.object({
   planId: requiredUuid,
   tier: vipTierSchema,
   paymentScheme: paymentSchemeSchema,
+  /**
+   * COMPANY-STATED package and payment block, verbatim from the company master
+   * list (its "VIP Package" columns), plus the two record identifiers.
+   *
+   * `customers` is the single source for these: they are deliberately NOT
+   * stored on `customer_applications`. `register_customer_application_once`
+   * copies them onto the customer row in the same transaction that creates it,
+   * which is why the create form can collect them and the detail page can show
+   * them without the application ever owning a second copy.
+   *
+   * Nothing here is server-authoritative. No total, discount or price is ever
+   * computed FROM these columns - money comes from `card_sales` and the
+   * VERIFIED payments, exactly as before.
+   */
+  raNumber: optionalCompanyText,
+  companyStatus: optionalCompanyText,
+  statedVipPackage: optionalCompanyText,
+  statedPaymentTerms: optionalCompanyText,
+  statedRegularPrice: optionalCompanyMoney,
+  statedDiscount: optionalCompanyMoney,
+  statedTotalAmount: optionalCompanyMoney,
+  statedRf: optionalCompanyMoney,
+  statedPaymentType: optionalCompanyText,
+  statedRefNo: optionalCompanyText,
+  statedPaymentDate: dateSchema.optional(),
+  /**
+   * The government ID number captured during the application. Write-only:
+   * `save_customer_application` mirrors it onto `customers` and no read path
+   * returns it. The type is mirrored from the uploaded document instead.
+   */
+  governmentIdNumber: optionalGovernmentIdNumber,
   primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
   /** The Sales Manager of record (SM column on the paper form). */
@@ -478,6 +535,16 @@ export const officialFormListQuerySchema = z.object({
   tier: vipTierSchema.optional(),
   seller: z.string().uuid().optional(),
   saleId: z.string().uuid().optional(),
+  /**
+   * Every application belonging to one customer, newest first.
+   *
+   * This is the lookup behind the customer workspace: the customer page owns
+   * its applications, so it must be able to ask "this person's applications"
+   * without pulling the whole paginated list and filtering in the browser.
+   * Ignored for reservation agreements, which hang off an APPLICATION rather
+   * than a customer.
+   */
+  customerId: z.string().uuid().optional(),
   from: dateSchema.optional(),
   to: dateSchema.optional(),
   search: z.string().trim().max(100).optional(),

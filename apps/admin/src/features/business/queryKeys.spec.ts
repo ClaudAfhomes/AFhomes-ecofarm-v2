@@ -51,13 +51,11 @@ describe('business query keys', () => {
   });
 
   it('builds the application and reservation keys', () => {
-    expect(applicationKeys.list('s', 't', 'q', 'f', 't2', true, 0)).toEqual([
+    expect(applicationKeys.list('s', 't', 'q', true, 0)).toEqual([
       'customer-applications',
       's',
       't',
       'q',
-      'f',
-      't2',
       true,
       0,
     ]);
@@ -67,13 +65,11 @@ describe('business query keys', () => {
       'customer-application-reservations',
       'a-1',
     ]);
-    expect(reservationKeys.list('s', 't', 'q', 'f', 't2', false, 1)).toEqual([
+    expect(reservationKeys.list('s', 't', 'q', false, 1)).toEqual([
       'reservation-agreements',
       's',
       't',
       'q',
-      'f',
-      't2',
       false,
       1,
     ]);

@@ -2,6 +2,7 @@ export {
   isExactDecimal,
   formatMoney,
   formatMoneyOrDash,
+  formatStatedMoney,
   compareMoney,
   addMoney,
   multiplyMoney,

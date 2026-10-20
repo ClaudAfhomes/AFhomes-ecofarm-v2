@@ -13,7 +13,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type {
+import type {
   ActivationResult,
   ApplicationHolder,
   PurchaseDocumentKind,
@@ -26,14 +26,13 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
-import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { formatCount, formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
-import {
+import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,
-  DateField,
+  Button,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -48,7 +47,7 @@ import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
 import { ReservationStatusBadge } from './ReservationStatusBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
+import {
   createReservationAgreement,
   decideReservationAgreement,
   exportReservationAgreement,
@@ -76,7 +75,7 @@ import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 import { humanizeApplicationIssues } from './official-forms-applications';
 
-import {
+import {
   today,
   asBase64,
   formatFileSize,
@@ -93,8 +92,6 @@ export function ReservationAgreementsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
@@ -109,7 +106,7 @@ export function ReservationAgreementsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: reservationKeys.list(status, tier, debouncedSearch, from, to, reservationWorkOnly, page),
+    queryKey: reservationKeys.list(status, tier, debouncedSearch, reservationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -118,8 +115,6 @@ export function ReservationAgreementsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
@@ -184,16 +179,30 @@ export function ReservationAgreementsPage() {
           <Button onClick={() => navigate('/admin/sales/reservations/new')}>New agreement</Button>
         }
       />
+      {/*
+       * Two figures, not a sentence. "38 agreements - 3 awaiting signature" read
+       * as one grey line, so the only number anyone acts on was the one you had
+       * to hunt for. As figures the exception carries its own weight, and the
+       * warning tone appears only when there is something to warn about.
+       */}
       {total > 0 ? (
-        <p role="status" aria-label="Reservation queue summary" className={styles.queueSummary}>
-          <strong>{total}</strong> {total === 1 ? 'agreement' : 'agreements'}
-          {pendingSignatures > 0 ? (
-            <>
-              {' · '}
-              <strong>{pendingSignatures}</strong> awaiting signature
-            </>
-          ) : null}
-        </p>
+        <dl
+          className={styles.queueSummary}
+          role="status"
+          aria-label="Reservation queue summary"
+        >
+          <div className={styles.queueSummaryCell}>
+            <dt>{total === 1 ? 'Agreement' : 'Agreements'}</dt>
+            <dd>{formatCount(total)}</dd>
+          </div>
+          <div
+            className={styles.queueSummaryCell}
+            data-alert={pendingSignatures > 0 ? 'true' : undefined}
+          >
+            <dt>Awaiting signature</dt>
+            <dd>{formatCount(pendingSignatures)}</dd>
+          </div>
+        </dl>
       ) : null}
       <FilterBar
         filtersToggleLabel="Expand Filters"
@@ -256,28 +265,6 @@ export function ReservationAgreementsPage() {
                 ]}
               />
             </label>
-            <DateField
-              id="reservations-from"
-              name="from"
-              label="From date"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setPage(0);
-              }}
-            />
-            <DateField
-              id="reservations-to"
-              name="to"
-              label="To date"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                setPage(0);
-              }}
-            />
           </>
         }
       />
@@ -339,10 +326,17 @@ export function ReservationAgreementsPage() {
                       {formatMoneyOrDash(item.totalPrice)}
                     </td>
                     <td data-label="Signatures">
-                      <StatusChip
-                        label={signaturesComplete ? 'Complete' : 'Pending signature'}
-                        tone={signaturesComplete ? 'success' : 'warning'}
-                      />
+                      {/*
+                       * The exception wears the colour. Four rows of green
+                       * "Complete" say nothing and drown the one row that is
+                       * actually waiting on somebody, so the settled state
+                       * recedes to quiet text and only the pending one is a chip.
+                       */}
+                      {signaturesComplete ? (
+                        <span className={styles.settled}>Complete</span>
+                      ) : (
+                        <StatusChip label="Pending signature" tone="warning" />
+                      )}
                     </td>
                     <td data-label="Status">
                       <ReservationStatusBadge status={item.status} />
@@ -754,20 +748,61 @@ export function ReservationAgreementEditorPage() {
           </Button>
         }
       />
+      {/*
+       * Figures, not a sentence. "Status: draft - Tier: SILVER - Total: 60000.00
+       * - Verified received: ..." read as one run of prose with the labels
+       * bolded inline, so no fact outranked another and the eye had nowhere to
+       * land first. As a divided strip the lifecycle state leads, the money
+       * lines up under it, and the timestamps sit quiet at the end.
+       */}
       {existing.data ? (
-        <p className={styles.stateSummary}>
-          <strong>Status:</strong> {existing.data.status} · <strong>Tier:</strong>{' '}
-          {existing.data.tier} · <strong>Total:</strong> {existing.data.totalPrice}
+        <dl className={styles.stateSummary} aria-label="Agreement state">
+          <div className={styles.stateSummaryCell}>
+            <dt>Status</dt>
+            <dd>
+              <ReservationStatusBadge status={existing.data.status} />
+            </dd>
+          </div>
+          <div className={styles.stateSummaryCell}>
+            <dt>Tier</dt>
+            <dd>{existing.data.tier}</dd>
+          </div>
+          {/*
+           * Money lives in ONE place. A sale-origin agreement has no detail
+           * panel below, so the strip carries it; an application-origin one
+           * already shows the frozen figures in the Server offer panel, and
+           * repeating them here would put the same peso on screen twice.
+           */}
           {!applicationOrigin ? (
             <>
-              {' '}
-              · <strong>Verified received:</strong> {existing.data.totalPaymentReceived} ·{' '}
-              <strong>Balance:</strong> {existing.data.balance}
+              <div className={styles.stateSummaryCell}>
+                <dt>Total</dt>
+                <dd>{formatMoneyOrDash(existing.data.totalPrice)}</dd>
+              </div>
+              <div className={styles.stateSummaryCell}>
+                <dt>Verified received</dt>
+                <dd>{formatMoneyOrDash(existing.data.totalPaymentReceived)}</dd>
+              </div>
+              {/* A zero balance means fully paid, which is the good state - so
+                  the warning tone belongs to an outstanding balance only. */}
+              <div
+                className={styles.stateSummaryCell}
+                data-alert={Number(existing.data.balance) > 0 ? 'true' : undefined}
+              >
+                <dt>Balance</dt>
+                <dd>{formatMoneyOrDash(existing.data.balance)}</dd>
+              </div>
             </>
-          ) : null}{' '}
-          · <strong>Submitted:</strong> {existing.data.submittedAt ?? '—'} ·{' '}
-          <strong>Executed:</strong> {existing.data.executedAt ?? '—'}
-        </p>
+          ) : null}
+          <div className={styles.stateSummaryCell}>
+            <dt>Submitted</dt>
+            <dd>{existing.data.submittedAt ? formatDateTime(existing.data.submittedAt) : '—'}</dd>
+          </div>
+          <div className={styles.stateSummaryCell}>
+            <dt>Executed</dt>
+            <dd>{existing.data.executedAt ? formatDateTime(existing.data.executedAt) : '—'}</dd>
+          </div>
+        </dl>
       ) : null}
       {summary.data ? (
         <p className={styles.moneyNote}>
@@ -846,7 +881,7 @@ export function ReservationAgreementEditorPage() {
       <fieldset disabled={!editable} className={styles.formRoot}>
         <section className={styles.panel} aria-labelledby="reservation-source-heading">
           <h2 id="reservation-source-heading" className={styles.panelTitle}>
-            1. Source &amp; references
+            Source &amp; references
           </h2>
           <p className={styles.panelNote}>Link application or sale here.</p>
           <div className={styles.editorGrid}>
@@ -911,7 +946,7 @@ export function ReservationAgreementEditorPage() {
         </section>
         <section className={styles.panel} aria-labelledby="reservation-dates-heading">
           <h2 id="reservation-dates-heading" className={styles.panelTitle}>
-            2. Agreement dates
+            Agreement dates
           </h2>
           <p className={styles.panelNote}>Dates bounding this agreement.</p>
           <div className={styles.editorGrid}>
@@ -932,7 +967,7 @@ export function ReservationAgreementEditorPage() {
         </section>
         <section className={styles.panel} aria-labelledby="reservation-primary-heading">
           <h2 id="reservation-primary-heading" className={styles.panelTitle}>
-            3. Primary cardholder
+            Primary cardholder
           </h2>
           <p className={styles.panelNote}>Signing owner of this reservation.</p>
           <div className={styles.editorGrid}>
@@ -951,7 +986,7 @@ export function ReservationAgreementEditorPage() {
         </section>
         <section className={styles.panel} aria-labelledby="reservation-secondary-heading">
           <h2 id="reservation-secondary-heading" className={styles.panelTitle}>
-            4. Supplementary cardholder
+            Supplementary cardholder
           </h2>
           <label className={styles.toggleCard}>
             <input
@@ -997,7 +1032,7 @@ export function ReservationAgreementEditorPage() {
         </section>
         <section className={styles.panel} aria-labelledby="reservation-schedule-heading">
           <h2 id="reservation-schedule-heading" className={styles.panelTitle}>
-            5. Payment plan schedule
+            Payment plan schedule
           </h2>
           <p className={styles.panelNote}>
             Obligations only, not payments. Cash lives in payments ledger.
@@ -1016,7 +1051,7 @@ export function ReservationAgreementEditorPage() {
         </section>
         <section className={styles.panel} aria-labelledby="reservation-import-heading">
           <h2 id="reservation-import-heading" className={styles.panelTitle}>
-            6. Bulk import
+            Bulk import
           </h2>
           <p className={styles.panelNote}>Import workbook candidates. Verify every field.</p>
           <div className={styles.importCard} data-selected={istFile ? 'true' : 'false'}>
@@ -1156,7 +1191,7 @@ export function ReservationAgreementEditorPage() {
  * Nothing here recalculates money. Every figure is the server's, and the Finalize
  * button follows the server's own eligibility rather than a browser total.
  */
-function ApplicationOriginAgreementPanel({
+function ApplicationOriginAgreementPanel({
   id,
   agreement,
 }: {
@@ -1415,7 +1450,7 @@ function ApplicationOriginAgreementPanel({
  * call and are never re-displayable, so this panel could not show them even if it
  * wanted to.
  */
-function MembershipConfirmation({
+function MembershipConfirmation({
   saleId,
   persisted,
 }: {

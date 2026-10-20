@@ -10,7 +10,11 @@ import {
   CUSTOMER_WORKBOOK_SHEETS,
   customerImportContinuationSchema,
 } from '@afhomes/contracts';
-import type { CustomerImportParseResponse, ImportJobStatus } from '@afhomes/contracts';
+import type {
+  CustomerImportJob,
+  CustomerImportParseResponse,
+  ImportJobStatus,
+} from '@afhomes/contracts';
 import {
   Alert,
   Button,
@@ -29,7 +33,7 @@ import {
 import { requestList } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
-import { formatCountOrDash } from '@afhomes/shared';
+import { formatCount, formatCountOrDash } from '@afhomes/shared';
 import { useSession } from '../../lib/session';
 import {
   cancelCustomerImport,
@@ -112,6 +116,66 @@ const JOB_STATUS_TONES: Record<
  * Actionable job-history load guidance per failure cause. Raw server internals
  * are never rendered; each branch names the next step instead.
  */
+/**
+ * The tab's question, answered before the list: how many jobs, how many rows
+ * actually landed, and how many rows are still broken. Three figures, because
+ * without them an operator has to read every card's count strip to learn
+ * whether anything needs their attention at all.
+ *
+ * Every figure is summed from the jobs on screen - never typed in - and the
+ * third is the only one that can take colour, and only when it is not zero.
+ */
+function JobSummary({ jobs }: { jobs: CustomerImportJob[] }) {
+  const written = jobs.reduce((sum, job) => sum + job.insertedRows + job.updatedRows, 0);
+  const failed = jobs.reduce((sum, job) => sum + job.failedRows, 0);
+  return (
+    <dl className={styles.jobSummary} aria-label="Import job summary">
+      <div className={styles.jobSummaryCell}>
+        <dt>Jobs</dt>
+        <dd>{formatCount(jobs.length)}</dd>
+      </div>
+      <div className={styles.jobSummaryCell}>
+        <dt>Rows written</dt>
+        <dd>{formatCount(written)}</dd>
+      </div>
+      <div className={styles.jobSummaryCell} data-alert={failed > 0 ? 'true' : undefined}>
+        <dt>Needs attention</dt>
+        <dd>{formatCount(failed)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
+ * One job's row breakdown. These five figures are a decomposition of Total, not
+ * five independent columns, so they read as one unit on a shared baseline
+ * instead of as the fifth through eleventh column of a table. Failed is the one
+ * an operator acts on, so it is the only figure that takes colour.
+ */
+function JobCounts({ job }: { job: CustomerImportJob }) {
+  const counts: Array<[string, number]> = [
+    ['Total', job.totalRows],
+    ['Inserted', job.insertedRows],
+    ['Updated', job.updatedRows],
+    ['Skipped', job.skippedRows],
+    ['Failed', job.failedRows],
+  ];
+  return (
+    <dl className={styles.jobCounts}>
+      {counts.map(([label, value]) => (
+        <div
+          key={label}
+          className={styles.jobCount}
+          data-alert={label === 'Failed' && value > 0 ? 'true' : undefined}
+        >
+          <dt>{label}</dt>
+          <dd>{formatCountOrDash(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function describeJobsLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
     return 'Check your connection and try again. If this continues, contact AFHomes support.';
@@ -923,71 +987,54 @@ export function CustomerImportExportPage() {
                 description="Parse a file to start the first job."
               />
             ) : (
-              <div
-                role="region"
-                aria-label="Import job records"
-                tabIndex={0}
-                className={`table-scroll ${styles.tableWrap} ${styles.jobsWrap}`}
-              >
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Job</th>
-                      <th>Source</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>Total</th>
-                      <th>Inserted</th>
-                      <th>Updated</th>
-                      <th>Skipped</th>
-                      <th>Failed / invalid</th>
-                      <th>Created</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jobs.data.map((job) => (
-                      <tr key={job.id}>
-                        <td data-label="Job">{job.jobNumber ?? '—'}</td>
-                        <td data-label="Source">{job.sourceName}</td>
-                        <td data-label="Type">{job.sourceType}</td>
-                        <td data-label="Status">
-                          <StatusChip label={job.status} tone={JOB_STATUS_TONES[job.status]} />
-                        </td>
-                        <td data-label="Total">{formatCountOrDash(job.totalRows)}</td>
-                        <td data-label="Inserted">{formatCountOrDash(job.insertedRows)}</td>
-                        <td data-label="Updated">{formatCountOrDash(job.updatedRows)}</td>
-                        <td data-label="Skipped">{formatCountOrDash(job.skippedRows)}</td>
-                        <td data-label="Failed / invalid">{formatCountOrDash(job.failedRows)}</td>
-                        <td data-label="Created">{formatDateTime(job.createdAt)}</td>
-                        <td data-label="Actions">
-                          {job.status === 'committing' && mayConfirm ? (
-                            <Button
-                              size="sm"
-                              loading={confirm.isPending}
-                              loadingLabel="Resuming…"
-                              onClick={() => confirm.mutate(job.id)}
-                            >
-                              Resume Import
-                            </Button>
-                          ) : null}
-                          {mayConfirm && (job.status === 'ready' || job.status === 'validated') ? (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              loading={cancel.isPending}
-                              loadingLabel="Cancelling…"
-                              onClick={() => cancel.mutate(job.id)}
-                            >
-                              Cancel
-                            </Button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <JobSummary jobs={jobs.data} />
+                <div className={styles.jobList}>
+                  {jobs.data.map((job) => (
+                    <article key={job.id} className={styles.jobCard}>
+                      <header className={styles.jobHead}>
+                        <StatusChip label={job.status} tone={JOB_STATUS_TONES[job.status]} />
+                        <span className={styles.jobName} title={job.sourceName}>
+                          {job.sourceName}
+                        </span>
+                        <span className={styles.jobWhen}>{formatDateTime(job.createdAt)}</span>
+                      </header>
+                      <p className={styles.jobMeta}>
+                        <span>{job.sourceType}</span>
+                        {job.jobNumber ? (
+                          <span className={styles.jobRef}>{job.jobNumber}</span>
+                        ) : null}
+                      </p>
+                      <JobCounts job={job} />
+                      {job.status === 'committing' && mayConfirm ? (
+                        <div className={styles.jobActions}>
+                          <Button
+                            size="sm"
+                            loading={confirm.isPending}
+                            loadingLabel="Resuming…"
+                            onClick={() => confirm.mutate(job.id)}
+                          >
+                            Resume Import
+                          </Button>
+                        </div>
+                      ) : null}
+                      {mayConfirm && (job.status === 'ready' || job.status === 'validated') ? (
+                        <div className={styles.jobActions}>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={cancel.isPending}
+                            loadingLabel="Cancelling…"
+                            onClick={() => cancel.mutate(job.id)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </>
             )}
           </section>
         </div>

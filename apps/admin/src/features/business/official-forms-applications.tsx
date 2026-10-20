@@ -46,8 +46,8 @@ import {
   notifyWarning,
   Alert,
   Button,
-  DateField,
   Dialog,
+  DateField,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
@@ -63,6 +63,7 @@ import {
   Skeleton,
   StatusChip,
   TextAreaField,
+  TextField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
 import { tierArtwork } from '@afhomes/ui';
@@ -95,6 +96,8 @@ import {
   updateCustomerApplication,
 } from './services';
 
+import { filterGovernmentIdInput } from '../../lib/normalize';
+
 import {
   today,
   emptyHolder,
@@ -119,8 +122,6 @@ export function CustomerApplicationsPage() {
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only applications that still need APPLICATION work. Turning this
   // off reveals the progressed history, which is never deleted or archived.
@@ -134,15 +135,7 @@ export function CustomerApplicationsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: applicationKeys.list(
-      status,
-      tier,
-      debouncedSearch,
-      from,
-      to,
-      applicationWorkOnly,
-      page,
-    ),
+    queryKey: applicationKeys.list(status, tier, debouncedSearch, applicationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -151,8 +144,6 @@ export function CustomerApplicationsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
         ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
@@ -218,7 +209,7 @@ export function CustomerApplicationsPage() {
                 Import/Export Data
               </Button>
             ) : null}
-            <Button onClick={() => navigate('/admin/customers/applications/new')}>
+            <Button onClick={() => navigate('/admin/customers/new')}>
               New application
             </Button>
           </>
@@ -286,28 +277,6 @@ export function CustomerApplicationsPage() {
                 ]}
               />
             </label>
-            <DateField
-              id="applications-from"
-              name="from"
-              label="From date"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setPage(0);
-              }}
-            />
-            <DateField
-              id="applications-to"
-              name="to"
-              label="To date"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                setPage(0);
-              }}
-            />
           </>
         }
       />
@@ -636,6 +605,9 @@ export function CustomerApplicationEditorPage() {
     };
   }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
+  // Write-only (never returned): starts blank on every open, blank never clears
+  // the stored value.
+  const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   // Steps unlock only by moving forward. Going back is always free; jumping
@@ -883,10 +855,17 @@ export function CustomerApplicationEditorPage() {
     // Unchosen selectors stay absent: never send "" as a UUID.
     customerId: customerId || undefined,
     planId: planId || undefined,
-    tier,
+  tier,
     paymentScheme,
+    // Company-stated mirror: the selected card tier and payment scheme are the
+    // company-stated VIP package / payment terms, so the customer record's
+    // "Package and Payment (company stated)" block reflects the application
+    // without a separate "Edit stated record" pass. Prices stay manual.
+    statedVipPackage: tier,
+    statedPaymentTerms: paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
+    governmentIdNumber: idNumber.trim() || undefined,
     ...meta,
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
@@ -1204,7 +1183,7 @@ export function CustomerApplicationEditorPage() {
         ? 'Complete primary holder fields.'
         : null,
     !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
-    null,
+  null,
     null,
   ];
   const steps = [
@@ -1233,15 +1212,35 @@ export function CustomerApplicationEditorPage() {
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
+  // Every step change puts the operator back at the top of the page.
+  //
+  // This used to scroll the step's own element into view, which is the wrong
+  // target for a wizard whose steps unmount each other: advancing UNMOUNTS the
+  // panel just left behind, so the document can get much shorter underneath
+  // the scroll. A smooth scroll then animates toward a height the layout no
+  // longer has and stops short, leaving the operator looking at empty ground
+  // instead of the step they pressed Next for.
+  //
+  // Scrolling the window to 0 has no target element to miss and cannot be
+  // clamped short. The stepper sits at the top of the page and marks the open
+  // step, so the operator lands on the new step's heading with their place in
+  // the flow still visible.
+  const revealStep = () => {
+    // After the swap has committed, so the shortened document is already in
+    // place and the browser has nothing left to clamp against.
+    window.setTimeout(() => window.scrollTo({ top: 0, left: 0 }), 0);
+  };
   const goStep = (index: number) => {
     if (index < 0 || index > steps.length - 1 || index > maxReached) return;
     setActiveStep(index);
+    revealStep();
   };
   const goNext = () => {
     if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
     const next = activeStep + 1;
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
+    revealStep();
   };
   // Edit entry point for the record-actions panel: the form below is the only
   // editor (there is no separate edit route), so editing means revealing it.
@@ -1333,15 +1332,15 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>Submitted</dt>
-                <dd>{existing.data.submittedAt ?? '—'}</dd>
+                <dd>{existing.data.submittedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Approved</dt>
-                <dd>{existing.data.approvedAt ?? '—'}</dd>
+                <dd>{existing.data.approvedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Rejected</dt>
-                <dd>{existing.data.rejectedAt ?? '—'}</dd>
+                <dd>{existing.data.rejectedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Customer</dt>
@@ -1357,7 +1356,7 @@ export function CustomerApplicationEditorPage() {
               </div>
               <div className={styles.snapshotField}>
                 <dt>Sale</dt>
-                <dd>{existing.data.saleId ?? '—'}</dd>
+                <dd>{existing.data.saleId ?? '-'}</dd>
               </div>
             </dl>
           </section>
@@ -1365,7 +1364,7 @@ export function CustomerApplicationEditorPage() {
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
         {relatedCustomer ? (
           <section aria-label="Linked company record" className={styles.panel}>
-            <h2 className={styles.panelTitle}>Linked company record — read-only</h2>
+            <h2 className={styles.panelTitle}>Linked company record (read-only)</h2>
             <p className={styles.hint}>
               Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
               on the customer page. Stated figures never change the offer.
@@ -1373,36 +1372,35 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>RA NO</dt>
-                <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+                <dd>{relatedCustomer.raNumber ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATUS (company)</dt>
-                <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+                <dd>{relatedCustomer.companyStatus ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>CITIZENSHIP</dt>
-                <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+                <dd>{relatedCustomer.citizenship ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>SUPPLEMENTARY</dt>
-                <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+                <dd>{relatedCustomer.supplementaryFullName ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>RELATED</dt>
                 <dd>
                   {[
-                    relatedCustomer.ostIstName,
                     relatedCustomer.svdName,
                     relatedCustomer.ssmName,
                     relatedCustomer.smName,
                   ]
                     .filter(Boolean)
-                    .join(' · ') || '—'}
+                    .join(' · ') || '-'}
                 </dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATED PACKAGE</dt>
-                <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+                <dd>{relatedCustomer.statedVipPackage ?? '-'}</dd>
               </div>
             </dl>
             <div className={styles.actions}>
@@ -1492,7 +1490,6 @@ export function CustomerApplicationEditorPage() {
           >
             <div className={styles.planBenefitsHead}>
               <div>
-                <p className={styles.planEyebrow}>Official plan benefits</p>
                 <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
               </div>
               <TierBadge tier={selectedPlan.code} />
@@ -1526,7 +1523,7 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="application-panel-heading"
             >
               <h2 id="application-panel-heading" className={styles.panelTitle}>
-                1. Application
+                Application
               </h2>
               <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
               {importRowId ? (
@@ -1647,7 +1644,7 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="identity-panel-heading"
             >
               <h2 id="identity-panel-heading" className={styles.panelTitle}>
-                2. Identity
+                Identity
               </h2>
               <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
               <fieldset className={styles.subGroup}>
@@ -1713,6 +1710,16 @@ export function CustomerApplicationEditorPage() {
                     ]}
                   />
                 </label>
+                <TextField
+                  id="application-government-id-number"
+                  name="governmentIdNumber"
+                  label="Government ID number"
+                  optional
+                  value={idNumber}
+                  onChange={(value) => setIdNumber(filterGovernmentIdInput(value))}
+                  maxLength={40}
+                  disabled={saveAndSubmit.isPending}
+                />
                 <IdCapturePicker
                   onFile={setIdFile}
                   disabled={saveAndSubmit.isPending}
@@ -1740,7 +1747,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 2) && (
             <div id="step-holders">
-              <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+              <HolderFields title="Primary holder" value={primary} onChange={setPrimary} />
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
@@ -1761,8 +1768,8 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 3) && (
             <fieldset id="step-recommender" className={styles.panel}>
-              <legend className={styles.panelTitle}>4. Recommender details</legend>
-              <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
+              <legend className={styles.panelTitle}>Recommender details</legend>
+              <p className={styles.hint}>Referrer and VIP recommender are active OST staff.</p>
               <div className={styles.editorGrid}>
                 <RecommenderFields
                   meta={meta}
@@ -1775,7 +1782,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 4) && (
             <fieldset id="step-channel" className={styles.panel}>
-              <legend className={styles.panelTitle}>5. Acquisition channel</legend>
+              <legend className={styles.panelTitle}>Acquisition channel</legend>
               {[
                 'CMP',
                 'DRP',
@@ -1804,7 +1811,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 5) && (
             <fieldset id="step-cert" className={styles.panel}>
-              <legend className={styles.panelTitle}>6. Certification</legend>
+              <legend className={styles.panelTitle}>Certification</legend>
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"

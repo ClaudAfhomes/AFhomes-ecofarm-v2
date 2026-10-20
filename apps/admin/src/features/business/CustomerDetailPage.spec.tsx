@@ -2,13 +2,14 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission, Customer, Sale } from '@afhomes/contracts';
+import type { AfHomesPermission, Customer, IdentityDocument, Sale } from '@afhomes/contracts';
 
 import { CustomerDetailPage } from './CustomerDetailPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { ApiError } from '../../lib/api/errors';
 import { getCustomerById, getSalePayments, getSales } from './services';
+import { getCurrentDocument, getDocumentAccessUrl } from '../documents/services';
 
 vi.mock('./services', () => ({
   getCustomerById: vi.fn(),
@@ -17,6 +18,12 @@ vi.mock('./services', () => ({
   getSaleSummary: vi.fn(),
   getCustomerApplications: vi.fn(),
   cancelSale: vi.fn(),
+}));
+
+// The ID image comes from the documents API, not the customers one.
+vi.mock('../documents/services', () => ({
+  getCurrentDocument: vi.fn(),
+  getDocumentAccessUrl: vi.fn(),
 }));
 
 const grant = (
@@ -54,6 +61,7 @@ const FULLSTAFF: SessionUser = {
 const RECORD = {
   id: 'c-1',
   customerNumber: 'CUS-000001',
+  raNumber: 'AF-CUS-2026-000001',
   customerCode: 'AF-CC-1A2B3C4D',
   fullName: 'MARIA SANTOS',
   email: 'maria@example.com',
@@ -104,19 +112,53 @@ const SALE = {
   createdAt: '2026-09-28T00:00:00.000Z',
 } as unknown as Sale;
 
-function renderDetail(user: SessionUser = STAFF) {
+function renderDetail(user: SessionUser = STAFF, tab = 'overview') {
   return renderWithProviders(
     <Routes>
       <Route path="/admin/customers" element={<p>directory</p>} />
       <Route path="/admin/customers/:id" element={<CustomerDetailPage />} />
       <Route path="/admin/customers/applications/:id" element={<p>application editor</p>} />
     </Routes>,
-    { user, route: '/admin/customers/c-1' },
+    { user, route: `/admin/customers/c-1?tab=${tab}` },
   );
 }
 
+const ID_SCAN_STAFF: SessionUser = {
+  ...STAFF,
+  afHomesPermissions: [grant('sales.customers'), grant('sales.id_documents')],
+};
+
+const ID_DOCUMENT = {
+  id: 'd-1',
+  subjectType: 'customer',
+  subjectId: 'c-1',
+  originalFilename: 'philippine-id.jpg',
+  mime: 'image/jpeg',
+  sizeBytes: 2048,
+  hasFile: true,
+  ocrStatus: 'not_requested',
+  ocrProvider: null,
+  verificationStatus: 'pending_review',
+  isCurrent: true,
+  extractedFields: {},
+  warnings: [],
+  reviewedFields: null,
+  possibleDuplicate: null,
+  uploadedAt: '2026-10-01T09:00:00.000Z',
+  reviewedAt: null,
+} as unknown as IdentityDocument;
+
 beforeEach(() => {
   vi.mocked(getSales).mockResolvedValue([]);
+  // No global `clearMocks` here, so the documents mocks start each test with
+  // an empty call history: the "never asked" assertion must see this test only.
+  vi.mocked(getCurrentDocument).mockReset();
+  vi.mocked(getDocumentAccessUrl).mockReset();
+  vi.mocked(getCurrentDocument).mockResolvedValue(null);
+  vi.mocked(getDocumentAccessUrl).mockResolvedValue({
+    url: 'https://signed.test/id.jpg',
+    expiresAt: '2026-10-20T00:00:00.000Z',
+  });
 });
 
 describe('CustomerDetailPage', () => {
@@ -124,31 +166,47 @@ describe('CustomerDetailPage', () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     renderDetail();
     expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
-    for (const value of ['CUS-000001', 'AF-CC-1A2B3C4D', '••••1234', 'GOLD']) {
+    for (const value of ['AF-CUS-2026-000001', 'CUS-000001', 'AF-CC-1A2B3C4D', '••••1234']) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
-    // Contact facts repeat inside Primary Member by company layout (15 columns).
-    expect(screen.getAllByText('maria@example.com').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('+639171234567').length).toBeGreaterThanOrEqual(2);
+    // The tier leads the header and repeats in the membership card.
+    expect(screen.getAllByText('GOLD').length).toBeGreaterThanOrEqual(1);
+    // Contact facts appear once on this tab. The company form transcribes them
+    // again, on its own tab, which is asserted there.
+    expect(screen.getAllByText('maria@example.com')).toHaveLength(1);
+    expect(screen.getAllByText('+639171234567')).toHaveLength(1);
     // Lookup-mirrored membership facts: status chip, tier, formatted expiry.
-    expect(screen.getAllByText('active').length).toBeGreaterThanOrEqual(2);
+    // The header and the membership card both humanise the raw status code.
+    expect(screen.getAllByText('Active').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/May.*2027/)).toBeInTheDocument();
     // No back link: the directory row is the way back.
     expect(screen.queryByRole('link', { name: 'Back to customers' })).not.toBeInTheDocument();
-    // Customer card reads as two columns: identity fields, then identifiers.
-    const grid = screen.getByText('Full name').closest('dl');
-    expect(grid?.className).toMatch(/twoCol/);
-    const order = Array.from(grid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent);
-    expect(order).toEqual([
-      'Full name',
-      'Status',
-      'Category',
-      'Portal account',
-      'Customer ID (RA No.)',
-      'Internal system reference',
-      'Customer code',
-      'Registered',
+    // State and identifiers lead the page, inside the header card, before any
+    // other card.
+    expect(screen.getByText('Not activated')).toBeInTheDocument();
+    expect(screen.getByText('Active VIP')).toBeInTheDocument();
+    // The header is a card; the state and identifier groups keep their labels.
+    const state = screen.getByText('Portal account:').closest('dl');
+    expect(
+      Array.from(state?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
+    ).toEqual(['Status:', 'Tier:', 'Category:', 'Portal account:']);
+    const masthead = screen.getByText('Customer ID (RA No.):').closest('dl');
+    expect(Array.from(masthead?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
+      'Customer ID (RA No.):',
+      'Internal system reference:',
+      'Customer code:',
+      'Registered:',
     ]);
+  });
+
+  it('renders a monogram and the "No Tier" badge when the customer has no tier', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, tier: null });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
+    // The monogram is derived from the first and last name.
+    expect(screen.getByText('MS')).toBeInTheDocument();
+    // A missing tier renders the shared "No Tier" badge in the header.
+    expect(screen.getAllByText('No Tier').length).toBeGreaterThanOrEqual(1);
   });
 
   it('reports fetch errors with a retry', async () => {
@@ -159,7 +217,7 @@ describe('CustomerDetailPage', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('renders the four company-stated sections with exact labels and masked TIN', async () => {
+  it('renders the four company-stated sections with exact labels and formatted TIN', async () => {
     vi.mocked(getCustomerById).mockResolvedValue({
       ...RECORD,
       firstName: 'MARIA',
@@ -177,9 +235,10 @@ describe('CustomerDetailPage', () => {
         countryCode: 'PH',
       },
       raNumber: 'RA-2026-0001',
-      companyStatus: 'Active Member',
+      companyStatus: 'FULLY PAID',
       citizenship: 'Filipino',
       civilStatus: 'Single',
+      tinNumber: '123456789',
       tinNumberMasked: '********9012',
       occupationBusinessName: 'Engineer',
       officeBusinessAddress: 'Makati HQ',
@@ -191,35 +250,38 @@ describe('CustomerDetailPage', () => {
       supplementaryMobile: '+639181234567',
       supplementaryEmail: 'juan@example.com',
       supplementaryLandline: '(02) 8999-0000',
+      supplementaryTinNumber: '987654321',
       supplementaryTinNumberMasked: '********7001',
-      ostIstName: 'OST Silk',
+
       svdName: 'SVD Santos',
       referrerName: 'Ref Reyes',
       relatedEmail: 'related@example.com',
       statedVipPackage: 'GOLD VIP',
+      statedPaymentTerms: 'spot_cash',
       statedRegularPrice: '60000.00',
       statedRf: 'RF-001',
       statedPaymentDate: '2026-01-01',
     } as unknown as Customer);
-    renderDetail();
+    renderDetail(STAFF, 'company');
     for (const title of [
       'Primary Member',
       'Supplementary Member',
       'Related Persons and Referral',
-      'Package and Payment — company stated',
+      'Package and Payment (company stated)',
     ]) {
       expect(await screen.findByText(title)).toBeInTheDocument();
     }
-    // Exact company labels with stored values; TIN only ever masked.
+    // Company identifiers remain visible in the header on every tab; TINs display formatted.
     for (const value of [
       'RA-2026-0001',
-      'Active Member',
-      '********9012',
+      'FULLY PAID',
+      '123-456-789',
+      '987-654-321',
       'JUAN CRUZ',
-      'OST Silk',
       'SVD Santos',
       'GOLD VIP',
-      '60000.00',
+      'Spot Cash',
+      '60,000.00',
       'RF-001',
       '(049) 555-1234',
       'Parian',
@@ -228,14 +290,19 @@ describe('CustomerDetailPage', () => {
     ]) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
-    expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
+    // Genders read Title Case, not the stored lowercase enum.
+    expect(screen.getByText('Female')).toBeInTheDocument();
+    expect(screen.getByText('Male')).toBeInTheDocument();
+    expect(screen.queryByText('123456789')).not.toBeInTheDocument();
+    // The company form transcribes the contact facts. Each copy now lives on its
+    // own tab, so no panel shows the same field twice.
+    expect(screen.getAllByText('maria@example.com')).toHaveLength(1);
+    expect(screen.getAllByText('+639171234567')).toHaveLength(1);
     // Primary Member follows the SSOT order exactly: split names, split
     // address parts, one landline, one email, one mobile number.
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
-    expect(
-      Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
-    ).toEqual([
-      'STATUS',
+    expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
+      'PAYMENT STATUS',
       'FIRST NAME',
       'LAST NAME',
       'MIDDLE NAME',
@@ -314,33 +381,20 @@ describe('CustomerDetailPage card sales', () => {
         verifiedAt: '2026-09-29T00:00:00.000Z',
       },
     ] as never);
-    renderDetail();
-    await screen.findByRole('heading', { name: 'Card Sales' });
+    renderDetail(STAFF, 'sales');
+    await screen.findByRole('heading', { name: 'Sale SALE-000001' });
     expect(vi.mocked(getSales)).toHaveBeenCalledWith({ customerId: 'c-1' });
-    expect(screen.getByRole('heading', { name: 'Sale Details' })).toBeInTheDocument();
-    expect(screen.getByText('SALE-000001')).toBeInTheDocument();
-    // Record fields down column one, money fields down column two.
-    const saleGrid = screen.getByText('SALE-000001').closest('dl');
-    expect(saleGrid?.className).toMatch(/twoColRows5/);
+    // The sale card is facts plus a ledger. The money figures live once, on
+    // Overview, so nothing here can disagree with the settlement strip.
+    const saleGrid = screen.getByText('Sam Seller').closest('dl');
+    expect(saleGrid?.className).toMatch(/fields/);
     expect(Array.from(saleGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'Sale number',
       'Card',
       'Scheme',
       'Seller',
       'Activation status',
-      'Total',
-      'Paid',
-      'Balance',
-      'Payment Status',
       'Created',
     ]);
-    expect(screen.getByText('₱15,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₱45,000.00')).toBeInTheDocument();
-    // Paid trails Total with a remaining balance: Unsettled, not Fully Paid.
-    expect(screen.getByText('Unsettled')).toBeInTheDocument();
-    expect(screen.queryByText('Fully Paid')).not.toBeInTheDocument();
-    // Once in the Customer card (portal account), once in the sale card.
-    expect(screen.getAllByText('Not activated')).toHaveLength(2);
     // History hides behind a disclosure until opened.
     expect(screen.queryByText('AF-PAY-ABC123')).not.toBeInTheDocument();
     const user = userEvent.setup();
@@ -358,30 +412,53 @@ describe('CustomerDetailPage card sales', () => {
     expect(screen.queryByText('c9165fee-635b-4486-9d96-bd79f8858dd2')).not.toBeInTheDocument();
   });
 
+  it('leads the Overview with what the customer still owes', async () => {
+    // The screen's question. Money is the biggest block and appears once.
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    vi.mocked(getSales).mockResolvedValue([SALE]);
+    renderDetail(FULLSTAFF, 'overview');
+    const strip = await screen.findByLabelText('Outstanding balance');
+    expect(strip).toHaveTextContent('Balance on SALE-000001');
+    expect(strip).toHaveTextContent('₱45,000.00');
+    expect(strip).toHaveTextContent('₱60,000.00');
+    expect(strip).toHaveTextContent('₱15,000.00');
+    // Paid trails Total with a remaining balance: Unsettled, not Fully Paid.
+    expect(screen.getByText('Unsettled')).toBeInTheDocument();
+    expect(screen.queryByText('Fully Paid')).not.toBeInTheDocument();
+    // The tab bar carries all three panels, one of them current.
+    const tabs = screen.getByLabelText('Customer record sections');
+    expect(tabs).toHaveTextContent('Overview');
+    expect(tabs).toHaveTextContent('Sales and payments');
+    expect(tabs).toHaveTextContent('Stated record');
+    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
   it('shows an empty state when the customer holds no sales', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     vi.mocked(getSales).mockResolvedValue([]);
-    renderDetail();
-    await screen.findByRole('heading', { name: 'Card Sales' });
-    expect(screen.getByText('No card sales yet.')).toBeInTheDocument();
+    renderDetail(STAFF, 'sales');
+    expect(await screen.findByText('No card sales yet.')).toBeInTheDocument();
   });
 
-  it('hides the card when the viewer lacks the card-sales scope', async () => {
+  it('hides sales entirely when the viewer lacks the card-sales scope', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     vi.mocked(getSales).mockRejectedValue(
       new ApiError({ code: 'FORBIDDEN', message: 'Denied', status: 403 }),
     );
-    renderDetail();
+    renderDetail(STAFF);
     await screen.findByRole('heading', { name: 'MARIA SANTOS' });
-    expect(screen.queryByRole('heading', { name: 'Card Sales' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Sales and payments' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Outstanding balance')).not.toBeInTheDocument();
   });
 
   it('reports sales fetch errors with a retry', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     vi.mocked(getSales).mockRejectedValue(new Error('sales down'));
-    renderDetail();
-    await screen.findByRole('heading', { name: 'Card Sales' });
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    renderDetail(STAFF, 'sales');
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });
 
@@ -417,7 +494,7 @@ describe('CustomerDetailPage merged actions', () => {
         route: '/admin/customers/c-1',
       },
     );
-    await screen.findByRole('heading', { name: 'Card Sales' });
+    await screen.findByRole('heading', { name: 'Actions' });
     // No sale-level actions without grants …
     expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
@@ -426,17 +503,73 @@ describe('CustomerDetailPage merged actions', () => {
     expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
   });
 
-  it('renders one Sale Details card per sale', async () => {
+  it('renders one sale card per sale, titled by its own number', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     vi.mocked(getSales).mockResolvedValue([
       SALE,
       { ...SALE, id: 's-2', saleNumber: 'SALE-000002' },
     ]);
-    renderDetail(FULLSTAFF);
-    await screen.findByRole('heading', { name: 'Card Sales' });
-    expect(screen.getAllByRole('heading', { name: 'Sale Details' })).toHaveLength(2);
-    // Once in the sale facts, once as a selector option in Customer Actions.
-    expect(screen.getAllByText('SALE-000001')).toHaveLength(2);
-    expect(screen.getAllByText('SALE-000002')).toHaveLength(2);
+    renderDetail(FULLSTAFF, 'sales');
+    expect(await screen.findByRole('heading', { name: 'Sale SALE-000001' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sale SALE-000002' })).toBeInTheDocument();
+  });
+
+  it('settles each sale once, on the Overview', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    vi.mocked(getSales).mockResolvedValue([
+      SALE,
+      { ...SALE, id: 's-2', saleNumber: 'SALE-000002', balance: '0.00' },
+    ]);
+    renderDetail(FULLSTAFF, 'sales');
+    expect(await screen.findByRole('heading', { name: 'Sale SALE-000001' })).toBeInTheDocument();
+    // The figures live on the Overview and are not repeated in the sale cards.
+    expect(screen.queryByText('₱45,000.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('₱60,000.00')).not.toBeInTheDocument();
+  });
+
+  it('shows the current ID image to staff who may view ID scans', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCurrentDocument).mockResolvedValue(ID_DOCUMENT);
+    renderDetail(ID_SCAN_STAFF);
+    const image = await screen.findByAltText('Scan of philippine-id.jpg');
+    expect(image).toHaveAttribute('src', 'https://signed.test/id.jpg');
+    // The server decides which document is current; the page only asks for it.
+    expect(vi.mocked(getCurrentDocument)).toHaveBeenCalledWith({
+      subjectType: 'customer',
+      subjectId: 'c-1',
+    });
+    // The scan is never shown without a grant, so the request is never sent.
+    expect(vi.mocked(getDocumentAccessUrl)).toHaveBeenCalledWith('d-1');
+  });
+
+  it('never asks for the ID image without the ID-scan grant', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    renderDetail();
+    await screen.findByRole('heading', { name: 'MARIA SANTOS' });
+    expect(vi.mocked(getCurrentDocument)).not.toHaveBeenCalled();
+    expect(screen.queryByAltText(/Scan of/)).not.toBeInTheDocument();
+  });
+
+  it('links a PDF scan out instead of inlining it', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCurrentDocument).mockResolvedValue({
+      ...ID_DOCUMENT,
+      mime: 'application/pdf',
+      originalFilename: 'philippine-id.pdf',
+    });
+    vi.mocked(getDocumentAccessUrl).mockResolvedValue({
+      url: 'https://signed.test/id.pdf',
+      expiresAt: '2026-10-20T00:00:00.000Z',
+    });
+    renderDetail(ID_SCAN_STAFF);
+    const link = await screen.findByRole('link', { name: /Open the PDF/ });
+    expect(link).toHaveAttribute('href', 'https://signed.test/id.pdf');
+    expect(screen.queryByAltText(/Scan of/)).not.toBeInTheDocument();
+  });
+
+  it('says so when the customer has no ID image on file', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    renderDetail(ID_SCAN_STAFF);
+    expect(await screen.findByText('Not Recorded')).toBeInTheDocument();
   });
 });
