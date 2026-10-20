@@ -823,7 +823,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             value={form.statedVipPackage}
             onChange={(e) => set('statedVipPackage')(e.target.value)}
             options={withStoredValue(
-              TEMPLATE_TIER_OPTIONS.map((v) => ({ value: v, label: v })),
+              [{ value: '', label: 'Not Recorded' }, ...TEMPLATE_TIER_OPTIONS.map((v) => ({ value: v, label: v }))],
               form.statedVipPackage || undefined,
             )}
           />
@@ -837,7 +837,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             value={form.statedPaymentTerms}
             onChange={(e) => set('statedPaymentTerms')(e.target.value)}
             options={withStoredValue(
-              PAYMENT_SCHEMES.map((v) => ({ value: v, label: PAYMENT_SCHEME_LABELS[v] })),
+              [{ value: '', label: 'Not Recorded' }, ...PAYMENT_SCHEMES.map((v) => ({ value: v, label: PAYMENT_SCHEME_LABELS[v] }))],
               form.statedPaymentTerms || undefined,
             )}
           />

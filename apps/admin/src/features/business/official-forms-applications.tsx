@@ -773,6 +773,12 @@ export function CustomerApplicationEditorPage() {
     planId: planId || undefined,
   tier,
     paymentScheme,
+    // Company-stated mirror: the selected card tier and payment scheme are the
+    // company-stated VIP package / payment terms, so the customer record's
+    // "Package and Payment (company stated)" block reflects the application
+    // without a separate "Edit stated record" pass. Prices stay manual.
+    statedVipPackage: tier,
+    statedPaymentTerms: paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
     governmentIdNumber: idNumber.trim() || undefined,

@@ -206,4 +206,15 @@ describe('Customer company edit', () => {
       tinNumber: '987-654-321',
     });
   });
+
+  it('shows Not Recorded in VIP Package and Payment Terms when nothing is stored', () => {
+    renderWithProviders(
+      <CustomerCompanyEditDialog customer={RECORD} open onClose={() => {}} onSaved={() => {}} />,
+      { user: STAFF, route: '/admin/customers/c-1' },
+    );
+    const vip = screen.getByLabelText('VIP Package') as HTMLSelectElement;
+    expect(vip.selectedOptions[0]?.textContent).toBe('Not Recorded');
+    const terms = screen.getByLabelText('Payment Terms') as HTMLSelectElement;
+    expect(terms.selectedOptions[0]?.textContent).toBe('Not Recorded');
+  });
 });

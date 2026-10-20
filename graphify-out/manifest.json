@@ -1710,27 +1710,27 @@
     "semantic_hash": "d1b5aca4b4d28b4f9dfeb9154cc08344"
   },
   "apps/admin/src/features/business/CustomerCompanyEdit.spec.tsx": {
-    "mtime": 1792479636.4751978,
-    "seen": 1792485199.3952787,
-    "ast_hash": "d43b572c89b3c37abcca0e8f87903c7e",
+    "mtime": 1792488390.0240552,
+    "seen": 1792489057.9793997,
+    "ast_hash": "e7a15bafe7142d074d2e06b95f286887",
     "semantic_hash": ""
   },
   "apps/admin/src/features/business/CustomerCompanyEditDialog.tsx": {
-    "mtime": 1792479909.420553,
-    "seen": 1792485199.39528,
-    "ast_hash": "d54c00592e12a9d4293f3660ffe267f5",
+    "mtime": 1792487138.665602,
+    "seen": 1792489057.9794033,
+    "ast_hash": "35edd1cf4937ac55ea57aa8a617fb177",
     "semantic_hash": ""
   },
   "apps/admin/src/features/business/CustomerDetailPage.spec.tsx": {
-    "mtime": 1792484131.3834455,
-    "seen": 1792485199.395281,
-    "ast_hash": "17ae290a283b3d90fa25bfa8f5915af6",
+    "mtime": 1792488408.003233,
+    "seen": 1792489057.9794054,
+    "ast_hash": "cba944897b3e76814b9257baffb945a6",
     "semantic_hash": ""
   },
   "apps/admin/src/features/business/CustomerDetailPage.tsx": {
-    "mtime": 1792484123.5295286,
-    "seen": 1792485199.3952825,
-    "ast_hash": "66f6b19d567e2bd82ba593a4bbba2a0c",
+    "mtime": 1792487746.6824486,
+    "seen": 1792489057.979407,
+    "ast_hash": "dd3e389ed942d5b22f2331be2cf41718",
     "semantic_hash": ""
   },
   "apps/admin/src/features/business/CustomerImportExportPage.spec.tsx": {
@@ -1962,9 +1962,9 @@
     "semantic_hash": "9041e972bf8c76f3fb903e01fd00d519"
   },
   "apps/admin/src/features/business/official-forms-applications.tsx": {
-    "mtime": 1792471553.1076078,
-    "seen": 1792485199.395345,
-    "ast_hash": "bf1652b080e8d211924f8292e95009f7",
+    "mtime": 1792486627.7261398,
+    "seen": 1792489057.9794924,
+    "ast_hash": "9f14057621bd369ac6333cfb0a2cfc9c",
     "semantic_hash": ""
   },
   "apps/admin/src/features/business/official-forms-chain.spec.ts": {
@@ -5676,10 +5676,10 @@
     "semantic_hash": "bb3c7cafb826c8ba3842ca9a4632ea85"
   },
   "SESSION.md": {
-    "mtime": 1792307351.1321719,
-    "seen": 1792378627.0639436,
-    "ast_hash": "ad3e84d37872e6b7696701d977c2a93c",
-    "semantic_hash": "ad3e84d37872e6b7696701d977c2a93c"
+    "mtime": 1792488581.6741445,
+    "seen": 1792489057.9809291,
+    "ast_hash": "6b2a58d1af6a2dd932f325d99e4fc318",
+    "semantic_hash": ""
   },
   "apps/admin/index.html": {
     "mtime": 1791880821.2566097,
@@ -6681,6 +6681,12 @@
     "mtime": 1792474465.6523173,
     "seen": 1792485199.39649,
     "ast_hash": "9ec2b87bb225e54f4b949e7db5b4cec8",
+    "semantic_hash": ""
+  },
+  "supabase/migrations/20261210000005_afhomes_backfill_stated_package_from_application.sql": {
+    "mtime": 1792487336.3849087,
+    "seen": 1792489057.9808707,
+    "ast_hash": "8089659f33cdc8fe0eced16468cc8770",
     "semantic_hash": ""
   }
 }

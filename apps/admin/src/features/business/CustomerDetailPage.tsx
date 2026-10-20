@@ -442,7 +442,7 @@ export function CustomerDetailPage() {
       company: true,
       fields: [
         ['VIP PACKAGE', stated(record.statedVipPackage)],
-        ['PAYMENT TERMS', stated(record.statedPaymentTerms)],
+        ['PAYMENT TERMS', stated(record.statedPaymentTerms ? paymentSchemeLabel(record.statedPaymentTerms) : null)],
         ['REGULAR PRICE', statedMono(formatStatedMoney(record.statedRegularPrice))],
         ['DISCOUNT', statedMono(formatStatedMoney(record.statedDiscount))],
         ['TOTAL AMOUNT', statedMono(formatStatedMoney(record.statedTotalAmount))],

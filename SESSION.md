@@ -61,81 +61,52 @@ Postgres + Auth. `packages/contracts` (Zod SSOT; `lifecycle.ts` statuses;
 
 ## Repo state
 
-- `orly/develop` @ `50511e6 "enhance: IST/OST functionalities"` — working tree
-  CLEAN (this file's rewrite is the only pending change). The last session
-  ships entirely in that one commit: 18 files, admin-only — zero
-  `api/`/contracts/SQL changes.
-- Rounds before it (committed): guided IST/OST import + export (`f9d9cbe`,
-  PR #16); member-details → validity/renewal link (`bdf5f6c`); approved team
-  moves separated from accreditation conversion (`29237cc` — added
-  `OstTeamTransferDialog` + `POST /members/:id/team-transfer`); OST province
-  lookup + creation form (`76118ba`); OST password onboarding (`3039b51`);
-  OST lifecycle + forward migration 09 + production apply logged (`15abff0`,
-  `3d85b13`).
-- Migrations run through `20261208000011_afhomes_ost_team_transfer.sql`;
-  production applies are recorded in `docs/supabase/MIGRATION-APPLICATIONS.md`
-  (latest entry = 00011). No SQL in this round; `pnpm test:db:*` untouched.
+- `orly/develop` @ `c761210 "chore: track workflow pack (graphidian + opencode)
+  and keep it @-detectable"` — working tree has UNCOMMITTED changes:
+  - Staged earlier this session: `CustomerCompanyEditDialog.tsx`,
+    `CustomerDetailPage.tsx`, `official-forms-applications.tsx`,
+    `CustomerCompanyEdit.spec.tsx`, `CustomerDetailPage.spec.tsx`,
+    `20261210000005_afhomes_backfill_stated_package_from_application.sql`.
+  - Unstaged: `.taste-skill/after/index.html`, `.taste-skill/masthead-harness.mjs`
+    (user WIP — design-taste harness, leave alone).
+- Migrations run through `20261210000005` in the disposable DB; production
+  applies recorded in `docs/supabase/MIGRATION-APPLICATIONS.md`. The new
+  backfill migration is NOT yet applied to production (approval-gated).
+- Pre-existing failures (documented, not from this session): lint 2 errors in
+  `MemberWorkbookDialog.spec.tsx:154` (`_approved`, `_pw` unused); DB section 77
+  OST team transfer (`"the fresh IST validity starts today": expected <today>,
+  got null`). Do not touch.
 
-## Last session's work (COMMITTED `50511e6`) — admin UI round: short copy + the OST/IST member surfaces
+## Last session's work (UNCOMMITTED) — "Package and Payment (company stated)" repair
 
-**1. `/admin/ost/members/:id` full redesign (UI-only)** — `OstAccreditationPages.tsx`
-(+ `.module.css`), `OstApplicantUpdate.tsx`, `ost.spec.tsx`. Component
-`OstAccreditationHistoryPage` (the same file also holds `OstManualRegistrationPage`
-and `OstImportExportPage` — untouched this round).
+Four focused edits, all admin-side (one new SQL migration):
 
-- Header: identity meta line (ID chip · name · sponsor); summary chips moved
-  directly under the header as one `role="group"` row (`.badges`,
-  `aria-label="Accreditation summary"`), ahead of the admin-only
-  `SaleTeamAccreditationCard`; the page description paragraph is gone.
-- Facts over inputs: the accreditation term renders as a facts strip (not form
-  fields); the renewal form is grouped (labels ≤3 words, "Reason" one-row); the
-  success alert renders inside the renewal panel under submit (was page
-  bottom; a rare failed refetch after submit hides it — accepted).
-- Applicant panel + renewal-details dialog share one page-local responsive
-  grid `.fieldColumns` — written doubled (`.fieldColumns.fieldColumns`) to
-  out-rank the shared `DetailFieldGrid`; 1 col below 720px, auto-fit above; the
-  dialog lands at 2 cols from 560px.
-- Applicant dialog "Proposed changes" gets `.changeBlock`/`.changeList`; the
-  page copy contract is pinned (≤5-word sentences, ≤3-word input labels, no em
-  dashes, no notes under inputs); skeleton mirrors the panels.
+1. `official-forms-applications.tsx` `payload()` now sends
+   `statedVipPackage: tier` and `statedPaymentTerms: paymentScheme`, so the
+   application's selected card tier + payment scheme flow through the existing
+   mirror (`coalesce` on `customers.stated_vip_package` /
+   `stated_payment_terms`) instead of staying NULL.
+2. `CustomerCompanyEditDialog.tsx` — VIP Package and Payment Terms selects now
+   carry a `Not Recorded` placeholder option (`value: ''`), so a genuinely unset
+   stored value no longer masquerades as the first card/scheme. `orNull` keeps
+   `''` out of the saved payload.
+3. `CustomerDetailPage.tsx` — PAYMENT TERMS now renders via
+   `paymentSchemeLabel(...)` (e.g. `spot_cash` → `Spot Cash`), mirroring the
+   existing PAYMENT TYPE pattern. Unknown/free-text values pass through.
+4. `supabase/migrations/20261210000005_afhomes_backfill_stated_package_from_application.sql`
+   — idempotent, coalesce-only backfill of `stated_vip_package` /
+   `stated_payment_terms` from each customer's latest linked application
+   (only where NULL). Applied cleanly on the disposable DB; production apply
+   pending explicit approval.
+5. Regression tests: `CustomerCompanyEdit.spec.tsx` (placeholder for null) and
+   `CustomerDetailPage.spec.tsx` (`Spot Cash` rendering).
 
-**2. `/admin/ost/members` list page removed**
-
-- Deleted `OstMembersPage.tsx` + `.module.css`; route + lazy import removed
-  from `App.tsx`; its 3 spec tests deleted; a new regression test pins the
-  details back button ("Back to members") → `/admin/network/members`.
-- Kept: `getOstMembers()` (the details page still uses it), API `/ost/members`,
-  `network.ost_members` module (reports + member-dialog gate).
-- Stale bookmarks fall to the catch-all `*` → `NotFound`. OST screens have NO
-  `navigation.ts` entries — deep links only; entry = `/admin/network/members`
-  → member dialog → **Renewal**.
-
-**3. IST/OST member dialogs + accreditation card (same commit)**
-
-- NEW `TransferToIstDialog.tsx` (+ spec) — OST → IST conversion. Member keeps
-  record + login; the held AA number is retired into accreditation history
-  ("never renumbered") and an AAI successor is issued. UI mirrors server gates:
-  accreditation must check `expired` (`getAccreditation('members', id)`),
-  target IST position + immediate head, reason ≥5 chars; posts
-  `transferMemberSchema` `direction: 'OST_TO_IST'` to `POST /members/:id/transfer`
-  (idempotent via `requestId`). Wired in `MembersPage` (`convertToIstId`);
-  entry = MemberDetailDialog footer "Transfer to IST" (OST members only;
-  admin/super_admin + `network.members` update gate, mirroring the RPC).
-- `MemberDetailDialog`: footer "Close" removed (dialog X remains); "Validity /
-  renewal" → "Renewal"; transfer label = "Transfer team" (OST) / "Transfer to
-  OST" (IST).
-- `TransferMemberDialog` = dual-mode wrapper: OST → `OstTeamTransferDialog`
-  (genealogy team move via `POST /members/:id/team-transfer`); IST → inline
-  Convert-to-OST form (title "Convert X to OST", submit "Convert to OST").
-- Copy sweep (same styling pass): `CreateOstDialog` (notes removed; "Sponsor";
-  "Complete now"/"Save as pending"; "Sales Managers failed to load."),
-  `MemberFormDialog` (all field notes removed — ZIP suggestion, blank-ID,
-  account/head hints; "Provinces failed to load." / "Cities failed to load." /
-  "Pick a province first." / "Reload the page.").
-- `SaleTeamAccreditationCard` (+ NEW `.module.css`): status chip moved to the
-  card header with a per-status tone map; "Accreditation" detail row dropped;
-  action area wrapped (`.actionButtons`); note = "Uses approved OST validity
-  dates.". Shared by dashboard, My Account, IST staff detail, OST page.
+Gates run this session: `CustomerDetailPage.spec.tsx` 17/17 + `OfficialFormsPages.spec.tsx`
+40/40 + `CustomerCompanyEdit.spec.tsx` 5/5 green; `tsc --noEmit` (admin + supabase)
+clean; `eslint` clean on touched files; admin build green; `pnpm check:env` PASS;
+`pnpm test:db:local` 2666/2667 (only the pre-existing section 77 failure).
+Lint root (`pnpm lint`) still red on the pre-existing `MemberWorkbookDialog.spec.tsx`
+errors — not touched.
 
 ## Test gotchas (admin)
 
@@ -155,6 +126,9 @@ and `OstImportExportPage` — untouched this round).
   via `--config`, add `--end-of-line auto`. Known pre-existing deviations:
   `OstAccreditationPages.tsx` (~5), `OstApplicantUpdate.tsx` (~2), `App.tsx` (1,
   `/admin/network/members` route). This round added ZERO — don't "fix" those.
+- A native `<select>` with no matching option defaults to the first option; use
+  an explicit empty placeholder option when a null stored value should read
+  "Not Recorded" (see `CustomerCompanyEditDialog`).
 
 ## Open threads / unanswered offers
 
@@ -178,29 +152,24 @@ and `OstImportExportPage` — untouched this round).
   `AA-XXXXXXXXXXXX` vs MANUAL `^AA[A-Z0-9]{4,12}$` — unify or keep; 1-yr
   auto-validity unconfirmed); live authenticated check of the OST team transfer
   (migration-11 log: local pilot only, persistence unverified).
+- Production apply of `20261210000005` (backfill) — approval-gated, not run.
 
 ## Verify (from root)
 
 ```sh
 pnpm test                     # canonical gate (turbo --concurrency=2 -- --maxWorkers=2)
 pnpm typecheck                # turbo 7 + tsc -p supabase
-pnpm lint
+pnpm lint                     # 2 pre-existing errors in MemberWorkbookDialog.spec.tsx
 pnpm check:env
-pnpm test:db:local            # only when SQL changes (none this round)
-pnpm test:db:harness
+pnpm test:db:local            # 2666/2667 (pre-existing section 77 failure)
+pnpm test:db:harness          # blocked by the pre-existing section 77 failure
 ```
 
-Focused (re-run green at `50511e6`, 2026-10-18):
+Focused (green this session):
 
 ```sh
-pnpm --filter @afhomes/admin exec vitest run src/features/ost src/features/network-members  # 81 (7 files)
-pnpm --filter @afhomes/admin exec vitest run src/app                                        # 77 (10 files)
-pnpm --filter @afhomes/admin exec vitest run src/app/staff-lifecycle.spec.tsx               # 14, run solo
+pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerDetailPage.spec.tsx  # 17
+pnpm --filter @afhomes/admin exec vitest run src/features/business/OfficialFormsPages.spec.tsx  # 40
+pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerCompanyEdit.spec.tsx # 5
 ```
-
-Last verified: the focused runs above GREEN post-commit; `tsc --noEmit` clean,
-`eslint` clean, `@afhomes/admin` build green (OstMembersPage chunks gone) —
-pre-commit on this identical tree. Root `pnpm test` NOT re-run this round (its
-last full green predates recent rounds: api 2313 · admin 846 · contracts 286 ·
-web 252 · ui 221 · shared 41 · config 6 — re-run it as the next gate). DB
-suites untouched (no SQL). Browser pass still open.
+"

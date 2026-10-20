@@ -1,15 +1,17 @@
 # Graph Report - AFhomes-ecofarm-v2  (2026-10-20)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 1056 files · ~2,436,835 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 108 file(s) not represented in the graph (top: .css 98, (none) 6, .example 3)
 
 ## Summary
-- 7870 nodes · 23940 edges · 379 communities (237 shown, 142 thin omitted)
+- 7871 nodes · 23941 edges · 380 communities (237 shown, 143 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 536 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b2ff67a4`
+- Built from commit: `c761210a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -31,7 +33,7 @@
 - Admin route definitions
 - Queues and reports API
 - DB integration test harness
-- StatusChip
+- CustomerLookupPage.tsx
 - Admin handlers and dashboard API
 - Password lifecycle tests
 - lib/cms.ts
@@ -314,14 +316,14 @@
 10. `Alert()` - 109 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Approved clarification and compatibility` --references--> `normalizePhilippinePhone()`  [INFERRED]
-  docs/handoffs/2026-10-18-member-company-import.md → packages/contracts/src/schemas/input.ts
 - `The Blocker: OST Portal `must_change_password` Gap` --references--> `authorizeAfHomes()`  [INFERRED]
   docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_lib/afhomes-access.ts
-- `Standing hard rules (never relaxed, at any stage)` --references--> `push()`  [INFERRED]
-  workflow/graphidian/00-guide.md → api/_lib/purchase-documents.ts
 - `Final corrected template integration - 2026-10-18` --references--> `companyLayout()`  [INFERRED]
   docs/handoffs/2026-10-18-member-company-import.md → api/_lib/member-workbook-layout.ts
+- `Standing hard rules (never relaxed, at any stage)` --references--> `push()`  [INFERRED]
+  workflow/graphidian/00-guide.md → api/_lib/purchase-documents.ts
+- `Approved clarification and compatibility` --references--> `normalizePhilippinePhone()`  [INFERRED]
+  docs/handoffs/2026-10-18-member-company-import.md → packages/contracts/src/schemas/input.ts
 - `Immediate Action Required` --references--> `admin()`  [INFERRED]
   docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_handlers/phase32-security.spec.ts
 
@@ -354,27 +356,27 @@
 - **AF Homes Accommodation Rate-Card Catalog** — apps_web_src_marketing_assets_uploads_1_bedroom_deluxe_villa_1_bedroom_deluxe_villa, apps_web_src_marketing_assets_uploads_3_bedroom_deluxe_villa_3_bedroom_deluxe_villa, apps_web_src_marketing_assets_uploads_king_villa_king_villa, apps_web_src_marketing_assets_uploads_premier_a_frame_premier_a_frame, apps_web_src_marketing_assets_uploads_premier_glamping_premier_glamping, apps_web_src_marketing_assets_uploads_queen_villa_queen_villa [INFERRED 0.95]
 - **Philippine Regulatory Compliance Portfolio** — apps_web_src_marketing_assets_uploads_compliance_milestones_compliance_milestones_overview, apps_web_src_marketing_assets_uploads_ecc_cert_ecc_certificate, apps_web_src_marketing_assets_uploads_llda_cert_llda_clearance [INFERRED 0.95]
 
-## Communities (379 total, 142 thin omitted)
+## Communities (380 total, 143 thin omitted)
 
 ### Community 0 - "OST renewal and shared UI"
 Cohesion: 0.02
-Nodes (101): AccreditationId(), AlertProps, AppShell(), AppShellProps, NAV, renderShell(), AuthLayoutProps, BottomNav() (+93 more)
+Nodes (100): AccreditationId(), AlertProps, AppShell(), AppShellProps, NAV, renderShell(), AuthLayoutProps, BottomNav() (+92 more)
 
 ### Community 1 - "Dashboard and analytics contracts"
 Cohesion: 0.03
 Nodes (133): completeDocumentUpload(), confirmDocument(), post(), runDocumentOcr(), HistoryQuery, post(), redeemPoints(), RedemptionItemVisibility (+125 more)
 
 ### Community 2 - "Skeleton"
-Cohesion: 0.10
-Nodes (71): STAFF, BusinessCommissionsPage(), BusinessFinanceQueuePage(), QueueSkeleton(), CustomerApplicationsPage(), GuideSkeleton(), PaymentSchemeGuidePage(), Section() (+63 more)
+Cohesion: 0.07
+Nodes (96): STAFF, BusinessCommissionsPage(), BusinessFinanceQueuePage(), PaymentDetails(), QueueSkeleton(), ReservationDetails(), statusBadgeProps(), TimelineSkeleton() (+88 more)
 
 ### Community 3 - "ref_vitest"
 Cohesion: 0.07
 Nodes (23): call(), holder, install(), authDb(), BUSINESS_IDS_SQL, call(), holder, MIGRATIONS (+15 more)
 
 ### Community 4 - "business/services.ts"
-Cohesion: 0.04
-Nodes (121): detail(), LocationProbe(), show(), isReservationFinanceSummary(), progressPercent(), RecordDialogSkeleton(), RecordPaymentDialog(), ReservationActions() (+113 more)
+Cohesion: 0.03
+Nodes (127): detail(), LocationProbe(), show(), isReservationFinanceSummary(), progressPercent(), RecordDialogSkeleton(), RecordPaymentDialog(), ReservationActions() (+119 more)
 
 ### Community 5 - "card-plans.spec.ts"
 Cohesion: 0.27
@@ -409,12 +411,12 @@ Cohesion: 0.05
 Nodes (49): toTitleCase(), AaNumberMode, aaNumberModeSchema, addressText(), CreateMember, CreateOstMember, CreateOstMemberMode, createOstMemberModeSchema (+41 more)
 
 ### Community 13 - "ref_react_router"
-Cohesion: 0.05
-Nodes (82): AdminForbiddenPage(), AdminLayout(), Loading(), MyAccountPage(), useProfilePhoto(), AfHomesStaffDetailPage(), initialsOf(), StaffDetailForm() (+74 more)
+Cohesion: 0.04
+Nodes (96): AdminForbiddenPage(), AdminLayout(), Loading(), roleRoutes(), MyAccountPage(), useProfilePhoto(), AfHomesStaffDetailPage(), initialsOf() (+88 more)
 
 ### Community 14 - "Admin route definitions"
 Cohesion: 0.06
-Nodes (54): AfHomesDashboardPage, AfHomesDepartmentsPage, AfHomesRoleDetailPage, AfHomesRolesPage, AfHomesStaffDetailPage, AfHomesStaffPage, App(), AuditPage (+46 more)
+Nodes (53): AfHomesDashboardPage, AfHomesDepartmentsPage, AfHomesRoleDetailPage, AfHomesRolesPage, AfHomesStaffDetailPage, AfHomesStaffPage, App(), AuditPage (+45 more)
 
 ### Community 15 - "Queues and reports API"
 Cohesion: 0.10
@@ -424,9 +426,9 @@ Nodes (54): buildQueue(), buildReservationQueue(), handler(), parseListQuery(), 
 Cohesion: 0.05
 Nodes (56): pg, Check, runActivationIntegrationChecks(), World, asBrowserRole(), baseline, BASELINE_TABLES, camel() (+48 more)
 
-### Community 17 - "StatusChip"
-Cohesion: 0.05
-Nodes (65): PaymentDetails(), ReservationDetails(), statusBadgeProps(), TimelineSkeleton(), VerifyDialog(), countFormatter, formatMoney(), formatPaymentMethod() (+57 more)
+### Community 17 - "CustomerLookupPage.tsx"
+Cohesion: 0.33
+Nodes (9): CustomerCard(), CustomerLookupPage(), describeCustomerLookupError(), FACT_ICONS, HighlightedName(), LookupSkeleton(), rankSuggestions(), TierKey (+1 more)
 
 ### Community 18 - "Admin handlers and dashboard API"
 Cohesion: 0.05
@@ -949,8 +951,8 @@ Cohesion: 0.22
 Nodes (9): check(), excluded, member(), migrate(), one(), root, selected, sql() (+1 more)
 
 ### Community 151 - "CustomerImportExportPage.tsx"
-Cohesion: 0.17
-Nodes (16): CustomerImportExportPage(), describeJobsLoadError(), downloadFile(), FeedbackTone, JOB_STATUS_TONES, JobCounts(), JobSummary(), renderRowErrors() (+8 more)
+Cohesion: 0.09
+Nodes (29): CustomerImportExportPage(), describeJobsLoadError(), downloadFile(), FeedbackTone, JOB_STATUS_TONES, JobCounts(), JobSummary(), renderRowErrors() (+21 more)
 
 ### Community 152 - "Release plan and allowlist"
 Cohesion: 0.16
@@ -1311,21 +1313,21 @@ Nodes (42): customerDeleteBlockers(), customerHasActiveMembership(), fullName(),
   apps/web/src/marketing/assets/uploads/smart-wellness-hotel.webp · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **192 isolated node(s):** `typescript`, `vitest`, `zod`, `typescript`, `vitest` (+187 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2895 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **142 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **192 isolated node(s):** `RFC-4180`, `RFC-4180`, `RFC-4180`, `../_handlers/c.js`, `@afhomes/contracts` (+187 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2896 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **143 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `BR-RATE-01 Ordering Half` connect `Business rules audit reports` to `Source audit and traceability`, `Test plan and approval register`, `phase2World`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
-- **What connects `typescript`, `vitest`, `zod` to the rest of the system?**
+  _High betweenness centrality (0.033) - this node is a cross-community bridge._
+- **What connects `RFC-4180`, `RFC-4180`, `RFC-4180` to the rest of the system?**
   _192 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `OST renewal and shared UI` be split into smaller, more focused modules?**
-  _Cohesion score 0.02218905472636816 - nodes in this community are weakly interconnected._
-- **Why does `BR-RATE-06 Invalid Inputs Generate No Number` connect `Test plan and approval register` to `Business rules audit reports`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+  _Cohesion score 0.02248616821481143 - nodes in this community are weakly interconnected._
+- **Why does `recharts` connect `Admin app tooling` to `Dashboard metrics and charts`?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
 - **Should `Dashboard and analytics contracts` be split into smaller, more focused modules?**
   _Cohesion score 0.02693512304250559 - nodes in this community are weakly interconnected._
 

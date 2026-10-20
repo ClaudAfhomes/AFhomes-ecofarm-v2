@@ -1,9 +1,7 @@
 # Graph Report - AFhomes-ecofarm-v2  (2026-10-20)
 
 ## Corpus Check
-- 1055 files · ~2,436,780 words
-- Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 108 file(s) not represented in the graph (top: .css 98, (none) 6, .example 3)
+- cluster-only mode — file stats not available
 
 ## Summary
 - 7870 nodes · 23940 edges · 379 communities (237 shown, 142 thin omitted)
@@ -77,7 +75,7 @@
 - Dashboard metrics and charts
 - protectedRequest
 - network-members/services.ts
-- OstAccreditationPages.tsx
+- admin/src/features/ost/services.ts
 - Marketing layout components
 - redemptions.ts
 - ost.spec.ts
@@ -316,14 +314,14 @@
 10. `Alert()` - 109 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `The Blocker: OST Portal `must_change_password` Gap` --references--> `authorizeAfHomes()`  [INFERRED]
-  docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_lib/afhomes-access.ts
-- `Final corrected template integration - 2026-10-18` --references--> `companyLayout()`  [INFERRED]
-  docs/handoffs/2026-10-18-member-company-import.md → api/_lib/member-workbook-layout.ts
-- `Standing hard rules (never relaxed, at any stage)` --references--> `push()`  [INFERRED]
-  workflow/graphidian/00-guide.md → api/_lib/purchase-documents.ts
 - `Approved clarification and compatibility` --references--> `normalizePhilippinePhone()`  [INFERRED]
   docs/handoffs/2026-10-18-member-company-import.md → packages/contracts/src/schemas/input.ts
+- `The Blocker: OST Portal `must_change_password` Gap` --references--> `authorizeAfHomes()`  [INFERRED]
+  docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_lib/afhomes-access.ts
+- `Standing hard rules (never relaxed, at any stage)` --references--> `push()`  [INFERRED]
+  workflow/graphidian/00-guide.md → api/_lib/purchase-documents.ts
+- `Final corrected template integration - 2026-10-18` --references--> `companyLayout()`  [INFERRED]
+  docs/handoffs/2026-10-18-member-company-import.md → api/_lib/member-workbook-layout.ts
 - `Immediate Action Required` --references--> `admin()`  [INFERRED]
   docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_handlers/phase32-security.spec.ts
 
@@ -602,7 +600,7 @@ Nodes (98): EXECUTIVE, LEGACY, show(), AfHomesAuditEvent, auditEventSchema, chan
 Cohesion: 0.07
 Nodes (32): ost, permissions, show(), updaterGrants, chooseFromList(), DETAIL, fillAddress(), OST_ROW (+24 more)
 
-### Community 61 - "OstAccreditationPages.tsx"
+### Community 61 - "admin/src/features/ost/services.ts"
 Cohesion: 0.09
 Nodes (36): ADMIN, APP, CODE, CURRENT_APPLICANT, MEMBER, mockedApprove, mockedCreateCode, mockedGetCodes (+28 more)
 
@@ -1313,7 +1311,7 @@ Nodes (42): customerDeleteBlockers(), customerHasActiveMembership(), fullName(),
   apps/web/src/marketing/assets/uploads/smart-wellness-hotel.webp · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **192 isolated node(s):** `RFC-4180`, `RFC-4180`, `RFC-4180`, `../_handlers/c.js`, `@afhomes/contracts` (+187 more)
+- **192 isolated node(s):** `typescript`, `vitest`, `zod`, `typescript`, `vitest` (+187 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2895 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **142 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1321,13 +1319,13 @@ Nodes (42): customerDeleteBlockers(), customerHasActiveMembership(), fullName(),
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `BR-RATE-01 Ordering Half` connect `Business rules audit reports` to `Source audit and traceability`, `Test plan and approval register`, `phase2World`?**
-  _High betweenness centrality (0.033) - this node is a cross-community bridge._
-- **What connects `RFC-4180`, `RFC-4180`, `RFC-4180` to the rest of the system?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **What connects `typescript`, `vitest`, `zod` to the rest of the system?**
   _192 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `OST renewal and shared UI` be split into smaller, more focused modules?**
   _Cohesion score 0.02218905472636816 - nodes in this community are weakly interconnected._
-- **Why does `recharts` connect `Admin app tooling` to `Dashboard metrics and charts`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **Why does `BR-RATE-06 Invalid Inputs Generate No Number` connect `Test plan and approval register` to `Business rules audit reports`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
 - **Should `Dashboard and analytics contracts` be split into smaller, more focused modules?**
   _Cohesion score 0.02693512304250559 - nodes in this community are weakly interconnected._
 

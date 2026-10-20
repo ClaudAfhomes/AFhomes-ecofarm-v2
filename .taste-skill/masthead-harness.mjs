@@ -64,31 +64,36 @@ const CHECK_ICON =
 const field = (label, value) => `        <div class="field"><dt>${label}</dt><dd>${value}</dd></div>`;
 
 // The masthead is one region of a page, so the harness renders the page around
-// it: the real PageHeader above (h1, description, the permission-gated action)
-// and one real DetailCard below. Measuring the strip in isolation would report
-// a missing title and an empty screen that belong to the harness, not the app.
+// it: the record header card (h1, standing, key rail) and one real DetailCard
+// below, plus the tab strip. Measuring the header in isolation would report a
+// missing title and an empty screen that belong to the harness, not the app.
 const BODY = `
     <section class="page">
-      <header class="header">
-        <div class="text">
-          <h1 class="title">MARIA SANTOS</h1>
-          <p class="description">Customer record and card sales.</p>
+      <header class="masthead">
+        <div class="mastheadIdentity">
+          <span class="monogram" aria-hidden="true">MS</span>
+          <div class="mastheadBody">
+            <h1 class="mastheadName">MARIA SANTOS</h1>
+            <dl class="fieldGrid mastheadState">
+${field('Status:', `<span class="chip success">${CHECK_ICON}Active</span>`)}
+${field('Tier:', '<span class="badge gold"><span class="dot" aria-hidden="true"></span>GOLD</span>')}
+${field('Category:', 'Active VIP')}
+${field('Portal account:', 'Not activated')}
+            </dl>
+          </div>
+          <button class="btn mastheadAction" type="button">Edit stated record</button>
         </div>
-        <div class="actions"><button class="btn" type="button">Edit company record</button></div>
-      </header>
-      <div class="masthead">
-        <dl class="fieldGrid mastheadState">
-${field('Status', `<span class="chip success">${CHECK_ICON}Active</span>`)}
-${field('Tier', '<span class="badge gold"><span class="dot" aria-hidden="true"></span>GOLD</span>')}
-${field('Category', 'Active VIP')}
-${field('Portal account', 'Not activated')}
-        </dl>
         <dl class="fieldGrid mastheadIds">
-${field('Customer ID', '<span class="mono">CUS-000001</span>')}
-${field('Customer code', '<span class="mono">AF-CC-1A2B3C4D</span>')}
-${field('Registered', 'Sep 1, 2026, 12:00 AM')}
+${field('Customer ID:', '<span class="mono">CUS-000001</span>')}
+${field('Customer code:', '<span class="mono">AF-CC-1A2B3C4D</span>')}
+${field('Registered:', 'Sep 1, 2026, 12:00 AM')}
         </dl>
-      </div>
+      </header>
+      <nav class="tabs" aria-label="Customer record sections">
+        <a class="tab tabCurrent" href="?tab=overview">Overview</a>
+        <a class="tab" href="?tab=sales">Sales and payments</a>
+        <a class="tab" href="?tab=company">Stated record</a>
+      </nav>
       <div class="grid">
         <div class="card">
           <h2 class="cardTitle">Contact and identity</h2>
@@ -141,11 +146,6 @@ ${BODY}
 </html>
 `;
 
-for (const [dir, title, css] of [
-  ['before', 'BEFORE', BEFORE],
-  ['after', 'AFTER', AFTER],
-]) {
-  mkdirSync(`${root}/.taste-skill/${dir}`, { recursive: true });
-  writeFileSync(`${root}/.taste-skill/${dir}/index.html`, page(title, css));
-  console.log(`wrote .taste-skill/${dir}/index.html`);
-}
+mkdirSync(`${root}/.taste-skill/after`, { recursive: true });
+writeFileSync(`${root}/.taste-skill/after/index.html`, page('AFTER', AFTER));
+console.log('wrote .taste-skill/after/index.html');
