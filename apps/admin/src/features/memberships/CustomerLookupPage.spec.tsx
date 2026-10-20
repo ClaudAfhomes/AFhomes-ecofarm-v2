@@ -3,12 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
-import { requestList, request } from '../../lib/api/client';
+import { requestList, protectedRequest } from '../../lib/api/client';
 import { RequireRole } from '../../app/RequireRole';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
-  request: vi.fn(),
+  protectedRequest: vi.fn(),
   setApiAccessTokenForTests: vi.fn(),
 }));
 // services are exercised through the mocked `request` client below.
@@ -57,8 +57,8 @@ async function pickOption(name: RegExp) {
 
 beforeEach(() => {
   vi.mocked(requestList).mockReset();
-  vi.mocked(request).mockReset();
-  vi.mocked(request).mockResolvedValue(FULL_PROSPECT);
+  vi.mocked(protectedRequest).mockReset();
+  vi.mocked(protectedRequest).mockResolvedValue(FULL_PROSPECT);
 });
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
@@ -102,7 +102,7 @@ it('shows a suspended member record without ever printing a code', async () => {
       membershipStatus: 'suspended' as const,
     },
   ]);
-  vi.mocked(request).mockResolvedValue({
+  vi.mocked(protectedRequest).mockResolvedValue({
     ...FULL_PROSPECT,
     tier: 'GOLD',
     membershipStatus: 'suspended',
