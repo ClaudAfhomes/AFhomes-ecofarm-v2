@@ -277,7 +277,7 @@ it.each([
   vi.mocked(requestList).mockResolvedValue([
     { ...PROSPECT, customerStatus: 'active' as const, tier, membershipStatus: 'active' as const },
   ]);
-  vi.mocked(request).mockResolvedValue({
+  vi.mocked(protectedRequest).mockResolvedValue({
     ...FULL_PROSPECT,
     tier,
     membershipStatus: 'active',
