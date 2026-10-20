@@ -3,17 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
-import { requestList } from '../../lib/api/client';
-import { getCustomerById } from '../business/services';
+import { requestList, request } from '../../lib/api/client';
 import { RequireRole } from '../../app/RequireRole';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
+  request: vi.fn(),
   setApiAccessTokenForTests: vi.fn(),
 }));
-vi.mock('../business/services', () => ({
-  getCustomerById: vi.fn(),
-}));
+// services are exercised through the mocked `request` client below.
 
 /**
  * Customer Lookup, the GSD/Employee desk.
@@ -58,8 +56,9 @@ async function pickOption(name: RegExp) {
 }
 
 beforeEach(() => {
-  vi.mocked(getCustomerById).mockReset();
-  vi.mocked(getCustomerById).mockResolvedValue(FULL_PROSPECT);
+  vi.mocked(requestList).mockReset();
+  vi.mocked(request).mockReset();
+  vi.mocked(request).mockResolvedValue(FULL_PROSPECT);
 });
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
@@ -103,7 +102,7 @@ it('shows a suspended member record without ever printing a code', async () => {
       membershipStatus: 'suspended' as const,
     },
   ]);
-  vi.mocked(getCustomerById).mockResolvedValue({
+  vi.mocked(request).mockResolvedValue({
     ...FULL_PROSPECT,
     tier: 'GOLD',
     membershipStatus: 'suspended',
@@ -278,6 +277,12 @@ it.each([
   vi.mocked(requestList).mockResolvedValue([
     { ...PROSPECT, customerStatus: 'active' as const, tier, membershipStatus: 'active' as const },
   ]);
+  vi.mocked(request).mockResolvedValue({
+    ...FULL_PROSPECT,
+    tier,
+    membershipStatus: 'active',
+    paymentStatus: 'fully_paid',
+  } as any);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
