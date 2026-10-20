@@ -1,21 +1,21 @@
 import { useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   customerLookupSchema,
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
+  type Customer,
 } from '@afhomes/contracts';
-import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon, Button } from '@afhomes/ui';
-import type { IconName } from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { humanizeCode } from '../business/format';
-import { membershipKeys } from '../business/queryKeys';
+import { membershipKeys, businessKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { tierArtwork } from '@afhomes/ui';
+import { getCustomerById } from '../business/services';
 
 /**
  * Customer Lookup for the GSD / Employee desk.
@@ -50,13 +50,6 @@ function tierKey(tier: string | null): TierKey {
   }
   return 'NONE';
 }
-
-const FACT_ICONS: { key: string; label: string; icon: IconName }[] = [
-  { key: 'customer', label: 'Customer Status', icon: 'user' },
-  { key: 'membership', label: 'Membership Status', icon: 'user-check' },
-  { key: 'tier', label: 'VIP Tier', icon: 'image' },
-  { key: 'validity', label: 'Valid Until', icon: 'clock' },
-];
 
 /** How many name suggestions the dropdown shows at most. */
 const MAX_SUGGESTIONS = 6;
@@ -104,10 +97,12 @@ function HighlightedName({ name, term }: { name: string; term: string }) {
   );
 }
 
-function CustomerCard({ customer }: { customer: CustomerLookup }) {
-  const navigate = useNavigate();
-  const tier = tierKey(customer.tier);
+function CustomerCard({ customer }: { customer: Customer }) {
+  const tier = tierKey(customer.tier ?? customer.statedVipPackage ?? null);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
+  const categoryLabel = customer.derivedCategory
+    ? (CUSTOMER_CATEGORY_LABELS[customer.derivedCategory] ?? customer.derivedCategory)
+    : '';
   return (
     <article className={styles.member} data-tier={tier} aria-label={customer.fullName}>
       <div className={styles.artWrap} aria-hidden={artwork ? undefined : true}>
@@ -121,37 +116,35 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
         )}
       </div>
       <div className={styles.cardBody}>
-        <p className={styles.category}>{CUSTOMER_CATEGORY_LABELS[customer.category]}</p>
+        <p className={styles.category}>{categoryLabel}</p>
         <h2>{customer.fullName}</h2>
         <p className={styles.identifiers}>
           {customer.customerNumber}
           {customer.customerCode ? ` · ${customer.customerCode}` : ''}
         </p>
-        {/* Customer Status and Membership Status are shown as separate facts,
-            never merged. An active customer can hold a suspended membership, and
-            conflating the two tells an operator the wrong thing about the record
-            in front of them. */}
         <dl className={styles.details}>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
-              <Icon name={FACT_ICONS[0]!.icon} size={16} />
+              <Icon name="user-check" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>{FACT_ICONS[0]!.label}</dt>
+              <dt>Payment Status</dt>
               <dd>
-                <StatusChip label={humanizeCode(customer.customerStatus)} />
+                <StatusChip
+                  label={humanizeCode(customer.paymentStatus ?? customer.companyStatus ?? 'none')}
+                />
               </dd>
             </div>
           </div>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
-              <Icon name={FACT_ICONS[1]!.icon} size={16} />
+              <Icon name="image" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>{FACT_ICONS[1]!.label}</dt>
+              <dt>VIP Tier</dt>
               <dd>
-                {customer.membershipStatus ? (
-                  <StatusChip label={humanizeCode(customer.membershipStatus)} />
+                {customer.tier ?? customer.statedVipPackage ? (
+                  <TierBadge tier={customer.tier ?? customer.statedVipPackage ?? ''} />
                 ) : (
                   'None'
                 )}
@@ -160,48 +153,32 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
           </div>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
-              <Icon name={FACT_ICONS[2]!.icon} size={16} />
+              <Icon name="clock" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>{FACT_ICONS[2]!.label}</dt>
-              <dd>{customer.tier ? <TierBadge tier={customer.tier} /> : 'None'}</dd>
-            </div>
-          </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name={FACT_ICONS[3]!.icon} size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>{FACT_ICONS[3]!.label}</dt>
+              <dt>Validity</dt>
               <dd>{customer.membershipExpiresAt?.slice(0, 10) ?? 'Not applicable'}</dd>
             </div>
           </div>
+          {customer.supplementaryFullName ? (
+            <div className={styles.fact}>
+              <span className={styles.factIcon} aria-hidden="true">
+                <Icon name="user" size={16} />
+              </span>
+              <div className={styles.factText}>
+                <dt>Supplementary</dt>
+                <dd>{customer.supplementaryFullName}</dd>
+              </div>
+            </div>
+          ) : null}
         </dl>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-          <Button
-            variant="secondary"
-            onClick={() => navigate(`/admin/customers/${customer.customerId}`)}
-          >
-            Open record
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() =>
-              navigate(
-                `/admin/customers/applications?search=${encodeURIComponent(customer.customerNumber)}`,
-              )
-            }
-          >
-            View forms
-          </Button>
-        </div>
       </div>
     </article>
   );
 }
 
 function LookupSkeleton() {
-  // Two placeholder cards while the ≥2-character search resolves.
+  // Two placeholder cards while a picked customer's detail resolves.
   return (
     <div
       className={styles.results}
@@ -209,7 +186,7 @@ function LookupSkeleton() {
       aria-label="Looking for Customer"
       aria-busy="true"
     >
-      {[0, 1].map((index) => (
+      {[0].map((index) => (
         <div className={styles.member} data-tier="NONE" aria-hidden="true" key={index}>
           <div className={styles.artWrap}>
             <div className={styles.artSkeleton} />
@@ -281,8 +258,16 @@ export function CustomerLookupPage() {
   // The picked record number. The card resolves live from the latest
   // fetched page, so a 30s refetch refreshes the shown card too.
   const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
-  const selected =
+  const selectedLookup =
     (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
+
+  const detail = useQuery({
+    queryKey: businessKeys.customer(selectedLookup?.customerId),
+    queryFn: () => getCustomerById(selectedLookup!.customerId),
+    enabled: Boolean(selectedLookup?.customerId),
+    placeholderData: (previousData) => previousData,
+    staleTime: 15_000,
+  });
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
@@ -421,13 +406,22 @@ export function CustomerLookupPage() {
       </div>
       {term.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a customer or member" />
-      ) : selected ? (
-        <div className={styles.results}>
-          <CustomerCard key={selected.customerNumber} customer={selected} />
-        </div>
-      ) : !hasSearched ? null : customers.isPending ? (
-        <LookupSkeleton />
-      ) : customers.isError ? (
+      ) : selectedLookup ? (
+        detail.isPending ? (
+          <LookupSkeleton />
+        ) : detail.isError ? (
+          <ErrorState
+            error={detail.error}
+            title="Customer lookup is unavailable right now"
+            message={describeCustomerLookupError(detail.error)}
+            onRetry={() => void detail.refetch()}
+          />
+        ) : detail.data ? (
+          <div className={styles.results}>
+            <CustomerCard key={selectedLookup.customerNumber} customer={detail.data} />
+          </div>
+        ) : null
+      ) : !hasSearched ? null : customers.isError ? (
         <ErrorState
           error={customers.error}
           title="Customer lookup is unavailable right now"
