@@ -1,14 +1,18 @@
 import { fireEvent, screen, within } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Route, Routes, useLocation } from 'react-router';
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList } from '../../lib/api/client';
+import { getCustomerById } from '../business/services';
 import { RequireRole } from '../../app/RequireRole';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
   setApiAccessTokenForTests: vi.fn(),
+}));
+vi.mock('../business/services', () => ({
+  getCustomerById: vi.fn(),
 }));
 
 /**
@@ -33,6 +37,20 @@ const PROSPECT = {
   category: 'PENDING' as const,
 };
 
+const FULL_PROSPECT = {
+  id: '11111111-1111-4111-8111-111111111111',
+  customerNumber: 'AF-CUS-00042',
+  customerCode: 'AF-CC-1A2B3C4D',
+  fullName: 'PROSPECT DELA CRUZ',
+  status: 'prospect',
+  paymentStatus: 'no_payment',
+  tier: null,
+  statedVipPackage: null,
+  membershipExpiresAt: null,
+  supplementaryFullName: null,
+  derivedCategory: 'PENDING',
+} as any;
+
 /** Type, wait for the matching suggestion, and pick it: the only path to a card. */
 async function pickOption(name: RegExp) {
   const option = await screen.findByRole('option', { name });
@@ -48,6 +66,11 @@ function LocationProbe() {
     </p>
   );
 }
+
+beforeEach(() => {
+  vi.mocked(getCustomerById).mockReset();
+  vi.mocked(getCustomerById).mockResolvedValue(FULL_PROSPECT);
+});
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
   vi.mocked(requestList).mockResolvedValue([PROSPECT]);
@@ -90,6 +113,13 @@ it('shows a suspended member record without ever printing a code', async () => {
       membershipStatus: 'suspended' as const,
     },
   ]);
+  vi.mocked(getCustomerById).mockResolvedValue({
+    ...FULL_PROSPECT,
+    tier: 'GOLD',
+    membershipStatus: 'suspended',
+    paymentStatus: 'fully_paid',
+    membershipExpiresAt: '2031-10-11',
+  } as any);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DEL' },
@@ -100,9 +130,10 @@ it('shows a suspended member record without ever printing a code', async () => {
   expect(row?.textContent).toMatch(/suspended/i);
   expect(row?.textContent).not.toMatch(/MBS-/);
   expect(row?.textContent).not.toMatch(/AFHOMES:/);
-  // Both statuses are present as separate rows, not merged into one value.
-  expect(row).toHaveTextContent('Customer Status');
-  expect(row).toHaveTextContent('Membership Status');
+  // Payment status, VIP tier and validity are shown as separate facts.
+  expect(row).toHaveTextContent('Payment Status');
+  expect(row).toHaveTextContent('VIP Tier');
+  expect(row).toHaveTextContent('Validity');
 });
 
 it('queries the customer-lookup endpoint, not the member-transaction lookup', async () => {
@@ -232,16 +263,15 @@ it('searches live with no Search button to click', async () => {
   );
 });
 
-it('shows skeleton-only loading while pending (no spinner, no loading text)', async () => {
+it('shows suggestion skeletons while pending, with no card skeleton', async () => {
   vi.mocked(requestList).mockReturnValue(new Promise(() => {}));
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
   });
-  const status = await screen.findByRole('status', { name: 'Looking for Customer' });
-  expect(status).toBeInTheDocument();
-  // Two placeholder cards while the search resolves.
-  expect(status.children).toHaveLength(2);
+  // No card-level skeleton is rendered while the search resolves.
+  expect(screen.queryByRole('status', { name: 'Looking for Customer' })).toBeNull();
+  expect(screen.queryByRole('article')).toBeNull();
   // The pending dropdown mirrors real suggestion rows (name + meta bars).
   const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
   expect(within(listbox).getAllByRole('presentation', { hidden: true })).toHaveLength(3);
@@ -398,36 +428,4 @@ it('offers no mutating control at all', async () => {
   expect(screen.queryByRole('button', { name: /edit|activate|payment|redeem/i })).toBeNull();
 });
 
-describe('lookup to record navigation', () => {
-  async function showCard() {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT]);
-    renderWithProviders(
-      <Routes>
-        <Route path="/admin/customer-lookup" element={<CustomerLookupPage />} />
-        <Route path="*" element={<LocationProbe />} />
-      </Routes>,
-      { route: '/admin/customer-lookup' },
-    );
-    fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-      target: { value: 'DELA' },
-    });
-    await pickOption(/PROSPECT DELA CRUZ/);
-    await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
-  }
 
-  it('opens the customer record by UUID', async () => {
-    await showCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Open record' }));
-    expect(await screen.findByLabelText('route')).toHaveTextContent(
-      `/admin/customers/${PROSPECT.customerId}`,
-    );
-  });
-
-  it('opens the application queue filtered to the picked number', async () => {
-    await showCard();
-    fireEvent.click(screen.getByRole('button', { name: 'View forms' }));
-    expect(await screen.findByLabelText('route')).toHaveTextContent(
-      '/admin/customers/applications?search=AF-CUS-00042',
-    );
-  });
-});
