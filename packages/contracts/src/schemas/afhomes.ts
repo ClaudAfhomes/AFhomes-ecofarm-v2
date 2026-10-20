@@ -421,3 +421,18 @@ export const changeAfHomesStaffPasswordSchema = z
     message: 'Choose a password different from your current password.',
   });
 export type ChangeAfHomesStaffPassword = z.infer<typeof changeAfHomesStaffPasswordSchema>;
+
+export const staffSaleInvolvementSchema = z.object({
+  id: z.string(),
+  customerId: z.string().uuid(),
+  customerName: z.string(),
+  customerNumber: z.string(),
+  saleId: z.string().uuid().nullable(),
+  applicationId: z.string().uuid().nullable(),
+  reference: z.string(),
+  tier: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  roles: z.array(z.string()),
+});
+export type StaffSaleInvolvement = z.infer<typeof staffSaleInvolvementSchema>;

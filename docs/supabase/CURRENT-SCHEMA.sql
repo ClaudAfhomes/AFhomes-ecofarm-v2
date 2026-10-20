@@ -5,7 +5,22 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 110. Public table inventory: 60.
+-- Migration count: 114. Public table inventory: 60. Private table inventory: 23.
+-- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
+-- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
+-- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.
+-- It preserves pre-system company IDs in ra_number, prevents duplicate company IDs, and issues
+-- AF-CUS-YYYY-NNNNNN through a private annual high-water counter for general new customers.
+-- Internal customer_number references stay separate. No existing identifiers are rewritten.
+-- External verified import 20261208000019 was approved and applied to the shared project on 2026-10-20.
+-- Opt-in acceptance creates canonical applications/reservations and verified historical payments;
+-- private immutable receipts retain the importer, acceptance time, source hash and exact totals.
+-- Staff sales involvement 20261208000018 was approved and live-applied on 2026-10-19: a service-only read RPC
+-- projects recorded application/import identities and frozen sale hierarchy into general summaries.
+-- It does not infer name-only attribution or change genealogy, payments, membership or commissions.
+-- It adds three private RLS-protected source/claim tables, service-only reviewed continuation RPCs,
+-- canonical purchase identity and stale-target guards. Claims are not ledger payments;
+-- explicit Finance reconciliation records unverified payments, with verification remaining separate.
 -- Company workbook change: one forward migration; no tables or columns added.
 -- New private.commit_company_customer_import(uuid,uuid); existing public.commit_customer_import_row
 -- New service-only read adapter public.match_company_import_staff(text[]) reuses registered staff/roles/hierarchy.
@@ -140,6 +155,10 @@
 --   20261208000013_afhomes_member_workbook_jobs_schema.sql
 --   20261208000014_afhomes_ist_employee_identity_functions.sql
 --   20261208000015_afhomes_member_workbook_jobs_functions.sql
+--   20261208000016_afhomes_customer_import_continuation.sql
+--   20261208000017_afhomes_import_company_customer_ids.sql
+--   20261208000018_afhomes_staff_sales_involvement.sql
+--   20261208000019_afhomes_customer_external_verified_import.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories
@@ -201,3 +220,27 @@
 --   public.staff_role_assignments
 --   public.staff_users
 --   public.tier_points_config
+-- Private table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
+--   private.business_id_aliases
+--   private.commission_rule_archive
+--   private.company_customer_id_counters
+--   private.customer_external_import_receipts
+--   private.customer_import_payment_claims
+--   private.customer_import_purchase_sources
+--   private.customer_import_source_rows
+--   private.member_workbook_jobs
+--   private.member_workbook_rows
+--   private.mutation_requests
+--   private.ost_accreditation_renewals
+--   private.ost_accreditation_terms
+--   private.ost_applicant_changes
+--   private.ost_import_jobs
+--   private.ost_import_rows
+--   private.ost_ist_conversions
+--   private.ost_registration_details
+--   private.ost_team_transfers
+--   private.purchase_document_evidence
+--   private.sale_team_aa_counters
+--   private.sale_team_accreditation_history
+--   private.sale_team_accreditations
+--   private.staff_security_policy

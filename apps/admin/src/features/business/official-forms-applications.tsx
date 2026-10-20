@@ -15,7 +15,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
-import {
+import { getImportRowIntake } from './import-workflow-services';
+import { ImportContinuationPanel } from './ImportContinuationPanel';
+import {
   createCustomerApplicationSchema,
   canTransitionCustomerApplication,
   registerCustomerApplicationSchema,
@@ -32,13 +34,20 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
-import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
-import {
+import {
+  applicationKeys,
+  businessKeys,
+  membershipKeys,
+  reservationKeys,
+  sharedScopes,
+} from './queryKeys';
+import {
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,
+  Button,
   Dialog,
+  DateField,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
@@ -60,7 +69,7 @@ import { TierBadge } from './TierBadge';
 import { tierArtwork } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
+import {
   ACCEPTED_MIME,
   MAX_BYTES,
   getCurrentDocument,
@@ -68,7 +77,7 @@ import {
   putUploadBytes,
   requestUploadGrant,
 } from '../documents/services';
-import {
+import {
   createCustomerApplication,
   registerCustomerApplication,
   decideCustomerApplication,
@@ -206,6 +215,7 @@ export function CustomerApplicationsPage() {
           </>
         }
       />
+      <ImportContinuationPanel />
       <FilterBar
         filtersToggleLabel="Expand Filters"
         search={
@@ -505,9 +515,11 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
 export function CustomerApplicationEditorPage() {
   const { user: applicationUser } = useSession();
   const mayLoadImport =
-    applicationUser?.afHomesPermissions.some(
+    applicationUser?.roleSlug === 'super_admin' ||
+    (applicationUser?.afHomesPermissions.some(
       (p) => p.moduleKey === 'governance.customer_import' && p.canView,
-    ) ?? false;
+    ) ??
+      false);
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
     setInvalidFields((current) =>
@@ -533,6 +545,14 @@ export function CustomerApplicationEditorPage() {
     retry: false,
   });
   const [applicationSearch] = useSearchParams();
+  const importRowId = applicationSearch.get('importRowId');
+  const [importPurchaseReference, setImportPurchaseReference] = useState('');
+  const importIntake = useQuery({
+    queryKey: ['customer-import-intake', importRowId],
+    queryFn: () => getImportRowIntake(importRowId!),
+    enabled: Boolean(importRowId && !id && mayLoadImport),
+    retry: false,
+  });
   const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
   // The picker resolves against the authoritative record, and a prefill click
   // is only accepted for the customer it was started for.
@@ -553,7 +573,7 @@ export function CustomerApplicationEditorPage() {
     vipRecommenderName: '',
     recommenderContact: '',
     recommenderEmail: '',
-    acknowledgedAt: today(),
+    acknowledgedAt: importRowId ? '' : today(),
   });
   const [channels, setChannels] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
@@ -674,7 +694,58 @@ export function CustomerApplicationEditorPage() {
     onError: (error) =>
       setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
   });
+  const loadedImport = useRef<string | null>(null);
+  useEffect(() => {
+    const source = importIntake.data;
+    if (!source || !importRowId || loadedImport.current === importRowId || plans.isPending) return;
+    if (source.continuation.applicationId) {
+      navigate(`/admin/customers/applications/${source.continuation.applicationId}`, {
+        replace: true,
+      });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      loadedImport.current = importRowId;
+      const data = source.prefill;
+      setImportPurchaseReference(source.purchaseReference ?? '');
+      if (source.continuation.customerId) {
+        setCustomerId(source.continuation.customerId);
+        selectedCustomerRef.current = source.continuation.customerId;
+        setPrefilledCustomerId(source.continuation.customerId);
+      }
+      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setSecondary(
+        data.secondary
+          ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
+          : null,
+      );
+      const plan = plans.data?.find((p) => p.code === data.tier);
+      if (plan && data.tier) {
+        setPlanId(plan.id);
+        setTier(data.tier);
+      }
+      if (data.paymentScheme) setPaymentScheme(data.paymentScheme);
+      setMeta((current) => ({
+        ...current,
+        ...source.team,
+        acknowledgedAt: '',
+        vipRecommenderName: data.recommenderName,
+        recommenderContact: data.recommenderContact,
+        recommenderEmail: data.recommenderEmail,
+      }));
+      setMessage(
+        'Imported details loaded for review. Enter the actual acknowledgement date and confirm the required evidence. Imported payment claims are reviewed separately by Finance.',
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [importIntake.data, importRowId, plans.data, plans.isPending, navigate]);
   const pickCustomer = (next: string) => {
+    if (importRowId && next !== importIntake.data?.continuation.customerId) {
+      setMessage(
+        'This imported purchase belongs to its linked customer. Open a separate application to select another customer.',
+      );
+      return;
+    }
     selectedCustomerRef.current = next;
     if (prefilledCustomerId && next !== prefilledCustomerId) {
       setPrimary(emptyHolder('PRIMARY'));
@@ -731,6 +802,19 @@ export function CustomerApplicationEditorPage() {
   // the single save-and-submit action. Transient states (a mutation in flight)
   // are deliberately NOT blockers - they are not something to fix.
   const blockers: string[] = [];
+  if (importRowId) {
+    if (!mayLoadImport)
+      blockers.push('Customer import access is required to review this purchase.');
+    else if (importIntake.isError)
+      blockers.push(
+        'Imported purchase review could not be loaded. Return to the customer record and retry.',
+      );
+    else if (!importIntake.data) blockers.push('Wait for the imported purchase review to load.');
+    if (!importPurchaseReference.trim()) blockers.push('Enter the actual purchase reference.');
+    if (importIntake.data?.continuation.conflicts.length)
+      blockers.push('Resolve the imported customer conflicts before saving.');
+    if (!meta.acknowledgedAt) blockers.push('Enter the actual acknowledgement date.');
+  }
   if (!planId) blockers.push('Select a VIP plan.');
   if (!consent) blockers.push('Certification and consent must be ticked.');
   // A picked file uploads on Save, so it satisfies the gate.
@@ -758,7 +842,7 @@ export function CustomerApplicationEditorPage() {
         vipRecommenderName: app.vipRecommenderName ?? '',
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
-        acknowledgedAt: app.acknowledgedAt,
+        acknowledgedAt: app.acknowledgedAt ?? '',
       });
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);
@@ -770,7 +854,7 @@ export function CustomerApplicationEditorPage() {
   const payload = () => ({
     // Unchosen selectors stay absent: never send "" as a UUID.
     customerId: customerId || undefined,
-    planId: planId || undefined,
+    planId: planId || undefined,
   tier,
     paymentScheme,
     // Company-stated mirror: the selected card tier and payment scheme are the
@@ -832,6 +916,14 @@ export function CustomerApplicationEditorPage() {
             await currentDocument.refetch();
           }
         } else {
+          if (importRowId && (!importIntake.data || importIntake.isError))
+            throw new Error('Load the imported purchase review before saving.');
+          if (importRowId && !importPurchaseReference.trim())
+            throw new Error(
+              'Enter the actual purchase reference. Reuse the same reference for the same purchase.',
+            );
+          if (importIntake.data?.continuation.conflicts.length)
+            throw new Error('Resolve the imported purchase conflicts before saving.');
           const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
           if (!checkedForSubmit.success)
             throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
@@ -874,6 +966,17 @@ export function CustomerApplicationEditorPage() {
             const created = await createCustomerApplication({
               ...checkedForSubmit.data,
               requestId: applicationRequest.forPayload(checkedForSubmit.data),
+              ...(importRowId && importIntake.data
+                ? {
+                    importContext: {
+                      rowId: importRowId,
+                      purchaseReference: importPurchaseReference.trim(),
+                      requestId: applicationRequest.forPayload(checkedForSubmit.data),
+                      expectedSourceHash: importIntake.data.continuation.expectedSourceHash,
+                      expectedTargetVersion: importIntake.data.continuation.expectedTargetVersion,
+                    },
+                  }
+                : {}),
             });
             appId = created.id;
           }
@@ -1079,7 +1182,7 @@ export function CustomerApplicationEditorPage() {
       : !primaryComplete
         ? 'Complete primary holder fields.'
         : null,
-    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
+    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
   null,
     null,
   ];
@@ -1423,6 +1526,34 @@ export function CustomerApplicationEditorPage() {
                 Application
               </h2>
               <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+              {importRowId ? (
+                <>
+                  <label className={styles.filterLabel}>
+                    Purchase reference
+                    <input
+                      value={importPurchaseReference}
+                      maxLength={200}
+                      onChange={(e) => setImportPurchaseReference(e.target.value)}
+                      readOnly={Boolean(importIntake.data?.purchaseReference)}
+                    />
+                    <span>
+                      Use the actual purchase reference. Reuse the same reference for this purchase;
+                      Customer ID (RA No.) identifies the person.
+                    </span>
+                  </label>
+                  <DateField
+                    id="import-acknowledgement-date"
+                    name="acknowledgedAt"
+                    label="Actual acknowledgement date"
+                    value={meta.acknowledgedAt}
+                    max={today()}
+                    onChange={(value) =>
+                      setMeta((current) => ({ ...current, acknowledgedAt: value }))
+                    }
+                    hint="Enter the date the customer actually acknowledged the application."
+                  />
+                </>
+              ) : null}
               <div className={styles.editorGrid}>
                 <div className={styles.pickerWrap}>
                   <label className={styles.filterLabel}>
@@ -1763,8 +1894,8 @@ export function CustomerApplicationEditorPage() {
                     </Button>
                   </div>
                   <p className={styles.hint}>
-                    Approval needs reviewed purchase terms; reopening returns the record to
-                    draft for corrections.
+                    Approval needs reviewed purchase terms; reopening returns the record to draft
+                    for corrections.
                   </p>
                 </div>
               ) : null}
@@ -1855,7 +1986,9 @@ export function CustomerApplicationEditorPage() {
                       Cancel
                     </Button>
                   </div>
-                  <p className={styles.hint}>Cancelling ends this application. This cannot be undone.</p>
+                  <p className={styles.hint}>
+                    Cancelling ends this application. This cannot be undone.
+                  </p>
                 </div>
               ) : null}
               <div className={styles.actionGroup}>

@@ -1,5 +1,6 @@
 ﻿import {
   CUSTOMER_EXPORT_COLUMNS,
+  aaNumberSchema,
   CUSTOMER_IMPORT_COLUMNS,
   CUSTOMER_IMPORT_ROW_LIMIT,
   CUSTOMER_SSOT_COLUMNS,
@@ -36,6 +37,7 @@
   type CustomerSsotColumn,
   type CustomerSsotSection,
 } from '@afhomes/contracts';
+import { z } from 'zod';
 import { escapeCsvCell, toCsv, toXlsx, toXlsxMulti, type XlsxColumn } from './report-export.js';
 
 /* ------------------------------------------------------------------ */
@@ -265,6 +267,14 @@ export type ImportContext = {
 };
 
 export type NormalizedImportRow = {
+  customerFacts?: import('./customer-import-continuation.js').ImportedCustomerFacts;
+  paymentClaims?: import('@afhomes/contracts').WorkbookPaymentClaim[];
+  continuationPreview?: import('@afhomes/contracts').CustomerImportContinuation;
+  externalVerified?: boolean;
+  externalReason?: string;
+  externalSummary?: ReturnType<
+    typeof import('./external-customer-import.js').externalImportSummary
+  >;
   category: CustomerCategory;
   tier: string | null;
   customerStatus: string;
@@ -482,7 +492,11 @@ export function validateImportRow(
     'referrer_name',
     'vip_recommender_name',
   ] as const) {
-    if (nonEmpty(get(key)) && !personNameSchema.safeParse(get(key)).success)
+    const registeredReference =
+      ['company_v1', 'company_v2'].includes(get('workbook_format')) &&
+      ['svd_name', 'ssm_name', 'sm_name', 'referrer_name', 'vip_recommender_name'].includes(key) &&
+      (z.uuid().safeParse(get(key)).success || aaNumberSchema.safeParse(get(key)).success);
+    if (nonEmpty(get(key)) && !registeredReference && !personNameSchema.safeParse(get(key)).success)
       err(key, 'Use letters, spaces, apostrophes and hyphens only');
     else capped(key, 120);
   }
@@ -808,7 +822,7 @@ export function validateImportRow(
       supplementaryTinNumber: get('supplementary_tin_number') || null,
       supplementaryMobile: supplementaryMobile ?? (supplementaryMobileRaw || null),
       supplementaryEmail: nonEmpty(get('supplementary_email'))
-        ? normalizeEmail(get('supplementary_email')) ?? get('supplementary_email')
+        ? (normalizeEmail(get('supplementary_email')) ?? get('supplementary_email'))
         : null,
       supplementaryLandline: get('supplementary_landline') || null,
       supplementaryOccupationBusinessName: get('supplementary_occupation_business_name') || null,
@@ -1199,9 +1213,7 @@ const INTERIM_ONLY_HEADERS = new Set(
 );
 
 /** True when a multi-sheet workbook was filled from the interim download. */
-export function workbookLooksInterimV2(
-  sheets: { name: string; matrix: string[][] }[],
-): boolean {
+export function workbookLooksInterimV2(sheets: { name: string; matrix: string[][] }[]): boolean {
   const guide = new Set(MEMBERSHIP_TEMPLATE_GUIDE_SHEETS);
   return sheets.some((sheet) => {
     if (guide.has(sheet.name.trim().toLowerCase())) return false;

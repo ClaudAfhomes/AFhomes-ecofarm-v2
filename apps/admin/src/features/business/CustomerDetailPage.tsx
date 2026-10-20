@@ -37,6 +37,7 @@ import { CustomerIdImage } from './CustomerIdImage';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import { SalePaymentList } from './SalePaymentDialog';
 import { TierBadge } from './TierBadge';
+import { ImportContinuationPanel } from './ImportContinuationPanel';
 import styles from './CustomerDetailPage.module.css';
 
 /**
@@ -208,7 +209,7 @@ export function CustomerDetailPage() {
             </div>
           </div>
           <div className={styles.mastheadIds}>
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} style={{ display: 'grid', gap: 2 }}>
                 <Skeleton style={{ height: 12, maxWidth: 80 }} />
                 <Skeleton style={{ height: 18, maxWidth: 140 }} />
@@ -384,7 +385,6 @@ export function CustomerDetailPage() {
       blurb: 'Who holds the card',
       company: true,
       fields: [
-        ['RA NO', statedMono(record.raNumber)],
         ['PAYMENT STATUS', stated(record.companyStatus)],
         ['FIRST NAME', stated(record.firstName)],
         ['LAST NAME', stated(record.lastName)],
@@ -518,7 +518,10 @@ export function CustomerDetailPage() {
           ) : null}
         </div>
         <DetailFieldGrid className={styles.mastheadIds}>
-          <DetailField label="Customer ID:">
+          <DetailField label="Customer ID (RA No.):">
+            <DetailMono>{record.raNumber || 'Not Recorded'}</DetailMono>
+          </DetailField>
+          <DetailField label="Internal system reference:">
             <DetailMono>{record.customerNumber}</DetailMono>
           </DetailField>
           <DetailField label="Customer code:">
@@ -529,6 +532,7 @@ export function CustomerDetailPage() {
           </DetailField>
         </DetailFieldGrid>
       </header>
+      <ImportContinuationPanel customerId={record.id} />
       <nav className={styles.tabs} aria-label="Customer record sections">
         {RECORD_TABS.filter((entry) => entry.id !== 'sales' || !salesHidden).map((entry) => (
           <Link

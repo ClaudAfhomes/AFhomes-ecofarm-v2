@@ -625,6 +625,7 @@ export const customerImportCommitResponseSchema = z.object({
       customerId: z.string().uuid().nullable(),
       membershipId: z.string().uuid().nullable(),
       error: z.string().nullable(),
+      importContinuation: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
 });

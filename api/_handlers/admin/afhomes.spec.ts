@@ -136,6 +136,51 @@ async function call(options: {
 const err = (body: unknown) => (body as Json).error as Json | undefined;
 const data = (body: unknown) => (body as Json).data;
 
+describe('staff sales involvement authorization', () => {
+  beforeEach(() => install());
+  it('passes the authenticated actor and target to the read-only adapter', async () => {
+    const original = (holder.db as FakeSupabase).rpc.bind(holder.db);
+    const rpc = vi
+      .spyOn(holder.db as FakeSupabase, 'rpc')
+      .mockImplementation((fn, args) =>
+        fn === 'staff_sales_involvement'
+          ? Promise.resolve({ data: [], error: null })
+          : original(fn, args),
+      );
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(data(state.body)).toEqual([]);
+    expect(rpc).toHaveBeenCalledWith('staff_sales_involvement', {
+      p_actor_id: UUID.superAdminStaff,
+      p_staff_id: UUID.adminStaff,
+      p_limit: 25,
+      p_offset: 0,
+    });
+  });
+  it('requires authentication', async () => {
+    const state = await call({ afPath: `staff/${UUID.adminStaff}/sales-involvement` });
+    expect(state.status).toBe(401);
+  });
+  it('denies a viewer without staff/customer access', async () => {
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.viewer,
+    });
+    expect(state.status).toBe(403);
+  });
+  it('rejects invalid pagination before querying purchase history', async () => {
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.superAdmin,
+      query: { limit: '1000' },
+    });
+    expect(state.status).toBe(400);
+  });
+});
+
 /* ================================================================== */
 /* Session / authentication                                           */
 /* ================================================================== */
@@ -777,7 +822,7 @@ describe('staff deletion blockers on tables without an id column', () => {
   });
 
   it('scans id-less tables without throwing for a clean target', async () => {
-    const db = install({
+    install({
       tables: {
         card_sale_hierarchy_snapshots: [{ ...HIERARCHY_ROW, ancestor_staff_id: UUID.adminStaff }],
         cms_documents: [{ ...CMS_DOC_ROW }],

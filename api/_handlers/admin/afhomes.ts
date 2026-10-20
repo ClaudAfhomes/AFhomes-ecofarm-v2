@@ -6,6 +6,7 @@ import {
   createAfHomesStaffSchema,
   updateAfHomesStaffProfileSchema,
   type AfHomesPermission,
+  staffSaleInvolvementSchema,
 } from '@afhomes/contracts';
 import { z } from 'zod';
 
@@ -1258,6 +1259,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       if (!entry) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
       return res.status(200).json(entry);
+    }
+    const staffSales = path.match(/^staff\/([0-9a-f-]+)\/sales-involvement$/);
+    if (staffSales && method === 'GET') {
+      const auth = await authorizeAfHomes(req, 'organization.staff');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const customerAuth = await authorizeAfHomes(req, 'sales.customers');
+      if ('error' in customerAuth)
+        return res.status(customerAuth.error.status).json({ error: customerAuth.error.error });
+      const parsed = z
+        .object({
+          id: z.string().uuid(),
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          offset: z.coerce.number().int().min(0).default(0),
+        })
+        .safeParse({ ...req.query, id: staffSales[1] });
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid involvement query', 400);
+      const { data, error } = await db.rpc('staff_sales_involvement', {
+        p_actor_id: auth.userId,
+        p_staff_id: parsed.data.id,
+        p_limit: parsed.data.limit,
+        p_offset: parsed.data.offset,
+      });
+      if (error) {
+        if (error.message?.includes('STAFF_NOT_FOUND'))
+          return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+        throw error;
+      }
+      return list(res, z.array(staffSaleInvolvementSchema).parse(data ?? []));
     }
     const staffAudit = path.match(/^staff\/([0-9a-f-]+)\/audit$/);
     if (staffAudit && method === 'GET') {

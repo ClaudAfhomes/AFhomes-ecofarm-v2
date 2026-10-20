@@ -61,6 +61,7 @@ const FULLSTAFF: SessionUser = {
 const RECORD = {
   id: 'c-1',
   customerNumber: 'CUS-000001',
+  raNumber: 'AF-CUS-2026-000001',
   customerCode: 'AF-CC-1A2B3C4D',
   fullName: 'MARIA SANTOS',
   email: 'maria@example.com',
@@ -165,7 +166,7 @@ describe('CustomerDetailPage', () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     renderDetail();
     expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
-    for (const value of ['CUS-000001', 'AF-CC-1A2B3C4D', '••••1234']) {
+    for (const value of ['AF-CUS-2026-000001', 'CUS-000001', 'AF-CC-1A2B3C4D', '••••1234']) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
     // The tier leads the header and repeats in the membership card.
@@ -189,9 +190,10 @@ describe('CustomerDetailPage', () => {
     expect(
       Array.from(state?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
     ).toEqual(['Status:', 'Tier:', 'Category:', 'Portal account:']);
-    const masthead = screen.getByText('Customer ID:').closest('dl');
+    const masthead = screen.getByText('Customer ID (RA No.):').closest('dl');
     expect(Array.from(masthead?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'Customer ID:',
+      'Customer ID (RA No.):',
+      'Internal system reference:',
       'Customer code:',
       'Registered:',
     ]);
@@ -269,7 +271,7 @@ describe('CustomerDetailPage', () => {
     ]) {
       expect(await screen.findByText(title)).toBeInTheDocument();
     }
-    // Exact company labels with stored values; TINs display formatted.
+    // Company identifiers remain visible in the header on every tab; TINs display formatted.
     for (const value of [
       'RA-2026-0001',
       'FULLY PAID',
@@ -300,7 +302,6 @@ describe('CustomerDetailPage', () => {
     // address parts, one landline, one email, one mobile number.
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
     expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'RA NO',
       'PAYMENT STATUS',
       'FIRST NAME',
       'LAST NAME',
@@ -346,7 +347,13 @@ describe('CustomerDetailPage', () => {
       'EMPLOYED POSITION',
     ]);
     // Related block carries the verbatim (NAME) headers.
-    for (const label of ['SVD (NAME)', 'SSM (NAME)', 'SM (NAME)', 'REFERRER (NAME)', 'VIP RECOMMENDER (NAME)']) {
+    for (const label of [
+      'SVD (NAME)',
+      'SSM (NAME)',
+      'SM (NAME)',
+      'REFERRER (NAME)',
+      'VIP RECOMMENDER (NAME)',
+    ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

@@ -64,6 +64,25 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
+it('requires an explicit external-history selection and carries it into the reviewed upload', async () => {
+  const user = userEvent.setup();
+  vi.mocked(parseCustomerImport).mockResolvedValue(previewFixture());
+  renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+  await user.click(screen.getByRole('checkbox', { name: /already verified outside/ }));
+  await user.upload(
+    screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+    new File(['synthetic'], 'verified.xlsx'),
+  );
+  await waitFor(() =>
+    expect(parseCustomerImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalVerificationReason: expect.stringContaining('verified outside the system'),
+      }),
+    ),
+  );
+  expect(screen.getByRole('checkbox', { name: /already verified outside/ })).toBeDisabled();
+});
+
 const previewFixture = (total = 1) =>
   customerImportParseResponseSchema.parse({
     job: {
@@ -106,6 +125,25 @@ const previewFixture = (total = 1) =>
   });
 
 describe('company workbook review', () => {
+  it('expands every genealogy conflict and shows the independent TIN cell error', async () => {
+    const preview = previewFixture();
+    preview.rows[0]!.errors = [
+      { field: 'vd_name', message: 'Synthetic VD lineage conflict' },
+      { field: 'recommender_name', message: 'Separate registered VD tree' },
+      { field: 'tin', message: 'TIN has 6 digits; enter the complete 9-digit TIN' },
+    ];
+    vi.mocked(parseCustomerImport).mockResolvedValue(preview);
+    renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+    const user = userEvent.setup();
+    await user.upload(
+      screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),
+      new File(['synthetic'], 'synthetic.xlsx'),
+    );
+    await user.click(await screen.findByText('Show 1 more'));
+    expect(screen.getByText(/Related!E2.*Separate registered VD tree/)).toBeVisible();
+    expect(screen.getByText(/Primary!T2.*TIN has 6 digits/)).toBeVisible();
+    expect(screen.queryByText('SYNTHETIC-PRIVATE-TIN')).not.toBeInTheDocument();
+  });
   it('accepts XLSM, displays mapped fields without TIN and gates confirmation by update permission', async () => {
     const user = userEvent.setup();
     const preview = previewFixture();

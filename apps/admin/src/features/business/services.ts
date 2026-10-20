@@ -345,7 +345,17 @@ export const registerCustomerApplication = (
     method: 'POST',
     body: JSON.stringify(input),
   });
-export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
+export const createCustomerApplication = (
+  input: CreateCustomerApplicationRequest & {
+    importContext?: {
+      rowId: string;
+      requestId: string;
+      expectedSourceHash: string;
+      expectedTargetVersion: string;
+      purchaseReference?: string;
+    };
+  },
+) =>
   post(
     '/official-forms/customer-applications',
     customerApplicationSchema,
@@ -748,6 +758,7 @@ export const getCustomerImportTemplate = (format: 'xlsx' | 'csv'): Promise<Gener
   request(`/customer-imports/template/${format}`, generatedImportFileSchema);
 
 export const parseCustomerImport = (input: {
+  externalVerificationReason?: string;
   source: 'excel' | 'csv' | 'google_sheets';
   contentBase64?: string;
   sheetUrl?: string;

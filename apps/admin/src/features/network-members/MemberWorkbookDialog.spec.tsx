@@ -151,7 +151,7 @@ it.each(['IST', 'OST'] as const)(
       rows: [{ rowNumber: 2, fields: { ...fields, source_layout: 'company-v2' }, errors: [] }],
     });
     vi.mocked(getMemberWorkbookJobs).mockImplementation(async () => [structuredClone(job)]);
-    vi.mocked(confirmMemberWorkbookRow).mockImplementation(async (_job, _row, _approved, _pw) => {
+    vi.mocked(confirmMemberWorkbookRow).mockImplementation(async (_job, _row) => {
       job.rows.find((r) => r.id === _row)!.state = 'completed';
       return [structuredClone(job)];
     });

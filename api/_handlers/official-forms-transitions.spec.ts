@@ -146,6 +146,74 @@ const draftApplication = {
   rejected_at: null,
 };
 
+it('creates an imported application through the canonical source transaction, not an unlinked application', async () => {
+  const db = install(
+    {
+      customer_import_rows: [
+        { id: APP_ID, raw_data: { tin: '123-456-789' }, normalized_data: { customerFacts: {} } },
+      ],
+      customer_applications: [{ ...draftApplication, status: 'draft' }],
+      customer_application_holders: [
+        {
+          application_id: APP_ID,
+          holder_type: 'PRIMARY',
+          last_name: 'Dela Cruz',
+          first_name: 'Ana',
+          birth_date: '1990-05-04',
+          permanent_address_line_1: '1 Main',
+          city_municipality: 'Calamba',
+          province: 'Laguna',
+          mobile: '09171234567',
+          email: 'ana@example.invalid',
+          printed_name: 'Ana Dela Cruz',
+        },
+      ],
+    },
+    { rpcs: [{ fn: 'complete_import_application_once', result: { applicationId: APP_ID } }] },
+  );
+  const input = {
+    requestId: REQUEST_ID,
+    customerId: draftApplication.customer_id,
+    planId: PLAN_ID,
+    tier: 'GOLD',
+    paymentScheme: 'spot_cash',
+    primary: {
+      holderType: 'PRIMARY',
+      firstName: 'Ana',
+      lastName: 'Dela Cruz',
+      birthDate: '1990-05-04',
+      permanentAddressLine1: '1 Main',
+      province: 'Laguna',
+      cityMunicipality: 'Calamba',
+      mobile: '09171234567',
+      email: 'ana@example.invalid',
+      printedName: 'Ana Dela Cruz',
+    },
+    consentAcknowledged: true,
+    acknowledgedAt: '2026-10-16',
+    primarySignatureStatus: 'received',
+    validIdReceived: false,
+    reservationPaymentProofReceived: false,
+    importContext: {
+      rowId: APP_ID,
+      requestId: REQUEST_ID,
+      expectedSourceHash: 'a'.repeat(64),
+      expectedTargetVersion: 'b'.repeat(64),
+    },
+  };
+  const result = await call(forms, { path: 'customer-applications', method: 'POST', body: input });
+  expect(result.status).toBe(201);
+  expect(
+    db.calls.some((c) => c.op === 'rpc' && c.table === 'complete_import_application_once'),
+  ).toBe(true);
+  expect(
+    db.calls.some((c) => c.op === 'rpc' && c.table === 'create_customer_application_once'),
+  ).toBe(false);
+  expect(
+    db.calls.find((c) => c.op === 'rpc' && c.table === 'complete_import_application_once')?.arg,
+  ).toMatchObject({ p_primary: { tinNumber: '123-456-789' } });
+});
+
 describe('official form review lifecycle', () => {
   it.each([undefined, {}, { fields: { idType: 'invented' } }])(
     'rejects final submission without a persisted supported ID type: %j',

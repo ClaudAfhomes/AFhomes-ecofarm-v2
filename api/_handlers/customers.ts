@@ -10,7 +10,6 @@ import { z } from 'zod';
 import {
   createCustomerSchema,
   maskGovernmentId,
-  normalizeAddressField,
   normalizePersonName,
   normalizePhilippinePhone,
   normalizePostalCode,
@@ -30,7 +29,6 @@ import {
   isoOrNull,
   jsonBody,
   type Db,
-  list,
   mapRpcError,
   method,
   route,
@@ -426,6 +424,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data, error } = await db.from('customers').insert(row).select('*').single();
       if (error) {
+        if (
+          (error as { constraint?: string }).constraint ===
+            'customers_company_customer_id_unique' ||
+          String(error.message).includes('customers_company_customer_id_unique')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'That Customer ID/RA No. already belongs to an existing customer. Review that customer instead of creating another.',
+            409,
+          );
         if ((error as { code?: string }).code === '23505')
           return fail(
             res,
@@ -515,7 +524,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.supplementaryFullName !== undefined)
         patch.supplementary_full_name =
           p.supplementaryFullName === null ? null : normalizePersonName(p.supplementaryFullName);
-      if (p.supplementaryAddress !== undefined) patch.supplementary_address = p.supplementaryAddress;
+      if (p.supplementaryAddress !== undefined)
+        patch.supplementary_address = p.supplementaryAddress;
       if (p.supplementaryBirthday !== undefined)
         patch.supplementary_birthday = p.supplementaryBirthday;
       if (p.supplementaryGender !== undefined) patch.supplementary_gender = p.supplementaryGender;
@@ -564,6 +574,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { error: writeError } = await db.from('customers').update(patch).eq('id', id);
       if (writeError) {
+        if (String(writeError.message).includes('customers_company_customer_id_unique'))
+          return fail(
+            res,
+            'CONFLICT',
+            'That Customer ID/RA No. already belongs to another customer.',
+            409,
+          );
         if ((writeError as { code?: string }).code === '23505')
           return fail(res, 'CONFLICT', 'That government ID is already registered', 409);
         throw writeError;
@@ -876,7 +893,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error('[api] customers:', error instanceof Error ? error.message : error);
     mapRpcError(res, error as { message?: string });
   }

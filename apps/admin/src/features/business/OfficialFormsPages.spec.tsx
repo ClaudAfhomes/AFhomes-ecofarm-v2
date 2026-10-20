@@ -33,6 +33,11 @@ import {
   putUploadBytes,
   requestUploadGrant,
 } from '../documents/services';
+import { getImportRowIntake } from './import-workflow-services';
+vi.mock('./import-workflow-services', () => ({
+  getImportRowIntake: vi.fn(),
+  getImportContinuations: vi.fn(async () => []),
+}));
 
 vi.mock('./services', () => ({
   createCustomerApplication: vi.fn(),
@@ -111,6 +116,70 @@ beforeEach(() => {
   vi.mocked(getCurrentDocument).mockResolvedValue(null);
 });
 afterEach(() => vi.clearAllMocks());
+
+it('reopens the canonical imported application after a reload instead of creating another', async () => {
+  vi.mocked(getCardProducts).mockResolvedValue([]);
+  vi.mocked(getCustomersPage).mockResolvedValue({ data: [], total: 0 });
+  vi.mocked(getImportRowIntake).mockResolvedValue({
+    continuation: {
+      rowId: 'row',
+      sourceId: 'source',
+      customerId: 'customer',
+      applicationId: 'existing-imported-app',
+      reservationId: null,
+      saleId: null,
+      stage: 'application',
+      missingRequirements: [],
+      conflicts: [],
+      proposedFields: [],
+      claimCount: 1,
+      expectedSourceHash: 'a'.repeat(64),
+      expectedTargetVersion: 'b'.repeat(64),
+      expectedTeamVersion: 'c'.repeat(64),
+      nextAction: null,
+    },
+    prefill: {
+      primary: {},
+      secondary: null,
+      recommenderName: '',
+      recommenderContact: '',
+      recommenderEmail: '',
+      salesManagerName: '',
+      referrerName: '',
+      missingFields: [],
+    },
+    claims: [],
+    purchaseReference: 'REVIEWED PURCHASE',
+    team: {},
+  });
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/customers/applications/new" element={<CustomerApplicationEditorPage />} />
+      <Route
+        path="/admin/customers/applications/existing-imported-app"
+        element={<h1>Existing imported application</h1>}
+      />
+    </Routes>,
+    {
+      route: '/admin/customers/applications/new?importRowId=row',
+      user: {
+        id: 'user',
+        name: 'Admin',
+        email: 'admin@example.invalid',
+        roleId: 'role',
+        roleSlug: 'super_admin',
+        roleName: 'Admin',
+        status: 'active',
+        afHomesPermissions: [],
+      },
+    },
+  );
+  expect(
+    await screen.findByRole('heading', { name: 'Existing imported application' }),
+  ).toBeInTheDocument();
+  expect(createCustomerApplication).not.toHaveBeenCalled();
+  expect(registerCustomerApplication).not.toHaveBeenCalled();
+});
 
 const application = {
   id: 'app-1',
@@ -618,7 +687,10 @@ describe('application private ID intake', () => {
     // the single display vocabulary, the same one the member and OST ID-type
     // dropdowns render. Deriving a label from the slug is what produced
     // "Drivers License" and "Tax Id" before.
-    await setup({ ...document('completed'), reviewedFields: { idType: 'drivers_license' } } as never);
+    await setup({
+      ...document('completed'),
+      reviewedFields: { idType: 'drivers_license' },
+    } as never);
     expect(await screen.findByText(/ID type: Driver's License/)).toBeInTheDocument();
     expect(screen.queryByText(/Drivers License/)).not.toBeInTheDocument();
     cleanup();
