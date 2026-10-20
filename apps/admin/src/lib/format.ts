@@ -31,6 +31,18 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+/**
+ * Group a TIN for display: 123-456-789, with an optional branch suffix
+ * (123-456-789-000). Digits are the record; grouping is presentation only.
+ */
+export function formatTin(value: string | null | undefined): string {
+  const digits = (value ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  const groups = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)].filter(Boolean);
+  const branch = digits.slice(9);
+  return branch ? `${groups.join('-')}-${branch}` : groups.join('-');
+}
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;

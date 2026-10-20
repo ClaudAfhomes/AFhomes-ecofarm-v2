@@ -62,7 +62,10 @@ export function customerHasActiveMembership(row: Record<string, unknown>): boole
   return list.some((membership) => membership.status === 'active');
 }
 
-const toCustomer = (row: Record<string, unknown>) => ({
+const toCustomer = (
+  row: Record<string, unknown>,
+  options: { includeTin?: boolean } = {},
+) => ({
   id: row.id,
   customerNumber: row.customer_number,
   // The customer's own Customer Code, distinct from the Customer ID above.
@@ -82,9 +85,16 @@ const toCustomer = (row: Record<string, unknown>) => ({
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked:
     isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
-  // Company-stated membership fields. TIN values are masked exactly like the
-  // government ID: the raw numbers never leave the database through this API.
+  // Company-stated membership fields. TIN values are masked on list, create
+  // and update reads. The single-record detail read opts in to the raw value
+  // so the edit dialog can show the current TIN; audits never carry it.
   tinNumberMasked: maskGovernmentId(isoOrNull(row.tin_number)),
+  ...(options.includeTin
+    ? {
+        tinNumber: isoOrNull(row.tin_number),
+        supplementaryTinNumber: isoOrNull(row.supplementary_tin_number),
+      }
+    : {}),
   raNumber: isoOrNull(row.ra_number),
   companyStatus: isoOrNull(row.company_status),
   citizenship: isoOrNull(row.citizenship),
@@ -446,10 +456,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Same RPC as the list, narrowed to one row, so the detail view can
       // never disagree with the directory about derived category, membership
       // state, or the masked government ID (the only form ever returned).
+      // TIN is the one opt-in exception: the edit dialog needs the current
+      // value to show it locked, so the single-record read includes it raw.
       const directory = await customerDirectory(db, { id: detail[1] });
       const row = directory[0];
       if (!row) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      return res.status(200).json(toCustomer(row.record));
+      return res.status(200).json(toCustomer(row.record, { includeTin: true }));
     }
 
     const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);

@@ -295,6 +295,13 @@
   max-width: 100%;
 }
 
+/* A locked field still shows its stored value but cannot be edited. */
+.filterLabel input[readonly] {
+  background: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+  cursor: default;
+}
+
 /* Editor top-level section: breathing room between the header, the guidance
    alert, and the first panel. */
 .editorSection {

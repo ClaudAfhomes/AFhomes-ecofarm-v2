@@ -132,6 +132,8 @@ export function Field({
   type = 'text',
   required = false,
   placeholder,
+  readOnly = false,
+  disabled = false,
 }: {
   normalize?: (value: string) => string;
   suggestName?: boolean;
@@ -145,6 +147,9 @@ export function Field({
   type?: string;
   required?: boolean;
   placeholder?: string;
+  /** Show the stored value but refuse edits (e.g. a locked TIN). */
+  readOnly?: boolean;
+  disabled?: boolean;
 }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
@@ -178,6 +183,8 @@ export function Field({
         value={value}
         placeholder={placeholder}
         required={required}
+        readOnly={readOnly}
+        disabled={disabled}
         aria-invalid={error || undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onBlur={() => setTouched(true)}
@@ -430,7 +437,7 @@ export function HolderFields({
             readOnly
             aria-readonly="true"
             aria-label="Postal code"
-            placeholder="Filled from the city / municipality"
+            placeholder="Filled from city"
             value={value.postalCode ?? ''}
             onFocus={(event) => event.currentTarget.select()}
           />

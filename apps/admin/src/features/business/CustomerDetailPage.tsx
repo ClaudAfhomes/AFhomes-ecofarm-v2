@@ -24,8 +24,8 @@ import {
   paymentSchemeLabel,
 } from '@afhomes/contracts';
 
-import { formatDate, formatDateTime } from '../../lib/format';
-import { formatPaymentMethod } from './format';
+import { formatDate, formatDateTime, formatTin } from '../../lib/format';
+import { formatPaymentMethod, humanizeCode } from './format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
 import { getCustomerById, getSalePayments, getSales } from './services';
@@ -96,6 +96,49 @@ function statedMono(value: string | null | undefined): ReactNode {
   return value ? <DetailMono>{value}</DetailMono> : stated(null);
 }
 
+/** Stored genders are lowercase enum values; the screen reads them Title Case. */
+const GENDER_LABELS: Record<string, string> = {
+  male: 'Male',
+  female: 'Female',
+  other: 'Other',
+  undisclosed: 'Undisclosed',
+};
+
+function genderLabel(value: string | null | undefined): string | null {
+  return value ? (GENDER_LABELS[value] ?? value) : null;
+}
+
+/**
+ * True when the customer carries any company-stated supplementary member data.
+ * Used to decide whether the Supplementary Member dossier card renders at all:
+ * a record with no supplementary data shows nothing instead of 14 "Not
+ * Recorded" placeholders.
+ */
+function hasSupplementaryRecord(customer: unknown): boolean {
+  if (!customer || typeof customer !== 'object') return false;
+  const record = customer as Record<string, unknown>;
+  const supplementaryKeys = [
+    'supplementaryFullName',
+    'supplementaryAddress',
+    'supplementaryBirthday',
+    'supplementaryGender',
+    'supplementaryCitizenship',
+    'supplementaryCivilStatus',
+    'supplementaryTinNumberMasked',
+    'supplementaryTinNumber',
+    'supplementaryMobile',
+    'supplementaryEmail',
+    'supplementaryLandline',
+    'supplementaryOccupationBusinessName',
+    'supplementaryOfficeAddress',
+    'supplementaryPosition',
+  ];
+  return supplementaryKeys.some((key) => {
+    const value = record[key];
+    return typeof value === 'string' && value.trim() !== '';
+  });
+}
+
 /**
  * Single customer record, reached by clicking a directory row.
  *
@@ -149,27 +192,29 @@ export function CustomerDetailPage() {
   if (customer.isPending)
     return (
       <section className={styles.page} role="status" aria-label="Loading customer">
-        <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-          <Skeleton style={{ height: 32, maxWidth: 240 }} />
-          <Skeleton style={{ height: 16, maxWidth: 360 }} />
-        </div>
         <div className={styles.masthead} aria-hidden="true">
-          <DetailFieldGrid className={styles.mastheadState}>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} style={{ display: 'grid', gap: 2 }}>
-                <Skeleton style={{ height: 12, maxWidth: 80 }} />
-                <Skeleton style={{ height: 18, maxWidth: 120 }} />
+          <div className={styles.mastheadIdentity}>
+            <Skeleton className={styles.monogramSkeleton} />
+            <div className={styles.mastheadBody}>
+              <Skeleton style={{ height: 28, maxWidth: 260 }} />
+              <div className={styles.mastheadState}>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} style={{ display: 'grid', gap: 2 }}>
+                    <Skeleton style={{ height: 12, maxWidth: 80 }} />
+                    <Skeleton style={{ height: 18, maxWidth: 120 }} />
+                  </div>
+                ))}
               </div>
-            ))}
-          </DetailFieldGrid>
-          <DetailFieldGrid className={styles.mastheadIds}>
+            </div>
+          </div>
+          <div className={styles.mastheadIds}>
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} style={{ display: 'grid', gap: 2 }}>
                 <Skeleton style={{ height: 12, maxWidth: 80 }} />
                 <Skeleton style={{ height: 18, maxWidth: 140 }} />
               </div>
             ))}
-          </DetailFieldGrid>
+          </div>
         </div>
         <DetailGrid className={styles.topGrid}>
           <DetailCard>
@@ -250,6 +295,43 @@ export function CustomerDetailPage() {
   // The header blurb is not decoration. Two of these blocks carry a warning the
   // operator needs before acting on them: the referral names do NOT establish a
   // reporting line, and the stated figures are NOT the sale total.
+  const supplementaryGroup: {
+    title: string;
+    icon?: IconName;
+    tone?: CompanyTone;
+    blurb?: string;
+    fields: Array<[string, ReactNode]>;
+    company?: boolean;
+  } = {
+    // Supplementary block, SSOT order. Names and address are stored joined
+    // (single text columns) and display as the two stored fields; AGE
+    // derives from the supplementary birthday.
+    title: 'Supplementary Member',
+    icon: 'users',
+    tone: 'info',
+    blurb: 'Second holder, Gold only',
+    company: true,
+    fields: [
+      ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName)],
+      ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress)],
+      ['BIRTHDAY', stated(record.supplementaryBirthday)],
+      ['GENDER', stated(genderLabel(record.supplementaryGender))],
+      ['AGE', ageOn(record.supplementaryBirthday)],
+      ['CITIZENSHIP', stated(record.supplementaryCitizenship)],
+      ['CIVIL STATUS', stated(record.supplementaryCivilStatus)],
+      [
+        'TIN NO.',
+        statedMono(formatTin(record.supplementaryTinNumber) || record.supplementaryTinNumberMasked),
+      ],
+      ['LANDLINE', stated(record.supplementaryLandline)],
+      ['MOBILE NO.', statedMono(record.supplementaryMobile)],
+      ['EMAIL', stated(record.supplementaryEmail)],
+      ['OCCUPATION / BUSINESS NAME', stated(record.supplementaryOccupationBusinessName)],
+      ['OFFICE / BUSINESS ADDRESS', stated(record.supplementaryOfficeAddress)],
+      ['EMPLOYED POSITION', stated(record.supplementaryPosition)],
+    ],
+  };
+
   const groups: Array<{
     title: string;
     /** Dossier presentation. Only the company blocks set these; the Overview
@@ -270,9 +352,7 @@ export function CustomerDetailPage() {
         ['Date of birth', record.dateOfBirth ?? 'Not Recorded'],
         [
           'Gender',
-          record.gender
-            ? record.gender.charAt(0).toUpperCase() + record.gender.slice(1)
-            : 'Not Recorded',
+          genderLabel(record.gender) ?? 'Not Recorded',
         ],
         [
           'ID type',
@@ -295,8 +375,9 @@ export function CustomerDetailPage() {
     {
       // Company-stated primary-member facts, SSOT order (see
       // customer-ssot.ts). STATUS here is the verbatim company value;
-      // lifecycle state stays under Customer above. TIN is masked like the
-      // government ID; AGE derives from the birthday, never stored.
+      // lifecycle state stays under Customer above. TIN shows the current
+      // value so the editor can verify it; AGE derives from the birthday,
+      // never stored.
       title: 'Primary Member',
       icon: 'user',
       tone: 'brand',
@@ -310,7 +391,7 @@ export function CustomerDetailPage() {
         ['MIDDLE NAME', stated(record.middleName)],
         ['SUFFIX', stated(record.suffix)],
         ['BIRTHDAY', stated(record.dateOfBirth)],
-        ['GENDER', stated(record.gender)],
+        ['GENDER', stated(genderLabel(record.gender))],
         ['AGE', ageOn(record.dateOfBirth)],
         ['CITIZENSHIP', stated(record.citizenship)],
         ['CIVIL STATUS', stated(record.civilStatus)],
@@ -322,39 +403,17 @@ export function CustomerDetailPage() {
         ['POSTAL CODE', statedMono(addressPartOf(record.address, 'postalCode'))],
         ['LANDLINE', stated(record.landline)],
         ['EMAIL', stated(record.email)],
-        ['TIN NO.', statedMono(record.tinNumberMasked)],
+        [
+          'TIN NO.',
+          statedMono(formatTin(record.tinNumber) || record.tinNumberMasked),
+        ],
         ['MOBILE NO.', statedMono(record.phone)],
         ['OCCUPATION / BUSINESS NAME', stated(record.occupationBusinessName)],
         ['OFFICE / BUSINESS ADDRESS', stated(record.officeBusinessAddress)],
         ['EMPLOYED POSITION', stated(record.employedPosition)],
       ],
     },
-    {
-      // Supplementary block, SSOT order. Names and address are stored joined
-      // (single text columns) and display as the two stored fields; AGE
-      // derives from the supplementary birthday.
-      title: 'Supplementary Member',
-      icon: 'users',
-      tone: 'info',
-      blurb: 'Second holder, Gold only',
-      company: true,
-      fields: [
-        ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName)],
-        ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress)],
-        ['BIRTHDAY', stated(record.supplementaryBirthday)],
-        ['GENDER', stated(record.supplementaryGender ? record.supplementaryGender.charAt(0).toUpperCase() + record.supplementaryGender.slice(1) : null)],
-        ['AGE', ageOn(record.supplementaryBirthday)],
-        ['CITIZENSHIP', stated(record.supplementaryCitizenship)],
-        ['CIVIL STATUS', stated(record.supplementaryCivilStatus)],
-        ['TIN NO.', statedMono(record.supplementaryTinNumberMasked)],
-        ['LANDLINE', stated(record.supplementaryLandline)],
-        ['MOBILE NO.', statedMono(record.supplementaryMobile)],
-        ['EMAIL', stated(record.supplementaryEmail)],
-        ['OCCUPATION / BUSINESS NAME', stated(record.supplementaryOccupationBusinessName)],
-        ['OFFICE / BUSINESS ADDRESS', stated(record.supplementaryOfficeAddress)],
-        ['EMPLOYED POSITION', stated(record.supplementaryPosition)],
-      ],
-    },
+    ...(hasSupplementaryRecord(record) ? [supplementaryGroup] : []),
     {
       // Stored verbatim as stated. These names do not assert reporting lines;
       // referral_relationships remains the only genealogy authority.
@@ -387,7 +446,7 @@ export function CustomerDetailPage() {
         ['REGULAR PRICE', statedMono(formatStatedMoney(record.statedRegularPrice))],
         ['DISCOUNT', statedMono(formatStatedMoney(record.statedDiscount))],
         ['TOTAL AMOUNT', statedMono(formatStatedMoney(record.statedTotalAmount))],
-        ['RF', statedMono(formatStatedMoney(record.statedRf))],
+        ['Reservation Fee', statedMono(formatStatedMoney(record.statedRf))],
         ['PAYMENT TYPE', stated(record.statedPaymentType ? formatPaymentMethod(record.statedPaymentType) : null)],
         ['REF NO', statedMono(record.statedRefNo)],
         ['PAYMENT DATE', stated(record.statedPaymentDate)],
@@ -401,7 +460,7 @@ export function CustomerDetailPage() {
       fields: [
         [
           'Membership status',
-          record.membershipStatus ? <StatusChip label={record.membershipStatus} /> : 'None',
+          record.membershipStatus ? <StatusChip label={humanizeCode(record.membershipStatus)} /> : 'None',
         ],
         ['VIP tier', <TierBadge tier={record.tier} />],
         [
@@ -416,17 +475,6 @@ export function CustomerDetailPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader
-        title={record.fullName}
-        description="Customer record and card sales."
-        actions={
-          canEditCompany ? (
-            <Button variant="secondary" onClick={() => setEditing(true)}>
-              Edit stated record
-            </Button>
-          ) : undefined
-        }
-      />
       {editing ? (
         <CustomerCompanyEditDialog
           customer={record}
@@ -435,39 +483,52 @@ export function CustomerDetailPage() {
           onSaved={() => void customer.refetch()}
         />
       ) : null}
-      {/* Identity. No panel, no tint, no rule, no row of pills: the facts sit on
-          the page ground at one step larger than the cards below, so the name
-          is answered by scale instead of by a box drawn around it. Two rows,
-          because 4 and 3 fit their columns exactly and 7 would orphan one. */}
-      <div className={styles.masthead}>
-        <DetailFieldGrid className={styles.mastheadState}>
-          <DetailField label="Status">
-            <StatusChip label={record.status} />
-          </DetailField>
-          <DetailField label="Tier">
-            <TierBadge tier={record.tier} />
-          </DetailField>
-          <DetailField label="Category">
-            {record.derivedCategory
-              ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory]
-              : 'Not Recorded'}
-          </DetailField>
-          <DetailField label="Portal account">
-            {record.portalAccountActivated ? 'Activated' : 'Not activated'}
-          </DetailField>
-        </DetailFieldGrid>
+      {/* Record header: one card that owns the name and the facts about it. The
+          state line (Status / Tier / Category / Portal account) is the person's
+          standing; the rail below is the row it is in. The group boundary is
+          the rail's stronger top rule, matching the prior strip's intent. */}
+      <header className={styles.masthead}>
+        <div className={styles.mastheadIdentity}>
+          <span className={styles.monogram} aria-hidden="true">
+            {customerInitials(record.fullName)}
+          </span>
+          <div className={styles.mastheadBody}>
+            <h1 className={styles.mastheadName}>{record.fullName}</h1>
+            <DetailFieldGrid className={styles.mastheadState}>
+              <DetailField label="Status:">
+                <StatusChip label={humanizeCode(record.status)} />
+              </DetailField>
+              <DetailField label="Tier:">
+                <TierBadge tier={record.tier} />
+              </DetailField>
+              <DetailField label="Category:">
+                {record.derivedCategory
+                  ? CUSTOMER_CATEGORY_LABELS[record.derivedCategory]
+                  : 'Not Recorded'}
+              </DetailField>
+              <DetailField label="Portal account:">
+                {record.portalAccountActivated ? 'Activated' : 'Not activated'}
+              </DetailField>
+            </DetailFieldGrid>
+          </div>
+          {canEditCompany ? (
+            <Button className={styles.mastheadAction} variant="secondary" onClick={() => setEditing(true)}>
+              Edit stated record
+            </Button>
+          ) : null}
+        </div>
         <DetailFieldGrid className={styles.mastheadIds}>
-          <DetailField label="Customer ID">
+          <DetailField label="Customer ID:">
             <DetailMono>{record.customerNumber}</DetailMono>
           </DetailField>
-          <DetailField label="Customer code">
+          <DetailField label="Customer code:">
             {record.customerCode ? <DetailMono>{record.customerCode}</DetailMono> : 'Not Recorded'}
           </DetailField>
-          <DetailField label="Registered">
+          <DetailField label="Registered:">
             {record.createdAt ? formatDateTime(record.createdAt) : 'Not Recorded'}
           </DetailField>
         </DetailFieldGrid>
-      </div>
+      </header>
       <nav className={styles.tabs} aria-label="Customer record sections">
         {RECORD_TABS.filter((entry) => entry.id !== 'sales' || !salesHidden).map((entry) => (
           <Link
@@ -669,4 +730,17 @@ function CustomerSaleCard({ sale }: { sale: Sale }) {
       </details>
     </DetailCard>
   );
+}
+
+const NAME_SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V', 'VI']);
+
+/** Two-letter monogram for a record header. Suffixes (JR., III, ...) are
+ *  skipped so "MARIA SANTOS JR." still reads "MS". */
+function customerInitials(fullName: string): string {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((word) => !NAME_SUFFIXES.has(word.replace(/\./g, '').toUpperCase()));
+  if (meaningful.length === 0) return 'C';
+  const first = meaningful[0]?.[0] ?? '';
+  const last = meaningful.length > 1 ? (meaningful[meaningful.length - 1]?.[0] ?? '') : '';
+  return `${first}${last}`.toUpperCase();
 }

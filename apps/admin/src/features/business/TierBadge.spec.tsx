@@ -25,6 +25,6 @@ describe('TierBadge', () => {
 
   it('falls back to neutral text without a tier', () => {
     render(<TierBadge tier={null} />);
-    expect(screen.getByText('No tier')).toBeInTheDocument();
+    expect(screen.getByText('No Tier')).toBeInTheDocument();
   });
 });

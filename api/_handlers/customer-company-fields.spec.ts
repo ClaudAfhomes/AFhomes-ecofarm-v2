@@ -3,8 +3,9 @@
  * (migration 20261130000001).
  *
  * - Manual create/update persist verbatim company fields.
- * - TIN values are write-only: masked on read, absent from raw JSON, and
- *   absent from audit payloads (same treatment as government ID numbers).
+ * - TIN values are masked on create/update/list reads and absent from audit
+ *   payloads. Only the single-record detail read returns the raw value (see
+ *   customer-detail.spec.ts).
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -96,7 +97,8 @@ describe('customer company-stated fields', () => {
     expect(row.ra_number).toBe('RA-2026-0001');
     expect(row.supplementary_full_name).toBe('Maria Clara');
     expect(row.svd_name).toBe('SVD Santos');
-    // Masked on read; raw values never leave through the API.
+    // Masked on the create response; the single-record detail read is the
+    // narrow exception (see customer-detail.spec.ts).
     expect(body.tinNumberMasked).toBe('********9012');
     expect(body).not.toHaveProperty('tin_number');
     expect(JSON.stringify(state.body)).not.toContain('123456789012');

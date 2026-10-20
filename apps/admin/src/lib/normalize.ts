@@ -22,6 +22,7 @@ import {
   type CreateCustomerRequest,
   type CreateReservationAgreementRequest,
 } from '@afhomes/contracts';
+import { formatTin } from './format';
 
 const upper = (value: string): string => normalizePersonName(value);
 const upperOpt = (value: string | undefined): string | undefined =>
@@ -77,6 +78,10 @@ export const filterBusinessTextInput = (value: string): string =>
 
 /** Live filter for TIN input: digits and dashes only. */
 export const filterTinInput = (value: string): string => value.replace(/[^\d-]/g, '').slice(0, 15);
+
+/** Live TIN input: digits only, grouped as 123-456-789 (optional branch). */
+export const formatTinInput = (value: string): string =>
+  formatTin(value.replace(/\D/g, '').slice(0, 14));
 
 /** Live filter for member TIN input: digits only, max 9. */
 export const filterMemberTinInput = (value: string): string =>

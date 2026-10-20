@@ -25,127 +25,205 @@
 }
 
 /*
- * Identity strip. One container split by 1px dividers into equal columns,
- * which is the measured default for a set of record facts (11 of 20 studied
- * screens divide one container rather than tile each fact). Seven facts that
- * each float on their own have no edges to share, so nothing says "these seven
- * describe one record".
+ * Record header. One card that owns the name and the facts about it, so the
+ * title, the standing and the identifiers can no longer drift apart (the
+ * previous strip sat under a PageHeader whose text started on the page edge).
  *
- * Two groups, because they are two different kinds of fact and the previous
- * round put them there on purpose: state is what the person IS, identifiers are
- * which row it is. The boundary between the groups is the stronger rule.
+ * The state line (Status / Tier / Category / Portal account) is the person's
+ * standing; the rail below is the row it is in. The two groups are separated
+ * by the rail's stronger top rule, as in the prior strip.
  *
- * Grid arithmetic at 1440: the canvas is 1100, split evenly, so the four state
- * facts get 137px each and the three identifiers 183px. Even is not a default:
- * the state values are 16px text and need about 88px, while the identifiers
- * carry a mono key and a full timestamp and need about 147px. The previous
- * 1.35fr state side starved the date and wrapped "12:00 AM" onto a second line.
+ * Grid arithmetic at 1440: the canvas is 1100, the card padding 20, so the
+ * identity body is 1100 - 40 - 48 - 16 - 160 - 16 = 820px and the state line
+ * fits its four facts on one row (~600px). The three-fact rail is 1100 - 40 =
+ * 1060px, ~353px per fact.
  */
 .masthead {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-5);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
   background: var(--color-bg-surface-raised);
-  /* Clips the cell padding and the dividers to the rounded corners. */
-  overflow: hidden;
   min-width: 0;
 }
 
-.page .mastheadState,
-.page .mastheadIds {
+.mastheadIdentity {
   display: grid;
-  gap: 0;
-  padding: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.monogram {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.mastheadBody {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.mastheadName {
   margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--text-page-title);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--color-text-primary);
 }
 
-.page .mastheadState {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.page .mastheadIds {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-left: 1px solid var(--color-border-default);
+.mastheadAction {
+  justify-self: end;
+  align-self: start;
+  white-space: nowrap;
 }
 
 /*
- * Cells. `DetailField` renders each pair as a bare div child of the dl, so the
- * divider is the adjacent-sibling border: every cell after the first carries a
- * rule, and the first needs none. Nothing is nested and nothing is boxed.
+ * State line: four facts about the person's standing. Inline on the wide screen,
+ * two columns on the phone, so the labels stay above their values there.
  */
-.page .mastheadState > div,
-.page .mastheadIds > div {
-  padding: var(--space-4);
+.page .mastheadState {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  padding: 0;
+}
+
+.page .mastheadState > div {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
 }
 
-.page .mastheadState > div + div,
+.page .mastheadState dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.page .mastheadState dd {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Record rail: the three identifiers that name the row. Stronger top rule to
+ * mark the group boundary; subtle rules between the cells.
+ */
+.page .mastheadIds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.page .mastheadIds > div {
+  min-width: 0;
+  padding-left: var(--space-4);
+}
+
+.page .mastheadIds > div:first-child {
+  padding-left: 0;
+}
+
 .page .mastheadIds > div + div {
   border-left: 1px solid var(--color-border-subtle);
 }
 
-.page .mastheadState dt,
 .page .mastheadIds dt {
   font-size: var(--text-caption);
-}
-
-/*
- * Three steps, so the eye lands in one place: the state value, then the
- * identifiers, then the labels under both.
- *
- * Status and tier arrive already coloured - a status chip and a tier badge -
- * and those own the colour on this strip. They are 12px marks and cannot be
- * resized from here without restyling the shared components, so the text values
- * come DOWN to meet them at 16px. Set larger, "Active VIP" out-shouted the
- * status of the record, which is backwards: the derived category and the portal
- * flag are secondary facts about a person whose status is the answer.
- */
-.page .mastheadState dd {
-  font-size: var(--text-body);
+  color: var(--color-text-muted);
   font-weight: 500;
-  letter-spacing: -0.01em;
 }
 
 .page .mastheadIds dd {
+  margin: 0;
   font-size: var(--text-body-s);
+  color: var(--color-text-primary);
 }
 
-@media (max-width: 899px) {
+.monogramSkeleton {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 639px) {
   .masthead {
-    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-4);
+    gap: var(--space-3);
   }
 
-  .page .mastheadIds {
-    border-left: 0;
-    border-top: 1px solid var(--color-border-default);
+  .monogram,
+  .monogramSkeleton {
+    width: 40px;
+    height: 40px;
+    font-size: var(--text-body-s);
   }
-}
 
-@media (max-width: 559px) {
+  .mastheadIdentity {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .mastheadAction {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    width: 100%;
+  }
+
   .page .mastheadState {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
   }
 
-  /* A wrapped cell is the first of its row, so its rule would divide nothing. */
-  .page .mastheadState > div:nth-child(3) {
-    border-left: 0;
+  .page .mastheadState > div {
+    display: grid;
+    align-items: start;
+    gap: 2px;
   }
 
-  .page .mastheadState > div:nth-child(n + 3) {
-    border-top: 1px solid var(--color-border-subtle);
-  }
-
-  /* The identifiers carry the longest strings on the strip - a mono key and a
-     full timestamp - so they take the whole row each instead of being squeezed
-     into half of one and wrapping mid-time. */
   .page .mastheadIds {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds > div {
+    padding-left: 0;
   }
 
   .page .mastheadIds > div + div {
     border-left: 0;
     border-top: 1px solid var(--color-border-subtle);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
   }
 }
 
@@ -530,6 +608,56 @@
   margin-bottom: var(--space-2);
 }
 
+/* Toggle switch row in the company edit dialog. */
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.checkRow input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--color-border-default);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.checkRow input::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+
+.checkRow input:checked {
+  background: var(--color-brand-primary);
+}
+
+.checkRow input:checked::before {
+  transform: translateX(18px);
+}
+
+.checkRow input:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
 /* Company edit dialog: stacked sections, full-width fields. */
 .editGrid {
   display: grid;
@@ -540,6 +668,130 @@
 .editGrid h3 {
   margin: var(--space-3) 0 0;
   font-size: var(--text-body);
+}
+
+/* Company edit dialog: tab strip over one card per section. */
+.editShell {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.editIntro {
+  display: grid;
+  gap: 2px;
+}
+
+.editIntro p {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.editCard {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Author `display` beats the UA `[hidden]` rule; keep inactive tabs hidden. */
+.editCard[hidden] {
+  display: none;
+}
+
+.editCardHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.editCardMark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+}
+
+.tonebrand .editCardMark {
+  background-color: var(--color-brand-secondary);
+}
+
+.toneinfo .editCardMark {
+  background-color: var(--color-info);
+}
+
+.tonegold .editCardMark {
+  background-color: var(--color-accent-strong);
+}
+
+.toneneutral .editCardMark {
+  background-color: var(--color-text-secondary);
+}
+
+.editCardHeading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.editCardTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.editCardBlurb {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.editCardBody {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.editFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.editFieldWide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* TIN field and its lock toggle share one grid cell. */
+.tinField {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+
+.editEmpty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
 }
 
 /* Status select pending state: the spinner docks inside the control's right

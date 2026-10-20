@@ -8,6 +8,7 @@ import {
   filterLandlineInput,
   filterMemberTinInput,
   filterMobileInput,
+  formatTinInput,
   normalizeCustomerApplicationRequest,
   normalizeCustomerRequest,
   normalizeProfileName,
@@ -68,6 +69,15 @@ describe('live field normalization', () => {
   it('keeps member TINs digit-only at 9', () => {
     expect(filterMemberTinInput('123-456-789')).toBe('123456789');
     expect(filterMemberTinInput('1234567890')).toBe('123456789');
+  });
+
+  it('groups a typed TIN as 123-456-789 and keeps a branch suffix', () => {
+    expect(formatTinInput('123456789')).toBe('123-456-789');
+    expect(formatTinInput('123-456-789')).toBe('123-456-789');
+    expect(formatTinInput('1234')).toBe('123-4');
+    expect(formatTinInput('123456789000')).toBe('123-456-789-000');
+    expect(formatTinInput('12345678901234567890')).toBe('123-456-789-01234');
+    expect(formatTinInput('abc')).toBe('');
   });
 
   it('keeps government IDs alphanumeric at 16', () => {

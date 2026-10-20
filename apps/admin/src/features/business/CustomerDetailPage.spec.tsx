@@ -168,31 +168,43 @@ describe('CustomerDetailPage', () => {
     for (const value of ['CUS-000001', 'AF-CC-1A2B3C4D', '••••1234']) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
-    // The tier leads the masthead and repeats in the membership card.
+    // The tier leads the header and repeats in the membership card.
     expect(screen.getAllByText('GOLD').length).toBeGreaterThanOrEqual(1);
     // Contact facts appear once on this tab. The company form transcribes them
     // again, on its own tab, which is asserted there.
     expect(screen.getAllByText('maria@example.com')).toHaveLength(1);
     expect(screen.getAllByText('+639171234567')).toHaveLength(1);
     // Lookup-mirrored membership facts: status chip, tier, formatted expiry.
-    expect(screen.getAllByText('active').length).toBeGreaterThanOrEqual(2);
+    // The header and the membership card both humanise the raw status code.
+    expect(screen.getAllByText('Active').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/May.*2027/)).toBeInTheDocument();
     // No back link: the directory row is the way back.
     expect(screen.queryByRole('link', { name: 'Back to customers' })).not.toBeInTheDocument();
-    // State and identifiers lead the page, under the name, before any card.
+    // State and identifiers lead the page, inside the header card, before any
+    // other card.
     expect(screen.getByText('Not activated')).toBeInTheDocument();
     expect(screen.getByText('Active VIP')).toBeInTheDocument();
-    // No panel is drawn around the name: the facts sit on the page ground.
-    const state = screen.getByText('Portal account').closest('dl');
+    // The header is a card; the state and identifier groups keep their labels.
+    const state = screen.getByText('Portal account:').closest('dl');
     expect(
       Array.from(state?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
-    ).toEqual(['Status', 'Tier', 'Category', 'Portal account']);
-    const masthead = screen.getByText('Customer ID').closest('dl');
+    ).toEqual(['Status:', 'Tier:', 'Category:', 'Portal account:']);
+    const masthead = screen.getByText('Customer ID:').closest('dl');
     expect(Array.from(masthead?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'Customer ID',
-      'Customer code',
-      'Registered',
+      'Customer ID:',
+      'Customer code:',
+      'Registered:',
     ]);
+  });
+
+  it('renders a monogram and the "No Tier" badge when the customer has no tier', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, tier: null });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
+    // The monogram is derived from the first and last name.
+    expect(screen.getByText('MS')).toBeInTheDocument();
+    // A missing tier renders the shared "No Tier" badge in the header.
+    expect(screen.getAllByText('No Tier').length).toBeGreaterThanOrEqual(1);
   });
 
   it('reports fetch errors with a retry', async () => {
@@ -203,7 +215,7 @@ describe('CustomerDetailPage', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('renders the four company-stated sections with exact labels and masked TIN', async () => {
+  it('renders the four company-stated sections with exact labels and formatted TIN', async () => {
     vi.mocked(getCustomerById).mockResolvedValue({
       ...RECORD,
       firstName: 'MARIA',
@@ -224,6 +236,7 @@ describe('CustomerDetailPage', () => {
       companyStatus: 'FULLY PAID',
       citizenship: 'Filipino',
       civilStatus: 'Single',
+      tinNumber: '123456789',
       tinNumberMasked: '********9012',
       occupationBusinessName: 'Engineer',
       officeBusinessAddress: 'Makati HQ',
@@ -235,6 +248,7 @@ describe('CustomerDetailPage', () => {
       supplementaryMobile: '+639181234567',
       supplementaryEmail: 'juan@example.com',
       supplementaryLandline: '(02) 8999-0000',
+      supplementaryTinNumber: '987654321',
       supplementaryTinNumberMasked: '********7001',
 
       svdName: 'SVD Santos',
@@ -254,11 +268,12 @@ describe('CustomerDetailPage', () => {
     ]) {
       expect(await screen.findByText(title)).toBeInTheDocument();
     }
-    // Exact company labels with stored values; TIN only ever masked.
+    // Exact company labels with stored values; TINs display formatted.
     for (const value of [
       'RA-2026-0001',
       'FULLY PAID',
-      '********9012',
+      '123-456-789',
+      '987-654-321',
       'JUAN CRUZ',
       'SVD Santos',
       'GOLD VIP',
@@ -271,7 +286,10 @@ describe('CustomerDetailPage', () => {
     ]) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
-    expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
+    // Genders read Title Case, not the stored lowercase enum.
+    expect(screen.getByText('Female')).toBeInTheDocument();
+    expect(screen.getByText('Male')).toBeInTheDocument();
+    expect(screen.queryByText('123456789')).not.toBeInTheDocument();
     // The company form transcribes the contact facts. Each copy now lives on its
     // own tab, so no panel shows the same field twice.
     expect(screen.getAllByText('maria@example.com')).toHaveLength(1);

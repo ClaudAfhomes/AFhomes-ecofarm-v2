@@ -5,14 +5,13 @@ import {
   CIVIL_STATUS_OPTIONS,
   PAYMENT_SCHEMES,
   PAYMENT_SCHEME_LABELS,
-  SEX_OPTIONS,
   SUFFIX_OPTIONS,
   TEMPLATE_PAYMENT_METHOD_OPTIONS,
   TEMPLATE_TIER_OPTIONS,
   tinNumberSchema,
 } from '@afhomes/contracts';
 import { DateField as AppDateField, Field, SelectField, chainOptions } from './official-forms-fields';
-import { Alert, Button, DateField, Dialog, Select, TextField } from '@afhomes/ui';
+import { Alert, Button, DateField, Dialog, Icon, Select, Tabs, TextField } from '@afhomes/ui';
 import { formatStatedMoney } from '@afhomes/shared';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
@@ -21,8 +20,9 @@ import {
   filterHolderNameInput,
   filterLandlineInput,
   filterMobileInput,
-  filterTinInput,
+  formatTinInput,
 } from '../../lib/normalize';
+import { formatTin } from '../../lib/format';
 import { GeographicAddressFields } from '../address/GeographicAddressFields';
 import { businessKeys } from './queryKeys';
 import { withStoredValue } from './official-forms-fields';
@@ -36,6 +36,40 @@ type Props = {
   onClose: () => void;
   onSaved: () => void;
 };
+
+type EditSection = 'primary' | 'supplementary' | 'related' | 'package';
+
+const EDIT_SECTIONS: { value: EditSection; label: string }[] = [
+  { value: 'primary', label: 'Primary' },
+  { value: 'supplementary', label: 'Supplementary' },
+  { value: 'related', label: 'Related' },
+  { value: 'package', label: 'Package' },
+];
+
+/** Card header for one editable section: title, one-line blurb, tinted mark. */
+function EditCardHead({
+  title,
+  blurb,
+  icon,
+  tone,
+}: {
+  title: string;
+  blurb: string;
+  icon: 'user' | 'user-plus' | 'users' | 'wallet';
+  tone?: string;
+}) {
+  return (
+    <header className={`${styles.editCardHead}${tone ? ` ${tone}` : ''}`}>
+      <span className={styles.editCardMark} aria-hidden="true">
+        <Icon name={icon} size={16} />
+      </span>
+      <div className={styles.editCardHeading}>
+        <h3 className={styles.editCardTitle}>{title}</h3>
+        <p className={styles.editCardBlurb}>{blurb}</p>
+      </div>
+    </header>
+  );
+}
 
 const text = (v: string | null | undefined) => v ?? '';
 const addressPart = (address: unknown, key: string): string => {
@@ -52,6 +86,23 @@ const filterMoneyInput = (value: string): string => {
   const decPart = parts.slice(1).join('').slice(0, 2);
   return parts.length > 1 ? `${intPart}.${decPart}` : intPart;
 };
+
+/** Money text that also displays grouped thousands while typing. */
+const formatMoneyInput = (value: string): string => {
+  const filtered = filterMoneyInput(value);
+  if (filtered === '') return '';
+  const formatted = formatStatedMoney(filtered);
+  return formatted === '—' ? filtered : formatted;
+};
+
+// Customer gender is stored lowercase (contract enum) and displayed Title Case.
+const CUSTOMER_GENDER_OPTIONS = [
+  { value: '', label: 'Not specified' },
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'other', label: 'Other' },
+  { value: 'undisclosed', label: 'Undisclosed' },
+];
 
 // Sanctioned payment-status values for the company-stated STATUS field.
 // Single source for this dialog; promote to packages/contracts only if a
@@ -72,11 +123,34 @@ const CUSTOMER_PAYMENT_STATUS_OPTIONS = [
  *
  * All 37 columns are verbatim: no value is translated, no hierarchy is
  * inferred, FULL NAME is never split. Stated package/payment figures never
- * drive server totals. TIN inputs are write-only: they start empty (the API
- * only returns a mask), a filled value sets, an empty value keeps.
+ * drive server totals. TINs are prefilled from the single-record detail read
+ * and locked behind a checkbox: unlocked they set (or clear), locked they keep.
  * The primary address parts and the two landlines are editable here; blank
  * parts fall back to the stored value, so a partial edit never wipes them.
  */
+/**
+ * True when the customer carries any company-stated supplementary member data.
+ * Drives the initial state of the "Supplementary Member" checkbox.
+ */
+function hasSupplementaryRecord(customer: Customer): boolean {
+  return [
+    customer.supplementaryFullName,
+    customer.supplementaryAddress,
+    customer.supplementaryBirthday,
+    customer.supplementaryGender,
+    customer.supplementaryCitizenship,
+    customer.supplementaryCivilStatus,
+    customer.supplementaryTinNumberMasked,
+    customer.supplementaryTinNumber,
+    customer.supplementaryMobile,
+    customer.supplementaryEmail,
+    customer.supplementaryLandline,
+    customer.supplementaryOccupationBusinessName,
+    customer.supplementaryOfficeAddress,
+    customer.supplementaryPosition,
+  ].some((value) => typeof value === 'string' && value.trim() !== '');
+}
+
 export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: Props) {
   const client = useQueryClient();
   const [form, setForm] = useState(() => ({
@@ -102,7 +176,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     landline: text(customer.landline),
     citizenship: text(customer.citizenship),
     civilStatus: text(customer.civilStatus),
-    tinNumber: '',
+    tinNumber: formatTin(customer.tinNumber),
     occupationBusinessName: text(customer.occupationBusinessName),
     officeBusinessAddress: text(customer.officeBusinessAddress),
     employedPosition: text(customer.employedPosition),
@@ -112,7 +186,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     supplementaryGender: text(customer.supplementaryGender),
     supplementaryCitizenship: text(customer.supplementaryCitizenship),
     supplementaryCivilStatus: text(customer.supplementaryCivilStatus),
-    supplementaryTinNumber: '',
+    supplementaryTinNumber: formatTin(customer.supplementaryTinNumber),
     supplementaryMobile: text(customer.supplementaryMobile),
     supplementaryEmail: text(customer.supplementaryEmail),
     supplementaryLandline: text(customer.supplementaryLandline),
@@ -136,6 +210,10 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     statedRefNo: text(customer.statedRefNo),
     statedPaymentDate: text(customer.statedPaymentDate),
   }));
+  const [hasSupplementary, setHasSupplementary] = useState(() => hasSupplementaryRecord(customer));
+  const [tinEditable, setTinEditable] = useState(false);
+  const [supplementaryTinEditable, setSupplementaryTinEditable] = useState(false);
+  const [section, setSection] = useState<EditSection>('primary');
   const set = (key: keyof typeof form) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -198,27 +276,33 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         landline: orNull(form.landline),
         citizenship: orNull(form.citizenship),
         civilStatus: orNull(form.civilStatus),
-        // Write-only: empty keeps the stored value, filled sets it.
-        ...(form.tinNumber.trim() ? { tinNumber: form.tinNumber.trim() } : {}),
+        // Locked keeps the stored value; unlocked sets it (blank clears).
+        ...(tinEditable ? { tinNumber: orNull(form.tinNumber) } : {}),
         occupationBusinessName: orNull(form.occupationBusinessName),
         officeBusinessAddress: orNull(form.officeBusinessAddress),
         employedPosition: orNull(form.employedPosition),
-        supplementaryFullName: orNull(form.supplementaryFullName),
-        supplementaryAddress: orNull(form.supplementaryAddress),
-        supplementaryBirthday: orNull(form.supplementaryBirthday),
-        supplementaryGender: orNull(form.supplementaryGender) as
-          'male' | 'female' | 'other' | 'undisclosed' | null,
-        supplementaryCitizenship: orNull(form.supplementaryCitizenship),
-        supplementaryCivilStatus: orNull(form.supplementaryCivilStatus),
-        ...(form.supplementaryTinNumber.trim()
-          ? { supplementaryTinNumber: form.supplementaryTinNumber.trim() }
-          : {}),
-        supplementaryMobile: orNull(form.supplementaryMobile),
-        supplementaryEmail: orNull(form.supplementaryEmail),
-        supplementaryLandline: orNull(form.supplementaryLandline),
-        supplementaryOccupationBusinessName: orNull(form.supplementaryOccupationBusinessName),
-        supplementaryOfficeAddress: orNull(form.supplementaryOfficeAddress),
-        supplementaryPosition: orNull(form.supplementaryPosition),
+        supplementaryFullName: hasSupplementary ? orNull(form.supplementaryFullName) : null,
+        supplementaryAddress: hasSupplementary ? orNull(form.supplementaryAddress) : null,
+        supplementaryBirthday: hasSupplementary ? orNull(form.supplementaryBirthday) : null,
+        supplementaryGender: hasSupplementary
+          ? (orNull(form.supplementaryGender) as 'male' | 'female' | 'other' | 'undisclosed' | null)
+          : null,
+        supplementaryCitizenship: hasSupplementary ? orNull(form.supplementaryCitizenship) : null,
+        supplementaryCivilStatus: hasSupplementary ? orNull(form.supplementaryCivilStatus) : null,
+        // Removing the second holder clears their TIN with the rest of the block.
+        ...(hasSupplementary
+          ? supplementaryTinEditable
+            ? { supplementaryTinNumber: orNull(form.supplementaryTinNumber) }
+            : {}
+          : { supplementaryTinNumber: null }),
+        supplementaryMobile: hasSupplementary ? orNull(form.supplementaryMobile) : null,
+        supplementaryEmail: hasSupplementary ? orNull(form.supplementaryEmail) : null,
+        supplementaryLandline: hasSupplementary ? orNull(form.supplementaryLandline) : null,
+        supplementaryOccupationBusinessName: hasSupplementary
+          ? orNull(form.supplementaryOccupationBusinessName)
+          : null,
+        supplementaryOfficeAddress: hasSupplementary ? orNull(form.supplementaryOfficeAddress) : null,
+        supplementaryPosition: hasSupplementary ? orNull(form.supplementaryPosition) : null,
         svdName: orNull(form.svdName),
         ssmName: orNull(form.ssmName),
         smName: orNull(form.smName),
@@ -244,6 +328,14 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     },
   });
 
+  /** One mounted tab panel per section, hidden while inactive. */
+  const panel = (value: EditSection) => ({
+    id: `ce-sections-${value}-panel`,
+    role: 'tabpanel' as const,
+    'aria-labelledby': `ce-sections-${value}-tab`,
+    hidden: section !== value,
+  });
+
   return (
     <Dialog
       open={open}
@@ -260,15 +352,30 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         </>
       }
     >
-      <div className={styles.editGrid}>
-        <p>
-          Verbatim stated record. Stated figures never affect verified totals. TIN is write-only
-          (current: {customer.tinNumberMasked ?? 'Not Recorded'}); leave blank to keep.
-        </p>
+      <div className={styles.editShell}>
+        <div className={styles.editIntro}>
+          <p>Stated record. Figures never affect totals.</p>
+          <p>TINs are locked. Check to edit.</p>
+        </div>
         {save.error ? <Alert variant="danger">{save.error.message}</Alert> : null}
-        <h3>Primary Member</h3>
+        <Tabs
+          items={EDIT_SECTIONS}
+          value={section}
+          onChange={(next) => setSection(next as EditSection)}
+          baseId="ce-sections"
+          ariaLabel="Edit stated record sections"
+        />
+        <section {...panel('primary')} className={styles.editCard}>
+          <EditCardHead
+            title="Primary Member"
+            blurb="Identity and contact"
+            icon="user"
+            tone={styles.tonebrand}
+          />
+          <div className={styles.editCardBody}>
+            <div className={styles.editFields}>
         <Field
-          label="Last name"
+          label="Last Name"
           value={form.lastName}
           suggestName
           normalize={filterHolderNameInput}
@@ -276,7 +383,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           required
         />
         <Field
-          label="First name"
+          label="First Name"
           value={form.firstName}
           suggestName
           normalize={filterHolderNameInput}
@@ -284,7 +391,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           required
         />
         <Field
-          label="Middle name"
+          label="Middle Name"
           value={form.middleName}
           suggestName
           normalize={filterHolderNameInput}
@@ -300,7 +407,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           )}
         />
         <AppDateField
-          label="Birth date"
+          label="Birth Date"
           value={form.dateOfBirth}
           onChange={(v) => set('dateOfBirth')(v)}
           required
@@ -309,10 +416,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           label="Sex"
           value={form.gender}
           onChange={(v) => set('gender')(v)}
-          options={withStoredValue(
-            [{ value: '', label: 'Not specified' }, ...SEX_OPTIONS.map((v) => ({ value: v, label: v }))],
-            form.gender || undefined,
-          )}
+          options={withStoredValue(CUSTOMER_GENDER_OPTIONS, form.gender || undefined)}
         />
         <Field
           label="Email"
@@ -332,16 +436,16 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-ra"
           name="raNumber"
-          label="RA NO"
+          label="Ra No"
           value={form.raNumber}
           onChange={set('raNumber')}
         />
         <label className={styles.filterLabel}>
-          PAYMENT STATUS
+          Payment Status
           <Select
             id="ce-status"
             name="companyStatus"
-            aria-label="PAYMENT STATUS"
+            aria-label="Payment Status"
             value={form.companyStatus}
             onChange={(e) => set('companyStatus')(e.target.value)}
             options={withStoredValue(CUSTOMER_PAYMENT_STATUS_OPTIONS, form.companyStatus)}
@@ -350,71 +454,73 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-addr1"
           name="addressLine1"
-          label="PERMANENT ADDRESS LINE 1"
+          label="Permanent Address Line 1"
           value={form.addressLine1}
           onChange={(value) => set('addressLine1')(filterHolderAddressInput(value))}
         />
         <TextField
           id="ce-addr2"
           name="addressLine2"
-          label="PERMANENT ADDRESS LINE 2"
+          label="Permanent Address Line 2"
           value={form.addressLine2}
           onChange={(value) => set('addressLine2')(filterHolderAddressInput(value))}
         />
-        <GeographicAddressFields
-          idPrefix="ce"
-          value={{
-            province: form.province || undefined,
-            provinceCode: form.provinceCode,
-            cityMunicipality: form.city || undefined,
-            cityMunicipalityCode: form.cityCode,
-            barangay: form.barangay || undefined,
-            barangayCode: form.barangayCode,
-            postalCode: form.postalCode || undefined,
-          }}
-          onChange={(next) => {
-            setForm((f) => ({
-              ...f,
-              province: next.province ?? f.province,
-              provinceCode: next.provinceCode,
-              city: next.cityMunicipality ?? f.city,
-              cityCode: next.cityMunicipalityCode,
-              barangay: next.barangay ?? f.barangay,
-              barangayCode: next.barangayCode,
-              postalCode: next.postalCode ?? f.postalCode,
-            }));
-          }}
-        />
+        <div className={styles.editFieldWide}>
+          <GeographicAddressFields
+            idPrefix="ce"
+            value={{
+              province: form.province || undefined,
+              provinceCode: form.provinceCode,
+              cityMunicipality: form.city || undefined,
+              cityMunicipalityCode: form.cityCode,
+              barangay: form.barangay || undefined,
+              barangayCode: form.barangayCode,
+              postalCode: form.postalCode || undefined,
+            }}
+            onChange={(next) => {
+              setForm((f) => ({
+                ...f,
+                province: next.province ?? f.province,
+                provinceCode: next.provinceCode,
+                city: next.cityMunicipality ?? f.city,
+                cityCode: next.cityMunicipalityCode,
+                barangay: next.barangay ?? f.barangay,
+                barangayCode: next.barangayCode,
+                postalCode: next.postalCode ?? f.postalCode,
+              }));
+            }}
+          />
+        </div>
         <TextField
           id="ce-postal"
           name="postalCode"
-          label="POSTAL CODE"
+          label="Postal Code"
           value={form.postalCode}
           onChange={() => {}}
           readOnly
           optional
-          hint="Filled from the city / municipality."
+          hint="Filled from city."
         />
         <TextField
           id="ce-land"
           name="landline"
-          label="LANDLINE"
+          label="Landline"
           value={form.landline}
           onChange={(value) => set('landline')(filterLandlineInput(value))}
         />
         <TextField
           id="ce-cit"
           name="citizenship"
-          label="CITIZENSHIP"
+          label="Citizenship"
           value={form.citizenship}
           onChange={(value) => set('citizenship')(filterHolderNameInput(value))}
         />
         <label className={styles.filterLabel}>
-          CIVIL STATUS
+          Civil Status
           <Select
             id="ce-civil"
             name="civilStatus"
-            aria-label="CIVIL STATUS"
+            aria-label="Civil Status"
             value={form.civilStatus}
             onChange={(e) => set('civilStatus')(e.target.value)}
             options={withStoredValue(
@@ -423,89 +529,113 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             )}
           />
         </label>
-        <Field
-          label="TIN"
-          value={form.tinNumber}
-          normalize={filterTinInput}
-          validate={tinNumberSchema}
-          validateMessage="Use a 9-digit TIN, for example 123-456-789."
-          onChange={(v) => set('tinNumber')(v)}
-        />
+        <div className={styles.tinField}>
+          <Field
+            label="Tin"
+            value={form.tinNumber}
+            normalize={formatTinInput}
+            validate={tinEditable ? tinNumberSchema : null}
+            validateMessage="Use 9-digit TIN e.g. 123-456-789."
+            readOnly={!tinEditable}
+            onChange={(v) => set('tinNumber')(v)}
+          />
+          <label className={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={tinEditable}
+              onChange={(e) => setTinEditable(e.target.checked)}
+              aria-label="Edit TIN"
+            />{' '}
+            Edit TIN
+          </label>
+        </div>
         <TextField
           id="ce-occ"
           name="occupationBusinessName"
-          label="OCCUPATION / BUSINESS NAME"
+          label="Occupation / Business Name"
           value={form.occupationBusinessName}
           onChange={(value) => set('occupationBusinessName')(filterBusinessTextInput(value))}
         />
         <TextField
           id="ce-office"
           name="officeBusinessAddress"
-          label="OFFICE / BUSINESS ADDRESS"
+          label="Office / Business Address"
           value={form.officeBusinessAddress}
           onChange={(value) => set('officeBusinessAddress')(filterBusinessTextInput(value))}
         />
         <TextField
           id="ce-pos"
           name="employedPosition"
-          label="EMPLOYED POSITION"
+          label="Employed Position"
           value={form.employedPosition}
           onChange={(value) => set('employedPosition')(filterBusinessTextInput(value))}
         />
-        <h3>Supplementary Member</h3>
-        <TextField
-          id="ce-sup-name"
+            </div>
+          </div>
+        </section>
+        <section {...panel('supplementary')} className={styles.editCard}>
+          <EditCardHead
+            title="Supplementary Member"
+            blurb="Optional second member"
+            icon="user-plus"
+            tone={styles.toneinfo}
+          />
+          <div className={styles.editCardBody}>
+            <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={hasSupplementary}
+            onChange={(e) => setHasSupplementary(e.target.checked)}
+            aria-label="Supplementary Member"
+          />{' '}
+          Supplementary Member
+        </label>
+            {hasSupplementary ? (
+              <div className={styles.editFields}>
+                <TextField
+                  id="ce-sup-name"
           name="supplementaryFullName"
-          label="SUPPLEMENTARY FULL NAME"
+          label="Supplementary Full Name"
           value={form.supplementaryFullName}
           onChange={(value) => set('supplementaryFullName')(filterHolderNameInput(value))}
         />
         <TextField
           id="ce-sup-addr"
           name="supplementaryAddress"
-          label="ADDRESS"
+          label="Address"
           value={form.supplementaryAddress}
           onChange={(value) => set('supplementaryAddress')(filterHolderAddressInput(value))}
         />
         <DateField
           id="ce-sup-bday"
           name="supplementaryBirthday"
-          label="BIRTHDAY"
+          label="Birthday"
           optional
           value={form.supplementaryBirthday}
           onChange={set('supplementaryBirthday')}
         />
         <label className={styles.filterLabel}>
-          GENDER
+          Gender
           <Select
-            aria-label="GENDER"
+            aria-label="Gender"
             value={form.supplementaryGender}
             onChange={(e) => set('supplementaryGender')(e.target.value)}
-            options={withStoredValue(
-              [
-                { value: '', label: 'Not specified' },
-                { value: 'male', label: 'Male' },
-                { value: 'female', label: 'Female' },
-                { value: 'other', label: 'Other' },
-                { value: 'undisclosed', label: 'Undisclosed' },
-              ],
-              form.supplementaryGender || undefined,
-            )}
+            options={withStoredValue(CUSTOMER_GENDER_OPTIONS, form.supplementaryGender || undefined)}
           />
         </label>
         <TextField
           id="ce-sup-cit"
           name="supplementaryCitizenship"
-          label="CITIZENSHIP"
+          label="Citizenship"
           value={form.supplementaryCitizenship}
           onChange={(value) => set('supplementaryCitizenship')(filterHolderNameInput(value))}
         />
         <label className={styles.filterLabel}>
-          CIVIL STATUS
+          Civil Status
           <Select
             id="ce-sup-civil"
             name="supplementaryCivilStatus"
-            aria-label="CIVIL STATUS"
+            aria-label="Civil Status"
             value={form.supplementaryCivilStatus}
             onChange={(e) => set('supplementaryCivilStatus')(e.target.value)}
             options={withStoredValue(
@@ -514,39 +644,51 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             )}
           />
         </label>
-        <Field
-          label="TIN"
-          value={form.supplementaryTinNumber}
-          normalize={filterTinInput}
-          validate={tinNumberSchema}
-          validateMessage="Use a 9-digit TIN, for example 123-456-789."
-          onChange={(v) => set('supplementaryTinNumber')(v)}
-        />
+        <div className={styles.tinField}>
+          <Field
+            label="Tin"
+            value={form.supplementaryTinNumber}
+            normalize={formatTinInput}
+            validate={supplementaryTinEditable ? tinNumberSchema : null}
+            validateMessage="Use 9-digit TIN e.g. 123-456-789."
+            readOnly={!supplementaryTinEditable}
+            onChange={(v) => set('supplementaryTinNumber')(v)}
+          />
+          <label className={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={supplementaryTinEditable}
+              onChange={(e) => setSupplementaryTinEditable(e.target.checked)}
+              aria-label="Edit Supplementary TIN"
+            />{' '}
+            Edit Supplementary TIN
+          </label>
+        </div>
         <TextField
           id="ce-sup-mob"
           name="supplementaryMobile"
-          label="MOBILE NO."
+          label="Mobile No."
           value={form.supplementaryMobile}
           onChange={(value) => set('supplementaryMobile')(filterMobileInput(value))}
         />
         <TextField
           id="ce-sup-email"
           name="supplementaryEmail"
-          label="EMAIL"
+          label="Email"
           value={form.supplementaryEmail}
           onChange={(value) => set('supplementaryEmail')(value.toLowerCase())}
         />
         <TextField
           id="ce-sup-land"
           name="supplementaryLandline"
-          label="LANDLINE"
+          label="Landline"
           value={form.supplementaryLandline}
           onChange={(value) => set('supplementaryLandline')(filterLandlineInput(value))}
         />
         <TextField
           id="ce-sup-occ"
           name="supplementaryOccupationBusinessName"
-          label="OCCUPATION / BUSINESS NAME"
+          label="Occupation / Business Name"
           value={form.supplementaryOccupationBusinessName}
           onChange={(value) =>
             set('supplementaryOccupationBusinessName')(filterBusinessTextInput(value))
@@ -555,25 +697,38 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-sup-office"
           name="supplementaryOfficeAddress"
-          label="OFFICE / BUSINESS ADDRESS"
+          label="Office / Business Address"
           value={form.supplementaryOfficeAddress}
           onChange={(value) => set('supplementaryOfficeAddress')(filterBusinessTextInput(value))}
         />
         <TextField
           id="ce-sup-pos"
           name="supplementaryPosition"
-          label="EMPLOYED POSITION"
+          label="Employed Position"
           value={form.supplementaryPosition}
           onChange={(value) => set('supplementaryPosition')(filterBusinessTextInput(value))}
         />
-        <h3>Related Persons and Referral</h3>
-
+              </div>
+            ) : (
+              <p className={styles.editEmpty}>No supplementary member.</p>
+            )}
+          </div>
+        </section>
+        <section {...panel('related')} className={styles.editCard}>
+          <EditCardHead
+            title="Related Persons and Referral"
+            blurb="Stated referral names"
+            icon="users"
+            tone={styles.toneneutral}
+          />
+          <div className={styles.editCardBody}>
+            <div className={styles.editFields}>
         <label className={styles.filterLabel}>
-          SVD (NAME)
+          SVD (Name)
           <Select
             id="ce-svd"
             name="svdName"
-            aria-label="SVD (NAME)"
+            aria-label="SVD (Name)"
             value={form.svdName}
             onChange={(e) => set('svdName')(e.target.value)}
             options={relatedPersonOptions('vice_director', form.svdName, null)}
@@ -582,11 +737,11 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
         </label>
         <label className={styles.filterLabel}>
-          SSM (NAME)
+          SSM (Name)
           <Select
             id="ce-ssm"
             name="ssmName"
-            aria-label="SSM (NAME)"
+            aria-label="SSM (Name)"
             value={form.ssmName}
             onChange={(e) => set('ssmName')(e.target.value)}
             options={relatedPersonOptions('senior_sales_manager', form.ssmName, staffIdForName(form.svdName))}
@@ -595,11 +750,11 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
         </label>
         <label className={styles.filterLabel}>
-          SM (NAME)
+          SM (Name)
           <Select
             id="ce-sm"
             name="smName"
-            aria-label="SM (NAME)"
+            aria-label="SM (Name)"
             value={form.smName}
             onChange={(e) => set('smName')(e.target.value)}
             options={relatedPersonOptions('sales_manager', form.smName, nearestAbove([form.ssmName, form.svdName]))}
@@ -608,11 +763,11 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
         </label>
         <label className={styles.filterLabel}>
-          REFERRER (NAME)
+          Referrer (Name)
           <Select
             id="ce-ref"
             name="referrerName"
-            aria-label="REFERRER (NAME)"
+            aria-label="Referrer (Name)"
             value={form.referrerName}
             onChange={(e) => set('referrerName')(e.target.value)}
             options={relatedPersonOptions('ost', form.referrerName, nearestAbove([form.smName, form.ssmName, form.svdName]))}
@@ -621,11 +776,11 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
         </label>
         <label className={styles.filterLabel}>
-          VIP RECOMMENDER (NAME)
+          VIP Recommender (Name)
           <Select
             id="ce-viprec"
             name="vipRecommenderName"
-            aria-label="VIP RECOMMENDER (NAME)"
+            aria-label="VIP Recommender (Name)"
             value={form.vipRecommenderName}
             onChange={(e) => set('vipRecommenderName')(e.target.value)}
             options={relatedPersonOptions('ost', form.vipRecommenderName, null)}
@@ -636,24 +791,35 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-rel-contact"
           name="relatedContactNo"
-          label="CONTACT NO."
+          label="Contact No."
           value={form.relatedContactNo}
           onChange={(value) => set('relatedContactNo')(filterMobileInput(value))}
         />
         <TextField
           id="ce-rel-email"
           name="relatedEmail"
-          label="EMAIL ADDRESS"
+          label="Email Address"
           value={form.relatedEmail}
           onChange={(value) => set('relatedEmail')(value.toLowerCase())}
         />
-        <h3>Package and Payment (company stated)</h3>
+            </div>
+          </div>
+        </section>
+        <section {...panel('package')} className={styles.editCard}>
+          <EditCardHead
+            title="Package and Payment (company stated)"
+            blurb="Company figures only"
+            icon="wallet"
+            tone={styles.tonegold}
+          />
+          <div className={styles.editCardBody}>
+            <div className={styles.editFields}>
         <label className={styles.filterLabel}>
-          VIP PACKAGE
+          VIP Package
           <Select
             id="ce-pkg"
             name="statedVipPackage"
-            aria-label="VIP PACKAGE"
+            aria-label="VIP Package"
             value={form.statedVipPackage}
             onChange={(e) => set('statedVipPackage')(e.target.value)}
             options={withStoredValue(
@@ -663,11 +829,11 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
         </label>
         <label className={styles.filterLabel}>
-          PAYMENT TERMS
+          Payment Terms
           <Select
             id="ce-terms"
             name="statedPaymentTerms"
-            aria-label="PAYMENT TERMS"
+            aria-label="Payment Terms"
             value={form.statedPaymentTerms}
             onChange={(e) => set('statedPaymentTerms')(e.target.value)}
             options={withStoredValue(
@@ -679,45 +845,42 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-reg"
           name="statedRegularPrice"
-          label="REGULAR PRICE"
+          label="Regular Price"
           value={form.statedRegularPrice}
-          onChange={(value) => set('statedRegularPrice')(filterMoneyInput(value))}
+          onChange={(value) => set('statedRegularPrice')(formatMoneyInput(value))}
           inputMode="decimal"
-          hint={form.statedRegularPrice ? formatStatedMoney(form.statedRegularPrice) : undefined}
         />
         <TextField
           id="ce-disc"
           name="statedDiscount"
-          label="DISCOUNT"
+          label="Discount"
           value={form.statedDiscount}
-          onChange={(value) => set('statedDiscount')(filterMoneyInput(value))}
+          onChange={(value) => set('statedDiscount')(formatMoneyInput(value))}
           inputMode="decimal"
-          hint={form.statedDiscount ? formatStatedMoney(form.statedDiscount) : undefined}
         />
         <TextField
           id="ce-total"
           name="statedTotalAmount"
-          label="TOTAL AMOUNT"
+          label="Total Amount"
           value={form.statedTotalAmount}
-          onChange={(value) => set('statedTotalAmount')(filterMoneyInput(value))}
+          onChange={(value) => set('statedTotalAmount')(formatMoneyInput(value))}
           inputMode="decimal"
-          hint={form.statedTotalAmount ? formatStatedMoney(form.statedTotalAmount) : undefined}
         />
         <TextField
           id="ce-rf"
           name="statedRf"
-          label="RF"
+          label="Reservation Fee"
           value={form.statedRf}
           onChange={(value) => set('statedRf')(filterMoneyInput(value))}
           inputMode="decimal"
           hint={form.statedRf ? formatStatedMoney(form.statedRf) : undefined}
         />
         <label className={styles.filterLabel}>
-          PAYMENT TYPE
+          Payment Type
           <Select
             id="ce-ptype"
             name="statedPaymentType"
-            aria-label="PAYMENT TYPE"
+            aria-label="Payment Type"
             value={form.statedPaymentType}
             onChange={(e) => set('statedPaymentType')(e.target.value)}
             options={withStoredValue(
@@ -743,18 +906,21 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         <TextField
           id="ce-refno"
           name="statedRefNo"
-          label="REF NO"
+          label="Ref No"
           value={form.statedRefNo}
           onChange={set('statedRefNo')}
         />
         <DateField
           id="ce-pdate"
           name="statedPaymentDate"
-          label="PAYMENT DATE"
+          label="Payment Date"
           optional
           value={form.statedPaymentDate}
           onChange={set('statedPaymentDate')}
         />
+            </div>
+          </div>
+        </section>
       </div>
     </Dialog>
   );
