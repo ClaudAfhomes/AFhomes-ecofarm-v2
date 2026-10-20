@@ -268,6 +268,7 @@ export function CustomerLookupPage() {
     placeholderData: (previousData) => previousData,
     staleTime: 15_000,
   });
+  if (typeof console !== 'undefined') console.log('DEBUG detail', selectedLookup?.customerId, detail.isPending, detail.data?.fullName, detail.error?.message);
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
