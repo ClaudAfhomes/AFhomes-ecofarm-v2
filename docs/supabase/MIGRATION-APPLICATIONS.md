@@ -355,3 +355,14 @@ The user authorized commit/push with the previously identified single live migra
 - All 117 preexisting public/private/Auth/Storage table counts and all 12 protected business-table digests were unchanged within the transaction. No application, reservation, payment, customer, membership, commission or genealogy history was promoted or rewritten.
 - Independent read-only postcheck confirmed the stored file body, RLS and restricted direct grants on the private receipt table, two service-only public entrypoints, no private helper execute leaks, and the exact preserved normal finalizer predecessor. The three intentionally changed existing functions are the finalizer dispatcher, import continuation projection and historical genealogy-capture guard; all other existing function definitions were unchanged.
 - Sanitized ignored evidence: `.tmp-bin/external-import-preflight.json` and `.tmp-bin/external-import-applied.json`. Schema context regenerated. Local disposable PostgreSQL proved the routing, existing payment reuse, source-change rollback, idempotent reimports, subsequent balance collection, normal finalization and permission gates; new-mode Preview/browser acceptance is separate.
+
+### APPROVED LIVE APPLY - 2026-10-20: Customer summaries and imported holder facts
+
+The user approved only `20261208000020_afhomes_customer_purchase_summary.sql` and `20261210000006_afhomes_preserve_imported_holder_facts.sql` on shared project `ikaevepedpqygdlipsei`, with commit/push to `claud/develop` Preview. No production website promotion.
+
+- SHA-256 respectively: `16c27ad352719bea627d4547dd80f82d85de2203f0c582fedc83952fad88dabe` and `f0d9b9c1821f711f7342a69aa218d463044eb18c4808bf2cbf8421e48c492cb6`.
+- Guarded apply matched 113 history entries through version 19, both installed function hashes and both file hashes. No historical missing migrations were replayed.
+- Both exact SQL files and history entries committed atomically at `2026-10-20T13:41:14.306Z`; history now contains 115 entries. PostgREST reload requested.
+- Counts and complete row digests for all 83 public/private tables were unchanged in the transaction. Only the two intended function definitions/ACLs changed; ownership and all other public/private functions were preserved.
+- Independent read-only postcheck verified stored SQL hashes, official Customer ID lookup, the existing Gold partial reservation totals, service-only directory access and restricted private mirror execution.
+- Ignored evidence: `.tmp-bin/customer-summary-preflight.json` and `.tmp-bin/customer-summary-applied.json`. Canonical schema index regenerated. Browser acceptance is recorded separately.

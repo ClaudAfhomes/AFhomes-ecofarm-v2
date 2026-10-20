@@ -145,6 +145,8 @@ const toCustomer = (
   verifiedPaid: (row.verified_paid as string | null | undefined) ?? '0.00',
   frozenTotal:
     row.frozen_total === null || row.frozen_total === undefined ? '0.00' : String(row.frozen_total),
+  openReservationTotal: String(row.open_reservation_total ?? '0.00'),
+  openReservationPaid: String(row.open_reservation_paid ?? '0.00'),
   derivedCategory: row.derivedCategory,
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,

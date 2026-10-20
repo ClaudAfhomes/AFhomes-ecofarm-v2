@@ -343,7 +343,12 @@ export function BusinessCustomersPage() {
                     </span>
                   </td>
                   <td data-label="Payment Status">
-                    <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
+                    {customer.paymentStatus ? (
+                      <StatusChip
+                        label={{ no_payment: 'No payment', partially_paid: 'Partial payment', fully_paid: 'Fully Paid' }[customer.paymentStatus]}
+                        tone={customer.paymentStatus === 'fully_paid' ? 'success' : customer.paymentStatus === 'partially_paid' ? 'warning' : 'neutral'}
+                      />
+                    ) : <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />}
                   </td>
                   <td data-label="VIP Tier">
                     <TierBadge tier={customer.tier} />

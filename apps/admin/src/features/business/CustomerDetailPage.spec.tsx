@@ -187,9 +187,12 @@ describe('CustomerDetailPage', () => {
     expect(screen.getByText('Active VIP')).toBeInTheDocument();
     // The header is a card; the state and identifier groups keep their labels.
     const state = screen.getByText('Portal account:').closest('dl');
-    expect(
-      Array.from(state?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
-    ).toEqual(['Status:', 'Tier:', 'Category:', 'Portal account:']);
+    expect(Array.from(state?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
+      'Status:',
+      'Tier:',
+      'Category:',
+      'Portal account:',
+    ]);
     const masthead = screen.getByText('Customer ID (RA No.):').closest('dl');
     expect(Array.from(masthead?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
       'Customer ID (RA No.):',
@@ -301,7 +304,9 @@ describe('CustomerDetailPage', () => {
     // Primary Member follows the SSOT order exactly: split names, split
     // address parts, one landline, one email, one mobile number.
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
-    expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
+    expect(
+      Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent),
+    ).toEqual([
       'PAYMENT STATUS',
       'FIRST NAME',
       'LAST NAME',
@@ -360,6 +365,60 @@ describe('CustomerDetailPage', () => {
 });
 
 describe('CustomerDetailPage card sales', () => {
+  it('shows verified reservation payments and the remaining balance before a sale exists', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      tier: 'GOLD',
+      frozenTotal: '312000.00',
+      verifiedPaid: '90000.00',
+      openReservationTotal: '312000.00',
+      openReservationPaid: '90000.00',
+    } as Customer);
+    renderDetail(FULLSTAFF);
+    const strip = await screen.findByLabelText('Outstanding balance');
+    expect(strip).toHaveTextContent('Open reservations');
+    expect(strip).toHaveTextContent('₱222,000.00');
+    expect(strip).toHaveTextContent('₱90,000.00');
+    expect(
+      screen.queryByText('Nothing outstanding for this customer yet.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not treat a failed sales request as proof that nothing is outstanding', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    vi.mocked(getSales).mockRejectedValue(new Error('sales unavailable'));
+    renderDetail(FULLSTAFF);
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(
+      screen.queryByText('Nothing outstanding for this customer yet.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps open reservation balances alongside existing sale balances', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      openReservationTotal: '312000.00',
+      openReservationPaid: '10000.00',
+    } as Customer);
+    vi.mocked(getSales).mockResolvedValue([SALE]);
+    renderDetail(FULLSTAFF);
+    const strip = await screen.findByLabelText('Outstanding balance');
+    expect(strip).toHaveTextContent('Open reservations');
+    expect(strip).toHaveTextContent('₱302,000.00');
+    expect(strip).toHaveTextContent('Balance on SALE-000001');
+    expect(strip).toHaveTextContent('₱45,000.00');
+  });
+
+  it('excludes cancelled sales from the outstanding balance', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue(RECORD);
+    vi.mocked(getSales).mockResolvedValue([{ ...SALE, status: 'cancelled' }]);
+    renderDetail(FULLSTAFF);
+    expect(
+      await screen.findByText('No committed reservation or sale to summarize.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('₱45,000.00')).not.toBeInTheDocument();
+  });
+
   it('renders each sale as a facts card with inline payment history', async () => {
     vi.mocked(getCustomerById).mockResolvedValue(RECORD);
     vi.mocked(getSales).mockResolvedValue([SALE]);
@@ -430,10 +489,7 @@ describe('CustomerDetailPage card sales', () => {
     expect(tabs).toHaveTextContent('Overview');
     expect(tabs).toHaveTextContent('Sales and payments');
     expect(tabs).toHaveTextContent('Stated record');
-    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('shows an empty state when the customer holds no sales', async () => {
@@ -528,7 +584,10 @@ describe('CustomerDetailPage merged actions', () => {
   });
 
   it('shows the current ID image to staff who may view ID scans', async () => {
-    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      governmentIdMasked: null,
+    } as unknown as Customer);
     vi.mocked(getCurrentDocument).mockResolvedValue(ID_DOCUMENT);
     renderDetail(ID_SCAN_STAFF);
     const image = await screen.findByAltText('Scan of philippine-id.jpg');
@@ -551,7 +610,10 @@ describe('CustomerDetailPage merged actions', () => {
   });
 
   it('links a PDF scan out instead of inlining it', async () => {
-    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      governmentIdMasked: null,
+    } as unknown as Customer);
     vi.mocked(getCurrentDocument).mockResolvedValue({
       ...ID_DOCUMENT,
       mime: 'application/pdf',
@@ -568,7 +630,10 @@ describe('CustomerDetailPage merged actions', () => {
   });
 
   it('says so when the customer has no ID image on file', async () => {
-    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, governmentIdMasked: null } as unknown as Customer);
+    vi.mocked(getCustomerById).mockResolvedValue({
+      ...RECORD,
+      governmentIdMasked: null,
+    } as unknown as Customer);
     renderDetail(ID_SCAN_STAFF);
     expect(await screen.findByText('Not Recorded')).toBeInTheDocument();
   });

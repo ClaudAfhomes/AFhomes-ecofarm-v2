@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router';
-import type { Sale } from '@afhomes/contracts';
+import type { Customer, Sale } from '@afhomes/contracts';
 import {
   Button,
   DetailCard,
@@ -30,7 +30,7 @@ import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
 import { getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
-import { formatMoneyOrDash, formatStatedMoney } from '@afhomes/shared';
+import { compareMoney, formatMoneyOrDash, formatStatedMoney, subtractMoney } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
 import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
 import { CustomerIdImage } from './CustomerIdImage';
@@ -351,10 +351,7 @@ export function CustomerDetailPage() {
         ['Email', record.email],
         ['Phone', record.phone],
         ['Date of birth', record.dateOfBirth ?? 'Not Recorded'],
-        [
-          'Gender',
-          genderLabel(record.gender) ?? 'Not Recorded',
-        ],
+        ['Gender', genderLabel(record.gender) ?? 'Not Recorded'],
         [
           'ID type',
           record.governmentIdType
@@ -403,10 +400,7 @@ export function CustomerDetailPage() {
         ['POSTAL CODE', statedMono(addressPartOf(record.address, 'postalCode'))],
         ['LANDLINE', stated(record.landline)],
         ['EMAIL', stated(record.email)],
-        [
-          'TIN NO.',
-          statedMono(formatTin(record.tinNumber) || record.tinNumberMasked),
-        ],
+        ['TIN NO.', statedMono(formatTin(record.tinNumber) || record.tinNumberMasked)],
         ['MOBILE NO.', statedMono(record.phone)],
         ['OCCUPATION / BUSINESS NAME', stated(record.occupationBusinessName)],
         ['OFFICE / BUSINESS ADDRESS', stated(record.officeBusinessAddress)],
@@ -442,12 +436,18 @@ export function CustomerDetailPage() {
       company: true,
       fields: [
         ['VIP PACKAGE', stated(record.statedVipPackage)],
-        ['PAYMENT TERMS', stated(record.statedPaymentTerms ? paymentSchemeLabel(record.statedPaymentTerms) : null)],
+        [
+          'PAYMENT TERMS',
+          stated(record.statedPaymentTerms ? paymentSchemeLabel(record.statedPaymentTerms) : null),
+        ],
         ['REGULAR PRICE', statedMono(formatStatedMoney(record.statedRegularPrice))],
         ['DISCOUNT', statedMono(formatStatedMoney(record.statedDiscount))],
         ['TOTAL AMOUNT', statedMono(formatStatedMoney(record.statedTotalAmount))],
         ['Reservation Fee', statedMono(formatStatedMoney(record.statedRf))],
-        ['PAYMENT TYPE', stated(record.statedPaymentType ? formatPaymentMethod(record.statedPaymentType) : null)],
+        [
+          'PAYMENT TYPE',
+          stated(record.statedPaymentType ? formatPaymentMethod(record.statedPaymentType) : null),
+        ],
         ['REF NO', statedMono(record.statedRefNo)],
         ['PAYMENT DATE', stated(record.statedPaymentDate)],
       ],
@@ -460,7 +460,11 @@ export function CustomerDetailPage() {
       fields: [
         [
           'Membership status',
-          record.membershipStatus ? <StatusChip label={humanizeCode(record.membershipStatus)} /> : 'None',
+          record.membershipStatus ? (
+            <StatusChip label={humanizeCode(record.membershipStatus)} />
+          ) : (
+            'None'
+          ),
         ],
         ['VIP tier', <TierBadge tier={record.tier} />],
         [
@@ -512,7 +516,11 @@ export function CustomerDetailPage() {
             </DetailFieldGrid>
           </div>
           {canEditCompany ? (
-            <Button className={styles.mastheadAction} variant="secondary" onClick={() => setEditing(true)}>
+            <Button
+              className={styles.mastheadAction}
+              variant="secondary"
+              onClick={() => setEditing(true)}
+            >
               Edit stated record
             </Button>
           ) : null}
@@ -547,7 +555,17 @@ export function CustomerDetailPage() {
       </nav>
       {tab === 'overview' ? (
         <>
-          {salesHidden ? null : <SettlementStrip sales={sales.data ?? []} />}
+          {salesHidden ? null : sales.isPending ? (
+            <Skeleton style={{ height: 100 }} />
+          ) : sales.isError ? (
+            <ErrorState
+              error={sales.error}
+              message={describeSalesLoadError(sales.error)}
+              onRetry={sales.refetch}
+            />
+          ) : (
+            <SettlementStrip sales={sales.data} customer={record} />
+          )}
           <DetailGrid className={styles.topGrid}>
             {workingGroups.map((group) => (
               <DetailCard key={group.title}>
@@ -650,8 +668,12 @@ const RECORD_TABS = [
  * the question. Money lives here and only here; the Sales panel carries the
  * payment ledger behind it, never a second copy of these totals.
  */
-function SettlementStrip({ sales }: { sales: Sale[] }) {
-  if (sales.length === 0)
+function SettlementStrip({ sales, customer }: { sales: Sale[]; customer: Customer }) {
+  const openTotal = customer.openReservationTotal ?? '0.00';
+  const openPaid = customer.openReservationPaid ?? '0.00';
+  const hasOpenReservations = compareMoney(openTotal, '0.00') > 0;
+  const activeSales = sales.filter((sale) => sale.status !== 'cancelled');
+  if (activeSales.length === 0 && !hasOpenReservations)
     return (
       <section className={styles.settlementEmpty} aria-label="Outstanding balance">
         <span className={styles.settlementEmptyMark} aria-hidden="true">
@@ -659,13 +681,30 @@ function SettlementStrip({ sales }: { sales: Sale[] }) {
         </span>
         <div className={styles.settlementEmptyBody}>
           <h3 className={styles.settlementEmptyTitle}>No card sales yet</h3>
-          <p className={styles.settlementEmptyText}>Nothing outstanding for this customer yet.</p>
+          <p className={styles.settlementEmptyText}>
+            No committed reservation or sale to summarize.
+          </p>
         </div>
       </section>
     );
   return (
     <section className={styles.settlement} aria-label="Outstanding balance">
-      {sales.map((sale) => (
+      {hasOpenReservations ? (
+        <div className={styles.settlementRow}>
+          <div className={styles.settlementLead}>
+            <span className={styles.settlementLabel}>Open reservations</span>
+            <span className={styles.settlementValue}>
+              {formatMoneyOrDash(subtractMoney(openTotal, openPaid))}
+            </span>
+          </div>
+          <dl className={styles.settlementFacts}>
+            <DetailField label="Total">{formatMoneyOrDash(openTotal)}</DetailField>
+            <DetailField label="Paid">{formatMoneyOrDash(openPaid)}</DetailField>
+          </dl>
+          <SettlementBadge total={openTotal} paid={openPaid} />
+        </div>
+      ) : null}
+      {activeSales.map((sale) => (
         <div key={sale.id} className={styles.settlementRow}>
           <div className={styles.settlementLead}>
             <span className={styles.settlementLabel}>
@@ -742,7 +781,9 @@ const NAME_SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V', 'VI']);
  *  skipped so "MARIA SANTOS JR." still reads "MS". */
 function customerInitials(fullName: string): string {
   const words = fullName.trim().split(/\s+/).filter(Boolean);
-  const meaningful = words.filter((word) => !NAME_SUFFIXES.has(word.replace(/\./g, '').toUpperCase()));
+  const meaningful = words.filter(
+    (word) => !NAME_SUFFIXES.has(word.replace(/\./g, '').toUpperCase()),
+  );
   if (meaningful.length === 0) return 'C';
   const first = meaningful[0]?.[0] ?? '';
   const last = meaningful.length > 1 ? (meaningful[meaningful.length - 1]?.[0] ?? '') : '';

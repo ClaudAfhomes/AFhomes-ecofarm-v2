@@ -96,6 +96,35 @@ async function call(options: { path: string; token?: string }): Promise<State> {
 }
 
 describe('GET /customers/:id', () => {
+  it('returns authoritative open-reservation totals without exposing a membership activation', async () => {
+    install([
+      {
+        record: {
+          ...RECORD,
+          memberships: null,
+          member_status: null,
+          tier: 'GOLD',
+          payment_status: 'partially_paid',
+          verified_paid: '90000.00',
+          frozen_total: '312000.00',
+          open_reservation_total: '312000.00',
+          open_reservation_paid: '90000.00',
+        },
+        total_count: 1,
+      },
+    ]);
+    const state = await call({ path: CUSTOMER.active, token: TOKEN2.salesManager });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      tier: 'GOLD',
+      paymentStatus: 'partially_paid',
+      openReservationTotal: '312000.00',
+      openReservationPaid: '90000.00',
+      membershipStatus: null,
+      hasActiveMembership: false,
+    });
+  });
+
   it('returns the directory row for a viewer of sales.customers', async () => {
     install();
     const state = await call({ path: CUSTOMER.active, token: TOKEN2.salesManager });
