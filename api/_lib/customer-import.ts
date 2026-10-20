@@ -476,7 +476,6 @@ export function validateImportRow(
     capped(key, 200);
   for (const key of [
     'supplementary_full_name',
-    'ost_ist_name',
     'svd_name',
     'ssm_name',
     'sm_name',
@@ -815,7 +814,6 @@ export function validateImportRow(
       supplementaryOccupationBusinessName: get('supplementary_occupation_business_name') || null,
       supplementaryOfficeAddress: get('supplementary_office_address') || null,
       supplementaryPosition: get('supplementary_position') || null,
-      ostIstName: get('ost_ist_name') || null,
       svdName: get('svd_name') || null,
       ssmName: get('ssm_name') || null,
       smName: get('sm_name') || null,

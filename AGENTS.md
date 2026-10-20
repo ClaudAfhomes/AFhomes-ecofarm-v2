@@ -49,7 +49,7 @@ API families (`api/_lib/router.ts`, data-driven `BUSINESS_FAMILIES`;
 unauthenticated `auth/customer/activate` + `auth/portals` and the
 ownership-based `customer` portal family. Handlers in `api/_handlers/`.
 
-Contracts live in `packages/contracts/src/schemas/` (~25 files). `lifecycle.ts`
+Contracts live in `packages/contracts/src/schemas/` (~56 files). `lifecycle.ts`
 is the **single source for the core sale-lifecycle statuses and their legal
 transitions** (customer, sale, payment, membership, commission, application,
 reservation — each with a transition map); newer domains own their own enums
@@ -63,7 +63,8 @@ seller resolution). `api/_lib/handler-kit.ts` is the shared handler plumbing.
 Admin screens: `apps/admin/src/features/` — `business/` (Card Products,
 Customers, Card Sales, Payment Queue, Activation Queue + commission
 qualification), plus `redemption/`, `documents/` (ID review queue),
-`genealogy/`, `memberships/`, `ost/`, `cms/`, `reports/`, `account/`,
+`genealogy/`, `memberships/`, `network-members/` (Members, member dialogs,
+OST team transfer, workbook import), `ost/`, `cms/`, `reports/`, `account/`,
 `address/`, `auth/`, `afhomes/` (session, roles, departments, staff,
 dashboard). The directory is the source of truth; the list above names the
 headline areas.
@@ -181,7 +182,7 @@ against the Supabase Dashboard rather than relying on it.
 
 ### Later phases (delivered after Phase 5 — summarized, not narrated)
 
-Roughly sixty further migrations, `20260930…` through `20261129…`. Grouped by
+Roughly 106 further migrations, `20260930…` through `20261210…`. Grouped by
 family; filename prefixes are the pointers, full bodies are authoritative:
 
 - **Roles/permissions baseline** (`20260930…_role_permission_baseline`) and
@@ -196,6 +197,11 @@ family; filename prefixes are the pointers, full bodies are authoritative:
 - **OST registration, accreditation and renewal workflow**
   (`…_phase8_ost_registration`, `…_ost_accreditation_workflow`; manual
   submit/approve/endorse/reject — no scheduled auto-renewal exists).
+- **OST team transfer / conversion** (`…_ost_team_transfer`,
+  `…_develop_transfer_integration`, `…_ost_ist_conversion`): OST → IST
+  conversion and genealogy team moves via `OstTeamTransferDialog` and
+  `POST /members/:id/team-transfer` (migration 00011; live authenticated
+  check still unverified — see SESSION.md open threads).
 - **Card management & plans** (`…_phase10_card_management`,
   `…_phase19_card_plan_description`, `…_card_plan_order`,
   `…_vip_payment_schemes`, `…_official_vip_benefits`).
@@ -206,6 +212,12 @@ family; filename prefixes are the pointers, full bodies are authoritative:
 - **Customer imports & directory** (`…_customer_import_jobs`,
   `…_customer_directory_*`, `…_fix_customer_application_plan_field`,
   `…_application_psgc_address`).
+- **Customer workbook & guided XLSX** (`…_customer_ssot_alignment`,
+  `…_mirror_application_onto_customer`, `…_mirror_every_application_path`,
+  `…_mirror_referral_names_on_customer`,
+  `…_mirror_government_id_*`): guided workbook / SSOT alignment, mirror
+  application data onto customer, mirror referral names + government ID.
+  Column vocabulary is internal (not a public contract).
 - **Application purchase flow & official forms** (`…_application_purchase_flow`,
   `…_official_forms`, `…_official_vip_benefits`).
 - **Services catalog** (`…_service_tier_discounts`, `…_service_publication`,
@@ -252,7 +264,7 @@ pnpm test           # vitest run (all workspaces)
 pnpm typecheck      # tsc --noEmit (all workspaces + supabase/ scripts)
 pnpm lint           # eslint
 pnpm build          # turbo run build
-pnpm format         # prettier --write .
+pnpm format         # prettier --write . (Prettier is NOT a gate; do not --write pre-existing formatting — see Conventions)
 pnpm check:env      # environment isolation guard (see "Environment")
 
 pnpm db:migrate                 # apply supabase/migrations (guarded)
@@ -359,6 +371,13 @@ the migrations assume but never create (`auth.users`, `auth.uid()`, the
   `afhomes_`, with the validation queries in the file header and a down note.
   After each batch run `supabase/security/rls_invariants.sql` (empty = PASS) and
   `pnpm test:db:local`.
+- **Customer workbook import:** the guided XLSX template (guided workbook +
+  44-column company layout) and the legacy 45-column layout are both still
+  parsed (`customer-import.ts` remaps the legacy layout, dropping the retired
+  `OST/IST NAME` column with a warning). The workbook column vocabulary
+  (`TEMPLATE_*_OPTIONS`, `WORKBOOK_PAYMENT_METHODS`, etc.) is an **internal**
+  import/validator detail, not a public API contract — do not document it as
+  a public contract. See `docs/AFHOMES-CUSTOMER-WORKBOOK-IMPLEMENTATION.md`.
 
 ### Defects that only real PostgreSQL execution found
 
@@ -687,6 +706,14 @@ sanctioned whole-object read — it parses through a `VITE_`-only Zod object, an
   repo-wide rename into work that touches authorization, and never narrow
   `vercel.json`'s `includeFiles: "packages/**"` — it is load-bearing for the
   deployed function.
+- **Pre-existing DB suite failure (section 77 — OST team transfer):** the
+  disposable Postgres suite (`pnpm test:db:local`) currently fails one check
+  (`"the fresh IST validity starts today": expected <today>, got null`) in
+  `public.transfer_sale_team_member` (OST→IST conversion sets `startsOn: null`).
+  This predates the latest work and is unrelated to the Edit Stated Record /
+  OST/IST NAME changes. Cause is unresolved (function vs. test expectation);
+  investigate before relying on `pnpm test:db:harness` (which requires a clean
+  exit 0). Do not silently adjust the assertion.
 
 ## Deployment
 

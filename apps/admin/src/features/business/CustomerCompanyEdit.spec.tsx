@@ -85,10 +85,10 @@ beforeEach(() => {
 });
 
 describe('Customer company edit', () => {
-  it('offers Edit company record only with update grant', async () => {
+  it('offers Edit stated record only with update grant', async () => {
     renderDetail(VIEWER);
     await screen.findByRole('heading', { name: 'MARIA SANTOS' });
-    expect(screen.queryByRole('button', { name: 'Edit company record' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit stated record' })).not.toBeInTheDocument();
   });
 
   it('renders the verbatim form with write-only TIN blank', async () => {
@@ -97,7 +97,7 @@ describe('Customer company edit', () => {
       { user: STAFF, route: '/admin/customers/c-1' },
     );
     // Two write-only TIN inputs start empty (masked value shown as hint, never prefilled).
-    const tins = await screen.findAllByLabelText(/TIN NO\. \(write-only, blank keeps\)/);
+    const tins = await screen.findAllByLabelText(/^TIN$/);
     expect(tins).toHaveLength(2);
     for (const tin of tins) expect((tin as HTMLInputElement).value).toBe('');
     expect(screen.getByText(/current: \*\*\*\*\*\*\*\*9012/)).toBeInTheDocument();
@@ -109,10 +109,6 @@ describe('Customer company edit', () => {
     for (const label of [
       'PERMANENT ADDRESS LINE 1',
       'PERMANENT ADDRESS LINE 2',
-      'PROVINCE',
-      'CITY',
-      'BARANGGAY',
-      'POSTAL CODE',
       'SVD (NAME)',
       'SSM (NAME)',
       'SM (NAME)',

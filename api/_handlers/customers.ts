@@ -105,7 +105,6 @@ const toCustomer = (row: Record<string, unknown>) => ({
   supplementaryOccupationBusinessName: isoOrNull(row.supplementary_occupation_business_name),
   supplementaryOfficeAddress: isoOrNull(row.supplementary_office_address),
   supplementaryPosition: isoOrNull(row.supplementary_position),
-  ostIstName: isoOrNull(row.ost_ist_name),
   svdName: isoOrNull(row.svd_name),
   ssmName: isoOrNull(row.ssm_name),
   smName: isoOrNull(row.sm_name),
@@ -382,7 +381,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         supplementary_occupation_business_name: input.supplementaryOccupationBusinessName ?? null,
         supplementary_office_address: input.supplementaryOfficeAddress ?? null,
         supplementary_position: input.supplementaryPosition ?? null,
-        ost_ist_name: input.ostIstName ?? null,
         svd_name: input.svdName ?? null,
         ssm_name: input.ssmName ?? null,
         sm_name: input.smName ?? null,
@@ -479,6 +477,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.suffix !== undefined)
         patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
+      if (p.dateOfBirth !== undefined) patch.date_of_birth = p.dateOfBirth;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
       if (p.landline !== undefined) patch.landline = p.landline;
@@ -528,7 +527,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch.supplementary_office_address = p.supplementaryOfficeAddress;
       if (p.supplementaryPosition !== undefined)
         patch.supplementary_position = p.supplementaryPosition;
-      if (p.ostIstName !== undefined) patch.ost_ist_name = p.ostIstName;
       if (p.svdName !== undefined) patch.svd_name = p.svdName;
       if (p.ssmName !== undefined) patch.ssm_name = p.ssmName;
       if (p.smName !== undefined) patch.sm_name = p.smName;
@@ -780,7 +778,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           supplementary_occupation_business_name: null,
           supplementary_office_address: null,
           supplementary_position: null,
-          ost_ist_name: null,
           svd_name: null,
           ssm_name: null,
           sm_name: null,

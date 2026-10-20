@@ -1,15 +1,17 @@
-# Graph Report - AFhomes-ecofarm-v2  (2026-10-19)
+# Graph Report - AFhomes-ecofarm-v2  (2026-10-20)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 1056 files · ~2,435,137 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 108 file(s) not represented in the graph (top: .css 98, (none) 6, .example 3)
 
 ## Summary
-- 7758 nodes · 23868 edges · 374 communities (238 shown, 136 thin omitted)
-- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 532 edges (avg confidence: 0.86)
+- 7861 nodes · 23902 edges · 390 communities (250 shown, 140 thin omitted)
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 535 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `3c0bb113`
+- Built from commit: `73f0a850`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -20,10 +22,10 @@
 - business/services.ts
 - official-forms-applications.tsx
 - card-plans.spec.ts
-- OstAccreditationPages.tsx
+- address/useOstAddress.ts
 - Points services and purchase schemas
 - Shared UI library and portal specs
-- report-export.ts
+- _handlers/official-forms.ts
 - Address and staff API tests
 - Admin API service clients
 - Member, address and AA-number contracts
@@ -31,21 +33,21 @@
 - Admin route definitions
 - Queues and reports API
 - DB integration test harness
-- Alert
+- CustomerDetailPage.tsx
 - Admin handlers and dashboard API
 - Password lifecycle tests
-- lib/cms.ts
+- images.ts
 - images.ts
 - Address hierarchy API tests
 - Application purchase flow guards
-- Customers API handlers
+- customer-onboarding-email.ts
 - Membership template import tests
 - Customer SSOT workbook columns
-- supabase-fake.ts
+- lib/cms.ts
 - Points rebuild SQL indexes
-- test-referral-codes.mjs
+- test-db-harness.mjs
 - normalize.ts
-- Commission services and finance
+- services-commissions.ts
 - CustomerMembershipPage.tsx
 - Commerce scheme economics (commerce.ts)
 - Button
@@ -53,11 +55,11 @@
 - Purchase flow contracts
 - members.ts
 - Marketing login and sections
-- Dev server and migration scripts
-- customer-activation.ts
+- ref_vitest
+- isoOrNull
 - Documents API handlers
 - Reports contracts and dashboard
-- MembershipCardPrintPage.tsx
+- BusinessPointsPage.tsx
 - redemptions.spec.ts
 - web/src/app/App.tsx
 - Authorization regression tests
@@ -66,7 +68,7 @@
 - Cutover and qualification rules
 - Local postgres harness
 - Phase 1 advisor indexes and qualifications
-- Auth recovery specs and mocks
+- renderWithProviders
 - Button
 - OpenCode Continuation: AF Homes IST/OST Bulk Import/Export Release — Stage 2 Blocked on OST Portal Enforcement
 - admin/src/lib/api/client.ts
@@ -74,15 +76,15 @@
 - Root tooling dependencies
 - Dashboard metrics and charts
 - protectedRequest
-- MembersPage.spec.tsx
-- ost.spec.tsx
+- network-members/services.ts
+- OstAccreditationPages.tsx
 - Marketing layout components
-- Memberships API and directories
-- afhomes/services.ts
-- psgc-cloud-provider.ts
+- redemptions.ts
+- OstOfficialFields.tsx
+- schemas/customer-import.ts
 - OST accreditation workflow schema
 - Admin app tooling
-- services-reservations.ts
+- CustomerDetailPage.spec.tsx
 - Reservation status and genealogy
 - API client and errors
 - schemas/sales.ts
@@ -90,25 +92,25 @@
 - Dual engagements and periods
 - DB testing package config
 - customer-portal.spec.ts
-- customer/services.ts
+- redemption.ts
 - Restaurant and compliance images
-- ost-import.ts
-- admin/src/features/ost/services.ts
-- Portal login pages and routing
-- official-forms-fields.tsx
-- _handlers/ost.ts
+- report-export.ts
+- phase29-analytics.spec.ts
+- pg
+- official-forms-fields.spec.tsx
+- ref_zod
 - StaffEntryPage.tsx
-- schemas/ost-accreditation.ts
+- schemas/ost.ts
 - fail
-- _handlers/official-forms.ts
-- Experiences.tsx
-- Controls and authorization rules
+- customer-imports.ts
+- ui/Button.tsx
+- Business Rules Index - AF Homes Ecofarm v2
 - Onboarding email over SMTP
-- Seo
+- compareMoney
 - _lib/member-workbook.ts
 - services-customers.ts
 - Marketing cards and stories
-- _lib/customer-workbook.ts
+- address-provider.ts
 - Import security and workbooks
 - UI package dependencies
 - Phase 1 foundation schema
@@ -116,10 +118,10 @@
 - IST / OST company workbook implementation — local review packet
 - OST transfer and history guards
 - AGENTS.md invariants and lessons
-- phase29-analytics.spec.ts
+- supabase-fake.ts
 - Points API tests and RPCs
 - Customer import jobs schema
-- customer-portal.spec.tsx
+- phase2-migration.spec.ts
 - Supabase cost-control plans
 - TypeScript base config
 - Turbo pipeline config
@@ -128,8 +130,8 @@
 - Business rules audit reports
 - Official forms and application holders
 - phase30-reports.spec.ts
-- Dev server and migration scripts
-- phase2-migration.spec.ts
+- official-forms-transitions.spec.ts
+- _handlers/role-baseline.spec.ts
 - api/stories.ts
 - post
 - Frontend lint tooling
@@ -169,7 +171,7 @@
 - Profile photo handling
 - Purchase gate tests
 - Legacy business ID upgrade
-- role-access-review.spec.tsx
+- admin/src/test/utils.tsx
 - Admin runtime deps
 - test-preview-wrappers.mjs
 - 20261208000015_afhomes_member_workbook_jobs_functions.sql
@@ -196,14 +198,14 @@
 - OST team transfer
 - Phase 6 CMS foundation schema
 - Reservation finance checks
-- schemas/sale-team.ts
+- test-security-remediation.mjs
 - CMS API tests
-- prerender.mjs
+- reservation-finance-queue.spec.tsx
 - apply-migrations.ts
 - API TypeScript config
-- SessionUser
+- Memberships.spec.tsx
 - Storage control plan docs
-- ost-address.spec.ts
+- Prompt
 - combobox-rank.ts
 - Company customer workbook
 - Official AA numbering
@@ -213,7 +215,8 @@
 - OST expired genealogy guards
 - OST role workflow guards
 - comments
-- Documents admin tests
+- BUILD — Implement the Approved Plan
+- Prompt
 - Auth and MAU control plan docs
 - Database size control docs
 - Postal reference build script
@@ -226,15 +229,16 @@
 - Self search-path hardening
 - Membership-sale reconciliation (AA)
 - CustomerLoginForm.tsx
-- dev-server.ts
+- Prompt
+- _lib/router.ts
 - Source audit and traceability
 - Membership fields plan
 - OpenCode config
 - Vercel verification script
 - Operational service payments
-- phase3-migration.spec.ts
+- Prompt
 - public.issue_ist_employee_identity
-- BR-RATE-01 - DSC/DRI rates freeze at sale-number issue
+- commissions.ts
 - Preview portal read functions
 - Refund earning consistency
 - Preview staff and customer functions
@@ -243,6 +247,7 @@
 - Purchase terms checks
 - Supabase TypeScript config
 - phase27-documents.spec.ts
+- useAddressHierarchy.spec.tsx
 - HTML entry documents
 - Admin TypeScript config
 - Web TypeScript config
@@ -281,6 +286,7 @@
 - Preview redemption rules
 - Preview resolve-member function
 - Network members schema
+- PLAN — Investigate and Propose an Implementation Plan
 - 1BR and 3BR villa images
 - King and Queen villa images
 - Premier A-frame and glamping images
@@ -294,33 +300,41 @@
 - Import row alignment doc
 - Migration lineage doc
 - pnpm toolchain pins
-- phase32-security.spec.ts
+- Prompt
 - OpenCode continuation: finish IST/OST import release
 - 20261208000013_afhomes_member_workbook_jobs_schema.sql
 - staff-activation.spec.tsx
 - reports-live.spec.tsx
+- CODE REVIEW — Review Changes Without Editing Them
+- BUG INVESTIGATION — Find the Cause Before Fixing
+- Prompt
+- Prompt
+- customer-onboarding-url.ts
+- Workflow Guide — Reusable Development Process
+- public.review_identity_document
+- TASK HANDOFF — Final Status Report
 
 ## God Nodes (most connected - your core abstractions)
-1. `Button()` - 233 edges
+1. `Button()` - 228 edges
 2. `makeRes()` - 155 edges
 3. `FakeSupabase` - 151 edges
-4. `ErrorState()` - 151 edges
+4. `ErrorState()` - 147 edges
 5. `protectedRequest()` - 141 edges
-6. `Skeleton()` - 140 edges
+6. `Skeleton()` - 138 edges
 7. `makeReq()` - 137 edges
-8. `StatusChip()` - 124 edges
-9. `request()` - 121 edges
-10. `Alert()` - 113 edges
+8. `request()` - 121 edges
+9. `StatusChip()` - 120 edges
+10. `Alert()` - 109 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Approved clarification and compatibility` --references--> `normalizePhilippinePhone()`  [INFERRED]
-  docs/handoffs/2026-10-18-member-company-import.md → packages/contracts/src/schemas/input.ts
 - `The Blocker: OST Portal `must_change_password` Gap` --references--> `authorizeAfHomes()`  [INFERRED]
   docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_lib/afhomes-access.ts
 - `Final corrected template integration - 2026-10-18` --references--> `companyLayout()`  [INFERRED]
   docs/handoffs/2026-10-18-member-company-import.md → api/_lib/member-workbook-layout.ts
 - `Standing hard rules (never relaxed, at any stage)` --references--> `push()`  [INFERRED]
   WORKFLOW.md → api/_lib/purchase-documents.ts
+- `Approved clarification and compatibility` --references--> `normalizePhilippinePhone()`  [INFERRED]
+  docs/handoffs/2026-10-18-member-company-import.md → packages/contracts/src/schemas/input.ts
 - `Immediate Action Required` --references--> `admin()`  [INFERRED]
   docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md → api/_handlers/phase32-security.spec.ts
 
@@ -353,147 +367,147 @@
 - **AF Homes Accommodation Rate-Card Catalog** — apps_web_src_marketing_assets_uploads_1_bedroom_deluxe_villa_1_bedroom_deluxe_villa, apps_web_src_marketing_assets_uploads_3_bedroom_deluxe_villa_3_bedroom_deluxe_villa, apps_web_src_marketing_assets_uploads_king_villa_king_villa, apps_web_src_marketing_assets_uploads_premier_a_frame_premier_a_frame, apps_web_src_marketing_assets_uploads_premier_glamping_premier_glamping, apps_web_src_marketing_assets_uploads_queen_villa_queen_villa [INFERRED 0.95]
 - **Philippine Regulatory Compliance Portfolio** — apps_web_src_marketing_assets_uploads_compliance_milestones_compliance_milestones_overview, apps_web_src_marketing_assets_uploads_ecc_cert_ecc_certificate, apps_web_src_marketing_assets_uploads_llda_cert_llda_clearance [INFERRED 0.95]
 
-## Communities (374 total, 136 thin omitted)
+## Communities (390 total, 140 thin omitted)
 
 ### Community 0 - "OST renewal and shared UI"
 Cohesion: 0.03
-Nodes (92): Rankable, AlertProps, AppShellProps, AuthLayoutProps, BottomNav(), BottomNavItem, BottomNavProps, BreadcrumbItem (+84 more)
+Nodes (90): ErrorBoundaryProps, ErrorBoundaryState, Rankable, AccreditationId(), AlertProps, AppShell(), AppShellProps, AuthLayoutProps (+82 more)
 
 ### Community 1 - "Dashboard and analytics contracts"
 Cohesion: 0.03
-Nodes (140): confirmDocument(), post(), submitOstApplication(), AnalyticsOverview, AnalyticsPeriod, analyticsPeriodSchema, analyticsScopeSchema, analyticsTrendPointSchema (+132 more)
+Nodes (134): nodes, confirmDocument(), post(), runDocumentOcr(), AnalyticsOverview, AnalyticsPeriod, analyticsPeriodSchema, analyticsScopeSchema (+126 more)
 
 ### Community 2 - "Admin business and staff screens"
-Cohesion: 0.06
-Nodes (109): STAFF, AfHomesDepartmentsPage(), DEPARTMENTS_KEY, AfHomesRolesPage(), RoleRow, BusinessActivationQueuePage(), IdentifiersDialog(), tierFromProductName() (+101 more)
+Cohesion: 0.07
+Nodes (106): STAFF, AfHomesDepartmentsPage(), BusinessActivationQueuePage(), IdentifiersDialog(), tierFromProductName(), BusinessCommissionsPage(), canDecideCommissions(), STATUS_LABEL (+98 more)
 
 ### Community 3 - "business/services.ts"
 Cohesion: 0.05
-Nodes (60): CardPlanVisibility, CommissionRuleHistory, commissionRuleHistorySchema, createCardCategory(), createCardProduct(), createCommissionRule(), createCustomer(), createCustomerApplication() (+52 more)
+Nodes (69): detail(), LocationProbe(), show(), base, cancelSale(), CardPlanVisibility, CommissionRuleHistory, commissionRuleHistorySchema (+61 more)
 
 ### Community 4 - "official-forms-applications.tsx"
-Cohesion: 0.05
-Nodes (84): BusinessFinanceQueuePage(), isReservationFinanceSummary(), PaymentDetails(), progressPercent(), QueueSkeleton(), RecordDialogSkeleton(), RecordPaymentDialog(), ReservationActions() (+76 more)
+Cohesion: 0.04
+Nodes (102): isReservationFinanceSummary(), PaymentDetails(), progressPercent(), RecordDialogSkeleton(), RecordPaymentDialog(), ReservationActions(), ReservationDetails(), STATUS_OPTIONS (+94 more)
 
 ### Community 5 - "card-plans.spec.ts"
 Cohesion: 0.27
 Nodes (9): byCode(), call(), createSale(), data(), handlers, holder, install(), JADE (+1 more)
 
-### Community 6 - "OstAccreditationPages.tsx"
-Cohesion: 0.09
-Nodes (50): useOstAddress(), CreateOstDialog(), IDENTITY_FIELDS, IdentityField, today(), OstTeamTransferDialog(), networkMemberKeys, CurrentState() (+42 more)
+### Community 6 - "address/useOstAddress.ts"
+Cohesion: 0.35
+Nodes (7): getAddressBarangays(), getAddressLocalities(), useOstAddress(), barangaySchema, localitySchema, provinceSchema, OstAddressSelection
 
 ### Community 7 - "Points services and purchase schemas"
 Cohesion: 0.03
-Nodes (89): PricedPurchase, purchaseReceiptDecisionResultSchema, purchaseReceiptWriteSchema, PurchaseSummaryRow, EXACT_DECIMAL_RATE_RE, EXACT_DECIMAL_STRING_RE, exactDecimalRateSchema, exactDecimalStringSchema (+81 more)
+Nodes (95): PricedPurchase, purchaseReceiptDecisionResultSchema, purchaseReceiptWriteSchema, PurchaseSummaryRow, ListResponse, listResponseSchema(), EXACT_DECIMAL_RATE_RE, EXACT_DECIMAL_STRING_RE (+87 more)
 
 ### Community 8 - "Shared UI library and portal specs"
 Cohesion: 0.04
-Nodes (33): auth, EXECUTIVE, LEGACY, CLAIM, { notifyConfirm, notifySuccess, grantedModules, api }, PURCHASE, DRAFT, mockedList (+25 more)
+Nodes (30): superAdmin, authMock, customerOnly, portalsBody, SESSION_BODY, supabaseMock, DRAFT, mockedList (+22 more)
 
-### Community 9 - "report-export.ts"
-Cohesion: 0.08
-Nodes (43): benefitRows(), CUSTOMER_IMPORT_HEADERS, customerApplicationXlsx(), customerImportTemplate(), decodeXml(), isOfficialTier(), IST_IMPORT_HEADERS, istImportTemplate() (+35 more)
+### Community 9 - "_handlers/official-forms.ts"
+Cohesion: 0.05
+Nodes (75): agreementFinanceSummary(), APPLICABLE_DECISION_AUDIT, applicationFields(), authorizeAgreementMutation(), authorizeAgreementSale(), documentModule(), getAgreement(), getApplication() (+67 more)
 
 ### Community 10 - "Address and staff API tests"
 Cohesion: 0.03
-Nodes (79): call(), upstream, call(), holder, install(), Row, applicationOriginBody, call() (+71 more)
+Nodes (91): call(), upstream, call(), holder, install(), Row, applicationOriginBody, call() (+83 more)
 
 ### Community 11 - "Admin API service clients"
 Cohesion: 0.05
-Nodes (78): getAfHomesRoleAudit(), getAfHomesStaff(), getAfHomesStaffAudit(), listClaims(), listClaimsPage(), listEarningRules(), listFinancePurchases(), listPointRefunds() (+70 more)
+Nodes (81): getAfHomesRoleAudit(), getAfHomesStaff(), getAfHomesStaffAudit(), listClaims(), listClaimsPage(), listEarningRules(), listFinancePurchases(), listPointRefunds() (+73 more)
 
 ### Community 12 - "Member, address and AA-number contracts"
-Cohesion: 0.04
-Nodes (54): AaNumberMode, aaNumberModeSchema, addressText(), CreateMember, CreateOstMember, CreateOstMemberMode, createOstMemberModeSchema, CreateOstMemberResult (+46 more)
+Cohesion: 0.03
+Nodes (70): provider, PERSON_NAME_RE, AaNumberMode, aaNumberModeSchema, addressText(), CreateOstMemberMode, createOstMemberModeSchema, createOstMemberSchema (+62 more)
 
 ### Community 13 - "session.tsx"
-Cohesion: 0.05
-Nodes (90): AdminForbiddenPage(), AdminLayout(), MyAccountPage(), useProfilePhoto(), AfHomesRoleDetailPage(), AfHomesRoleFormDialog(), blankPermissions(), RoleFormInput (+82 more)
+Cohesion: 0.07
+Nodes (48): AdminForbiddenPage(), AdminLayout(), MyAccountPage(), useProfilePhoto(), DEPARTMENTS_KEY, AfHomesRoleDetailPage(), AfHomesRoleFormDialog(), blankPermissions() (+40 more)
 
 ### Community 14 - "Admin route definitions"
-Cohesion: 0.05
-Nodes (61): AfHomesDashboardPage, AfHomesDepartmentsPage, AfHomesRoleDetailPage, AfHomesRolesPage, AfHomesStaffDetailPage, AfHomesStaffPage, App(), AuditPage (+53 more)
+Cohesion: 0.06
+Nodes (55): AfHomesDashboardPage, AfHomesDepartmentsPage, AfHomesRoleDetailPage, AfHomesRolesPage, AfHomesStaffDetailPage, AfHomesStaffPage, App(), AuditPage (+47 more)
 
 ### Community 15 - "Queues and reports API"
-Cohesion: 0.10
-Nodes (54): buildQueue(), buildReservationQueue(), handler(), parseListQuery(), PAYMENT_VERIFICATION_STATUSES, QueueRow, shape(), authorizeReport() (+46 more)
+Cohesion: 0.13
+Nodes (42): buildCommissions(), buildCustomers(), BUILDERS, buildGenealogy(), buildMemberships(), buildOst(), buildPayments(), buildPlans() (+34 more)
 
 ### Community 16 - "DB integration test harness"
-Cohesion: 0.05
-Nodes (57): PaymentScheme, pg, Check, runActivationIntegrationChecks(), World, asBrowserRole(), baseline, BASELINE_TABLES (+49 more)
+Cohesion: 0.07
+Nodes (45): PaymentScheme, asBrowserRole(), baseline, BASELINE_TABLES, camel(), captureBaseline(), check(), createdApplicationIds (+37 more)
 
-### Community 17 - "Alert"
-Cohesion: 0.17
-Nodes (31): GuideSkeleton(), PaymentSchemeGuidePage(), Section(), PurchaseRow, PointsRulesPage(), PURCHASE_STATUS_TONE, PurchasePaymentRow(), PurchasePaymentsPage() (+23 more)
+### Community 17 - "CustomerDetailPage.tsx"
+Cohesion: 0.06
+Nodes (61): CompanyTone, CustomerDetailPage(), CustomerSaleCard(), describeCustomerLoadError(), describeSalesLoadError(), RECORD_TABS, SettlementStrip(), stated() (+53 more)
 
 ### Community 18 - "Admin handlers and dashboard API"
 Cohesion: 0.05
-Nodes (90): audit(), cents(), countWhere(), customerHasActivity(), dashboard(), Db, describeServerError(), fail() (+82 more)
+Nodes (69): audit(), cents(), countWhere(), customerHasActivity(), dashboard(), Db, describeServerError(), fail() (+61 more)
 
 ### Community 19 - "Password lifecycle tests"
 Cohesion: 0.06
-Nodes (51): call(), hireNewcomer(), holder, install(), installWithNewHire(), Json, TokenUser, UNIQUE (+43 more)
+Nodes (52): call(), hireNewcomer(), holder, install(), installWithNewHire(), Json, TokenUser, UNIQUE (+44 more)
 
-### Community 20 - "lib/cms.ts"
-Cohesion: 0.06
-Nodes (37): StoryCardProps, overlayClasses, positionClasses, ImageRevealProps, PageHeaderProps, SmartImageProps, TiltCard(), tierStyle (+29 more)
+### Community 20 - "images.ts"
+Cohesion: 0.10
+Nodes (25): ACCENT_HAIRLINE, ExperienceHeroProps, StatusBadge(), CmsHeroMedia(), overlayClasses, positionClasses, useCmsHeroMedia(), ImageRevealProps (+17 more)
 
 ### Community 21 - "images.ts"
-Cohesion: 0.06
-Nodes (39): Layout(), menuItem, menuPanel, Navbar(), statusDot, ScrollToTop(), Accordion(), AccordionItemData (+31 more)
+Cohesion: 0.11
+Nodes (25): Hero(), Layout(), menuItem, menuPanel, Navbar(), statusDot, ScrollToTop(), AnimatedText() (+17 more)
 
 ### Community 22 - "Address hierarchy API tests"
 Cohesion: 0.04
-Nodes (34): call(), holder, install(), ADDRESS, holder, install(), post(), holder (+26 more)
+Nodes (37): byGoldEconomics(), call(), holder, install(), linkCustomer(), seedMembership(), seedPayment(), State (+29 more)
 
 ### Community 23 - "Application purchase flow guards"
 Cohesion: 0.05
 Nodes (28): application_purchase_source_consistency, application_purchase_terms_guard, payment_purchase_source_consistency, payments_reservation_reference_unique, payments_reservation_status_idx, private.append_purchase_document(), private.check_purchase_source_consistency(), private.complete_purchase_mutation() (+20 more)
 
-### Community 24 - "Customers API handlers"
-Cohesion: 0.07
-Nodes (51): customerDeleteBlockers(), customerHasActiveMembership(), fullName(), handler(), hasReference(), listQuerySchema, parseListQuery(), removeCustomerAuth() (+43 more)
+### Community 24 - "customer-onboarding-email.ts"
+Cohesion: 0.24
+Nodes (9): CustomerOnboardingEmail, escapeHtml(), MailDeliveryResult, MailEnv, MailTransport, sendCustomerOnboardingEmail(), smtpConfig(), MESSAGE (+1 more)
 
 ### Community 25 - "Membership template import tests"
-Cohesion: 0.04
-Nodes (97): buildCompanyExportRows(), buildContext(), commitCreateRow(), ExportFilters, exportQuerySchema, handler(), importRows(), parseSchema (+89 more)
+Cohesion: 0.05
+Nodes (74): companyCsv(), companyRow(), holder, install(), alignSectionBodies(), assertNoRepeatedHeader(), CompanyTemplateRemap, customerExportXlsx() (+66 more)
 
 ### Community 26 - "Customer SSOT workbook columns"
 Cohesion: 0.04
-Nodes (60): draftApplication, draftHolderRow, holder, install(), installQueue(), installReservations(), PROPOSAL_HASH, geographicCodeSchema (+52 more)
+Nodes (51): calls, clients, mount(), QAUser, typedField(), AddressHierarchy, addressHierarchyQuerySchema, addressHierarchySchema (+43 more)
 
-### Community 27 - "supabase-fake.ts"
-Cohesion: 0.13
-Nodes (14): body(), holder, person(), save(), compareOp(), FakeAuthUser, FakeCall, FakeLink (+6 more)
+### Community 27 - "lib/cms.ts"
+Cohesion: 0.06
+Nodes (34): ErrorBoundary, Logo(), LogoProps, faqCategories, siteConfig, vipPlans, useCmsRevision(), CmsState (+26 more)
 
 ### Community 28 - "Points rebuild SQL indexes"
 Cohesion: 0.07
 Nodes (32): earning_claims_account_status_idx, earning_claims_customer_idx, earning_claims_fallback_uidx, earning_claims_period_idx, earning_claims_qr_uidx, points_ledger_one_earned_per_claim, points_periods_account_range_idx, private.af_candidate() (+24 more)
 
-### Community 29 - "test-referral-codes.mjs"
-Cohesion: 0.06
-Nodes (17): ROOT, Run, SCRIPT, Envelope, SERVER_FILE, config, prepare, root (+9 more)
+### Community 29 - "test-db-harness.mjs"
+Cohesion: 0.25
+Nodes (5): baseEnv, failed, REPO_ROOT, results, SUITE
 
 ### Community 30 - "normalize.ts"
-Cohesion: 0.11
-Nodes (43): normalizeHolderOptionals(), ApplicationHolder, filterGovernmentIdInput(), filterHolderAddressInput(), filterLandlineInput(), filterMemberTinInput(), LIVE_UPPERCASE_FIELDS, normalizeApplicationHolder() (+35 more)
+Cohesion: 0.10
+Nodes (45): normalizeHolderOptionals(), ApplicationHolder, filterMemberTinInput(), LIVE_UPPERCASE_FIELDS, normalizeApplicationHolder(), normalizeCustomerApplicationRequest(), normalizeCustomerRequest(), normalizeProfileName() (+37 more)
 
-### Community 31 - "Commission services and finance"
-Cohesion: 0.05
-Nodes (48): CommissionRuleHistory, commissionRuleHistorySchema, createCommissionRule(), markCommissionPaid(), patch(), post(), qualifyCommission(), updateCommissionRule() (+40 more)
+### Community 31 - "services-commissions.ts"
+Cohesion: 0.15
+Nodes (16): CommissionRuleHistory, commissionRuleHistorySchema, createCommissionRule(), markCommissionPaid(), patch(), post(), qualifyCommission(), updateCommissionRule() (+8 more)
 
 ### Community 32 - "CustomerMembershipPage.tsx"
-Cohesion: 0.12
-Nodes (47): CustomerDashboardPage(), toneFor(), CustomerMembershipPage(), IssuedCredentials(), toneFor(), CustomerPaymentsPage(), CustomerPointsPage(), readClaimFromUrl() (+39 more)
+Cohesion: 0.10
+Nodes (55): CustomerDashboardPage(), toneFor(), CustomerMembershipPage(), IssuedCredentials(), toneFor(), CustomerPaymentsPage(), CustomerPointsPage(), readClaimFromUrl() (+47 more)
 
 ### Community 33 - "Commerce scheme economics (commerce.ts)"
-Cohesion: 0.07
-Nodes (42): productDownPaymentExceedsPrice(), deriveSpotCashState(), divideSchedule(), PaymentLike, ProductRejection, resolveSchemeEconomics(), SCHEME_DEFAULTS, SchemeEconomics (+34 more)
+Cohesion: 0.06
+Nodes (54): categoryIsActive(), downlineOf(), handler(), idempotentVerifyResult(), listQuerySchema, loadSaleView(), moneyBySale(), parseListQuery() (+46 more)
 
 ### Community 34 - "Button"
-Cohesion: 0.07
-Nodes (75): AdminMfaPage(), ActivateDialog(), MarkPaidDialog(), QualifyDialog(), AdjustDialog(), BusinessPointsPage(), message(), ResolvedMember (+67 more)
+Cohesion: 0.05
+Nodes (116): AdminMfaPage(), ActivateDialog(), MarkPaidDialog(), QualifyDialog(), VerifyDialog(), CommissionSettingsPage(), initialForm(), CustomerRecordActions() (+108 more)
 
 ### Community 35 - "Phase 2 business schema indexes"
 Cohesion: 0.06
@@ -501,59 +515,59 @@ Nodes (44): card_plans_active_sort_idx, card_sales_created_by_idx, card_sales_cu
 
 ### Community 36 - "Purchase flow contracts"
 Cohesion: 0.04
-Nodes (51): calls, clients, mount(), QAUser, typedField(), financeQueueItemSchema, CustomerApplicationStatus, customerApplicationStatusSchema (+43 more)
+Nodes (66): createReservationAgreement(), decideReservationAgreement(), finalizeReservationPurchase(), patch(), post(), recordReservationPayment(), reopenReservationAgreement(), submitReservationAgreement() (+58 more)
 
 ### Community 37 - "members.ts"
-Cohesion: 0.14
-Nodes (21): aaNumberTaken(), accreditationFailure(), accreditationNumber(), fieldDetails(), handler(), MEMBER_ROLES, memberRows(), ostFullName() (+13 more)
+Cohesion: 0.08
+Nodes (46): buildExportRows(), customerDeleteBlockers(), customerHasActiveMembership(), fullName(), handler(), hasReference(), listQuerySchema, parseListQuery() (+38 more)
 
 ### Community 38 - "Marketing login and sections"
-Cohesion: 0.20
-Nodes (35): HomeLoginPage(), ExperienceHero(), ALMSection(), BrandIntro(), CtaBanner(), DevelopmentJourney(), chipTone, Ecosystem() (+27 more)
+Cohesion: 0.19
+Nodes (37): HomeLoginPage(), ExperienceHero(), ALMSection(), BrandIntro(), CtaBanner(), DevelopmentJourney(), chipTone, Ecosystem() (+29 more)
 
-### Community 39 - "Dev server and migration scripts"
-Cohesion: 0.04
-Nodes (33): MIGRATION, sql, chainSql, ../_handlers/c.js, MIGRATION, sql, benefitsSql, commissionSql (+25 more)
+### Community 39 - "ref_vitest"
+Cohesion: 0.02
+Nodes (75): ROOT, Run, SCRIPT, Envelope, SERVER_FILE, MIGRATION, sql, chainSql (+67 more)
 
-### Community 40 - "customer-activation.ts"
-Cohesion: 0.38
-Nodes (9): findAuthUserByEmail(), handler(), hashOnboardingToken(), normalizeEmail(), readDisplayName(), recoverExistingAuthUser(), REFUSALS, splitCode() (+1 more)
+### Community 40 - "isoOrNull"
+Cohesion: 0.11
+Nodes (32): rotationRpc(), findAuthUserByEmail(), handler(), hashOnboardingToken(), normalizeEmail(), readDisplayName(), recoverExistingAuthUser(), REFUSALS (+24 more)
 
 ### Community 41 - "Documents API handlers"
-Cohesion: 0.07
-Nodes (52): currentDocumentsForSubjects(), currentIdForSubject(), DocRow, extractedOf(), handler(), inScope(), MODULE_FOR_SUBJECT, ownedSubjects() (+44 more)
+Cohesion: 0.10
+Nodes (43): currentDocumentsForSubjects(), currentIdForSubject(), DocRow, extractedOf(), handler(), inScope(), MODULE_FOR_SUBJECT, ownedSubjects() (+35 more)
 
 ### Community 42 - "Reports contracts and dashboard"
-Cohesion: 0.06
-Nodes (44): REPORT_DEFS, ReportColumn, ReportDef, viewAll, AfHomesAction, afHomesActionSchema, afHomesDashboardPointSchema, afHomesDepartmentSchema (+36 more)
+Cohesion: 0.05
+Nodes (46): EXTRA_GATED_ROUTES, REPORT_DEFS, ReportColumn, ReportDef, viewAll, AfHomesAction, afHomesActionSchema, AfHomesDashboard (+38 more)
 
-### Community 43 - "MembershipCardPrintPage.tsx"
-Cohesion: 0.21
-Nodes (11): ClaimQr(), claimUrl(), IssuedClaim, describePrintLoadError(), MembershipCardPrintPage(), PrintCodes, getMembershipCard(), markMembershipPrinted() (+3 more)
+### Community 43 - "BusinessPointsPage.tsx"
+Cohesion: 0.12
+Nodes (23): AdjustDialog(), BusinessPointsPage(), message(), ResolvedMember, ReverseDialog(), ClaimQr(), claimUrl(), IssuedClaim (+15 more)
 
 ### Community 44 - "redemptions.spec.ts"
-Cohesion: 0.06
-Nodes (30): byGoldEconomics(), call(), holder, install(), linkCustomer(), seedMembership(), seedPayment(), State (+22 more)
+Cohesion: 0.13
+Nodes (14): ago(), ahead(), baseTables(), call(), holder, install(), PERMISSIONS_ALL, PERMISSIONS_NONE (+6 more)
 
 ### Community 45 - "web/src/app/App.tsx"
-Cohesion: 0.10
-Nodes (30): AboutPage, ALMJapaneseRestaurantPage, App(), CmsPage, CompliancePage, ContactPage, ExperienceDetailPage, ExperiencesPage (+22 more)
+Cohesion: 0.09
+Nodes (29): AboutPage, ALMJapaneseRestaurantPage, App(), CmsPage, CompliancePage, ContactPage, ExperienceDetailPage, ExperiencesPage (+21 more)
 
 ### Community 46 - "Authorization regression tests"
-Cohesion: 0.08
-Nodes (34): GUARDED, Panel(), renderPath(), user(), ADMIN_NAV_ITEMS, AdminNavItem, breadcrumbItems(), canAccessNavTarget() (+26 more)
+Cohesion: 0.10
+Nodes (28): ADMIN_NAV_ITEMS, AdminNavItem, breadcrumbItems(), canAccessNavTarget(), canViewModule(), canViewReports(), covers(), findNavItem() (+20 more)
 
 ### Community 47 - "services-applications.ts"
-Cohesion: 0.12
-Nodes (19): base, createCustomerApplication(), decideCustomerApplication(), generateOfficialFormPdf(), patch(), post(), previewOfficialFormImport(), reopenCustomerApplication() (+11 more)
+Cohesion: 0.18
+Nodes (15): createCustomerApplication(), decideCustomerApplication(), GeneratedFormFile, generatedFormFileSchema, generateOfficialFormPdf(), patch(), post(), previewOfficialFormImport() (+7 more)
 
 ### Community 48 - "Contact form and inquiries"
-Cohesion: 0.08
-Nodes (35): contactApi, hasInquiryBackend, InquiryRecord, InquiryStatus, readInquiries(), storeInquiry(), ContactForm(), Errors (+27 more)
+Cohesion: 0.10
+Nodes (32): contactApi, hasInquiryBackend, InquiryRecord, InquiryStatus, readInquiries(), storeInquiry(), ContactForm(), Errors (+24 more)
 
 ### Community 49 - "Cutover and qualification rules"
-Cohesion: 0.08
-Nodes (51): BR-CUT - 27 September 2026 Cutover, No Grandfathering, BR-CUT-01 - New terms apply in full to both companies; sub-threshold sales never count, BR-CUT-02 - Already-credited Closed Deals protected by contracts; nothing else carried over, BR-OPS - Go-Live Prerequisites and Operational Controls, BR-OPS-02 - Placeholder passwords changed; VBA locked; three distinct secrets, BR-OPS-03 - Install Rev E / Apps Script v2.1 only; delete older copies, BR-OPS-04 - First-live-month run: backups, hand-checks, pre-5th approvals, BR-QLF - Closed-Deal Qualification, Thresholds, Freezing, Reversals, Payout Stages (+43 more)
+Cohesion: 0.10
+Nodes (39): BR-CUT - 27 September 2026 Cutover, No Grandfathering, BR-CUT-01 - New terms apply in full to both companies; sub-threshold sales never count, BR-CUT-02 - Already-credited Closed Deals protected by contracts; nothing else carried over, BR-QLF - Closed-Deal Qualification, Thresholds, Freezing, Reversals, Payout Stages, BR-QLF-01 - Qualification is automatic on counted APPROVED collections, BR-QLF-02 - Thresholds: AFhomes VIP 25%, AFhomes IGP 10%, JA&D IGP 10%, BR-QLF-03 - Qualification date freezes; threshold changes bind new qualifications only, BR-QLF-04 - Refund removes qualification outright; replacement qualifies from zero (+31 more)
 
 ### Community 50 - "Local postgres harness"
 Cohesion: 0.07
@@ -563,61 +577,61 @@ Nodes (16): pointApprovalSchema, DATA_DIR, listMigrations(), MIGRATIONS_DIR, POR
 Cohesion: 0.06
 Nodes (30): audit_events_actor_id_idx, card_plans_category_id_idx, card_sales_customer_id_idx, card_sales_plan_id_idx, card_sales_seller_ost_id_idx, card_sales_seller_staff_id_idx, commissions_ost_id_idx, final_qualifications_reviewed_by_idx (+22 more)
 
-### Community 52 - "Auth recovery specs and mocks"
-Cohesion: 0.03
-Nodes (60): renderLayout(), USER, showsFilterBar(), superAdmin, gatedUser, passwordMock, ungatedUser, authMock (+52 more)
+### Community 52 - "renderWithProviders"
+Cohesion: 0.06
+Nodes (30): showsFilterBar(), authMock, renderForgot(), renderReset(), supabaseMock, prefill, show(), calls (+22 more)
 
 ### Community 53 - "Button"
-Cohesion: 0.09
-Nodes (39): AdminActivateAccountPage(), InviteFragment, Phase, readInviteFragment(), removeCallbackCredentials(), AdminForgotPasswordPage(), StaffForgotPasswordPage(), AdminResetPasswordPage() (+31 more)
+Cohesion: 0.13
+Nodes (26): AdminForgotPasswordPage(), StaffForgotPasswordPage(), authMock, renderForgot(), renderReset(), supabaseMock, CustomerActivatePage(), CustomerForgotPasswordPage() (+18 more)
 
 ### Community 54 - "OpenCode Continuation: AF Homes IST/OST Bulk Import/Export Release — Stage 2 Blocked on OST Portal Enforcement"
 Cohesion: 0.07
 Nodes (26): Approved cutover executed - 2026-10-18, Commit-scope review - 2026-10-18, Compatibility Matrix (Tested), Compatible Preview verified and maintenance resumed - 2026-10-18, Current State Summary, Cutover and recovery boundary, Deployment Sequence (Stage 2), Do Not (+18 more)
 
 ### Community 55 - "admin/src/lib/api/client.ts"
-Cohesion: 0.13
-Nodes (26): getCustomerApplicationsPage(), getCustomersPage(), getCustomerApplicationsPage(), getFinanceQueue(), getReservationAgreementsPage(), getReservationAgreementsPage(), getDocumentSummaries(), ApiRequestInit (+18 more)
+Cohesion: 0.08
+Nodes (36): AdminActivateAccountPage(), InviteFragment, Phase, readInviteFragment(), removeCallbackCredentials(), getCustomerApplicationsPage(), getCustomersPage(), getFinanceQueue() (+28 more)
 
 ### Community 56 - "renderWithProviders"
 Cohesion: 0.04
-Nodes (31): bodies, CUSTOMER, installRoutes(), LEDGER, LEGACY_SUMMARY, ok(), render(), RouteHandler (+23 more)
+Nodes (40): bodies, CUSTOMER, installRoutes(), LEDGER, LEGACY_SUMMARY, ok(), render(), RouteHandler (+32 more)
 
 ### Community 57 - "Root tooling dependencies"
 Cohesion: 0.05
 Nodes (40): description, devDependencies, pg, prettier, @supabase/supabase-js, tsx, turbo, @types/node (+32 more)
 
 ### Community 58 - "Dashboard metrics and charts"
-Cohesion: 0.08
-Nodes (37): canViewModule(), AfHomesDashboardPage(), AfHomesTrendChart, cls(), dashboardMetrics(), filterSalesMetrics(), Metric, METRIC_PRESENTATION (+29 more)
+Cohesion: 0.10
+Nodes (34): AfHomesDashboardPage(), AfHomesTrendChart, cls(), dashboardMetrics(), filterSalesMetrics(), Metric, METRIC_PRESENTATION, MetricCards() (+26 more)
 
 ### Community 59 - "protectedRequest"
-Cohesion: 0.05
-Nodes (80): show(), createAfHomesDepartment(), createAfHomesRole(), deactivateAfHomesStaff(), deleteAfHomesDepartment(), deleteAfHomesRole(), getAfHomesDashboard(), purgeTestAfHomesStaff() (+72 more)
+Cohesion: 0.04
+Nodes (94): GATED, install(), ROLE_ROW, STAFF_ROW, SUPER, EXECUTIVE, LEGACY, show() (+86 more)
 
-### Community 60 - "MembersPage.spec.tsx"
-Cohesion: 0.18
-Nodes (9): chooseFromList(), DETAIL, fillAddress(), OST_ROW, ROW, SALES_DEPT, showList(), SSM_UPLINE (+1 more)
+### Community 60 - "network-members/services.ts"
+Cohesion: 0.09
+Nodes (28): chooseFromList(), DETAIL, fillAddress(), OST_ROW, ROW, SALES_DEPT, showList(), SSM_UPLINE (+20 more)
 
-### Community 61 - "ost.spec.tsx"
-Cohesion: 0.10
-Nodes (19): ADMIN, APP, CODE, CURRENT_APPLICANT, MEMBER, mockedApprove, mockedCreateCode, mockedGetCodes (+11 more)
+### Community 61 - "OstAccreditationPages.tsx"
+Cohesion: 0.07
+Nodes (53): ACCEPTED_MIME, MAX_BYTES, ADMIN, APP, CODE, CURRENT_APPLICANT, MEMBER, mockedApprove (+45 more)
 
 ### Community 62 - "Marketing layout components"
-Cohesion: 0.08
-Nodes (27): Footer(), FooterGroup(), FooterGroupProps, ChevronDown(), siteConfig, docsResponse(), freshCms(), mockApi() (+19 more)
-
-### Community 63 - "Memberships API and directories"
 Cohesion: 0.09
-Nodes (37): buildExportRows(), authorizeCardStaff(), categoryDirectory(), CategoryInfo, handler(), issuerDirectory(), IssuerInfo, saleSchemeDirectory() (+29 more)
+Nodes (33): Footer(), FooterGroup(), FooterGroupProps, ContainerProps, ContainerSize, widthBySize, ChevronDown(), PageHeader() (+25 more)
 
-### Community 64 - "afhomes/services.ts"
-Cohesion: 0.07
-Nodes (30): GATED, install(), ROLE_ROW, STAFF_ROW, SUPER, AfHomesAuditEvent, auditEventSchema, changeAfHomesStaffPassword() (+22 more)
-
-### Community 65 - "psgc-cloud-provider.ts"
+### Community 63 - "redemptions.ts"
 Cohesion: 0.15
-Nodes (18): AddressProviderError, byLocality, key(), provinceAlias, provinceKey(), resolvePostalCode(), rows, rowSchema (+10 more)
+Nodes (19): displayNameFor(), displayNameOf(), handler(), historyQuery(), toItem(), toRedemption(), authoritativeBalance(), CARD_QR_PREFIX (+11 more)
+
+### Community 64 - "OstOfficialFields.tsx"
+Cohesion: 0.09
+Nodes (19): DateFieldProps, FileFieldProps, FieldError(), FieldErrorProps, FormField(), FormFieldProps, Name(), NormalizedInput() (+11 more)
+
+### Community 65 - "schemas/customer-import.ts"
+Cohesion: 0.07
+Nodes (31): withCustomerCategories(), compareMoney(), CUSTOMER_CATEGORY_LABELS, CUSTOMER_EXPORT_COLUMNS, CustomerCategory, customerCategorySchema, CustomerExportRow, CustomerImportColumn (+23 more)
 
 ### Community 66 - "OST accreditation workflow schema"
 Cohesion: 0.11
@@ -627,21 +641,21 @@ Nodes (16): ost_one_current_term, ost_one_reviewable_renewal, private.ost_accred
 Cohesion: 0.06
 Nodes (35): description, @afhomes/config, @afhomes/contracts, @afhomes/shared, @afhomes/ui, eslint, eslint-config-prettier, @eslint/js (+27 more)
 
-### Community 68 - "services-reservations.ts"
-Cohesion: 0.12
-Nodes (22): GeneratedFormFile, generatedFormFileSchema, createReservationAgreement(), decideReservationAgreement(), finalizeReservationPurchase(), patch(), post(), recordReservationPayment() (+14 more)
+### Community 68 - "CustomerDetailPage.spec.tsx"
+Cohesion: 0.07
+Nodes (22): IMPORTER, STAFF, SUPER, RECORD, renderDetail(), STAFF, VIEWER, FULLSTAFF (+14 more)
 
 ### Community 69 - "Reservation status and genealogy"
 Cohesion: 0.06
-Nodes (37): HINT, ICON, LABEL, STAGES, genealogyNodeSchema, genealogyStatusSchema, GenealogySummary, genealogySummarySchema (+29 more)
+Nodes (33): HINT, ICON, LABEL, STAGES, canTransition(), canTransitionCommission(), canTransitionCustomer(), canTransitionCustomerApplication() (+25 more)
 
 ### Community 70 - "API client and errors"
 Cohesion: 0.12
-Nodes (19): getPointApprovals(), useOstAddress(), parseBody(), rawRequest(), requestBody(), requestList(), auth, schema (+11 more)
+Nodes (19): OstResetPasswordPage(), Phase, parseBody(), rawRequest(), requestBody(), requestList(), auth, schema (+11 more)
 
 ### Community 71 - "schemas/sales.ts"
 Cohesion: 0.08
-Nodes (33): CardPlanVisibility, createCardCategory(), createCardProduct(), patch(), post(), updateCardCategory(), updateCardProduct(), saleStatusSchema (+25 more)
+Nodes (32): CardPlanVisibility, createCardCategory(), createCardProduct(), patch(), post(), updateCardCategory(), updateCardProduct(), saleStatusSchema (+24 more)
 
 ### Community 72 - "Web app tooling"
 Cohesion: 0.06
@@ -649,99 +663,99 @@ Nodes (34): description, @afhomes/config, @afhomes/contracts, @afhomes/shared, @
 
 ### Community 73 - "Dual engagements and periods"
 Cohesion: 0.15
-Nodes (44): BR-ACM - Assumed Collection Credit, BR-ACM-01 - Assumed credit rates 40% VIP / 20% IGP, Director-adjustable, BR-ACM-02 - Credit reaches BA, PA, PB, quota measure and below-target review, BR-ACM-03 - Credit never touches Override; seller keeps DSC/DRI, BR-ACM-04 - Attribution automatic via current upline chain; vacancy rolls upward, BR-DUAL - Dual Engagements, Transfers, Chain Integrity, Back-Dated Dates, BR-DUAL-01 - Dual engagement is two accreditation rows with link column and three warnings, BR-DUAL-02 - BROKEN CHAIN warns, never blocks; sub-team moves change every upline column (+36 more)
+Nodes (43): BR-ACM - Assumed Collection Credit, BR-ACM-01 - Assumed credit rates 40% VIP / 20% IGP, Director-adjustable, BR-ACM-02 - Credit reaches BA, PA, PB, quota measure and below-target review, BR-ACM-03 - Credit never touches Override; seller keeps DSC/DRI, BR-ACM-04 - Attribution automatic via current upline chain; vacancy rolls upward, BR-DUAL - Dual Engagements, Transfers, Chain Integrity, Back-Dated Dates, BR-DUAL-01 - Dual engagement is two accreditation rows with link column and three warnings, BR-DUAL-02 - BROKEN CHAIN warns, never blocks; sub-team moves change every upline column (+35 more)
 
 ### Community 74 - "DB testing package config"
-Cohesion: 0.06
-Nodes (28): description, devDependencies, embedded-postgres, name, private, scripts, test:db:harness, test:db:local (+20 more)
+Cohesion: 0.09
+Nodes (17): description, devDependencies, embedded-postgres, name, private, scripts, test:db:harness, test:db:local (+9 more)
 
 ### Community 75 - "customer-portal.spec.ts"
 Cohesion: 0.15
 Nodes (17): agoHours(), baseTables(), callActivate(), callPortal(), callPortalAnonymous(), holder, inHours(), install() (+9 more)
 
-### Community 76 - "customer/services.ts"
-Cohesion: 0.04
-Nodes (58): HistoryQuery, post(), redeemPoints(), RedemptionItemVisibility, decidePointApproval(), getCustomerPointsLedger(), ListResponse, listResponseSchema() (+50 more)
+### Community 76 - "redemption.ts"
+Cohesion: 0.08
+Nodes (29): HistoryQuery, post(), redeemPoints(), RedemptionItemVisibility, CustomerPointsEntry, membershipStatusSchema, CreateRedemptionItemRequest, createRedemptionItemRequestSchema (+21 more)
 
 ### Community 77 - "Restaurant and compliance images"
 Cohesion: 0.10
 Nodes (33): ALM Japanese Restaurant, ALM Japanese Restaurant Teppan Banner, ALM Japanese Restaurant Flyer (Teppan Show Cooking), Reservations-Only, No Walk-Ins Policy, Teppan Show Cooking, Compliance Milestones Overview, LGU of Calauan, Laguna, Phase 1: Land Reclassification (LGU/Province, Aug 2024 - Mar 2025) (+25 more)
 
-### Community 78 - "ost-import.ts"
-Cohesion: 0.31
-Nodes (8): MAX_IMPORT_BYTES, parseCsvMatrix(), readXlsx(), OST_IMPORT_COLUMNS, ostImportSourceSchema, parseOstImportRow(), readOstImport(), fields
+### Community 78 - "report-export.ts"
+Cohesion: 0.10
+Nodes (24): sendExport(), MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, membershipTemplateCsv(), OST_IMPORT_COLUMNS, ostImportSourceSchema, parseOstImportRow(), readOstImport() (+16 more)
 
-### Community 79 - "admin/src/features/ost/services.ts"
-Cohesion: 0.23
-Nodes (16): approveAccreditation(), approveOstApplication(), confirmAccreditationSignatures(), confirmOstImport(), createReferralCode(), decideRenewal(), endorseAccreditation(), parseOstImport() (+8 more)
-
-### Community 80 - "Portal login pages and routing"
-Cohesion: 0.19
-Nodes (17): AdminLoginPage(), PortalLoginPage(), Refusal(), StaffLoginPage(), AUTH_PATHS, decideForPortal(), entryPortal, loginPathFor() (+9 more)
-
-### Community 81 - "official-forms-fields.tsx"
-Cohesion: 0.09
-Nodes (26): nodes, APPLICATION_STATUS_TONES, businessText(), CHAIN_LEVELS, chainOptions(), choiceOptions(), DateField(), emptyHolder() (+18 more)
-
-### Community 82 - "_handlers/ost.ts"
+### Community 79 - "phase29-analytics.spec.ts"
 Cohesion: 0.11
-Nodes (32): handler(), rpcFailure(), uuid, applicantName(), CodeCheck, handler(), newReferralCode(), ReferralCodeIssuer (+24 more)
+Nodes (20): A, B, edge(), future, holder, inMonth, install(), monthFrom (+12 more)
+
+### Community 80 - "pg"
+Cohesion: 0.12
+Nodes (12): pg, Check, runActivationIntegrationChecks(), World, Check, runPurchaseConcurrencyChecks(), World, Check (+4 more)
+
+### Community 81 - "official-forms-fields.spec.tsx"
+Cohesion: 0.27
+Nodes (5): emptyHolder(), Holder(), Recommender(), render(), renderRecommender()
+
+### Community 82 - "ref_zod"
+Cohesion: 0.07
+Nodes (56): handler(), Node, SellerRole, sellerRoles, handler(), rpcFailure(), uuid, applicantName() (+48 more)
 
 ### Community 83 - "StaffEntryPage.tsx"
-Cohesion: 0.15
-Nodes (17): env, AdminEntryPage(), Refusal(), StaffEntryPage(), StaffLoginEntryPage(), env, adminOrigin(), decideStaffEntry() (+9 more)
+Cohesion: 0.09
+Nodes (33): AdminLoginPage(), PortalLoginPage(), Refusal(), StaffLoginPage(), env, AUTH_PATHS, decideForPortal(), entryPortal (+25 more)
 
-### Community 84 - "schemas/ost-accreditation.ts"
-Cohesion: 0.11
-Nodes (25): OstRenewalPage(), approveOstAccreditationSchema, date, ManualOstAccreditation, manualOstAccreditationSchema, optionalText, ostAccreditationRecordsSchema, ostAnnualExpiry() (+17 more)
+### Community 84 - "schemas/ost.ts"
+Cohesion: 0.07
+Nodes (32): submitOstApplication(), OstMe, ostMeSchema, customerStatusSchema, ostMutationResultSchema, SubmitOstAccreditation, buildOstRegistrationUrl(), canTransitionOstApplication() (+24 more)
 
 ### Community 85 - "fail"
 Cohesion: 0.08
-Nodes (85): address(), failProvider(), provider, applyCategoryFilters(), CategoryVisibility, handler(), planCounts(), toCategory() (+77 more)
+Nodes (65): address(), failProvider(), provider, applyCategoryFilters(), CategoryVisibility, handler(), planCounts(), toCategory() (+57 more)
 
-### Community 86 - "_handlers/official-forms.ts"
+### Community 86 - "customer-imports.ts"
+Cohesion: 0.07
+Nodes (51): buildCompanyExportRows(), buildContext(), commitCreateRow(), ExportFilters, exportQuerySchema, handler(), importRows(), parseSchema (+43 more)
+
+### Community 87 - "ui/Button.tsx"
+Cohesion: 0.12
+Nodes (13): Accordion(), AccordionItemData, AccordionProps, ButtonAsAnchor, ButtonAsButton, ButtonAsLink, ButtonProps, CommonProps (+5 more)
+
+### Community 88 - "Business Rules Index - AF Homes Ecofarm v2"
 Cohesion: 0.11
-Nodes (32): agreementFinanceSummary(), APPLICABLE_DECISION_AUDIT, applicationFields(), authorizeAgreementMutation(), documentModule(), getAgreement(), getApplication(), handler() (+24 more)
-
-### Community 87 - "Experiences.tsx"
-Cohesion: 0.13
-Nodes (22): ACCENT_HAIRLINE, ExperienceHeroProps, BadgeProps, badgeTones, StatusBadge(), StatusBadgeProps, statusStyles, ButtonAsAnchor (+14 more)
-
-### Community 88 - "Controls and authorization rules"
-Cohesion: 0.21
-Nodes (19): BR-AUTH - Director-Controlled Figures, Per-Person Rates, Logging, BR-AUTH-01 - Every pay-governing figure Director-only, range-checked, warned, logged, BR-AUTH-02 - Per-person rates resolve from standard; deviation is logged Director act returning row to PENDING, BR-CTL - Approval Locks, Corrections, Close Month, Director Actions, Audit Log, BR-CTL-01 - Supervisor approval stamps account+time and locks the whole row, BR-CTL-02 - Locked-row correction needs Director unlock, clerk correction, re-approve, BR-CTL-03 - Close Month writes values, refuses repeats, warns on unapproved, BR-CTL-04 - Eleven Director actions under one password per action, all logged (+11 more)
+Nodes (43): BR-AUTH - Director-Controlled Figures, Per-Person Rates, Logging, BR-AUTH-01 - Every pay-governing figure Director-only, range-checked, warned, logged, BR-AUTH-02 - Per-person rates resolve from standard; deviation is logged Director act returning row to PENDING, BR-CTL - Approval Locks, Corrections, Close Month, Director Actions, Audit Log, BR-CTL-01 - Supervisor approval stamps account+time and locks the whole row, BR-CTL-02 - Locked-row correction needs Director unlock, clerk correction, re-approve, BR-CTL-03 - Close Month writes values, refuses repeats, warns on unapproved, BR-CTL-04 - Eleven Director actions under one password per action, all logged (+35 more)
 
 ### Community 89 - "Onboarding email over SMTP"
 Cohesion: 0.07
 Nodes (28): dependencies, @afhomes/contracts, @afhomes/shared, nodemailer, saxes, @supabase/auth-js, @supabase/supabase-js, zod (+20 more)
 
-### Community 90 - "Seo"
-Cohesion: 0.16
-Nodes (19): CmsHeroMedia(), useCmsHeroMedia(), ContainerProps, ContainerSize, widthBySize, PageHeader(), PlaceholderNotice(), absoluteUrl() (+11 more)
+### Community 90 - "compareMoney"
+Cohesion: 0.30
+Nodes (12): productDownPaymentExceedsPrice(), formatPoints(), settlementStatus(), addMoney(), compareMoney(), divideMoneyExact(), fromCents(), isExactDecimal() (+4 more)
 
 ### Community 92 - "_lib/member-workbook.ts"
-Cohesion: 0.10
-Nodes (45): uploadFields(), workbookDate(), readWorkbookParts(), companyMemberWorkbook(), decode(), encode(), escape(), memberHeadLabel() (+37 more)
+Cohesion: 0.11
+Nodes (43): uploadFields(), workbookDate(), readWorkbookParts(), companyMemberWorkbook(), decode(), encode(), escape(), memberHeadLabel() (+35 more)
 
 ### Community 93 - "services-customers.ts"
 Cohesion: 0.10
 Nodes (26): anonymizeCustomer(), cancelCustomerImport(), confirmCustomerImport(), createCustomer(), customerAnonymizationSchema, customerDeactivationSchema, customerDeletionSchema, deactivateCustomer() (+18 more)
 
 ### Community 94 - "Marketing cards and stories"
-Cohesion: 0.25
-Nodes (17): StoryCard(), TierCard(), tierStyle, VipTeaser(), Badge(), EmptyState(), ErrorState(), LoadingState() (+9 more)
+Cohesion: 0.12
+Nodes (28): StoryCard(), TierCard(), tierStyle, VipTeaser(), Badge(), BadgeProps, badgeTones, StatusBadgeProps (+20 more)
 
-### Community 95 - "_lib/customer-workbook.ts"
+### Community 95 - "address-provider.ts"
 Cohesion: 0.07
-Nodes (38): ADDRESS_CACHE_TTL_MS, AddressHierarchyCheck, AddressHierarchyRejection, AddressProvider, AddressProviderErrorCode, AddressProviderLevel, CachedAddressProvider, createCachedAddressProvider() (+30 more)
+Nodes (43): ADDRESS_CACHE_TTL_MS, AddressHierarchyCheck, AddressHierarchyRejection, AddressProvider, AddressProviderError, AddressProviderErrorCode, AddressProviderLevel, CachedAddressProvider (+35 more)
 
 ### Community 96 - "Import security and workbooks"
-Cohesion: 0.07
-Nodes (24): withCustomerCategories(), MAX_SHEET_FETCH_BYTES, context, crc(), fields, sheet(), workbook(), children() (+16 more)
+Cohesion: 0.11
+Nodes (20): ImportContext, context, crc(), fields, workbook(), children(), descendants(), Node (+12 more)
 
 ### Community 97 - "UI package dependencies"
 Cohesion: 0.08
-Nodes (24): description, @afhomes/contracts, jsdom, jsqr, react, react-dom, react-router, sweetalert2 (+16 more)
+Nodes (23): description, @afhomes/contracts, jsdom, jsqr, react, react-dom, react-router, sweetalert2 (+15 more)
 
 ### Community 98 - "Phase 1 foundation schema"
 Cohesion: 0.22
@@ -749,7 +763,7 @@ Nodes (23): customers_email_unique, private.has_permission(), public.audit_event
 
 ### Community 99 - "phase2World"
 Cohesion: 0.03
-Nodes (114): activeSale(), call(), daysAgo(), holder, install(), call(), handlers, holder (+106 more)
+Nodes (135): activeSale(), call(), daysAgo(), holder, install(), call(), holder, install() (+127 more)
 
 ### Community 100 - "IST / OST company workbook implementation — local review packet"
 Cohesion: 0.09
@@ -763,9 +777,9 @@ Nodes (8): ost_renewal_accreditation_sync, ost_renewal_history_guard, private.as
 Cohesion: 0.10
 Nodes (11): AGENTS.md — AF Homes Codebase Authority, Delivered Phase History (Phases 1-5 and later families), AF Homes Platform Architecture (SPAs, Vercel Function, Supabase), Invite-Based Super Admin Bootstrap, Single Vercel Function Deployment, AF Homes Ecofarm README, Root Command Catalog, Monorepo Layout (+3 more)
 
-### Community 103 - "phase29-analytics.spec.ts"
-Cohesion: 0.04
-Nodes (59): call(), holder, records, call(), holder, install(), getDetail(), getHistory() (+51 more)
+### Community 103 - "supabase-fake.ts"
+Cohesion: 0.05
+Nodes (35): call(), holder, records, holder, VALID_CUSTOMER, getDetail(), getHistory(), getReport() (+27 more)
 
 ### Community 104 - "Points API tests and RPCs"
 Cohesion: 0.10
@@ -775,9 +789,9 @@ Nodes (16): ADULT_RULE, ago(), ALL, baseTables(), call(), CLAIM_RPC(), Grant, ho
 Cohesion: 0.14
 Nodes (11): card_sales_origin_idx, customer_import_job_lifecycle, customer_import_jobs_status_idx, customer_import_rows_job_idx, private.next_membership_number(), private.validate_import_job_lifecycle(), public.customer_directory(), public.customer_import_jobs (+3 more)
 
-### Community 106 - "customer-portal.spec.tsx"
-Cohesion: 0.12
-Nodes (14): CUSTOMER, installRoutes(), LEDGER, MEMBERSHIP, ok(), PAYMENTS, POINTS, POSITION (+6 more)
+### Community 106 - "phase2-migration.spec.ts"
+Cohesion: 0.14
+Nodes (12): allCode, call(), handlers, holder, install(), MATRIX, MIGRATIONS, rls (+4 more)
 
 ### Community 107 - "Supabase cost-control plans"
 Cohesion: 0.11
@@ -811,21 +825,21 @@ Nodes (7): customer_application_holder_tier, customer_application_holders_name_i
 Cohesion: 0.16
 Nodes (7): get(), holder, install(), iso(), now, State, tables()
 
-### Community 115 - "Dev server and migration scripts"
-Cohesion: 0.12
-Nodes (17): FILES, isGuard(), read(), readCode(), rel(), REPO, SCANNED_EXTENSIONS, SKIP_DIRS (+9 more)
+### Community 115 - "official-forms-transitions.spec.ts"
+Cohesion: 0.18
+Nodes (10): call(), draftApplication, draftHolderRow, holder, install(), installQueue(), installReservations(), PROPOSAL_HASH (+2 more)
 
-### Community 116 - "phase2-migration.spec.ts"
-Cohesion: 0.05
-Nodes (37): authDb(), BUSINESS_IDS_SQL, call(), holder, MIGRATIONS, State, allCode, call() (+29 more)
+### Community 116 - "_handlers/role-baseline.spec.ts"
+Cohesion: 0.14
+Nodes (19): baselineCode, baselineSql, baselineTables(), baselineTokens(), byKey(), call(), full(), holder (+11 more)
 
 ### Community 117 - "api/stories.ts"
-Cohesion: 0.24
-Nodes (9): apiClient, ApiError, isApiEnabled, request(), RequestOptions, storiesApi, vipApi, delay() (+1 more)
+Cohesion: 0.14
+Nodes (13): apiClient, ApiError, isApiEnabled, request(), RequestOptions, storiesApi, vipApi, StoryCardProps (+5 more)
 
 ### Community 118 - "post"
-Cohesion: 0.04
-Nodes (47): render(), services, controls, PURCHASE, applyPointsDiscount(), cancelPointPurchase(), commitPointDiscount(), completePurchase() (+39 more)
+Cohesion: 0.05
+Nodes (42): render(), services, CLAIM, { notifyConfirm, notifySuccess, grantedModules, api }, PURCHASE, applyPointsDiscount(), commitPointDiscount(), completePurchase() (+34 more)
 
 ### Community 119 - "Frontend lint tooling"
 Cohesion: 0.10
@@ -892,8 +906,8 @@ Cohesion: 0.24
 Nodes (17): bucketKey(), calendarWindow(), COMMISSION_STATUSES, currentNetworkContext(), currentTeam(), decimalCents(), handler(), inWindow() (+9 more)
 
 ### Community 135 - "purchase-documents.ts"
-Cohesion: 0.05
-Nodes (45): edges(), economics(), FORBIDDEN_FIELD_PATTERN, identity(), money(), PurchaseDocumentEvidence, purchaseDocumentPdf(), push() (+37 more)
+Cohesion: 0.06
+Nodes (31): edges(), 0. Authority order (read first, applies everywhere), 10. Stage 10 — Final handoff, 11. Stage 11 — Start-of-day / end-of-day procedures, 12. Task-type quick reference, 13. Known limitations of this file, 1. Stage 1 — Start of session, 2. Stage 2 — Task classification (+23 more)
 
 ### Community 136 - "Frontend test tooling deps"
 Cohesion: 0.11
@@ -908,16 +922,16 @@ Cohesion: 0.16
 Nodes (7): ost_renewal_history_guard, ost_term_history_guard, private.guard_ost_renewal_history(), private.guard_ost_term_history(), private.ost_applicant_snapshot(), public.ost_accreditation_records(), public.submit_ost_renewal()
 
 ### Community 140 - "GeographicAddressFields.tsx"
-Cohesion: 0.10
-Nodes (31): clearedBelow(), GeographicAddressFields(), GeographicAddressFieldsProps, postalOf(), shownAs(), Unverified(), getAddressBarangays(), getAddressLocalities() (+23 more)
+Cohesion: 0.33
+Nodes (10): clearedBelow(), GeographicAddressFields(), GeographicAddressFieldsProps, postalOf(), shownAs(), Unverified(), getAddressProvinces(), useBarangaysQuery() (+2 more)
 
 ### Community 141 - "AfHomesStaffDirectory.spec.tsx"
 Cohesion: 0.17
 Nodes (9): ADMIN, ADMIN_ROLE, ANA, BOSS, EMPLOYEE_ROLE, OST_MEMBER, OST_ROLE, SUPER_ROLE (+1 more)
 
 ### Community 142 - "Trend chart tests"
-Cohesion: 0.16
-Nodes (9): emptyReport(), g, getTrend, monthKey(), monthlyReport(), renderChart(), ResizeObserverStub, thisYear() (+1 more)
+Cohesion: 0.15
+Nodes (10): emptyReport(), g, getTrend, monthKey(), monthlyReport(), renderChart(), ResizeObserverStub, thisYear() (+2 more)
 
 ### Community 143 - "CardPlans.spec.tsx"
 Cohesion: 0.12
@@ -948,16 +962,16 @@ Cohesion: 0.20
 Nodes (9): check(), excluded, member(), migrate(), one(), root, selected, sql() (+1 more)
 
 ### Community 151 - "CustomerImportExportPage.tsx"
-Cohesion: 0.13
-Nodes (23): CustomerImportExportPage(), describeJobsLoadError(), downloadFile(), FeedbackTone, JOB_STATUS_TONES, JobCounts(), JobSummary(), renderRowErrors() (+15 more)
+Cohesion: 0.15
+Nodes (21): CustomerImportExportPage(), describeJobsLoadError(), downloadFile(), FeedbackTone, JOB_STATUS_TONES, JobCounts(), JobSummary(), renderRowErrors() (+13 more)
 
 ### Community 152 - "Release plan and allowlist"
 Cohesion: 0.16
 Nodes (14): Release Review: Applied Eight vs develop, Narrowed mutation_requests_operation_check Defect (SQLSTATE 23514), OST_ROLE_WORKFLOW_REQUIRED Blocker Reproduced on Develop Baseline, Explicit Commit Allowlist (no wildcards, no git add -A), Release Plan and Commit Allowlist (DRAFT), mutation_requests_operation_check 14-Operation Union, Six-Step Release Sequence with Three Separate Approvals, Scoped Approvals A (commit) / B (live apply) / B(c) backup / C (push+deploy) (+6 more)
 
 ### Community 153 - "Profile photo handling"
-Cohesion: 0.15
-Nodes (12): PROFILE_PHOTO_MAX_BYTES, PROFILE_PHOTO_SOURCE_MAX_BYTES, ProfilePhoto, profilePhotoInputSchema, profilePhotoSchema, compressProfilePhoto(), profilePhotoBase64(), drawImage (+4 more)
+Cohesion: 0.14
+Nodes (13): PROFILE_PHOTO_MAX_BYTES, PROFILE_PHOTO_SOURCE_MAX_BYTES, ProfilePhoto, profilePhotoInputSchema, profilePhotoSchema, compressProfilePhoto(), profilePhotoBase64(), drawImage (+5 more)
 
 ### Community 154 - "Purchase gate tests"
 Cohesion: 0.18
@@ -967,9 +981,9 @@ Nodes (12): check(), counts(), denied(), evidence, hash(), insert(), output, q()
 Cohesion: 0.20
 Nodes (5): business_id_aliases_active_idx, business_id_aliases_entity_idx, private.business_id_aliases, public.customer_directory(), public.search_customer_ids()
 
-### Community 156 - "role-access-review.spec.tsx"
-Cohesion: 0.25
-Nodes (6): ADMIN_VIEWER, DEPARTMENTS, mockDepartments(), OPERATIONAL_SLUGS, role, SUPER_ADMIN
+### Community 156 - "admin/src/test/utils.tsx"
+Cohesion: 0.06
+Nodes (26): renderLayout(), USER, GUARDED, Panel(), renderPath(), user(), gatedUser, passwordMock (+18 more)
 
 ### Community 157 - "Admin runtime deps"
 Cohesion: 0.14
@@ -1000,8 +1014,8 @@ Cohesion: 0.17
 Nodes (11): baseHolder, BATANGAS, CALAUAN, DAYAP, holder, LAGUNA, LEMERY, post() (+3 more)
 
 ### Community 165 - "masthead-harness.mjs"
-Cohesion: 0.25
-Nodes (5): AFTER, CURRENT, field(), root, SHARED
+Cohesion: 0.16
+Nodes (9): body(), holder, person(), save(), AFTER, CURRENT, field(), root (+1 more)
 
 ### Community 166 - "sanitize-member-template.ts"
 Cohesion: 0.12
@@ -1067,17 +1081,17 @@ Nodes (9): cms_document_versions_history, cms_page_sections_page_order, cms_page
 Cohesion: 0.29
 Nodes (11): cents(), Check, legacySaleFor(), money(), moneyAdd(), moneySubtract(), runReservationFinanceChecks(), Summary (+3 more)
 
-### Community 183 - "schemas/sale-team.ts"
-Cohesion: 0.24
-Nodes (8): aaNumberSchema, manageSaleTeamSchema, SaleTeamAccreditation, saleTeamAccreditationSchema, saleTeamHistoricalAccreditationSchema, saleTeamKindSchema, saleTeamLookupSchema, saleTeamSearchResultSchema
+### Community 183 - "test-security-remediation.mjs"
+Cohesion: 0.15
+Nodes (11): applied, baseline, client, ctl, dataDir, localUrl, portCheck, postgres (+3 more)
 
 ### Community 184 - "CMS API tests"
 Cohesion: 0.22
 Nodes (8): audits(), call(), db(), holder, install(), JPEG, store, tables()
 
-### Community 185 - "prerender.mjs"
-Cohesion: 0.17
-Nodes (7): baseUrl, defaults, globalSeo, indexPath, outputDirectory, pageSeo, routes
+### Community 185 - "reservation-finance-queue.spec.tsx"
+Cohesion: 0.22
+Nodes (7): FINANCE_USER, mockFetch(), ok(), RECORDED_PAYMENT, renderQueue(), requests, RESERVATION_ROW
 
 ### Community 186 - "apply-migrations.ts"
 Cohesion: 0.13
@@ -1087,13 +1101,17 @@ Nodes (16): httpsUrl(), resolveAdminUrl(), VercelUrlEnv, CHECK_ONLY, main(), ONL
 Cohesion: 0.18
 Nodes (10): compilerOptions, allowImportingTsExtensions, module, moduleResolution, noEmit, skipLibCheck, strict, target (+2 more)
 
-### Community 188 - "SessionUser"
-Cohesion: 0.06
-Nodes (25): admin, api, record, IMPORTER, STAFF, SUPER, FINANCE_USER, mockFetch() (+17 more)
+### Community 188 - "Memberships.spec.tsx"
+Cohesion: 0.10
+Nodes (21): CARD, HISTORY, MEMBER, mockedGetAudit, mockedGetMembershipCard, mockedGetMemberships, renderDetail(), STAFF (+13 more)
 
 ### Community 189 - "Storage control plan docs"
 Cohesion: 0.20
 Nodes (9): Bucket Limits Audit (afhomes-service-images has no explicit file_size_limit), Embed Renderer plus Submit-Approve-Publish Moderation, GB-Hours Cycle-Average Billing Nuance, Phase 4 Plan: File Storage Control plus Public URL Media, Profile Buckets (public + private) with 0.5 MB Stored-Size Pipeline, Public URL Media Model (platform + embed_id, https-only validators), Orphan/Dangling/Superseded Object Reconciliation Dry Run, sha256 Dedupe plus Same-Grant Retry Reuse (never cross-customer) (+1 more)
+
+### Community 190 - "Prompt"
+Cohesion: 0.22
+Nodes (8): Phase 1: Discovery, Phase 2: Understanding, Phase 3: Report, Prompt, Recommended agent/mode, Repository / focus (optional), Rules, STARTER / EXPLORATION — Familiarize Yourself With the Codebase
 
 ### Community 191 - "combobox-rank.ts"
 Cohesion: 0.31
@@ -1115,9 +1133,13 @@ Nodes (6): ost_genealogy_transfer_guard, ost_member_sponsor_guard, private.asser
 Cohesion: 0.22
 Nodes (4): ost_edge_authority_guard, ost_role_workflow_guard, private.guard_ost_edge_authority(), private.guard_ost_role_workflow()
 
-### Community 202 - "Documents admin tests"
-Cohesion: 0.20
-Nodes (5): DOCS_USER, render(), requests, Route, routes
+### Community 201 - "BUILD — Implement the Approved Plan"
+Cohesion: 0.22
+Nodes (8): Approved plan, Before finishing, BUILD — Implement the Approved Plan, Prompt, Recommended agent/mode, Requirements, Task, Verification
+
+### Community 202 - "Prompt"
+Cohesion: 0.22
+Nodes (8): After approval, Audit, Prompt, Proposal, Recommended agent/mode, Rules, Scope, UPDATE AGENTS.md — Audit Instructions Before Editing
 
 ### Community 203 - "Auth and MAU control plan docs"
 Cohesion: 0.20
@@ -1132,8 +1154,8 @@ Cohesion: 0.22
 Nodes (8): cities, corrections, localityNames, names(), provinces, rows, sections(), unique
 
 ### Community 206 - "Flexible commission rules"
-Cohesion: 0.27
-Nodes (7): BR-QLF-03 - Qualification date freezes; threshold changes bind new qualifications only, BR-RATE-03 - Anniversary rate reviews; only new sales carry new rates, commission_rules_lookup_idx, commission_rules_no_overlap, private.reject_overlapping_commission_rule(), public.commission_rules, public.resolve_commission_rule()
+Cohesion: 0.33
+Nodes (5): commission_rules_lookup_idx, commission_rules_no_overlap, private.reject_overlapping_commission_rule(), public.commission_rules, public.resolve_commission_rule()
 
 ### Community 211 - "Readonly auth recovery functions"
 Cohesion: 0.29
@@ -1144,12 +1166,16 @@ Cohesion: 0.29
 Nodes (3): public.afhomes_self_customer_profile(), public.afhomes_self_portals(), public.afhomes_self_session()
 
 ### Community 214 - "CustomerLoginForm.tsx"
-Cohesion: 0.10
-Nodes (30): CustomerGuard(), OstGuard(), Dashboard(), mount(), ost, Orphan(), CustomerDecision, CustomerLoginForm() (+22 more)
+Cohesion: 0.11
+Nodes (30): CustomerGuard(), CustomerShell(), NAV, OstGuard(), Dashboard(), mount(), ost, CustomerDecision (+22 more)
 
-### Community 216 - "dev-server.ts"
-Cohesion: 0.20
-Nodes (8): initialEnvKeys, parseBody(), port, REQUIRED_TABLES, routerFile, server, thisFile, toVercelHeaders()
+### Community 215 - "Prompt"
+Cohesion: 0.22
+Nodes (8): DOCUMENTATION AUDIT & UPDATE — README and Markdown Files, Phase 1: Audit, Phase 2: Proposal, Phase 3: Approved updates, Prompt, Recommended agent/mode, Report, Scope
+
+### Community 216 - "_lib/router.ts"
+Cohesion: 0.10
+Nodes (28): initialEnvKeys, parseBody(), port, REQUIRED_TABLES, routerFile, server, thisFile, toVercelHeaders() (+20 more)
 
 ### Community 217 - "Source audit and traceability"
 Cohesion: 0.36
@@ -1167,13 +1193,13 @@ Nodes (8): .opencode/**, permission, edit, references, skills, $schema, descript
 Cohesion: 0.28
 Nodes (7): cache, cli, diagnostic(), entries, get(), packageFile, run()
 
-### Community 222 - "phase3-migration.spec.ts"
-Cohesion: 0.33
-Nodes (6): code, functionBody(), header, MIGRATION, sql, stripComments()
+### Community 222 - "Prompt"
+Cohesion: 0.22
+Nodes (8): Method, Prompt, Recommended agent/mode, Report, Review areas where applicable, Rules, Scope, SECURITY REVIEW — Assess a Defined Scope
 
-### Community 224 - "BR-RATE-01 - DSC/DRI rates freeze at sale-number issue"
-Cohesion: 0.36
-Nodes (9): BR-RATE - DSC/DRI Rates, Freezing, Anniversaries, Early Performers, BR-RATE-01 - DSC/DRI rates freeze at sale-number issue, BR-RATE-02 - Zero rate never freezes (BUG-001 fix), BR-RATE-04 - Early-performer single-cell unlock: one rate cell, one sale, then re-approve, BR-RATE-06 - Invalid inputs generate NO sale number; duplicates prevented at freeze, X2 - Qualification + payout engine (Lane 4 cross-model build), A2 - AFhomes VIP/IGP Integrated Generator v10.2.0 workbook, B2 - AFhomes Generator v10.2.0 VBA Module RevE (+1 more)
+### Community 224 - "commissions.ts"
+Cohesion: 0.43
+Nodes (7): commissionInScope(), commissionRuleTargetExists(), handler(), listQuerySchema, resolveCommissionScope(), toCommission(), toRule()
 
 ### Community 225 - "Preview portal read functions"
 Cohesion: 0.25
@@ -1198,6 +1224,10 @@ Nodes (7): compilerOptions, lib, noEmit, types, extends, include, ../tsconfig.ba
 ### Community 232 - "phase27-documents.spec.ts"
 Cohesion: 0.10
 Nodes (22): call(), holder, install(), JPEG, Row, State, store, tables() (+14 more)
+
+### Community 233 - "useAddressHierarchy.spec.tsx"
+Cohesion: 0.29
+Nodes (7): BATANGAS, CALAUAN, DAYAP, LAGUNA, LEMERY, wrapper(), createTestQueryClient()
 
 ### Community 235 - "HTML entry documents"
 Cohesion: 0.29
@@ -1291,9 +1321,13 @@ Nodes (3): exports, ./base.css, ./tokens.css
 Cohesion: 0.67
 Nodes (3): scripts, test, typecheck
 
-### Community 370 - "phase32-security.spec.ts"
+### Community 284 - "PLAN — Investigate and Propose an Implementation Plan"
 Cohesion: 0.25
-Nodes (7): admin(), biz(), bodyOf(), dataOf(), holder, install(), State
+Nodes (7): Phase 1: Understand the task, Phase 2: Propose the plan, PLAN — Investigate and Propose an Implementation Plan, Prompt, Recommended agent/mode, Rules, Task
+
+### Community 370 - "Prompt"
+Cohesion: 0.25
+Nodes (7): Change under verification, Prompt, Recommended agent/mode, Report, Rules, Steps, TEST & VERIFY — Verify a Change
 
 ### Community 371 - "OpenCode continuation: finish IST/OST import release"
 Cohesion: 0.22
@@ -1307,6 +1341,34 @@ Nodes (5): authMock, installFetch(), jsonResponse(), renderActivation(), supabas
 Cohesion: 0.40
 Nodes (5): EMPLOYEE, envelope(), install(), openRedemptionsReport(), reportCalls
 
+### Community 375 - "CODE REVIEW — Review Changes Without Editing Them"
+Cohesion: 0.25
+Nodes (7): CODE REVIEW — Review Changes Without Editing Them, Prompt, Recommended agent/mode, Report format, Review priorities, Review target, Rules
+
+### Community 379 - "BUG INVESTIGATION — Find the Cause Before Fixing"
+Cohesion: 0.25
+Nodes (7): BUG INVESTIGATION — Find the Cause Before Fixing, Bug report, Investigation, Output, Prompt, Recommended agent/mode, Rules
+
+### Community 380 - "Prompt"
+Cohesion: 0.25
+Nodes (7): After approval, Before implementation, Final report, Prompt, Recommended agent/mode, REFACTOR — Improve Structure Without Changing Behavior, Target
+
+### Community 381 - "Prompt"
+Cohesion: 0.25
+Nodes (7): Prompt, Recommended agent/mode, Release / change, RELEASE READINESS — Assess Before Release or Deployment, Report, Review, Rules
+
+### Community 382 - "customer-onboarding-url.ts"
+Cohesion: 0.48
+Nodes (5): customerActivationUrl(), CustomerUrlEnv, loopback, resolveCustomerPortalOrigin(), safeOrigin()
+
+### Community 383 - "Workflow Guide — Reusable Development Process"
+Cohesion: 0.29
+Nodes (6): Agent/mode guidance, Approval gates, Goal, Universal rules, Workflow, Workflow Guide — Reusable Development Process
+
+### Community 385 - "TASK HANDOFF — Final Status Report"
+Cohesion: 0.50
+Nodes (3): Prompt, Task, TASK HANDOFF — Final Status Report
+
 ## Ambiguous Edges - Review These
 - `CF-02 Gate Mismatch` → `BR-QLF-01 Qualification Gate Mismatch`  [AMBIGUOUS]
   docs/system-audit/PHASE-1-BUSINESS-RULES-REPORT.md · relation: conceptually_related_to
@@ -1314,23 +1376,23 @@ Nodes (5): EMPLOYEE, envelope(), install(), openRedemptionsReport(), reportCalls
   apps/web/src/marketing/assets/uploads/smart-wellness-hotel.webp · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **192 isolated node(s):** `typescript`, `vitest`, `zod`, `typescript`, `vitest` (+187 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2809 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **136 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **192 isolated node(s):** `RFC-4180`, `RFC-4180`, `RFC-4180`, `../_handlers/c.js`, `@afhomes/contracts` (+187 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2894 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **140 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `BR-RATE-01 Ordering Half` connect `Business rules audit reports` to `Source audit and traceability`, `Test plan and approval register`, `phase2World`?**
-  _High betweenness centrality (0.034) - this node is a cross-community bridge._
-- **What connects `typescript`, `vitest`, `zod` to the rest of the system?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **What connects `RFC-4180`, `RFC-4180`, `RFC-4180` to the rest of the system?**
   _192 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `OST renewal and shared UI` be split into smaller, more focused modules?**
-  _Cohesion score 0.025077486615948153 - nodes in this community are weakly interconnected._
-- **Why does `motion` connect `images.ts` to `Marketing login and sections`, `Web app tooling`, `lib/cms.ts`, `Experiences.tsx`, `Seo`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+  _Cohesion score 0.027060755336617406 - nodes in this community are weakly interconnected._
+- **Why does `recharts` connect `Admin app tooling` to `Dashboard metrics and charts`?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
 - **Should `Dashboard and analytics contracts` be split into smaller, more focused modules?**
-  _Cohesion score 0.025719378660555132 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.02621923937360179 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

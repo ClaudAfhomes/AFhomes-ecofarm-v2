@@ -25,11 +25,12 @@ import {
 } from '@afhomes/contracts';
 
 import { formatDate, formatDateTime } from '../../lib/format';
+import { formatPaymentMethod } from './format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
 import { getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatMoneyOrDash, formatStatedMoney } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
 import { CustomerCompanyEditDialog } from './CustomerCompanyEditDialog';
 import { CustomerIdImage } from './CustomerIdImage';
@@ -303,7 +304,7 @@ export function CustomerDetailPage() {
       company: true,
       fields: [
         ['RA NO', statedMono(record.raNumber)],
-        ['STATUS', stated(record.companyStatus)],
+        ['PAYMENT STATUS', stated(record.companyStatus)],
         ['FIRST NAME', stated(record.firstName)],
         ['LAST NAME', stated(record.lastName)],
         ['MIDDLE NAME', stated(record.middleName)],
@@ -341,7 +342,7 @@ export function CustomerDetailPage() {
         ['SUPPLEMENTARY FULL NAME', stated(record.supplementaryFullName)],
         ['SUPPLEMENTARY ADDRESS', stated(record.supplementaryAddress)],
         ['BIRTHDAY', stated(record.supplementaryBirthday)],
-        ['GENDER', stated(record.supplementaryGender)],
+        ['GENDER', stated(record.supplementaryGender ? record.supplementaryGender.charAt(0).toUpperCase() + record.supplementaryGender.slice(1) : null)],
         ['AGE', ageOn(record.supplementaryBirthday)],
         ['CITIZENSHIP', stated(record.supplementaryCitizenship)],
         ['CIVIL STATUS', stated(record.supplementaryCivilStatus)],
@@ -363,7 +364,6 @@ export function CustomerDetailPage() {
       blurb: 'Stated names, not the genealogy',
       company: true,
       fields: [
-        ['OST/IST NAME', stated(record.ostIstName)],
         ['SVD (NAME)', stated(record.svdName)],
         ['SSM (NAME)', stated(record.ssmName)],
         ['SM (NAME)', stated(record.smName)],
@@ -384,13 +384,13 @@ export function CustomerDetailPage() {
       fields: [
         ['VIP PACKAGE', stated(record.statedVipPackage)],
         ['PAYMENT TERMS', stated(record.statedPaymentTerms)],
-        ['REGULAR PRICE', statedMono(record.statedRegularPrice)],
-        ['DISCOUNT', statedMono(record.statedDiscount)],
-        ['TOTAL AMOUNT', statedMono(record.statedTotalAmount)],
-        ['RF', statedMono(record.statedRf)],
-        ['PAYMENT TYPE', stated(record.statedPaymentType)],
+        ['REGULAR PRICE', statedMono(formatStatedMoney(record.statedRegularPrice))],
+        ['DISCOUNT', statedMono(formatStatedMoney(record.statedDiscount))],
+        ['TOTAL AMOUNT', statedMono(formatStatedMoney(record.statedTotalAmount))],
+        ['RF', statedMono(formatStatedMoney(record.statedRf))],
+        ['PAYMENT TYPE', stated(record.statedPaymentType ? formatPaymentMethod(record.statedPaymentType) : null)],
         ['REF NO', statedMono(record.statedRefNo)],
-        ['DATE', stated(record.statedPaymentDate)],
+        ['PAYMENT DATE', stated(record.statedPaymentDate)],
       ],
     },
     {
@@ -422,7 +422,7 @@ export function CustomerDetailPage() {
         actions={
           canEditCompany ? (
             <Button variant="secondary" onClick={() => setEditing(true)}>
-              Edit company record
+              Edit stated record
             </Button>
           ) : undefined
         }
@@ -576,7 +576,7 @@ export function CustomerDetailPage() {
 const RECORD_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'sales', label: 'Sales and payments' },
-  { id: 'company', label: 'Company record' },
+  { id: 'company', label: 'Stated record' },
 ] as const;
 
 /**

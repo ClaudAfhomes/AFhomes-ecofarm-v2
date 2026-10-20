@@ -221,7 +221,7 @@ describe('CustomerDetailPage', () => {
         countryCode: 'PH',
       },
       raNumber: 'RA-2026-0001',
-      companyStatus: 'Active Member',
+      companyStatus: 'FULLY PAID',
       citizenship: 'Filipino',
       civilStatus: 'Single',
       tinNumberMasked: '********9012',
@@ -236,7 +236,7 @@ describe('CustomerDetailPage', () => {
       supplementaryEmail: 'juan@example.com',
       supplementaryLandline: '(02) 8999-0000',
       supplementaryTinNumberMasked: '********7001',
-      ostIstName: 'OST Silk',
+
       svdName: 'SVD Santos',
       referrerName: 'Ref Reyes',
       relatedEmail: 'related@example.com',
@@ -257,13 +257,12 @@ describe('CustomerDetailPage', () => {
     // Exact company labels with stored values; TIN only ever masked.
     for (const value of [
       'RA-2026-0001',
-      'Active Member',
+      'FULLY PAID',
       '********9012',
       'JUAN CRUZ',
-      'OST Silk',
       'SVD Santos',
       'GOLD VIP',
-      '60000.00',
+      '60,000.00',
       'RF-001',
       '(049) 555-1234',
       'Parian',
@@ -282,7 +281,7 @@ describe('CustomerDetailPage', () => {
     const primaryGrid = screen.getByText('FIRST NAME').closest('dl');
     expect(Array.from(primaryGrid?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
       'RA NO',
-      'STATUS',
+      'PAYMENT STATUS',
       'FIRST NAME',
       'LAST NAME',
       'MIDDLE NAME',
@@ -403,7 +402,7 @@ describe('CustomerDetailPage card sales', () => {
     const tabs = screen.getByLabelText('Customer record sections');
     expect(tabs).toHaveTextContent('Overview');
     expect(tabs).toHaveTextContent('Sales and payments');
-    expect(tabs).toHaveTextContent('Company record');
+    expect(tabs).toHaveTextContent('Stated record');
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute(
       'aria-current',
       'page',

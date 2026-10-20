@@ -87,7 +87,9 @@ import {
   updateCustomerApplication,
 } from './services';
 
-import {
+import { filterGovernmentIdInput } from '../../lib/normalize';
+
+import {
   today,
   emptyHolder,
   HolderFields,
@@ -1279,7 +1281,6 @@ export function CustomerApplicationEditorPage() {
                 <dt>RELATED</dt>
                 <dd>
                   {[
-                    relatedCustomer.ostIstName,
                     relatedCustomer.svdName,
                     relatedCustomer.ssmName,
                     relatedCustomer.smName,
@@ -1578,7 +1579,7 @@ export function CustomerApplicationEditorPage() {
                   label="Government ID number"
                   optional
                   value={idNumber}
-                  onChange={setIdNumber}
+                  onChange={(value) => setIdNumber(filterGovernmentIdInput(value))}
                   maxLength={40}
                   disabled={saveAndSubmit.isPending}
                 />

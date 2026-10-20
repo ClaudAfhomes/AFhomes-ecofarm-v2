@@ -58,7 +58,6 @@ const COMPANY_FIELDS = {
   supplementaryGender: 'female',
   supplementaryMobile: '09181234567',
   supplementaryEmail: 'maria@example.com',
-  ostIstName: 'OST Silk',
   svdName: 'SVD Santos',
   referrerName: 'Ref Reyes',
   relatedContactNo: '09191111111',

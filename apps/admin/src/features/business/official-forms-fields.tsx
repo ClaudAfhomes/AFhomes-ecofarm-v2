@@ -206,7 +206,7 @@ export function Field({
  * Civil status). A dropdown rather than a text box: the value is a closed set,
  * so free typing could only ever produce a value the server refuses.
  */
-function SelectField({
+export function SelectField({
   label,
   value,
   onChange,
@@ -254,7 +254,7 @@ const choiceOptions = (values: readonly string[], emptyLabel = 'Not specified') 
  * record honest: the operator sees what is actually stored and changes it
  * deliberately. The contract still refuses it on write, so it cannot persist.
  */
-const withStoredValue = (
+export const withStoredValue = (
   options: { value: string; label: string }[],
   stored: string | undefined,
 ) =>
@@ -357,7 +357,7 @@ export function HolderFields({
           label="Suffix"
           value={value.suffix ?? ''}
           onChange={(v) => set('suffix', v)}
-          options={choiceOptions(SUFFIX_OPTIONS, 'None')}
+          options={withStoredValue(choiceOptions(SUFFIX_OPTIONS, 'None'), value.suffix ?? undefined)}
         />
         <DateField
           label="Birth date"

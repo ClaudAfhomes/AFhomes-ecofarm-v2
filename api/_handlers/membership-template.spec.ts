@@ -642,12 +642,11 @@ describe('company membership template', () => {
       }[];
     };
     const row = body.rows[0]!;
-    expect(row.fields.ost_ist_name).toBe('OST Name');
     expect(row.fields.svd_name).toBe('SVD Name');
     expect(row.fields.email).toBe('juan@example.com');
-    // The removed column has a real target, so it is preserved rather than
-    // reported among the ignored-column warnings.
-    expect(row.warnings.map((w) => w.field)).not.toContain('OST/IST NAME');
+    // The OST/IST NAME column is no longer stored: it is reported as an
+    // ignored column rather than being silently merged.
+    expect(row.warnings.map((w) => w.field)).toContain('OST/IST NAME');
   });
 
   it('rejects foreign multi-sheet workbooks instead of guessing a tab', async () => {

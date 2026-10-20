@@ -472,7 +472,6 @@ export const COMPANY_IMPORT_EXTRA_COLUMNS = [
   'supplementary_occupation_business_name',
   'supplementary_office_address',
   'supplementary_position',
-  'ost_ist_name',
   'svd_name',
   'ssm_name',
   'sm_name',
@@ -557,14 +556,13 @@ export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX = 28;
 
 /**
  * Positional mapping for the superseded 45-column layout: the current map
- * with the preserved `ost_ist_name` target re-inserted at its old position.
- * Legacy files keep importing fully (their OST/IST NAME values still land on
- * the existing customer-record pipeline) instead of failing as 45 unknown
- * headers; only fresh downloads stop carrying the column.
+ * with a `null` at the old OST/IST NAME position, so that column is reported
+ * as an ignored column (with a warning) instead of being stored. Legacy
+ * files still import fully; only fresh downloads stop carrying the column.
  */
 export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
   ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
-  'ost_ist_name',
+  null,
   ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
 ];
 
