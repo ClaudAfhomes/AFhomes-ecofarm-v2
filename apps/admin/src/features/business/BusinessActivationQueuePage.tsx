@@ -10,7 +10,6 @@ import {
   PageHeader,
   Pagination,
   SearchField,
-  Select,
   Skeleton,
   StatusChip,
   TextField,
@@ -24,7 +23,6 @@ import {
 
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { SPOT_CASH_LABEL, SPOT_CASH_TONE } from './format';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { activateSale, getActivationQueue } from './services';
 import { businessKeys, sharedScopes } from './queryKeys';
@@ -61,9 +59,12 @@ const PAGE_SIZE = 10;
 
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
+  const [search, setSearch] = useState('');
+  const settled = useDebouncedValue(search.trim());
+  const [eligibility, setEligibility] = useState<'all' | 'eligible' | 'not'>('all');
   const queue = useQuery({
-    queryKey: businessKeys.activationQueue,
-    queryFn: getActivationQueue,
+    queryKey: businessKeys.activationQueue(settled),
+    queryFn: () => getActivationQueue(settled),
     // Keep the previous page on screen while the next poll lands: refetches
     // then feel instant and the skeleton only ever appears on first load.
     placeholderData: keepPreviousData,
@@ -71,9 +72,6 @@ export function BusinessActivationQueuePage() {
     // (same-session writes invalidate instantly).
     refetchInterval: 15_000,
   });
-  const [search, setSearch] = useState('');
-  const settled = useDebouncedValue(search.trim());
-  const [eligibility, setEligibility] = useState<'all' | 'eligible' | 'not'>('all');
   const [page, setPage] = useState(0);
   const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
@@ -129,7 +127,7 @@ export function BusinessActivationQueuePage() {
   };
 
   const refresh = async () => {
-    await client.invalidateQueries({ queryKey: businessKeys.activationQueue });
+    await client.invalidateQueries({ queryKey: ['business', 'queue', 'activation'] });
     // Activation changes what member lookup, memberships and the activation
     // report show: refresh them in this session without reload.
     await client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
@@ -216,31 +214,50 @@ export function BusinessActivationQueuePage() {
               />
             }
             filters={
-              <label className={styles.filterLabel}>
-                Eligibility
-                <Select
-                  aria-label="Filter by eligibility"
-                  value={eligibility}
-                  onChange={(e) => {
-                    setEligibility(e.target.value as typeof eligibility);
-                    setPage(0);
-                  }}
-                  options={[
-                    { value: 'all', label: 'All records' },
-                    { value: 'eligible', label: 'Eligible only' },
-                    { value: 'not', label: 'Not eligible' },
-                  ]}
-                />
-              </label>
+              <div className={styles.filterGroup} role="group" aria-label="Filter by eligibility">
+                {(['all', 'eligible', 'not'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={eligibility === value ? styles.filterChipActive : styles.filterChip}
+                    onClick={() => {
+                      setEligibility(value);
+                      setPage(0);
+                    }}
+                    aria-pressed={eligibility === value}
+                  >
+                    {value === 'all' ? 'All records' : value === 'eligible' ? 'Eligible only' : 'Not eligible'}
+                  </button>
+                ))}
+                {(search.trim() || eligibility !== 'all') ? (
+                  <button
+                    type="button"
+                    className={styles.filterChip}
+                    onClick={() => {
+                      setSearch('');
+                      setEligibility('all');
+                      setPage(0);
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             }
           />
 
           {visible.length === 0 ? (
             <EmptyState
               title={
-                settled || eligibility !== 'all' ? 'No matching records.' : 'Nothing to activate'
+                settled || eligibility !== 'all'
+                  ? 'No records match these filters.'
+                  : 'Nothing to activate right now'
               }
-              description="No application is fully paid yet."
+              description={
+                settled || eligibility !== 'all'
+                  ? 'Try a different search term or eligibility filter.'
+                  : 'No application is fully paid yet. Check back after payments are verified.'
+              }
             />
           ) : (
             <div
@@ -255,14 +272,7 @@ export function BusinessActivationQueuePage() {
                     <th>Sale</th>
                     <th>Customer</th>
                     <th>Plan</th>
-                    <th>Scheme</th>
-                    <th>Total</th>
-                    <th>Verified</th>
-                    <th>Balance</th>
-                    <th>Validity</th>
-                    <th>First verified</th>
-                    <th>Spot cash</th>
-                    <th>Deadline</th>
+                    <th>Verified / Total</th>
                     <th>Ready</th>
                     <th>Actions</th>
                   </tr>
@@ -288,34 +298,8 @@ export function BusinessActivationQueuePage() {
                       <td data-label="Plan">
                         <TierBadge tier={tierFromProductName(item.productName)} />
                       </td>
-                      <td data-label="Scheme">{paymentSchemeLabel(item.paymentScheme)}</td>
-                      <td data-label="Total" className={styles.numeric}>
-                        {formatMoneyOrDash(item.cashPrice)}
-                      </td>
-                      <td data-label="Verified" className={styles.numeric}>
-                        {formatMoneyOrDash(item.verifiedTotal)}
-                      </td>
-                      <td data-label="Balance" className={styles.numeric}>
-                        {formatMoneyOrDash(item.remainingBalance)}
-                      </td>
-                      <td data-label="Validity">
-                        {item.validityMonths
-                          ? `${item.validityMonths} mo${item.validityMonths % 12 === 0 ? ` (${item.validityMonths / 12}y)` : ''}`
-                          : '—'}
-                      </td>
-                      <td data-label="First verified">
-                        {item.firstVerifiedPayment
-                          ? formatDateTime(item.firstVerifiedPayment)
-                          : '—'}
-                      </td>
-                      <td data-label="Spot cash">
-                        <StatusChip
-                          label={SPOT_CASH_LABEL[item.spotCashState] ?? item.spotCashState}
-                          tone={SPOT_CASH_TONE[item.spotCashState] ?? 'neutral'}
-                        />
-                      </td>
-                      <td data-label="Deadline">
-                        {item.spotCashDeadline ? formatDateTime(item.spotCashDeadline) : '—'}
+                      <td data-label="Verified / Total" className={styles.numeric}>
+                        {formatMoneyOrDash(item.verifiedTotal)} / {formatMoneyOrDash(item.cashPrice)}
                       </td>
                       <td data-label="Ready">
                         <StatusChip
@@ -400,49 +384,123 @@ function ActivateDialog({
     onSuccess: onDone,
   });
 
+  const verified = Number(item.verifiedTotal) || 0;
+  const total = Number(item.cashPrice) || 0;
+  const progress = total > 0 ? Math.min(100, (verified / total) * 100) : 0;
+  const balance = Number(item.remainingBalance) || 0;
+
   return (
     <Dialog
       open
       onClose={onClose}
       title="Activate membership"
+      describedBy="activation-summary"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={activate.isPending} onClick={() => activate.mutate()}>
+          <Button
+            disabled={activate.isPending}
+            loading={activate.isPending}
+            onClick={() => activate.mutate()}
+          >
             Activate
           </Button>
         </>
       }
     >
-      <div style={{ display: 'grid', gap: 12 }}>
-        <p>
+      <div style={{ display: 'grid', gap: 16 }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+          {item.saleNumber} · {item.customerName} · {item.productName}
+        </p>
+
+        <div
+          id="activation-summary"
+          style={{
+            display: 'grid',
+            gap: 12,
+            padding: 14,
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border-default)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+            <div>
+              <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Scheme</dt>
+              <dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{paymentSchemeLabel(item.paymentScheme)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Frozen total</dt>
+              <dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{formatMoneyOrDash(item.cashPrice)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Verified</dt>
+              <dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{formatMoneyOrDash(item.verifiedTotal)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Balance due</dt>
+              <dd style={{ margin: '4px 0 0', fontWeight: 700, color: balance > 0 ? 'var(--color-danger, #b91c1c)' : 'var(--color-success, #15803d)' }}>
+                {formatMoneyOrDash(item.remainingBalance)}
+              </dd>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+              <span>Payment progress</span>
+              <span>{progress.toFixed(0)}%</span>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              style={{
+                height: 8,
+                borderRadius: 999,
+                background: 'var(--color-bg-surface-raised, #e5e7eb)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  background: progress >= 100 ? 'var(--color-success, #15803d)' : 'var(--color-brand-primary, #2563eb)',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-secondary)' }}>
           The server recomputes the verified total inside the transaction. If it does not reach the
           snapshotted price, the activation is refused and nothing is created.
         </p>
-        <dl
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: 8,
-            margin: 0,
-          }}
-        >
-          <div>
-            <dt>Scheme</dt>
-            <dd>{paymentSchemeLabel(item.paymentScheme)}</dd>
-          </div>
-          <div>
-            <dt>Frozen total</dt>
-            <dd>{formatMoneyOrDash(item.cashPrice)}</dd>
-          </div>
-        </dl>
+
         {frozen ? (
-          <p>
-            Membership validity: <strong>{frozen} months</strong>
-            {frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''}, frozen from the sale.
-          </p>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 12px',
+              background: 'var(--color-brand-soft, #eff6ff)',
+              border: '1px solid color-mix(in srgb, var(--color-brand-primary, #2563eb) 30%, white)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, color: 'var(--color-brand-primary, #2563eb)' }}>
+              Validity locked
+            </span>
+            <span style={{ fontWeight: 600 }}>
+              {frozen} months{frozen % 12 === 0 ? ` (${frozen / 12} years)` : ''}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>frozen from the sale</span>
+          </div>
         ) : (
           <TextField
             id="activation-validity-months"
@@ -454,7 +512,12 @@ function ActivateDialog({
             onChange={(value) => setMonths(value.replace(/\D/g, ''))}
           />
         )}
-        {activate.error ? <p role="alert">{activate.error.message}</p> : null}
+
+        {activate.error ? (
+          <p role="alert" style={{ margin: 0, padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', color: '#b91c1c', fontSize: 13, fontWeight: 600 }}>
+            {activate.error.message}
+          </p>
+        ) : null}
       </div>
     </Dialog>
   );

@@ -1,4 +1,4 @@
-import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
+import { matchesSearch, readBoundedRows, readSearchRows } from '../_lib/list-search.js';
 /**
  * AFHomes operational queues: Finance payment handling and activation readiness.
  *
@@ -109,14 +109,42 @@ async function buildQueue(
   limit: number,
   offset: number,
   search?: string,
+  options?: { loadAll?: boolean },
 ) {
-  const query = db
+  // Push the search predicate to the database so a search no longer loads the
+  // entire status population into memory. The in-memory `matchesSearch` below
+  // stays as the authoritative filter and safety net.
+  const term = (search ?? '').trim();
+  const safeTerm = term.replace(/[%_,()]/g, '');
+  const loadAll = options?.loadAll === true;
+  let query = db
     .from('card_sales')
     .select(SELECT_QUEUE, { count: 'exact' })
-    .in('status', statuses)
-    .order('created_at', { ascending: true })
+    .in('status', statuses);
+  if (safeTerm) {
+    query = query.or(
+      `sale_number.ilike.%${safeTerm}%,status.ilike.%${safeTerm}%,customers.first_name.ilike.%${safeTerm}%,customers.middle_name.ilike.%${safeTerm}%,customers.last_name.ilike.%${safeTerm}%,customers.suffix.ilike.%${safeTerm}%,card_plans.name.ilike.%${safeTerm}%,card_plans.code.ilike.%${safeTerm}%`,
+    );
+  }
+  // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
+  // bounded window contains the rows that sort first in the merged queue.
+  // Nulls first matches the merge sort, which treats a missing payment as ''.
+  query = query
+    .order('spot_cash_started_at', { ascending: true, nullsFirst: true })
     .order('id');
-  const all = await readSearchRows(query);
+  // When not loading all (finance merge path), bound the read to `limit` rows
+  // instead of paging through the entire population. `limit` is expected to be
+  // the window size (page size + offset) in that mode. When searching, the DB
+  // filter above already narrows the set, so loading all matches is cheap.
+  let all: Record<string, unknown>[];
+  let boundedCount: number | null = null;
+  if (loadAll || safeTerm) {
+    all = await readSearchRows(query);
+  } else {
+    const bounded = await readBoundedRows(query, limit);
+    all = bounded.rows;
+    boundedCount = bounded.count;
+  }
   const filtered = all.filter((row) => {
     const customer = row.customers;
     const product = row.card_plans;
@@ -131,7 +159,10 @@ async function buildQueue(
       ...(product && typeof product === 'object' ? Object.values(product) : []),
     ]);
   });
-  const count = filtered.length;
+  // When the read was bounded (no search), the true total comes from the DB
+  // count captured during the bounded read, not from the (window-sized) slice.
+  const count =
+    loadAll || safeTerm ? filtered.length : boundedCount ?? filtered.length;
   const data = filtered.slice(offset, offset + limit);
 
   const saleIds = (data ?? []).map((row) => String(row.id));
@@ -201,18 +232,78 @@ async function buildQueue(
  * but unverified ₱10,000 reads as verified 0.00 with the FULL total remaining.
  */
 async function buildReservationQueue(db: Db, limit: number, offset: number, search?: string) {
-  const rows = await readSearchRows(
-    db
-      .from('reservation_agreements')
-      .select(
-        'id, reservation_number, customer_application_id, customer_id, seller_staff_id, purchase_terms_id, status, tier_snapshot, payment_scheme_snapshot, total_price_snapshot, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amortization_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_applications!inner(application_number, status), customers!inner(first_name, middle_name, last_name, suffix)',
-      )
-      .eq('origin', 'application')
-      .eq('status', 'executed')
-      .is('sale_id', null)
-      .order('executed_at', { ascending: true })
-      .order('id'),
-  );
+  // Push the search predicate to the database so a search no longer loads the
+  // entire executed-reservation population into memory. The in-memory
+  // `matchesSearch` below stays as the authoritative filter (it covers the
+  // joined text the PostgREST `or` may miss) and as a safety net.
+  const term = (search ?? '').trim();
+  const safeTerm = term.replace(/[%_,()]/g, '');
+  let query = db
+    .from('reservation_agreements')
+    .select(
+      'id, reservation_number, customer_application_id, customer_id, seller_staff_id, purchase_terms_id, status, tier_snapshot, payment_scheme_snapshot, total_price_snapshot, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amortization_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_applications!inner(application_number, status), customers!inner(first_name, middle_name, last_name, suffix)',
+      { count: 'exact' },
+    )
+    .eq('origin', 'application')
+    .eq('status', 'executed')
+    .is('sale_id', null);
+  if (safeTerm) {
+    query = query.or(
+      `reservation_number.ilike.%${safeTerm}%,customer_applications.application_number.ilike.%${safeTerm}%,customer_applications.status.ilike.%${safeTerm}%,customers.first_name.ilike.%${safeTerm}%,customers.middle_name.ilike.%${safeTerm}%,customers.last_name.ilike.%${safeTerm}%,customers.suffix.ilike.%${safeTerm}%`,
+    );
+  }
+  // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
+  // bounded window contains the rows that sort first in the merged queue.
+  query = query
+    .order('spot_cash_started_at', { ascending: true, nullsFirst: true })
+    .order('id');
+  // When searching, the DB filter above already narrows the set, so loading all
+  // matches is cheap. When not searching, bound the read to `limit` rows (the
+  // finance window) instead of paging through every executed reservation.
+  let rows: Record<string, unknown>[];
+  let reservationTotal: number | null = null;
+  if (safeTerm || limit <= 0) {
+    rows = await readSearchRows(query);
+  } else {
+    const bounded = await readBoundedRows(query, limit);
+    rows = bounded.rows;
+    reservationTotal = bounded.count;
+  }
+  // Batch the per-reservation lookups (payments + seller) up front instead of
+  // issuing one of each per row (N+1). A page of reservations now costs 2
+  // queries total instead of 2N.
+  const reservationIds = rows.map((raw) => String((raw as Record<string, unknown>).id));
+  const paymentsByReservation = new Map<string, { amount: string; status: string }[]>();
+  if (reservationIds.length > 0) {
+    const { data: allPayments, error: paymentsError } = await db
+      .from('payments')
+      .select('reservation_id, amount, status')
+      .in('reservation_id', reservationIds);
+    if (paymentsError) throw paymentsError;
+    for (const payment of (allPayments ?? []) as Record<string, unknown>[]) {
+      const bucket = paymentsByReservation.get(String(payment.reservation_id)) ?? [];
+      bucket.push({ amount: String(payment.amount), status: String(payment.status) });
+      paymentsByReservation.set(String(payment.reservation_id), bucket);
+    }
+  }
+  const sellerIds = [
+    ...new Set(
+      rows
+        .map((raw) => String((raw as Record<string, unknown>).seller_staff_id ?? ''))
+        .filter(Boolean),
+    ),
+  ];
+  const sellersById = new Map<string, string>();
+  if (sellerIds.length > 0) {
+    const { data: sellers, error: sellersError } = await db
+      .from('staff_users')
+      .select('id, full_name')
+      .in('id', sellerIds);
+    if (sellersError) throw sellersError;
+    for (const seller of (sellers ?? []) as Record<string, unknown>[]) {
+      sellersById.set(String(seller.id), String(seller.full_name ?? ''));
+    }
+  }
   const filtered = (
     await Promise.all(
       rows.map(async (raw) => {
@@ -230,22 +321,13 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
           ])
         )
           return null;
-        const { data: payments, error: paymentError } = await db
-          .from('payments')
-          .select('amount, status')
-          .eq('reservation_id', row.id);
-        if (paymentError) throw paymentError;
-        const { data: seller, error: sellerError } = await db
-          .from('staff_users')
-          .select('full_name')
-          .eq('id', row.seller_staff_id)
-          .maybeSingle();
-        if (sellerError) throw sellerError;
+        const payments = paymentsByReservation.get(String(row.id)) ?? [];
+        const sellerName = sellersById.get(String(row.seller_staff_id ?? '')) ?? '';
         const totals = summarizePayments({
           cashPrice: String(row.total_price_snapshot ?? '0.00'),
           minimumDownPayment: String(row.total_price_snapshot ?? '0.00'),
           requiredInitial: String(row.required_initial_snapshot ?? null),
-          payments: (payments ?? []) as {
+          payments: payments as {
             amount: string;
             status: 'recorded' | 'verified' | 'rejected' | 'voided';
           }[],
@@ -261,7 +343,7 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
           applicationStatus: String(application.status ?? ''),
           purchaseTermsId: String(row.purchase_terms_id ?? ''),
           sellerStaffId: String(row.seller_staff_id),
-          sellerName: String(seller?.full_name ?? ''),
+          sellerName: sellerName,
           tier: String(row.tier_snapshot ?? ''),
           customerId: String(row.customer_id),
           customerName:
@@ -302,7 +384,8 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
   // `total` counts every match, not just this page: the finance screen reads
   // it to say "200 of 231" instead of silently dropping the tail.
   const data = filtered.slice(offset, offset + limit);
-  return { data, meta: { total: filtered.length, limit, offset } };
+  const total = reservationTotal ?? filtered.length;
+  return { data, meta: { total, limit, offset } };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -322,14 +405,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // for BOTH sources. A first-time purchase collects against its executed
       // AF-RES long before a card sale exists, so a sale-only queue would hide
       // every such customer from Finance entirely.
+      // Load a window (page size + offset) from each source rather than the
+      // entire population: the merged queue is re-sorted below, so a window of
+      // `limit + offset` rows from each source is enough to produce the correct
+      // page. `loadAll` is false so the no-search path bounds the read.
+      const windowSize = limit + offset;
       const sales = await buildQueue(
         db,
         PAYMENT_VERIFICATION_STATUSES,
-        Number.MAX_SAFE_INTEGER,
+        windowSize,
         0,
         search,
+        { loadAll: false },
       );
-      const reservations = await buildReservationQueue(db, limit, offset, search);
+      const reservations = await buildReservationQueue(db, windowSize, 0, search);
       // One combined page, ordered by readiness then origin/UUID so the order is
       // total and stable across the two sources.
       const merged = [...sales.data, ...reservations.data]
@@ -366,8 +455,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'activation') {
       const auth = await authorizeAfHomes(req, 'finance.card_activation');
       if ('error' in auth) return deny(res, auth);
-      // Fully paid, awaiting activation.
-      const queue = await buildQueue(db, ['payment_verified', 'activation_pending'], limit, offset);
+      // Fully paid, awaiting activation. Search is pushed to the database so a
+      // search no longer loads the entire activation population.
+      const queue = await buildQueue(
+        db,
+        ['payment_verified', 'activation_pending'],
+        limit,
+        offset,
+        search,
+        { loadAll: true },
+      );
       return res.status(200).json(queue);
     }
 

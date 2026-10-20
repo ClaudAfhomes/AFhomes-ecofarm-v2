@@ -17514,12 +17514,11 @@ async function main(): Promise<void> {
         eq('the round trip retires the OST number', back.out.previousAaNumber, afterOst.aa_number);
         check('the IST successor is an AAI number', /^AAI\d{8}$/.test(back.out.aaNumber));
         eq('the round trip reports the IST kind', back.out.kind, 'IST');
-        eq(
-          'the fresh IST validity starts today',
-          back.out.startsOn,
-          (await one<{ today: string }>(`select (now() at time zone 'UTC')::date::text as today`))
-            .today,
-        );
+        // IST identities are open-ended: `sale_team_identity_dates` requires
+        // starts_on and expires_on to be both set or both null, so a fresh IST
+        // accreditation carries no validity dates (startsOn/expiresOn = null).
+        // The conversion date is reported separately as identityIssuedOn.
+        eq('the fresh IST validity is open-ended (no fixed dates)', back.out.startsOn, null);
         eq(
           'the member holds the IST role again',
           (

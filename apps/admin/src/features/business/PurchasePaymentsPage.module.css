@@ -321,3 +321,17 @@
     flex: 1 1 auto;
   }
 }
+
+.clickableRow {
+  cursor: pointer;
+}
+
+.clickableRow:hover {
+  background: var(--color-bg-surface-hover, #f5f5f5);
+}
+
+.detailGrid {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}

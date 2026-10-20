@@ -20,6 +20,7 @@ export const saleTeamAccreditationSchema = z
     status: z.enum(['accredited', 'expired', 'revoked', 'inactive', 'not_started']),
     startsOn: z.iso.date().nullable(),
     expiresOn: z.iso.date().nullable(),
+    photoUrl: z.string().nullable().default(null),
   })
   .strict()
   .superRefine(prefixMatchesKind)
@@ -42,6 +43,7 @@ export const saleTeamHistoricalAccreditationSchema = z
     status: z.literal('superseded'),
     startsOn: z.iso.date().nullable(),
     expiresOn: z.iso.date().nullable(),
+    photoUrl: z.string().nullable().default(null),
     successorAaNumber: aaNumberSchema.nullable(),
   })
   .strict()

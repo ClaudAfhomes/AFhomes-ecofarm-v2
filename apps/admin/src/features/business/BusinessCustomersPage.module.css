@@ -262,3 +262,14 @@
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
+
+/* Inline indicator shown while a refetch (filter/search/pagination/sort) is in flight. */
+.refetchIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  align-self: end;
+  padding-bottom: 2px;
+}

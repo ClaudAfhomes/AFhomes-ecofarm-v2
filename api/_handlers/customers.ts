@@ -159,6 +159,7 @@ const listQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   status: z.string().trim().max(30).optional(),
   payment: z.enum(['no_payment', 'partially_paid', 'fully_paid']).optional(),
+  companyStatus: z.string().trim().max(30).optional(),
   category: customerCategorySchema.optional(),
   tier: z.enum(['GOLD', 'SILVER', 'BRONZE']).optional(),
   seller: z.string().uuid().optional(),

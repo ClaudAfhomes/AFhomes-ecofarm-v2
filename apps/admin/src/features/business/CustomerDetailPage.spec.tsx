@@ -212,6 +212,13 @@ describe('CustomerDetailPage', () => {
     expect(screen.getAllByText('No Tier').length).toBeGreaterThanOrEqual(1);
   });
 
+  it('falls back to the company-stated package in the masthead when there is no membership tier', async () => {
+    vi.mocked(getCustomerById).mockResolvedValue({ ...RECORD, tier: null, statedVipPackage: 'SILVER' });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
+    expect(screen.getAllByText('SILVER').length).toBeGreaterThanOrEqual(1);
+  });
+
   it('reports fetch errors with a retry', async () => {
     vi.mocked(getCustomerById).mockRejectedValue(new Error('boom'));
     renderDetail();

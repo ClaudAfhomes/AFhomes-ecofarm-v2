@@ -18,7 +18,7 @@ describe('business query keys', () => {
   it('builds the business root keys', () => {
     expect(businessKeys.all).toEqual(['business']);
     expect(businessKeys.queue).toEqual(['business', 'queue']);
-    expect(businessKeys.activationQueue).toEqual(['business', 'queue', 'activation']);
+    expect(businessKeys.activationQueue()).toEqual(['business', 'queue', 'activation', '']);
     expect(businessKeys.financeQueue('gold')).toEqual(['business', 'queue', 'finance', 'gold']);
     expect(businessKeys.customers({ a: 1 }, { b: 2 }, 0)).toEqual([
       'business',
@@ -81,7 +81,7 @@ describe('business query keys', () => {
   it('keeps every scope a prefix of the keys it clears', () => {
     const startsWith = (full: readonly unknown[], prefix: readonly unknown[]) =>
       prefix.every((segment, index) => segment === full[index]);
-    expect(startsWith(businessKeys.activationQueue, businessKeys.queue)).toBe(true);
+    expect(startsWith(businessKeys.activationQueue(''), businessKeys.queue)).toBe(true);
     expect(startsWith(businessKeys.financeQueue(''), businessKeys.queue)).toBe(true);
     expect(startsWith(businessKeys.customers({}, {}, 0), businessKeys.customersScope)).toBe(true);
     expect(startsWith(businessKeys.salePayments('x'), businessKeys.salePaymentsScope)).toBe(true);

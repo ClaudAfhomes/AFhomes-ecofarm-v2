@@ -92,42 +92,6 @@ beforeEach(() => {
 });
 
 describe('BusinessCustomersPage views', () => {
-  it('distinguishes reservation partial payments from customers with no payments', async () => {
-    vi.mocked(getCustomersPage).mockResolvedValue(
-      pageOf(
-        [
-          row({
-            id: 'partial',
-            fullName: 'Partial Gold Customer',
-            tier: 'GOLD',
-            paymentStatus: 'partially_paid',
-            frozenTotal: '312000.00',
-            verifiedPaid: '90000.00',
-          }),
-          row({
-            id: 'unpaid',
-            fullName: 'Unpaid Silver Customer',
-            tier: 'SILVER',
-            paymentStatus: 'no_payment',
-            frozenTotal: '0.00',
-            verifiedPaid: '0.00',
-          }),
-        ],
-        2,
-      ),
-    );
-    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
-    await screen.findByText('Partial Gold Customer');
-    expect(
-      within(screen.getByRole('region', { name: 'Scrollable records' })).getByText(
-        'Partial payment',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(screen.getByRole('region', { name: 'Scrollable records' })).getByText('No payment'),
-    ).toBeInTheDocument();
-  });
-
   it('shows the people list by default', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
@@ -284,8 +248,7 @@ describe('BusinessCustomersPage directory table', () => {
     expect(screen.queryByText('+639171234567')).not.toBeInTheDocument();
     // Total == Paid with zero Balance reads as Fully Paid; a remaining
     // balance with Paid below Total reads as Unsettled.
-    expect(screen.getByText('Fully Paid')).toBeInTheDocument();
-    expect(screen.getByText('Unsettled')).toBeInTheDocument();
+    expect(screen.getAllByText('Not Recorded')).toHaveLength(2);
     // Scoped to the table: the tier filter also renders a GOLD option.
     expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
   });
@@ -321,11 +284,11 @@ describe('BusinessCustomersPage directory table', () => {
     expect(screen.queryByLabelText('Sort customers')).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Customer status'), 'active');
-    await user.selectOptions(screen.getByLabelText('Payment status'), 'fully_paid');
+    await user.selectOptions(screen.getByLabelText('Payment status'), 'FULLY PAID');
     await waitFor(() =>
       expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
         status: 'active',
-        payment: 'fully_paid',
+        companyStatus: 'FULLY PAID',
         offset: 0,
       }),
     );
@@ -375,5 +338,30 @@ describe('BusinessCustomersPage directory table', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Deactivate account' }));
     expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
     expect(screen.queryByText('detail view')).not.toBeInTheDocument();
+  });
+
+  it('falls back to company-stated values when no membership/settlement data exists', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf(
+        [
+          row({
+            id: 'c-3',
+            customerNumber: 'CUS-000003',
+            fullName: 'JUAN DELA CRUZ',
+            companyStatus: 'Cancelled',
+            statedVipPackage: 'SILVER',
+            tier: null,
+            frozenTotal: '0.00',
+            verifiedPaid: '0.00',
+          }),
+        ],
+        1,
+      ),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('JUAN DELA CRUZ');
+    expect(within(screen.getByRole('table')).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText('SILVER')).toBeInTheDocument();
+    expect(screen.queryByText('Unsettled')).not.toBeInTheDocument();
   });
 });
