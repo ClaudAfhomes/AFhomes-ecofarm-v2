@@ -354,9 +354,9 @@ it('primary landline refuses letters and blocks save while the number is invalid
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  // Save & Submit lives in the header and the sticky footer alike; both share state.
-  expect(screen.getAllByRole('button', { name: 'Save & Submit' })).toHaveLength(2);
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
+  // Submit lives in the sticky footer only; it shares state with the removed header action.
+  expect(screen.getAllByRole('button', { name: 'Submit' })).toHaveLength(1);
+  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
@@ -375,7 +375,7 @@ it('supplementary landline gets its own frontend error', async () => {
   expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
+  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
     expect(save).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
@@ -388,7 +388,7 @@ it('recommender contact gets its own frontend error and valid formatting is allo
   await user.type(input, '0917TEST');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
+  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
     expect(save).toBeDisabled();
   await user.clear(input);
   await user.type(input, '0917-123-4567');

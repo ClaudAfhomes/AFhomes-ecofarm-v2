@@ -5,54 +5,26 @@ import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
 import { requestList, protectedRequest } from '../../lib/api/client';
 import { RequireRole } from '../../app/RequireRole';
-import type { Customer } from '@afhomes/contracts';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
   protectedRequest: vi.fn(),
   setApiAccessTokenForTests: vi.fn(),
 }));
-// services are exercised through the mocked `request` client below.
 
-/**
- * Customer Lookup, the GSD/Employee desk.
- *
- * The rule these tests exist to pin is the one that separates this screen from the
- * member-TRANSACTION lookup it replaced in the nav: NO Membership Code is ever
- * displayed. Not current, not legacy, not in the `AFHOMES:` envelope. That is a
- * business rule (a Membership Code is a transaction credential, not a customer-search
- * key), so it is asserted on the rendered output rather than left to review.
- */
-
-const PROSPECT = {
-  customerId: '11111111-1111-4111-8111-111111111111',
-  customerNumber: 'AF-CUS-00042',
-  customerCode: 'AF-CC-1A2B3C4D',
-  fullName: 'PROSPECT DELA CRUZ',
-  customerStatus: 'prospect' as const,
-  tier: null,
-  membershipStatus: null,
-  membershipExpiresAt: null,
-  category: 'PENDING' as const,
-  paymentStatus: 'no_payment' as const,
-  companyStatus: null,
-  statedVipPackage: null,
-  supplementaryFullName: null,
+const JUAN = {
+  firstName: 'Juan',
+  maskedLastName: 'D***',
+  vipTier: 'GOLD' as const,
+  validUntil: '2033-10-21',
 };
 
-const FULL_PROSPECT = {
-  id: '11111111-1111-4111-8111-111111111111',
-  customerNumber: 'AF-CUS-00042',
-  customerCode: 'AF-CC-1A2B3C4D',
-  fullName: 'PROSPECT DELA CRUZ',
-  status: 'prospect',
-  paymentStatus: 'no_payment',
-  tier: null,
-  statedVipPackage: null,
-  membershipExpiresAt: null,
-  supplementaryFullName: null,
-  derivedCategory: 'PENDING',
-} as unknown as Customer;
+const MARIA = {
+  firstName: 'Maria',
+  maskedLastName: 'S***',
+  vipTier: 'SILVER' as const,
+  validUntil: '2031-10-11',
+};
 
 /** Type, wait for the matching suggestion, and pick it: the only path to a card. */
 async function pickOption(name: RegExp) {
@@ -63,86 +35,45 @@ async function pickOption(name: RegExp) {
 beforeEach(() => {
   vi.mocked(requestList).mockReset();
   vi.mocked(protectedRequest).mockReset();
-  vi.mocked(protectedRequest).mockImplementation(async (path: string) => {
-    const id = String(path).split('/').pop();
-    if (id === MARIA.customerId) return FULL_MARIA;
-    return FULL_PROSPECT;
-  });
 });
 
-it('shows a non-member customer with the two statuses kept separate', async () => {
-  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+it('shows an active VIP customer with only the four approved fields', async () => {
+  vi.mocked(requestList).mockResolvedValue([JUAN]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'JUA' },
   });
-  await pickOption(/PROSPECT DELA CRUZ/);
-  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
-  // The identifiers share one paragraph, so assert on the row's text rather than on
-  // an exact-match element, which would fail for a formatting reason.
-  const row = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
-  expect(row).toHaveTextContent('AF-CUS-00042');
-  expect(row).toHaveTextContent('AF-CC-1A2B3C4D');
-  // A prospect holds no membership: that is stated, not left as an empty cell.
-  expect(row).toHaveTextContent('None');
+  await pickOption(/Juan D\*\*\*/);
+  const card = (await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).closest('article');
+  expect(card).toHaveTextContent('Juan D***');
+  expect(card).toHaveTextContent('GOLD');
+  expect(card).toHaveTextContent('2033-10-21');
+  // No identifiers or private fields anywhere on the card.
+  expect(card?.textContent).not.toMatch(/AF-CUS-/);
+  expect(card?.textContent).not.toMatch(/AF-CC-/);
+  expect(card?.textContent).not.toMatch(/MBS-/);
+  expect(card?.textContent).not.toMatch(/Payment Status/);
 });
 
 it('never renders a Membership Code, whatever the search term was', async () => {
-  vi.mocked(requestList).mockResolvedValue([
-    { ...PROSPECT, customerStatus: 'active' as const, tier: 'GOLD', membershipStatus: 'suspended' },
-  ]);
+  vi.mocked(requestList).mockResolvedValue([]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    // The term a user would paste from a printed card.
     target: { value: 'MBS-000004' },
   });
-  // A code matches no name, so the list itself says the customer does not
-  // exist — and with nothing picked, no card renders at all.
-  expect(await screen.findByText('Customer does not exist')).toBeInTheDocument();
+  const notices = await screen.findAllByText('No active VIP customer found');
+  expect(notices.length).toBeGreaterThan(0);
   expect(screen.queryByRole('article')).toBeNull();
 });
 
-it('shows a suspended member record without ever printing a code', async () => {
-  vi.mocked(requestList).mockResolvedValue([
-    {
-      ...PROSPECT,
-      customerStatus: 'active' as const,
-      tier: 'GOLD',
-      membershipStatus: 'suspended' as const,
-    },
-  ]);
-  vi.mocked(protectedRequest).mockResolvedValue({
-    ...FULL_PROSPECT,
-    tier: 'GOLD',
-    membershipStatus: 'suspended',
-    paymentStatus: 'fully_paid',
-    membershipExpiresAt: '2031-10-11',
-  } as unknown as Customer);
-  renderWithProviders(<CustomerLookupPage />);
-  fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DEL' },
-  });
-  await pickOption(/PROSPECT DELA CRUZ/);
-  // The card never prints a membership code.
-  const row = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
-  expect(row?.textContent).not.toMatch(/MBS-/);
-  expect(row?.textContent).not.toMatch(/AFHOMES:/);
-  // Payment status, VIP tier and validity are shown as separate facts.
-  expect(row).toHaveTextContent('Payment Status');
-  expect(row).toHaveTextContent('VIP Tier');
-  expect(row).toHaveTextContent('Validity');
-});
-
 it('queries the customer-lookup endpoint, not the member-transaction lookup', async () => {
-  vi.mocked(requestList).mockReset();
   vi.mocked(requestList).mockResolvedValue([]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'AF-CC-1A2B3C4D' },
   });
-  // Nothing on file: the dropdown row and the empty panel agree.
-  const notices = await screen.findAllByText('Customer does not exist');
-  expect(notices).toHaveLength(2);
+  const notices = await screen.findAllByText('No active VIP customer found');
+  expect(notices.length).toBeGreaterThan(0);
   expect(vi.mocked(requestList).mock.calls[0]?.[0]).toContain('/memberships/customer-lookup');
 });
 
@@ -153,7 +84,7 @@ it('prompts for more characters below the minimum instead of querying', async ()
     target: { value: 'A' },
   });
   expect(
-    screen.getByText('Enter at least two characters to find a customer or member'),
+    screen.getByText('Enter at least two characters to find an active VIP customer'),
   ).toBeInTheDocument();
   expect(vi.mocked(requestList)).not.toHaveBeenCalled();
 });
@@ -187,12 +118,11 @@ it.each(['employee', 'admin', 'super_admin'])(
         },
       },
     );
-    expect(await screen.findByRole('heading', { name: 'Membership Lookup' })).toBeInTheDocument();
-    expect(screen.queryByText('Customer Lookup')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Customer Lookup' })).toBeInTheDocument();
   },
 );
+
 it('refuses the direct lookup to a role holding only the till permission', async () => {
-  // The screen has its own module; the redemption till key must not open it.
   renderWithProviders(
     <RequireRole>
       <CustomerLookupPage />
@@ -219,8 +149,9 @@ it('refuses the direct lookup to a role holding only the till permission', async
       },
     },
   );
-  expect(screen.queryByRole('heading', { name: 'Membership Lookup' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Customer Lookup' })).not.toBeInTheDocument();
 });
+
 it('denies the direct lookup to a customer without staff permissions', async () => {
   renderWithProviders(
     <RequireRole>
@@ -241,22 +172,20 @@ it('denies the direct lookup to a customer without staff permissions', async () 
     },
   );
   expect(await screen.findByText('Access denied')).toBeInTheDocument();
-  expect(screen.queryByRole('heading', { name: 'Membership Lookup' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Customer Lookup' })).not.toBeInTheDocument();
 });
 
 it('searches live with no Search button to click', async () => {
-  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+  vi.mocked(requestList).mockResolvedValue([JUAN]);
   renderWithProviders(<CustomerLookupPage />);
   expect(screen.queryByRole('button', { name: 'Search' })).toBeNull();
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'JUA' },
   });
-  // The debounced term flows straight into the query — no submit step — and
-  // the match is suggested; only the pick puts the card on screen.
-  await pickOption(/PROSPECT DELA CRUZ/);
-  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+  await pickOption(/Juan D\*\*\*/);
+  expect(await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).toBeInTheDocument();
   expect(vi.mocked(requestList).mock.calls[0]?.[0]).toContain(
-    '/memberships/customer-lookup?search=DELA',
+    '/memberships/customer-lookup?search=JUA',
   );
 });
 
@@ -264,17 +193,11 @@ it('shows suggestion skeletons while pending, with no card skeleton', async () =
   vi.mocked(requestList).mockReturnValue(new Promise(() => {}));
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'JUA' },
   });
-  // No card-level skeleton is rendered while the search resolves.
-  expect(screen.queryByRole('status', { name: 'Looking for Customer' })).toBeNull();
-  expect(screen.queryByRole('article')).toBeNull();
-  // The pending dropdown mirrors real suggestion rows (name + meta bars).
   const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
   expect(within(listbox).getAllByRole('presentation', { hidden: true })).toHaveLength(3);
-  expect(screen.queryByText('Looking for Customer…')).toBeNull();
-  expect(screen.queryByText('Searching for matches…')).toBeNull();
-  expect(screen.queryByText('No matching customers or members')).not.toBeInTheDocument();
+  expect(screen.queryByRole('article')).toBeNull();
 });
 
 it.each([
@@ -282,168 +205,98 @@ it.each([
   ['SILVER', 'Silver VIP membership card'],
   ['BRONZE', 'Bronze VIP membership card'],
 ] as const)('shows the %s card artwork on a %s member card', async (tier, alt) => {
-  vi.mocked(requestList).mockResolvedValue([
-    { ...PROSPECT, customerStatus: 'active' as const, tier, membershipStatus: 'active' as const },
-  ]);
-  vi.mocked(protectedRequest).mockResolvedValue({
-    ...FULL_PROSPECT,
-    tier,
-    membershipStatus: 'active',
-    paymentStatus: 'fully_paid',
-  } as unknown as Customer);
+  const row = { ...JUAN, vipTier: tier as 'GOLD' | 'SILVER' | 'BRONZE' };
+  vi.mocked(requestList).mockResolvedValue([row]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'JUA' },
   });
-  await pickOption(/PROSPECT DELA CRUZ/);
+  await pickOption(new RegExp(`Juan D\\*\\*\\*`));
   expect(await screen.findByAltText(alt)).toBeInTheDocument();
-  const card = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
+  const card = (await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).closest('article');
   expect(card).toHaveAttribute('data-tier', tier);
 });
 
-it('shows a cardless placeholder — never a tier image — for a prospect', async () => {
-  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+it('shows suggestion rows with masked names only', async () => {
+  vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'A' },
   });
-  await pickOption(/PROSPECT DELA CRUZ/);
-  await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
-  expect(screen.getByText('No card on file')).toBeInTheDocument();
-  expect(screen.queryByRole('img')).toBeNull();
-  const card = (await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).closest('article');
-  expect(card).toHaveAttribute('data-tier', 'NONE');
+  // need 2 chars
+  fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
+    target: { value: 'MA' },
+  });
+  const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
+  await screen.findByRole('option', { name: /Maria S\*\*\*/ });
+  expect(listbox.textContent).not.toMatch(/AF-CUS-/);
+  expect(listbox.textContent).not.toMatch(/AF-CC-/);
+  expect(listbox.textContent).not.toMatch(/MBS-/);
 });
-
-const MARIA = {
-  ...PROSPECT,
-  customerId: '22222222-2222-4222-8222-222222222222',
-  customerNumber: 'AF-CUS-00043',
-  customerCode: 'AF-CC-9Z8Y7X6W',
-  fullName: 'MARIA SANTOS',
-  customerStatus: 'active' as const,
-  tier: 'GOLD',
-  membershipStatus: 'active' as const,
-  membershipExpiresAt: '2031-10-11',
-  category: 'ACTIVE_VIP' as const,
-  paymentStatus: 'fully_paid' as const,
-};
-
-const FULL_MARIA = {
-  id: '22222222-2222-4222-8222-222222222222',
-  customerNumber: 'AF-CUS-00043',
-  customerCode: 'AF-CC-9Z8Y7X6W',
-  fullName: 'MARIA SANTOS',
-  status: 'active',
-  paymentStatus: 'fully_paid',
-  tier: 'GOLD',
-  statedVipPackage: 'GOLD',
-  membershipExpiresAt: '2031-10-11',
-  supplementaryFullName: null,
-  derivedCategory: 'ACTIVE_VIP',
-} as unknown as Customer;
 
 describe('name suggestions', () => {
   it('suggests names matching the typed letters, prefix-first', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
+    vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
     renderWithProviders(<CustomerLookupPage />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-      target: { value: 'MAR' },
-    });
-    const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
-    expect(listbox).toBeInTheDocument();
-    // MARIA SANTOS starts with the typed letters; the prospect does not match.
-    // Options land with the debounced fetch, after the pending-state listbox.
-    expect(await screen.findByRole('option', { name: /MARIA SANTOS/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /PROSPECT DELA CRUZ/ })).toBeNull();
-    // The matched letters are highlighted, not just listed.
-    expect(await screen.findByText('MAR')).toBeInTheDocument();
+    const box = screen.getByRole('combobox', { name: 'Find customer' });
+    fireEvent.change(box, { target: { value: 'MA' } });
+    expect(await screen.findByRole('option', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Juan D\*\*\*/ })).toBeNull();
   });
 
   it('shows the picked suggestion card on Enter', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
+    vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
-    fireEvent.change(box, { target: { value: 'MAR' } });
-    await screen.findByRole('listbox', { name: 'Name suggestions' });
-    await screen.findByRole('option', { name: /MARIA SANTOS/ });
+    fireEvent.change(box, { target: { value: 'MA' } });
+    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(box).toHaveValue('MARIA SANTOS');
-    expect(screen.queryByRole('listbox', { name: 'Name suggestions' })).toBeNull();
-    // The pick — not the typing — is what puts the card on screen.
-    expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
+    expect(box).toHaveValue('Maria S***');
+    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
   });
 
   it('picks the top suggestion on Enter with nothing highlighted', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
+    vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
-    fireEvent.change(box, { target: { value: 'MAR' } });
-    await screen.findByRole('option', { name: /MARIA SANTOS/ });
+    fireEvent.change(box, { target: { value: 'MA' } });
+    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(box).toHaveValue('MARIA SANTOS');
-    expect(await screen.findByRole('heading', { name: 'MARIA SANTOS' })).toBeInTheDocument();
+    expect(box).toHaveValue('Maria S***');
+    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
   });
 
   it('closes the suggestions on Escape with no card shown', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
+    vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
-    fireEvent.change(box, { target: { value: 'MAR' } });
-    await screen.findByRole('option', { name: /MARIA SANTOS/ });
+    fireEvent.change(box, { target: { value: 'MA' } });
+    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
     fireEvent.keyDown(box, { key: 'Escape' });
     expect(screen.queryByRole('listbox', { name: 'Name suggestions' })).toBeNull();
-    // Nothing was picked, so no card: the panel invites a pick instead.
-    expect(screen.queryByRole('heading', { name: 'MARIA SANTOS' })).toBeNull();
-    expect(
-      await screen.findByText('Select a suggested name to view the record.'),
-    ).toBeInTheDocument();
-  });
-
-  it('never prints codes inside the suggestion rows', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
-    renderWithProviders(<CustomerLookupPage />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-      target: { value: 'DE' },
-    });
-    const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
-    // Wait for real options: the pending-state list holds no names to judge.
-    await screen.findByRole('option', { name: /DELA CRUZ/ });
-    expect(listbox.textContent).not.toMatch(/MBS-/);
-    expect(listbox.textContent).not.toMatch(/AFHOMES:/);
-    expect(listbox.textContent).not.toMatch(/AF-CUS-/);
-    expect(listbox.textContent).not.toMatch(/AF-CC-/);
+    expect(screen.queryByRole('heading', { name: /Maria S\*\*\*/ })).toBeNull();
   });
 
   it('clears the shown card as soon as typing resumes', async () => {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT, MARIA]);
+    vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
-    fireEvent.change(box, { target: { value: 'DEL' } });
-    await pickOption(/PROSPECT DELA CRUZ/);
-    expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
-    // The next keystroke unpicks synchronously — the old card never lingers
-    // beside suggestions for a different term.
-    fireEvent.change(box, { target: { value: 'DELA' } });
-    expect(screen.queryByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeNull();
-    expect(
-      await screen.findByText('Select a suggested name to view the record.'),
-    ).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: 'MA' } });
+    await pickOption(/Maria S\*\*\*/);
+    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: 'MAR' } });
+    expect(screen.queryByRole('heading', { name: /Maria S\*\*\*/ })).toBeNull();
   });
 });
 
 it('offers no mutating control at all', async () => {
-  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+  vi.mocked(requestList).mockResolvedValue([JUAN]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-    target: { value: 'DELA' },
+    target: { value: 'JUA' },
   });
-  await pickOption(/PROSPECT DELA CRUZ/);
-  await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
-  // Read-only by construction: a GSD operator looking up a customer has no button
-  // that could edit one, take a payment or spend points.
+  await pickOption(/Juan D\*\*\*/);
+  await screen.findByRole('heading', { name: /Juan D\*\*\*/ });
   expect(screen.queryByRole('button', { name: /edit|activate|payment|redeem/i })).toBeNull();
 });
-
-

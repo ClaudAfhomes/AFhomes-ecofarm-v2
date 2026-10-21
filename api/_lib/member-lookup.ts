@@ -1,4 +1,4 @@
-import { customerLookupSchema, memberLookupSchema } from '@afhomes/contracts';
+import { customerLookupSchema, gsdActiveVipLookupSchema, memberLookupSchema } from '@afhomes/contracts';
 import { isoOrNull } from './handler-kit.js';
 export function memberLookupFromDirectory(r: Record<string, unknown>) {
   return memberLookupSchema.parse({
@@ -49,5 +49,41 @@ export function customerLookupFromDirectory(r: Record<string, unknown>) {
     companyStatus: (r.company_status as string | null) ?? null,
     statedVipPackage: (r.stated_vip_package as string | null) ?? null,
     supplementaryFullName: (r.supplementary_full_name as string | null) ?? null,
+  });
+}
+
+/**
+ * Strict GSD Customer Lookup projection (active VIP only).
+ *
+ * Returns the four approved display fields and nothing else. Returns `null` when
+ * any required value is missing/invalid so the caller can drop the row (fail
+ * closed) rather than render a placeholder. The surname mask is the first
+ * Unicode grapheme of the surname + a fixed `***` (no length preservation).
+ * `validUntil` is the authoritative `expires_at` formatted in Asia/Manila.
+ */
+export function gsdActiveVipLookupFromDirectory(r: Record<string, unknown>) {
+  const firstName = typeof r.first_name === 'string' ? r.first_name.trim() : '';
+  const lastName = typeof r.last_name === 'string' ? r.last_name.trim() : '';
+  const tier = typeof r.tier === 'string' ? r.tier.trim().toUpperCase() : '';
+  const expiresAt = isoOrNull(r.expires_at);
+  if (!firstName || !lastName || !tier || !expiresAt) return null;
+  if (tier !== 'BRONZE' && tier !== 'SILVER' && tier !== 'GOLD') return null;
+  const firstGrapheme = [...lastName][0];
+  if (!firstGrapheme) return null;
+  const maskedLastName = `${firstGrapheme}***`;
+  let validUntil: string;
+  try {
+    validUntil = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(
+      new Date(expiresAt),
+    );
+  } catch {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) return null;
+  return gsdActiveVipLookupSchema.parse({
+    firstName,
+    maskedLastName,
+    vipTier: tier as 'BRONZE' | 'SILVER' | 'GOLD',
+    validUntil,
   });
 }

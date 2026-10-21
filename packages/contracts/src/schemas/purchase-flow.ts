@@ -206,7 +206,7 @@ const proposalConfirmation = {
 };
 export const reviewPurchaseTermsSchema = z.strictObject({
   ...proposalConfirmation,
-  reason: z.string().trim().min(5).max(500),
+  reason: z.string().trim().min(5).max(500).optional(),
 });
 export type ReviewPurchaseTermsRequest = z.infer<typeof reviewPurchaseTermsSchema>;
 export const submitPurchaseApplicationSchema = z.strictObject(proposalConfirmation);

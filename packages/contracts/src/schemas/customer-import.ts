@@ -699,4 +699,24 @@ export const customerLookupSchema = z.object({
 });
 export type CustomerLookup = z.infer<typeof customerLookupSchema>;
 
+/**
+ * Strict GSD Customer Lookup projection.
+ *
+ * Only active customers with an active, unexpired VIP membership (BRONZE/SILVER/GOLD)
+ * may be represented. The response carries the four display-only fields and nothing
+ * else: no identifiers, no statuses, no financial/company/private data. The mask is
+ * a visual surname mask (`D***`), not a cryptographic hash.
+ */
+export const gsdActiveVipLookupSchema = z.object({
+  /** Customer's given/first name. */
+  firstName: z.string().min(1),
+  /** First Unicode grapheme of the surname + fixed `***`. */
+  maskedLastName: z.string().regex(/^.\*\*\*$/u),
+  /** Authoritative VIP tier of the qualifying membership. */
+  vipTier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
+  /** Authoritative `memberships.expires_at` formatted in Asia/Manila, `YYYY-MM-DD`. */
+  validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type GsdActiveVipLookup = z.infer<typeof gsdActiveVipLookupSchema>;
+
 export const customerSellerOptionSchema = z.object({ id: z.string().uuid(), name: z.string() });

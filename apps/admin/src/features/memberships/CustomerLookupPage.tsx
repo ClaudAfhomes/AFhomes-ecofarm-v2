@@ -1,16 +1,15 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  customerLookupSchema,
-  CUSTOMER_CATEGORY_LABELS,
-  type CustomerLookup,
+  gsdActiveVipLookupSchema,
+  type GsdActiveVipLookup,
 } from '@afhomes/contracts';
-import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, Icon } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { humanizeCode } from '../business/format';
+
 import { membershipKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { tierArtwork } from '@afhomes/ui';
@@ -62,21 +61,24 @@ const MAX_SUGGESTIONS = 6;
  * match behind the scenes but are never printed here; the full identifiers
  * stay on the result cards below.
  */
-function rankSuggestions(rows: CustomerLookup[], term: string): CustomerLookup[] {
+function displayName(row: GsdActiveVipLookup): string {
+  return `${row.firstName} ${row.maskedLastName}`;
+}
+
+function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVipLookup[] {
   const needle = term.trim().toLowerCase();
   if (needle.length < 2) return [];
-  const starts: CustomerLookup[] = [];
-  const contains: CustomerLookup[] = [];
+  const starts: GsdActiveVipLookup[] = [];
+  const contains: GsdActiveVipLookup[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    if (seen.has(row.customerNumber)) continue;
-    const matches =
-      row.fullName.toLowerCase().includes(needle) ||
-      row.customerNumber.toLowerCase().includes(needle) ||
-      (row.customerCode ?? '').toLowerCase().includes(needle);
+    const name = displayName(row);
+    const key = `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+    if (seen.has(key)) continue;
+    const matches = name.toLowerCase().includes(needle) || row.vipTier.toLowerCase().includes(needle);
     if (!matches) continue;
-    seen.add(row.customerNumber);
-    (row.fullName.toLowerCase().startsWith(needle) ? starts : contains).push(row);
+    seen.add(key);
+    (name.toLowerCase().startsWith(needle) ? starts : contains).push(row);
   }
   return [...starts, ...contains].slice(0, MAX_SUGGESTIONS);
 }
@@ -95,14 +97,12 @@ function HighlightedName({ name, term }: { name: string; term: string }) {
   );
 }
 
-function CustomerCard({ customer }: { customer: CustomerLookup }) {
-  const tier = tierKey(customer.tier ?? customer.statedVipPackage ?? null);
+function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
+  const tier = tierKey(customer.vipTier);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
-  const categoryLabel = customer.category
-    ? (CUSTOMER_CATEGORY_LABELS[customer.category] ?? customer.category)
-    : '';
+  const name = displayName(customer);
   return (
-    <article className={styles.member} data-tier={tier} aria-label={customer.fullName}>
+    <article className={styles.member} data-tier={tier} aria-label={name}>
       <div className={styles.artWrap} aria-hidden={artwork ? undefined : true}>
         {artwork ? (
           <img className={styles.art} src={artwork.src} alt={artwork.alt} loading="lazy" />
@@ -114,26 +114,8 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
         )}
       </div>
       <div className={styles.cardBody}>
-        <p className={styles.category}>{categoryLabel}</p>
-        <h2>{customer.fullName}</h2>
-        <p className={styles.identifiers}>
-          {customer.customerNumber}
-          {customer.customerCode ? ` · ${customer.customerCode}` : ''}
-        </p>
+        <h2>{name}</h2>
         <dl className={styles.details}>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="user-check" size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>Payment Status</dt>
-              <dd>
-                <StatusChip
-                  label={humanizeCode(customer.paymentStatus ?? customer.companyStatus ?? 'none')}
-                />
-              </dd>
-            </div>
-          </div>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
               <Icon name="image" size={16} />
@@ -141,11 +123,7 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
             <div className={styles.factText}>
               <dt>VIP Tier</dt>
               <dd>
-                {customer.tier ?? customer.statedVipPackage ? (
-                  <TierBadge tier={customer.tier ?? customer.statedVipPackage ?? ''} />
-                ) : (
-                  'None'
-                )}
+                <TierBadge tier={customer.vipTier} />
               </dd>
             </div>
           </div>
@@ -154,21 +132,10 @@ function CustomerCard({ customer }: { customer: CustomerLookup }) {
               <Icon name="clock" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>Validity</dt>
-              <dd>{customer.membershipExpiresAt?.slice(0, 10) ?? 'Not applicable'}</dd>
+              <dt>Valid Until</dt>
+              <dd>{customer.validUntil}</dd>
             </div>
           </div>
-          {customer.supplementaryFullName ? (
-            <div className={styles.fact}>
-              <span className={styles.factIcon} aria-hidden="true">
-                <Icon name="user" size={16} />
-              </span>
-              <div className={styles.factText}>
-                <dt>Supplementary</dt>
-                <dd>{customer.supplementaryFullName}</dd>
-              </div>
-            </div>
-          ) : null}
         </dl>
       </div>
     </article>
@@ -185,7 +152,7 @@ export function CustomerLookupPage() {
     queryFn: () =>
       requestList(
         '/memberships/customer-lookup?search=' + encodeURIComponent(activeTerm),
-        customerLookupSchema,
+        gsdActiveVipLookupSchema,
       ),
     // Keep the previous page on screen while the next keystroke's fetch runs:
     // refetches then feel instant (stale results + busy indicator) and the
@@ -217,17 +184,20 @@ export function CustomerLookupPage() {
       ? optionId(activeIndex)
       : undefined;
 
-  // The picked suggestion's customer number. The card resolves live from the
-  // latest fetched page, so a 30s refetch refreshes the shown card too. No
-  // second, permission-gated fetch: everything the card needs is already in
-  // the authorized lookup row.
-  const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
+  // The picked suggestion's composite key (no internal IDs are available). The
+  // card resolves live from the latest fetched page, so a 30s refetch refreshes
+  // the shown card too and clears it if the member is no longer eligible. No
+  // second, permission-gated fetch: everything the card needs is already in the
+  // authorized lookup row.
+  const rowKey = (row: GsdActiveVipLookup) =>
+    `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedLookup =
-    (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
+    (customers.data ?? []).find((row) => rowKey(row) === selectedKey) ?? null;
 
-  const pickSuggestion = (row: CustomerLookup) => {
-    setSearch(row.fullName);
-    setSelectedNumber(row.customerNumber);
+  const pickSuggestion = (row: GsdActiveVipLookup) => {
+    setSearch(displayName(row));
+    setSelectedKey(rowKey(row));
     setActiveIndex(-1);
     setSuggestOpen(false);
   };
@@ -272,7 +242,7 @@ export function CustomerLookupPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title="Membership Lookup" description="Find any customer or member." />
+      <PageHeader title="Customer Lookup" description="Find an active VIP customer." />
       <div className={styles.search}>
         <div
           className={styles.suggestWrap}
@@ -291,12 +261,12 @@ export function CustomerLookupPage() {
             size="lg"
             busy={customers.isFetching && activeTerm.length >= 2}
             label="Find customer"
-            placeholder="Customer ID, Customer Code, or name"
+            placeholder="Name of an active VIP customer"
             value={search}
             onChange={(value) => {
               setSearch(value);
               // Typing on unpicks: the card below belongs to the last pick.
-              setSelectedNumber(null);
+              setSelectedKey(null);
               setActiveIndex(-1);
               setSuggestOpen(true);
             }}
@@ -328,12 +298,12 @@ export function CustomerLookupPage() {
                 ))
               ) : suggestions.length === 0 ? (
                 <li className={styles.suggestHint} role="presentation">
-                  Customer does not exist
+                  No active VIP customer found
                 </li>
               ) : (
                 suggestions.map((row, index) => (
                   <li
-                    key={row.customerNumber}
+                    key={rowKey(row)}
                     id={optionId(index)}
                     className={styles.suggestOption}
                     role="option"
@@ -347,11 +317,10 @@ export function CustomerLookupPage() {
                     onMouseEnter={() => setActiveIndex(index)}
                   >
                     <span className={styles.suggestName}>
-                      <HighlightedName name={row.fullName} term={term} />
+                      <HighlightedName name={displayName(row)} term={term} />
                     </span>
                     <span className={styles.suggestMeta}>
-                      {CUSTOMER_CATEGORY_LABELS[row.category]}
-                      {row.tier ? ` · ${row.tier}` : ''}
+                      {row.vipTier} · Valid until {row.validUntil}
                     </span>
                   </li>
                 ))
@@ -361,10 +330,10 @@ export function CustomerLookupPage() {
         </div>
       </div>
       {term.length < 2 ? (
-        <EmptyState title="Enter at least two characters to find a customer or member" />
+        <EmptyState title="Enter at least two characters to find an active VIP customer" />
       ) : selectedLookup ? (
         <div className={styles.results}>
-          <CustomerCard key={selectedLookup.customerNumber} customer={selectedLookup} />
+          <CustomerCard key={rowKey(selectedLookup)} customer={selectedLookup} />
         </div>
       ) : !hasSearched ? null : customers.isError ? (
         <ErrorState
@@ -375,8 +344,8 @@ export function CustomerLookupPage() {
         />
       ) : customers.data?.length === 0 ? (
         <EmptyState
-          title="Customer does not exist"
-          description="Check the spelling and try different letters."
+          title="No active VIP customer found"
+          description="Check the name and try again."
         />
       ) : (
         <EmptyState title="Select a suggested name to view the record." />

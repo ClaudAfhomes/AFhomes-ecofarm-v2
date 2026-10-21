@@ -1308,7 +1308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_actor_id: auth.userId,
         p_application_id: appReview[1],
         p_expected_hash: parsed.data.expectedProposalHash,
-        p_reason: parsed.data.reason,
+        p_reason: parsed.data.reason ?? null,
         p_seller_candidate: parsed.data.sellerCandidateId ?? null,
       });
       if (error) return mapRpcError(res, error);
