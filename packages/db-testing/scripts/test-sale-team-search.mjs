@@ -85,6 +85,31 @@ try {
     (name) => !name.endsWith('_afhomes_normalization_integrity.sql'),
   ))
     await db.query(fs.readFileSync(`supabase/migrations/${file}`, 'utf8').replace(/^\uFEFF/, ''));
+  // Reproduce recorded-but-absent search objects only inside this disposable loopback database.
+  await db.query(`
+    drop function public.begin_sale_team_search(text,text),
+      public.reveal_sale_team_search(text,uuid,text,text,uuid),
+      public.save_sale_team_search_contact(text,text,text,text),
+      public.sale_team_search_contact_exists(uuid),
+      public.cleanup_sale_team_search(integer);
+    drop table private.sale_team_search_contacts,private.sale_team_search_disclosures,
+      private.sale_team_search_attempts;
+  `);
+  const repair = fs.readFileSync(
+    'supabase/migrations/20261212000002_afhomes_reconcile_public_sale_team_search.sql',
+    'utf8',
+  );
+  await db.query(repair);
+  await db.query(repair);
+  check(
+    Number((await db.query(`select count(*) from pg_proc p
+      join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
+      and p.proname in ('begin_sale_team_search','reveal_sale_team_search',
+      'save_sale_team_search_contact','sale_team_search_contact_exists',
+      'cleanup_sale_team_search')`)).rows[0].count),
+    5,
+    'Forward repair restores missing search functions and is safe to replay',
+  );
   check(
     (
       await db.query(

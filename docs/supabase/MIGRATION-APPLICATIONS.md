@@ -366,3 +366,15 @@ The user approved only `20261208000020_afhomes_customer_purchase_summary.sql` an
 - Counts and complete row digests for all 83 public/private tables were unchanged in the transaction. Only the two intended function definitions/ACLs changed; ownership and all other public/private functions were preserved.
 - Independent read-only postcheck verified stored SQL hashes, official Customer ID lookup, the existing Gold partial reservation totals, service-only directory access and restricted private mirror execution.
 - Ignored evidence: `.tmp-bin/customer-summary-preflight.json` and `.tmp-bin/customer-summary-applied.json`. Canonical schema index regenerated. Browser acceptance is recorded separately.
+
+### APPROVED LIVE APPLY - 2026-10-21: Public sale-team search repair and cleanup
+
+The user approved only `20261212000002_afhomes_reconcile_public_sale_team_search.sql` on shared project `ikaevepedpqygdlipsei`, then separately approved enabling `pg_cron` and creating only the hourly `afhomes-sale-team-search-cleanup` job. No production website promotion was performed.
+
+- SQL SHA-256: `48661964b40907fa686d4e012e738af7a72d428163548927c8c91997d501702b`.
+- Preflight found version `20261212000001` recorded but its five search routines and three private search tables absent. The guarded runner applied only version `20261212000002`; 13 older pending versions were deliberately skipped. History increased from 116 to 117 entries.
+- Independent postcheck confirmed only the approved version was added, eight protected business-table counts were unchanged, all five routines are service-role-only, the three private tables have RLS and restricted browser grants, and `supabase/security/rls_invariants.sql` returned no violations. Managed PostgREST exposes all five routines. The schema index was regenerated.
+- Disposable PostgreSQL removed the missing search objects, applied the repair twice, and passed all 49 search/concurrency/privacy/ACL checks.
+- The separately approved cleanup configuration installed `pg_cron` and scheduled `select public.cleanup_sale_team_search(30);` at `0 * * * *`. The script verified all unrelated jobs were unchanged; a subsequent read-only check matched the active job. The command also executed successfully against empty search tables. The first automatic execution was not yet observed at setup time.
+- Retention is configurable through `AFHOMES_SEARCH_CONTACT_RETENTION_DAYS` (1-3650 whole days). After changing it, rerun `node scripts/configure-sale-team-search-cleanup.mjs --apply` with `AFHOMES_TARGET_PROJECT_REF=ikaevepedpqygdlipsei`, and update/redeploy the matching API environment. `--check` reads configuration without changing it. The public notice substitutes the same setting for `{{CONTACT_RETENTION_DAYS}}`.
+- Sanitized preflight evidence is outside the repo under `C:/Users/SSD-CLAUD/afhomes-backups/search-repair-2026-10-21-preflight.json`; operator probes remain ignored. No credentials are recorded here. Public browser acceptance remains separate from database proof.
