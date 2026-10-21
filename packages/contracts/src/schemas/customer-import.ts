@@ -688,6 +688,14 @@ export const customerLookupSchema = z.object({
   membershipStatus: z.string().nullable(),
   membershipExpiresAt: z.string().nullable(),
   category: customerCategorySchema,
+  /** Derived payment state from the directory RPC; null when no sale exists. */
+  paymentStatus: z.enum(['no_payment', 'partially_paid', 'fully_paid']).nullable(),
+  /** Company-stated status, verbatim (never a server-computed total). */
+  companyStatus: z.string().nullable(),
+  /** Company-stated VIP package; fallback for `tier` when no membership exists. */
+  statedVipPackage: z.string().nullable(),
+  /** Supplementary member's name, when one is on file. */
+  supplementaryFullName: z.string().nullable(),
 });
 export type CustomerLookup = z.infer<typeof customerLookupSchema>;
 

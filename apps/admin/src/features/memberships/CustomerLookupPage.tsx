@@ -4,7 +4,6 @@ import {
   customerLookupSchema,
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
-  type Customer,
 } from '@afhomes/contracts';
 import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
@@ -12,10 +11,9 @@ import { requestList } from '../../lib/api/client';
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { humanizeCode } from '../business/format';
-import { membershipKeys, businessKeys } from '../business/queryKeys';
+import { membershipKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { tierArtwork } from '@afhomes/ui';
-import { getCustomerById } from '../business/services';
 
 /**
  * Customer Lookup for the GSD / Employee desk.
@@ -97,11 +95,11 @@ function HighlightedName({ name, term }: { name: string; term: string }) {
   );
 }
 
-function CustomerCard({ customer }: { customer: Customer }) {
+function CustomerCard({ customer }: { customer: CustomerLookup }) {
   const tier = tierKey(customer.tier ?? customer.statedVipPackage ?? null);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
-  const categoryLabel = customer.derivedCategory
-    ? (CUSTOMER_CATEGORY_LABELS[customer.derivedCategory] ?? customer.derivedCategory)
+  const categoryLabel = customer.category
+    ? (CUSTOMER_CATEGORY_LABELS[customer.category] ?? customer.category)
     : '';
   return (
     <article className={styles.member} data-tier={tier} aria-label={customer.fullName}>
@@ -177,42 +175,6 @@ function CustomerCard({ customer }: { customer: Customer }) {
   );
 }
 
-function LookupSkeleton() {
-  // Two placeholder cards while a picked customer's detail resolves.
-  return (
-    <div
-      className={styles.results}
-      role="status"
-      aria-label="Looking for Customer"
-      aria-busy="true"
-    >
-      {[0].map((index) => (
-        <div className={styles.member} data-tier="NONE" aria-hidden="true" key={index}>
-          <div className={styles.artWrap}>
-            <div className={styles.artSkeleton} />
-          </div>
-          <div className={styles.cardBody}>
-            <span className={styles.skeletonChip} style={{ width: '8rem' }} />
-            <span className={styles.skeletonTitle} style={{ width: '14rem' }} />
-            <span className={styles.skeletonLine} style={{ width: '11rem' }} />
-            <div className={styles.details}>
-              {[0, 1, 2, 3].map((fact) => (
-                <div className={styles.fact} key={fact}>
-                  <span className={styles.factSkeletonIcon} />
-                  <div className={styles.factText}>
-                    <span className={styles.skeletonLine} style={{ width: '60%' }} />
-                    <span className={styles.skeletonLine} style={{ width: '90%' }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function CustomerLookupPage() {
   const [search, setSearch] = useState('');
   const debouncedTerm = useDebouncedValue(search.trim());
@@ -255,20 +217,17 @@ export function CustomerLookupPage() {
       ? optionId(activeIndex)
       : undefined;
 
-  // The picked record number. The card resolves live from the latest
-  // fetched page, so a 30s refetch refreshes the shown card too.
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-
-  const detail = useQuery({
-    queryKey: businessKeys.customer(selectedCustomerId ?? undefined),
-    queryFn: () => getCustomerById(selectedCustomerId!),
-    enabled: Boolean(selectedCustomerId),
-    staleTime: 15_000,
-  });
+  // The picked suggestion's customer number. The card resolves live from the
+  // latest fetched page, so a 30s refetch refreshes the shown card too. No
+  // second, permission-gated fetch: everything the card needs is already in
+  // the authorized lookup row.
+  const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
+  const selectedLookup =
+    (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
-    setSelectedCustomerId(row.customerId);
+    setSelectedNumber(row.customerNumber);
     setActiveIndex(-1);
     setSuggestOpen(false);
   };
@@ -337,7 +296,7 @@ export function CustomerLookupPage() {
             onChange={(value) => {
               setSearch(value);
               // Typing on unpicks: the card below belongs to the last pick.
-              setSelectedCustomerId(null);
+              setSelectedNumber(null);
               setActiveIndex(-1);
               setSuggestOpen(true);
             }}
@@ -403,21 +362,10 @@ export function CustomerLookupPage() {
       </div>
       {term.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a customer or member" />
-      ) : selectedCustomerId ? (
-        detail.isPending ? (
-          <LookupSkeleton />
-        ) : detail.isError ? (
-          <ErrorState
-            error={detail.error}
-            title="Customer lookup is unavailable right now"
-            message={describeCustomerLookupError(detail.error)}
-            onRetry={() => void detail.refetch()}
-          />
-        ) : detail.data ? (
-          <div className={styles.results}>
-            <CustomerCard key={selectedCustomerId} customer={detail.data} />
-          </div>
-        ) : null
+      ) : selectedLookup ? (
+        <div className={styles.results}>
+          <CustomerCard key={selectedLookup.customerNumber} customer={selectedLookup} />
+        </div>
       ) : !hasSearched ? null : customers.isError ? (
         <ErrorState
           error={customers.error}

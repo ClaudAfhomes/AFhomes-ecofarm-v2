@@ -34,6 +34,10 @@ const PROSPECT = {
   membershipStatus: null,
   membershipExpiresAt: null,
   category: 'PENDING' as const,
+  paymentStatus: 'no_payment' as const,
+  companyStatus: null,
+  statedVipPackage: null,
+  supplementaryFullName: null,
 };
 
 const FULL_PROSPECT = {
@@ -322,6 +326,7 @@ const MARIA = {
   membershipStatus: 'active' as const,
   membershipExpiresAt: '2031-10-11',
   category: 'ACTIVE_VIP' as const,
+  paymentStatus: 'fully_paid' as const,
 };
 
 const FULL_MARIA = {

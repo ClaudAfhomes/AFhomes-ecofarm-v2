@@ -41,5 +41,13 @@ export function customerLookupFromDirectory(r: Record<string, unknown>) {
     membershipStatus: r.member_status ?? null,
     membershipExpiresAt: isoOrNull(r.expires_at),
     category: r.derivedCategory,
+    // Business-state display fields, already present in `customer_directory`
+    // (`c.*`). Exposed here so the GSD desk can render the record card from
+    // this authorized read alone, without the `sales.customers`-gated detail
+    // endpoint.
+    paymentStatus: (r.payment_status as 'no_payment' | 'partially_paid' | 'fully_paid' | null) ?? null,
+    companyStatus: (r.company_status as string | null) ?? null,
+    statedVipPackage: (r.stated_vip_package as string | null) ?? null,
+    supplementaryFullName: (r.supplementary_full_name as string | null) ?? null,
   });
 }
