@@ -1888,9 +1888,9 @@ export function CustomerApplicationEditorPage() {
                 <Button
                   onClick={async () => {
                     try {
+                      await decide.mutateAsync('approved');
                       if (!proposal.data) await proposal.refetch();
                       await review.mutateAsync();
-                      await decide.mutateAsync('approved');
                     } catch (e) {
                       setMessage(e instanceof Error ? e.message : 'Approval failed.');
                     }
