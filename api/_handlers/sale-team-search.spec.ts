@@ -146,6 +146,27 @@ it('refuses Cloudflare test keys on hosted targets even with publication setting
   vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({ available: true });
 });
+it.each(['7', '30', '90'])(
+  'renders the configured %s-day contact retention in the public notice',
+  async (days) => {
+    vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
+    vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
+    vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
+    vi.stubEnv('AFHOMES_SEARCH_CONTACT_RETENTION_DAYS', days);
+    vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
+    vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', 'synthetic-real-secret');
+    vi.stubEnv(
+      'AFHOMES_SEARCH_PRIVACY_NOTICE',
+      'Contact retention is {{CONTACT_RETENTION_DAYS}} days. This synthetic notice describes the verification purpose, limited recipients and privacy contact.',
+    );
+    const state = await call('search/config', undefined, 'GET');
+    expect(state.body).toMatchObject({
+      available: true,
+      privacyNotice: `Contact retention is ${days} days. This synthetic notice describes the verification purpose, limited recipients and privacy contact.`,
+    });
+  },
+);
 it('returns 429 without a result when the disclosure allowance is exhausted', async () => {
   const searchToken = await start();
   holder.db!.rpcs.find((r) => r.fn === 'reveal_sale_team_search')!.result = {

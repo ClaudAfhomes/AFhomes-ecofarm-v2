@@ -145,9 +145,9 @@ export function searchConfiguration() {
     .map((v) => v.trim())
     .filter(Boolean);
   const retentionDays = Number(e.AFHOMES_SEARCH_CONTACT_RETENTION_DAYS);
-  const privacyNotice = localPreview
-    ? DRAFT_SEARCH_NOTICE
-    : (e.AFHOMES_SEARCH_PRIVACY_NOTICE ?? '');
+  const privacyNotice = (
+    localPreview ? DRAFT_SEARCH_NOTICE : (e.AFHOMES_SEARCH_PRIVACY_NOTICE ?? '')
+  ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays));
   const noticeVersion =
     e.AFHOMES_SEARCH_NOTICE_VERSION ?? (localPreview ? 'local-draft-2026-10-21' : '');
   const siteKey = e.VITE_TURNSTILE_SITE_KEY ?? '';

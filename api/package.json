@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "cd .. && tsx watch api/dev-server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
