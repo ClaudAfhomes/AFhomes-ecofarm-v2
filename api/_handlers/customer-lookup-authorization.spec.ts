@@ -7,40 +7,37 @@ vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: 
 const memberships = (await import('./memberships.js')).default;
 
 /**
- * Customer Lookup is the GSD/Employee desk. These tests pin the two properties that
+ * Customer Lookup is the GSD/Employee desk. These tests pin the properties that
  * separate it from the member-TRANSACTION lookup that shares a handler file:
  *
- * 1. It is READ-ONLY, and it is read-only because the permission it requires carries
- *    no `create`/`update`/`delete` and no sibling mutating handler exists on this path.
- *    A GSD operator who can reach this screen cannot edit a customer, take a payment,
- *    activate a membership or spend points.
- * 2. It NEVER returns a Membership Code - not current, not legacy, not in the
- *    `AFHOMES:` envelope, and not a QR or fallback credential. The response has no
- *    field one could be rendered into, which is why this is asserted on the response
- *    BODY rather than on a UI that could be changed tomorrow.
- *
- * It also pins the SEPARATION from the till: the screen is its own module
- * (`operations.customer_lookup`, seeded by 20261131000003), so holding the
- * `operations.redemption` till key no longer opens it.
+ * 1. It is READ-ONLY (view-only permission, no mutating branch on this path).
+ * 2. It returns ONLY active VIPs (customer active + active unexpired membership
+ *    on a BRONZE/SILVER/GOLD plan), enforced server-side before paging.
+ * 3. It NEVER returns a Membership Code, credential, identifier, status, or any
+ *    field beyond the four approved display fields.
+ * 4. It is its own module (`operations.customer_lookup`), so the till key does
+ *    not open it.
  */
-
 const customerId = '11111111-1111-4111-8111-111111111111';
 
-/** What `customer_directory` actually returns: `c.*` plus the membership join. */
+/** What `customer_directory` actually returns for an eligible active VIP. */
 const DIRECTORY_RECORD = {
   record: {
     id: customerId,
-    full_name: 'PROSPECT DELA CRUZ',
+    first_name: 'Juan',
+    middle_name: null,
+    last_name: 'Dela Cruz',
+    suffix: null,
+    full_name: 'JUAN DELA CRUZ',
     customer_number: 'AF-CUS-00042',
     customer_code: 'AF-CC-1A2B3C4D',
-    status: 'prospect',
-    // Present in the row because the SQL selects `c.*` and left-joins memberships.
-    // None of it may reach this response.
+    status: 'active',
+    // Sensitive fields present in the raw row (c.* join). None may reach the response.
     membership_number: 'MBS-A1B2C3D4-E5F60718-293A4B5C-6D7E8F90',
-    member_status: null,
-    tier: null,
-    expires_at: null,
-    derivedCategory: 'PENDING',
+    member_status: 'active',
+    tier: 'GOLD',
+    expires_at: '2033-10-21T00:00:00.000Z',
+    derivedCategory: 'ACTIVE_VIP',
     available_points: '0',
     fallback_code_hash: 'never-returned',
     qr_token_hash: 'never-returned',
@@ -49,6 +46,10 @@ const DIRECTORY_RECORD = {
     phone: 'never-returned',
     auth_user_id: 'never-returned',
     verified_paid: '0.00',
+    payment_status: 'fully_paid',
+    company_status: null,
+    stated_vip_package: 'GOLD',
+    supplementary_full_name: null,
   },
   total_count: 1,
 };
@@ -56,16 +57,14 @@ const DIRECTORY_RECORD = {
 function install({
   allowed = true,
   grant = {},
-}: { allowed?: boolean; grant?: Record<string, boolean> } = {}) {
+  rows = [DIRECTORY_RECORD],
+}: { allowed?: boolean; grant?: Record<string, boolean>; rows?: Array<unknown> } = {}) {
   const tables = baseTables();
   if (allowed)
     tables.role_permissions.push({
       role_id: UUID.role.employee,
       module_id: moduleId('operations.customer_lookup'),
       can_view: true,
-      // Explicitly false: the GSD desk is a lookup, not a till. The seeded
-      // grant carries view only, and these are restated here so the test fails
-      // if someone quietly widens the grant this route depends on.
       can_create: grant.canCreate ?? false,
       can_update: grant.canUpdate ?? false,
       can_delete: grant.canDelete ?? false,
@@ -73,7 +72,7 @@ function install({
   holder.db = new FakeSupabase({
     tables,
     tokens: baseTokens(),
-    rpcs: [{ fn: 'customer_directory', result: [DIRECTORY_RECORD] }],
+    rpcs: [{ fn: 'customer_directory', result: rows }],
   });
   return holder.db;
 }
@@ -89,7 +88,7 @@ async function lookup(token: string, search = 'DELA') {
 
 afterEach(() => vi.clearAllMocks());
 
-describe('Customer Lookup (GSD) is read-only and exposes no Membership credential', () => {
+describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () => {
   it('serves an Employee who holds only the lookup permission', async () => {
     install();
     const s = await lookup(TOKEN.viewer);
@@ -97,14 +96,17 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     const body = s.body as { data: Array<Record<string, unknown>> };
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
-      customerId,
-      customerNumber: 'AF-CUS-00042',
-      customerCode: 'AF-CC-1A2B3C4D',
-      fullName: 'PROSPECT DELA CRUZ',
-      customerStatus: 'prospect',
-      membershipStatus: null,
-      tier: null,
+      firstName: 'Juan',
+      maskedLastName: 'D***',
+      vipTier: 'GOLD',
+      validUntil: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
+    expect(Object.keys(body.data[0]!)).toEqual([
+      'firstName',
+      'maskedLastName',
+      'vipTier',
+      'validUntil',
+    ]);
   });
 
   it('refuses a caller with no permission at all, before reaching the database', async () => {
@@ -121,8 +123,6 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
   });
 
   it('refuses the till permission: redemption alone does not open the lookup', async () => {
-    // The separation the dedicated module exists for. A tills-only grant must
-    // not read customer records, and the refusal happens before the database.
     const db = install({ allowed: false });
     db.tables['role_permissions']!.push({
       role_id: UUID.role.employee,
@@ -143,33 +143,39 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
     expect(called).toBe(false);
   });
 
-  it('never returns a Membership Code, credential or identity field', async () => {
+  it('never returns a Membership Code, credential, identifier, status, or extra field', async () => {
     install();
     const s = await lookup(TOKEN.viewer);
-    // Assert on the serialized body, not on named fields: a new field could be added
-    // that leaks, and this catches it.
     const serialized = JSON.stringify(s.body);
-    expect(serialized).not.toContain('MBS-A1B2C3D4');
-    expect(serialized).not.toContain('membership_number');
-    expect(serialized).not.toContain('membershipNumber');
-    expect(serialized).not.toContain('fallback_code_hash');
-    expect(serialized).not.toContain('qr_token_hash');
-    expect(serialized).not.toContain('government_id_number');
-    expect(serialized).not.toContain('auth_user_id');
-    expect(serialized).not.toContain('example.invalid');
+    for (const forbidden of [
+      'MBS-A1B2C3D4',
+      'membership_number',
+      'membershipNumber',
+      'fallback_code_hash',
+      'qr_token_hash',
+      'government_id_number',
+      'auth_user_id',
+      'example.invalid',
+      'customerNumber',
+      'customerCode',
+      'customerId',
+      'fullName',
+      'customerStatus',
+      'membershipStatus',
+      'membershipExpiresAt',
+      'category',
+      'paymentStatus',
+      'companyStatus',
+      'statedVipPackage',
+      'supplementaryFullName',
+      'AF-CUS-',
+      'AF-CC-',
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
-  it('keeps Customer Status and Membership Status as separate facts', async () => {
-    install();
-    const s = await lookup(TOKEN.viewer);
-    const row = (s.body as { data: Array<Record<string, unknown>> }).data[0];
-    // Both keys must exist, so a screen cannot be forced to invent one from the other.
-    expect(row).toHaveProperty('customerStatus');
-    expect(row).toHaveProperty('membershipStatus');
-    expect(row?.customerStatus).not.toBe(row?.membershipStatus ?? undefined);
-  });
-
-  it('searches ALL customers, not only members', async () => {
+  it('enforces active-VIP filters server-side before paging', async () => {
     const db = install();
     const seen: Array<Record<string, unknown>> = [];
     const original = db.rpc.bind(db);
@@ -179,15 +185,25 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
       return original(...args);
     };
     await lookup(TOKEN.viewer);
-    // The filter must NOT be membersOnly: a GSD operator has to find prospects and
-    // suspended accounts, which are precisely the calls that arrive at this desk.
-    expect(seen[0]).toMatchObject({ membersOnly: false });
+    expect(seen[0]).toMatchObject({
+      membersOnly: true,
+      status: 'active',
+      activeVipOnly: true,
+    });
   });
 
   it('requires at least two characters, like every other lookup', async () => {
     install();
     const s = await lookup(TOKEN.viewer, 'A');
     expect(s.status).toBe(400);
+  });
+
+  it('returns an empty list when the directory returns no rows', async () => {
+    install({ rows: [] });
+    const s = await lookup(TOKEN.viewer);
+    expect(s.status).toBe(200);
+    const body = s.body as { data: unknown[] };
+    expect(body.data).toEqual([]);
   });
 
   it('refuses a mutating method on the lookup path', async () => {
@@ -197,15 +213,10 @@ describe('Customer Lookup (GSD) is read-only and exposes no Membership credentia
       makeReq({ method: 'POST', familyPath: 'customer-lookup', token: TOKEN.viewer }),
       res,
     );
-    // No POST branch exists for this path, so it must not be readable, let alone
-    // able to write. Anything but 404 means a mutating route appeared here.
     expect(state.status).toBe(404);
   });
 
   it('does not become writable when its module gains a create grant', async () => {
-    // Even with `create` present on the grant, this route still has no mutating
-    // branch - which is the property that makes "read-only by construction"
-    // true rather than aspirational.
     install({ grant: { canCreate: true } });
     const { res, state } = makeRes();
     await memberships(

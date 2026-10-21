@@ -562,6 +562,7 @@
   display: grid;
   gap: var(--space-4);
   align-content: start;
+  padding-bottom: 6rem;
 }
 
 /* Editor form root: the disabling wrapper stays a fieldset for behavior, but
@@ -582,8 +583,16 @@
   min-width: 0;
   padding: var(--space-5);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg, var(--radius-md));
   background: var(--color-bg-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.panelTitle {
+  margin: 0 0 var(--space-3);
+  padding: 0 0 var(--space-2);
+  font-size: var(--text-h3);
+  border-bottom: 1px solid var(--color-border-default);
 }
 
 .panelTitle {
@@ -635,11 +644,32 @@
 .stickyFooter {
   position: sticky;
   bottom: 0;
-  z-index: 1;
-  margin-top: var(--space-2);
-  padding: var(--space-3) 0;
+  z-index: 10;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   background-color: var(--color-bg-surface);
-  border-top: 1px solid var(--color-border-default);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, var(--radius-md));
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.stickyFooterInner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.stickyFooterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .stickyFooterActions {
@@ -855,12 +885,114 @@
   margin-bottom: var(--space-3);
 }
 
+/* Linked customer row on the application record status card. */
+.linkedCustomerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle, var(--color-surface-default));
+}
+
+.linkedCustomerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.linkedCustomerName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+
+.linkedCustomerName:hover {
+  text-decoration: underline;
+}
+
+.linkedCustomerMeta {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Application record status: lifecycle timeline + linked records. */
+.statusTimeline {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+@media (min-width: 640px) {
+  .statusTimeline {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+  }
+}
+
+.statusMilestone {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle, var(--color-surface-default));
+}
+
+.statusMilestone[data-state='Done'] {
+  border-color: var(--color-success, var(--color-border-default));
+}
+
+.statusMarker {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-secondary);
+}
+
+.statusMilestone[data-state='Done'] .statusMarker {
+  color: var(--color-success, var(--color-brand-primary));
+}
+
+.statusMilestoneBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.statusMilestoneLabel {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.statusMilestoneTime {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
 /* Record actions on the application detail screen: decision, data,
    lifecycle, next-step and export controls grouped under their own headings
    instead of one undifferentiated run of buttons. */
 .recordGroups {
-  display: grid;
-  gap: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.recordGroups .actionGroup,
+.recordGroups .actions {
+  display: contents;
 }
 
 .actionGroup {
@@ -895,12 +1027,12 @@
   color: var(--color-text-secondary);
 }
 
-.workflowStep[data-state='done'],
-.workflowStep[data-state='current'] {
+.workflowStep[data-state='Done'],
+.workflowStep[data-state='Current'] {
   color: var(--color-text-primary);
 }
 
-.workflowStep[data-state='current'] {
+.workflowStep[data-state='Current'] {
   font-weight: 600;
 }
 
@@ -911,11 +1043,11 @@
   font-weight: 700;
 }
 
-.workflowStep[data-state='done'] .workflowMark {
+.workflowStep[data-state='Done'] .workflowMark {
   color: var(--color-success);
 }
 
-.workflowStep[data-state='current'] .workflowMark {
+.workflowStep[data-state='Current'] .workflowMark {
   color: var(--color-brand-primary);
 }
 
@@ -923,6 +1055,157 @@
 .workflowNext {
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border-default);
+}
+
+/* Purchase workflow: modern timeline + next-step callout. */
+.workflowHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.workflowProgress {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.workflowTimeline {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto;
+  gap: var(--space-2);
+}
+
+@media (min-width: 640px) {
+  .workflowTimeline {
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, auto);
+    gap: var(--space-3);
+  }
+}
+
+.workflowTimelineItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+}
+
+.workflowTimelineItem[data-state='Done'] {
+  opacity: 0.72;
+}
+
+.workflowTimelineItem[data-state='Current'] {
+  border-color: var(--color-brand-primary, var(--color-border-strong));
+  background: var(--color-surface-subtle, var(--color-surface-default));
+  box-shadow: 0 0 0 1px var(--color-brand-primary, transparent);
+}
+
+.workflowNode {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle, var(--color-surface-default));
+}
+
+.workflowTimelineItem[data-state='Done'] .workflowNode {
+  background: var(--color-success, #3f7d4e);
+  border-color: var(--color-success, #3f7d4e);
+  color: #fff;
+}
+
+.workflowTimelineItem[data-state='Current'] .workflowNode {
+  background: var(--color-brand-primary, #2563eb);
+  border-color: var(--color-brand-primary, #2563eb);
+  color: #fff;
+}
+
+.workflowTimelineBody {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.workflowTimelineLabel {
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.workflowTimelineItem[data-state='Pending'] .workflowTimelineLabel {
+  color: var(--color-text-secondary);
+}
+
+.workflowTimelineStatus {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-brand-primary, #2563eb);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.workflowConnector {
+  display: none;
+}
+
+.workflowNextCard {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, var(--radius-md));
+  background: var(--color-surface-subtle, var(--color-surface-default));
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workflowNextHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workflowNextEyebrow {
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.workflowNextTitle {
+  margin: 0;
+  font-size: var(--text-body-l, var(--text-body));
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.workflowNextActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.workflowNextPrimary {
+  flex: 1 1 auto;
 }
 
 .workflowNext h3 {

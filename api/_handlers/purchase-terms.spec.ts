@@ -378,7 +378,7 @@ describe('old approved application review', () => {
     ...extra,
   });
 
-  it('captures an explicitly new offer with a mandatory reason', async () => {
+  it('captures an explicitly new offer with a supplied reason', async () => {
     const termsId = '77777777-7777-4777-8777-777777777777';
     install({ rpcs: [{ fn: 'review_application_purchase_terms_once', result: termsId }] });
     const response = await call({
@@ -395,13 +395,27 @@ describe('old approved application review', () => {
     });
   });
 
-  it('requires a reason of real length', async () => {
+  it('allows an omitted reason and sends null to the RPC', async () => {
+    const termsId = '77777777-7777-4777-8777-777777777777';
+    install({ rpcs: [{ fn: 'review_application_purchase_terms_once', result: termsId }] });
+    const response = await call({
+      path: `customer-applications/${APP_ID}/purchase-terms/review`,
+      method: 'POST',
+      body: review({ reason: undefined }),
+    });
+    expect(response.status).toBe(200);
+    const calls = rpcCall(holder.db as FakeSupabase, 'review_application_purchase_terms_once');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.arg).toMatchObject({ p_reason: null, p_expected_hash: HASH });
+  });
+
+  it('validates the length of a supplied reason', async () => {
     install();
-    for (const reason of [undefined, 'ok', 'x'.repeat(501)]) {
+    for (const reason of ['ok', 'x'.repeat(501)]) {
       const response = await call({
         path: `customer-applications/${APP_ID}/purchase-terms/review`,
         method: 'POST',
-        body: review(reason === undefined ? { reason: undefined } : { reason }),
+        body: review({ reason }),
       });
       expect(response.status).toBe(400);
     }

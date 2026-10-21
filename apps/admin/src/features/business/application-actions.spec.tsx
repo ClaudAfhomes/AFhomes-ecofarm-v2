@@ -159,11 +159,11 @@ it.each(['draft', 'submitted', 'approved', 'rejected', 'cancelled'] as const)(
   'keeps %s actions outside the read-only fields',
   async (status) => {
     await show(status);
-    // Save & Submit lives in the header and the sticky footer alike; both share
+    // Submit lives in the header and the sticky footer alike; both share
     // state. This fixture has no current identity document, so the ID gate
     // blocks the action for every status, and non-draft records are read-only.
-    const saves = screen.getAllByRole('button', { name: 'Save & Submit' });
-    expect(saves).toHaveLength(2);
+    const saves = screen.getAllByRole('button', { name: 'Submit' });
+    expect(saves).toHaveLength(1);
     for (const save of saves) expect(save).toBeDisabled();
     expect(screen.getByLabelText('First name')).toHaveProperty('disabled', false);
     if (status !== 'draft') expect(screen.getByLabelText('First name')).toBeDisabled();
@@ -355,7 +355,7 @@ it('does not expose a new application form when an existing application fails to
   );
   await screen.findByText('Application could not be loaded');
   expect(screen.queryByText('New Customer Application')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Save & Submit' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
 });
 
 it('guides legacy submitted applications through terms capture instead of a doomed approval', async () => {

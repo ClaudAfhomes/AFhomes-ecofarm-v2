@@ -306,6 +306,10 @@ export default function App() {
                 element={protectedPage(<CustomerApplicationEditorPage />)}
               />
               <Route
+                path="/admin/customers/applications/:id/edit"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
+              <Route
                 path="/admin/sales/reservations"
                 element={protectedPage(<ReservationAgreementsPage />)}
               />

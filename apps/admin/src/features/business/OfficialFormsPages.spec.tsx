@@ -775,7 +775,7 @@ describe('application private ID intake', () => {
     fireEvent.pointerDown(await screen.findByRole('option', { name: option }));
   };
 
-  it('registers a new customer on Save & Submit when New Register is selected', async () => {
+  it('registers a new customer on Submit when New Register is selected', async () => {
     // Regression: the create contract was parsed before the register branch,
     // so New Register - which carries no customerId by design - was refused
     // with "Select a customer for this application." and never registered.
@@ -855,7 +855,7 @@ describe('application private ID intake', () => {
     fireEvent.click(
       screen.getByRole('checkbox', { name: /I certify the information and consent/ }),
     );
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save & Submit' })[1]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Submit' })[0]!);
 
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
     const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];

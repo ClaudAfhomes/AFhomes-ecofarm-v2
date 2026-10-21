@@ -8,6 +8,8 @@
 
 ## R1. Scope and confirmed owner decision
 
+**Upstream requirement change (`develop`, commit `d9afa1c`):** the requested allowance is 3 successful searches per IP in a rolling **7 days**. The implementation described below still enforces **24 hours**; the seven-day change is pending implementation and verification. Resolving the branch conflict does not change that runtime policy or authorize a database apply.
+
 Enhance `/sale-team-search` with acknowledgment on every valid search attempt, session contact validation, surname masking, official company verification contact, and at most **3 successful disclosures per IP in a rolling 24 hours**. Preserve exact AA lookup, existing roles/permissions, employee identity, OST terms, transfers, issued identifiers and business history. No directory, autocomplete, polling, new dependency, or unrelated refactor.
 
 **Current CAPTCHA provider:** The latest user request restores Cloudflare Turnstile. The temporary Google reCAPTCHA integration is removed. Official Cloudflare test keys remain loopback-preview only; hosted activation requires registered keys and approved hostnames.

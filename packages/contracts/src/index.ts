@@ -726,6 +726,8 @@ export {
   type MemberLookup,
   customerLookupSchema,
   type CustomerLookup,
+  gsdActiveVipLookupSchema,
+  type GsdActiveVipLookup,
 } from './schemas/customer-import.js';
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';

@@ -1,5 +1,9 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
-import { customerLookupFromDirectory, memberLookupFromDirectory } from '../_lib/member-lookup.js';
+import {
+  customerLookupFromDirectory,
+  gsdActiveVipLookupFromDirectory,
+  memberLookupFromDirectory,
+} from '../_lib/member-lookup.js';
 /**
  * AFHomes memberships (cards), identifier resolution, and the points ledger.
  *
@@ -250,11 +254,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'Enter at least two search characters', 400);
       const directory = await customerDirectory(db, {
         search,
-        // NOT membersOnly. A GSD operator must be able to find a prospect, a
-        // suspended account or a cancelled one - those are exactly the calls that
-        // arrive at this desk. Filtering to members would answer "no such customer"
-        // for a customer who exists, which is worse than a wide result.
-        membersOnly: false,
+        // Active VIP only: customer status active + active, unexpired membership
+        // whose plan resolves to BRONZE/SILVER/GOLD. `membersOnly` alone is not
+        // sufficient (it only proves a membership row exists); `activeVipOnly`
+        // pins every predicate inside the SQL `filtered` CTE, before paging.
+        membersOnly: true,
+        status: 'active',
+        activeVipOnly: true,
         limit: 50,
         sort: 'name',
       });
@@ -264,7 +270,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Membership Code - current, legacy or `AFHOMES:`-wrapped - finds nobody here.
       // That separation is enforced in SQL and asserted in `db-integration.ts`; this
       // response additionally has no field a Membership Code could be rendered into.
-      const data = directory.map(({ record: r }) => customerLookupFromDirectory(r));
+      // Strict allowlist: only the four approved display fields are emitted; rows
+      // missing a required value are dropped (fail closed).
+      const data = directory
+        .map(({ record: r }) => gsdActiveVipLookupFromDirectory(r))
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+      res.setHeader('Cache-Control', 'no-store');
       return res
         .status(200)
         .json({ data, meta: { total: directory[0]?.total_count ?? 0, limit: 50, offset: 0 } });
