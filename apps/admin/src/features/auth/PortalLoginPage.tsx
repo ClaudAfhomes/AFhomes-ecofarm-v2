@@ -35,7 +35,7 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
   const { status, signIn, logout } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; captcha?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -107,11 +107,14 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
     }
     setServerError(null);
     setDecision(null);
+    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+      setErrors({ captcha: 'Complete security verification before signing in.' });
+      return;
+    }
     setPending(true);
     try {
       if (env.VITE_TURNSTILE_SITE_KEY) {
-        if (!captchaToken) throw new Error('Complete security verification.');
-        await signIn(email, password, captchaToken);
+        await signIn(email, password, captchaToken!);
       } else await signIn(email, password);
       const portals: AuthPortals = await getAuthPortals();
       applyDecision(decideForPortal(portal, portals, requested));
@@ -222,6 +225,7 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
               onToken={setCaptchaToken}
               resetVersion={captchaVersion}
             />
+            {errors.captcha ? <p role="alert">{errors.captcha}</p> : null}
             <Button
               loadingLabel="Signing in…"
               type="submit"

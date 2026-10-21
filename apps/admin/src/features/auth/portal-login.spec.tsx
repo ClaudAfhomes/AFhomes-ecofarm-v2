@@ -13,6 +13,7 @@ import { useLocation } from 'react-router';
 
 import App from '../../app/App';
 import { renderWithProviders } from '../../test/utils';
+import { env } from '../../lib/env';
 
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
@@ -243,6 +244,20 @@ describe('staff entry decisions', () => {
 });
 
 describe('admin entry decisions', () => {
+  it('asks for missing CAPTCHA verification without blaming credentials or calling Auth', async () => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    try {
+      renderWithProviders(<App />, { route: '/admin/login' });
+      await screen.findByRole('heading', { name: 'Admin Login' });
+      await signInAs('admin@afhomes.test');
+      expect(await screen.findByText('Complete security verification before signing in.')).toBeVisible();
+      expect(screen.queryByText('We could not sign you in')).not.toBeInTheDocument();
+      expect(authMock.signInWithPassword).not.toHaveBeenCalled();
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+    }
+  });
   it('accepts an admin', async () => {
     portalsBody.current = staffPortals('admin');
     renderWithProviders(

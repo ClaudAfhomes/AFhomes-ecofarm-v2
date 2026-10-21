@@ -162,7 +162,7 @@ function updatePayload(member: Member, values: MemberFormValues): UpdateMemberPr
 }
 
 export function MemberDetailDialog({
-  member,
+  member: listedMember,
   onClose,
   onChanged,
   onTransfer,
@@ -186,12 +186,12 @@ export function MemberDetailDialog({
 
   const invalidate = () => client.invalidateQueries({ queryKey: networkMemberKeys.scope });
 
-  // The list row carries masks; the record view reads the member once more so
-  // the identification fields show in clear for verification.
+  // OST lists can lack registration fields; fetch the full record for display and edit.
   const detail = useQuery({
-    queryKey: networkMemberKeys.detail(member.id),
-    queryFn: () => getMember(member.id),
+    queryKey: networkMemberKeys.detail(listedMember.id),
+    queryFn: () => getMember(listedMember.id),
   });
+  const member = detail.data ?? listedMember;
 
   const save = useBusinessMutation({
     mutationFn: (values: MemberFormValues) => {
@@ -314,6 +314,7 @@ export function MemberDetailDialog({
             ) : null}
             <Button
               variant="primary"
+              disabled={!detail.data}
               onClick={() => {
                 save.reset();
                 issue.reset();
@@ -395,10 +396,10 @@ export function MemberDetailDialog({
             {detail.isPending ? (
               <p className={styles.inlineStatus} role="status">
                 <Spinner size="sm" />
-                Loading full IDs…
+                Loading member details…
               </p>
             ) : detail.isError ? (
-              <Alert variant="warning">Full IDs failed to load. Showing masked values.</Alert>
+              <Alert variant="warning">Member details failed to load. Showing available list values.</Alert>
             ) : null}
           </DetailCard>
           <DetailCard>

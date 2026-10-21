@@ -1468,6 +1468,78 @@ describe('POST /members/ost (direct OST creation)', () => {
   });
 });
 
+describe('OST member record details', () => {
+  const applicationId = 'af000000-0000-4000-8000-000000000001';
+  function ostDetailFixture() {
+    const tables = baseTables();
+    const moduleId = 'af000000-0000-4000-8000-000000000002';
+    tables.modules!.push({ id: moduleId, key: 'network.ost_registrations', is_active: true });
+    tables.role_permissions!.push({ role_id: ROLE_ADMIN, module_id: moduleId, can_view: true });
+    tables.ost_members = [{ id: OST_ID, application_id: applicationId }];
+    return tables;
+  }
+  const records = {
+    currentApplicant: {
+      fullName: 'OST AGENT', birthDate: '1990-01-02', email: 'ost@afhomes.test',
+      phone: '+639171234567', sex: 'female', civilStatus: 'single',
+      address: { line1: '17 Mango Street', city: 'Calauan', province: 'Laguna', postalCode: '4012' },
+      messenger: null, employerName: 'LAGUNA SERVICES', jobPosition: 'CONSULTANT',
+      tinMasked: '***1234', programCategory: 'non_vip', vipCardType: null,
+    },
+    registration: {
+      form_number: 'OST-SYNTHETIC', date_applied: '2026-10-01', program_category: 'non_vip',
+      vip_card_type: null, applicant_signature_status: 'received', referrer_signature_status: 'received',
+      endorsed_at: null,
+      official_details: { telephone: '', messenger: 'OLD MESSENGER', employerAddress: '18 Rizal Street', governmentIdType: 'passport' },
+    },
+    terms: [], renewals: [],
+  };
+  it('reads saved OST creation fields and current corrections without an IST profile', async () => {
+    const db = install(ostDetailFixture(), { rpcs: [
+      { fn: 'get_sale_team_accreditation', result: null },
+      { fn: 'ost_accreditation_records', result: records },
+    ] });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      dateOfBirth: '1990-01-02', sex: 'Female', civilStatus: 'Single',
+      streetNo: '17 Mango Street', cityMunicipality: 'Calauan', province: 'Laguna', zipCode: '4012',
+      mobileNo: '+639171234567', telNo: null, fbMessenger: null,
+      employerName: 'LAGUNA SERVICES', employerAddress: '18 Rizal Street', jobPosition: 'CONSULTANT',
+      governmentIdType: 'passport', tinMasked: '***1234', tin: null, governmentIdNumber: null,
+    });
+    expect(db.calls.find(c => c.op === 'rpc' && c.table === 'ost_accreditation_records')?.arg).toMatchObject({
+      p_actor_id: ADMIN_ID, p_ost_id: OST_ID, p_application_id: applicationId,
+    });
+  });
+  it('does not read the OST official form without its existing view permission', async () => {
+    const db = install();
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(db.calls.some(c => c.op === 'rpc' && c.table === 'ost_accreditation_records')).toBe(false);
+  });
+  it('keeps existing member profile fields ahead of the frozen OST form', async () => {
+    const tables = ostDetailFixture();
+    tables.network_member_profiles!.push({ staff_id: OST_ID, tel_no: '+63281234567',
+      employer_address: '25 Updated Street', government_id_type: 'drivers_license' });
+    install(tables, { rpcs: [
+      { fn: 'get_sale_team_accreditation', result: null },
+      { fn: 'ost_accreditation_records', result: records },
+    ] });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.body).toMatchObject({ telNo: '+63281234567', employerAddress: '25 Updated Street',
+      governmentIdType: 'drivers_license' });
+  });
+  it('preserves the OST scope denial instead of returning another team\'s details', async () => {
+    install(ostDetailFixture(), {
+      rpcErrors: { ost_accreditation_records: { code: '42501', message: 'MUTATION_FORBIDDEN' } },
+    });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(403);
+    expect(state.body).not.toHaveProperty('mobileNo');
+  });
+});
+
 describe('POST /members/:id/transfer', () => {
   it('reads the current OST team from genealogy even when there is no profile row', async () => {
     const db = install();
