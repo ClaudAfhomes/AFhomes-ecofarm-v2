@@ -1889,7 +1889,7 @@ export function CustomerApplicationEditorPage() {
                   onClick={async () => {
                     try {
                       await decide.mutateAsync('approved');
-                      if (!proposal.data) await proposal.refetch();
+                      await proposal.refetch();
                       await review.mutateAsync();
                     } catch (e) {
                       setMessage(e instanceof Error ? e.message : 'Approval failed.');
