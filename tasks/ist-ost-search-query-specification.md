@@ -248,7 +248,7 @@ The number is now confirmed, so the number itself no longer blocks release. Rema
 ### Search allowance (CONFIRMED)
 
 - Maximum 3 successful searches per IP address.
-- Rolling 24-hour window.
+- Rolling 7 days window.
 - Enforcement on the server.
 - Client-side restrictions alone are insufficient.
 - Counter must behave correctly across instances and restarts.
