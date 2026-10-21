@@ -159,6 +159,12 @@ function showList() {
   renderWithProviders(<MembersPage />);
 }
 
+async function openMemberEdit() {
+  const edit = await screen.findByRole('button', { name: 'Edit' });
+  await waitFor(() => expect(edit).toBeEnabled());
+  fireEvent.click(edit);
+}
+
 function showCreate() {
   vi.mocked(getMembers).mockResolvedValue([]);
   vi.mocked(getMemberDepartments).mockResolvedValue([SALES_DEPT] as never);
@@ -511,7 +517,7 @@ describe('Members page', () => {
     vi.mocked(updateMember).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // New fields mirror creation, prefilled from the record.
     expect(screen.getByLabelText('Full Name')).toHaveValue('SALES MANAGER');
     expect(screen.getByLabelText('Date of Birth')).toHaveValue('1990-02-02');
@@ -542,7 +548,7 @@ describe('Members page', () => {
     vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
     await screen.findByText('SALES MANAGER');
     fireEvent.click(screen.getByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // The same sections creation renders, in the same order.
     for (const section of [
       'Assignment',
@@ -582,7 +588,7 @@ describe('Members page', () => {
     vi.mocked(updateMember).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // Moving the position clears the head; the new level asks for its own.
     fireEvent.change(screen.getByLabelText('Position'), {
       target: { value: 'senior_sales_manager' },
@@ -627,11 +633,12 @@ describe('Members page', () => {
 
   it('issues a missing AA number from the Edit form too', async () => {
     vi.mocked(getMembers).mockResolvedValue([{ ...ROW, aaNumber: null }] as never);
+    vi.mocked(getMember).mockResolvedValue({ ...DETAIL, aaNumber: null } as never);
     const { issueMemberAccreditation } = await import('./services');
     vi.mocked(issueMemberAccreditation).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     expect(await screen.findByLabelText('AA Number Source')).toHaveValue('auto');
     fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
     await waitFor(() =>
@@ -655,7 +662,7 @@ describe('Members page', () => {
     );
     await screen.findByText('SALES MANAGER');
     fireEvent.click(screen.getByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'taken@afhomes.test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     // Impossible to miss: a centered modal plus the inline alert. While the

@@ -38,6 +38,8 @@ import {
   memberDetailSchema,
   memberListQuerySchema,
   memberSchema,
+  ostAccreditationRecordsSchema,
+  toTitleCase,
   transferMemberSchema,
   transferOstTeamSchema,
   updateMemberProfileSchema,
@@ -761,7 +763,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const auth = await authorizeAfHomes(req, 'network.members');
       if ('error' in auth) return deny(res, auth);
       const rows = await memberRows(db, '', undefined);
-      const row = rows.find((r: Member) => r.id === id);
+      let row = rows.find((r: Member) => r.id === id);
       if (!row) return fail(res, 'NOT_FOUND', 'Member not found', 404);
       // The console's single-record read carries the identification fields in
       // clear so an operator can verify the recorded values; every list-shaped
@@ -773,6 +775,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         .maybeSingle();
       if (secretsError) throw secretsError;
       const secretRow = secrets as Record<string, unknown> | null;
+      if (
+        row.position === 'ost' &&
+        auth.permissions.some(p => p.moduleKey === 'network.ost_registrations' && p.canView)
+      ) {
+        const { data: ost, error: ostError } = await db
+          .from('ost_members')
+          .select('application_id')
+          .eq('id', id)
+          .maybeSingle();
+        if (ostError) throw ostError;
+        if (ost) {
+          // OST registration and accepted corrections are authoritative; no IST profile is required.
+          const records = await db.rpc('ost_accreditation_records', {
+            p_actor_id: auth.userId,
+            p_ost_id: id,
+            p_application_id: ost.application_id,
+          });
+          if (records.error) {
+            if (records.error.code === '42501')
+              return fail(res, 'FORBIDDEN', 'You cannot view this OST registration.', 403);
+            throw records.error;
+          }
+          const { currentApplicant: current, registration } = ostAccreditationRecordsSchema.parse(records.data);
+          if (current) {
+            const address = current.address ?? {};
+            const form = registration?.official_details ?? {};
+            row = {
+              ...row,
+              fullName: current.fullName,
+              email: current.email ?? row.email,
+              dateOfBirth: current.birthDate,
+              sex: current.sex ? toTitleCase(current.sex.replaceAll('_', ' ')) : null,
+              civilStatus: current.civilStatus ? toTitleCase(current.civilStatus) : null,
+              streetNo: isoOrNull(address.line1),
+              cityMunicipality: isoOrNull(address.city),
+              province: isoOrNull(address.province),
+              zipCode: isoOrNull(address.postalCode),
+              mobileNo: current.phone,
+              telNo: row.telNo ?? isoOrNull(form.telephone),
+              fbMessenger: current.messenger,
+              employerName: current.employerName,
+              employerAddress: row.employerAddress ?? isoOrNull(form.employerAddress),
+              jobPosition: current.jobPosition,
+              governmentIdType: row.governmentIdType ?? isoOrNull(form.governmentIdType),
+              tinMasked: current.tinMasked,
+            };
+          }
+        }
+      }
       return res.status(200).json(
         memberDetailSchema.parse({
           ...row,
