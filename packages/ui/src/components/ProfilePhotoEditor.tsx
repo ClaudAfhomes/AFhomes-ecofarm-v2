@@ -10,12 +10,14 @@ export function ProfilePhotoEditor({
   error,
   onRefresh,
   onUpload,
+  staged = false,
 }: {
   photo?: ProfilePhoto;
   loading: boolean;
   error?: string;
   onRefresh: () => void;
   onUpload: (dataBase64: string) => Promise<unknown>;
+  staged?: boolean;
 }) {
   const id = useId(),
     input = useRef<HTMLInputElement>(null);
@@ -30,7 +32,11 @@ export function ProfilePhotoEditor({
     setFailed(false);
     try {
       await onUpload(await profilePhotoBase64(file));
-      setMessage('Profile photo saved.');
+      setMessage(
+        staged
+          ? 'Profile photo selected. It will be saved when the account is created.'
+          : 'Profile photo saved.',
+      );
     } catch (cause) {
       setFailed(true);
       setMessage(
@@ -51,15 +57,17 @@ export function ProfilePhotoEditor({
         <img
           className={styles.photo}
           src={imageUrl}
-          alt="Your profile"
+          alt={staged ? 'Selected profile photo' : 'Your profile'}
           onError={() => setFailedUrl(imageUrl)}
         />
       ) : (
         <div className={styles.placeholder}>No photo preview</div>
       )}
       <p id={`${id}-help`}>
-        Photos are automatically compressed to 0.5 MB or less. Replacing a photo overwrites the
-        previous image.
+        Photos are automatically compressed to 0.5 MB or less.{' '}
+        {staged
+          ? 'Choose a photo before creating the account.'
+          : 'Replacing a photo overwrites the previous image.'}
       </p>
       {loading ? <p role="status">Loading profile photo...</p> : null}
       {error ? <p role="alert">{error}</p> : null}
@@ -73,22 +81,27 @@ export function ProfilePhotoEditor({
         type="file"
         accept="image/jpeg,image/png,image/webp"
         aria-label="Choose profile photo"
+        aria-required={staged || undefined}
         aria-describedby={`${id}-help`}
         disabled={loading || busy || !photo?.canUpload || !!error}
         onChange={(event) => void choose(event.target.files?.[0])}
       />
-      {busy ? <p role="status">Compressing and saving photo...</p> : null}
+      {busy ? (
+        <p role="status">{staged ? 'Preparing photo...' : 'Compressing and saving photo...'}</p>
+      ) : null}
       {message ? <p role={failed ? 'alert' : 'status'}>{message}</p> : null}
-      <Button
-        variant="secondary"
-        disabled={loading || busy}
-        onClick={() => {
-          setFailedUrl(null);
-          onRefresh();
-        }}
-      >
-        Refresh photo
-      </Button>
+      {!staged ? (
+        <Button
+          variant="secondary"
+          disabled={loading || busy}
+          onClick={() => {
+            setFailedUrl(null);
+            onRefresh();
+          }}
+        >
+          Refresh photo
+        </Button>
+      ) : null}
     </section>
   );
 }

@@ -1,4 +1,5 @@
 import { ostAnnualExpiry } from './ost-accreditation.js';
+import { profilePhotoInputSchema } from './profile-photo.js';
 import { z } from 'zod';
 
 import {
@@ -189,6 +190,8 @@ export type MemberProfile = z.infer<typeof memberProfileSchema>;
  */
 export const createMemberSchema = memberProfileSchema
   .extend({
+    // Optional for existing workbook/API callers; manual account forms require a photo.
+    profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
     fullName: memberFullNameSchema,
     email: emailSchema,
     temporaryPassword: z.string().min(8).max(128),
@@ -358,6 +361,7 @@ export const manualOstAaNumberSchema = z
 
 export const createOstMemberSchema = z
   .object({
+    profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
     mode: createOstMemberModeSchema,
     temporaryPassword: z.string().min(8).max(128).optional(),
     aaNumberMode: z.enum(['auto', 'manual']).default('auto'),

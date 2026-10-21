@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MembersPage } from './MembersPage';
 import { renderWithProviders } from '../../test/utils';
 import { ApiError } from '../../lib/api/errors';
+vi.mock('../../../../../packages/ui/src/components/compress-profile-photo.js', () => ({
+  profilePhotoBase64: vi.fn(async () => 'cGhvdG8='),
+}));
 
 vi.mock('./services', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services')>();
@@ -172,6 +175,7 @@ const openCreate = async () => {
 };
 
 const fillRequired = () => {
+  fireEvent.change(screen.getByLabelText('Choose profile photo'), { target: { files: [new File(['photo'], 'profile.jpg', { type: 'image/jpeg' })] } });
   fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New Member' } });
   fireEvent.change(screen.getByLabelText('Date of Birth'), { target: { value: '1992-05-06' } });
   fireEvent.change(screen.getByLabelText('Sex'), { target: { value: 'Male' } });

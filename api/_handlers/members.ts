@@ -66,6 +66,7 @@ import {
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { createAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
+import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
   'vice_director',
@@ -574,6 +575,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const input = parsed.data;
     if (input.mode === 'complete' && !['admin', 'super_admin'].includes(auth.roleSlug))
       return fail(res, 'FORBIDDEN', 'Administrator approval is required.', 403);
+    if (input.profilePhotoBase64 && !decodeProfilePhoto(input.profilePhotoBase64))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
     const sponsor = await validateOstSponsor(db, input.sponsorStaffId, 'manual');
     if (!sponsor.ok) return fail(res, 'VALIDATION_ERROR', sponsor.message, sponsor.status);
     const verified = await verifyOstAddress(input.identity);
@@ -640,6 +643,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       aaNumber: input.aaNumberMode === 'manual' ? input.aaNumber! : null,
       startsOn: input.startsOn!,
       expiresOn: input.expiresOn!,
+      profilePhotoBase64: input.profilePhotoBase64,
     });
     if (!installed.ok) return fail(res, installed.code, installed.message, installed.status);
     return res.status(201).json(
@@ -1103,6 +1107,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         'Create OST accounts through official OST registration and approval.',
         409,
       );
+    if (input.profilePhotoBase64 && !decodeProfilePhoto(input.profilePhotoBase64))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
 
     const roles = await roleCatalog(db);
     const target = roles.find((r) => r.slug === input.position);
@@ -1234,12 +1240,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       await ignore(db.from('staff_role_assignments').delete().eq('staff_id', id));
       await ignore(db.from('staff_users').delete().eq('id', id));
       await ignore(db.auth.admin.deleteUser(id));
+      if (input.profilePhotoBase64) await ignore(removeProfilePhoto(id));
     };
     const insertError = (label: string, error: { message?: string; code?: string } | null) =>
       new Error(
         `${label} insert failed [${error?.code ?? 'unknown'}]: ${error?.message ?? 'unknown'}`,
       );
     try {
+      if (input.profilePhotoBase64) await saveProfilePhoto(created.user.id, input.profilePhotoBase64);
       const now = new Date().toISOString();
       const { error: staffError } = await db.from('staff_users').insert({
         id: created.user.id,

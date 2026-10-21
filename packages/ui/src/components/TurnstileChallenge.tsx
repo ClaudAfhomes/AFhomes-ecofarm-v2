@@ -45,6 +45,7 @@ export function TurnstileChallenge({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
+  const [retryVersion, setRetryVersion] = useState(0);
   useEffect(() => {
     if (!siteKey) return;
     let live = true;
@@ -54,27 +55,48 @@ export function TurnstileChallenge({
         if (!live || !root.current || !window.turnstile) return;
         widget = window.turnstile.render(root.current, {
           sitekey: siteKey,
-          callback: onToken,
-          'expired-callback': () => onToken(null),
+          callback: (token) => {
+            if (!live) return;
+            setError('');
+            onToken(token);
+          },
+          'expired-callback': () => {
+            if (live) onToken(null);
+          },
           'error-callback': () => {
+            if (!live) return;
             onToken(null);
-            setError('Security check failed. Reload to retry.');
+            setError('Security check failed. Please retry.');
           },
         });
       })
       .catch(() => {
-        if (live) setError('Security check could not load. Reload to retry.');
+        if (live) setError('Security check could not load. Please retry.');
       });
     return () => {
       live = false;
       if (widget) window.turnstile?.remove(widget);
     };
-  }, [siteKey, onToken, resetVersion]);
+  }, [siteKey, onToken, resetVersion, retryVersion]);
   if (!siteKey) return null;
   return (
     <div>
       <div ref={root} aria-label="Security verification" />
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <>
+          <p role="alert">{error}</p>
+          <button
+            type="button"
+            onClick={() => {
+              onToken(null);
+              setError('');
+              setRetryVersion((value) => value + 1);
+            }}
+          >
+            Retry security check
+          </button>
+        </>
+      )}
     </div>
   );
 }

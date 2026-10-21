@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { emailSchema, personNameSchema, phoneSchema } from './input.js';
 
 export const aaNumberSchema = z
   .string()
@@ -82,3 +83,67 @@ export const manageSaleTeamSchema = z
       ctx.addIssue({ code: 'custom', message: 'Expiry cannot precede start.' });
   });
 export type SaleTeamAccreditation = z.infer<typeof saleTeamAccreditationSchema>;
+
+export const saleTeamSearchContactSchema = z
+  .object({
+    name: personNameSchema,
+    email: emailSchema,
+    mobile: phoneSchema,
+  })
+  .strict();
+export const saleTeamSearchStartSchema = z
+  .object({
+    aaNumber: aaNumberSchema,
+    sessionId: z.uuid(),
+    captchaToken: z.string().min(1).max(2048),
+  })
+  .strict();
+export const saleTeamSearchRevealSchema = z
+  .object({
+    sessionId: z.uuid(),
+    searchToken: z.string().min(1).max(4096),
+    noticeVersion: z.string().min(1).max(100),
+    acknowledged: z.literal(true),
+    contact: saleTeamSearchContactSchema.optional(),
+    contactReceipt: z.string().min(1).max(4096).optional(),
+  })
+  .strict()
+  .refine(
+    (v) => Boolean(v.contact) !== Boolean(v.contactReceipt),
+    'Provide contact details or a session receipt.',
+  );
+export const publicSaleTeamSearchResultSchema = z
+  .object({
+    aaNumber: aaNumberSchema,
+    kind: saleTeamKindSchema,
+    status: z.literal('accredited'),
+    maskedName: z.string().min(1).max(250),
+    expiresOn: z.iso.date().nullable(),
+    photoUrl: z.url().nullable(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    prefixMatchesKind(v, ctx);
+    if (v.kind === 'OST' && !v.expiresOn)
+      ctx.addIssue({ code: 'custom', message: 'OST expiry is required.' });
+  });
+export const saleTeamSearchConfigSchema = z
+  .object({
+    available: z.boolean(),
+    localPreview: z.boolean(),
+    noticeVersion: z.string(),
+    privacyNotice: z.string(),
+    verificationPhone: z.string(),
+    siteKey: z.string(),
+  })
+  .strict();
+export const saleTeamSearchStartedSchema = z.object({ searchToken: z.string() }).strict();
+export const saleTeamSearchRevealedSchema = z
+  .object({
+    result: publicSaleTeamSearchResultSchema.nullable(),
+    contactReceipt: z.string(),
+  })
+  .strict();
+export type SaleTeamSearchContact = z.infer<typeof saleTeamSearchContactSchema>;
+export type PublicSaleTeamSearchResult = z.infer<typeof publicSaleTeamSearchResultSchema>;
+export type SaleTeamSearchConfig = z.infer<typeof saleTeamSearchConfigSchema>;

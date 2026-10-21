@@ -22,6 +22,8 @@ const ROOT = process.cwd();
 
 /** Never readable by a browser, never `VITE_`-prefixed, never inlined by Vite. */
 const SERVER_ONLY = [
+  'AFHOMES_SEARCH_SECRET',
+  'AFHOMES_SEARCH_TURNSTILE_SECRET',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'SUPABASE_PUBLISHABLE_KEY',

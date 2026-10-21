@@ -7,6 +7,15 @@ vi.mock('./compress-profile-photo.js', () => ({
 }));
 const photo = { url: null, expiresAt: null, canUpload: true, notice: null };
 describe('profile photo editor', () => {
+  it('stages a creation photo without claiming it was saved remotely', async () => {
+    const select = vi.fn();
+    render(<ProfilePhotoEditor staged photo={photo} loading={false} onRefresh={vi.fn()} onUpload={select} />);
+    await userEvent.upload(screen.getByLabelText('Choose profile photo'), new File(['x'], 'p.jpg', { type: 'image/jpeg' }));
+    expect(select).toHaveBeenCalledWith('compressed-jpeg');
+    expect(screen.getByText('Profile photo selected. It will be saved when the account is created.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile photo saved.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh photo' })).not.toBeInTheDocument();
+  });
   it('compresses before saving and allows same-file replacement after completion', async () => {
     const save = vi.fn(async () => photo),
       user = userEvent.setup();

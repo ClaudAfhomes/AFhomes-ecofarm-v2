@@ -1,4 +1,6 @@
 import { storedAccreditationNumbers } from '../_lib/accreditation-numbers.js';
+import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
+import { profilePhotoInputSchema } from '@afhomes/contracts';
 import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
 import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
@@ -458,6 +460,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const credentials = createAfHomesStaffSchema
         .pick({ temporaryPassword: true })
         .partial()
+        .extend({ profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional() })
         .safeParse(jsonBody(req));
       if (!credentials.success)
         return fail(
@@ -467,6 +470,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           400,
         );
       const temporaryPassword = credentials.data.temporaryPassword;
+      if (
+        credentials.data.profilePhotoBase64 &&
+        !decodeProfilePhoto(credentials.data.profilePhotoBase64)
+      )
+        return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
       let invited;
       if (temporaryPassword) {
         invited = await db.auth.admin.createUser({
@@ -514,6 +522,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
 
       let installed;
+      if (credentials.data.profilePhotoBase64) {
+        try {
+          await saveProfilePhoto(ostUserId, credentials.data.profilePhotoBase64);
+        } catch {
+          // Password creation guarantees this request owns the new Auth identity.
+          let cleanupFailed = !temporaryPassword;
+          if (temporaryPassword) {
+            const removed = await db.auth.admin.deleteUser(ostUserId);
+            cleanupFailed = !!removed.error;
+            try {
+              await removeProfilePhoto(ostUserId);
+            } catch {
+              cleanupFailed = true;
+            }
+          }
+          return fail(
+            res,
+            'INTERNAL',
+            cleanupFailed
+              ? 'Account cleanup needs administrator review before retrying.'
+              : 'Could not save the profile photo. Please retry.',
+            503,
+          );
+        }
+      }
       try {
         installed = await db.rpc('install_legacy_ost_identity', {
           p_application_id: id,

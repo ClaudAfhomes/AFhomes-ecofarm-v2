@@ -8,6 +8,7 @@ export type VercelRequest = {
   query: Record<string, string | string[] | undefined>;
   headers: Record<string, string | string[] | undefined>;
   body?: unknown;
+  socket?: { remoteAddress?: string };
 };
 
 export type VercelResponse = {
