@@ -4,7 +4,6 @@ import {
   customerLookupSchema,
   CUSTOMER_CATEGORY_LABELS,
   type CustomerLookup,
-  type Customer,
 } from '@afhomes/contracts';
 import { PageHeader, SearchField, ErrorState, EmptyState, StatusChip, Icon } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
@@ -12,10 +11,9 @@ import { requestList } from '../../lib/api/client';
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { humanizeCode } from '../business/format';
-import { membershipKeys, businessKeys } from '../business/queryKeys';
+import { membershipKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { tierArtwork } from '@afhomes/ui';
-import { getCustomerById } from '../business/services';
 
 /**
  * Customer Lookup for the GSD / Employee desk.
@@ -97,12 +95,10 @@ function HighlightedName({ name, term }: { name: string; term: string }) {
   );
 }
 
-function CustomerCard({ customer }: { customer: Customer }) {
-  const tier = tierKey(customer.tier ?? customer.statedVipPackage ?? null);
+function CustomerCard({ customer }: { customer: CustomerLookup }) {
+  const tier = tierKey(customer.tier);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
-  const categoryLabel = customer.derivedCategory
-    ? (CUSTOMER_CATEGORY_LABELS[customer.derivedCategory] ?? customer.derivedCategory)
-    : '';
+  const categoryLabel = CUSTOMER_CATEGORY_LABELS[customer.category];
   return (
     <article className={styles.member} data-tier={tier} aria-label={customer.fullName}>
       <div className={styles.artWrap} aria-hidden={artwork ? undefined : true}>
@@ -128,11 +124,9 @@ function CustomerCard({ customer }: { customer: Customer }) {
               <Icon name="user-check" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>Payment Status</dt>
+              <dt>Customer Status</dt>
               <dd>
-                <StatusChip
-                  label={humanizeCode(customer.paymentStatus ?? customer.companyStatus ?? 'none')}
-                />
+                <StatusChip label={humanizeCode(customer.customerStatus)} />
               </dd>
             </div>
           </div>
@@ -143,8 +137,8 @@ function CustomerCard({ customer }: { customer: Customer }) {
             <div className={styles.factText}>
               <dt>VIP Tier</dt>
               <dd>
-                {customer.tier ?? customer.statedVipPackage ? (
-                  <TierBadge tier={customer.tier ?? customer.statedVipPackage ?? ''} />
+                {customer.tier ? (
+                  <TierBadge tier={customer.tier} />
                 ) : (
                   'None'
                 )}
@@ -160,17 +154,15 @@ function CustomerCard({ customer }: { customer: Customer }) {
               <dd>{customer.membershipExpiresAt?.slice(0, 10) ?? 'Not applicable'}</dd>
             </div>
           </div>
-          {customer.supplementaryFullName ? (
-            <div className={styles.fact}>
-              <span className={styles.factIcon} aria-hidden="true">
-                <Icon name="user" size={16} />
-              </span>
-              <div className={styles.factText}>
-                <dt>Supplementary</dt>
-                <dd>{customer.supplementaryFullName}</dd>
-              </div>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
+              <Icon name="user" size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>Membership Status</dt>
+              <dd>{customer.membershipStatus ? humanizeCode(customer.membershipStatus) : 'None'}</dd>
             </div>
-          ) : null}
+          </div>
         </dl>
       </div>
     </article>
@@ -178,7 +170,7 @@ function CustomerCard({ customer }: { customer: Customer }) {
 }
 
 function LookupSkeleton() {
-  // Two placeholder cards while a picked customer's detail resolves.
+  // Placeholder while the lookup search resolves.
   return (
     <div
       className={styles.results}
@@ -260,14 +252,6 @@ export function CustomerLookupPage() {
   const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
   const selectedLookup =
     (customers.data ?? []).find((row) => row.customerNumber === selectedNumber) ?? null;
-
-  const detail = useQuery({
-    queryKey: businessKeys.customer(selectedLookup?.customerId),
-    queryFn: () => getCustomerById(selectedLookup!.customerId),
-    enabled: Boolean(selectedLookup?.customerId),
-    placeholderData: (previousData) => previousData,
-    staleTime: 15_000,
-  });
 
   const pickSuggestion = (row: CustomerLookup) => {
     setSearch(row.fullName);
@@ -407,21 +391,12 @@ export function CustomerLookupPage() {
       {term.length < 2 ? (
         <EmptyState title="Enter at least two characters to find a customer or member" />
       ) : selectedLookup ? (
-        detail.isPending ? (
-          <LookupSkeleton />
-        ) : detail.isError ? (
-          <ErrorState
-            error={detail.error}
-            title="Customer lookup is unavailable right now"
-            message={describeCustomerLookupError(detail.error)}
-            onRetry={() => void detail.refetch()}
-          />
-        ) : detail.data ? (
-          <div className={styles.results}>
-            <CustomerCard key={selectedLookup.customerNumber} customer={detail.data} />
-          </div>
-        ) : null
-      ) : !hasSearched ? null : customers.isError ? (
+        <div className={styles.results}>
+          <CustomerCard key={selectedLookup.customerNumber} customer={selectedLookup} />
+        </div>
+      ) : !hasSearched ? null : customers.isPending ? (
+        <LookupSkeleton />
+      ) : customers.isError ? (
         <ErrorState
           error={customers.error}
           title="Customer lookup is unavailable right now"

@@ -35,20 +35,6 @@ const PROSPECT = {
   category: 'PENDING' as const,
 };
 
-const FULL_PROSPECT = {
-  id: '11111111-1111-4111-8111-111111111111',
-  customerNumber: 'AF-CUS-00042',
-  customerCode: 'AF-CC-1A2B3C4D',
-  fullName: 'PROSPECT DELA CRUZ',
-  status: 'prospect',
-  paymentStatus: 'no_payment',
-  tier: null,
-  statedVipPackage: null,
-  membershipExpiresAt: null,
-  supplementaryFullName: null,
-  derivedCategory: 'PENDING',
-} as any;
-
 /** Type, wait for the matching suggestion, and pick it: the only path to a card. */
 async function pickOption(name: RegExp) {
   const option = await screen.findByRole('option', { name });
@@ -58,7 +44,19 @@ async function pickOption(name: RegExp) {
 beforeEach(() => {
   vi.mocked(requestList).mockReset();
   vi.mocked(protectedRequest).mockReset();
-  vi.mocked(protectedRequest).mockResolvedValue(FULL_PROSPECT);
+  vi.mocked(protectedRequest).mockRejectedValue(new Error('FORBIDDEN: customer master access'));
+});
+
+it('shows a picked lookup result without requesting the protected customer master record', async () => {
+  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+  vi.mocked(protectedRequest).mockRejectedValue(new Error('FORBIDDEN: customer master access'));
+  renderWithProviders(<CustomerLookupPage />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
+    target: { value: 'DELA' },
+  });
+  await pickOption(/PROSPECT DELA CRUZ/);
+  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+  expect(protectedRequest).not.toHaveBeenCalled();
 });
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
@@ -102,13 +100,6 @@ it('shows a suspended member record without ever printing a code', async () => {
       membershipStatus: 'suspended' as const,
     },
   ]);
-  vi.mocked(protectedRequest).mockResolvedValue({
-    ...FULL_PROSPECT,
-    tier: 'GOLD',
-    membershipStatus: 'suspended',
-    paymentStatus: 'fully_paid',
-    membershipExpiresAt: '2031-10-11',
-  } as any);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DEL' },
@@ -119,8 +110,9 @@ it('shows a suspended member record without ever printing a code', async () => {
   expect(row?.textContent).toMatch(/suspended/i);
   expect(row?.textContent).not.toMatch(/MBS-/);
   expect(row?.textContent).not.toMatch(/AFHOMES:/);
-  // Payment status, VIP tier and validity are shown as separate facts.
-  expect(row).toHaveTextContent('Payment Status');
+  // Customer and membership status, VIP tier and validity are separate facts.
+  expect(row).toHaveTextContent('Customer Status');
+  expect(row).toHaveTextContent('Membership Status');
   expect(row).toHaveTextContent('VIP Tier');
   expect(row).toHaveTextContent('Validity');
 });
@@ -277,12 +269,6 @@ it.each([
   vi.mocked(requestList).mockResolvedValue([
     { ...PROSPECT, customerStatus: 'active' as const, tier, membershipStatus: 'active' as const },
   ]);
-  vi.mocked(protectedRequest).mockResolvedValue({
-    ...FULL_PROSPECT,
-    tier,
-    membershipStatus: 'active',
-    paymentStatus: 'fully_paid',
-  } as any);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
