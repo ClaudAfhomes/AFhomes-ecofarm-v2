@@ -244,16 +244,33 @@ describe('staff entry decisions', () => {
 });
 
 describe('admin entry decisions', () => {
-  it('asks for missing CAPTCHA verification without blaming credentials or calling Auth', async () => {
+  it('keeps CAPTCHA required for the staff login', async () => {
     const previousKey = env.VITE_TURNSTILE_SITE_KEY;
     env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
     try {
-      renderWithProviders(<App />, { route: '/admin/login' });
-      await screen.findByRole('heading', { name: 'Admin Login' });
-      await signInAs('admin@afhomes.test');
+      renderWithProviders(<App />, { route: '/staff/login' });
+      await screen.findByRole('heading', { name: 'Staff Login' });
+      await signInAs('staff@afhomes.test');
       expect(await screen.findByText('Complete security verification before signing in.')).toBeVisible();
       expect(screen.queryByText('We could not sign you in')).not.toBeInTheDocument();
       expect(authMock.signInWithPassword).not.toHaveBeenCalled();
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+    }
+  });
+  it('signs in through the admin login without CAPTCHA even when a site key is configured', async () => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    portalsBody.current = staffPortals('admin');
+    try {
+      renderWithProviders(<><App /><LocationProbe /></>, { route: '/admin/login' });
+      await screen.findByRole('heading', { name: 'Admin Login' });
+      expect(screen.queryByLabelText('Security verification')).not.toBeInTheDocument();
+      await signInAs('admin@afhomes.test');
+      await expectLocation('/admin');
+      expect(authMock.signInWithPassword).toHaveBeenCalledWith({
+        email: 'admin@afhomes.test', password: 'Password123!',
+      });
     } finally {
       env.VITE_TURNSTILE_SITE_KEY = previousKey;
     }
