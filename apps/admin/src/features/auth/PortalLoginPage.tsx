@@ -30,6 +30,7 @@ import styles from './AdminLoginPage.module.css';
  */
 export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
   const isAdmin = portal === 'admin';
+  const captchaSiteKey = isAdmin ? undefined : env.VITE_TURNSTILE_SITE_KEY;
   const navigate = useNavigate();
   const location = useLocation();
   const { status, signIn, logout } = useSession();
@@ -107,13 +108,13 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
     }
     setServerError(null);
     setDecision(null);
-    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+    if (captchaSiteKey && !captchaToken) {
       setErrors({ captcha: 'Complete security verification before signing in.' });
       return;
     }
     setPending(true);
     try {
-      if (env.VITE_TURNSTILE_SITE_KEY) {
+      if (captchaSiteKey) {
         await signIn(email, password, captchaToken!);
       } else await signIn(email, password);
       const portals: AuthPortals = await getAuthPortals();
@@ -221,7 +222,7 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
 
           <div className={styles.submitRow}>
             <TurnstileChallenge
-              siteKey={env.VITE_TURNSTILE_SITE_KEY}
+              siteKey={captchaSiteKey}
               onToken={setCaptchaToken}
               resetVersion={captchaVersion}
             />
