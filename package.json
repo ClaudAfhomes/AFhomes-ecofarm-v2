@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "turbo run dev",
+    "dev:search:local": "node packages/db-testing/scripts/preview-sale-team-search.mjs",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck && tsc --noEmit -p supabase",
@@ -21,6 +22,7 @@
     "db:migrate": "tsx supabase/apply-migrations.ts",
     "bootstrap:superadmin": "tsx supabase/invite-superadmin.ts",
     "test:db": "tsx supabase/db-integration.ts",
+    "test:db:search": "node packages/db-testing/scripts/test-sale-team-search.mjs",
     "test:db:local": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-local.mjs",
     "test:db:harness": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-harness.mjs",
     "test:security:db": "node packages/db-testing/scripts/test-security-remediation.mjs --full"

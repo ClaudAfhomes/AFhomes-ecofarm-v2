@@ -120,6 +120,7 @@ const server = http.createServer(async (req, res) => {
     query,
     headers: toVercelHeaders(req.headers),
     body,
+    socket: { remoteAddress: req.socket.remoteAddress },
     url: pathname + url.search,
   };
 
@@ -231,7 +232,7 @@ void (async () => {
   }
 })();
 
-server.listen(port, () => {
+server.listen(port, process.env.AFHOMES_DEV_HOST ?? '::', () => {
   // eslint-disable-next-line no-console
   console.log(`[dev-server] API listening on http://localhost:${port} (api/v1/*)`);
   // eslint-disable-next-line no-console

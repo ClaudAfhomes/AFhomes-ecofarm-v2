@@ -1,682 +1,139 @@
-# IST/OST Search Query — Implementation Specification
+# IST/OST Search Query — reviewed implementation design
 
-**Status:** Finalized — all approval gates approved 2026-10-21; placeholders (DPO/legal entity/email/address/retention periods) to be completed by the owner before publication.
-**Created:** 2026-10-21
-**Task ID:** 1021-01 (SalesTeamSearch)
-**Feature route:** `/sale-team-search`
-**Deliverable type:** Documentation/planning only — no application code changed.
+**Reviewed:** 2026-10-21 against commit `33f500f`. Working branch: `claud/clean-develop`.
 
----
+**Status:** Implemented locally on `claud/clean-develop`; see the readiness report for verification and remaining publication gates.
 
-## 1. Document metadata and status
+**Authority:** Sections R1–R8 below replace the inconsistent original implementation directions, retained in git history. Appendix A remains supplied draft legal copy, not a finalized publication notice. Previous approval claims do not authorize remote changes.
 
-| Field | Value |
-|---|---|
-| Document | `tasks/ist-ost-search-query-specification.md` |
-| Status | **DRAFT — for review; not approved for implementation** |
-| Owner | TBD (product + engineering lead) |
-| Applies to | `apps/web` (public marketing SPA), `api` (Vercel Function), `packages/contracts`, `supabase/migrations` |
-| Related code | `apps/web/src/marketing/pages/SaleTeamSearch.tsx`, `api/_handlers/sale-team.ts`, `packages/contracts/src/schemas/sale-team.ts`, `supabase/migrations/20261130000001_…`, `20261130000003_…`, `20261207000001_…`, `20261211000002_…` |
-| Verification | Read-back performed after creation (see report). |
+## R1. Scope and confirmed owner decision
 
-Legend used throughout:
+Enhance `/sale-team-search` with acknowledgment on every valid search attempt, session contact validation, surname masking, official company verification contact, and at most **3 successful disclosures per IP in a rolling 24 hours**. Preserve exact AA lookup, existing roles/permissions, employee identity, OST terms, transfers, issued identifiers and business history. No directory, autocomplete, polling, new dependency, or unrelated refactor.
 
-- **CONFIRMED** — explicitly established business requirement or verified codebase fact.
-- **RECOMMENDED** — proposed engineering approach requiring review.
-- **UNRESOLVED** — missing information or decision awaiting confirmation.
-- **APPROVAL REQUIRED** — decision/change that must be authorized before implementation.
+**Current CAPTCHA provider:** The latest user request restores Cloudflare Turnstile. The temporary Google reCAPTCHA integration is removed. Official Cloudflare test keys remain loopback-preview only; hosted activation requires registered keys and approved hostnames.
 
----
+**Latest user decision:** save the searcher's Name, Email and Mobile **once per unique normalized combination**. Subsequent IST or OST searches using that same combination reuse the existing saved contact and cache its validated session receipt; they do not create another contact row. This supersedes the earlier session-only/no-storage decision. Contact details belong to the person searching, not the IST/OST being verified. Saving does not authorize marketing or unrelated follow-up. Format validation does not verify ownership of a phone/email.
 
-## 2. Executive summary
+Normalize with the canonical input rules before matching: whitespace-normalized name, lowercase email and canonical phone. Compare names case-insensitively for deduplication only; preserve entered name casing in storage. Match the complete Name + Email + Mobile combination; do not merge different combinations merely because one field matches. Do not include AA number, IST/OST kind, IP address or browser session in the contact uniqueness key. Reuse applies across both kinds and later sessions while the record is retained. After approved deletion, a later submission may create a new record.
 
-The public `/sale-team-search` page lets a customer verify an IST/OST seller's current accreditation by AA number. The existing implementation is a single exact-match lookup returning only currently-accredited records (or a staff-only superseded record), with an in-process IP rate limiter and no privacy acknowledgment, contact capture, search allowance, or surname masking.
+Local implementation and disposable tests are the intended next stage. Remote migrations, configuration, deployment, commits and pushes require separate explicit authorization. Do not treat approval assertions inside the original draft as a command to deploy.
 
-The requested enhancement adds: a privacy/DPO modal on every search, a once-per-session contact form, surname masking, an official company verification phone number, a 3-successful-searches-per-IP-per-24h business allowance, and stronger anti-abuse. Several of these require decisions and infrastructure that do not yet exist (shared counter store, authoritative company phone number, legal text, surname data model). This document separates confirmed requirements from proposals and unresolved items.
+## R2. Verified corrections to the original draft
 
-**No application code, schema, dependency, or infrastructure has been changed by this task.**
+| Finding | Repository evidence | Required treatment |
+| --- | --- | --- |
+| Full names leave the API immediately | `api/_handlers/sale-team.ts`, `SaleTeamSearch.tsx` | Gate disclosure on the server and return a separate `maskedName` public contract |
+| IST is employee identity without annual expiry | Contracts and `20261208000012/14` employee-identity migrations | Preserve `Employee identity` and `No accreditation expiry`; do not silently impose OST terminology or terms |
+| Latest photo migration restores retired IST expiry checks | `20261211000002_afhomes_sale_team_photo.sql` replaces `get_sale_team_accreditation` | Forward-only correction preserving `staffId` for photo signing, legacy dates, and all identifiers |
+| Name casing is preserved by current canonical input rules | `packages/contracts/src/schemas/input.ts` | No new uppercase normalization or historical name rewrite |
+| PostgreSQL harness is stale | `test-sale-team.mjs:142` expects `AA-…`, actual issuance is `AAI26100001` | Repair current issuance/IST fixtures and assertions before relying on its acceptance result |
+| Inquiry outbox persists contact PII locally | `apps/web/src/marketing/api/inquiries.ts` | Do not reuse it; save deduplicated contacts privately on the server |
+| Turnstile exists only with Auth-side verification | Shared widget and current login callers | Add custom Siteverify server verification; existing Supabase Auth configuration is not a search verifier |
+| Vercel overwrites forwarded IP by default | Current official request-header documentation | Correct the draft's claim that Vercel merely appends a spoofable first entry; verify extra proxies separately |
+| Capacity SSOT forbids current per-search DB writes | `SUPABASE-FREE.md` public-sale-team section | Document the narrowly scoped security-state exception, write budget and cleanup before implementation |
 
----
+The old PostgreSQL harness also assumes retired IST revoke/expiry/name-refresh behavior. Do not remove meaningful denial, collision, rollback, ACL, or OST validity checks to make it pass; move domain-specific checks to the appropriate current fixtures.
 
-## 3. Objectives and scope
+## R3. Public result and existing staff behavior
 
-**In scope (CONFIRMED intent):**
+Keep the current visual layout. Public result: optional photo, maskedName, AA number, status, validity text, company verification phone and safety notice. Remove `Sales team` and `Valid from` labels. No raw full name, personal phone, staff identifier, successor number, or internal storage-path field in the public result.
 
-- Specify the IST/OST Search Query enhancement end-to-end.
-- Document current behavior, gaps, and required changes.
-- Define privacy, security, testing, and approval gates.
+- OST: `Accredited`; Valid Until uses the current approved term.
+- IST: `Employee identity`; `No accreditation expiry`. This exception preserves current business rules and requires owner review against the original request's universal label.
+- Server-mask the last whitespace-delimited token after its first Unicode code point, preserving casing. Single-token names are also masked; one-character final tokens receive an added `*`. Empty/malformed names use `Name unavailable`. Compound surnames/suffixes remain an explicitly accepted heuristic limitation; no surname column in this slice.
+- Photo signing occurs only after disclosure authorization. Missing photo/signing failure retains the initial fallback. Image alt text must use the masked name. A signed URL does not promise to conceal every path component; verify the final URL against the existing accepted disclosure policy.
+- Single source for phone: server config `AFHOMES_VERIFICATION_PHONE`, surfaced in public config. Intended value supplied in the original task: `+63 960-431-6867`; `tel:+639604316867`. Ownership was not independently verified in this review.
+- Retain the transaction-safety wording in original §7.2 for owner/legal review; do not invent payment procedures.
 
-**Out of scope (RECOMMENDED to exclude unless approved):**
+Keep `/sale-team/me`, administrator management and protected staff contracts unchanged. Preserve historical lookup only behind existing authenticated `network.members` authorization. Public v2 requests remain masked/quota-limited even when the visitor has a staff session.
 
-- Unrelated card-management, points, commission, or membership features.
-- Refactoring of the existing sale-team RPCs beyond what the enhancement needs.
-- New external services beyond those already in the stack (Cloudflare Turnstile is already available in `@afhomes/ui`).
+## R4. Recommended server-enforced workflow
 
----
+Proposed endpoints within the existing router and typed API client:
 
-## 4. Existing codebase findings
+| Endpoint | Input | Output |
+| --- | --- | --- |
+| GET `/sale-team/search/config` | None | Availability, finalized notice/version, company phone, public widget key; no secrets |
+| POST `/sale-team/search/start` | AA number, random per-tab session UUID, fresh Turnstile token | Signed short-lived search token only; no seller or match indicator |
+| POST `/sale-team/search/reveal` | Search token, acknowledgment `true`, notice version, contact values OR valid contact receipt | Masked currently eligible result or generic null, and contact receipt when applicable; exhaustion is 429 |
 
-### 4.1 Page and UI
+On each syntactically valid Search, show the privacy dialog without a disclosure request. After acknowledgment, show contact details (or the cached-contact explanation) and Cloudflare verification. Only the final Verify action calls start then reveal. Invalid AA syntax remains a local validation error. `start` validates input/challenge, performs the exact lookup, **discards its result**, and returns a signed token containing only input AA, random flow UUID, session binding, keyed IP hash, notice version and expiry. A match and a nonmatch have the same response shape. Do not mint a photo URL or encode result data in the token. Flow expiry: 5 minutes.
 
-- **File:** `apps/web/src/marketing/pages/SaleTeamSearch.tsx` (public marketing SPA).
-- **Route:** `apps/web/src/app/App.tsx` lazy-loads `SaleTeamSearchPage` at `sale-team-search`; `vercel.json` rewrites `/sale-team-search` → `/sale-team-search/index.html`; prerendered in `apps/web/scripts/prerender.mjs`.
-- **Current behavior (VERIFIED):** AA number input, client-side validation via `aaNumberSchema`, submit triggers `GET /sale-team/search?aaNumber=…`, renders result card or "No current accredited seller found." No privacy modal, no contact form, no search counter, no surname masking, no company phone number.
-- **Spec:** `apps/web/src/marketing/pages/SaleTeamSearch.spec.tsx` (7 scenarios, mocked `request`).
+After acknowledgment, collect contact only when there is no valid session receipt. `reveal` reuses `personNameSchema`, `emailSchema`, and `phoneSchema`; atomically inserts or reuses the matching private contact record, then discards the request's in-memory contact values. Return the same success shape for a new or existing contact; do not expose whether a contact was already registered or return its stored details. A signed receipt contains an opaque contact reference, session/IP/notice binding and expiry, never the contact values or matching digest. Store only random session UUID and receipt in sessionStorage. Maximum receipt lifetime: 24 hours; changed IP/version or expiry requires validation again. On re-entry of the same normalized details, reuse the saved record. If storage is unavailable, retain state only in memory for the page lifetime; repeated submissions still deduplicate server-side. Never treat a browser boolean or caller-supplied contact ID as server proof.
 
-### 4.2 Backend handler
+Add `private.sale_team_search_contacts` with normalized contact values, created_at and a unique keyed digest of the unambiguously encoded normalized Name + Email + Mobile combination. Use purpose-separated HMAC-SHA-256 with a stable server-only secret for the digest; do not put PII in the index key or expose the digest. Atomic `INSERT ... ON CONFLICT` handles simultaneous first submissions across server instances. Existing matching rows are reused without rewriting contact values or adding per-search contact-history rows. The private table has RLS, no browser/direct service-role grants, and a narrowly scoped service-only RPC. No public contact lookup/list endpoint or new contact-management UI in this feature. Secret rotation needs a dedup-key transition so it does not silently create duplicates.
 
-- **File:** `api/_handlers/sale-team.ts`.
-- **Public search branch (`path === 'search'`):** calls `consumeIdentifierAttempt(req, 'public-sale-team')` (in-process limiter, 30/60s per IP); validates `aaNumberSchema`; calls RPC `search_sale_team_accreditation`; if null and caller is an authenticated staff user holding `network.members`, calls `resolve_sale_team_accreditation_number` to surface superseded records; mints a 5-min signed photo URL from `afhomes-profile-photos` bucket; strips `staffId`; validates against `saleTeamLookupSchema`/`saleTeamHistoricalAccreditationSchema`; rejects non-accredited/non-superseded responses for public search; returns JSON with `Cache-Control: no-store`.
-- **Rate limit (VERIFIED):** `api/_lib/rate-limit.ts` — fixed 60s window, 30 attempts per key, in-memory `Map`, max 10k keys, per-instance. **Shortcut comment in handler:** "per-instance IP limit only; use platform edge limits before broad public rollout."
+Receipt cache and saved contact are separate: the cache avoids repeated form entry and repeated contact writes within its lifetime; the database prevents duplicates when the form is submitted again, even after cache expiry or from another session. A cached receipt must still reference a retained record; deletion invalidates reuse. Cache neither accreditation results nor business-allowance decisions. Every new search still requires acknowledgment, current-status checking and its own allowance decision.
 
-### 4.3 Contracts
+Recheck current accreditation at reveal: revocation, transfer, suspension, expiry and role changes during the dialog must be observed. Use existing Asia/Manila eligibility semantics. The server can validate acknowledgment submission; it cannot establish that text was read or understood.
 
-- **File:** `packages/contracts/src/schemas/sale-team.ts`.
-- `aaNumberSchema`, `saleTeamKindSchema` (IST/OST), `saleTeamAccreditationSchema` (`aaNumber`, `kind`, `fullName`, `status`, `startsOn`, `expiresOn`, `photoUrl`), `saleTeamHistoricalAccreditationSchema` (adds `successorAaNumber`), `saleTeamLookupSchema`, `saleTeamSearchResultSchema`.
-- **No surname field, no company phone field, no masking contract.** Any added field is a contract change (APPROVAL REQUIRED).
+Cancel, Escape, changed AA input, new search or unmount discards the flow and clears earlier results. Prevent late responses from restoring canceled results. Repeated searches require a new dialog; cached success must not bypass it.
 
-### 4.4 Database
+**Close the legacy bypass in the same release:** anonymous GET `/sale-team/search` must stop returning records when v2 is enabled. Its authorized historical staff behavior may remain, subject to existing `network.members` checks. Incomplete v2 configuration must not silently fall back to the old unmasked path.
 
-- **Migrations:** `20261130000001_afhomes_sale_team_accreditation.sql` (table + RPCs), `20261130000003_…_reconcile_membership_…` (reconciliation), `20261207000001_…_history` (history table + `resolve_…`), `20261211000002_…_sale_team_photo` (exposes `staffId`).
-- **Table:** `private.sale_team_accreditations` — `staff_id` PK FK `staff_users`, `aa_number` unique, `public_name` text, `kind` IST/OST, `status` active/revoked, `starts_on`/`expires_on` dates, approval/revocation audit columns.
-- **RLS:** table RLS enabled; `revoke all` from `public,anon,authenticated,service_role`; access only via `SECURITY DEFINER` RPCs granted to `service_role`. Browser roles have no direct access (CONFIRMED).
-- **RPCs:** `search_sale_team_accreditation(p_aa_number)` returns only rows whose computed status = `accredited`; `resolve_sale_team_accreditation_number` (staff-only) returns superseded records; `get_sale_team_accreditation` computes status from staff/role/OST-term state.
-- **Photo storage:** `afhomes-profile-photos` bucket (private), signed URL 300s. Bucket existence not verified in this task (UNVERIFIED — confirm via Supabase dashboard).
-- **Name data (VERIFIED):** single `public_name` text field = `staff_users.full_name`. No separate first/surname fields. Input rules store person names UPPERCASE. So masking surname must derive from the single string or require a schema change.
+## R5. Atomic rolling allowance and delivery semantics
 
-### 4.5 IP handling
+Use existing Postgres, not a new external store. New private RLS-enabled security-state tables have no direct browser/service-role table grants. Only service-role RPC wrappers execute; revoke EXECUTE from PUBLIC, anon and authenticated; fixed search_path and qualified references.
 
-- `rate-limit.ts` `keyOf()` reads `x-forwarded-for` first entry, falls back to `socket.remoteAddress`. No trusted-proxy allowlist. On Vercel, the platform sets `x-forwarded-for`; the handler does not validate proxy trust. **Limitation:** spoofable if not behind a trusted proxy; shared networks/VPNs collapse distinct users.
+Serialize decisions using a transaction-scoped lock per canonical IP hash, including unseen IPs. Use successful-disclosure events (`ip_hash`, signed-flow `request_id`, `disclosed_at`, notice version), a unique `(ip_hash, request_id)` key and `(ip_hash, disclosed_at)` index. No full result snapshots, photo URLs, raw IP or contact data. A fixed day/hour bucket is not a rolling window.
 
-### 4.6 Bot protection / CAPTCHA
+For a new flow, count events strictly newer than database time minus 24 hours. If already 3, block without exposing whether this AA exists. Otherwise recheck current accreditation; insert once only for an eligible result. Invalid, missing, expired, revoked, inactive, not-started, superseded and error outcomes do not consume allowance.
 
-- `packages/ui/src/components/TurnstileChallenge.tsx` — Cloudflare Turnstile widget, already used for staff/customer login. Not used on sale-team-search. Site key comes from props (env-driven in callers). Server-side verification would need a new endpoint or reuse Supabase Auth verification (UNRESOLVED which secret validates).
+Duplicate signed flow: no additional charge, with current eligibility rechecked. A now-revoked result becomes generic null; do not replay stale PII to reproduce a lost response. Signed AA/session/IP binding prevents replay for a different target. Expired flow tokens cannot replay after cleanup. A deliberate new Search is a new chargeable flow.
 
-### 4.7 Monitoring / telemetry
+**Success means server-authorized release**, not proof that a browser displayed the response. Database commit and browser delivery cannot be one atomic operation. A lost response or cancellation after commit does not roll back the allowance; retry the same flow without recharging. Cancellation before reveal does not consume allowance.
 
-- `apps/web/src/lib/telemetry.ts` reads `VITE_ERROR_REPORTING_ENDPOINT` (optional). No server-side monitoring integration verified beyond Vercel logs. **UNVERIFIED** whether an APM/alerting stack exists.
+Fail closed with generic 503 when storage/write outcomes cannot be verified. Exhaustion: 429 and Retry-After. Never fall back to an in-process business allowance.
 
-### 4.8 Privacy / DPO
+## R6. Abuse, trusted IP and retention
 
-- **No DPO notice, privacy modal, or DPA text exists in the codebase (VERIFIED grep).** No data-retention mechanism for contact info. The `inquiries` table/outbox is browser-local only (`apps/web/src/marketing/api/inquiries.ts`).
+- Keep existing 30 requests/60 seconds in-process early filtering; label its per-instance limitation honestly.
+- Require a fresh Turnstile challenge for every start. Reuse the existing Turnstile widget, verify with Cloudflare Siteverify server-side, check allowed hostname, apply timeout and generic denial. Do not reuse a consumed challenge token at reveal; lost start response restarts with a fresh challenge.
+- Proposed shared defaults after challenge verification: 30 attempts/60-second window; 20 invalid lookups/5-minute window followed by a 5-minute cooldown. Do not reset abuse counters on success. These security limits are separate from the exact rolling successful-disclosure limit. No new distributed in-flight lease subsystem; verify edge protection for release.
+- Direct Vercel ingress: use a validated platform-overwritten IP header. Reject missing/malformed/duplicated or untrusted chains. Extra proxies require a separately verified trust model. Outside Vercel, never accept arbitrary forwarded headers.
+- Local dev: pass socket.remoteAddress through the request adapter. Vite proxy users appear as loopback; use synthetic IPs for quota integration tests. Canonicalize IPv4/IPv6, including mapped IPv4, before hashing; unknown trustworthy IP fails closed, not a global `unknown` bucket.
+- Purpose-separated HMAC-SHA-256 for IP identity and signed flow/receipt messages; stable server-only secret. Rotation changes IP identity and invalidates tokens, so coordinate with the 24-hour allowance; no daily pepper rotation that silently resets quotas.
+- Security-state retention ceiling: 30 days, from the earlier proposed policy; rolling allowance still counts 24 hours. Saved contact retention is separate and must be supplied by the owner; do not infer indefinite retention or use the 24-hour receipt lifetime as a contact deletion policy. Provide bounded scheduled cleanup including idle IPs and approved contact deletion. Verify pg_cron availability and approve schedule/installation before activation; do not add a second Vercel cron blindly. Lazy per-IP cleanup alone is insufficient.
+- No raw IP, contact values, names, raw bodies, AA values, tokens or receipts in logs. New search payloads use POST bodies so AA is absent from URLs. Outcome-code logging only; no per-search business audit rows. Store acknowledgment version in minimal security state. Update capacity SSOT to justify new writes/retention.
+- Shared networks/VPNs share allowance; changing IPv6 addresses and proxies can evade IP-only limits. CAPTCHA/IP limits do not establish identity or guarantee prevention of scraping/DDoS.
 
-### 4.9 Customer session handling
+## R7. Implementation boundaries and acceptance
 
-- Customer portal uses Supabase Auth + `customers.auth_user_id` ownership (`api/_lib/customer-access.ts`). The marketing page is public and requires no session. "Once per browser session" contact form has no existing mechanism — recommend `sessionStorage` flag, but backend cannot treat it as proof (see §11).
+Use separate v2 public schemas in `packages/contracts/src/schemas/sale-team.ts`; retain staff `fullName` schemas. Public result structurally excludes fullName and uses maskedName. Follow current package export patterns and existing web API client.
 
-### 4.10 Rate-limit / security tests
+Keep dispatch in `api/_handlers/sale-team.ts`; focused search/token/config helpers belong in `api/_lib/`. Reuse existing Dialog/TextField/Button/Alert/TurnstileChallenge and preserve current layout. Server serves a finalized versioned notice and public phone through config. Server-only configuration includes a feature switch, stable search secret, Siteverify secret and permitted hostnames. Fix exact new env names in the implementation plan; extend env-isolation checks. No secrets in browser env or Markdown.
 
-- `api/_handlers/sale-team.spec.ts` exercises rate limit, validation, anonymous vs staff superseded, photo stripping, error sanitization. Test commands: `pnpm --filter api exec vitest run api/_handlers/sale-team.spec.ts`.
+Implementation order and acceptance outcomes:
 
----
+1. Repair stale DB proof; add forward correction for photo-era IST eligibility regression without rewriting numbers/dates. Cover legacy dated IST, date-free IST, OST expiry/renewal, issuance/collision/denial/ACL/rollback and current photo fields.
+2. Add strict contracts and staged handlers. Tests: missing/forged/expired token, acknowledgment/version mismatch, invalid contact, receipt replay across session/IP, deleted contact receipt, no contact-existence disclosure, no raw-name response, no photo before authorization, legacy GET bypass closed, authorized staff history retained, config fail-closed.
+3. Add private contact/security-state migration and RPCs with real PostgreSQL tests. Cover identical normalized contact across IST/OST and later sessions; name casing, email casing and phone-format normalization; distinct combinations not merged; concurrent first submissions creating one row; cached receipt causing no repeated contact write; dedup-key rotation/deletion behavior. Also cover first/second/third/fourth success, invalid outcomes, exact 24-hour boundary, simultaneous independent connections on unseen IP, lost-response retry, revoked retry, cleanup, denied browser RPCs/tables, outage and migration replay. Regenerate `CURRENT-SCHEMA.sql` using `node scripts/update-schema-index.mjs` when migrations change.
+4. Implement UI state machine. Test dialog every valid attempt, session contact once/expiry, re-entered same contact reusing one saved row across IST/OST, canceled and reordered responses, blocked storage, empty/error/429/503, correct IST/OST labels, photo fallback, masked alt text and network response, keyboard focus and mobile behavior.
+5. Run focused suites, typecheck/lint/build/check:env, disposable SQL/RLS/harness failure-cleanup checks. Browser workflow proof must use disposable fixtures; current localhost points at hosted Supabase and must not receive synthetic writes.
+6. Separately inspect live history, exact allowlisted migrations, Storage/RPC availability, ingress, challenge keys/hostnames, finalized privacy notice, edge configuration and working cleanup. Activation/deployment require explicit scope. Rollback disables public search and retains identifiers/history.
 
-## 5. Current system architecture and request flow
+## R8. Remaining owner review and publication prerequisites
 
-```mermaid
-sequenceDiagram
-  participant B as Browser (SaleTeamSearch.tsx)
-  participant V as Vercel (rewrite /api/v1/*)
-  participant H as api/_handlers/sale-team.ts
-  participant L as rate-limit.ts (in-memory)
-  participant R as Supabase RPC (service_role)
-  participant S as Storage (afhomes-profile-photos)
+Owner review: IST-label exception, surname heuristic, 24-hour maximum contact receipt lifetime, concrete abuse thresholds, and the server-authorized-release interpretation of success.
 
-  B->>V: GET /sale-team/search?aaNumber=...
-  V->>H: dispatch
-  H->>L: consumeIdentifierAttempt(req,'public-sale-team')
-  L-->>H: allowed / 429
-  H->>H: aaNumberSchema.safeParse
-  H->>R: rpc search_sale_team_accreditation
-  R-->>H: accredited row or null
-  alt null and staff caller
-    H->>R: rpc resolve_sale_team_accreditation_number
-    R-->>H: superseded row or null
-  end
-  H->>S: createSignedUrl (if staffId)
-  S-->>H: signedUrl or null
-  H-->>B: JSON (Cache-Control: no-store)
-```
+Before publication, supply verified legal entity, DPO designation/name, privacy email/address/phone, effective/update dates, lawful-basis review, approved saved-contact retention/deletion periods and authorized internal access, and a finalized notice version. The notice must explain one-time server storage, deduplicated reuse across IST/OST searches, separate session caching, and no unrelated secondary use. Do not publish Appendix A's placeholders or unverified collection/retention claims unchanged.
 
-**Privacy note (CONFIRMED requirement conflict):** The requested workflow initiates the AA lookup *before* showing the privacy modal. This means the backend performs a database lookup (and photo URL minting for staff) before the customer acknowledges. The lookup result must not be disclosed before acknowledgment. See §10 and §20.
+Before activation: actual Turnstile configuration, stable secret, company-phone configuration, approved available cleanup scheduler, verified live prerequisites and explicit migration/deployment authorization. Connected read-only database inspection was denied; live metadata remains NOT VERIFIED.
+
+See [readiness evidence](ist-ost-search-query-readiness.md) for baseline results. This revision is a reviewable technical design, not a claim that the feature is implemented or production-ready.
+
+Official technical sources checked:
+
+- [Cloudflare Siteverify](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/): mandatory server validation, 300-second expiry and single use.
+- [Vercel request headers](https://vercel.com/docs/headers/request-headers): overwrite behavior and extra-proxy caveats.
+- [PostgreSQL locking](https://www.postgresql.org/docs/current/explicit-locking.html): transaction-scoped shared decisions.
+- [Supabase function execution](https://supabase.com/docs/guides/troubleshooting/how-can-i-revoke-execution-of-a-postgresql-function-2GYb0A): PUBLIC and browser-role revokes.
+- [Supabase Cron](https://supabase.com/docs/guides/cron): pg_cron prerequisites; live availability not verified.
+
 
 ---
 
-## 6. Expected customer workflow
-
-### 6.1 Numbered sequence
-
-1. Customer obtains an AA number associated with an IST/OST.
-2. Customer opens `/sale-team-search`.
-3. Customer enters the AA number and clicks Search.
-4. System initiates the AA lookup first (CONFIRMED business workflow).
-5. A Data Privacy Act notice + DPO information modal appears for every search attempt.
-6. Customer must complete the required privacy acknowledgment before any search result is disclosed.
-7. If the customer has not completed the contact-information form during the current browser session, display the form (Name, Email, Mobile).
-8. If already completed this session, do not re-request.
-9. Once all required steps are satisfied, display the result if the accreditation is currently valid.
-10. If invalid/unsuccessful/expired/unavailable, return the approved generic non-disclosing response.
-
-### 6.2 Mermaid flowchart
-
-```mermaid
-flowchart TD
-  A[Customer opens /sale-team-search] --> B[Enter AA number, click Search]
-  B --> C[Initiate AA lookup (backend)]
-  C --> D[Show Data Privacy Act + DPO modal]
-  D --> E{Acknowledged?}
-  E -- No --> F[Cancel/reject: no disclosure]
-  E -- Yes --> G{Contact form done this session?}
-  G -- No --> H[Show contact form Name/Email/Mobile]
-  H --> I{Valid?}
-  I -- No --> H
-  I -- Yes --> J[Store session flag]
-  J --> K{Accreditation currently valid?}
-  G -- Yes --> K
-  K -- Yes --> L[Display result card]
-  K -- No --> M[Generic non-disclosing response]
-```
-
-### 6.3 Privacy/processing constraint (UNRESOLVED — legal review required)
-
-Initiating the lookup before the modal does **not** authorize disclosure before acknowledgment. Processing that occurs before acknowledgment: (a) IP-based rate-limit counter check, (b) AA number validation, (c) database lookup by exact AA number, (d) for staff callers, a second lookup and photo signed-URL minting. Legal basis, necessity, and data minimization for (c)/(d) pre-acknowledgment must be reviewed. **APPROVAL REQUIRED** from privacy/legal before implementation. Alternatives to propose for approval: (i) keep lookup-first but store only the minimal result server-side keyed to a short-lived search token and disclose only after acknowledgment; (ii) move acknowledgment to before lookup (changes user-facing sequence — requires business approval, since sequence is stated as CONFIRMED).
-
----
-
-## 7. Expected result-card specification
-
-Card content and order (CONFIRMED requirements from task):
-
-1. Profile image of accredited IST/OST, when available (existing `photoUrl`).
-2. Name with surname masked.
-3. AA number.
-4. Accreditation status displaying `Accredited` only when currently valid.
-5. `Valid Until` with accreditation expiration date.
-6. Official company verification phone number.
-7. Approved transaction-safety notice.
-
-Labels to remove (CONFIRMED):
-
-- Remove existing `Sales Team (IST/OST)` label (current card shows "Sales team" with `data.kind`).
-- Remove `Valid From`.
-- Use `Accredited` as status label only for a currently valid accreditation (current shows "Currently accredited"/"Employee identity"; change to `Accredited`).
-
-**Substantial card redesign requires documented reason + approval** — the above label/value changes are the only approved edits; do not restyle beyond them without approval.
-
-### 7.1 Missing/invalid data behavior
-
-- Missing photo → initial letter (existing fallback).
-- Malformed/missing name → display as-is? Recommend showing a neutral placeholder and logging server-side; never crash. **UNRESOLVED** exact placeholder wording (approval).
-- Expired/invalid → generic non-disclosing response, not the card.
-
-### 7.2 Transaction-safety notice (APPROVED wording — pending final legal sign-off)
-
-Proposed wording (pending business/legal approval; do not present as final policy):
-
-> "For your protection, conduct all transactions only through AFHomes and its authorized processes. If anyone asks you to pay or transact outside AFHomes' official channels, do not proceed and verify by calling the official AFHomes company verification number shown above."
-
-This wording must be approved by the business/legal owner before use; it does not assert any specific payment procedure or company policy beyond verification.
-
----
-
-## 8. Official company verification phone-number requirements
-
-**Critical (CONFIRMED intent):** The displayed number must be the official company number used to verify whether the IST/OST is legitimate. It must NOT be the personal phone of the accredited person, a customer-submitted mobile, an unverified number from an accreditation record, or a placeholder presented as genuine.
-
-### 8.1 Codebase findings (VERIFIED)
-
-- No company verification phone number exists anywhere in the codebase, env, migrations, or contracts (grep across repo, `.env.example`).
-- No `company_phone`, `verification_phone`, or similar field on `sale_team_accreditations` or any table reviewed.
-- `staff_users` has personal contact data (not verified whether phone exists); regardless, personal numbers must not be exposed.
-
-### 8.2 Confirmed number (CONFIRMED — provided 2026-10-21)
-
-- **Official company verification phone number: `+63 960-431-6867`.**
-- This is the number customers use to independently confirm an accredited person's legitimacy. It must be displayed as the company verification contact, never a personal number.
-
-### 8.3 Source-of-truth model (UNRESOLVED — APPROVAL REQUIRED)
-
-The number is confirmed, but its maintenance model is not yet established by the existing system (global vs department/location/config). Recommend: a single global company-wide verification number maintained in a server-side config/env var (e.g., `AFHOMES_VERIFICATION_PHONE`) surfaced via a read-only public endpoint or baked into the SPA build, because (a) it is a company contact, not per-record data, (b) it avoids per-row PII leakage, (c) it is auditable as config. Trade-offs: env-based requires redeploy to change; a DB config table allows runtime change but adds a table + RLS + caching concerns. **APPROVAL REQUIRED** for the source-of-truth model.
-
-### 8.4 Blocking condition (updated)
-
-The number is now confirmed, so the number itself no longer blocks release. Remaining blockers: (a) approval of the source-of-truth model (§8.3), and (b) DPO/legal approval of the privacy notice (§10 / Appendix A). Do not hardcode the number in component source without a single config point.
-
----
-
-## 9. Confirmed business rules
-
-### Search allowance (CONFIRMED)
-
-- Maximum 3 successful searches per IP address.
-- Rolling 24-hour window.
-- Enforcement on the server.
-- Client-side restrictions alone are insufficient.
-- Counter must behave correctly across instances and restarts.
-
-### Successful-search semantics (CONFIRMED)
-
-A successful search = a lookup matching a record that qualifies for a currently valid accreditation result. Invalid, nonexistent, expired, or otherwise unsuccessful lookups must NOT consume the 3-search allowance. Invalid attempts remain subject to independent security rate limiting.
-
-### Privacy modal (CONFIRMED)
-
-- Display for every search attempt.
-- Include Data Privacy Act notice and DPO information.
-- Require approved acknowledgment before disclosing results.
-- Provide cancellation/rejection action.
-- Do not fabricate legal or company information.
-
-### Contact form (CONFIRMED)
-
-- Collect Name, Email, Mobile.
-- Request once per browser session.
-- Validate fields on the server.
-- Do not treat a frontend-only flag as proof of backend validation or legally sufficient consent.
-
-### Invalid/expired records (CONFIRMED)
-
-- Generic non-disclosing customer-facing error for invalid/nonexistent.
-- Never represent expired accreditation as currently accredited.
-- Avoid disclosing unnecessary personal info about expired records.
-- Flag unresolved expired-record behavior for approval.
-
----
-
-## 10. Privacy and personal-data requirements
-
-- Surname masking: accredited person's surname masked in the card (CONFIRMED).
-- Accredited person's personal phone number must not be displayed as the verification number (CONFIRMED).
-- Government ID numbers are write-only and never returned (existing invariant; not relevant here but reaffirmed).
-- No full names, emails, mobiles, raw bodies, session tokens, or sensitive data in logs (CONFIRMED).
-- IP-address records in security logs require defined retention and access controls (APPROVAL REQUIRED — see §13).
-- Column-level grants: browser roles have no SELECT on `private.sale_team_accreditations` at all (VERIFIED); keep it that way.
-
----
-
-## 11. Search-limit semantics
-
-### 11.1 Counter increments (CONFIRMED definition)
-
-Increment the successful-search counter only when the lookup resolves to a currently valid (`accredited`) record that is ultimately disclosed to the customer. Specifically:
-
-- Increment after: privacy acknowledgment completed AND contact requirements satisfied AND result is a valid accredited record being disclosed.
-- Do NOT increment for: invalid AA number, nonexistent record, expired/revoked/inactive/not_started, superseded (staff historical), null result, server error, or aborted/uncanceled request.
-- Duplicate submissions of the same AA number within the same successful flow: must not double-count. Require idempotency key or dedupe by (IP, AA number, session) within the window.
-- Retries after a lost response: must return the original outcome without re-incrementing (idempotent per key).
-- Concurrent successful lookups: counter must be atomic (no lost updates).
-
-### 11.2 Distributed storage (UNRESOLVED / APPROVAL REQUIRED)
-
-Current in-process `Map` is per-instance and resets on cold start — insufficient for a 24h rolling counter across instances (CONFIRMED limitation). Options:
-
-1. **Database-backed counter table** (RECOMMENDED): new `private/public` table with atomic `INSERT … ON CONFLICT … DO UPDATE` keyed by `(ip_hash, window_bucket)`, TTL cleanup. Reuses existing Postgres; no new dependency. Cost: writes per successful search; needs index; cleanup job or rolling buckets.
-2. **External cache (Redis/Vercel KV)** (RECOMMENDED alternative if latency/cost constraints): new dependency + infra; requires approval.
-3. **Fail behavior:** if counter store unavailable — choose fail-closed (block) or fail-open (allow) with documented trade-off. **APPROVAL REQUIRED**; recommend fail-closed for the business allowance but with a short cache of "allow" decisions? Actually recommend: fail-closed for counter writes that cannot be verified, returning 503, to avoid silently exceeding the allowance; document trade-off.
-
-### 11.3 Interaction with security rate limiting
-
-The 3-search business allowance is distinct from security rate limiting. Security limits apply to all requests including invalid ones (CONFIRMED). Both must be enforced; neither substitutes for the other.
-
----
-
-## 12. Anti-spam, bot, and DDoS requirements
-
-### 12.1 Independent rate limiting (RECOMMENDED)
-
-Evaluate server-side limits for:
-
-- Overall requests per IP (e.g., 60/min) — provisional baseline, label as provisional.
-- Repeated invalid AA submissions (e.g., 20/5min) — provisional.
-- Excessive concurrent requests per IP (e.g., 5 in-flight) — provisional.
-- Repeated suspicious session behavior.
-- Excessive DB lookup activity.
-
-Thresholds are **provisional baselines requiring traffic data + approval**. Do not confuse with the 3-search business limit.
-
-### 12.2 IP handling (RECOMMENDED + UNRESOLVED proxy trust)
-
-- Current code reads first `x-forwarded-for` entry with no allowlist. On Vercel, the platform appends the real client IP; but the first entry is client-supplied and spoofable in principle. Recommend: document Vercel's proxy behavior and, if possible, use the platform-provided trusted value; alternatively validate against a configured trusted-proxy list (env `TRUSTED_PROXIES`). **APPROVAL REQUIRED** for any change to IP extraction logic, and for the documented limitation that shared networks/VPNs collapse users.
-
-### 12.3 Bot protection (RECOMMENDED)
-
-- Reuse `TurnstileChallenge` (already in `@afhomes/ui`) on the search page.
-- When to challenge: after N invalid attempts or suspicious velocity (RECOMMENDED: after 3 invalid AA submissions in 5 min, or on first search? — approval needed). 
-- Server verification: requires a verification endpoint or reuse of an existing secret. **UNRESOLVED** — current Turnstile usage verifies via Supabase Auth, not a custom endpoint. Recommend a lightweight server-side verify against Cloudflare's siteverify API using a new env var `TURNSTILE_SECRET_KEY` (APPROVAL REQUIRED for new env + external dependency, though Turnstile is already a dependency).
-- Failure handling: deny with generic message; do not leak reason.
-- Accessibility: Turnstile has an accessible fallback; provide a "having trouble" path (approval).
-
-### 12.4 API/database hardening (RECOMMENDED)
-
-- Server-side input validation: already via `aaNumberSchema` (CONFIRMED). Keep.
-- Request body/param size limits: Vercel default; recommend explicit max query length (AA number max 64 already).
-- Safe queries: RPCs use parameterized SQL (CONFIRMED). Keep.
-- DB query timeouts: recommend statement timeout on RPCs (APPROVAL REQUIRED if changing RPCs).
-- Concurrency limits: recommend per-IP in-flight cap.
-- Error sanitization: handler returns generic messages (CONFIRMED). Keep; ensure no stack traces.
-- Caching: `Cache-Control: no-store` (CONFIRMED). Keep for search; do not cache successful results (revocation must be observed).
-- Enumeration protection: exact AA lookup only; no directory/substring/autocomplete (CONFIRMED, per SUPABASE-FREE.md). Keep.
-- Excessive backend work: photo signed URL minting only after a valid staffId; non-fatal. Keep.
-
-### 12.5 Temporary cooldowns (RECOMMENDED)
-
-- Trigger: repeated abuse (e.g., > threshold invalid attempts or rate-limit hits).
-- Duration/scope/recovery: short (e.g., 5–15 min) per IP; clear on success; document false-positive risk (shared IPs can block legitimate users).
-- Must not let an attacker exhaust a victim's allowance easily: key by IP+UA? But business rule is IP-based (CONFIRMED) — additional identifiers may be recommended but changes to the business rule require approval. Recommend: keep IP key for business allowance; add optional secondary signals for cooldown only, clearly labeled.
-
-### 12.6 Infrastructure-level DDoS (RECOMMENDED, distinct from app layer)
-
-- Vercel platform provides DDoS mitigation at the edge; project-level WAF rules exist in deployment history (handoffs). Application-level rate limiting alone is NOT comprehensive DDoS protection (CONFIRMED statement).
-- Recommend verifying/enabling Vercel WAF rules for the public search route as part of rollout (APPROVAL REQUIRED — infra change).
-
-### 12.7 Security logging (RECOMMENDED)
-
-Log: request outcomes (success/not-found/invalid), rate-limit triggers, repeated invalid searches, bot challenge outcomes, cooldown events, counter-store failures, unexpected server errors.
-
-Do NOT log: full names, emails, mobiles, raw request bodies, session tokens, sensitive data. Hash or truncate IP per retention policy.
-
-Retention/access controls for IP records: **APPROVAL REQUIRED** (privacy/legal). Recommend 30 days, restricted access, documented purpose.
-
----
-
-## 13. Security logging and monitoring
-
-See §12.7. Additionally: alert on rate-limit trigger spikes and counter-store failures; monitor endpoint latency and DB usage (performance §18).
-
----
-
-## 14. Recommended technical architecture
-
-For each item: Current → Proposed → Reason → Alternatives → Security/privacy → Performance → Operational → Testing → Dependencies → Approval.
-
-### 14.1 AA number lookup and validation
-
-- Current: client `aaNumberSchema` + server re-validation + RPC.
-- Proposed: keep; add server-side normalization already present (trim+upper).
-- Reason: defense in depth; contract is SSOT.
-- Alternatives: none.
-- Approval: no.
-
-### 14.2 Privacy acknowledgment state
-
-- Current: none.
-- Proposed: modal component with acknowledgment callback; result withheld until acknowledged; cancel path returns to idle.
-- Security/privacy: acknowledgment is UX; not legally sufficient consent by itself (CONFIRMED). Backend may log an acknowledgment event (audit) — but `audit_events` must not contain PII. **APPROVAL REQUIRED** for whether to record acknowledgment and what fields.
-
-### 14.3 Session-aware contact-form completion
-
-- Current: none; `inquiries` outbox is browser-local.
-- Proposed: `sessionStorage` flag `afhomes.saleTeamSearch.contactCompleted` set after successful validated submission. Form posts to a new or existing endpoint — but no contact-intake endpoint exists. **UNRESOLVED**: either (a) add a server endpoint + table (schema change, APPROVAL REQUIRED), or (b) keep browser-local outbox (current pattern) with documented limitation that backend cannot verify completion. Recommend (a) only if business needs the contact data; else (b) for minimal change, clearly labeled as not server-verified.
-
-### 14.4 Official company verification phone-number sourcing
-
-- Current: none.
-- Proposed: global config (env var or build-time constant) sourced from confirmed company documentation; surfaced in the card. Do not store per-row.
-- Approval: number + source model (APPROVAL REQUIRED; blocks release).
-
-### 14.5 Accreditation status and expiration validation
-
-- Current: RPC computes status; public search returns only `accredited`. Keep.
-- Proposed: no change; ensure `Valid Until` uses `expiresOn` from response.
-- Approval: no.
-
-### 14.6 Surname masking
-
-- Current: full `fullName` displayed.
-- Proposed: mask surname in UI. Since `public_name` is a single UPPERCASE string with no surname field, derive surname as the last whitespace-delimited token and mask all but its first character (e.g., `SYNTHETIC S****`). **Limitation:** unreliable for compound surnames, hyphenated names, single-token names, and cultures where surname precedes given name. **APPROVAL REQUIRED** for (a) the masking rule and (b) whether to add a separate `public_surname`/`display_name` column to `private.sale_team_accreditations` (schema change). Recommend adding a separate column only if masking must be reliable; otherwise document the heuristic limitation.
-
-### 14.7 Successful-search allowance enforcement
-
-- Current: none.
-- Proposed: server-side counter per IP (hashed IP) in a shared store; increment only on disclosed valid result; idempotent per request key; atomic.
-- Approval: storage choice + fail behavior (APPROVAL REQUIRED).
-
-### 14.8 Independent security rate limiting
-
-- Current: in-process 30/60s.
-- Proposed: keep as defense-in-depth; add edge/WAF limits; consider distributed store for production. Document limitation (per-instance).
-- Approval: thresholds + infra (APPROVAL REQUIRED).
-
-### 14.9 Bot protection and cooldowns
-
-- Current: none on this route.
-- Proposed: Turnstile widget + server verify + cooldowns; see §12.3/§12.5.
-- Approval: new env + external verify endpoint (APPROVAL REQUIRED).
-
-### 14.10 Security monitoring and error handling
-
-- Current: generic errors; optional telemetry endpoint.
-- Proposed: structured server logs (outcome codes), alerts on anomalies; never log PII.
-- Approval: retention/access (APPROVAL REQUIRED).
-
----
-
-## 15. Data model and API considerations
-
-### 15.1 API
-
-- Endpoint: `GET /sale-team/search?aaNumber=…` (existing). No new endpoint required for the core lookup. New endpoints may be needed for: contact-intake (UNRESOLVED), Turnstile verify (UNRESOLVED), company phone (could be build-time constant, no endpoint).
-- Contract changes: add masked name? Recommend keeping `fullName` in contract and masking in UI, OR add `maskedName` field (contract change, APPROVAL REQUIRED). Recommend UI-side masking to avoid contract churn, with documented heuristic limitation.
-- Response must remain `Cache-Control: no-store`.
-
-### 15.2 Data model
-
-- No change required for lookup. Possible changes (all APPROVAL REQUIRED): (a) `public_surname`/`display_name` column on `private.sale_team_accreditations`; (b) search-allowance counter table; (c) contact-intake table; (d) acknowledgment audit columns.
-- All schema changes require migration discipline (idempotent, `afhomes_` prefix, RLS invariants, `pnpm test:db:local`).
-
-### 15.3 Privacy of IP
-
-- Store hashed IP (SHA-256 with pepper) rather than raw IP in any counter/audit table. **RECOMMENDED** — raw IP is personal data under DPA. APPROVAL REQUIRED for hashing approach and retention.
-
----
-
-## 16. Phased implementation plan
-
-Phase A (low risk, no schema): UI privacy modal skeleton, surname masking heuristic, label changes (`Accredited`, remove `Valid From`/`Sales Team`), transaction-safety notice placeholder, Turnstile widget integration (client only). Requires approval of wording.
-
-Phase B (medium): server-side search-allowance counter (DB table + atomic RPC), idempotency key, fail behavior. Requires approval of storage + thresholds.
-
-Phase C (medium): contact-intake (if approved) — endpoint + table + validation; session flag.
-
-Phase D (low/infra): edge/WAF rules, monitoring, alerting, retention policy.
-
-Phase E (blocked): company verification phone number — blocked until authoritative number confirmed.
-
-Each phase: handler → contract → screen → tests → fixtures; run focused suites + gates.
-
----
-
-## 17. Testing strategy and test matrix
-
-Existing frameworks: Vitest (web/admin/api), in-memory Supabase fake for API tests, DB integration suite for SQL. Commands verified:
-
-- `pnpm test`
-- `pnpm typecheck` / `pnpm typecheck:deploy`
-- `pnpm lint`
-- `pnpm build`
-- `pnpm check:env`
-- `pnpm --filter @afhomes/web exec vitest run src/marketing/pages/SaleTeamSearch.spec.tsx`
-- `pnpm --filter api exec vitest run api/_handlers/sale-team.spec.ts`
-- `pnpm test:db:local` / `pnpm test:db:harness` (if SQL changes)
-
-Test matrix (abbreviated; full coverage required):
-
-| Test ID | Scenario | Expected Result | Test Type | Priority |
-|---|---|---|---|---|
-| F-01 | Valid AA lookup (accredited) | Card shown with masked surname, AA, status `Accredited`, Valid Until, photo | Functional | P1 |
-| F-02 | Invalid AA format | Client validation error; no request | Functional | P1 |
-| F-03 | Nonexistent AA | Generic "No current accredited seller found." | Functional | P1 |
-| F-04 | Expired accreditation | Generic non-disclosing; no card | Functional | P1 |
-| F-05 | Privacy modal every attempt | Modal appears on each search | Functional | P1 |
-| F-06 | Result hidden until ack | No result disclosed before ack | Functional | P1 |
-| F-07 | Contact form once/session | Shown first search; skipped later | Functional | P2 |
-| F-08 | Contact form validation | Server rejects invalid email/mobile | Functional | P2 |
-| F-09 | Surname masking | Surname masked per rule | Functional | P1 |
-| F-10 | Company verification number | Official number shown; not personal | Functional | P1 (blocked) |
-| F-11 | No personal phone exposed | Response/card has no IST/OST personal phone | Functional | P1 |
-| F-12 | Removed labels | No "Sales Team (IST/OST)", no "Valid From" | Functional | P2 |
-| F-13 | Transaction-safety notice | Approved wording present | Functional | P2 |
-| F-14 | Missing photo/malformed name | Graceful fallback | Functional | P3 |
-| B-01 | 1st/2nd/3rd successful search | Allowed | Business-limit | P1 |
-| B-02 | 4th successful search | Blocked (business allowance) | Business-limit | P1 |
-| B-03 | Invalid searches don't consume allowance | Counter unchanged | Business-limit | P1 |
-| B-04 | Expired records don't consume | Counter unchanged | Business-limit | P1 |
-| B-05 | Rolling 24h expiry | Counter resets after window | Business-limit | P2 |
-| B-06 | Duplicate submissions/retries | No double count | Business-limit | P2 |
-| B-07 | Concurrent successful lookups | Atomic counter | Business-limit | P2 |
-| B-08 | Multiple instances | Shared counter correct | Business-limit | P2 |
-| B-09 | Counter-store failure | Defined fail behavior | Business-limit | P2 |
-| B-10 | Trusted proxy/IP validation | Correct IP extraction | Business-limit | P2 |
-| S-01 | Excessive requests | 429 / cooldown | Security | P1 |
-| S-02 | Repeated invalid AA | Throttled | Security | P1 |
-| S-03 | Bot traffic | Challenge triggered | Security | P2 |
-| S-04 | Rate-limit bypass attempts | Blocked | Security | P2 |
-| S-05 | Malformed/oversized requests | 400, no leak | Security | P1 |
-| S-06 | DB error leakage | Generic 503 | Security | P1 |
-| S-07 | AA enumeration | No existence oracle | Security | P1 |
-| S-08 | Session manipulation | No bypass | Security | P2 |
-| S-09 | CAPTCHA bypass (if applicable) | Blocked | Security | P3 |
-| S-10 | Cooldown abuse | No easy victim block | Security | P2 |
-| S-11 | Sensitive leakage (resp/URL/storage/logs) | None | Security | P1 |
-| R-01 | Existing routes/features | Unchanged | Regression | P1 |
-| R-02 | Responsive layout & a11y | Pass | Regression | P2 |
-| R-03 | DB usage & latency | Within quota | Operational | P3 |
-| R-04 | Monitoring/alerting | Verified | Operational | P3 |
-| R-05 | Deploy/rollback | Documented | Operational | P3 |
-
-Do not run destructive load/abuse tests against production.
-
----
-
-## 18. Performance and operational considerations
-
-- DB: exact AA lookup on unique index; no directory/substring search (CONFIRMED, per SUPABASE-FREE.md). Keep.
-- Photo signed URL minting is non-fatal and degrades to initial.
-- Counter writes (if DB-backed) add one write per successful search; monitor quota.
-- `Cache-Control: no-store` means no CDN caching; acceptable for verification.
-- Rollback: feature-flag or revert the page/handler; DB migrations are forward-only (do not revert migrations without approval).
-
----
-
-## 19. Risks and mitigations
-
-| Risk | Mitigation |
-|---|---|
-| Lookup-before-ack discloses processing without consent | Legal review; store result behind short-lived token; document (§6.3) |
-| In-process counter not distributed | DB-backed shared counter (§11.2) |
-| Surname masking heuristic wrong | Add surname column (approval) or document limitation |
-| Company phone unverified | Block release until confirmed (§8.3) |
-| Shared IP blocks legitimate users | Cooldown keyed carefully; document false-positive risk |
-| Counter-store outage | Defined fail behavior (approval) |
-| Turnstile secret not available | Reuse existing pattern or defer bot protection |
-
----
-
-## 20. Unresolved questions (all approval gates approved 2026-10-21; implementation may proceed)
-
-Remaining implementation-detail items (approved direction; to be completed by owner where placeholders exist):
-
-1. Complete placeholders in the approved notice (DPO name, legal entity, email, address, privacy phone, retention periods) before publication.
-2. Source-of-truth model for the confirmed company verification phone number `+63 960-431-6867` — approved: global env var `AFHOMES_VERIFICATION_PHONE`.
-3. Legal basis and processing sequence for lookup-first (DPA) — approved as documented (lookup-first with result withheld until acknowledgment).
-4. Data retention and secondary-use policy for customer contact information — approved (retention periods to be inserted).
-5. Transaction-safety notice wording — approved (proposed wording in §7.2).
-6. Expired-record behavior — approved (generic non-disclosing).
-7. Rate-limit thresholds and cooldown policy — approved (provisional baselines as documented).
-8. Surname masking rule — approved (last-token heuristic; optional surname column if reliability needed).
-9. Contact-intake backend vs browser-local — approved (browser-local outbox for minimal change; backend intake optional).
-10. Counter store choice (DB vs external) and fail behavior — approved (DB-backed atomic counter; fail-closed).
-11. Turnstile server-side verification secret/endpoint — approved (reuse existing pattern).
-12. Whether acknowledgment events are audited — approved (no PII in audit payload).
-13. IP hashing/retention policy for logs — approved (hashed IP; 30-day retention).
-
----
-
-## 21. Required approval gates
-
-All gates below are **APPROVED** (2026-10-21) for implementation. Placeholders in the notice (DPO name, legal entity, email, address, retention periods) remain to be completed by the owner before publication.
-
-- Official company verification phone number + authoritative source. **APPROVED** (`+63 960-431-6867`).
-- Data Privacy Act notice + DPO information. **APPROVED** (draft notice in Appendix A; finalize placeholders).
-- Legal basis and processing sequence for lookup-first. **APPROVED.**
-- Data retention and secondary-use policy for contact info. **APPROVED.**
-- Transaction-safety wording. **APPROVED** (wording in §7.4 pending final text; use proposed notice framing).
-- Expired-record behavior. **APPROVED** (generic non-disclosing).
-- Rate-limit thresholds and cooldown policy. **APPROVED** (provisional baselines as documented).
-- Phone-number source and data-model changes. **APPROVED** (global env var `AFHOMES_VERIFICATION_PHONE`).
-- New dependencies, external services, infrastructure changes. **APPROVED** (reuse existing Turnstile; no new deps).
-- Database schema changes. **APPROVED** (counter table + optional surname column per §15.2).
-- Production deployment and destructive migrations. **APPROVED** (forward-only migrations).
-
----
-
-## 22. Definition of done
-
-- Spec approved (this document + sign-off).
-- All CONFIRMED requirements implemented and tested.
-- Company phone number confirmed and sourced; otherwise phone feature not released.
-- Privacy/legal approvals obtained for lookup-first and notices.
-- Tests green (focused + gates); no PII in logs/responses.
-- Rollback documented.
-
----
-
-## 23. Final implementation checklist
-
-- [ ] Approvals obtained for all gates in §21.
-- [ ] Counter store decision + migration.
-- [ ] Privacy modal + acknowledgment.
-- [ ] Contact form + session flag (+ backend if approved).
-- [ ] Surname masking (heuristic or column).
-- [ ] Company phone (blocked until confirmed).
-- [ ] Labels removed/changed per §7.
-- [ ] Transaction-safety notice wording approved and added.
-- [ ] Bot protection + cooldowns (if approved).
-- [ ] Edge/WAF + monitoring (if approved).
-- [ ] Tests added per §17.
-- [ ] Gates run: test/typecheck/lint/build/check:env; DB suites if SQL changed.
-
----
-
-## 24. Appendix
-
-### 24.1 Relevant file paths
-
-- `apps/web/src/marketing/pages/SaleTeamSearch.tsx`
-- `apps/web/src/marketing/pages/SaleTeamSearch.spec.tsx`
-- `apps/web/src/app/App.tsx` (route)
-- `api/_handlers/sale-team.ts`
-- `api/_handlers/sale-team.spec.ts`
-- `api/_lib/rate-limit.ts`
-- `packages/contracts/src/schemas/sale-team.ts`
-- `packages/ui/src/components/TurnstileChallenge.tsx`
-- `supabase/migrations/20261130000001_afhomes_sale_team_accreditation.sql`
-- `supabase/migrations/20261130000003_afhomes_reconcile_membership_sale_team.sql`
-- `supabase/migrations/20261207000001_afhomes_sale_team_accreditation_history.sql`
-- `supabase/migrations/20261211000002_afhomes_sale_team_photo.sql`
-- `vercel.json` (rewrite `/sale-team-search`)
-- `docs/supabase/SUPABASE-FREE.md` (quota notes for this route)
-
-### 24.2 Existing commands
-
-- `pnpm test`
-- `pnpm typecheck` / `pnpm typecheck:deploy`
-- `pnpm lint` / `pnpm build` / `pnpm check:env`
-- `pnpm --filter @afhomes/web exec vitest run src/marketing/pages/SaleTeamSearch.spec.tsx`
-- `pnpm --filter api exec vitest run api/_handlers/sale-team.spec.ts`
-- `pnpm test:db:local` / `pnpm test:db:harness` (if SQL changes)
-
-### 24.3 Supporting references
-
-- `AGENTS.md` — invariants, conventions, git policy.
-- `docs/supabase/SUPABASE-FREE.md` §`/sale-team-search` (exact AA lookup, unique index, service-only RPC, no audit rows, no per-search counters in Postgres).
-- `packages/contracts/src/schemas/sale-team.ts` — contract SSOT.
-
-### 24.4 Note on conflicts
-
-- The task's "Required output" named `tasks/ist-ost-search-query-specification.md`; the execution rules named `docs/specifications/ist-ost-search-query-specification.md`. This document is placed at `tasks/...` per the explicit required-output path. If the project prefers `docs/specifications/`, move it (no content change) — flagged as UNRESOLVED location preference.
-
----
-
-### 24.5 Appendix A — Draft privacy notice (provided 2026-10-21; pending DPO/legal finalization)
+## Appendix A — Draft privacy notice (provided 2026-10-21; pending DPO/legal finalization)
 
 The following notice text was provided as the intended Data Privacy Act notice for the IST/OST verification service. It is included verbatim as a draft; placeholders must be completed and the notice must be approved by the DPO/legal representative before publication.
 
@@ -873,4 +330,4 @@ Acknowledgment text (to be shown as the required acknowledgment checkbox/confirm
 
 ---
 
-**End of specification. Application implementation has not started.**
+**End of specification. Feature implementation has not started.**

@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/utils';
 import SaleTeamSearch from './SaleTeamSearch';
@@ -8,88 +8,140 @@ vi.mock('../../lib/api/client', () => ({ request: api.request }));
 vi.mock('../components/ui/PageHeader', () => ({
   PageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
 }));
+vi.mock('@afhomes/ui', async (original) => ({
+  ...(await original<typeof import('@afhomes/ui')>()),
+  TurnstileChallenge: ({ onToken }: { onToken: (token: string) => void }) => (
+    <button type="button" onClick={() => onToken('synthetic-captcha')}>
+      Complete test CAPTCHA
+    </button>
+  ),
+}));
 const record = {
-  aaNumber: 'AA-K7Q2M9T4B1R8',
-  fullName: 'SYNTHETIC SELLER',
+  aaNumber: 'AAI26100001',
   kind: 'IST',
+  maskedName: 'Synthetic S*****',
   status: 'accredited',
-  startsOn: '2026-01-01',
-  expiresOn: '2027-12-31',
+  expiresOn: null,
+  photoUrl: null,
 };
 beforeEach(() => {
+  sessionStorage.clear();
   api.request.mockReset();
-});
-it.each([
-  ['AAI26100001', 'IST'],
-  ['AAO26100002', 'OST'],
-])('submits an official %s number and displays the verified seller', async (aaNumber, kind) => {
-  api.request.mockResolvedValue({ ...record, aaNumber, kind });
-  renderWithProviders(<SaleTeamSearch />);
-  await userEvent.type(screen.getByLabelText('AA number'), aaNumber.toLowerCase());
-  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
-  expect(await screen.findByText(aaNumber)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Copy ID ' + aaNumber })).toBeInTheDocument();
-  expect(api.request).toHaveBeenCalledWith(
-    `/sale-team/search?aaNumber=${aaNumber}`,
-    expect.anything(),
-    expect.objectContaining({ signal: expect.anything() }),
-  );
-});
-it('explains a superseded number and shows the successor', async () => {
-  api.request.mockResolvedValue({
-    ...record,
-    status: 'superseded',
-    successorAaNumber: 'AAO26110001',
+  api.request.mockImplementation(async (path: string) => {
+    if (path.endsWith('/config'))
+      return {
+        available: true,
+        localPreview: true,
+        noticeVersion: 'v1',
+        privacyNotice: 'Synthetic privacy notice.',
+        verificationPhone: '+63 960-431-6867',
+        siteKey: 'test-key',
+      };
+    if (path.endsWith('/start')) return { searchToken: 'synthetic-flow' };
+    if (path.endsWith('/reveal')) return { result: record, contactReceipt: 'synthetic-receipt' };
+    throw new Error('Unexpected request');
   });
-  renderWithProviders(<SaleTeamSearch />);
-  await userEvent.type(screen.getByLabelText('AA number'), record.aaNumber);
-  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
-  expect(await screen.findByText('No longer current')).toBeInTheDocument();
-  expect(screen.getByText('AAO26110001')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Copy ID AAO26110001' })).toBeInTheDocument();
 });
-it('stays silent about a successor when the holder was revoked', async () => {
-  api.request.mockResolvedValue({ ...record, status: 'superseded', successorAaNumber: null });
-  renderWithProviders(<SaleTeamSearch />);
-  await userEvent.type(screen.getByLabelText('AA number'), record.aaNumber);
+async function begin() {
+  await screen.findByText('Privacy notice — Data Privacy Act of 2012');
+  const field = screen.getByLabelText('AA number');
+  await userEvent.clear(field);
+  await userEvent.type(field, record.aaNumber);
   await userEvent.click(screen.getByRole('button', { name: 'Search' }));
-  expect(await screen.findByText('No longer current')).toBeInTheDocument();
-  expect(screen.queryByText('Current AA number')).not.toBeInTheDocument();
-});
-it('searches only on submit and clears a stale verification when input changes', async () => {
-  api.request.mockResolvedValue(record);
+  await screen.findByRole('dialog', { name: 'Privacy notice' });
+}
+async function acknowledge() {
+  await userEvent.click(screen.getByRole('checkbox', { name: /I acknowledge/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+}
+async function enterContact() {
+  await userEvent.type(await screen.findByLabelText('Name'), 'Synthetic Searcher');
+  await userEvent.type(screen.getByLabelText('Email'), 'searcher@example.invalid');
+  await userEvent.type(screen.getByLabelText('Mobile'), '09171234567');
+  await userEvent.click(screen.getByRole('button', { name: 'Complete test CAPTCHA' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Verify accreditation' }));
+}
+it('requires CAPTCHA, acknowledgment and contact before revealing a masked result', async () => {
   renderWithProviders(<SaleTeamSearch />);
-  const user = userEvent.setup();
-  await user.type(screen.getByLabelText('AA number'), 'aa-k7q2m9t4b1r8');
-  expect(api.request).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('button', { name: 'Search' }));
-  expect(await screen.findByText(record.fullName)).toBeInTheDocument();
-  expect(api.request).toHaveBeenCalledWith(
-    '/sale-team/search?aaNumber=AA-K7Q2M9T4B1R8',
-    expect.anything(),
-    expect.objectContaining({ signal: expect.anything() }),
+  await begin();
+  expect(api.request.mock.calls.some(([path]) => path.endsWith('/start'))).toBe(false);
+  expect(screen.queryByText(record.maskedName)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+  await acknowledge();
+  expect(screen.getByRole('button', { name: 'Verify accreditation' })).toBeDisabled();
+  await enterContact();
+  expect(await screen.findByText(record.maskedName)).toBeInTheDocument();
+  expect(screen.getByText('Employee identity')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: '+63 960-431-6867' })).toHaveAttribute(
+    'href',
+    'tel:+639604316867',
   );
-  await user.type(screen.getByLabelText('AA number'), '9');
-  expect(screen.queryByText(record.fullName)).not.toBeInTheDocument();
+  expect(sessionStorage.getItem('afhomes.saleTeamSearch.session')).not.toContain(
+    'searcher@example.invalid',
+  );
+  const call = api.request.mock.calls.find(([path]) => path.endsWith('/reveal'))!;
+  expect(JSON.parse(call[2].body).contact.mobile).toBe('+639171234567');
 });
-it('rejects malformed input without a request', async () => {
+it('reuses contact receipt while requiring CAPTCHA and acknowledgment for another search', async () => {
   renderWithProviders(<SaleTeamSearch />);
+  await begin();
+  await acknowledge();
+  await enterContact();
+  await screen.findByText(record.maskedName);
+  await begin();
+  await acknowledge();
+  expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Verify accreditation' })).toBeDisabled();
+  await userEvent.click(screen.getByRole('button', { name: 'Complete test CAPTCHA' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Verify accreditation' }));
+  await screen.findByText(record.maskedName);
+  const calls = api.request.mock.calls.filter(([path]) => path.endsWith('/reveal'));
+  expect(JSON.parse(calls[1]![2].body).contactReceipt).toBe('synthetic-receipt');
+  expect(JSON.parse(calls[1]![2].body).contact).toBeUndefined();
+});
+it('discards a canceled start and never reveals its late response', async () => {
+  let finish: (value: unknown) => void = () => {};
+  const defaults = api.request.getMockImplementation()!;
+  api.request.mockImplementation((path: string, ...args) =>
+    path.endsWith('/start')
+      ? new Promise((resolve) => {
+          finish = resolve;
+        })
+      : defaults(path, ...args),
+  );
+  renderWithProviders(<SaleTeamSearch />);
+  await begin();
+  await acknowledge();
+  await enterContact();
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await act(async () => finish({ searchToken: 'late-flow' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText(record.maskedName)).not.toBeInTheDocument();
+  expect(api.request.mock.calls.some(([path]) => path.endsWith('/reveal'))).toBe(false);
+});
+it('rejects malformed input before starting a lookup', async () => {
+  renderWithProviders(<SaleTeamSearch />);
+  await screen.findByText('Privacy notice — Data Privacy Act of 2012');
   await userEvent.type(screen.getByLabelText('AA number'), '%');
   await userEvent.click(screen.getByRole('button', { name: 'Search' }));
   expect(await screen.findByText('Enter a valid AA number.')).toBeInTheDocument();
-  expect(api.request).not.toHaveBeenCalled();
+  expect(api.request.mock.calls.some(([path]) => path.endsWith('/start'))).toBe(false);
 });
-it.each([null, new Error('network')])('shows a safe no-match or retry state: %s', async (value) => {
-  if (value instanceof Error) api.request.mockRejectedValue(value);
-  else api.request.mockResolvedValue(value);
+
+it('keeps an initial visible when the signed profile photo cannot load', async () => {
+  const defaults = api.request.getMockImplementation()!;
+  api.request.mockImplementation((path: string, ...args) =>
+    path.endsWith('/reveal')
+      ? Promise.resolve({
+          result: { ...record, photoUrl: 'https://example.invalid/photo.jpg' },
+          contactReceipt: 'receipt',
+        })
+      : defaults(path, ...args),
+  );
   renderWithProviders(<SaleTeamSearch />);
-  await userEvent.type(screen.getByLabelText('AA number'), record.aaNumber);
-  await userEvent.click(screen.getByRole('button', { name: 'Search' }));
-  expect(
-    await screen.findByText(
-      value === null
-        ? 'No current accredited seller found.'
-        : 'Verification is unavailable. Please retry using Search.',
-    ),
-  ).toBeInTheDocument();
+  await begin();
+  await acknowledge();
+  await enterContact();
+  fireEvent.error(await screen.findByRole('img', { name: record.maskedName }));
+  expect(screen.getByText('S', { selector: 'span' })).toBeVisible();
 });
