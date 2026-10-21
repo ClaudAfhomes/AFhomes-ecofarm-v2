@@ -56,6 +56,8 @@ export default function SaleTeamSearch() {
   const [contact, setContact] = useState({ name: '', email: '', mobile: '' });
   const [reuseContact, setReuseContact] = useState(false);
   const [result, setResult] = useState<PublicSaleTeamSearchResult | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
   const epoch = useRef(0);
   const controller = useRef<AbortController | null>(null);
   useEffect(
@@ -80,6 +82,7 @@ export default function SaleTeamSearch() {
     setBusy(false);
     setPhase('idle');
     setResult(null);
+    setPhotoOpen(false);
     setSearchToken('');
     setAcknowledged(false);
     setContact({ name: '', email: '', mobile: '' });
@@ -261,7 +264,13 @@ export default function SaleTeamSearch() {
                 {result.kind === 'IST' ? 'Employee identity' : 'Accredited'}
               </span>
               <div className="mt-4 flex items-center gap-4">
-                <span className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-leaf-100 text-xl font-semibold text-leaf-700">
+                <button
+                  type="button"
+                  aria-label="Enlarge profile photo"
+                  disabled={!result.photoUrl || failedPhotoUrl === result.photoUrl}
+                  onClick={() => setPhotoOpen(true)}
+                  className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-leaf-100 text-xl font-semibold text-leaf-700 focus-visible:outline-2 focus-visible:outline-offset-4 disabled:cursor-default"
+                >
                   <span aria-hidden="true">{result.maskedName.charAt(0)}</span>
                   {result.photoUrl ? (
                     <img
@@ -270,21 +279,23 @@ export default function SaleTeamSearch() {
                       className="absolute inset-0 h-full w-full object-cover"
                       onError={(e) => {
                         e.currentTarget.hidden = true;
+                        setFailedPhotoUrl(result.photoUrl);
                       }}
                     />
                   ) : null}
-                </span>
-                <h2 className="font-display text-2xl font-medium text-navy-900">
-                  {result.maskedName}
-                </h2>
+                </button>
+                <div
+                  role="group"
+                  aria-label="Seller identity"
+                  className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-navy-900"
+                >
+                  <h2 className="font-display text-2xl font-medium">{result.maskedName}</h2>
+                  <div className="text-base" aria-label={`AA number ${result.aaNumber}`}>
+                    <AccreditationId value={result.aaNumber} />
+                  </div>
+                </div>
               </div>
               <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <dt className="label-caps text-ink-400">AA number</dt>
-                  <dd className="mt-2">
-                    <AccreditationId value={result.aaNumber} />
-                  </dd>
-                </div>
                 <div>
                   <dt className="label-caps text-ink-400">Valid until</dt>
                   <dd className="mt-2">
@@ -321,6 +332,23 @@ export default function SaleTeamSearch() {
           ) : null}
         </div>
       </Container>
+      <Dialog
+        open={photoOpen && !!result?.photoUrl}
+        onClose={() => setPhotoOpen(false)}
+        title="Profile photo"
+      >
+        {result?.photoUrl ? (
+          <img
+            src={result.photoUrl}
+            alt={result.maskedName}
+            className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain"
+            onError={() => {
+              setFailedPhotoUrl(result.photoUrl);
+              setPhotoOpen(false);
+            }}
+          />
+        ) : null}
+      </Dialog>
       <Dialog
         open={phase === 'privacy'}
         onClose={discard}

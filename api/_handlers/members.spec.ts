@@ -18,6 +18,8 @@ import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
 import { zipStored } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as FakeSupabase }));
+const photos = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+vi.mock('../_lib/storage.js', () => ({ storageClient: () => ({ from: () => photos }) }));
 
 vi.mock('../_lib/rest.js', () => ({
   serviceClient: () => holder.db,
@@ -342,6 +344,8 @@ const rpcArgs = (fn: string) =>
   ).calls.filter((c) => c.op === 'rpc' && c.table === fn);
 
 beforeEach(() => {
+  photos.upload.mockReset().mockResolvedValue({ error: null });
+  photos.remove.mockReset().mockResolvedValue({ error: null });
   install();
   resetAddressProviderCache();
   upstream.provinces.mockResolvedValue([LAGUNA]);
@@ -354,6 +358,25 @@ beforeEach(() => {
 });
 
 describe('POST /members', () => {
+  const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+  it('saves the creation photo against the new account without exposing image bytes', async () => {
+    const state = await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith('55555555-5555-4555-8555-555555555555/profile.jpg', expect.any(Buffer), expect.objectContaining({ upsert: true, contentType: 'image/jpeg' }));
+    expect(JSON.stringify(holder.db.rows('audit_events'))).not.toContain(photo);
+  });
+  it('rejects invalid image bytes before creating an account', async () => {
+    const state = await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: Buffer.from('not a jpeg').toString('base64') }) });
+    expect(state.status).toBe(400);
+    expect(holder.db.rows('staff_users').some(r => r.email === 'new.member@afhomes.test')).toBe(false);
+    expect(photos.upload).not.toHaveBeenCalled();
+  });
+  it('compensates a failed creation-photo upload', async () => {
+    photos.upload.mockResolvedValue({ error: { message: 'storage unavailable' } });
+    await expect(call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: photo }) })).rejects.toThrow();
+    expect(holder.db.rows('staff_users').some(r => r.email === 'new.member@afhomes.test')).toBe(false);
+    expect(photos.remove).toHaveBeenCalled();
+  });
   it('provisions the login, links the head, records the OST referrer and issues the AA', async () => {
     const state = await call({
       method: 'POST',
@@ -1236,6 +1259,23 @@ const installDirect = (extra: Record<string, unknown> = {}) =>
   });
 
 describe('POST /members/ost (direct OST creation)', () => {
+  it('saves the photo before installing the new OST account', async () => {
+    installDirect();
+    const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+    const state = await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith(`${DIRECT_MEMBER_ID}/profile.jpg`, expect.any(Buffer), expect.objectContaining({ upsert: true }));
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(1);
+  });
+  it('does not install the OST account when its photo cannot be saved', async () => {
+    const db = installDirect();
+    photos.upload.mockResolvedValue({ error: { message: 'unavailable' } });
+    const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+    const state = await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(503);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
+    expect(db.deletedAuthUsers).toContain(DIRECT_MEMBER_ID);
+  });
   it('rejects a missing password before any submission or account write', async () => {
     const db = installDirect();
     const state = await call({

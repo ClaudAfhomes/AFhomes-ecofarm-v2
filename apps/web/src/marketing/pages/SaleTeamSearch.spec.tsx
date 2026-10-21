@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/utils';
 import SaleTeamSearch from './SaleTeamSearch';
@@ -144,4 +144,27 @@ it('keeps an initial visible when the signed profile photo cannot load', async (
   await enterContact();
   fireEvent.error(await screen.findByRole('img', { name: record.maskedName }));
   expect(screen.getByText('S', { selector: 'span' })).toBeVisible();
+});
+
+it('opens and closes a larger photo and groups the name with the AA number', async () => {
+  const defaults = api.request.getMockImplementation()!;
+  api.request.mockImplementation((path: string, ...args) =>
+    path.endsWith('/reveal')
+      ? Promise.resolve({ result: { ...record, kind: 'OST', expiresOn: '2027-10-21', photoUrl: 'https://example.invalid/photo.jpg' }, contactReceipt: 'receipt' })
+      : defaults(path, ...args),
+  );
+  renderWithProviders(<SaleTeamSearch />);
+  await begin();
+  await acknowledge();
+  await enterContact();
+  const identity = within(await screen.findByRole('group', { name: 'Seller identity' }));
+  expect(identity.getByRole('heading', { name: record.maskedName })).toBeInTheDocument();
+  expect(identity.getByText(record.aaNumber)).toBeInTheDocument();
+  expect(screen.getByText('Valid until')).toBeInTheDocument();
+  expect(screen.getByText('2027-10-21')).toBeInTheDocument();
+  expect(screen.queryByText(/valid from|sales team details/i)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Enlarge profile photo' }));
+  expect(screen.getByRole('dialog', { name: 'Profile photo' })).toBeInTheDocument();
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Profile photo' })).not.toBeInTheDocument();
 });

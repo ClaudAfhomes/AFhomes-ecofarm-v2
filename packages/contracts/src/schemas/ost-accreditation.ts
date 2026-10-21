@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { profilePhotoInputSchema } from './profile-photo.js';
 import { submitOstApplicationSchema } from './ost.js';
 import { governmentIdTypeSchema, customerAddressSchema } from './sales.js';
 import { addressHierarchySchema, geographicCodeSchema } from './address.js';
@@ -103,6 +104,7 @@ export const manualOstAccreditationSchema = submitOstAccreditationSchema
   .strict();
 export const approveOstAccreditationSchema = z
   .object({
+    profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
     startsOn: date,
     expiresOn: date,
     temporaryPassword: z.string().min(8).max(128).optional(),

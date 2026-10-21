@@ -28,6 +28,7 @@ import {
   DateField,
   Dialog,
   PasswordField,
+  ProfilePhotoEditor,
   Select,
   Spinner,
   TextField,
@@ -114,6 +115,7 @@ export interface MemberFormSeed {
 
 /** The form's submit payload: the seed plus everything else it owns. */
 export interface MemberFormValues extends MemberFormSeed {
+  profilePhotoBase64: string;
   departmentId: string;
   temporaryPassword: string;
   confirmPassword: string;
@@ -156,6 +158,7 @@ export function MemberFormDialog({
   aaIssueError?: unknown;
 }) {
   const editing = mode === 'edit';
+  const [profilePhotoBase64, setProfilePhotoBase64] = useState('');
 
   const departments = useQuery({
     queryKey: ['network', 'members', 'departments'],
@@ -258,6 +261,7 @@ export function MemberFormDialog({
     : temporaryPassword.length >= 8 && temporaryPassword === confirmPassword;
 
   const requiredFilled =
+    (editing || profilePhotoBase64 !== '') &&
     (editing || salesDepartment !== null) &&
     fullName.trim().length > 1 &&
     dateOfBirth.length === 10 &&
@@ -327,6 +331,7 @@ export function MemberFormDialog({
       !manualIstAaNumberSchema.safeParse(aaNumberInput).success
     )
       return 'Type a valid AA number.';
+    if (!editing && !profilePhotoBase64) return 'Choose a profile photo.';
     return null;
   }
   const blockedWhy = disabledReason();
@@ -335,6 +340,7 @@ export function MemberFormDialog({
 
   const submit = () => {
     onSubmit({
+      profilePhotoBase64,
       position,
       fullName,
       dateOfBirth,
@@ -403,6 +409,22 @@ export function MemberFormDialog({
       }
     >
       <div className={styles.dialogBody} aria-busy={isSubmitting || undefined}>
+        {!editing ? (
+          <ProfilePhotoEditor
+            staged
+            photo={{
+              url: profilePhotoBase64 ? `data:image/jpeg;base64,${profilePhotoBase64}` : null,
+              expiresAt: null,
+              canUpload: !isSubmitting,
+              notice: null,
+            }}
+            loading={false}
+            onRefresh={() => {}}
+            onUpload={async (value) => {
+              setProfilePhotoBase64(value);
+            }}
+          />
+        ) : null}
         <fieldset className={styles.formSection}>
           <legend className={styles.sectionTitle}>Assignment</legend>
           <div className={styles.formFields}>
