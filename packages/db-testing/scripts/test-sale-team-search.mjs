@@ -123,6 +123,7 @@ try {
   await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
   checks += await testSearch(db, connect);
   await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
+  await db.query(fs.readFileSync('supabase/migrations/20261212000005_afhomes_public_search_readiness.sql', 'utf8'));
   checks += await testSearchSettings(db, connect);
 } finally {
   await Promise.all(clients.map((db) => db.end().catch(() => {})));

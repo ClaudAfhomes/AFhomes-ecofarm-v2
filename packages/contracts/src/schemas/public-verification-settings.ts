@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const publicVerificationFieldsSchema = z.object({
   enabled: z.boolean(),
   dailyLimitEnabled: z.boolean().default(true),
+  privacyApproved: z.boolean().default(false),
   verificationPhone: z
     .string()
     .trim()
@@ -16,6 +17,7 @@ export const publicVerificationFieldsSchema = z.object({
   retentionDays: z.number().int().min(1).max(3650),
 });
 export const publicVerificationSettingsSchema = publicVerificationFieldsSchema.extend({
+  cleanupReady: z.boolean().default(false),
   noticeVersion: z.string().min(1).max(100),
   revision: z.number().int().positive(),
   updatedAt: z.string(),
