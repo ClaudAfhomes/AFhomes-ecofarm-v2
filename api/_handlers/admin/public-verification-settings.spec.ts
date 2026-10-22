@@ -10,6 +10,7 @@ vi.mock('../../_lib/rest.js', () => ({
 const handler = (await import('./afhomes.js')).default;
 const initial = {
   enabled: false,
+  dailyLimitEnabled: true,
   verificationPhone: '+639604316867',
   privacyNotice: 'Synthetic finalized privacy notice. '.repeat(8),
   retentionDays: 30,
@@ -57,11 +58,12 @@ it('persists settings through the actor-checked RPC and reads them back', async 
   const state = await call('PUT', TOKEN.superAdmin, {
     ...fields,
     enabled: true,
+    dailyLimitEnabled: false,
     retentionDays: 90,
     expectedRevision: 1,
   });
   expect(state.status).toBe(200);
-  expect((await call()).body).toMatchObject({ enabled: true, retentionDays: 90, revision: 2 });
+  expect((await call()).body).toMatchObject({ enabled: true, dailyLimitEnabled: false, retentionDays: 90, revision: 2 });
   expect(
     holder.db?.calls.find(
       (c) => c.op === 'rpc' && c.table === 'update_public_verification_settings',

@@ -130,6 +130,7 @@ export const publicSaleTeamSearchResultSchema = z
 export const saleTeamSearchConfigSchema = z
   .object({
     available: z.boolean(),
+    dailyLimitEnabled: z.boolean().default(true),
     localPreview: z.boolean(),
     noticeVersion: z.string(),
     privacyNotice: z.string(),

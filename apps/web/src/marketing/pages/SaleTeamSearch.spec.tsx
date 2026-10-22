@@ -61,6 +61,12 @@ async function enterContact() {
   await userEvent.click(screen.getByRole('button', { name: 'Complete test CAPTCHA' }));
   await userEvent.click(screen.getByRole('button', { name: 'Verify accreditation' }));
 }
+it('shows when the daily search allowance is disabled', async () => {
+  api.request.mockResolvedValueOnce({ available:true, dailyLimitEnabled:false, localPreview:true, noticeVersion:'v1',privacyNotice:'Synthetic privacy notice.',verificationPhone:'+639604316867',siteKey:'test-key' });
+  renderWithProviders(<SaleTeamSearch />);
+  expect(await screen.findByText(/The daily search limit is currently disabled/)).toBeVisible();
+  expect(screen.queryByText(/Up to 3 successful verifications/)).not.toBeInTheDocument();
+});
 it('requires CAPTCHA, acknowledgment and contact before revealing a masked result', async () => {
   renderWithProviders(<SaleTeamSearch />);
   await begin();

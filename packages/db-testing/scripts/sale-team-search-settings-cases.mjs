@@ -13,6 +13,7 @@ export async function testSearchSettings(db, connect) {
   const before = await get();
   check(before.enabled, true);
   check(before.retentionDays, 30);
+  check(before.dailyLimitEnabled, true);
   const actor = randomUUID();
   await db.query('insert into auth.users(id,email) values($1,$2)', [
     actor,
@@ -107,6 +108,8 @@ export async function testSearchSettings(db, connect) {
       'utf8',
     ),
   );
+  const dailyMigration = fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8');
+  await db.query(dailyMigration);
   check((await get()).retentionDays, 7);
   check(
     (
@@ -134,6 +137,23 @@ export async function testSearchSettings(db, connect) {
   await db.query("insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='finance'",[other]);
   await db.query("insert into public.role_permissions(role_id,module_id,can_view,can_create,can_update,can_delete) select r.id,m.id,true,false,true,false from public.roles r cross join public.modules m where r.slug='finance' and m.key='governance.config' on conflict(role_id,module_id) do update set can_view=true,can_update=true");
   await assert.rejects(db.query('select public.update_public_verification_settings($1,$2,$3)',[other,fields,(await get()).revision]),/SETTINGS_FORBIDDEN/); checks++;
+  const current = await get();
+  const unlimited = (await update({...fields, dailyLimitEnabled:false}, current.revision)).rows[0].s;
+  check(unlimited.dailyLimitEnabled, false);
+  check(unlimited.noticeVersion !== current.noticeVersion, true);
+  await db.query(dailyMigration);
+  check((await get()).dailyLimitEnabled, false);
+  const cid=(await db.query('select public.save_sale_team_search_contact($1,$2,$3,$4) id', ['e'.repeat(64),'Synthetic Unlimited Visitor','unlimited@example.invalid','+639171234568'])).rows[0].id;
+  const ip='a'.repeat(64);
+  const reveal=async()=> (await db.query('select public.reveal_sale_team_search($1,$2,$3,$4,$5) r',[ip,randomUUID(),'AAI20010001',unlimited.noticeVersion,cid])).rows[0].r;
+  for(let i=0;i<5;i++) { const result=await reveal(); check(result.limited,false); check(result.result.aaNumber,'AAI20010001'); }
+  check((await db.query('select count(*)::int n from private.sale_team_search_disclosures where ip_hash=$1',[ip])).rows[0].n,5);
+  const limited=(await update({...fields,dailyLimitEnabled:true},unlimited.revision)).rows[0].s;
+  check(limited.dailyLimitEnabled,true);
+  check((await reveal()).limited,true);
+  check((await get()).retentionDays,7);
+  await assert.rejects(update({...fields,dailyLimitEnabled:'false'},limited.revision),/SETTINGS_INVALID/); checks++;
+  check((await get()).dailyLimitEnabled,true);
   const audit = await db.query(fs.readFileSync('supabase/security/rls_invariants.sql', 'utf8'));
   check((Array.isArray(audit) ? audit : [audit]).flatMap(result => result.rows), []);
   return checks;

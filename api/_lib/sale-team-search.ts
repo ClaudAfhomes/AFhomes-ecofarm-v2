@@ -147,9 +147,15 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
     .filter(Boolean);
   const retentionDays = settings?.retentionDays ??
     (localPreview ? Number(e.AFHOMES_SEARCH_CONTACT_RETENTION_DAYS) : NaN);
+  const dailyLimitEnabled = settings?.dailyLimitEnabled ?? true;
+  const searchLimitNotice = dailyLimitEnabled
+    ? 'Current verification permits three successful disclosures per IP address in a rolling 24 hours.'
+    : 'The daily successful-verification limit is currently disabled. Anti-bot checks and short-term request limits still apply.';
   const privacyNotice = (
     localPreview ? DRAFT_SEARCH_NOTICE : (settings?.privacyNotice ?? '')
-  ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays));
+  ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays))
+    .replaceAll('{{SEARCH_LIMIT_NOTICE}}', searchLimitNotice)
+    .replaceAll('Current verification permits three successful disclosures per IP address in a rolling 24 hours.', searchLimitNotice);
   const noticeVersion =
     settings?.noticeVersion ?? (localPreview ? 'local-draft-2026-10-21' : '');
   const siteKey = e.VITE_TURNSTILE_SITE_KEY ?? '';
@@ -184,6 +190,7 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
     retentionDays,
     public: {
       available,
+      dailyLimitEnabled,
       localPreview,
       noticeVersion: available ? noticeVersion : '',
       privacyNotice: available ? privacyNotice : '',

@@ -120,7 +120,9 @@ try {
     [{ public: false, file_size_limit: 500000, allowed_mime_types: ['image/jpeg'] }],
     'Private profile-photo bucket cap and MIME',
   );
+  await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
   checks += await testSearch(db, connect);
+  await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
   checks += await testSearchSettings(db, connect);
 } finally {
   await Promise.all(clients.map((db) => db.end().catch(() => {})));

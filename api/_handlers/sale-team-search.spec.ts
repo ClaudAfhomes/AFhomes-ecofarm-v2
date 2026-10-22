@@ -14,13 +14,14 @@ const record = {
   expiresOn: null,
 };
 const savedSettings = {
-  enabled: true, verificationPhone: '+639604316867', retentionDays: 30,
+  enabled: true, dailyLimitEnabled: true, verificationPhone: '+639604316867', retentionDays: 30,
   privacyNotice: 'Synthetic approved notice for a configuration test. '.repeat(5),
   noticeVersion: 'approved-v1', revision: 1, updatedAt: '2026-10-22T00:00:00.000Z',
 };
 beforeEach(() => {
   savedSettings.enabled = true;
   savedSettings.retentionDays = 30;
+  savedSettings.dailyLimitEnabled = true;
   savedSettings.privacyNotice = 'Synthetic approved notice for a configuration test. '.repeat(5);
   resetIdentifierRateLimit();
   for (const [key, value] of Object.entries({
@@ -194,6 +195,19 @@ it.each(['7', '30', '90'])(
     });
   },
 );
+it('publishes the disabled daily limit and matching privacy wording from saved settings', async () => {
+  vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
+  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
+  vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
+  vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', 'synthetic-real-secret');
+  savedSettings.dailyLimitEnabled = false;
+  savedSettings.privacyNotice = 'Synthetic finalized privacy notice. '.repeat(4) + 'Current verification permits three successful disclosures per IP address in a rolling 24 hours.';
+  const state = await call('search/config', undefined, 'GET');
+  expect(state.body).toMatchObject({ available: true, dailyLimitEnabled: false });
+  expect(state.body).toMatchObject({ privacyNotice: expect.stringContaining('daily successful-verification limit is currently disabled') });
+  expect(state.body).not.toMatchObject({ privacyNotice: expect.stringContaining('permits three successful') });
+});
 it('returns 429 without a result when the disclosure allowance is exhausted', async () => {
   const searchToken = await start();
   holder.db!.rpcs.find((r) => r.fn === 'reveal_sale_team_search')!.result = {

@@ -55,6 +55,7 @@ function SettingsForm({
 }) {
   const client = useQueryClient();
   const [enabled, setEnabled] = useState(settings.enabled);
+  const [dailyLimitEnabled, setDailyLimitEnabled] = useState(settings.dailyLimitEnabled);
   const [phone, setPhone] = useState(settings.verificationPhone);
   const [notice, setNotice] = useState(settings.privacyNotice);
   const [days, setDays] = useState(String(settings.retentionDays));
@@ -78,6 +79,7 @@ function SettingsForm({
         if (disabled) return;
         const input = updatePublicVerificationSettingsSchema.safeParse({
           enabled,
+          dailyLimitEnabled,
           verificationPhone: phone,
           privacyNotice: notice,
           retentionDays: Number(days),
@@ -112,6 +114,19 @@ function SettingsForm({
         onChange={setPhone}
         disabled={disabled}
       />
+      <label className={styles.toggle}>
+        <input
+          type="checkbox"
+          checked={dailyLimitEnabled}
+          disabled={disabled}
+          onChange={(event) => setDailyLimitEnabled(event.target.checked)}
+        />
+        Limit each IP address to 3 successful searches in 24 hours
+      </label>
+      <p>
+        Turn off for testing without the daily search limit. This applies to all public visitors.
+        Anti-bot checks and short-term request limits stay active. Turn it back on after testing.
+      </p>
       <TextField
         id="retention-days"
         name="retentionDays"
@@ -131,7 +146,7 @@ function SettingsForm({
         disabled={disabled}
         rows={14}
         maxLength={20000}
-        hint="Use {{CONTACT_RETENTION_DAYS}} for the saved retention period. Notice changes require visitors to acknowledge the new version."
+        hint="Use {{CONTACT_RETENTION_DAYS}} for retention and {{SEARCH_LIMIT_NOTICE}} for the current daily limit. Notice or daily-limit changes require visitors to acknowledge the new version."
       />
       {validation || save.error ? (
         <Alert variant="danger">{validation || save.error?.message}</Alert>

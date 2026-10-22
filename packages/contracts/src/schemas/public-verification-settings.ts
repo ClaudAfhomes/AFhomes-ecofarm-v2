@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const publicVerificationFieldsSchema = z.object({
   enabled: z.boolean(),
+  dailyLimitEnabled: z.boolean().default(true),
   verificationPhone: z
     .string()
     .trim()
