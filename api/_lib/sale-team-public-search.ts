@@ -5,6 +5,7 @@ import {
   saleTeamLookupSchema,
   saleTeamSearchRevealSchema,
   saleTeamSearchStartSchema,
+  publicVerificationSettingsSchema,
 } from '@afhomes/contracts';
 import { fail, jsonBody, method, singleRpcRow, type Db } from './handler-kit.js';
 import type { VercelRequest, VercelResponse } from './http.js';
@@ -42,7 +43,13 @@ export async function handlePublicSaleTeamSearch(
   db: Db,
   path: string,
 ): Promise<void> {
-  const config = searchConfiguration();
+  let config = searchConfiguration();
+  if (!config.localPreview) {
+    const saved = await db.rpc('get_public_verification_settings');
+    const parsed = saved.error ? null : publicVerificationSettingsSchema.safeParse(saved.data);
+    if (parsed?.success) config = searchConfiguration(parsed.data);
+  }
+  res.setHeader('Cache-Control', 'no-store');
   if (path === 'search/config' && method(req) === 'GET') {
     res.status(200).json(config.public);
     return;

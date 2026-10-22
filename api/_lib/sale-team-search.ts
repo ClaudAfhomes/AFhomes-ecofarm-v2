@@ -5,6 +5,7 @@ import {
   aaNumberSchema,
   saleTeamSearchContactSchema,
   type SaleTeamSearchContact,
+  type PublicVerificationSettings,
 } from '@afhomes/contracts';
 import type { VercelRequest } from './http.js';
 import { DRAFT_SEARCH_NOTICE } from './sale-team-search-notice.js';
@@ -128,7 +129,7 @@ export async function verifySearchCaptcha(
   }
 }
 
-export function searchConfiguration() {
+export function searchConfiguration(settings?: PublicVerificationSettings) {
   const e = process.env;
   let loopback = false;
   try {
@@ -144,14 +145,16 @@ export function searchConfiguration() {
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean);
-  const retentionDays = Number(e.AFHOMES_SEARCH_CONTACT_RETENTION_DAYS);
+  const retentionDays = settings?.retentionDays ??
+    (localPreview ? Number(e.AFHOMES_SEARCH_CONTACT_RETENTION_DAYS) : NaN);
   const privacyNotice = (
-    localPreview ? DRAFT_SEARCH_NOTICE : (e.AFHOMES_SEARCH_PRIVACY_NOTICE ?? '')
+    localPreview ? DRAFT_SEARCH_NOTICE : (settings?.privacyNotice ?? '')
   ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays));
   const noticeVersion =
-    e.AFHOMES_SEARCH_NOTICE_VERSION ?? (localPreview ? 'local-draft-2026-10-21' : '');
+    settings?.noticeVersion ?? (localPreview ? 'local-draft-2026-10-21' : '');
   const siteKey = e.VITE_TURNSTILE_SITE_KEY ?? '';
-  const verificationPhone = e.AFHOMES_VERIFICATION_PHONE ?? '';
+  const verificationPhone = settings?.verificationPhone ??
+    (localPreview ? e.AFHOMES_VERIFICATION_PHONE ?? '' : '');
   const finalized =
     e.AFHOMES_SEARCH_PRIVACY_APPROVED === 'true' &&
     e.AFHOMES_SEARCH_CLEANUP_READY === 'true' &&
@@ -159,7 +162,7 @@ export function searchConfiguration() {
     !/\[Insert|\bTBD\b/.test(privacyNotice);
   const testKeys = /^(1x|2x|3x)0{10}/.test(siteKey) || /^(1x|2x|3x)0{10}/.test(captchaSecret);
   const available =
-    e.AFHOMES_SEARCH_ENABLED === 'true' &&
+    (settings?.enabled ?? (localPreview && e.AFHOMES_SEARCH_ENABLED === 'true')) &&
     secret.length >= 32 &&
     !!captchaSecret &&
     hostnames.length > 0 &&

@@ -1,4 +1,5 @@
 import { testSearch } from './sale-team-search-cases.mjs';
+import { testSearchSettings } from './sale-team-search-settings-cases.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -107,7 +108,7 @@ try {
       and p.proname in ('begin_sale_team_search','reveal_sale_team_search',
       'save_sale_team_search_contact','sale_team_search_contact_exists',
       'cleanup_sale_team_search')`)).rows[0].count),
-    5,
+    6,
     'Forward repair restores missing search functions and is safe to replay',
   );
   check(
@@ -120,6 +121,7 @@ try {
     'Private profile-photo bucket cap and MIME',
   );
   checks += await testSearch(db, connect);
+  checks += await testSearchSettings(db, connect);
 } finally {
   await Promise.all(clients.map((db) => db.end().catch(() => {})));
   if (started) {

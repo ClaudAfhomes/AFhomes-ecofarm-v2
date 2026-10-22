@@ -7,6 +7,8 @@ import {
   updateAfHomesStaffProfileSchema,
   type AfHomesPermission,
   staffSaleInvolvementSchema,
+  publicVerificationSettingsSchema,
+  updatePublicVerificationSettingsSchema,
 } from '@afhomes/contracts';
 import { z } from 'zod';
 
@@ -737,6 +739,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const path = String(req.query.afPath ?? '');
   const method = req.method ?? 'GET';
   try {
+    if (path === 'public-verification-settings') {
+      if (!['GET', 'PUT'].includes(method)) return fail(res, 'NOT_FOUND', 'Route not found.', 404);
+      const principal = await authorizeAfHomes(
+        req, 'governance.config', method === 'GET' ? 'view' : 'update',
+      );
+      if ('error' in principal)
+        return res.status(principal.error.status).json({ error: principal.error.error });
+      if (!['admin', 'super_admin'].includes(principal.roleSlug))
+        return fail(res, 'FORBIDDEN', 'Administrator access is required.', 403);
+      if (!svc) return fail(res, 'INTERNAL', 'Settings storage is unavailable.', 503);
+      let result;
+      if (method === 'GET') result = await svc.rpc('get_public_verification_settings');
+      else {
+        const parsed = updatePublicVerificationSettingsSchema.safeParse(req.body);
+        if (!parsed.success)
+          return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Check the settings.', 400);
+        const { expectedRevision, ...fields } = parsed.data;
+        result = await svc.rpc('update_public_verification_settings', {
+          p_actor: principal.userId,
+          p_input: fields,
+          p_expected_revision: expectedRevision,
+        });
+      }
+      if (result.error?.code === '23505')
+        return fail(res, 'CONFLICT', 'Settings changed. Reload before saving again.', 409);
+      if (result.error?.code === '42501')
+        return fail(res, 'FORBIDDEN', 'Settings access was refused.', 403);
+      if (result.error) return fail(res, 'INTERNAL', 'Settings could not be loaded or saved.', 503);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json(publicVerificationSettingsSchema.parse(result.data));
+    }
     if (path === 'account-activation' && method === 'GET') {
       const candidate = await resolveStaffAccountSetup(req);
       if ('error' in candidate)
