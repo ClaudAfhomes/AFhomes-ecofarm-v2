@@ -314,12 +314,20 @@ export default function SaleTeamSearch() {
                   </dd>
                 </div>
               </dl>
-              <p className="mt-6 text-body-sm text-ink-600">
-                For your protection, conduct all transactions only through AFHomes and its
-                authorized processes. If anyone asks you to pay or transact outside AFHomes'
-                official channels, do not proceed and verify by calling the official AFHomes company
-                verification number shown above.
-              </p>
+              <aside
+                aria-label="Transaction safety notice"
+                className="mt-6 rounded-xl border border-l-4 border-gold-500 bg-gold-100 p-5 text-ink-900"
+              >
+                <p className="text-body leading-relaxed">
+                  <strong>
+                    For your protection, conduct all transactions only through AFHomes and its
+                    authorized processes.
+                  </strong>{' '}
+                  If anyone asks you to pay or transact outside AFHomes' official channels,{' '}
+                  <strong>do not proceed</strong> and verify by calling the official AFHomes company
+                  verification number shown above.
+                </p>
+              </aside>
             </article>
           ) : null}
           {phase === 'result' && !result ? (
