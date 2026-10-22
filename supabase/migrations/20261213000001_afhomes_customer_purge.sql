@@ -21,6 +21,63 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
 $$;
 revoke all on function private.purchase_test_cleanup_allowed(regclass) from public, anon, authenticated, service_role;
 
+-- Exempt purge from the purchase-term identity/version guards.
+create or replace function private.guard_reservation_purchase_identity() returns trigger
+language plpgsql set search_path=pg_catalog,public,private,pg_temp as $$
+declare t public.customer_application_purchase_terms%rowtype;
+begin
+  if current_setting('afhomes.allow_customer_purge', true) = 'on' then return new; end if;
+  if tg_op='UPDATE' and new.origin is distinct from old.origin then raise exception 'RESERVATION_SOURCE_IMMUTABLE' using errcode='55000'; end if;
+  if new.origin<>'application' then return new; end if;
+  select pt.* into t from public.customer_application_purchase_terms pt where pt.id=new.purchase_terms_id;
+  if not found then raise exception 'PURCHASE_TERMS_REVIEW_REQUIRED' using errcode='55000'; end if;
+  if row(new.customer_application_id,new.customer_id,new.plan_id,new.seller_staff_id,new.tier_snapshot,new.payment_scheme_snapshot,
+    new.total_price_snapshot::numeric,new.reservation_fee_snapshot::numeric,new.required_initial_snapshot::numeric,new.down_payment_snapshot::numeric,new.validity_years_snapshot,new.inclusions_snapshot,
+    new.monthly_amortization_snapshot::numeric,new.installment_months_snapshot,new.validity_months_snapshot,new.spot_cash_days_snapshot,
+    new.minimum_down_payment_snapshot::numeric,new.discount_percent_snapshot,new.yearly_points_snapshot,new.annual_points_tranches_snapshot,
+    new.holder_limit_snapshot,new.commission_rule_id,new.commission_rate_snapshot::numeric,new.commission_base_snapshot::numeric,new.expected_commission_snapshot::numeric)
+    is distinct from row(t.application_id,t.customer_id,t.plan_id,t.seller_staff_id,t.tier,t.payment_scheme,
+    t.total_price::numeric,t.reservation_fee::numeric,t.required_initial::numeric,t.required_initial::numeric,t.validity_months/12,jsonb_build_object('items',t.inclusions),t.monthly_amount::numeric,t.installment_months,
+    t.validity_months,t.spot_cash_days,t.minimum_down_payment::numeric,t.discount_percent,t.yearly_points,t.annual_points_tranches,
+    t.holder_limit,t.commission_rule_id,t.commission_rate::numeric,t.commission_base::numeric,t.expected_commission::numeric) then
+    raise exception 'RESERVATION_TERMS_CONFLICT' using errcode='23514';
+  end if;
+  if tg_op='UPDATE' then
+    if row(new.purchase_terms_id,new.customer_application_id,new.customer_id,new.plan_id,new.seller_staff_id,new.reservation_date)
+      is distinct from row(old.purchase_terms_id,old.customer_application_id,old.customer_id,old.plan_id,old.seller_staff_id,old.reservation_date) then
+      raise exception 'RESERVATION_TERMS_IMMUTABLE' using errcode='55000';
+    end if;
+    if old.sale_id is not null and new.sale_id is distinct from old.sale_id then raise exception 'RESERVATION_SALE_IMMUTABLE' using errcode='55000'; end if;
+    if old.status in ('executed','cancelled') and new.status is distinct from old.status then raise exception 'INVALID_AGREEMENT_TRANSITION' using errcode='55000'; end if;
+  end if;
+  return new;
+end $$;
+revoke all on function private.guard_reservation_purchase_identity() from public, anon, authenticated, service_role;
+
+create or replace function private.guard_application_purchase_terms() returns trigger
+language plpgsql set search_path=pg_catalog,public,pg_temp as $$
+begin
+  if current_setting('afhomes.allow_customer_purge', true) = 'on' then return new; end if;
+  if tg_table_name='customer_application_purchase_terms' then
+    if not exists(select 1 from public.customer_applications a where a.id=new.application_id
+      and a.customer_id=new.customer_id and a.plan_id=new.plan_id) then
+      raise exception 'APPLICATION_TERMS_IDENTITY_INVALID' using errcode='23514';
+    end if;
+    return new;
+  end if;
+  if new.purchase_terms_id is distinct from old.purchase_terms_id and exists(
+    select 1 from public.reservation_agreements r where r.customer_application_id=old.id and r.status<>'cancelled') then
+    raise exception 'PURCHASE_TERMS_VERSION_FROZEN' using errcode='55000';
+  end if;
+  if new.purchase_terms_id is not null and not exists(select 1 from public.customer_application_purchase_terms pt
+    where pt.id=new.purchase_terms_id and pt.application_id=new.id
+      and pt.customer_id=new.customer_id and pt.plan_id=new.plan_id) then
+    raise exception 'PURCHASE_TERMS_REVIEW_REQUIRED' using errcode='55000';
+  end if;
+  return new;
+end $$;
+revoke all on function private.guard_application_purchase_terms() from public, anon, authenticated, service_role;
+
 create or replace function public.purge_customer(p_customer_id uuid)
 returns void
 language plpgsql
@@ -36,10 +93,13 @@ begin
     raise exception 'customer not found';
   end if;
 
-  -- Bypass FK/trigger enforcement for this transaction so the cascade can run
-  -- in any order without partial failures.
-  perform set_config('session_replication_role', 'replica', true);
+  -- Enable guarded deletes (purchase evidence, payment history) for this transaction.
   perform set_config('afhomes.allow_customer_purge', 'on', true);
+
+  -- Null out cross-references that create circular FKs.
+  update public.card_sales set import_row_id = null, import_job_id = null where customer_id = p_customer_id;
+  update public.customer_import_rows set sale_id = null, membership_id = null where customer_id = p_customer_id;
+  update private.customer_import_purchase_sources set application_id = null where customer_id = p_customer_id;
 
   -- Identity documents (rows only; storage objects are removed by the handler).
   delete from public.identity_documents where customer_id = p_customer_id;
@@ -60,8 +120,12 @@ begin
   delete from private.customer_external_import_receipts
     where source_id in (select id from private.customer_import_purchase_sources where customer_id = p_customer_id);
   delete from private.customer_import_purchase_sources where customer_id = p_customer_id;
-  delete from public.customer_application_purchase_terms where customer_id = p_customer_id;
-  delete from public.customer_applications where customer_id = p_customer_id;
+  -- (customer applications and their purchase terms are deleted after
+  --  reservation agreements, to satisfy circular FKs.)
+
+  -- Null application purchase_terms_id now that reservations are about to be
+  -- removed (avoids PURCHASE_TERMS_REVIEW_REQUIRED / origin check).
+  update public.customer_applications set purchase_terms_id = null where customer_id = p_customer_id;
 
   -- Reservation agreements and their children.
   delete from public.reservation_agreement_documents
@@ -116,6 +180,10 @@ begin
     where sale_id in (select id from public.card_sales where customer_id = p_customer_id);
   delete from public.card_sale_hierarchy_snapshots
     where sale_id in (select id from public.card_sales where customer_id = p_customer_id);
+
+  -- Purchase terms and applications (after reservations are gone).
+  delete from public.customer_application_purchase_terms where customer_id = p_customer_id;
+  delete from public.customer_applications where customer_id = p_customer_id;
 
   -- Memberships.
   delete from public.memberships where customer_id = p_customer_id;
