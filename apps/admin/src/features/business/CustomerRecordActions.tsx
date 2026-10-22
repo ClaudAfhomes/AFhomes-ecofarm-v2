@@ -33,11 +33,15 @@ import { useSaleRowActions } from './useSaleRowActions';
 export function CustomerRecordActions({
   customer,
   sales,
-  onChanged: _onChanged,
+  onEdit,
+  onDelete,
+  canEdit,
 }: {
   customer: Customer;
   sales: Sale[];
-  onChanged: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  canEdit?: boolean;
 }) {
   const saleActions = useSaleRowActions();
   const { user } = useSession();
@@ -130,6 +134,19 @@ export function CustomerRecordActions({
                 </>
               ) : null}
             </>
+          ) : null}
+          {onEdit && canEdit ? (
+            <Button variant="secondary" onClick={onEdit}>
+              Edit
+            </Button>
+          ) : null}
+          {onDelete && user?.roleSlug === 'super_admin' ? (
+            <Button
+              variant="danger"
+              onClick={onDelete}
+            >
+              Delete
+            </Button>
           ) : null}
         </div>
         {issueActivation.error && !activationResult ? (

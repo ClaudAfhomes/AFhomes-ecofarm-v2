@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { HolderFields, RecommenderFields, emptyHolder } from './official-forms-fields';
-import { getGenealogy } from '../genealogy/services';
+import { getGenealogy, getOstMemberContacts } from '../genealogy/services';
 
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(),
@@ -13,6 +13,7 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: vi.fn(async () => []),
   getGenealogyDownline: vi.fn(async () => []),
   getGenealogySummary: vi.fn(),
+  getOstMemberContacts: vi.fn(async () => ({})),
 }));
 
 /**
@@ -341,23 +342,44 @@ describe('VIP recommender', () => {
 });
 
 describe('recommender typed fields', () => {
-  it('refuses a contact number carrying letters, rather than storing part of it', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([]);
-    renderRecommender();
-    const contact = screen.getByLabelText('Recommender Contact');
-    // The keystroke is refused whole, so the field can never hold the digits
-    // left over from a number that was never valid.
-    fireEvent.change(contact, { target: { value: '0917abc1234' } });
-    expect(contact).toHaveValue('');
-    fireEvent.change(contact, { target: { value: '09171234567' } });
-    expect(contact).toHaveValue('09171234567');
+  it('refuses a contact number carrying letters by not offering invalid options', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node('ost-1', 'ANA SANTOS', 'ost'),
+    ]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    renderRecommender({
+      referrerStaffId: 'ost-1',
+      vipRecommenderName: '',
+    });
+    await waitFor(() => expect(screen.getByLabelText('Recommender Contact')).toBeInTheDocument());
+    // Wait for contact options to load
+    await waitFor(() => {
+      const contactSelect = screen.getByLabelText('Recommender Contact');
+      expect(within(contactSelect).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+    });
+    // Invalid contact numbers with letters are never offered as options
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /0917abc/ })).not.toBeInTheDocument();
   });
 
-  it('keeps the email lowercase while typing', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([]);
-    renderRecommender();
-    const email = screen.getByLabelText('Recommender Email');
-    fireEvent.change(email, { target: { value: 'Ana@Example.COM' } });
-    expect(email).toHaveValue('ana@example.com');
+  it('keeps the email lowercase in dropdown options', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node('ost-1', 'ANA SANTOS', 'ost'),
+    ]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'Ana@Example.COM' },
+    });
+    renderRecommender({
+      referrerStaffId: 'ost-1',
+      vipRecommenderName: '',
+    });
+    await waitFor(() => expect(screen.getByLabelText('Recommender Email')).toBeInTheDocument());
+    // Wait for email options to load
+    await waitFor(() => {
+      const emailSelect = screen.getByLabelText('Recommender Email');
+      expect(within(emailSelect).getByRole('option', { name: /ana@example\.com/ })).toBeInTheDocument();
+    });
+    expect(within(screen.getByLabelText('Recommender Email')).queryByRole('option', { name: /Ana@Example/ })).not.toBeInTheDocument();
   });
 });

@@ -141,7 +141,7 @@ describe('directory tables carry mobile card labels', () => {
     expectLabeledCards(table, ['Application', 'Applicant', 'Tier', 'Seller', 'Status']);
   });
 
-  it('reservations: Reservation, Applicant, Tier, Payment scheme, Amount, Signatures, Status', async () => {
+  it('reservations: Reservation, Applicant, Tier, Payment scheme, Amount, Payment', async () => {
     vi.mocked(getReservationAgreementsPage).mockResolvedValue({
       data: [
         {
@@ -151,10 +151,9 @@ describe('directory tables carry mobile card labels', () => {
           tier: 'SILVER',
           paymentScheme: 'spot_cash',
           totalPrice: '312000.00',
-          primarySignatureStatus: 'received',
-          secondarySignatureStatus: null,
           hasSecondaryHolder: false,
           status: 'submitted',
+          paymentStatus: null,
         },
       ],
       total: 1,
@@ -167,8 +166,7 @@ describe('directory tables carry mobile card labels', () => {
       'Tier',
       'Payment scheme',
       'Amount',
-      'Signatures',
-      'Status',
+      'Payment',
     ]);
   });
 

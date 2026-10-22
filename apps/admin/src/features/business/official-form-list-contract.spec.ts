@@ -73,8 +73,6 @@ describe('real summary response contract regression', () => {
         reservationNumber: 'IST-QA-1',
         paymentScheme: 'spot_cash',
         totalPrice: '312000.00',
-        primarySignatureStatus: 'received',
-        secondarySignatureStatus: null,
         hasSecondaryHolder: false,
         saleId: id,
         tier: 'GOLD',
@@ -83,6 +81,7 @@ describe('real summary response contract regression', () => {
         createdAt: base.created_at,
         submittedAt: null,
         status: 'draft',
+        paymentStatus: null,
       },
     ]);
   });

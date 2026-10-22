@@ -150,8 +150,6 @@ export function purchaseDocumentPdf(evidence: PurchaseDocumentEvidence): Uint8Ar
       push(rows, 'Primary address', fields.primaryAddress);
       push(rows, 'Secondary holder', fields.secondaryName);
       push(rows, 'Secondary address', fields.secondaryAddress);
-      push(rows, 'Primary signature', fields.primarySignatureStatus);
-      push(rows, 'Secondary signature', fields.secondarySignatureStatus);
       push(rows, 'Payment schedule', fields.schedule);
       push(rows, 'Verified total at capture', fields.verifiedTotal);
       push(rows, 'Balance at capture', fields.balance);

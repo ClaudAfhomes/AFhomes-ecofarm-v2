@@ -468,6 +468,7 @@ export {
   reservationAgreementDecisionSchema,
   formImportPreviewSchema,
   officialFormListQuerySchema,
+  SCHEDULE_PARTICULAR_OPTIONS,
 } from './schemas/official-forms.js';
 export type {
   ApplicationHolder,

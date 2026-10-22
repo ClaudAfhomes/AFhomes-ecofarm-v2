@@ -11,7 +11,6 @@ import {
   agreementPaymentInputSchema,
   createReservationAgreementSchema,
   reservationHolderSchema,
-  signatureStatusSchema,
   vipTierSchema,
   reservationAgreementSchema,
 } from './official-forms.js';
@@ -219,8 +218,6 @@ const mutableAgreement = {
   monthlyAmortizationStart: agreement.monthlyAmortizationStart,
   monthlyAmortizationEnd: agreement.monthlyAmortizationEnd,
   paymentDueDay: agreement.paymentDueDay,
-  primarySignatureStatus: signatureStatusSchema.optional(),
-  secondarySignatureStatus: signatureStatusSchema.optional(),
   scheduleNotes: z.array(agreementPaymentInputSchema.strict()).max(24).optional(),
 };
 const applicationCreate = z.strictObject({
@@ -231,7 +228,6 @@ const applicationCreate = z.strictObject({
   ...mutableAgreement,
   reservationDate: agreement.reservationDate,
   agreementDate: agreement.agreementDate,
-  primarySignatureStatus: signatureStatusSchema,
   scheduleNotes: z.array(agreementPaymentInputSchema.strict()).max(24).default([]),
 });
 const saleCreate = createReservationAgreementSchema
@@ -451,7 +447,6 @@ const agreementDocumentFields = {
       particular: z.string(),
       amount: money,
       paymentDate: z.string().date().nullable(),
-      remarks: z.string().nullable(),
     }),
   ),
   reservationDate: z.string().date(),
@@ -460,8 +455,6 @@ const agreementDocumentFields = {
   monthlyAmortizationStart: z.string().date().nullable(),
   monthlyAmortizationEnd: z.string().date().nullable(),
   paymentDueDay: z.number().int().min(1).max(31).nullable(),
-  primarySignatureStatus: signatureStatusSchema,
-  secondarySignatureStatus: signatureStatusSchema.nullable(),
 };
 export const purchaseDocumentEvidenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({

@@ -24,7 +24,6 @@ const create = {
   purchaseTermsId: termsId,
   reservationDate: '2026-10-07',
   agreementDate: '2026-10-07',
-  primarySignatureStatus: 'pending',
   scheduleNotes: [],
 };
 const terms = {
@@ -108,7 +107,7 @@ describe('application-first purchase contracts', () => {
   });
   it('updates agreement fields without accepting source or immutable date changes', () => {
     expect(
-      purchaseReservationUpdateSchema.safeParse({ requestId, primarySignatureStatus: 'received' })
+      purchaseReservationUpdateSchema.safeParse({ requestId, revisionNumber: 'R1' })
         .success,
     ).toBe(true);
     expect(
@@ -241,15 +240,12 @@ describe('application-first purchase contracts', () => {
       monthlyAmortizationStart: null,
       monthlyAmortizationEnd: null,
       paymentDueDay: null,
-      primarySignatureStatus: 'received',
-      secondarySignatureStatus: null,
       schedule: [
         {
           lineNumber: 1,
           particular: 'RESERVATION',
           amount: '10000.00',
           paymentDate: null,
-          remarks: null,
         },
       ],
     };

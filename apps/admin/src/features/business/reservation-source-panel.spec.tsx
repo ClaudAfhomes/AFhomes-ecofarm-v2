@@ -25,6 +25,8 @@ const APPLICATION_ID = '00000000-0000-4000-8000-000000000003';
 const SALE_ID = '00000000-0000-4000-8000-000000000002';
 const SALE_NUMBER = 'QA-SALE-0001';
 const APPLICATION_NUMBER = 'QA-APP-0001';
+const NAMELESS_APPLICATION_ID = '00000000-0000-4000-8000-000000000004';
+const NAMELESS_APPLICATION_NUMBER = 'QA-APP-0002';
 
 const holder = {
   holderType: 'PRIMARY' as const,
@@ -49,6 +51,18 @@ vi.mock('./services', async (importOriginal) => {
         status: 'submitted',
         applicationNumber: APPLICATION_NUMBER,
         applicantName: 'QA HOLDER',
+        tier: 'GOLD',
+        createdBy: null,
+        createdAt: '2026-09-01T00:00:00.000Z',
+        submittedAt: '2026-09-01T00:00:00.000Z',
+      },
+      {
+        // An imported application can carry no applicant name. The option must
+        // still name something the operator can act on.
+        id: NAMELESS_APPLICATION_ID,
+        status: 'submitted',
+        applicationNumber: NAMELESS_APPLICATION_NUMBER,
+        applicantName: null,
         tier: 'GOLD',
         createdBy: null,
         createdAt: '2026-09-01T00:00:00.000Z',
@@ -129,7 +143,7 @@ describe('reservation source panel', () => {
     const source = await screen.findByRole('group', { name: 'Source' });
     expect(within(source).getByRole('combobox', { name: 'Card sale' })).toBeInTheDocument();
     expect(
-      within(source).getByRole('combobox', { name: 'Source Customer Application' }),
+      within(source).getByRole('combobox', { name: 'Source Application' }),
     ).toBeInTheDocument();
   });
 
@@ -185,5 +199,29 @@ describe('reservation source panel', () => {
 
     await screen.findByText('Linked source');
     expect(screen.queryByRole('combobox', { name: 'Card sale' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The picker names the APPLICANT, not the application number.
+   *
+   * The number is an internal reference the operator does not know yet. The
+   * selected application is named in full by the linked-source strip below the
+   * picker, so the option itself only has to say who it is.
+   */
+  it('names the application option by the applicant alone', async () => {
+    renderNew(NEW_ROUTE);
+
+    expect(await screen.findByRole('option', { name: 'QA HOLDER' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: new RegExp(APPLICATION_NUMBER) })).toBeNull();
+  });
+
+  /**
+   * An imported application can carry no applicant name. The option must still
+   * say something the operator can act on, so it falls back to the number.
+   */
+  it('falls back to the application number when the applicant has no name', async () => {
+    renderNew(NEW_ROUTE);
+
+    expect(await screen.findByRole('option', { name: NAMELESS_APPLICATION_NUMBER })).toBeInTheDocument();
   });
 });
