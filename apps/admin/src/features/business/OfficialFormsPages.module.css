@@ -364,9 +364,12 @@
   background: var(--color-bg-surface);
   text-align: left;
   font-size: var(--text-caption);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-secondary);
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid var(--color-border-default);
 }
 
 .queueTable th,
@@ -378,6 +381,24 @@
 
 .queueTable tbody tr:last-child td {
   border-bottom: 0;
+}
+
+/* Column widths keep the wide table from reflowing on every data change. */
+.queueTable thead th:nth-child(1),
+.queueTable tbody td:nth-child(1) { width: 12%; }
+.queueTable thead th:nth-child(5),
+.queueTable tbody td:nth-child(5) { width: 11%; text-align: right; font-variant-numeric: tabular-nums; }
+.queueTable thead th:nth-child(6),
+.queueTable tbody td:nth-child(6) { width: 9%; text-align: center; }
+.queueTable thead th:nth-child(7),
+.queueTable tbody td:nth-child(7) { width: 10%; text-align: center; }
+.queueTable thead th:nth-child(8),
+.queueTable tbody td:nth-child(8) { width: 11%; }
+
+/* Zebra striping: a hairline tint on alternate rows so a wide table stays
+   readable without heavy grid lines. */
+.queueTable tbody tr:nth-child(even) td {
+  background-color: var(--color-bg-surface);
 }
 
 /* White rows need an explicit base: `--color-state-hover` is a translucent
@@ -560,9 +581,28 @@
    alert, and the first panel. */
 .editorSection {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   align-content: start;
   padding-bottom: 6rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Numbered editor panels, same card pattern as the redemption and
+   import/export workflows. Works on <section> and <fieldset> alike. */
+.panel {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, var(--radius-md));
+  background: var(--color-bg-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 160ms ease;
+}
+
+.panel:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 /* Editor form root: the disabling wrapper stays a fieldset for behavior, but
@@ -860,6 +900,27 @@
   gap: var(--space-2);
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+}
+
+.moneyVerified {
+  font-weight: 600;
+  color: var(--color-text-success, var(--color-text-primary));
+  font-variant-numeric: tabular-nums;
+}
+
+.moneyRemaining {
+  font-weight: 600;
+  color: var(--color-text-warning, var(--color-text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.moneyDivider {
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  opacity: 0.6;
 }
 
 /* Buttons grouped so primary, secondary, and destructive actions read as

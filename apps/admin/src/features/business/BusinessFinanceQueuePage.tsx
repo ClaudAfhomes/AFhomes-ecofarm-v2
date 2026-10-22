@@ -90,6 +90,15 @@ function progressPercent(verified: string, total: string): number {
   return Math.max(0, Math.min(100, Math.round((done / full) * 100)));
 }
 
+/** Formats a raw numeric money string with thousands separators while typing. */
+function formatMoneyInput(raw: string): string {
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  if (!cleaned) return '';
+  const [intPart, decPart] = cleaned.split('.');
+  const formattedInt = (intPart ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
+}
+
 /** Client-side status filter over the loaded queue rows (no API change). */
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
@@ -112,6 +121,23 @@ function statusBadgeProps(status: string): {
     label: SALE_STATUS_LABEL[status] ?? humanizeCode(status),
     tone: SALE_STATUS_TONE[status] ?? 'neutral',
   };
+}
+
+/**
+ * Payment-derived status for a finance-queue row. Mirrors the reservations
+ * list so both surfaces agree on the words. Cancelled stays a lifecycle
+ * fact (the row is still in the queue only while collectible).
+ */
+function financePaymentStatus(item: FinanceCollectionQueueItem): {
+  label: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+} {
+  if (item.status === 'cancelled')
+    return { label: 'Cancelled', tone: 'danger' };
+  if (item.fullyPaid) return { label: 'Fully Paid', tone: 'success' };
+  const verified = item.verifiedTotal ?? '0.00';
+  if (verified !== '0.00' && verified !== '0') return { label: 'Partial', tone: 'warning' };
+  return { label: 'Pending', tone: 'warning' };
 }
 
 /**
@@ -319,26 +345,11 @@ export function BusinessFinanceQueuePage() {
       ) ?? detail) as FinanceCollectionQueueItem)
     : null;
 
-  // Row activation opens the record-payment dialog straight away: this is
-  // the finance operator's primary action on the queue. Full details stay
-  // one step away behind the row menu's View details. Menu interactions
-  // never reach here — the menu wrapper stops propagation.
+  // Row activation opens the view-details panel: recording stays available
+  // through the row menu's "Record payment" action so a click never spends
+  // or records money by accident.
   const selectItem = (item: FinanceCollectionQueueItem) => {
-    if (item.origin === 'sale') {
-      setRecording({
-        id: item.saleId,
-        origin: 'sale',
-        customerName: item.customerName,
-        recordLabel: item.saleNumber,
-      });
-    } else {
-      setRecording({
-        id: item.reservationId,
-        origin: 'reservation',
-        customerName: item.customerName,
-        recordLabel: item.reservationNumber,
-      });
-    }
+    setDetail(item);
   };
   const onRowKeyDown = (event: KeyboardEvent, item: FinanceCollectionQueueItem) => {
     if ((event.target as HTMLElement).closest('[data-row-menu]')) return;
@@ -514,7 +525,7 @@ export function BusinessFinanceQueuePage() {
                   {visible.map((item) => {
                     const recordNumber =
                       item.origin === 'sale' ? item.saleNumber : item.reservationNumber;
-                    const status = statusBadgeProps(item.status);
+                    const status = financePaymentStatus(item);
                     return (
                       <TableRow
                         key={item.origin === 'sale' ? item.saleId : item.reservationId}
@@ -659,6 +670,10 @@ export function BusinessFinanceQueuePage() {
               });
             }
             await refresh();
+            // Drop the cached queue so the page re-enters its loading skeleton
+            // and visibly re-fetches the updated content instead of silently
+            // swapping stale rows.
+            await client.resetQueries({ queryKey: businessKeys.queue });
           }}
           onClose={() => setRecording(null)}
         />
@@ -778,7 +793,7 @@ export function RecordPaymentDialog({
       const confirmed = await notifyConfirm({
         title: 'Record this payment?',
         message:
-          'The payment is saved as recorded and does not count toward the price until it is verified.',
+          'Recorded only. Server recalculates balance.',
         detail: [
           customerName ? `Customer: ${customerName}` : null,
           recordLabel
@@ -815,6 +830,9 @@ export function RecordPaymentDialog({
       setConfirming(false);
       await onDone();
       paymentRequest.complete();
+      // Close the modal once the payment is recorded so the success alert is
+      // the only thing left on screen.
+      onClose();
       // Captured in a const so the narrowing survives into the filter callback.
       const outcome = recorded.result;
       // The re-read reports the SERVER's row. If it fails the payment is still
@@ -908,8 +926,7 @@ export function RecordPaymentDialog({
           ) : null}
           <div className={styles.formGrid}>
             <p className={styles.formNote}>
-              The payment is saved as <strong>recorded</strong> and does not count toward the price
-              until it is verified. The resulting balance is recalculated on the server.
+              <strong>Recorded only.</strong> Server recalculates balance.
             </p>
             {summary.data ? (
               <section className={styles.detailSection} aria-label="Sale figures">
@@ -959,9 +976,9 @@ export function RecordPaymentDialog({
                   label="Amount"
                   type="text"
                   inputMode="decimal"
-                  value={amount}
+                  value={formatMoneyInput(amount)}
                   onChange={(value) => {
-                    setAmount(value);
+                    setAmount(value.replace(/[^0-9.]/g, ''));
                     setAmountDirty(true);
                   }}
                   error={
@@ -983,14 +1000,22 @@ export function RecordPaymentDialog({
                     ]}
                   />
                 </label>
-                <TextField
-                  id="record-payment-method"
-                  name="method"
-                  label="Method"
-                  optional
-                  value={method}
-                  onChange={setMethod}
-                />
+                <label className={styles.field}>
+                  Method
+                  <Select
+                    aria-label="Method"
+                    value={method}
+                    onChange={(e) => setMethod(e.target.value)}
+                    options={[
+                      { value: 'bank_transfer', label: 'Bank Transfer' },
+                      { value: 'cash', label: 'Cash' },
+                      { value: 'gcash', label: 'GCash' },
+                      { value: 'maya', label: 'Maya' },
+                      { value: 'check', label: 'Check' },
+                      { value: 'other', label: 'Other' },
+                    ]}
+                  />
+                </label>
                 <TextField
                   id="record-payment-reference"
                   name="reference"
@@ -998,7 +1023,7 @@ export function RecordPaymentDialog({
                   optional
                   value={reference}
                   onChange={setReference}
-                  hint="Enter the transaction/reference number from the payment receipt, bank transfer, GCash/Maya transaction, deposit slip, or official receipt."
+                  hint="Enter the transaction or reference number."
                 />
                 {save.error ? (
                   <p role="alert" className={styles.formAlert}>
@@ -1026,6 +1051,10 @@ export function VerifyDialog({
   onClose: () => void;
 }) {
   const [reason, setReason] = useState('');
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [decidingDecision, setDecidingDecision] = useState<'verified' | 'rejected' | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const payments = useQuery({
     queryKey: businessKeys.paymentsFor(origin, saleId),
     queryFn: async () =>
@@ -1041,8 +1070,10 @@ export function VerifyDialog({
       paymentId: string;
       decision: 'verified' | 'rejected';
       reason?: string;
-    }) =>
-      origin === 'reservation'
+    }) => {
+      setDecidingId(input.paymentId);
+      setDecidingDecision(input.decision);
+      return origin === 'reservation'
         ? await verifyReservationPayment(saleId, input.paymentId, {
             requestId: verificationRequest.forPayload(input),
             decision: input.decision,
@@ -1051,10 +1082,28 @@ export function VerifyDialog({
         : await verifyPayment(input.paymentId, {
             decision: input.decision,
             ...(input.reason ? { reason: input.reason } : {}),
-          }),
-    onSuccess: async () => {
-      await onDone();
+          });
+    },
+    onSuccess: async (_result, input) => {
       verificationRequest.complete();
+      if (input?.decision === 'verified') {
+        notifySuccess({
+          title: 'Payment verified',
+          message: 'The payment now counts toward the price.',
+        });
+      }
+      setRefreshing(true);
+      await onDone();
+      await payments.refetch();
+      setRefreshing(false);
+      setDecidingId(null);
+      setDecidingDecision(null);
+      setRejectingId(null);
+      setReason('');
+    },
+    onError: () => {
+      setDecidingId(null);
+      setDecidingDecision(null);
     },
   });
 
@@ -1076,68 +1125,95 @@ export function VerifyDialog({
             Payment {decide.variables?.decision}.
           </p>
         ) : null}
-        {pending.length > 0 ? (
-          <div className={styles.dialogHero}>
-            <span className={styles.dialogHeroIcon} aria-hidden="true">
-              <Icon name="check" size={22} />
-            </span>
-            <div className={styles.dialogHeroBody}>
-              <p className={styles.dialogHeroTitle}>
-                {formatCountOrDash(pending.length)} awaiting verification
-              </p>
-              <p className={styles.dialogHeroMeta}>
-                Verify to count the money toward the price, or reject it back for correction.
-              </p>
-            </div>
+        {refreshing ? (
+          <div role="status" aria-label="Refreshing payments" className={styles.formGrid}>
+            <Skeleton style={{ height: 64 }} />
+            <Skeleton style={{ height: 64 }} />
           </div>
         ) : null}
-        {pending.length === 0 ? (
+        {!refreshing && pending.length === 0 ? (
           <p className={styles.formNote}>No payment is awaiting verification.</p>
-        ) : (
-          <ul className={styles.timeline}>
-            {pending.map((payment) => (
-              <li key={payment.id} className={styles.timelineItem}>
-                <div className={styles.timelineTop}>
-                  <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
-                  <StatusChip label={humanizeCode(payment.status)} />
-                </div>
-                <p className={styles.timelineMeta}>
-                  {payment.paymentType.replaceAll('_', ' ')} · {payment.method}{' '}
-                  {payment.reference ? `(${payment.reference})` : '(No reference)'}
+        ) : null}
+        {!refreshing && pending.length > 0 ? (
+          <>
+            <div className={styles.dialogHero}>
+              <span className={styles.dialogHeroIcon} aria-hidden="true">
+                <Icon name="check" size={22} />
+              </span>
+              <div className={styles.dialogHeroBody}>
+                <p className={styles.dialogHeroTitle}>
+                  {formatCountOrDash(pending.length)} awaiting verification
                 </p>
-                <div className={styles.timelineActions}>
-                  <Button
-                    onClick={() => decide.mutate({ paymentId: payment.id, decision: 'verified' })}
-                    loading={decide.isPending}
-                    loadingLabel="Verifying…"
-                  >
-                    Verify
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() =>
-                      decide.mutate({
-                        paymentId: payment.id,
-                        decision: 'rejected',
-                        reason: reason || 'Rejected by Finance',
-                      })
-                    }
-                    disabled={decide.isPending}
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        <TextField
-          id="verify-reject-reason"
-          name="reason"
-          label="Reason (required to reject)"
-          value={reason}
-          onChange={setReason}
-        />
+                <p className={styles.dialogHeroMeta}>
+                  Verify to count the money, or reject for correction.
+                </p>
+              </div>
+            </div>
+            <ul className={styles.timeline}>
+              {pending.map((payment) => {
+                const isDeciding = decidingId === payment.id;
+                const isRejecting = rejectingId === payment.id;
+                return (
+                  <li key={payment.id} className={styles.timelineItem}>
+                    <div className={styles.timelineTop}>
+                      <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
+                      <StatusChip label={humanizeCode(payment.status)} />
+                    </div>
+                    <p className={styles.timelineMeta}>
+                      {payment.paymentType.replaceAll('_', ' ')} · {payment.method}{' '}
+                      {payment.reference ? `(${payment.reference})` : '(No reference)'}
+                    </p>
+                    <div className={styles.timelineActions}>
+                      <Button
+                        onClick={() =>
+                          decide.mutate({ paymentId: payment.id, decision: 'verified' })
+                        }
+                        loading={isDeciding && decidingDecision === 'verified'}
+                        loadingLabel="Verifying…"
+                        disabled={decide.isPending}
+                      >
+                        Verify
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => setRejectingId(isRejecting ? null : payment.id)}
+                        disabled={decide.isPending}
+                      >
+                        {isRejecting ? 'Cancel' : 'Reject'}
+                      </Button>
+                    </div>
+                    {isRejecting ? (
+                      <div className={styles.formGrid}>
+                        <TextField
+                          id="verify-reject-reason"
+                          name="reason"
+                          label="Reason (required to reject)"
+                          value={reason}
+                          onChange={setReason}
+                        />
+                        <Button
+                          variant="danger"
+                          disabled={decide.isPending || reason.trim().length < 3}
+                          loading={isDeciding && decidingDecision === 'rejected'}
+                          loadingLabel="Rejecting…"
+                          onClick={() =>
+                            decide.mutate({
+                              paymentId: payment.id,
+                              decision: 'rejected',
+                              reason: reason.trim(),
+                            })
+                          }
+                        >
+                          Confirm reject
+                        </Button>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : null}
         {decide.error ? (
           <p role="alert" className={styles.formAlert}>
             {decide.error.message}

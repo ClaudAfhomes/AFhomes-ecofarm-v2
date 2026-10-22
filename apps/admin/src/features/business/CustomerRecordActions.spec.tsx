@@ -101,7 +101,7 @@ function renderActions(user: SessionUser = STAFF, sales: Sale[] = []) {
     <Routes>
       <Route
         path="/admin/customers/:id"
-        element={<CustomerRecordActions customer={RECORD} sales={sales} onChanged={() => {}} />}
+        element={<CustomerRecordActions customer={RECORD} sales={sales} />}
       />
       <Route path="/admin/customers/applications/new" element={<p>new application</p>} />
       <Route path="/admin/customers" element={<p>directory</p>} />

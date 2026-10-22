@@ -4,6 +4,7 @@ import { manageSaleTeamSchema } from './sale-team.js';
 
 it('allows date-free IST employee identity but still requires OST validity', () => {
   const employee = {
+    staffId: '00000000-0000-4000-8000-000000000001',
     aaNumber: 'AAI26100001',
     kind: 'IST',
     fullName: 'SYNTHETIC',
@@ -32,6 +33,7 @@ it.each(['AAI26000001', 'AAO26130001', 'AAI26100000', 'AAO261000001', 'JAI261000
 
 it('rejects a typed accreditation number belonging to the other seller kind', () => {
   const record = {
+    staffId: '00000000-0000-4000-8000-000000000001',
     aaNumber: 'AAI26100001',
     kind: 'IST',
     fullName: 'Synthetic Seller',

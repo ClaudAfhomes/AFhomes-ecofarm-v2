@@ -463,23 +463,17 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
   ];
 
   const next = !hasReservation
-    ? status === 'approved'
+    ? status === 'submitted'
       ? {
-          label: 'Create reservation',
-          detail: 'No reservation exists yet.',
-          to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+          label: 'Review terms',
+          detail: 'Review the offer, then decide.',
+          to: null,
         }
-      : status === 'submitted'
-        ? {
-            label: 'Review terms',
-            detail: 'Review the offer, then decide.',
-            to: null,
-          }
-        : {
-            label: 'Continue draft',
-            detail: 'Complete the draft and submit.',
-            to: null,
-          }
+      : {
+          label: 'Continue draft',
+          detail: 'Complete the draft and submit.',
+          to: null,
+        }
     : finalized
       ? {
           label: 'Continue Activation',
@@ -647,6 +641,8 @@ export function CustomerApplicationEditorPage() {
   const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  // Track successful submission to hide the ID verification note in the Certify step.
+  const [submissionSuccess, setSubmissionSuccess] = useState(false);
   // Steps unlock only by moving forward. Going back is always free; jumping
   // ahead never is, so an operator cannot skip a step's own checks. Existing
   // records open unlocked: their data was entered before, or the form below
@@ -1030,19 +1026,23 @@ export function CustomerApplicationEditorPage() {
           expectedProposalHash: offer.expectedProposalHash,
         });
       }),
-    onSuccess: (app) => {
+    onSuccess: async (app) => {
       notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
-      void existing.refetch();
-      void proposal.refetch();
-      void client.invalidateQueries({ queryKey: applicationKeys.scope });
-      void client.invalidateQueries({ queryKey: reservationKeys.scope });
-      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
-      void client.invalidateQueries({ queryKey: sharedScopes.reports });
+      await existing.refetch();
+      await proposal.refetch();
+      await client.invalidateQueries({ queryKey: applicationKeys.scope });
+      await client.invalidateQueries({ queryKey: reservationKeys.scope });
+      await client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
+      await client.invalidateQueries({ queryKey: sharedScopes.reports });
+      setSubmissionSuccess(true);
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
       if (isEditRoute) navigate(`/admin/customers/applications/${id}`, { replace: true });
     },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save and submit failed.'),
+    onError: (e) => {
+      setSubmissionSuccess(false);
+      setMessage(e instanceof Error ? e.message : 'Save and submit failed.');
+    },
   });
   // One stable request identity per logical action, so a timeout-after-commit
   // retry replays the original decision instead of attempting a second one.
@@ -1069,7 +1069,11 @@ export function CustomerApplicationEditorPage() {
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: applicationKeys.reservations(id!) });
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: ['reservation-payments'] });
+      void client.invalidateQueries({ queryKey: ['reservation-finance'] });
+      void client.invalidateQueries({ queryKey: businessKeys.queue });
       void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
       void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
@@ -1084,7 +1088,9 @@ export function CustomerApplicationEditorPage() {
   const reviewRequest = useMutationRequest();
   const review = useBusinessMutation({
     mutationFn: async () => {
-      const offer = proposal.data ?? (await getPurchaseTermsProposal(id!));
+      // Always fetch fresh: proposal.data may be a stale snapshot from the
+      // current render (React Query cache updates before component re-renders).
+      const offer = await getPurchaseTermsProposal(id!);
       if (!offer) throw new Error('Load the purchase terms offer before confirming.');
       const reason = 'Auto-confirmed on approval';
       return reviewApplicationPurchaseTerms(id!, {
@@ -1135,6 +1141,13 @@ export function CustomerApplicationEditorPage() {
   const editable = !existing.data || existing.data.status === 'draft';
   const isEditRoute = location.pathname.endsWith('/edit');
   const showForm = isNew || editable || isEditRoute;
+  // Compute whether any action button in the Actions card would be enabled.
+  const hasRecordActions =
+    id &&
+    !isEditRoute &&
+    existing.data &&
+    (existing.data.status === 'submitted' ||
+      existing.data.status === 'rejected');
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = linkedCustomer.data ?? null;
   // Snapshot names for chain selections the genealogy list no longer contains
@@ -1410,9 +1423,6 @@ export function CustomerApplicationEditorPage() {
                   <Link to={`/admin/customers/${relatedCustomer.id}`} className={styles.linkedCustomerName}>
                     {relatedCustomer.fullName}
                   </Link>
-                  <span className={styles.linkedCustomerMeta}>
-                    {relatedCustomer.customerNumber}
-                  </span>
                 </div>
                 <Button
                   variant="primary"
@@ -1839,14 +1849,20 @@ export function CustomerApplicationEditorPage() {
                 />{' '}
                 I certify the information and consent to verification and processing under RA 10173.
               </label>
-              <label className={styles.checkRow}>
-                <input
-                  type="checkbox"
-                  checked={validId}
-                  onChange={(e) => setValidId(e.target.checked)}
-                />{' '}
-                Valid government ID with specimen signatures received
-              </label>
+              {submissionSuccess ? (
+                <p className={styles.hint} style={{ color: 'var(--color-success)' }}>
+                  ✓ Valid government ID with specimen signatures received — verified on submission.
+                </p>
+              ) : (
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={validId}
+                    onChange={(e) => setValidId(e.target.checked)}
+                  />{' '}
+                  Valid government ID with specimen signatures received
+                </label>
+              )}
             </fieldset>
           )}
         </fieldset>
@@ -1881,7 +1897,7 @@ export function CustomerApplicationEditorPage() {
           </div>
         </div>
         ) : null}
-        {id && !isEditRoute ? (
+        {hasRecordActions ? (
           <section aria-label="Record actions" className={styles.panel}>
             <div className={styles.recordGroups}>
               <div className={styles.actions}>

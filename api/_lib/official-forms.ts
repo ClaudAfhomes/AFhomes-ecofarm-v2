@@ -123,8 +123,6 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'acquisition_channels',
   'consent_acknowledged',
   'acknowledgement_date',
-  'primary_signature_status',
-  'secondary_signature_status',
   'valid_id_received',
   'reservation_payment_proof_received',
 ] as const;
@@ -139,8 +137,6 @@ export const IST_IMPORT_HEADERS = [
   'monthly_amortization_start',
   'monthly_amortization_end',
   'payment_due_day',
-  'primary_signature_status',
-  'secondary_signature_status',
   'primary_name',
   'primary_address',
   'primary_contact_number',
@@ -155,9 +151,7 @@ export const IST_IMPORT_HEADERS = [
   'schedule_particular',
   'schedule_amount',
   'schedule_payment_date',
-  'schedule_remarks',
   'payment_dates',
-  'payment_remarks',
 ] as const;
 
 const textColumns = (headers: readonly string[]): XlsxColumn[] =>
@@ -255,7 +249,6 @@ const requiredIst = [
   'vip_tier',
   'reservation_date',
   'agreement_date',
-  'primary_signature_status',
   'primary_name',
   'primary_address',
   'primary_contact_number',
@@ -362,16 +355,6 @@ export function validateFormImport(
     errors.push({ field: 'sale_id', message: 'Must be a sale UUID' });
   if (fields.customer_application_id && !UUID_RE.test(fields.customer_application_id))
     errors.push({ field: 'customer_application_id', message: 'Must be an application UUID' });
-  if (
-    fields.primary_signature_status &&
-    !['pending', 'received'].includes(fields.primary_signature_status)
-  )
-    errors.push({ field: 'primary_signature_status', message: 'Must be pending or received' });
-  if (
-    fields.secondary_signature_status &&
-    !['pending', 'received'].includes(fields.secondary_signature_status)
-  )
-    errors.push({ field: 'secondary_signature_status', message: 'Must be pending or received' });
   if (fields.payment_due_day && !/^(0?[1-9]|[12][0-9]|3[01])$/.test(fields.payment_due_day))
     errors.push({ field: 'payment_due_day', message: 'Must be 1-31' });
   if (fields.schedule_amount && !/^\d+(\.\d{1,2})?$/.test(fields.schedule_amount))
@@ -506,9 +489,7 @@ export function officialFormPdf(
       'schedule_particular',
       'schedule_amount',
       'schedule_payment_date',
-      'schedule_remarks',
       'payment_dates',
-      'payment_remarks',
     ])
       if (fields[key] !== undefined) rows.push([label(key), fields[key] ?? '']);
     rows.push([
@@ -516,8 +497,7 @@ export function officialFormPdf(
       'Scheduled obligations only. Actual received payments live in the payments table.',
     ]);
     section('CERTIFICATION AND SIGNATURES');
-    rows.push(['primary signature', fields.primary_signature_status ?? 'pending']);
-    rows.push(['secondary signature', fields.secondary_signature_status ?? '']);
+
     rows.push([
       'certification',
       'I certify the information is true and consent to verification and processing.',
@@ -556,8 +536,7 @@ export function officialFormPdf(
     section('CERTIFICATION');
     rows.push(['consent acknowledged', fields.consent_acknowledged ?? '']);
     rows.push(['acknowledgement date', fields.acknowledgement_date ?? '']);
-    rows.push(['primary signature', fields.primary_signature_status ?? 'pending']);
-    rows.push(['secondary signature', fields.secondary_signature_status ?? '']);
+
     section('RESERVATION REQUIREMENTS');
     rows.push(['valid id received', fields.valid_id_received ?? '']);
     rows.push([

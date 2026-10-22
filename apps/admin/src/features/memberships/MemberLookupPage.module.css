@@ -141,6 +141,47 @@
   background-color: var(--tier-wash);
 }
 
+/* Clickable flip card: front = VIP card, back = government ID. */
+.flipWrap {
+  position: relative;
+  width: 100%;
+  min-height: 168px;
+  perspective: 1000px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.flipInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 168px;
+  transition: transform 500ms ease;
+  transform-style: preserve-3d;
+}
+
+.flipInner.flipped {
+  transform: rotateY(180deg);
+}
+
+.flipFront,
+.flipBack {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--tier-wash);
+}
+
+.flipBack {
+  transform: rotateY(180deg);
+}
+
 /* Contain, never cover: the whole card face stays visible, letterboxed on
    the tier wash. Nothing on the printed card is ever cropped away. */
 .art {

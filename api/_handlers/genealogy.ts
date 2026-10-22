@@ -26,6 +26,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if ('error' in auth) return deny(res, auth);
   const db = serviceClient() as Db;
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+
+  const path = subPath(req);
+  if (path === 'ost-contacts') {
+    const staffIdsParam = req.query.staffIds as string | undefined;
+    if (!staffIdsParam) return fail(res, 'VALIDATION_ERROR', 'staffIds parameter required', 400);
+    const staffIds = staffIdsParam.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!staffIds.length) return res.status(200).json({});
+    // Fetch email from staff_users for all selected staff (SVD, SSM, SM, Referrer, VIP Recommender)
+    const { data: staffRows, error: staffError } = await db
+      .from('staff_users')
+      .select('id,email')
+      .in('id', staffIds);
+    if (staffError) throw staffError;
+    const emailByStaff = new Map<string, string>(
+      (staffRows ?? []).map((r: { id: string; email: string }) => [r.id, r.email]),
+    );
+    // Fetch phone and email from ost_members for OST members (Referrer, VIP Recommender)
+    const { data: ostRows, error: ostError } = await db
+      .from('ost_members')
+      .select('id,phone,email')
+      .in('id', staffIds);
+    if (ostError) throw ostError;
+    const ostByStaff = new Map<string, { phone: string; email: string }>(
+      (ostRows ?? []).map((r: { id: string; phone: string; email: string }) => [r.id, { phone: r.phone, email: r.email }]),
+    );
+    // Combine: for each staff ID, return phone (from ost_members or null) and email (from staff_users or ost_members)
+    const contacts: Record<string, { phone: string | null; email: string }> = {};
+    for (const id of staffIds) {
+      const ost = ostByStaff.get(id);
+      const email = emailByStaff.get(id) ?? ost?.email ?? '';
+      contacts[id] = { phone: ost?.phone ?? null, email };
+    }
+    return res.status(200).json(contacts);
+  }
+
   try {
     const [staffRows, assignRows, roleRows, relRows, ostRows] = await Promise.all([
       readSearchRows(db.from('staff_users').select('id,full_name,status').order('id')),

@@ -191,7 +191,6 @@ describe('submit normalization', () => {
       reservationDate: '2026-01-01',
       agreementDate: '2026-01-02',
       scheduleNotes: [],
-      primarySignatureStatus: 'pending' as const,
       primary: {
         holderType: 'PRIMARY',
         name: 'claud jimenez',

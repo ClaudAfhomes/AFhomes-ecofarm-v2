@@ -710,12 +710,22 @@ export type CustomerLookup = z.infer<typeof customerLookupSchema>;
 export const gsdActiveVipLookupSchema = z.object({
   /** Customer's given/first name. */
   firstName: z.string().min(1),
-  /** First Unicode grapheme of the surname + fixed `***`. */
-  maskedLastName: z.string().regex(/^.\*\*\*$/u),
+  /** Customer's full last name (no mask). */
+  lastName: z.string().min(1),
+  /** Customer's RA number (company customer ID). */
+  raNumber: z.string().nullable().optional(),
   /** Authoritative VIP tier of the qualifying membership. */
   vipTier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
   /** Authoritative `memberships.expires_at` formatted in Asia/Manila, `YYYY-MM-DD`. */
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Total available points (from points_accounts.balance). */
+  totalAvailablePoints: z.number().int().nonnegative(),
+  /** Weekend available points (total * 0.5). */
+  weekendAvailablePoints: z.number().int().nonnegative(),
+  /** Weekday available points (total - weekend). */
+  weekdayAvailablePoints: z.number().int().nonnegative(),
+  /** Short-lived signed URL for the customer's government ID image, or null. */
+  governmentIdImageUrl: z.string().nullable(),
 });
 export type GsdActiveVipLookup = z.infer<typeof gsdActiveVipLookupSchema>;
 

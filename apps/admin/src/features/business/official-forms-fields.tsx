@@ -32,7 +32,7 @@ import {
   normalizeLiveHumanField,
 } from '../../lib/normalize';
 import { GeographicAddressFields } from '../address/GeographicAddressFields';
-import { getGenealogy } from '../genealogy/services';
+import { getGenealogy, getOstMemberContacts } from '../genealogy/services';
 
 export const today = () => {
   const now = new Date();
@@ -615,6 +615,7 @@ export function RecommenderFields({
     retry: false,
   });
   const nodes = chain.data ?? [];
+
   // The nearest selected level above each dropdown: gaps stay selectable, so
   // an SM under an SVD with no SSM named still lists that SVD's downline.
   const aboveFor = (index: number): string | null => {
@@ -625,12 +626,27 @@ export function RecommenderFields({
     }
     return null;
   };
+
+  // Build options for a chain level, excluding the other recommender if set.
   const optionsFor = (index: number) => {
     const level = CHAIN_LEVELS[index]!;
-    const options = chainOptions(nodes, level.role, aboveFor(index)).map((node) => ({
+    let options = chainOptions(nodes, level.role, aboveFor(index)).map((node) => ({
       value: node.staffId,
       label: node.fullName,
     }));
+
+    // Mutual exclusion: Referrer (index 3) and VIP Recommender cannot be the same person.
+    // When building Referrer options, exclude the VIP Recommender's staff ID if we can find it.
+    const isReferrerLevel = level.key === 'referrerStaffId';
+
+    if (isReferrerLevel && meta.vipRecommenderName) {
+      // Find the staff ID for the selected VIP recommender by name
+      const vipNode = nodes.find((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost');
+      if (vipNode) {
+        options = options.filter((opt) => opt.value !== vipNode.staffId);
+      }
+    }
+
     // A stored selection the list no longer contains (a departure, or a chain
     // outside the viewer's own scope) stays visible and submittable; the
     // server refuses it at write time if the staff is no longer eligible.
@@ -642,6 +658,29 @@ export function RecommenderFields({
       });
     return [{ value: '', label: 'Not specified' }, ...options];
   };
+
+  // Build VIP recommender options, excluding the selected Referrer
+  const vipRecommenderOptions = (() => {
+    const baseOptions = [
+      { value: '', label: 'Not specified' },
+      ...chainOptions(nodes, 'ost', null).map((node) => ({
+        value: node.fullName,
+        label: node.fullName,
+      })),
+    ];
+    // Exclude the selected Referrer if it's an OST staff member
+    if (meta.referrerStaffId) {
+      const referrerNode = nodes.find((n) => n.staffId === meta.referrerStaffId && n.role === 'ost');
+      if (referrerNode) {
+        return withStoredValue(
+          baseOptions.filter((opt) => opt.value !== referrerNode.fullName),
+          meta.vipRecommenderName,
+        );
+      }
+    }
+    return withStoredValue(baseOptions, meta.vipRecommenderName);
+  })();
+
   const setChain = (key: keyof ReferralChainIds, next: string) => {
     const order: (keyof ReferralChainIds)[] = [
       'svdStaffId',
@@ -655,25 +694,44 @@ export function RecommenderFields({
     for (const later of order.slice(order.indexOf(key) + 1)) cleared[later] = '';
     onChain({ ...pickChain(meta), [key]: next, ...cleared });
   };
-  const fields = [
-    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
-    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
-    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
-  ] as const;
-  // The VIP recommender is an OST member, chosen from the same genealogy list
-  // the Referrer level reads - NOT narrowed to the selected upline's downline,
-  // because a recommender is not in the applicant's reporting chain. The stored
-  // column is the recommender's NAME, so the choice writes the name.
-  const vipRecommenderOptions = withStoredValue(
-    [
-      { value: '', label: 'Not specified' },
-      ...chainOptions(nodes, 'ost', null).map((node) => ({
-        value: node.fullName,
-        label: node.fullName,
-      })),
-    ],
-    meta.vipRecommenderName,
-  );
+
+  // Fetch contact info for all 5 recommenders (SVD, SSM, SM, Referrer, VIP Recommender)
+  const selectedOstStaffIds = [
+    meta.svdStaffId,
+    meta.ssmStaffId,
+    meta.smStaffId,
+    meta.referrerStaffId,
+    // Find VIP recommender's staff ID by name
+    ...(meta.vipRecommenderName
+      ? nodes.filter((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost').map((n) => n.staffId)
+      : []),
+  ].filter(Boolean);
+
+  const contactsQuery = useQuery({
+    queryKey: ['ost-member-contacts', selectedOstStaffIds.sort().join(',')],
+    queryFn: () => getOstMemberContacts(selectedOstStaffIds),
+    enabled: selectedOstStaffIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
+  // Build contact options from selected recommenders
+  const contactOptions = contactsQuery.data
+    ? Object.entries(contactsQuery.data).flatMap(([staffId, { phone, email }]) => {
+        const opts: { value: string; label: string }[] = [];
+        if (phone) opts.push({ value: phone, label: `${phone} (${chainNames[staffId] ?? 'Recommender'})` });
+        if (email) opts.push({ value: email, label: `${email} (${chainNames[staffId] ?? 'Recommender'})` });
+        return opts;
+      })
+    : [];
+
+  const emailOptions = contactsQuery.data
+    ? Object.entries(contactsQuery.data).flatMap(([staffId, { email }]) =>
+        email ? [{ value: email.toLowerCase(), label: `${email.toLowerCase()} (${chainNames[staffId] ?? 'Recommender'})` }] : []
+      )
+    : [];
+
   return (
     <>
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
@@ -707,7 +765,7 @@ export function RecommenderFields({
       ) : null}
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
         <p className={styles.subGroupTitle}>VIP recommender</p>
-        <p className={styles.hint}>Recommender is active OST staff. Contact and email are typed.</p>
+        <p className={styles.hint}>Recommender is active OST staff. Select contact and email from the dropdowns below.</p>
       </div>
       <label className={styles.filterLabel}>
         <span>VIP Recommender</span>
@@ -720,21 +778,42 @@ export function RecommenderFields({
           options={vipRecommenderOptions}
         />
       </label>
-      {fields.map(({ key, label, optionalPhone }) => (
-        <Field
-          key={key}
-          label={label}
-          value={meta[key]}
-          type={key === 'acknowledgedAt' ? 'date' : 'text'}
-          normalize={
-            key === 'recommenderEmail'
-              ? (v) => v.toLowerCase()
-              : (v) => normalizeLiveHumanField(key, v)
-          }
-          optionalPhone={optionalPhone}
-          onChange={(v) => onChange(key, v)}
+      {/* Recommender Contact - dropdown from selected recommenders */}
+      <label className={styles.filterLabel}>
+        <span>Recommender Contact</span>
+        <Select
+          aria-label="Recommender Contact"
+          value={meta.recommenderContact}
+          onChange={(event) => onChange('recommenderContact', event.target.value)}
+          options={[
+            { value: '', label: 'Select contact' },
+            ...contactOptions.map((opt) => ({ value: opt.value, label: opt.label })),
+          ]}
         />
-      ))}
+      </label>
+      {/* Recommender Email - dropdown from selected recommenders */}
+      <label className={styles.filterLabel}>
+        <span>Recommender Email</span>
+        <Select
+          aria-label="Recommender Email"
+          value={meta.recommenderEmail}
+          onChange={(event) => onChange('recommenderEmail', event.target.value)}
+          options={[
+            { value: '', label: 'Select email' },
+            ...emailOptions.map((opt) => ({ value: opt.value, label: opt.label })),
+          ]}
+        />
+      </label>
+      {/* Acknowledged At - keep as date field */}
+      <label className={styles.filterLabel}>
+        <span>Acknowledged At</span>
+        <input
+          type="date"
+          value={meta.acknowledgedAt}
+          onChange={(event) => onChange('acknowledgedAt', event.target.value)}
+          className="input-date"
+        />
+      </label>
     </>
   );
 }

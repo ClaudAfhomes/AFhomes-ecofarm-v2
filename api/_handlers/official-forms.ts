@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { workbookApplicationPrefill } from '../_lib/customer-workbook.js';
 import { z } from 'zod';
+import { addMoney, compareMoney } from '@afhomes/shared';
 import { currentIdForSubject } from './documents.js';
 import { governmentIdTypeSchema } from '@afhomes/contracts';
 import {
@@ -502,8 +503,6 @@ async function getAgreement(db: Db, id: string) {
     monthlyAmortizationStart: row.monthly_amortization_start ?? undefined,
     monthlyAmortizationEnd: row.monthly_amortization_end ?? undefined,
     paymentDueDay: row.payment_due_day ?? undefined,
-    primarySignatureStatus: row.primary_signature_status,
-    secondarySignatureStatus: row.secondary_signature_status ?? undefined,
     primary: holders.find((h) => h.holderType === 'PRIMARY') ?? null,
     secondary: holders.find((h) => h.holderType === 'SECONDARY'),
     schedule: ((scheduleResult.data ?? []) as Record<string, unknown>[]).map((line) => ({
@@ -511,7 +510,6 @@ async function getAgreement(db: Db, id: string) {
       particular: line.particular,
       amount: line.amount_snapshot,
       paymentDate: line.payment_date ?? undefined,
-      remarks: line.remarks ?? undefined,
     })),
     status: row.status,
     createdBy: row.created_by,
@@ -672,6 +670,48 @@ async function listRows(
     for (const row of rows) {
       row.applicant_name = names.get(String(row.id)) ?? null;
       row.has_secondary_holder = secondaryAgreements.has(String(row.id));
+    }
+    // Attach a payment verification status so the reservations list can show
+    // Pending/Verified without a per-row round-trip.
+    const paymentIds = rows.map((row) => String(row.id));
+    if (paymentIds.length) {
+      const { data: payments, error: paymentsError } = await db
+        .from('payments')
+        .select('reservation_id,status')
+        .in('reservation_id', paymentIds);
+      if (paymentsError) throw paymentsError;
+      const verified = new Set<string>();
+      const anyPayment = new Set<string>();
+      const verifiedTotal = new Map<string, string>();
+      for (const p of (payments ?? []) as Record<string, unknown>[]) {
+        const rid = String(p.reservation_id ?? '');
+        if (!rid) continue;
+        anyPayment.add(rid);
+        if (String(p.status ?? '') === 'verified') {
+          verified.add(rid);
+          const amount = String(p.amount ?? '0.00');
+          verifiedTotal.set(rid, addMoney(verifiedTotal.get(rid) ?? '0.00', amount));
+        }
+      }
+      for (const row of rows) {
+        const rid = String(row.id);
+        const vTotal = verifiedTotal.get(rid) ?? '0.00';
+        const total = String(row.total_price_snapshot ?? '0.00');
+        row.payment_status = verified.has(rid)
+          ? 'paid'
+          : anyPayment.has(rid)
+            ? 'pending'
+            : null;
+        row.verified_total = vTotal;
+        let fullyPaid = false;
+        try {
+          fullyPaid =
+            compareMoney(total, '0.00') > 0 && compareMoney(vTotal, total) >= 0;
+        } catch {
+          fullyPaid = false;
+        }
+        row.fully_paid = fullyPaid;
+      }
     }
   }
   return res.status(200).json({
@@ -1794,7 +1834,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const agreement = await getAgreement(db, agreementExport[1]!);
       if (!agreement) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const first = agreement.schedule[0] as
-        | { particular?: string; amount?: string; paymentDate?: string; remarks?: string }
+        | { particular?: string; amount?: string; paymentDate?: string }
         | undefined;
       const primary = (agreement.primary ?? {}) as Record<string, string>;
       const secondary = (agreement.secondary ?? null) as Record<string, string> | null;
@@ -1808,8 +1848,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         monthly_amortization_start: String(agreement.monthlyAmortizationStart ?? ''),
         monthly_amortization_end: String(agreement.monthlyAmortizationEnd ?? ''),
         payment_due_day: String(agreement.paymentDueDay ?? ''),
-        primary_signature_status: String(agreement.primarySignatureStatus),
-        secondary_signature_status: String(agreement.secondarySignatureStatus ?? ''),
         primary_name: String(primary.name ?? ''),
         primary_address: String(primary.address ?? ''),
         primary_contact_number: String(primary.contactNumber ?? ''),
@@ -1824,9 +1862,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         schedule_particular: String(first?.particular ?? ''),
         schedule_amount: String(first?.amount ?? ''),
         schedule_payment_date: String(first?.paymentDate ?? ''),
-        schedule_remarks: String(first?.remarks ?? ''),
         payment_dates: agreement.schedule.map((line) => String(line.paymentDate ?? '')).join('|'),
-        payment_remarks: agreement.schedule.map((line) => String(line.remarks ?? '')).join('|'),
       };
       return agreementExport[2] === 'xlsx'
         ? sendFile(
