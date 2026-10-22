@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Customer, Sale } from '@afhomes/contracts';
 import {
   Button,
+  ConfirmDialog,
   DetailCard,
   DetailCardTitle,
   DetailField,
@@ -28,7 +29,7 @@ import { formatDate, formatDateTime, formatTin } from '../../lib/format';
 import { formatPaymentMethod, humanizeCode } from './format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
-import { getCustomerById, getSalePayments, getSales } from './services';
+import { deleteCustomer, getCustomerById, getSalePayments, getSales } from './services';
 import { businessKeys } from './queryKeys';
 import { compareMoney, formatMoneyOrDash, formatStatedMoney, subtractMoney } from '@afhomes/shared';
 import { SettlementBadge } from './SettlementBadge';
@@ -160,6 +161,9 @@ export function CustomerDetailPage() {
   const tab = searchParams.get('tab') ?? 'overview';
   const { user } = useSession();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const navigate = useNavigate();
   const canEditCompany =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
@@ -487,6 +491,40 @@ export function CustomerDetailPage() {
           onSaved={() => void customer.refetch()}
         />
       ) : null}
+      <ConfirmDialog
+        open={deleting}
+        onCancel={() => {
+          setDeleting(false);
+          setDeleteConfirm('');
+        }}
+        onConfirm={async () => {
+          if (deleteConfirm !== 'DELETE') return;
+          try {
+            await deleteCustomer(record.id);
+            navigate('/admin/customers');
+          } catch {
+            // error surfaced via? keep dialog open
+          }
+        }}
+        title="Permanently Delete Customer Account"
+        message={
+          <div>
+            <p>
+              This permanently removes the customer and ALL of their sales, payments, membership, points, redemptions, applications and ID image. This cannot be undone.
+            </p>
+            <input
+              id="record-account-confirm"
+              name="accountConfirm"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder="Type DELETE to confirm"
+            />
+          </div>
+        }
+        danger
+        confirmLabel="Delete"
+        confirmDisabled={deleteConfirm !== 'DELETE'}
+      />
       {/* Record header: one card that owns the name and the facts about it. The
           state line (Status / Tier / Category / Portal account) is the person's
           standing; the rail below is the row it is in. The group boundary is
@@ -515,15 +553,29 @@ export function CustomerDetailPage() {
               </DetailField>
             </DetailFieldGrid>
           </div>
-          {canEditCompany ? (
-            <Button
-              className={styles.mastheadAction}
-              variant="secondary"
-              onClick={() => setEditing(true)}
-            >
-              Edit stated record
-            </Button>
-          ) : null}
+          <div className={styles.mastheadActions}>
+            {canEditCompany ? (
+              <Button
+                className={styles.mastheadAction}
+                variant="secondary"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </Button>
+            ) : null}
+            {user?.roleSlug === 'super_admin' ? (
+              <Button
+                className={styles.mastheadAction}
+                variant="danger"
+                onClick={() => {
+                  setDeleting(true);
+                  setDeleteConfirm('');
+                }}
+              >
+                Delete
+              </Button>
+            ) : null}
+          </div>
         </div>
         <DetailFieldGrid className={styles.mastheadIds}>
           <DetailField label="Customer ID (RA No.):">

@@ -26,6 +26,9 @@ Postgres + Auth. `packages/contracts` (Zod SSOT; `lifecycle.ts` statuses;
   preserve every flow and permission; inspect before implementing; desktop/
   tablet/mobile; gate on focused vitest + `tsc` + `eslint` + admin build; end
   with a short report. ONE named surface at a time — wait for the next.
+- **Added copy gets reviewed and stripped.** The user removed a section heading
+  and its explanatory note after I added them. Do not add headings, captions or
+  notes that only restate a label; make the layout carry the meaning.
 - User-facing copy: every sentence max 5–6 words. Surface rules the user states
   win (e.g. `/admin/ost/members/:id`: sentences ≤5 words, every input label
   ≤3 words, NO em dashes, NO notes under inputs). Detail areas user names:
@@ -59,77 +62,110 @@ Postgres + Auth. `packages/contracts` (Zod SSOT; `lifecycle.ts` statuses;
 - No `select('*')` on wide rows; filter in SQL; Free-quota rules per
   `docs/supabase/SUPABASE-FREE.md`.
 
-## Repo state
+### Tooling facts (verified this session)
 
-- `orly/develop` @ `a3cd8c6 "fixes: Package and Payment (company stated)"` —
-  working tree has UNCOMMITTED changes (large, multi-area):
-  - Modified (27 files): api (`customers.ts`, `queues.ts`, `sale-team.ts`,
-    `list-search.ts`, specs), admin (BusinessActivationQueuePage, BusinessCustomersPage,
-    CustomerDetailPage, PurchasePaymentsPage, official-forms-reservations, services,
-    queryKeys, specs), web (SaleTeamSearch, Navbar), docs/CURRENT-SCHEMA.sql,
-    contracts/sale-team.ts, supabase/db-integration.ts.
-  - New untracked: `supabase/migrations/20261210000006_…_company_status_filter.sql`,
-    `20261211000001_…_performance_indexes.sql`, `20261211000002_…_sale_team_photo.sql`.
-  - User WIP (leave alone): `.taste-skill/after/index.html`,
-    `.taste-skill/masthead-harness.mjs`.
-- Migrations through `20261210000005` recorded committed; the three new
-  migrations (`000006`, `20261211000001`, `20261211000002`) are UNAPPLIED
-  to production (approval-gated) and not verified on the disposable DB this session.
-- Pre-existing failures (documented, not from this session): lint 2 errors in
-  `MemberWorkbookDialog.spec.tsx:154` (`_approved`, `_pw` unused); DB section 77
-  OST team transfer (`"the fresh IST validity starts today": expected <today>,
-  got null`). Do not touch.
-- Gates this session: `pnpm typecheck` clean (7/7); `pnpm lint` 0 errors
-  (admin 24 warnings, web 8 warnings, pre-existing); focused admin specs 42/42;
-  focused api specs 19/19. `pnpm test:db:local` NOT re-run this session (new
-  migrations unverified).
+- **Visual pass without browser tooling:** Chrome IS installed at
+  `C:/Program Files/Google/Chrome/Application/chrome.exe`; `agent-browser` is
+  NOT installed. Headless screenshot works:
+  `chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars
+  --virtual-time-budget=3000 --window-size=W,H --screenshot="ABSOLUTE.png"
+  "file:///ABSOLUTE.html"`. **The `--screenshot` path must be ABSOLUTE** — a
+  relative path fails with "Access is denied". A static harness built from the
+  SHIPPED css + the real markup is an acceptable substitute for an
+  auth-gated route; say "verified in harness, not in the live app".
+- **Harness CSS extraction:** a regex that grabs `.cls { … }` FLATTENS `@media`
+  blocks, so inner rules apply globally and the screenshot lies. Parse
+  brace-aware, keep the `@media` wrapper, and strip a leading CSS comment
+  before testing the prelude for `@media` (a comment before `@media` hides it).
+- **Graphify `check-update` can give a FALSE NEGATIVE.** It reported "nothing
+  pending" while the graph still described code deleted 4 commits earlier.
+  Verify by querying a symbol that changed, or `git diff --name-only
+  <built_at_commit>..HEAD` over source files. `built_at_commit` is NOT bumped
+  by `graphify update`.
+- **Graphify `graphify label` needs an LLM key** (GEMINI/GOOGLE). None is set
+  here, so communities renamed by the rebuild keep hub-derived names.
 
-## Last session's work (UNCOMMITTED) — loading-speed + company-stated + UX polish
+## Repo state (verified 2026-10-22)
 
-Theme: make Finance/Customer screens fast and push work to the DB; align the
-customer directory's "Payment Status" with the company-stated `company_status`;
-add seller profile photos to the public sale-team verification card.
+- `develop` @ `5c48c1b "fixes: delete permanent"`. Production project is
+  `ikaevepedpqygdlipsei`, last applied migration `20261212000004`.
+- **Committed by the user this session (their work, not mine):** `48e642b` +
+  `60f2bc0` + `41ccbae` + `5c48c1b` — the customer PURGE feature:
+  `supabase/migrations/20261213000001_afhomes_customer_purge.sql`,
+  `api/_handlers/customers.ts` (DELETE now calls `public.purge_customer` and
+  removes storage objects; the 409 `PROTECTED_HISTORY` blocker list and the
+  `POST /customers/:id/anonymize` route were DELETED), `api/_lib/testing/
+  supabase-fake.ts` (a hand-written JS mirror of the SQL), admin customer
+  delete UI, `docs/supabase/CURRENT-SCHEMA.sql` regenerated.
+- **Working tree — leave all of it alone unless the user says otherwise:**
+  - User WIP (6 files, do not touch): `CustomerDetailPage.tsx`,
+    `CustomerDetailPage.module.css`, `CustomerDetailPage.spec.tsx`,
+    `CustomerRecordActions.tsx`, `CustomerRecordActions.spec.tsx`,
+    `official-forms-applications.tsx` (the "Load offer" button removal —
+    the user confirmed it is INTENTIONAL, keep it removed).
+  - Mine (this session): `official-forms-reservations.tsx`,
+    `OfficialFormsPages.module.css`, new `reservation-source-panel.spec.tsx`.
+  - Graphify artifacts (regenerated by `graphify update .`, never hand-edited):
+    `graphify-out/{graph.json,graph.html,GRAPH_REPORT.md,manifest.json,
+    .graphify_labels*.json}`, `graphify-out/cache/*`, plus new untracked
+    `graphify-out/2026-10-22/` (the tool's backup of the previous graph) and
+    `graphify-out/cache/ast/v0.9.92-s17-*/`.
+- `20261213000001_afhomes_customer_purge.sql` is COMMITTED but NOT applied to
+  production (prod is at `20261212000004`) → it can still be corrected in
+  place rather than by a forward-only fix.
+- **Pre-existing failures (verified at HEAD, NOT from this session):**
+  - `src/features/business` = 30 failed / 387 passed, in 3 files:
+    `application-actions.spec.tsx` (16 — "Unable to find a label with the text
+    of: First name", "Export XLSX", "Reopen to re…"), `PurchasePaymentsPage.
+    spec.tsx` (11 — missing "record a payment" / "verify" / "reject" controls,
+    "receipts for" region), `final-blockers.spec.tsx` (3 — "Unable to find …
+    role button and name 'Submit'"). The specs expect controls the current
+    pages no longer render. Do not "fix" them by weakening assertions.
+  - `pnpm lint`: admin 1 error + 24 warnings; web 8 warnings, 0 errors. The
+    error is `CustomerRecordActions.tsx:36 '_onChanged' is defined but never
+    used` — in the USER's WIP file.
+  - DB section 77 OST team transfer (`"the fresh IST validity starts today":
+    expected <today>, got null`) still blocks `pnpm test:db:harness`.
+- Gates this session: `pnpm typecheck` clean (7/7 + `tsc -p supabase`);
+  `pnpm check:env` PASS (668 browser / 279 server files); `pnpm lint` 1 error
+  (user WIP) + 32 warnings; admin build green; focused admin specs 68/68;
+  whole `src/features/business` 387 pass / 30 fail (failure list byte-identical
+  to the pre-change baseline). `pnpm test:db:local` NOT run (no SQL change).
 
-1. `api/_lib/list-search.ts` — new `readBoundedRows()` (windowed read with
-   exact count) alongside `readSearchRows()`.
-2. `api/_handlers/queues.ts` — Finance queue now pushes search to PostgREST,
-   bounds non-search reads to `limit+offset` instead of loading the whole
-   population, batches reservation payments + sellers (no N+1), orders by the
-   merge key. Activation queue supports `search`.
-3. `api/_handlers/customers.ts` — `companyStatus` filter param forwarded to
-   `customer_directory`.
-4. `supabase/migrations/20261210000006_…_company_status_filter.sql` —
-   `customer_directory()` gains `p_filters->>'companyStatus'` predicate on
-   `company_status`.
-5. `supabase/migrations/20261211000001_…_performance_indexes.sql` — trigram +
-   join indexes for customer directory and finance queue (pg_trgm).
-6. `supabase/migrations/20261211000002_…_sale_team_photo.sql` —
-   `get_sale_team_accreditation` / `resolve_sale_team_accreditation_number`
-   expose `staffId`; handler mints a 5-min signed URL from
-   `afhomes-profile-photos` and strips `staffId` before response.
-7. `packages/contracts/src/schemas/sale-team.ts` — `photoUrl` field.
-8. `apps/admin/…/BusinessCustomersPage.tsx` — Payment filter replaced with
-   company-status filter (Cancelled/Fully Paid/Partial/Installment/RF only/
-   Refunded); VIP Tier filter; Payment Status column now shows `companyStatus`
-   (or "Not Recorded"); VIP Tier falls back to `statedVipPackage`.
-9. `apps/admin/…/BusinessActivationQueuePage.tsx` — search + eligibility chips,
-   redesigned Activate dialog (progress bar, balance, validity-locked badge).
-10. `apps/admin/…/PurchasePaymentsPage.tsx` — clickable rows open a detail
-    Dialog instead of one panel per row.
-11. `apps/admin/…/CustomerDetailPage.tsx` — VIP tier falls back to stated
-    package; payment history lazy-loaded behind collapsed `<details>`.
-12. `apps/admin/…/official-forms-reservations.tsx` — lazy sales/plans/
-    applications queries gated on mode; loading/busy states on buttons.
-13. `apps/web/…/SaleTeamSearch.tsx` — redesigned verification card with photo
-    avatar; `Navbar.tsx` dark-top for `/sale-team-search`.
-14. `apps/admin/…/queryKeys.ts` — `activationQueue` now takes a search string
-    (breaking-ish: callers updated; spec updated).
-15. Tests: `BusinessCustomersPage.spec.tsx`, `CustomerDetailPage.spec.tsx`,
-    `queryKeys.spec.ts`, `customer-list-filters.spec.ts`, `sale-team.spec.ts`.
+## Last session's work (UNCOMMITTED) — reservation source panel redesign
 
-Gates run this session: `tsc` clean; `eslint` 0 errors; focused admin 42/42;
-focused api 19/19; `pnpm check:env` not re-run (no env-touching changes);
-`pnpm build` not run this session; `pnpm test:db:local` not run.
+Scope: ONE surface — the `aria-labelledby="reservation-source-heading"` section
+of `ReservationAgreementEditorPage` (`/admin/sales/reservations/new`, same
+component serves `/admin/sales/reservations/:id`). UI-only: no handler,
+contract, SQL, migration, dependency or permission change.
+
+1. `official-forms-reservations.tsx` — Card sale + Source Customer Application
+   now sit in one `<fieldset>`/`<legend>` named "Source" (exposed as
+   `role="group"`); "Auto-fill from sale" moved OUT of the layout grid to sit
+   under the Card sale control it acts on (`size="sm"`, outside the `<label>`
+   so it cannot activate the select); "Imported Tier" moved to its own band
+   separated by a rule; the copy caption became a "Linked source" strip
+   (application number + holder name + `StatusChip`) with `aria-live="polite"`.
+2. `official-forms-reservations.tsx` — `holderFullName()` lifted to module
+   scope, shared by the copy effect and the strip. Null-guarded `primary`
+   (the copy effect already had `if (!app.primary) return;`; without the guard
+   a thin application payload crashed the page).
+3. `OfficialFormsPages.module.css` — new scoped classes only
+   (`.sourceLayout`, `.sourceGroup`, `.sourceGroupTitle`, `.sourceFields`,
+   `.sourceField`, `.sourceAction`, `.sourceContext`, `.sourceLinked*`).
+   Shared `.panel`/`.panelTitle`/`.panelNote`/`.filterLabel`/`.editorGrid`/
+   `.note`/`.actions` NOT touched (other panels share them).
+4. Copy round (user-requested): the "Imported context" heading and the
+   "Display only. Server decides." note were REMOVED. `--sourceTitleSpace`
+   (`calc(var(--text-caption) * var(--line-height-body) + var(--space-3))` =
+   31.2px) reserves the legend's line so the tier control stays level with the
+   other two; the ≤1023px stacked rule drops the reservation.
+5. New `reservation-source-panel.spec.tsx` — 6 tests. Failing-first proved:
+   restoring HEAD's markup makes 5 of 6 fail (the 6th is the
+   behaviour-preservation test and must pass on both).
+6. `align-items: start` on `.sourceFields` — added after the visual pass
+   caught a stretched grid track pushing the application select out of
+   alignment. A DOM test could not see this.
 
 ## Test gotchas (admin)
 
@@ -144,62 +180,121 @@ focused api 19/19; `pnpm check:env` not re-run (no env-touching changes);
   most users.
 - Load flakes: re-run a flaked suite solo before believing it; root `pnpm test`
   pins `--maxWorkers=2`. `src/app/staff-lifecycle.spec.tsx` flaked once under
-  parallel load → 14/14 solo.
+  parallel load → 14/14 solo. A combined 3-suite run flaked where each suite
+  passed solo — always re-run solo before calling a failure real.
 - Prettier check on a copy: keep the extension, use the repo `.prettierrc.json`
   via `--config`, add `--end-of-line auto`. Known pre-existing deviations:
   `OstAccreditationPages.tsx` (~5), `OstApplicantUpdate.tsx` (~2), `App.tsx` (1,
-  `/admin/network/members` route). This round added ZERO — don't "fix" those.
+  `/admin/network/members` route), `official-forms-reservations.tsx` (imports
+  at 16–76, `<dl` at ~195, and ~988/1177/1442). This round added ZERO to
+  those files — don't "fix" them.
 - A native `<select>` with no matching option defaults to the first option; use
   an explicit empty placeholder option when a null stored value should read
   "Not Recorded" (see `CustomerCompanyEditDialog`).
 - PostgREST `count: 'exact'` is only returned when the query is built with
   `{ count: 'exact' }`; `readBoundedRows` reads it per chunk — keep that option
   on any query that relies on the total.
+- A `<Select>` inside a `<label>`: the `aria-label` on the control OVERRIDES
+  the wrapping label, so `getByLabelText` and `getByRole('combobox', {name})`
+  can disagree. Keep both strings identical or the spec will pick one.
+- `getSales`/`getCustomerApplications` load asynchronously: wait for the
+  `<option>` before driving a `<select>`, or `selectOptions` throws
+  "Value … not found in options".
+- A `<fieldset>`/`<legend>` group is queryable as
+  `getByRole('group', { name: '…' })` — the cheapest way to assert that a
+  control is (or is not) inside a group.
 
 ## Open threads / unanswered offers
 
-- Browser visual pass of the redesigned OST page + the new dialogs (desktop/
-  tablet/mobile) — NOT done (no browser tooling); responsive verified by code
-  only.
-- Offered, unanswered: rename `TransferMemberDialog` submit "Convert to OST"
-  (line 202; dialog title "Convert X to OST"); shorten shared
-  `OstOfficialFields` repo-wide, or add a compact flag; extend the copy/layout
-  treatment to the other two pages in the same file —
-  `OstManualRegistrationPage` (`/admin/ost/applications/new`) and
-  `OstImportExportPage` (`/admin/ost/applications/import-export`); shared
-  `OstAddressFields` "ZIP / postal code (Optional)" is 4 words (public web
-  registration uses it); repo-wide `—` placeholder convention in
-  `@afhomes/shared` format helpers.
+- **Customer-purge review (HIGHEST VALUE — the migration is committed but
+  unapplied and the SQL is unproven).** Findings, all VERIFIED against source:
+  1. The purge SQL is **never executed by any test** — only the in-memory
+     fake (`api/_lib/testing/supabase-fake.ts:1255`) mirrors it; no
+     `supabase/db-integration.ts` section covers it.
+  2. `identity_documents` is deleted BEFORE `customer_application_documents`,
+     but `customer_application_documents.identity_document_id → identity_
+     documents(id)` is NO ACTION (migrations use explicit `on delete`, 223
+     occurrences, so absence = RESTRICT) → 23503 and the whole purge aborts.
+     The later `identity_document_id in (select id from identity_documents …)`
+     subquery is DEAD (the rows are already gone).
+  3. `customer_applications.recommender_customer_id` is unhandled → a customer
+     who recommended someone else's application cannot be purged.
+  4. Four child tables are filtered by the wrong column and leave survivors
+     that block their parent: `redemption_quotes` (by `approval_customer_id`),
+     `earning_claims` (by `customer_id`), `customer_external_import_receipts`
+     (by `source_id`), `customer_import_payment_claims` (by `source_id`),
+     `customer_application_documents` (missing `payment_id`).
+  5. The migration silently changes a shared guard's contract:
+     `private.guard_application_purchase_terms` branch 2 went from
+     `APPLICATION_TERMS_IDENTITY_INVALID`/23514 to `PURCHASE_TERMS_REVIEW_
+     REQUIRED`/55000 → `packages/db-testing/scripts/test-purchase-gate3.mjs:600`
+     asserts `/23514.*APPLICATION_TERMS_IDENTITY_INVALID/` and will FAIL. That
+     script is NOT wired into `pnpm test:db:local`, so it fails silently.
+  6. `payments.receipt_storage_path` is a free-form CLIENT string
+     (`packages/contracts/src/schemas/finance.ts:60`, no format validation);
+     the handler splits it on the first `/` and calls `storage.from(bucket)`.
+     A crafted path can make the purge delete objects from ANY bucket the
+     service role can reach (including public `afhomes-cms-media`). Needs a
+     bucket allowlist.
+  7. Storage objects are removed BEFORE the transactional RPC, so an RPC
+     failure leaves DB rows pointing at unrecoverable files.
+  8. `afhomes.allow_customer_purge` is set `on` and never reset → the
+     immutability guards stay bypassed for the rest of the transaction.
+  Fixing 2/3/4/5 + adding a DB suite section is the minimum before any
+  production apply. THE USER DECLINED the delete/deactivate UI work ("don't do
+  this") — but the SQL defects above were never addressed.
+- Optional copy pass (offered, not started): "Card sale" vs "Source Customer
+  Application" label wording. Touch points: `final-blockers.spec.tsx:291`,
+  `final-blockers.spec.tsx:272,285`, `reservation-detail-panel.spec.tsx:411`.
+- Live authenticated visual pass of the reservation source panel — NOT done
+  (no staff session; `agent-browser` not installed). Verified in a static
+  harness built from the shipped css at 1440/900/390 only.
+- The 390px panel overflows the viewport — PRE-EXISTING house
+  `Select`/`filterLabel` behaviour (the BEFORE render overflows identically),
+  not introduced by the redesign. Untouched deliberately.
+- Graphify community labels are STALE for 51 communities (renamed by hub after
+  the rebuild). `graphify label` cannot run without a Gemini/Google key.
+- Graphify is otherwise CURRENT: rebuilt to 8516 nodes / 25554 edges /
+  415 communities; the deleted `customerDeleteBlockers` node is gone;
+  `purge_customer` and the new spec are indexed; `check-update` clean.
 - Carried-forward (verify before acting): UUID once seen in Members view (user
   must name the cell/screenshot); departments delete grant (Super Admin only);
   single MOBILE slot; duplicate Create Reservation buttons; Q1–Q7; RA/STATUS
   sets; stated-figure semantics; reservation picker paging; re-download
   `docs/testing/membership-template.xlsx`; AA numbering shapes (AUTO
   `AA-XXXXXXXXXXXX` vs MANUAL `^AA[A-Z0-9]{4,12}$` — unify or keep; 1-yr
-  auto-validity unconfirmed); live authenticated check of the OST team transfer
-  (migration-11 log: local pilot only, persistence unverified).
-- Production apply of `20261210000005` (backfill) + the three new migrations
-  (`000006`, `20261211000001`, `20261211000002`) — approval-gated, not run.
+  auto-validity unconfirmed); live authenticated check of the OST team transfer.
+- Production apply of `20261210000005` (backfill) + `20261211000001/2` +
+  `20261211000003/4/5` + `20261212000001..4` — approval-gated, not run.
 - `pnpm test:db:local` + `pnpm test:db:harness` not re-run this session; run
-  before relying on the new migrations.
-- Pre-existing DB section 77 failure still blocks `test:db:harness`.
+  before relying on any migration. Pre-existing section 77 failure still
+  blocks the harness.
 
 ## Verify (from root)
 
 ```sh
 pnpm test                     # canonical gate (turbo --concurrency=2 -- --maxWorkers=2)
 pnpm typecheck                # turbo 7 + tsc -p supabase  (clean this session)
-pnpm lint                     # 2 pre-existing errors in MemberWorkbookDialog.spec.tsx
-pnpm check:env
-pnpm test:db:local            # not re-run this session; 2666/2667 expected (pre-existing section 77)
+pnpm lint                     # 1 error (user WIP CustomerRecordActions.tsx:36) + 32 warnings
+pnpm check:env                # PASS this session
+pnpm build                    # admin build green this session
+pnpm test:db:local            # NOT run this session (no SQL change); 2666/2667 expected (pre-existing section 77)
 pnpm test:db:harness          # blocked by the pre-existing section 77 failure
 ```
 
 Focused (green this session):
 
 ```sh
-pnpm --filter @afhomes/admin exec vitest run src/features/business/BusinessCustomersPage.spec.tsx  # pass
-pnpm --filter @afhomes/admin exec vitest run src/features/business/CustomerDetailPage.spec.tsx      # pass
-pnpm --filter @afhomes/admin exec vitest run src/features/business/queryKeys.spec.ts                 # pass
-pnpm --filter api exec vitest run _handlers/customer-list-filters.spec.ts _handlers/sale-team.spec.ts # 19
+pnpm --filter @afhomes/admin exec vitest run --maxWorkers=2 \
+  src/features/business/reservation-source-panel.spec.tsx \
+  src/features/business/reservation-detail-panel.spec.tsx \
+  src/features/business/OfficialFormsPages.spec.tsx          # 68/68
+```
+
+Known-failing (pre-existing, byte-identical failure list vs the pre-change
+baseline — do not "fix" without a decision):
+
+```sh
+pnpm --filter @afhomes/admin exec vitest run --maxWorkers=2 src/features/business
+# 387 pass / 30 fail: application-actions (16), PurchasePaymentsPage (11), final-blockers (3)
 ```
