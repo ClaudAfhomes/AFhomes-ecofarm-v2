@@ -14,6 +14,8 @@ export async function testSearchSettings(db, connect) {
   check(before.enabled, true);
   check(before.retentionDays, 30);
   check(before.dailyLimitEnabled, true);
+  check(before.privacyApproved, true);
+  check(before.cleanupReady, false);
   const actor = randomUUID();
   await db.query('insert into auth.users(id,email) values($1,$2)', [
     actor,
@@ -110,6 +112,8 @@ export async function testSearchSettings(db, connect) {
   );
   const dailyMigration = fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8');
   await db.query(dailyMigration);
+  const readinessMigration = fs.readFileSync('supabase/migrations/20261212000005_afhomes_public_search_readiness.sql', 'utf8');
+  await db.query(readinessMigration);
   check((await get()).retentionDays, 7);
   check(
     (
@@ -142,6 +146,7 @@ export async function testSearchSettings(db, connect) {
   check(unlimited.dailyLimitEnabled, false);
   check(unlimited.noticeVersion !== current.noticeVersion, true);
   await db.query(dailyMigration);
+  await db.query(readinessMigration);
   check((await get()).dailyLimitEnabled, false);
   const cid=(await db.query('select public.save_sale_team_search_contact($1,$2,$3,$4) id', ['e'.repeat(64),'Synthetic Unlimited Visitor','unlimited@example.invalid','+639171234568'])).rows[0].id;
   const ip='a'.repeat(64);
@@ -154,6 +159,37 @@ export async function testSearchSettings(db, connect) {
   check((await get()).retentionDays,7);
   await assert.rejects(update({...fields,dailyLimitEnabled:'false'},limited.revision),/SETTINGS_INVALID/); checks++;
   check((await get()).dailyLimitEnabled,true);
+  const approved = await get();
+  const revoked = (await update({...fields,privacyApproved:false},approved.revision)).rows[0].s;
+  check(revoked.privacyApproved,false);
+  check(revoked.noticeVersion!==approved.noticeVersion,true);
+  await db.query(readinessMigration);
+  check((await get()).privacyApproved,false);
+  check((await db.query("select after_data->'privacyApproved' approved from public.audit_events where actor_id=$1 and action='PUBLIC_VERIFICATION_SETTINGS_UPDATED' order by created_at desc limit 1",[actor])).rows[0].approved,false);
+  const reapproved=(await update({...fields,privacyApproved:true},revoked.revision)).rows[0].s;
+  check(reapproved.privacyApproved,true);
+  await assert.rejects(update({...fields,privacyApproved:'true'},reapproved.revision),/SETTINGS_INVALID/); checks++;
+  const attemptedOverride=(await update({...fields,cleanupReady:true},reapproved.revision)).rows[0].s;
+  check(attemptedOverride.cleanupReady,false);
+  // Scheduler table fixture only: never run against a shared or managed database.
+  await db.query(`create schema cron; create table cron.job(jobname text,schedule text,command text,active boolean,database text,username text)`);
+  check((await get()).cleanupReady,false);
+  await db.query(`insert into cron.job values('afhomes-sale-team-search-cleanup','0 * * * *','select public.cleanup_sale_team_search();',true,current_database(),current_user)`);
+  check((await get()).cleanupReady,true);
+  for(const [column,value,restore] of [['active',false,true],['schedule','* * * * *','0 * * * *'],['command','select public.cleanup_sale_team_search(30);','select public.cleanup_sale_team_search();'],['database','foreign_database',null],['username','foreign_owner',null]]) {
+    await db.query(`update cron.job set ${column}=$1`,[value]);
+    check((await get()).cleanupReady,false);
+    await db.query(`update cron.job set ${column}=${column==='database'?'current_database()':column==='username'?'current_user':'$1'}`,restore===null?[]:[restore]);
+  }
+  check((await get()).cleanupReady,true);
+  await db.query('alter function public.cleanup_sale_team_search() rename to cleanup_sale_team_search_unavailable');
+  check((await get()).cleanupReady,false);
+  await db.query('alter function public.cleanup_sale_team_search_unavailable() rename to cleanup_sale_team_search');
+  check((await get()).cleanupReady,true);
+  await db.query('insert into cron.job select * from cron.job');
+  check((await get()).cleanupReady,false);
+  await db.query('drop table cron.job; drop schema cron');
+  check((await get()).cleanupReady,false);
   const audit = await db.query(fs.readFileSync('supabase/security/rls_invariants.sql', 'utf8'));
   check((Array.isArray(audit) ? audit : [audit]).flatMap(result => result.rows), []);
   return checks;

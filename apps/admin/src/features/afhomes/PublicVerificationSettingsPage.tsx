@@ -56,6 +56,7 @@ function SettingsForm({
   const client = useQueryClient();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [dailyLimitEnabled, setDailyLimitEnabled] = useState(settings.dailyLimitEnabled);
+  const [privacyApproved, setPrivacyApproved] = useState(settings.privacyApproved);
   const [phone, setPhone] = useState(settings.verificationPhone);
   const [notice, setNotice] = useState(settings.privacyNotice);
   const [days, setDays] = useState(String(settings.retentionDays));
@@ -80,6 +81,7 @@ function SettingsForm({
         const input = updatePublicVerificationSettingsSchema.safeParse({
           enabled,
           dailyLimitEnabled,
+          privacyApproved,
           verificationPhone: phone,
           privacyNotice: notice,
           retentionDays: Number(days),
@@ -148,6 +150,22 @@ function SettingsForm({
         maxLength={20000}
         hint="Use {{CONTACT_RETENTION_DAYS}} for retention and {{SEARCH_LIMIT_NOTICE}} for the current daily limit. Notice or daily-limit changes require visitors to acknowledge the new version."
       />
+      <label className={styles.toggle}>
+        <input
+          type="checkbox"
+          checked={privacyApproved}
+          disabled={disabled}
+          onChange={(event) => setPrivacyApproved(event.target.checked)}
+        />
+        Privacy notice approved
+      </label>
+      <p>Approve the notice above before enabling public verification.</p>
+      <Alert variant={settings.cleanupReady ? 'success' : 'warning'}>
+        {settings.cleanupReady
+          ? 'Cleanup ready: the hourly contact-cleanup job is configured and active.'
+          : 'Cleanup not ready: the hourly contact-cleanup job is missing, inactive or misconfigured. Public verification is unavailable.'}
+      </Alert>
+      <p>Cleanup readiness is checked automatically. It cannot be enabled with a checkbox.</p>
       {validation || save.error ? (
         <Alert variant="danger">{validation || save.error?.message}</Alert>
       ) : null}

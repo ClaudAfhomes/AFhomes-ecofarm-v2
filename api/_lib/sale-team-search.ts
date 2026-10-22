@@ -162,8 +162,8 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
   const verificationPhone = settings?.verificationPhone ??
     (localPreview ? e.AFHOMES_VERIFICATION_PHONE ?? '' : '');
   const finalized =
-    e.AFHOMES_SEARCH_PRIVACY_APPROVED === 'true' &&
-    e.AFHOMES_SEARCH_CLEANUP_READY === 'true' &&
+    settings?.privacyApproved === true &&
+    settings.cleanupReady === true &&
     privacyNotice.length > 100 &&
     !/\[Insert|\bTBD\b/.test(privacyNotice);
   const testKeys = /^(1x|2x|3x)0{10}/.test(siteKey) || /^(1x|2x|3x)0{10}/.test(captchaSecret);

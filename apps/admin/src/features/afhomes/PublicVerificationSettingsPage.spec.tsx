@@ -10,6 +10,8 @@ vi.mock('./services', () => ({
 const initial = {
   enabled: false,
   dailyLimitEnabled: true,
+  privacyApproved: true,
+  cleanupReady: true,
   verificationPhone: '+639604316867',
   retentionDays: 30,
   privacyNotice:
@@ -74,6 +76,7 @@ it('keeps the form read-only when configuration update is denied', async () => {
   ]} });
   expect(await screen.findByLabelText('Enable public IST/OST search')).toBeDisabled();
   expect(screen.getByLabelText('Privacy notice')).toBeDisabled();
+  expect(screen.getByLabelText('Privacy notice approved')).toBeDisabled();
   expect(screen.getByLabelText('Limit each IP address to 3 successful searches in 24 hours')).toBeDisabled();
   expect(screen.queryByRole('button',{name:'Save settings'})).not.toBeInTheDocument();
 });
@@ -86,4 +89,24 @@ it('shows save errors and keeps the edited values available', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
   expect(await screen.findByText('Settings changed. Reload before saving again.')).toBeVisible();
   expect(screen.getByLabelText('Contact retention (days)')).toHaveValue('30');
+});
+it('saves revoked privacy approval and displays it after reopening', async () => {
+  const saved = { ...initial, privacyApproved: false, revision: 2 };
+  vi.mocked(savePublicVerificationSettings).mockResolvedValue(saved);
+  renderWithProviders(<PublicVerificationSettingsPage />, { user });
+  fireEvent.click(await screen.findByLabelText('Privacy notice approved'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  await waitFor(() => expect(savePublicVerificationSettings).toHaveBeenCalledWith(
+    expect.objectContaining({privacyApproved:false}), expect.anything(),
+  ));
+  cleanup();
+  vi.mocked(getPublicVerificationSettings).mockResolvedValue(saved);
+  renderWithProviders(<PublicVerificationSettingsPage />, { user });
+  expect(await screen.findByLabelText('Privacy notice approved')).not.toBeChecked();
+});
+it('shows cleanup readiness as automatic status without a writable checkbox', async () => {
+  vi.mocked(getPublicVerificationSettings).mockResolvedValue({...initial,cleanupReady:false});
+  renderWithProviders(<PublicVerificationSettingsPage />, { user });
+  expect(await screen.findByText(/Cleanup not ready:/)).toBeVisible();
+  expect(screen.queryByRole('checkbox',{name:/cleanup/i})).not.toBeInTheDocument();
 });

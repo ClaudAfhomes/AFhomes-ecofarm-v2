@@ -14,11 +14,16 @@ const record = {
   expiresOn: null,
 };
 const savedSettings = {
+  privacyApproved: true, cleanupReady: true,
   enabled: true, dailyLimitEnabled: true, verificationPhone: '+639604316867', retentionDays: 30,
   privacyNotice: 'Synthetic approved notice for a configuration test. '.repeat(5),
   noticeVersion: 'approved-v1', revision: 1, updatedAt: '2026-10-22T00:00:00.000Z',
 };
 beforeEach(() => {
+  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', undefined);
+  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', undefined);
+  savedSettings.privacyApproved = true;
+  savedSettings.cleanupReady = true;
   savedSettings.enabled = true;
   savedSettings.retentionDays = 30;
   savedSettings.dailyLimitEnabled = true;
@@ -135,14 +140,13 @@ it('closes the old anonymous GET even when the new feature configuration is inco
 });
 it('fails closed on hosted draft configuration and never exposes server secrets in config', async () => {
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+  savedSettings.privacyNotice = '[Insert finalized privacy notice here]';
   const state = await call('search/config', undefined, 'GET');
   expect((state.body as { available: boolean }).available).toBe(false);
   expect(JSON.stringify(state.body)).not.toContain('synthetic-secret');
 });
 it('uses saved controls immediately and ignores old environment control values', async () => {
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
   vi.stubEnv('AFHOMES_SEARCH_ENABLED', 'false');
   vi.stubEnv('AFHOMES_VERIFICATION_PHONE', 'obsolete');
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({
@@ -154,18 +158,24 @@ it('uses saved controls immediately and ignores old environment control values',
 });
 it('fails closed when database settings cannot be read even if the old env switch is enabled', async () => {
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
   holder.db!.rpcErrors.get_public_verification_settings = { message: 'storage unavailable' };
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({ available: false });
+});
+it.each(['privacyApproved', 'cleanupReady'] as const)('requires saved %s even if obsolete env flags claim readiness', async (field) => {
+  vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
+  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
+  savedSettings[field] = false;
+  expect((await call('search/config', undefined, 'GET')).body).toMatchObject({available:false});
+  expect((await call('search/start', {})).status).toBe(503);
+  expect((await call('search/reveal', {})).status).toBe(503);
+  expect(holder.db!.calls.some(c=>c.op==='rpc' && ['begin_sale_team_search','save_sale_team_search_contact','reveal_sale_team_search'].includes(c.table))).toBe(false);
 });
 it('refuses Cloudflare test keys on hosted targets even with publication settings approved', async () => {
   vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', '1x0000000000000000000000000000000AA');
   vi.stubEnv('VITE_TURNSTILE_SITE_KEY', '1x00000000000000000000AA');
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({ available: true });
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
   vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
   vi.stubEnv(
     'AFHOMES_SEARCH_PRIVACY_NOTICE',
@@ -180,9 +190,7 @@ it.each(['7', '30', '90'])(
   'renders the configured %s-day contact retention in the public notice',
   async (days) => {
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-    vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-    vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
-    vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
+        vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
     vi.stubEnv('AFHOMES_SEARCH_CONTACT_RETENTION_DAYS', days);
     savedSettings.retentionDays = Number(days);
     vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
@@ -197,8 +205,6 @@ it.each(['7', '30', '90'])(
 );
 it('publishes the disabled daily limit and matching privacy wording from saved settings', async () => {
   vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
   vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
   vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', 'synthetic-real-secret');
   savedSettings.dailyLimitEnabled = false;
