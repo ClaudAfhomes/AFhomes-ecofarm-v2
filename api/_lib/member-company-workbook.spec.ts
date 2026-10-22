@@ -124,6 +124,7 @@ describe('official company member workbook v2', () => {
         status: 'active',
         createdAt: '2020-01-01',
         aaNumber: 'AAI20010001',
+        detailAuthorized: true,
       });
       const source = readWorkbookParts(
         readFileSync(
@@ -172,6 +173,7 @@ describe('official company member workbook v2', () => {
             status: 'active',
             createdAt: '2020-01-01',
             referrerStaffId: i ? `${i}1111111-1111-4111-8111-111111111111` : null,
+            detailAuthorized: true,
           }),
       );
       const prefix = kind === 'IST' ? 'AAI' : 'AAO';
@@ -358,6 +360,7 @@ describe('official company member workbook v2', () => {
       employerAddress: 'Calauan',
       jobPosition: 'Seller',
       governmentIdType: 'passport',
+      detailAuthorized: true,
     });
     const db = {
       rpc: async () => ({

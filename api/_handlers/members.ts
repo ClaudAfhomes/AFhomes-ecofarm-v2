@@ -68,6 +68,7 @@ import {
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { createAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
+import { getVisibleGenealogyIds, canAccessMemberDetail } from '../_lib/genealogy-visibility.js';
 import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
@@ -503,7 +504,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if ('error' in auth) return deny(res, auth);
     const parsed = memberListQuerySchema.safeParse(req.query);
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid member query', 400);
-    return list(res, await memberRows(db, parsed.data.search ?? '', parsed.data.position));
+    const rows = await memberRows(db, parsed.data.search ?? '', parsed.data.position);
+    const visibleIds = await getVisibleGenealogyIds(db, auth.userId, auth.roleSlug);
+    if (visibleIds) {
+      const filtered = rows.filter((r: Member) => visibleIds.has(r.id));
+      // Add detailAuthorized flag for frontend UX (upline names are non-clickable)
+      const withDetailAuth = await Promise.all(
+        filtered.map(async (r) => ({
+          ...r,
+          detailAuthorized: await canAccessMemberDetail(db, auth.userId, auth.roleSlug, r.id),
+        }))
+      );
+      return list(res, withDetailAuth);
+    }
+    // No restriction (admin): all members are detail-authorized
+    const withDetailAuth = rows.map((r) => ({ ...r, detailAuthorized: true }));
+    return list(res, withDetailAuth);
   }
 
   /* ---------------- issue a missing AA number (never a renumber) ---------------- */
@@ -765,6 +781,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const rows = await memberRows(db, '', undefined);
       let row = rows.find((r: Member) => r.id === id);
       if (!row) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+      // DETAIL AUTHORIZATION: strict check - no upline profile access for sellers
+      const canAccess = await canAccessMemberDetail(db, auth.userId, auth.roleSlug, id);
+      if (!canAccess)
+        return fail(res, 'FORBIDDEN', 'Member is outside your authorized genealogy scope', 403);
       // The console's single-record read carries the identification fields in
       // clear so an operator can verify the recorded values; every list-shaped
       // read keeps the masks. The detail read is the only place they surface.
@@ -834,6 +854,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const auth = await authorizeAfHomes(req, 'network.members', 'update');
     if ('error' in auth) return deny(res, auth);
+    // DETAIL AUTHORIZATION: same strict check as GET - no upline profile updates for sellers
+    const canAccess = await canAccessMemberDetail(db, auth.userId, auth.roleSlug, id);
+    if (!canAccess)
+      return fail(res, 'FORBIDDEN', 'Member is outside your authorized genealogy scope', 403);
     const parsed = updateMemberProfileSchema.safeParse(jsonBody(req));
     if (!parsed.success || Object.keys(parsed.data).length === 0)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));

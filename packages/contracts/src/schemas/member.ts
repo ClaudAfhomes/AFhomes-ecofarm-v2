@@ -321,6 +321,8 @@ export const memberSchema = z.object({
   tinMasked: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
   createdAt: z.string(),
+  /** Whether the current user is authorized to view this member's full detail. */
+  detailAuthorized: z.boolean().optional(),
 });
 export type Member = z.infer<typeof memberSchema>;
 

@@ -145,7 +145,16 @@ export const genealogyKeys = {
   tree: key('genealogy'),
   node: (staffId: string | undefined) => key('genealogy', staffId),
   upline: (staffId: string | undefined) => key('genealogy', staffId, 'upline'),
+  downline: (staffId: string | undefined) => key('genealogy', staffId, 'downline'),
   summary: (staffId: string | undefined) => key('genealogy', staffId, 'summary'),
+};
+
+/** `['team-sales', ...]` family: team sales activity analytics. */
+export const teamSalesKeys = {
+  analytics: (staffId: string | undefined, period: string, from?: string, to?: string) =>
+    key('team-sales', staffId, period, from ?? '', to ?? ''),
+  overview: (period: string, from?: string, to?: string) =>
+    key('team-sales', 'overview', period, from ?? '', to ?? ''),
 };
 
 /** Roots shared with other domains; business pages only read or clear them. */

@@ -110,6 +110,7 @@ const ROW = {
   tinMasked: '•••-•••-789',
   governmentIdMasked: '•••4321',
   createdAt: '2026-09-01T00:00:00.000Z',
+  detailAuthorized: true,
 };
 
 const SALES_DEPT = {
@@ -152,6 +153,7 @@ const OST_ROW = {
   positionLabel: 'OST',
   referrerName: 'SM ONE',
   aaNumber: 'AAO20010001',
+  detailAuthorized: true,
 };
 
 function showList() {
