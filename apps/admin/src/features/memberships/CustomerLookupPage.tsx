@@ -141,7 +141,10 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
         </div>
       </button>
       <div className={styles.cardBody}>
-        <h2>{name}</h2>
+        <div className={styles.cardTitle}>
+          <h2>{name}</h2>
+          <TierBadge tier={customer.vipTier} />
+        </div>
         <dl className={styles.details}>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
@@ -154,17 +157,6 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
           </div>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="image" size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>VIP Tier</dt>
-              <dd>
-                <TierBadge tier={customer.vipTier} />
-              </dd>
-            </div>
-          </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
               <Icon name="clock" size={16} />
             </span>
             <div className={styles.factText}>
@@ -172,31 +164,24 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
               <dd>{customer.validUntil}</dd>
             </div>
           </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="image" size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>Total Points</dt>
-              <dd>{customer.totalAvailablePoints}</dd>
+          <div className={styles.pointsGrid}>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Total Points</dt>
+                <dd>{customer.totalAvailablePoints}</dd>
+              </div>
             </div>
-          </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="image" size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>Weekend Points</dt>
-              <dd>{customer.weekendAvailablePoints}</dd>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Weekend Points</dt>
+                <dd>{customer.weekendAvailablePoints}</dd>
+              </div>
             </div>
-          </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="image" size={16} />
-            </span>
-            <div className={styles.factText}>
-              <dt>Weekday Points</dt>
-              <dd>{customer.weekdayAvailablePoints}</dd>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Weekday Points</dt>
+                <dd>{customer.weekdayAvailablePoints}</dd>
+              </div>
             </div>
           </div>
         </dl>

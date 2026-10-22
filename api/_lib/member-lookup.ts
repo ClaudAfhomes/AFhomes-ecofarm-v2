@@ -111,9 +111,12 @@ export async function gsdActiveVipLookupFromDirectory(
         .eq('subject_type', 'customer')
         .order('created_at', { ascending: false })
         .limit(1);
-      const path = (docs as Array<{ storage_path?: string }> | null)?.[0]?.storage_path;
-      if (path) {
-        const signed = await db.storage.from('afhomes-customer-ids').createSignedUrl(path, 300);
+      const storagePath = (docs as Array<{ storage_path?: string }> | null)?.[0]?.storage_path;
+      if (storagePath) {
+        const slash = storagePath.indexOf('/');
+        const bucket = slash > 0 ? storagePath.slice(0, slash) : 'afhomes-customer-ids';
+        const objectPath = slash > 0 ? storagePath.slice(slash + 1) : storagePath;
+        const signed = await db.storage.from(bucket).createSignedUrl(objectPath, 300);
         governmentIdImageUrl = signed?.data?.signedUrl ?? null;
       }
     } catch {
