@@ -1,0 +1,29 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 900px;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+.form > p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+.toggle {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  font-weight: 600;
+}
+.toggle input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}

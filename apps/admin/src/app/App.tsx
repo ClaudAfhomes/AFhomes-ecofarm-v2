@@ -1,4 +1,9 @@
 import { lazy } from 'react';
+const PublicVerificationSettingsPage = lazy(() =>
+  import('../features/afhomes/PublicVerificationSettingsPage').then((m) => ({
+    default: m.PublicVerificationSettingsPage,
+  })),
+);
 
 // Route pages load on demand: one chunk per feature module.
 // Auth screens, layout, and guards stay eager for first paint.
@@ -438,6 +443,7 @@ export default function App() {
                 element={protectedPage(<AfHomesDepartmentsPage />)}
               />
               <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+              <Route path="/admin/settings/public-verification" element={protectedPage(<PublicVerificationSettingsPage />)} />
               {/* My Account: the forced first-login password change lives here, so
               the guard must let a gated session through (see RequireRole). */}
               <Route path="/admin/profile" element={protectedPage(<MyAccountPage />)} />

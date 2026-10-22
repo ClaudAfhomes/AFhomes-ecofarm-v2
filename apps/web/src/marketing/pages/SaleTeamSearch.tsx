@@ -209,7 +209,10 @@ export default function SaleTeamSearch() {
             Search by AA number
           </h2>
           <p className="mt-2 text-body-sm text-ink-600">
-            Enter the full AA number. Up to 3 successful verifications per IP address in 24 hours.
+            Enter the full AA number.{' '}
+            {config?.dailyLimitEnabled !== false
+              ? 'Up to 3 successful verifications per IP address in 24 hours.'
+              : 'The daily search limit is currently disabled. Security checks still apply.'}
           </p>
           {config?.available ? (
             <>
