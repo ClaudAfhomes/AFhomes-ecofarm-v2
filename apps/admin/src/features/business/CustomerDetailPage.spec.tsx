@@ -533,10 +533,10 @@ describe('CustomerDetailPage merged actions', () => {
     await screen.findByRole('heading', { name: 'Actions' });
     // Record-level workflows …
     expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
-    // … beside the per-sale payment actions and the status dropdown.
+    // … beside the per-sale payment actions.
     expect(screen.getByRole('button', { name: 'Record payment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Verify payment' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Membership status')).toBeInTheDocument();
+
     // … and the removed sale buttons stay gone.
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();

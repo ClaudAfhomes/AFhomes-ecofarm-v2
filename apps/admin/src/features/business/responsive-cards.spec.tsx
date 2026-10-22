@@ -16,7 +16,6 @@ import {
 } from './services';
 
 vi.mock('./services', () => ({
-  anonymizeCustomer: vi.fn(),
   createCardCategory: vi.fn(),
   createCardProduct: vi.fn(),
   createCustomer: vi.fn(),

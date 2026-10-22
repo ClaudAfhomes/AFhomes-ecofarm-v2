@@ -10,7 +10,6 @@ import {
   DetailCardTitle,
   Dialog,
   Select,
-  Spinner,
   TextField,
 } from '@afhomes/ui';
 import { useNavigate } from 'react-router';
@@ -19,11 +18,9 @@ import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/format';
 import styles from './CustomerDetailPage.module.css';
 import {
-  anonymizeCustomer,
   deactivateCustomer,
   deleteCustomer,
   issueCustomerAccountActivation,
-  updateCustomerStatus,
 } from './services';
 import { RecordPaymentDialog, VerifyDialog } from './BusinessFinanceQueuePage';
 import { businessKeys } from './queryKeys';
@@ -32,7 +29,7 @@ import { useSaleRowActions } from './useSaleRowActions';
 /**
  * All actions for one customer in a single card, mirroring the directory row
  * menu so the detail page carries the same workflows: the one-time activation
- * link, deactivation, and (super admin only) anonymize and permanent delete -
+ * link, deactivation, and (super admin only) permanent delete -
  * plus the per-sale payment actions (record/verify) aimed at a selected sale.
  * Edit/cancel of a sale stay on the sales directory. Same guards, same dialogs,
  * same auditing - the server re-checks everything.
@@ -57,9 +54,7 @@ export function CustomerRecordActions({
     ) === true;
   const isSuperAdmin = user?.roleSlug === 'super_admin';
 
-  const [accountAction, setAccountAction] = useState<'deactivate' | 'delete' | 'anonymize' | null>(
-    null,
-  );
+  const [accountAction, setAccountAction] = useState<'deactivate' | 'delete' | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -73,13 +68,12 @@ export function CustomerRecordActions({
   const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction === 'delete') await deleteCustomer(customer.id);
-      else if (accountAction === 'anonymize') await anonymizeCustomer(customer.id);
       else await deactivateCustomer(customer.id);
     },
     onSuccess: async () => {
       setAccountAction(null);
       setConfirmation('');
-      if (accountAction === 'delete' || accountAction === 'anonymize') {
+      if (accountAction === 'delete') {
         navigate('/admin/customers');
         return;
       }
@@ -110,20 +104,6 @@ export function CustomerRecordActions({
 
   const showActivation =
     canIssueActivation && customer.hasActiveMembership && !customer.portalAccountActivated;
-
-  const canUpdateCustomer =
-    user?.roleSlug === 'super_admin' ||
-    user?.afHomesPermissions.some(
-      (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
-    ) === true;
-
-  const statusMutation = useBusinessMutation({
-    mutationFn: (status: 'prospect' | 'active' | 'suspended') =>
-      updateCustomerStatus(customer.id, status),
-    onSuccess: async () => {
-      await refresh();
-    },
-  });
 
   // Only the payment actions are offered here; edit/cancel of a sale stay on the
   // sales directory, so a user with only those grants sees no dead sale card.
@@ -165,27 +145,15 @@ export function CustomerRecordActions({
             </Button>
           ) : null}
           {isSuperAdmin ? (
-            <>
-              <Button
-                variant="secondary"
-                className={styles.toneSlate}
-                onClick={() => {
-                  setAccountAction('anonymize');
-                  setConfirmation('');
-                }}
-              >
-                Anonymize
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setAccountAction('delete');
-                  setConfirmation('');
-                }}
-              >
-                Delete permanently
-              </Button>
-            </>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setAccountAction('delete');
+                setConfirmation('');
+              }}
+            >
+              Delete permanently
+            </Button>
           ) : null}
           {!deactivationBlocked ? (
             <Button
@@ -224,38 +192,7 @@ export function CustomerRecordActions({
               ) : null}
             </>
           ) : null}
-          {canUpdateCustomer ? (
-            <span className={styles.statusWrap}>
-              <Select
-                aria-label="Membership status"
-                value={
-                  ['prospect', 'active', 'suspended'].includes(customer.status)
-                    ? customer.status
-                    : ''
-                }
-                disabled={statusMutation.isPending}
-                onChange={(e) => {
-                  const next = e.target.value as 'prospect' | 'active' | 'suspended' | '';
-                  if (next && next !== customer.status) statusMutation.mutate(next);
-                }}
-                options={[
-                  { value: '', label: 'Select Status', disabled: true },
-                  { value: 'prospect', label: 'Prospect' },
-                  { value: 'active', label: 'Active' },
-                  { value: 'suspended', label: 'Suspended' },
-                ]}
-              />
-              {statusMutation.isPending ? (
-                <span className={styles.statusSpinner}>
-                  <Spinner size="sm" label="Updating status" />
-                </span>
-              ) : null}
-            </span>
-          ) : null}
         </div>
-        {statusMutation.error ? (
-          <Alert variant="danger">{statusMutation.error.message}</Alert>
-        ) : null}
         {issueActivation.error && !activationResult ? (
           <Alert variant="danger">{issueActivation.error.message}</Alert>
         ) : null}
@@ -332,18 +269,14 @@ export function CustomerRecordActions({
         title={
           accountAction === 'delete'
             ? 'Permanently Delete Customer Account'
-            : accountAction === 'anonymize'
-              ? 'Anonymize Customer Account'
-              : 'Deactivate Customer Account'
+            : 'Deactivate Customer Account'
         }
         message={
           <div>
             <p>
               {accountAction === 'delete'
-                ? 'This permanently removes an unused customer account only when no protected business records exist.'
-                : accountAction === 'anonymize'
-                  ? 'Direct profile information and login access will be removed while business history remains.'
-                  : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
+                ? 'This permanently removes the customer and ALL of their sales, payments, membership, points, redemptions, applications and ID image. This cannot be undone.'
+                : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
             </p>
             {accountAction !== 'deactivate' ? (
               <TextField
@@ -359,11 +292,7 @@ export function CustomerRecordActions({
         }
         danger
         confirmLabel={
-          accountAction === 'delete'
-            ? 'Delete permanently'
-            : accountAction === 'anonymize'
-              ? 'Anonymize'
-              : 'Confirm'
+          accountAction === 'delete' ? 'Delete permanently' : 'Confirm'
         }
         confirmDisabled={accountAction !== 'deactivate' && confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}
