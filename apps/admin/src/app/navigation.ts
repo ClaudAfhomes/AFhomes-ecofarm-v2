@@ -150,6 +150,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
       { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
       { to: '/admin/roles', label: 'Roles', module: 'organization.roles' },
+      { to: '/admin/settings/public-verification', label: 'Public Verification Settings', module: 'governance.config' },
     ],
   },
   // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`
