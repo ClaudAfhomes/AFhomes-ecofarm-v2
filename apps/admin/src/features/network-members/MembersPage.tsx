@@ -78,6 +78,10 @@ export function MembersPage() {
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  // Determine if a member row should be clickable based on detailAuthorized flag
+  // For upline name-only records, detailAuthorized is false
+  const isClickable = (member: typeof rows[0]) => member.detailAuthorized === true;
   const active = rows.filter((member) => member.status === 'active').length;
   const filtersActive = search !== '' || position !== 'all';
   const rangeStart = rows.length === 0 ? 0 : safePage * PAGE_SIZE + 1;
@@ -123,7 +127,7 @@ export function MembersPage() {
     <section className={styles.page}>
       <PageHeader
         title="Members"
-        description="Hierarchy sellers (IST) and OSTs with their heads."
+        description="Sales-network members. Click a row to view details."
         actions={
           <>
             <Button variant="secondary" onClick={() => setWorkbookOpen(true)}>Import / export</Button>
@@ -229,49 +233,54 @@ export function MembersPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {visible.map((member) => (
-                  <TableRow
-                    key={member.id}
-                    className={styles.clickable}
-                    onClick={() => setViewingId(member.id)}
-                  >
-                    <TableCell label="Code">
-                      <span
-                        className={
-                          member.employeeNumber
-                            ? styles.codeChip
-                            : `${styles.codeChip} ${styles.codeEmpty}`
-                        }
-                      >
-                        {member.employeeNumber ?? '—'}
-                      </span>
-                    </TableCell>
-                    <TableCell label="Name">
-                      <span className={styles.identityCell}>
-                        <span className={styles.identityAvatar} aria-hidden="true">
-                          {(member.fullName.trim().charAt(0) || '-').toUpperCase()}
+                {visible.map((member) => {
+                  const clickable = isClickable(member);
+                  return (
+                    <TableRow
+                      key={member.id}
+                      className={`${styles.clickable} ${clickable ? '' : styles.nonClickable}`}
+                      onClick={clickable ? () => setViewingId(member.id) : undefined}
+                      aria-disabled={!clickable}
+                      tabIndex={clickable ? 0 : -1}
+                    >
+                      <TableCell label="Code">
+                        <span
+                          className={
+                            member.employeeNumber
+                              ? styles.codeChip
+                              : `${styles.codeChip} ${styles.codeEmpty}`
+                          }
+                        >
+                          {member.employeeNumber ?? '—'}
                         </span>
-                        <span>
-                          <span className={styles.identityName}>{member.fullName}</span>
-                          <small className={styles.identityMeta}>{member.email}</small>
+                      </TableCell>
+                      <TableCell label="Name">
+                        <span className={styles.identityCell}>
+                          <span className={styles.identityAvatar} aria-hidden="true">
+                            {(member.fullName.trim().charAt(0) || '-').toUpperCase()}
+                          </span>
+                          <span>
+                            <span className={styles.identityName}>{member.fullName}</span>
+                            <small className={styles.identityMeta}>{member.email}</small>
+                          </span>
                         </span>
-                      </span>
-                    </TableCell>
-                    <TableCell label="Position">
-                      <StatusChip label={member.positionLabel} tone="neutral" />
-                    </TableCell>
-                    <TableCell label="AA Number">
-                      <span className={styles.codeCell}>{member.aaNumber ?? '—'}</span>
-                    </TableCell>
-                    <TableCell label="Status">
-                      <StatusChip
-                        label={member.status}
-                        tone={member.status === 'active' ? 'success' : 'neutral'}
-                      />
-                    </TableCell>
-                    <TableCell label="Added">{formatDateTime(member.createdAt)}</TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell label="Position">
+                        <StatusChip label={member.positionLabel} tone="neutral" />
+                      </TableCell>
+                      <TableCell label="AA Number">
+                        <span className={styles.codeCell}>{member.aaNumber ?? '—'}</span>
+                      </TableCell>
+                      <TableCell label="Status">
+                        <StatusChip
+                          label={member.status}
+                          tone={member.status === 'active' ? 'success' : 'neutral'}
+                        />
+                      </TableCell>
+                      <TableCell label="Added">{formatDateTime(member.createdAt)}</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

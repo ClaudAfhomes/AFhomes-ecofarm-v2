@@ -19,6 +19,7 @@ const ost = memberSchema.parse({
   positionLabel: 'OST',
   status: 'active',
   createdAt: '2026-01-01',
+  detailAuthorized: true,
 });
 const permissions: AfHomesPermission[] = ['network.ost_registrations', 'network.ost_members'].map(
   (moduleKey) => ({

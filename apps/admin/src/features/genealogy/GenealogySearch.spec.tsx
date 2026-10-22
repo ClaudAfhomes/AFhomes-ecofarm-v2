@@ -5,7 +5,13 @@ import { renderWithProviders } from '../../test/utils';
 import { GenealogyPage } from './GenealogyPage';
 import { getGenealogy } from './services';
 
-vi.mock('./services', () => ({ getGenealogy: vi.fn() }));
+vi.mock('./services', () => ({
+  getGenealogy: vi.fn(),
+  getTeamSalesOverview: vi.fn(),
+  teamSalesKeys: {
+    overview: (period: string) => ['team-sales', 'overview', period],
+  },
+}));
 const node = {
   staffId: '11111111-1111-4111-8111-111111111111',
   fullName: 'CLAUD SELLER',

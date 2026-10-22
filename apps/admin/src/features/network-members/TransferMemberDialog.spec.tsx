@@ -36,6 +36,7 @@ const member = memberSchema.parse({
   createdAt: '2020-01-01',
   referrerName: 'SM ONE',
   referrerStaffId: '33333333-3333-4333-8333-333333333333',
+  detailAuthorized: true,
 });
 const records = (displayStatus: 'expired' | 'active') => ({
   registration: null,

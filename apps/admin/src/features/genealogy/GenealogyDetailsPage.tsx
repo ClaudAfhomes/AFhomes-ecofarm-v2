@@ -1,16 +1,31 @@
+import { useState, useCallback, useMemo } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusChip,
+  DateField,
+} from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
+import type { Member } from '@afhomes/contracts';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
-import { getGenealogyNode, getGenealogySummary, getGenealogyUpline } from './services';
+import { getGenealogyNode, getGenealogySummary, getGenealogyUpline, getTeamSalesAnalytics } from './services';
 import { humanizeCode } from '../business/format';
-import { genealogyKeys } from '../business/queryKeys';
+import { genealogyKeys, teamSalesKeys } from '../business/queryKeys';
+import { useSession } from '../../lib/session';
+import { GenealogyTree } from './GenealogyTree';
+import { MemberDetailDialog } from '../network-members/MemberDetailDialog';
+import { getMember } from '../network-members/services';
 import styles from './GenealogyDetailsPage.module.css';
 
 /**
- * One seller's network record: identity, upline chain, and team summary.
+ * One seller's network record: identity, upline chain, team summary,
+ * interactive downline tree, and team sales activity.
  *
  * Read-only by construction: every figure comes from the authorized genealogy
  * APIs, and nothing here edits attribution. The server remains the security
@@ -19,10 +34,56 @@ import styles from './GenealogyDetailsPage.module.css';
 export function GenealogyDetailsPage() {
   const { staffId = '' } = useParams();
   const navigate = useNavigate();
+  const { user } = useSession();
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [viewingMember, setViewingMember] = useState<Member | null>(null);
+  const [memberLoading, setMemberLoading] = useState(false);
+
+  // Quick presets
+  const presets = [
+    { label: 'Today', days: 0 },
+    { label: 'Past 7 Days', days: 7 },
+    { label: 'Past 28 Days', days: 28 },
+    { label: 'Past 6 Months', days: 180 },
+  ] as const;
+
+  // Compute today's date once per render cycle
+  const today = useMemo(() => new Date(), []);
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const applyPreset = useCallback((days: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - days);
+    setDateTo(to.toISOString().slice(0, 10));
+    setDateFrom(from.toISOString().slice(0, 10));
+  }, []);
+
+  const isPresetActive = useCallback(
+    (days: number) => {
+      const expectedFrom = new Date();
+      expectedFrom.setDate(today.getDate() - days);
+      return dateFrom === expectedFrom.toISOString().slice(0, 10) && dateTo === todayStr;
+    },
+    [dateFrom, dateTo, today, todayStr]
+  );
+
+  const handleMemberClick = async (genealogyNode: import('@afhomes/contracts').GenealogyNode) => {
+    setMemberLoading(true);
+    try {
+      const fullMember = await getMember(genealogyNode.staffId);
+      setViewingMember(fullMember);
+    } catch (error) {
+      console.error('Failed to load member details:', error);
+    } finally {
+      setMemberLoading(false);
+    }
+  };
+
   const node = useQuery({
     queryKey: genealogyKeys.node(staffId),
     queryFn: () => getGenealogyNode(staffId),
-    // A summary refresh elsewhere updates this view without blanking it.
     placeholderData: keepPreviousData,
   });
   const chain = useQuery({
@@ -35,17 +96,16 @@ export function GenealogyDetailsPage() {
     queryFn: () => getGenealogySummary(staffId),
     placeholderData: keepPreviousData,
   });
+  const salesQuery = useQuery({
+    queryKey: teamSalesKeys.analytics(staffId, 'month', dateFrom, dateTo),
+    queryFn: () => getTeamSalesAnalytics(staffId, 'month', dateFrom, dateTo),
+    placeholderData: keepPreviousData,
+  });
 
-  // First load skeletonizes the whole page so no static content flashes
-  // before the seller it describes. The sr-only line keeps the pending copy.
   if (node.isPending)
     return (
       <section>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading seller"
-        >
+        <div style={{ display: 'grid', gap: 'var(--space-4)' }} role="status" aria-label="Loading seller">
           <span className="sr-only">Loading seller…</span>
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
             <Skeleton style={{ height: 32, maxWidth: 280 }} />
@@ -229,6 +289,162 @@ export function GenealogyDetailsPage() {
           </>
         )}
       </section>
+
+      <section className={styles.panel} aria-label="My Downline">
+        <h2 className={styles.panelTitle}>My Downline</h2>
+        <GenealogyTree
+          rootStaffId={staffId}
+          viewerRole={user?.roleSlug ?? ''}
+          viewerId={user?.id ?? ''}
+          onMemberClick={handleMemberClick}
+        />
+        {memberLoading && <div className={styles.loading}>Loading member details…</div>}
+      </section>
+
+      <section className={styles.panel} aria-label="Team sales activity">
+        <div className={styles.filterSection}>
+          <h2 className={styles.panelTitle}>Team Sales Activity</h2>
+
+          {/* Quick presets */}
+          <div className={styles.presetButtons} role="group" aria-label="Quick date presets">
+            {presets.map((p) => (
+              <Button
+                key={p.label}
+                variant="ghost"
+                size="sm"
+                onClick={() => applyPreset(p.days)}
+                className={isPresetActive(p.days) ? styles.presetActive : ''}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+
+          {/* Custom date range */}
+          <div className={styles.dateRangeInputs}>
+            <div className={styles.dateInputGroup}>
+              <DateField
+                id="date-from"
+                name="date-from"
+                label="Start Date"
+                value={dateFrom}
+                onChange={setDateFrom}
+                max={dateTo || todayStr}
+                hint="Optional — defaults to period start"
+                optional
+              />
+            </div>
+            <div className={styles.dateInputGroup}>
+              <DateField
+                id="date-to"
+                name="date-to"
+                label="End Date"
+                value={dateTo}
+                onChange={setDateTo}
+                min={dateFrom || undefined}
+                max={todayStr}
+                hint="Optional — defaults to today"
+                optional
+              />
+            </div>
+          </div>
+
+          {/* Validation message */}
+          {dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo) && (
+            <div className={styles.validationError} role="alert">
+              End date must be on or after start date
+            </div>
+          )}
+        </div>
+
+        {salesQuery.isPending ? (
+          <div className={styles.salesLoading}>
+            <Skeleton style={{ height: 120 }} />
+            <Skeleton style={{ height: 200 }} />
+          </div>
+        ) : salesQuery.isError ? (
+          <ErrorState error={salesQuery.error} title="Sales activity could not be loaded" onRetry={() => void salesQuery.refetch()} />
+        ) : (
+          <>
+            <div className={styles.kpiGrid}>
+              <article className={styles.kpiCard}>
+                <dt>Total Sales</dt>
+                <dd>{formatCountOrDash(salesQuery.data.kpis.totalTeamSales)}</dd>
+              </article>
+              <article className={styles.kpiCard}>
+                <dt>Members With Sales</dt>
+                <dd>{formatCountOrDash(salesQuery.data.kpis.membersWithSales)}</dd>
+              </article>
+              <article className={styles.kpiCard}>
+                <dt>No Sales</dt>
+                <dd>{formatCountOrDash(salesQuery.data.kpis.membersNoSales)}</dd>
+              </article>
+              <article className={styles.kpiCard}>
+                <dt>Top Seller</dt>
+                <dd>{formatCountOrDash(salesQuery.data.kpis.topSellerCount)}</dd>
+              </article>
+              <article className={styles.kpiCard}>
+                <dt>Participation</dt>
+                <dd>{salesQuery.data.kpis.participationRate.toFixed(1)}%</dd>
+              </article>
+            </div>
+
+            <div className={styles.tableWrap}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th style={{ textAlign: 'right' }}>Sales</th>
+                    <th>Activity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salesQuery.data.members
+                    .sort((a, b) => b.salesCount - a.salesCount)
+                    .map((member) => (
+                      <tr key={member.staffId}>
+                        <td>
+                          <span className={styles.memberName}>
+                            {member.fullName}
+                            {member.staffId === user?.id && <span className={styles.youBadge}>(You)</span>}
+                          </span>
+                        </td>
+                        <td><StatusChip label={humanizeCode(member.role)} tone="neutral" /></td>
+                        <td style={{ textAlign: 'right' }}>{formatCountOrDash(member.salesCount)}</td>
+                        <td>
+                          <StatusChip
+                            label={member.salesActivity}
+                            tone={
+                              member.salesActivity === 'Top Seller' ? 'success' :
+                              member.salesActivity === 'With Sales' ? 'info' :
+                              member.salesActivity === 'Low Sales' ? 'warning' : 'neutral'
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className={styles.reportPeriod}>
+              {dateFrom || dateTo
+                ? `Custom range: ${dateFrom || 'start'} to ${dateTo || 'today'} (UTC)`
+                : `Reporting period: ${salesQuery.data.window.from.slice(0, 10)} to ${salesQuery.data.window.to.slice(0, 10)} (UTC)`}
+            </p>
+          </>
+        )}
+
+      </section>
+
+      {viewingMember && (
+        <MemberDetailDialog
+          member={viewingMember}
+          onClose={() => setViewingMember(null)}
+          onChanged={() => { /* invalidate queries if needed */ }}
+        />
+      )}
     </section>
   );
 }

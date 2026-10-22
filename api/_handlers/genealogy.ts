@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { readSearchRows } from '../_lib/list-search.js';
 /** PHASE 7 authorized VD -> SSM -> SM -> OST genealogy reads. */
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { canAccessMemberDetail } from '../_lib/genealogy-visibility.js';
 import { deny, fail, list, method, subPath, type Db } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { serviceClient } from '../_lib/rest.js';
@@ -182,7 +183,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const match = path.match(/^([0-9a-f-]+)(?:\/(upline|downline|summary))?$/);
     if (!match) return fail(res, 'NOT_FOUND', 'Genealogy endpoint not found', 404);
     const id = match[1]!;
-    if (!visible.has(id))
+    // DETAIL AUTHORIZATION: strict check - no upline genealogy access for sellers
+    const canAccess = await canAccessMemberDetail(db, auth.userId, auth.roleSlug, id);
+    if (!canAccess)
       return fail(res, 'FORBIDDEN', 'Genealogy record is outside your authorized scope', 403);
     const node = nodes.find((n) => n.staffId === id);
     if (!node) return fail(res, 'NOT_FOUND', 'Seller not found', 404);

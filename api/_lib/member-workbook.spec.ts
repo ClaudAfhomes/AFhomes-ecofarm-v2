@@ -21,6 +21,7 @@ const member = (
     status: 'active',
     createdAt: '2020-01-01',
     referrerStaffId: head ? id(head) : null,
+    detailAuthorized: true,
   });
 const members = [
   member(1, 'vice_director', null),

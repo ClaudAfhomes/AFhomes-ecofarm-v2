@@ -198,3 +198,192 @@
   min-width: 0;
   max-width: 100%;
 }
+
+/* Admin Team Sales Activity Section */
+.adminSalesSection {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-h3);
+  font-weight: 700;
+}
+
+/* Date Filter Section */
+.dateFilterSection {
+  margin-bottom: var(--space-4);
+}
+
+.presetButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.presetButtons button {
+  border-radius: var(--radius-full);
+}
+
+.presetActive {
+  background: var(--color-brand-primary);
+  color: #fff;
+  border-color: var(--color-brand-primary);
+}
+
+.presetActive:hover {
+  background: var(--color-brand-secondary);
+  border-color: var(--color-brand-secondary);
+}
+
+.dateRangeInputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.dateInputGroup {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.dateLabel {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.validationError {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
+  font-size: var(--text-body-s);
+}
+
+/* KPI Cards */
+.adminKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.kpiCard {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  display: grid;
+  gap: var(--space-2);
+  transition: box-shadow var(--transition-fast);
+}
+
+.kpiCard:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.kpiIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: #fff;
+}
+
+.kpiCard dt {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.kpiCard dd {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* Team Comparison Table */
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.teamTable th,
+.teamTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.teamTable th {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  white-space: nowrap;
+}
+
+.teamTable td {
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.teamTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.teamTable tbody tr:hover {
+  background: var(--color-state-hover);
+}
+
+/* Column alignment classes */
+.colNum {
+  width: 48px;
+  text-align: center;
+}
+
+.colName {
+  min-width: 200px;
+  text-align: left;
+}
+
+.colCenter {
+  width: 120px;
+  text-align: center;
+}
+
+.colCenter th,
+.colCenter td {
+  text-align: center;
+}
+
+/* Team link */
+.teamLink {
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.teamLink:hover {
+  text-decoration: underline;
+}
+
+/* View Genealogy button in table */
+.teamActionBtn {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-body-s);
+}

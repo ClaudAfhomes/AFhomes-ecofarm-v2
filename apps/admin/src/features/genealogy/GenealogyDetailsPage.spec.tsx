@@ -3,12 +3,14 @@ import { Route, Routes } from 'react-router';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { GenealogyDetailsPage } from './GenealogyDetailsPage';
-import { getGenealogyNode, getGenealogySummary, getGenealogyUpline } from './services';
+import { getGenealogyNode, getGenealogySummary, getGenealogyUpline, getGenealogyDownline, getTeamSalesAnalytics } from './services';
 
 vi.mock('./services', () => ({
   getGenealogyNode: vi.fn(),
   getGenealogySummary: vi.fn(),
   getGenealogyUpline: vi.fn(),
+  getGenealogyDownline: vi.fn(),
+  getTeamSalesAnalytics: vi.fn(),
 }));
 const node = {
   staffId: '11111111-1111-4111-8111-111111111111',
@@ -31,6 +33,21 @@ beforeEach(() => {
     roleCounts: { vice_director: 0, senior_sales_manager: 0, sales_manager: 1, ost: 2 },
   });
   vi.mocked(getGenealogyUpline).mockResolvedValue([]);
+  vi.mocked(getGenealogyDownline).mockResolvedValue([]);
+  vi.mocked(getTeamSalesAnalytics).mockResolvedValue({
+    period: 'month',
+    window: { from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z', timezone: 'UTC' },
+    viewerStaffId: node.staffId,
+    viewerRole: 'sales_manager',
+    kpis: {
+      totalTeamSales: 0,
+      membersWithSales: 0,
+      membersNoSales: 0,
+      topSellerCount: 0,
+      participationRate: 0,
+    },
+    members: [],
+  });
 });
 function renderDetails() {
   return renderWithProviders(

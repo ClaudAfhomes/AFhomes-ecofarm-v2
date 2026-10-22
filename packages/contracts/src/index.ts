@@ -546,6 +546,11 @@ export {
   salesTrendGranularitySchema,
   salesTrendPeriodSchema,
   salesTrendReportSchema,
+  teamSalesActivitySchema,
+  teamSalesAnalyticsSchema,
+  teamSalesMemberSchema,
+  teamSalesOverviewSchema,
+  teamSalesTeamSchema,
 } from './schemas/analytics.js';
 export type {
   AnalyticsOverview,
@@ -553,6 +558,11 @@ export type {
   SalesTrendGranularity,
   SalesTrendPeriod,
   SalesTrendReport,
+  TeamSalesActivity,
+  TeamSalesAnalytics,
+  TeamSalesMember,
+  TeamSalesOverview,
+  TeamSalesTeam,
 } from './schemas/analytics.js';
 
 /* ---- Phase 2B: operational dashboard queue cards (AFHomes queue-card pattern) ----
