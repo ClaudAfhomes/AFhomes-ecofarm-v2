@@ -5,7 +5,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 132. Public table inventory: 60. Private table inventory: 27.
+-- Migration count: 133. Public table inventory: 60. Private table inventory: 27.
 -- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
 -- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
 -- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.
@@ -177,6 +177,7 @@
 --   20261212000002_afhomes_reconcile_public_sale_team_search.sql
 --   20261212000003_afhomes_public_verification_settings.sql
 --   20261212000004_afhomes_public_search_daily_limit.sql
+--   20261212000005_afhomes_public_search_readiness.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

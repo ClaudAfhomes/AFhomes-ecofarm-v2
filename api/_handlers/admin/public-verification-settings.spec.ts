@@ -11,6 +11,8 @@ const handler = (await import('./afhomes.js')).default;
 const initial = {
   enabled: false,
   dailyLimitEnabled: true,
+  privacyApproved: true,
+  cleanupReady: true,
   verificationPhone: '+639604316867',
   privacyNotice: 'Synthetic finalized privacy notice. '.repeat(8),
   retentionDays: 30,
@@ -54,7 +56,7 @@ async function call(method = 'GET', token: string | null = TOKEN.superAdmin, bod
   return state;
 }
 it('persists settings through the actor-checked RPC and reads them back', async () => {
-  const { noticeVersion, revision, updatedAt, ...fields } = initial;
+  const { noticeVersion, revision, updatedAt, cleanupReady, ...fields } = initial;
   const state = await call('PUT', TOKEN.superAdmin, {
     ...fields,
     enabled: true,
@@ -101,8 +103,14 @@ it('rejects invalid retention and stale updates without reporting a save', async
     code: '23505',
     message: 'SETTINGS_CHANGED',
   };
-  const { noticeVersion, revision, updatedAt, ...fields } = initial;
+  const { noticeVersion, revision, updatedAt, cleanupReady, ...fields } = initial;
   expect((await call('PUT', TOKEN.superAdmin, { ...fields, expectedRevision: 1 })).status).toBe(
     409,
   );
+});
+it('persists privacy approval but rejects a client-supplied cleanup-ready override', async () => {
+  const {noticeVersion,revision,updatedAt,cleanupReady,...fields}=initial;
+  expect((await call('PUT', TOKEN.superAdmin, {...fields,privacyApproved:false,expectedRevision:1})).status).toBe(200);
+  expect((await call()).body).toMatchObject({privacyApproved:false,cleanupReady:true});
+  expect((await call('PUT', TOKEN.superAdmin, {...fields,cleanupReady:true,expectedRevision:2})).status).toBe(400);
 });
